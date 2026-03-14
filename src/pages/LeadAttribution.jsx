@@ -2,47 +2,34 @@ import { useState } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import DataTable from '../components/DataTable'
-import LeadStatusBadge from '../components/LeadStatusBadge'
-import { supabase } from '../lib/supabase'
+import { useLeadAttribution } from '../hooks/useLeadAttribution'
+import { Loader } from 'lucide-react'
 
 const statusOptions = ['set', 'showed', 'no_show', 'rescheduled', 'cancelled', 'closed', 'not_closed']
 
 export default function LeadAttribution() {
   const [range, setRange] = useState(30)
   const [filter, setFilter] = useState('all')
-
-  // Placeholder data — will come from Supabase setter_leads table
-  const leads = [
-    { id: '1', lead_name: 'Mike Johnson', setter: 'Leandre', closer: 'Daniel', date_set: '2026-03-10', appointment_date: '2026-03-12', status: 'closed', revenue: 997 },
-    { id: '2', lead_name: 'Sarah Williams', setter: 'Leandre', closer: 'Daniel', date_set: '2026-03-09', appointment_date: '2026-03-11', status: 'showed', revenue: 0 },
-    { id: '3', lead_name: 'Tom Davis', setter: 'Leandre', closer: 'Josh', date_set: '2026-03-08', appointment_date: '2026-03-10', status: 'closed', revenue: 8000 },
-    { id: '4', lead_name: 'Lisa Chen', setter: 'Austin', closer: 'Daniel', date_set: '2026-03-07', appointment_date: '2026-03-09', status: 'no_show', revenue: 0 },
-    { id: '5', lead_name: 'James Brown', setter: 'Austin', closer: 'Josh', date_set: '2026-03-13', appointment_date: '2026-03-15', status: 'set', revenue: 0 },
-    { id: '6', lead_name: 'Anna Smith', setter: 'Valeria', closer: 'Daniel', date_set: '2026-03-06', appointment_date: '2026-03-08', status: 'not_closed', revenue: 0 },
-  ]
+  const { leads, loading, updateStatus } = useLeadAttribution(range)
 
   const filtered = filter === 'all' ? leads : leads.filter(l => l.status === filter)
 
-  const stats = {
-    total: leads.length,
-    showed: leads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.status)).length,
-    closed: leads.filter(l => l.status === 'closed').length,
-    noShow: leads.filter(l => l.status === 'no_show').length,
-    revenue: leads.reduce((sum, l) => sum + (l.revenue || 0), 0),
-  }
-
-  const showRate = stats.total ? ((stats.showed / stats.total) * 100).toFixed(1) : 0
-  const closeRate = stats.showed ? ((stats.closed / stats.showed) * 100).toFixed(1) : 0
+  const showed = leads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.status)).length
+  const closed = leads.filter(l => l.status === 'closed').length
+  const noShow = leads.filter(l => l.status === 'no_show').length
+  const revenue = leads.reduce((sum, l) => sum + parseFloat(l.revenue_attributed || 0), 0)
+  const resolved = showed + noShow
+  const showRate = resolved ? ((showed / resolved) * 100).toFixed(1) : 0
+  const closeRate = showed ? ((closed / showed) * 100).toFixed(1) : 0
 
   const handleStatusChange = async (leadId, newStatus) => {
-    // TODO: Update in Supabase
-    console.log('Update lead', leadId, 'to', newStatus)
+    await updateStatus(leadId, newStatus)
   }
 
   const columns = [
     { key: 'lead_name', label: 'Lead' },
-    { key: 'setter', label: 'Setter' },
-    { key: 'closer', label: 'Closer' },
+    { key: 'setter_name', label: 'Setter' },
+    { key: 'closer_name', label: 'Closer' },
     { key: 'date_set', label: 'Date Set' },
     { key: 'appointment_date', label: 'Appt Date' },
     {
@@ -61,12 +48,16 @@ export default function LeadAttribution() {
       ),
     },
     {
-      key: 'revenue',
+      key: 'revenue_attributed',
       label: 'Revenue',
       align: 'right',
-      render: v => v > 0 ? <span className="text-success">${v.toLocaleString()}</span> : '—',
+      render: v => v > 0 ? <span className="text-success">${parseFloat(v).toLocaleString()}</span> : '—',
     },
   ]
+
+  if (loading) {
+    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  }
 
   return (
     <div>
@@ -75,17 +66,15 @@ export default function LeadAttribution() {
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
 
-      {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-        <KPICard label="Total Leads" value={stats.total} />
+        <KPICard label="Total Leads" value={leads.length} />
         <KPICard label="Show Rate" value={`${showRate}%`} target={70} direction="above" />
         <KPICard label="Close Rate" value={`${closeRate}%`} target={25} direction="above" />
-        <KPICard label="No Shows" value={stats.noShow} />
-        <KPICard label="Revenue" value={`$${stats.revenue.toLocaleString()}`} />
+        <KPICard label="No Shows" value={noShow} />
+        <KPICard label="Revenue" value={`$${revenue.toLocaleString()}`} />
       </div>
 
-      {/* Filter */}
-      <div className="flex gap-1 mb-4">
+      <div className="flex gap-1 mb-4 flex-wrap">
         <button
           onClick={() => setFilter('all')}
           className={`px-3 py-1 rounded text-xs ${filter === 'all' ? 'bg-opt-yellow text-bg-primary' : 'bg-bg-card text-text-secondary border border-border-default'}`}
@@ -107,7 +96,7 @@ export default function LeadAttribution() {
         })}
       </div>
 
-      <DataTable columns={columns} data={filtered} />
+      <DataTable columns={columns} data={filtered} emptyMessage="No leads yet" />
     </div>
   )
 }
