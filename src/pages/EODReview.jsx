@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Check, Edit3, Loader, ChevronDown, ChevronUp, MessageSquare } from 'lucide-react'
+import { Check, Edit3, Loader, ChevronLeft, ChevronRight, MessageSquare, Calendar } from 'lucide-react'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useEODSubmit } from '../hooks/useEOD'
 import { supabase } from '../lib/supabase'
@@ -11,10 +11,23 @@ const outcomeOptions = [
   { value: 'closed', label: 'Closed', color: 'text-success' },
 ]
 
+const formatDateLabel = (dateStr) => {
+  const d = new Date(dateStr + 'T12:00:00')
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+  const diff = Math.round((today - d) / 86400000)
+  const weekday = d.toLocaleDateString('en-US', { weekday: 'short' })
+  const month = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  if (diff === 0) return `Today — ${weekday}, ${month}`
+  if (diff === 1) return `Yesterday — ${weekday}, ${month}`
+  return `${weekday}, ${month}`
+}
+
 export default function EODReview() {
   const [tab, setTab] = useState('closer')
   const [confirmed, setConfirmed] = useState(false)
   const [selectedMember, setSelectedMember] = useState('')
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
   const [calls, setCalls] = useState([])
   const [loadingCalls, setLoadingCalls] = useState(false)
   const [expandedCall, setExpandedCall] = useState(null)
@@ -25,7 +38,14 @@ export default function EODReview() {
 
   const today = new Date().toISOString().split('T')[0]
 
-  // Pull booked calls + try to match Fathom transcripts
+  const shiftDate = (days) => {
+    const d = new Date(selectedDate + 'T12:00:00')
+    d.setDate(d.getDate() + days)
+    const newDate = d.toISOString().split('T')[0]
+    if (newDate <= today) setSelectedDate(newDate)
+  }
+
+  // Pull booked calls for selected date + try to match Fathom transcripts
   useEffect(() => {
     if (tab !== 'closer' || !selectedMember) { setCalls([]); return }
 
@@ -34,26 +54,20 @@ export default function EODReview() {
       setConfirmed(false)
       setExpandedCall(null)
 
-      const since = new Date()
-      since.setDate(since.getDate() - 7)
-      const sinceStr = since.toISOString().split('T')[0]
-
-      // Fetch booked leads
+      // Fetch leads with appointment on the selected date
       const { data } = await supabase
         .from('setter_leads')
         .select('id, lead_name, setter_id, status, appointment_date, date_set, lead_source, revenue_attributed, setter:team_members!setter_leads_setter_id_fkey(name)')
         .eq('closer_id', selectedMember)
-        .gte('appointment_date', sinceStr)
-        .lte('appointment_date', today)
-        .order('appointment_date', { ascending: false })
+        .eq('appointment_date', selectedDate)
+        .order('lead_name', { ascending: true })
 
-      // Fetch Fathom transcripts for this closer in the same window
+      // Fetch Fathom transcripts for this closer on the same date
       const { data: transcripts } = await supabase
         .from('closer_transcripts')
         .select('id, prospect_name, summary, meeting_date, duration_seconds')
         .eq('closer_id', selectedMember)
-        .gte('meeting_date', sinceStr)
-        .order('meeting_date', { ascending: false })
+        .eq('meeting_date', selectedDate)
 
       // Build call rows with Fathom match attempt
       const rows = (data || []).map(lead => {
@@ -91,7 +105,7 @@ export default function EODReview() {
     }
 
     loadCalls()
-  }, [tab, selectedMember, today])
+  }, [tab, selectedMember, selectedDate])
 
   const updateCall = (index, field, value) => {
     setCalls(prev => prev.map((c, i) => {
@@ -153,7 +167,7 @@ export default function EODReview() {
       notes: c.notes,
     }))
 
-    const result = await submitCloserEOD(selectedMember, today, eodData, callRows)
+    const result = await submitCloserEOD(selectedMember, selectedDate, eodData, callRows)
 
     if (result.success) {
       for (const c of calls) {
@@ -180,7 +194,7 @@ export default function EODReview() {
 
   const handleConfirmSetter = async () => {
     if (!selectedMember) return alert('Select a setter first')
-    const result = await submitSetterEOD(selectedMember, today, setterData)
+    const result = await submitSetterEOD(selectedMember, selectedDate, setterData)
     if (result.success) setConfirmed(true)
     else alert('Failed: ' + result.error)
   }
@@ -190,8 +204,8 @@ export default function EODReview() {
 
   return (
     <div>
-      {/* Header row: title, tabs, selector, date */}
-      <div className="flex items-center gap-3 mb-5 flex-wrap">
+      {/* Header row: title, tabs, selector */}
+      <div className="flex items-center gap-3 mb-2 flex-wrap">
         <h1 className="text-xl font-bold mr-2">EOD Review</h1>
         <div className="flex gap-1">
           {['closer', 'setter'].map(t => (
@@ -212,7 +226,40 @@ export default function EODReview() {
           <option value="">Select {tab}...</option>
           {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
-        <span className="text-xs text-text-400 ml-auto">{today}</span>
+      </div>
+
+      {/* Date selector */}
+      <div className="flex items-center gap-2 mb-5">
+        <Calendar size={14} className="text-text-400" />
+        <button
+          onClick={() => shiftDate(-1)}
+          className="p-1 rounded hover:bg-bg-card-hover text-text-400 hover:text-text-primary"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <input
+          type="date"
+          value={selectedDate}
+          max={today}
+          onChange={e => setSelectedDate(e.target.value)}
+          className="bg-bg-card border border-border-default rounded px-2 py-1 text-sm text-text-primary"
+        />
+        <button
+          onClick={() => shiftDate(1)}
+          disabled={selectedDate >= today}
+          className="p-1 rounded hover:bg-bg-card-hover text-text-400 hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          <ChevronRight size={16} />
+        </button>
+        <span className="text-xs text-text-400">{formatDateLabel(selectedDate)}</span>
+        {selectedDate !== today && (
+          <button
+            onClick={() => setSelectedDate(today)}
+            className="text-[10px] text-opt-yellow hover:underline ml-1"
+          >
+            Jump to today
+          </button>
+        )}
       </div>
 
       {/* Closer EOD */}
@@ -222,7 +269,7 @@ export default function EODReview() {
             <div className="flex items-center justify-center h-32"><Loader className="animate-spin text-opt-yellow" /></div>
           ) : calls.length === 0 ? (
             <div className="bg-bg-card border border-border-default rounded-lg p-8 text-center text-text-400 text-sm">
-              No booked calls found for {selectedName} in the last 7 days.
+              No booked calls for {selectedName} on {formatDateLabel(selectedDate).split(' — ').pop() || selectedDate}.
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4">
@@ -360,7 +407,7 @@ export default function EODReview() {
               {/* Right: summary sidebar */}
               <div className="space-y-3">
                 <div className="bg-bg-card border border-border-default rounded-lg p-4 sticky top-20">
-                  <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">{selectedName}'s Day</h3>
+                  <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">{selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()}</h3>
 
                   <div className="grid grid-cols-2 gap-3 mb-3">
                     <div className="text-center">
