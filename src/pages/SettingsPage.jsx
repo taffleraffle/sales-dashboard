@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Check, X, RefreshCw } from 'lucide-react'
+import { syncFathomTranscripts } from '../services/fathomSync'
 
 const apiConfigs = [
   { key: 'meta', label: 'Meta Ads API', envVar: 'VITE_META_ADS_ACCESS_TOKEN', description: 'Pulls ad spend, CPL, CPC, impressions, leads' },
@@ -10,6 +11,7 @@ const apiConfigs = [
 
 export default function SettingsPage() {
   const [syncing, setSyncing] = useState(null)
+  const [lastResult, setLastResult] = useState(null)
 
   const getStatus = (envVar) => {
     const val = import.meta.env[envVar]
@@ -18,8 +20,19 @@ export default function SettingsPage() {
 
   const handleSync = async (key) => {
     setSyncing(key)
-    // TODO: trigger actual API sync
-    await new Promise(r => setTimeout(r, 2000))
+    setLastResult(null)
+    try {
+      if (key === 'fathom') {
+        const result = await syncFathomTranscripts()
+        setLastResult({ key, success: true, message: `Synced ${result.synced} transcripts (${result.skipped} skipped)` })
+      } else {
+        // TODO: implement other sync handlers
+        await new Promise(r => setTimeout(r, 1000))
+        setLastResult({ key, success: true, message: 'Sync not yet implemented for this API' })
+      }
+    } catch (err) {
+      setLastResult({ key, success: false, message: err.message })
+    }
     setSyncing(null)
   }
 
@@ -32,31 +45,39 @@ export default function SettingsPage() {
 
         {apiConfigs.map(api => {
           const connected = getStatus(api.envVar)
+          const result = lastResult?.key === api.key ? lastResult : null
           return (
-            <div key={api.key} className="bg-bg-card border border-border-default rounded-lg p-4 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  {connected ? (
-                    <Check size={14} className="text-success" />
-                  ) : (
-                    <X size={14} className="text-danger" />
-                  )}
-                  <span className="font-medium text-sm">{api.label}</span>
-                  <span className={`text-[11px] px-2 py-0.5 rounded ${connected ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'}`}>
-                    {connected ? 'Connected' : 'Not configured'}
-                  </span>
+            <div key={api.key} className="bg-bg-card border border-border-default rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    {connected ? (
+                      <Check size={14} className="text-success" />
+                    ) : (
+                      <X size={14} className="text-danger" />
+                    )}
+                    <span className="font-medium text-sm">{api.label}</span>
+                    <span className={`text-[11px] px-2 py-0.5 rounded ${connected ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'}`}>
+                      {connected ? 'Connected' : 'Not configured'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-text-400">{api.description}</p>
                 </div>
-                <p className="text-xs text-text-400">{api.description}</p>
+                {connected && (
+                  <button
+                    onClick={() => handleSync(api.key)}
+                    disabled={syncing === api.key}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-bg-primary border border-border-default text-text-secondary hover:text-text-primary disabled:opacity-50"
+                  >
+                    <RefreshCw size={12} className={syncing === api.key ? 'animate-spin' : ''} />
+                    {syncing === api.key ? 'Syncing...' : 'Sync Now'}
+                  </button>
+                )}
               </div>
-              {connected && (
-                <button
-                  onClick={() => handleSync(api.key)}
-                  disabled={syncing === api.key}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-bg-primary border border-border-default text-text-secondary hover:text-text-primary disabled:opacity-50"
-                >
-                  <RefreshCw size={12} className={syncing === api.key ? 'animate-spin' : ''} />
-                  {syncing === api.key ? 'Syncing...' : 'Sync Now'}
-                </button>
+              {result && (
+                <p className={`text-xs mt-2 ${result.success ? 'text-success' : 'text-danger'}`}>
+                  {result.message}
+                </p>
               )}
             </div>
           )
@@ -73,6 +94,14 @@ export default function SettingsPage() {
           </div>
           <p className="text-xs text-text-400">{import.meta.env.VITE_SUPABASE_URL}</p>
         </div>
+      </div>
+
+      <div className="mt-8">
+        <h2 className="text-sm font-medium text-text-secondary mb-3">Team Members</h2>
+        <p className="text-xs text-text-400 mb-2">
+          To add closer/setter emails for Fathom matching, update the <code className="text-text-secondary">email</code> column
+          in the <code className="text-text-secondary">team_members</code> table in Supabase.
+        </p>
       </div>
     </div>
   )

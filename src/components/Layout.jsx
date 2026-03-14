@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, Target, TrendingUp, Settings } from 'lucide-react'
+import { BarChart3, Users, UserCheck, Target, TrendingUp, ClipboardCheck, Settings } from 'lucide-react'
 
 const navItems = [
   { to: '/sales', icon: BarChart3, label: 'Overview', end: true },
@@ -7,6 +7,7 @@ const navItems = [
   { to: '/sales/closers', icon: UserCheck, label: 'Closers' },
   { to: '/sales/setters', icon: Users, label: 'Setters' },
   { to: '/sales/attribution', icon: Target, label: 'Attribution' },
+  { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
   { to: '/sales/settings', icon: Settings, label: 'Settings' },
 ]
 
