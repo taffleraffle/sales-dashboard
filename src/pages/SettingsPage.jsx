@@ -6,7 +6,6 @@ const apiConfigs = [
   { key: 'meta', label: 'Meta Ads API', envVar: 'VITE_META_ADS_ACCESS_TOKEN', description: 'Pulls ad spend, CPL, CPC, impressions, leads' },
   { key: 'hyros', label: 'Hyros API', envVar: 'VITE_HYROS_API_KEY', description: 'Pulls revenue attribution, ROAS per campaign' },
   { key: 'fathom', label: 'Fathom API', envVar: 'VITE_FATHOM_API_KEY', description: 'Pulls call transcripts for objection analysis' },
-  { key: 'ghl', label: 'GHL Analytics', envVar: 'VITE_GHL_ANALYTICS_URL', description: 'Pipeline funnel, dialer metrics, speed to lead' },
 ]
 
 export default function SettingsPage() {

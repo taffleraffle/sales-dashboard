@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs } from '../hooks/useCloserData'
 import { useSetterEODs } from '../hooks/useSetterData'
-import { usePipelineAnalytics } from '../hooks/usePipelineAnalytics'
+import { useFunnelData } from '../hooks/useFunnelData'
 
 const funnelSteps = [
   { label: 'Leads', key: 'leads' },
@@ -18,7 +18,7 @@ const funnelSteps = [
 
 export default function SalesOverview() {
   const [range, setRange] = useState(30)
-  const { data: pipeline, loading: loadingPipeline, error: pipelineError } = usePipelineAnalytics(range)
+  const { data: funnelData, loading: loadingFunnel } = useFunnelData(range)
   const { members: closers } = useTeamMembers('closer')
   const { members: setters } = useTeamMembers('setter')
   const { reports: closerReports } = useCloserEODs(null, range)
@@ -34,33 +34,18 @@ export default function SalesOverview() {
     cash: acc.cash + parseFloat(r.total_cash_collected || 0),
   }), { booked: 0, liveCalls: 0, offers: 0, closes: 0, revenue: 0, cash: 0 })
 
-  // Aggregate setter EOD data
-  const setterTotals = setterReports.reduce((acc, r) => ({
-    dials: acc.dials + (r.outbound_calls || 0),
-    leads: acc.leads + (r.total_leads || 0),
-    mcs: acc.mcs + (r.meaningful_conversations || 0),
-    sets: acc.sets + (r.sets || 0),
-  }), { dials: 0, leads: 0, mcs: 0, sets: 0 })
-
-  // Use GHL pipeline for funnel if available, otherwise fall back to EOD
-  const pFunnel = pipeline?.funnel
-  const sourceOutcomes = pipeline?.sourceOutcomes
-
+  // Build funnel from Supabase setter_leads + closer EOD reports
   const funnel = {
-    leads: pFunnel?.newLeads || setterTotals.leads || 0,
-    bookings: pFunnel?.setCallsTotal || closerTotals.booked || 0,
-    shows: pFunnel?.setCallsTotal ? Math.round(pFunnel.setCallsTotal * (pFunnel.showRate || 0) / 100) : closerTotals.liveCalls,
+    leads: funnelData.leads,
+    bookings: funnelData.bookings,
+    shows: funnelData.shows,
     offers: closerTotals.offers,
-    closes: pFunnel?.closedCount || closerTotals.closes || 0,
+    closes: funnelData.closes,
   }
 
   const showRate = funnel.bookings ? ((funnel.shows / funnel.bookings) * 100).toFixed(1) : 0
   const closeRate = funnel.shows ? ((funnel.closes / funnel.shows) * 100).toFixed(1) : 0
   const offerRate = funnel.shows ? ((funnel.offers / funnel.shows) * 100).toFixed(1) : 0
-
-  // Auto vs Manual from pipeline source outcomes
-  const autoData = sourceOutcomes?.auto || {}
-  const manualData = sourceOutcomes?.manual || {}
 
   // Per-closer quick view
   const closerCards = closers.map(c => {
@@ -88,8 +73,7 @@ export default function SalesOverview() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold">Sales Overview</h1>
         <div className="flex items-center gap-3">
-          {loadingPipeline && <span className="text-xs text-text-400">Loading pipeline...</span>}
-          {pipelineError && <span className="text-xs text-danger">Pipeline error</span>}
+          {loadingFunnel && <span className="text-xs text-text-400">Loading...</span>}
           <DateRangeSelector selected={range} onChange={setRange} />
         </div>
       </div>
@@ -143,15 +127,15 @@ export default function SalesOverview() {
           <div className="grid grid-cols-3 gap-3">
             <div>
               <p className="text-[11px] text-text-400 uppercase">Bookings</p>
-              <p className="text-lg font-bold">{autoData.total || pFunnel?.autoBooked || 0}</p>
+              <p className="text-lg font-bold">{funnelData.autoBookings}</p>
             </div>
             <div>
               <p className="text-[11px] text-text-400 uppercase">Show Rate</p>
-              <p className="text-lg font-bold">{autoData.show_rate || pFunnel?.showRateAuto || 0}%</p>
+              <p className="text-lg font-bold">{funnelData.autoShowRate}%</p>
             </div>
             <div>
               <p className="text-[11px] text-text-400 uppercase">Close Rate</p>
-              <p className="text-lg font-bold">{autoData.close_rate || pFunnel?.closeRateAuto || 0}%</p>
+              <p className="text-lg font-bold">{funnelData.autoCloseRate}%</p>
             </div>
           </div>
         </div>
@@ -160,15 +144,15 @@ export default function SalesOverview() {
           <div className="grid grid-cols-3 gap-3">
             <div>
               <p className="text-[11px] text-text-400 uppercase">Bookings</p>
-              <p className="text-lg font-bold">{manualData.total || pFunnel?.manualSet || 0}</p>
+              <p className="text-lg font-bold">{funnelData.manualSets}</p>
             </div>
             <div>
               <p className="text-[11px] text-text-400 uppercase">Show Rate</p>
-              <p className="text-lg font-bold">{manualData.show_rate || pFunnel?.showRateManual || 0}%</p>
+              <p className="text-lg font-bold">{funnelData.manualShowRate}%</p>
             </div>
             <div>
               <p className="text-[11px] text-text-400 uppercase">Close Rate</p>
-              <p className="text-lg font-bold">{manualData.close_rate || pFunnel?.closeRateManual || 0}%</p>
+              <p className="text-lg font-bold">{funnelData.manualCloseRate}%</p>
             </div>
           </div>
         </div>
