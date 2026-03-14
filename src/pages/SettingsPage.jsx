@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Check, X, RefreshCw } from 'lucide-react'
 import { syncFathomTranscripts } from '../services/fathomSync'
+import { syncMetaAds } from '../services/metaAdsSync'
+import { syncHyrosAttribution } from '../services/hyrosSync'
 
 const apiConfigs = [
   { key: 'meta', label: 'Meta Ads API', envVar: 'VITE_META_ADS_ACCESS_TOKEN', description: 'Pulls ad spend, CPL, CPC, impressions, leads' },
@@ -24,10 +26,12 @@ export default function SettingsPage() {
       if (key === 'fathom') {
         const result = await syncFathomTranscripts()
         setLastResult({ key, success: true, message: `Synced ${result.synced} transcripts (${result.skipped} skipped)` })
-      } else {
-        // TODO: implement other sync handlers
-        await new Promise(r => setTimeout(r, 1000))
-        setLastResult({ key, success: true, message: 'Sync not yet implemented for this API' })
+      } else if (key === 'meta') {
+        const result = await syncMetaAds()
+        setLastResult({ key, success: true, message: `Synced ${result.synced} ad records (${result.skipped} skipped)` })
+      } else if (key === 'hyros') {
+        const result = await syncHyrosAttribution()
+        setLastResult({ key, success: true, message: `Synced ${result.synced} attribution records (${result.skipped} skipped)` })
       }
     } catch (err) {
       setLastResult({ key, success: false, message: err.message })
