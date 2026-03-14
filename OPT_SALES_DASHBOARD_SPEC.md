@@ -641,7 +641,7 @@ src/components/LeadStatusBadge.jsx
 
 **Q1: Team members table.** `account_managers` table in seo-tracker PostgreSQL. All fields exist (`is_closer`, `is_setter`, `department`, `ghl_user_id`, `commission_rate`). Just need core function — no need to replicate the full model.
 
-**Q2: Architecture.** Built as a separate GitHub repo (`taffleraffle/sales-dashboard`). Will merge into the main codebase later. Hosted on **Render** as its own service.
+**Q2: Architecture.** Built as a separate GitHub repo (`taffleraffle/sales-dashboard`). Will merge into the main codebase later. Hosted on **Render** as its own service. **Standalone React+Vite app** — NOT embedded in Command Centre (which is Node.js/Express server-rendered, not React).
 
 **Q3: Auth system.** TBD based on Render deployment. EOD forms need user context for who's submitting.
 
@@ -653,19 +653,21 @@ src/components/LeadStatusBadge.jsx
 
 **Q6: Speed-to-lead data source.** Use the **Wavv API via webhook** for actual first-dial timestamps. The current Flask app uses GHL `lastStageChangeAt - createdAt` as a proxy, which is inaccurate (measures stage change, not actual dial time). Wavv webhooks provide real dial event timestamps — use those instead.
 
-**Q7: CSV format.** Reference the existing CSV import code in `seo-tracker/app/routes/company.py` (line ~7075) for exact column mapping and date format.
+**Q7: CSV format.** See **Appendix E** for actual sample rows from the V6 Master Sales Tracker, including exact column headers, date format (DD/MM/YYYY), and data patterns.
 
-**Q8: Historical data.** Import whatever merges cleanly from existing Flask/PostgreSQL.
+**Q8: Historical data.** **Start fresh — no historical backfill.** Fresh Supabase instance, clean slate. No need to import old Flask/PostgreSQL data.
+
+**Q9: Database.** **New Supabase instance** (fresh start). Do NOT build a Flask API layer — connect directly to Supabase from the React app using the Supabase JS client. GHL analytics stays in the existing Flask app and is consumed via the existing `/api/setter-analytics` endpoint.
 
 ### Nice-to-Have
 
-**Q9:** Submit = final. No approval workflow needed.
+**Q10:** Submit = final. No approval workflow needed.
 
-**Q10:** TBD — not blocking.
+**Q11:** TBD — not blocking.
 
-**Q11:** Keep GHL pipeline analytics in the Flask app. The new sales dashboard can call the existing `/api/setter-analytics` endpoint for funnel/dialer/speed-to-lead data rather than rebuilding the 935-line analytics engine.
+**Q12:** Keep GHL pipeline analytics in the Flask app. The new sales dashboard can call the existing `/api/setter-analytics` endpoint for funnel/dialer/speed-to-lead data rather than rebuilding the 935-line analytics engine. **CORS headers will need to be added to the Flask app** for cross-origin requests from the React dashboard.
 
-**Q12:** Full transparency — everyone sees everything. Small team.
+**Q13:** Full transparency — everyone sees everything. Small team.
 
 ---
 
@@ -793,6 +795,42 @@ POST /webhooks/ghl/appointment       GHL → HYROS
 POST /webhooks/ghl/opportunity       GHL → auto-create client
 POST /webhooks/stripe/payment        Stripe → HYROS
 ```
+
+## Appendix E: CSV Sample Data (V6 Master Sales Tracker)
+
+The Marketing Tracker CSV import uses the V6 Master Sales Tracker format. Below are actual sample rows showing the exact column structure and data patterns.
+
+### Column Headers
+```
+Date,Ad Spend,Revenue,Profit/Loss,ROI,Total Leads (Excl. Junk),Junk Leads,Total Leads (Incl. Junk),CPL (Excl. Junk),% Leads Booked,Leads Booked,Shows,Show Rate,Cost per show,Trials Set From Show,Close Rate From Show,Revenue Per Show,Sets from Leads,Set Rate,CPA,LTV,Bookings (auto),Bookings (manual),No-Show Rate,Answer Rate
+```
+
+### Row Types
+
+**Period summary rows** (aggregated, identified by labels like "4 Days", "7 Days", "30 Days", "MTD"):
+```
+4 Days,$1599.61,$5985.00,$4385.39,274.2%,42,0,42,$38.09,28.6%,12,9,75.0%,$177.73,4,44.4%,$665.00,4,9.5%,$399.90,$5985.00,6,6,25.0%,
+7 Days,$3089.54,$5985.00,$2895.46,93.7%,73,0,73,$42.32,23.3%,17,13,76.5%,$237.66,4,30.8%,$460.38,4,5.5%,$772.39,$5985.00,7,10,23.5%,
+30 Days,$10621.37,$17955.00,$7333.63,69.0%,308,1,309,$34.49,22.7%,70,47,67.1%,$226.01,12,25.5%,$382.02,12,3.9%,$885.11,$17955.00,30,40,32.9%,
+MTD,$10621.37,$17955.00,$7333.63,69.0%,308,1,309,$34.49,22.7%,70,47,67.1%,$226.01,12,25.5%,$382.02,12,3.9%,$885.11,$17955.00,30,40,32.9%,
+```
+
+**Daily rows** (date format DD/MM/YYYY):
+```
+10/03/2026,$478.46,$0.00,"($478.46)",-100.0%,13,0,13,$36.80,23.1%,3,3,100.0%,$159.49,0,0.0%,$0.00,0,0.0%,#DIV/0!,$0.00,2,1,0.0%,
+09/03/2026,$0.00,$0.00,$0.00,#DIV/0!,0,0,0,#DIV/0!,#DIV/0!,0,0,#DIV/0!,#DIV/0!,0,#DIV/0!,#DIV/0!,0,#DIV/0!,#DIV/0!,$0.00,0,0,#DIV/0!,
+08/03/2026,$501.25,$0.00,"($501.25)",-100.0%,8,0,8,$62.66,37.5%,3,2,66.7%,$250.63,0,0.0%,$0.00,0,0.0%,#DIV/0!,$0.00,1,2,33.3%,
+07/03/2026,$619.90,$5985.00,$5365.10,865.5%,21,0,21,$29.52,28.6%,6,4,66.7%,$154.98,4,100.0%,$1496.25,4,19.0%,$154.98,$5985.00,3,3,33.3%,
+```
+
+### Parsing Notes
+- **Dollar signs**: `$1599.61` — strip `$` and commas before parsing as float
+- **Percentages**: `274.2%` — strip `%` and divide by 100
+- **Negative values in parens**: `"($478.46)"` — standard accounting notation, treat as negative
+- **`#DIV/0!`**: Division by zero from the spreadsheet — treat as `null`/`0`
+- **Empty cells**: Trailing commas indicate empty values — treat as `null`/`0`
+- **Date column**: DD/MM/YYYY format for daily rows; text labels ("4 Days", "MTD") for summary rows
+- **Summary vs daily detection**: If `Date` column doesn't match DD/MM/YYYY pattern, it's a summary row — may want to skip or handle separately
 
 ---
 
