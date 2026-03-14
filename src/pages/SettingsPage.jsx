@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Check, X, RefreshCw } from 'lucide-react'
+import { Check, X, RefreshCw, Brain } from 'lucide-react'
 import { syncFathomTranscripts } from '../services/fathomSync'
 import { syncMetaAds } from '../services/metaAdsSync'
 import { syncHyrosAttribution } from '../services/hyrosSync'
+import { analyzeObjections } from '../services/objectionAnalysis'
 
 const apiConfigs = [
   { key: 'meta', label: 'Meta Ads API', envVar: 'VITE_META_ADS_ACCESS_TOKEN', description: 'Pulls ad spend, CPL, CPC, impressions, leads' },
@@ -96,6 +97,44 @@ export default function SettingsPage() {
             <span className="text-[11px] px-2 py-0.5 rounded bg-success/15 text-success">Connected</span>
           </div>
           <p className="text-xs text-text-400">{import.meta.env.VITE_SUPABASE_URL}</p>
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <h2 className="text-sm font-medium text-text-secondary mb-3">AI Analysis</h2>
+        <div className="bg-bg-card border border-border-default rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Brain size={14} className="text-opt-yellow" />
+                <span className="font-medium text-sm">Objection Analysis</span>
+              </div>
+              <p className="text-xs text-text-400">Analyzes Fathom transcripts with Claude to identify common objections per closer</p>
+            </div>
+            <button
+              onClick={async () => {
+                setSyncing('objections')
+                setLastResult(null)
+                try {
+                  const result = await analyzeObjections()
+                  setLastResult({ key: 'objections', success: true, message: `Analyzed ${result.analyzed} transcripts across ${result.closers} closers` })
+                } catch (err) {
+                  setLastResult({ key: 'objections', success: false, message: err.message })
+                }
+                setSyncing(null)
+              }}
+              disabled={syncing === 'objections'}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-bg-primary border border-border-default text-text-secondary hover:text-text-primary disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={syncing === 'objections' ? 'animate-spin' : ''} />
+              {syncing === 'objections' ? 'Analyzing...' : 'Run Analysis'}
+            </button>
+          </div>
+          {lastResult?.key === 'objections' && (
+            <p className={`text-xs mt-2 ${lastResult.success ? 'text-success' : 'text-danger'}`}>
+              {lastResult.message}
+            </p>
+          )}
         </div>
       </div>
 
