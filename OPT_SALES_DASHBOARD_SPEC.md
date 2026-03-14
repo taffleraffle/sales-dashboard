@@ -283,7 +283,9 @@ Tab 3 Dialer: Dials, pickup rate, MC rate, calls/set, per-stage breakdown.
 | Show Rate | > 70% | live / booked |
 | Offer Rate | > 80% | offers / live |
 | Close Rate | > 25% | closes / live |
-| Trial→Ascension | > 70% | ascended / trials |
+| Ascension Rate | > 70% | ascended / trials |
+| PIF Rate | track | pif_count / total_closes |
+| Avg Deal Size | track | total_revenue / closes |
 
 ---
 
@@ -303,18 +305,27 @@ Tab 3 Dialer: Dials, pickup rate, MC rate, calls/set, per-stage breakdown.
 
 ### Architecture
 
-- **Frontend:** React + Vite, new module within Command Centre
-- **Database:** Supabase (shared instance)
+- **Frontend:** React + Vite, standalone app (NOT in Command Centre)
+- **Database:** New Supabase instance (fresh start, direct JS client)
 - **Styling:** Tailwind, dark navy, JetBrains Mono, OPT Yellow (#f5c518)
 - **Charts:** Recharts
-- **Data:** Manual CSV + EOD forms now; Meta/HYROS API later
+- **Data:** All API-driven. Meta Ads API + Hyros API + GHL Pipeline + Fathom API + Wavv tags. Auto-generated EODs where possible, manual review/confirm.
 - **Time views:** Daily, 7-day, 30-day, MTD, custom range
 
 ### Section 1: Overview / Command View (`/sales`)
 
-KPI cards (traffic-light vs benchmarks): Adspend, Leads+CPL, Bookings+CPB, Show Rate, Close Rate, Trial Cash, FE ROAS, All Cash ROAS, Active Trials, Ascension Rate, PIF count + avg deal.
+KPI cards (traffic-light vs benchmarks): Ad Spend, CPL, CPC, ROAS, CPA, Show Rate, Close Rate, Ascension Rate, PIF Count + PIF Rate, Active Trials.
 
-Funnel visualization: Leads → Bookings → Live Calls → Offers → Closes → Ascensions (with conversion rates between steps).
+**Full funnel visualization with conversion % at every step:**
+```
+Leads → % → Bookings → % → Shows → % → Offers → % → Closes → % → Ascensions
+  |              |            |            |            |              |
+ (from Meta)  (auto+manual)  (show rate)  (offer rate) (close rate)  (ascend rate)
+```
+
+How many leads does it take for a close? How many calls? Show the ratios.
+
+**Auto-booking vs Manual comparison:** CPA, show rate, close rate side-by-side for auto-booked leads vs manually set leads.
 
 Team quick-view cards: per-closer close rate, per-setter sets/day, with trend arrows.
 
@@ -322,33 +333,73 @@ Global date range selector with presets (Today, 7d, 30d, MTD, Custom).
 
 ### Section 2: Marketing Performance (`/sales/marketing`)
 
-Daily trend charts: Adspend+Leads, CPL, Bookings+Show Rate, Offers+Close Rate, Cash Collected (stacked), ROAS trends.
-
-Sales efficiency table: 4d/7d/30d/MTD trailing with conditional formatting.
-
-Revenue breakdown: Trial vs Ascend cash, Contracted vs Collected, AR, Refunds.
-
-Cancellation trends: DTF % and Prospect % with spike detection.
+**All data pulled automatically from Meta Ads API + Hyros:**
+- **Ad spend** — total + per campaign/ad set (from Meta)
+- **CPL** — cost per lead (Meta spend / Meta leads)
+- **CPC** — cost per click (from Meta)
+- **ROAS** — return on ad spend (Hyros attributed revenue / Meta spend)
+- **CPA** — cost per acquisition, broken down: auto-booking CPA vs manual set CPA
+- **Auto-booking vs manual:** show rate and close rate for auto-booked leads vs manually set
+- **Full funnel %:** What % of leads become bookings? What % of bookings show? What % of shows close? How many leads per close? How many calls per close?
+- Trend charts: spend, CPL, ROAS over time
+- Campaign/ad set drill-down
 
 ### Section 3: Closer Performance (`/sales/closers`, `/sales/closers/:id`)
 
-Overview: card per closer with period stats and gauges.
+**Overview:** Card per closer with period stats and gauges.
 
-Individual: Show/Offer/Close rate gauges, revenue cards (cash, PIF split, avg deal), attribution table (which setter's leads they close best), daily trend, call log.
+**Individual closer dashboard:**
+- **Ascension rate** — what % of their trials ascend to monthly retainer
+- **PIF rate** — how many Pay-in-Full deals, PIF count, PIF % of total closes
+- **Show/Close rate gauges**
+- Revenue cards (cash collected, PIF split, avg deal size)
+- **Fathom call transcripts** — automatically pulled via Fathom API, matched to the closer's strategy calls by the prospect's email on the GHL calendar booking
+- **Most common objections** — Claude analysis of Fathom transcripts per closer, surfacing recurring objection themes (e.g. "price too high", "need to think about it", "already working with someone")
+- Attribution table (which setter's leads they close best)
+- Daily trend, call log
+
+**Fathom Integration:**
+- Fathom API: `https://api.fathom.ai/external/v1/meetings` (already integrated in Command Centre)
+- Auth: `X-Api-Key` header, env var `FATHOM_API_KEY`
+- Match closer's calls by: GHL calendar event email → Fathom meeting invitee email
+- Pull: transcript summary, action items, recording URL
+- Objection analysis: batch transcripts through Claude API to extract and categorize objections per closer
 
 ### Section 4: Setter Performance (`/sales/setters`, `/sales/setters/:id`)
 
-Overview: card per setter with activity and conversion stats.
+**Company-level metrics (overview page):**
+- **Total dials** — from Wavv tags across all pipeline contacts
+- **Total leads called** — unique contacts dialed
+- **Meaningful conversations (MCs)** — wavv-interested + wavv-appointment-set + wavv-not-interested + wavv-callback
+- **Sets** — meetings booked (wavv-appointment-set + GHL stage moves to Set Call)
+- **Conversion rate** — sets / leads called, sets / total dials, MCs / dials
 
-Individual: Conversion gauges (leads→set, calls→set, MCs→set), activity metrics, attribution metrics (show rate, close rate, revenue attributed via SetterLead), comparison vs other setters, daily trend, lead outcomes table.
+**Individual setter dashboard:**
+- Same metrics as above but filtered to their assigned leads
+- **Show rate per setter** — what % of THIS setter's booked meetings actually showed up
+- **Auto-bookings vs manual sets** — how many of their leads were auto-booked (AI triage) vs manually set by the setter
+- Conversion gauges (leads→set, dials→set, MCs→set)
+- Attribution: close rate on their sets, revenue attributed
+- Comparison vs other setters
 
-### Section 5: EOD Submission & Attribution (`/sales/eod/closer`, `/sales/eod/setter`, `/sales/attribution`)
+### Section 5: EOD Reports — Auto-Generated, Manual Review (`/sales/eod`)
 
-Closer EOD form: date, calls, no-shows, live calls, offers, closes, revenue + individual call entries linked to SetterLeads. Mobile-friendly.
+**Goal: Auto-generate EOD reports from API data. Closers/setters review and confirm, not fill from scratch.**
 
-Setter EOD form: date, leads, calls, pickups, MCs, sets + per-lead entries (name, closer, appointment date) + self-assessment. Mobile-friendly.
+**Auto-generated Closer EOD:**
+- Pull GHL calendar events for the day → count booked calls (NC/FU), shows, no-shows
+- Pull Fathom transcripts for completed calls → match to calendar events
+- Pre-fill: calls booked, live calls taken, no-shows, outcomes (from GHL opportunity stage changes)
+- Closer reviews, adjusts if needed, adds notes, hits confirm
+- Revenue/close data from GHL opportunity monetary values
 
-Attribution manager: filterable table of all SetterLeads, inline status updates, summary stats.
+**Auto-generated Setter EOD:**
+- Pull Wavv dial data from GHL contact tags (new tags added today — compare tag count snapshots)
+- Pre-fill: total dials, pickups, MCs, sets
+- Pull GHL pipeline moves for leads they worked
+- Setter reviews, adjusts if needed, adds self-assessment, hits confirm
+
+**Attribution manager:** filterable table of all SetterLeads, inline status updates, summary stats.
 
 ---
 
@@ -356,34 +407,76 @@ Attribution manager: filterable table of all SetterLeads, inline status updates,
 
 ### Tables (Supabase/PostgreSQL)
 
-#### `sales_tracker_entries` — Daily Marketing Metrics
+#### `marketing_daily` — Auto-synced from Meta Ads API
 ```sql
-CREATE TABLE sales_tracker_entries (
+CREATE TABLE marketing_daily (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  entry_date DATE NOT NULL UNIQUE,
-  currency VARCHAR(3) DEFAULT 'NZD',
-  total_adspend NUMERIC(12,2),
-  total_leads INTEGER,
-  total_qualified_bookings INTEGER,
-  cancelled_dtf INTEGER,
-  cancelled_by_prospect INTEGER,
-  net_new_calls_calendar INTEGER,
-  net_fu_calls_calendar INTEGER,
-  new_live_calls_taken INTEGER,
-  net_calls_taken INTEGER,
-  offers_made INTEGER,
-  total_closes INTEGER,
-  trial_cash_collected NUMERIC(12,2),
-  trial_contracted_revenue NUMERIC(12,2),
-  total_ascensions INTEGER,
-  ascend_cash_collected NUMERIC(12,2),
-  ascend_contracted_revenue NUMERIC(12,2),
-  ar_collected NUMERIC(12,2),
-  ar_defaulted NUMERIC(12,2),
-  num_refunds INTEGER,
-  total_refunds_amount NUMERIC(12,2),
+  date DATE NOT NULL,
+  campaign_id VARCHAR(100),
+  campaign_name VARCHAR(300),
+  adset_id VARCHAR(100),
+  adset_name VARCHAR(300),
+  spend NUMERIC(12,2) DEFAULT 0,
+  impressions INTEGER DEFAULT 0,
+  clicks INTEGER DEFAULT 0,
+  leads INTEGER DEFAULT 0,
+  cpc NUMERIC(10,4),
+  cpl NUMERIC(10,4),
+  ctr NUMERIC(8,4),
   created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  UNIQUE(date, campaign_id, adset_id)
+);
+```
+
+#### `attribution_daily` — Auto-synced from Hyros API
+```sql
+CREATE TABLE attribution_daily (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  date DATE NOT NULL,
+  campaign_id VARCHAR(100),
+  campaign_name VARCHAR(300),
+  revenue_attributed NUMERIC(12,2) DEFAULT 0,
+  conversions INTEGER DEFAULT 0,
+  roas NUMERIC(10,4),
+  event_tag VARCHAR(100),           -- 'call_booked', 'deal_closed', 'ascended'
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(date, campaign_id, event_tag)
+);
+```
+
+#### `closer_transcripts` — Auto-pulled from Fathom API
+```sql
+CREATE TABLE closer_transcripts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  closer_id UUID NOT NULL,
+  fathom_meeting_id VARCHAR(200) UNIQUE,
+  prospect_name VARCHAR(200),
+  prospect_email VARCHAR(200),
+  meeting_date DATE,
+  duration_seconds INTEGER,
+  summary TEXT,                     -- Fathom auto-summary
+  transcript_url VARCHAR(500),      -- Link to Fathom recording
+  objections JSONB,                 -- Claude-extracted: [{category, quote, severity}]
+  outcome VARCHAR(30),              -- closed, not_closed, no_show, follow_up
+  revenue NUMERIC(10,2),
+  ghl_calendar_event_id VARCHAR(200),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+#### `objection_analysis` — Claude-analyzed objection patterns per closer
+```sql
+CREATE TABLE objection_analysis (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  closer_id UUID NOT NULL,
+  period_start DATE NOT NULL,
+  period_end DATE NOT NULL,
+  objection_category VARCHAR(200),  -- e.g. 'price', 'timing', 'competitor', 'trust'
+  occurrence_count INTEGER DEFAULT 0,
+  example_quotes JSONB,             -- Top 3 verbatim quotes
+  win_rate NUMERIC(6,2),            -- % of times closer overcame this objection
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(closer_id, period_start, period_end, objection_category)
 );
 ```
 
@@ -653,35 +746,67 @@ GHL Analytics →  On-demand poll   →  Proxied from Flask app         →  Das
 
 ---
 
-### CHUNK 2 — BEN: Closers + Setters + EOD + Attribution
+### CHUNK 2 — BEN: Closers + Setters + EOD + Attribution + Fathom
 
 **Branch:** `feature/closers-setters-eod`
 
-**Ben builds:** All closer pages, all setter pages, both EOD forms, lead attribution manager.
+**Ben builds:** Closer pages (with Fathom transcripts + objection analysis), setter pages, auto-generated EOD forms, lead attribution manager.
 
 **Ben's files (no overlap with Will):**
 ```
 src/pages/CloserOverview.jsx
-src/pages/CloserDetail.jsx
+src/pages/CloserDetail.jsx              # Includes transcript feed + objections panel
 src/pages/SetterOverview.jsx
 src/pages/SetterDetail.jsx
-src/pages/CloserEODForm.jsx
-src/pages/SetterEODForm.jsx
+src/pages/EODReview.jsx                 # Auto-generated EOD, review + confirm
 src/pages/LeadAttribution.jsx
 src/hooks/useCloserData.js
 src/hooks/useSetterData.js
+src/hooks/useFathomTranscripts.js       # Pull + match Fathom recordings to closers
 src/hooks/useLeadAttribution.js
-src/components/EODCallEntry.jsx
-src/components/EODLeadEntry.jsx
+src/services/fathomApi.js               # Fathom API client
+src/services/ghlCalendarApi.js          # GHL calendar events for EOD auto-gen
+src/components/TranscriptCard.jsx       # Fathom transcript summary card
+src/components/ObjectionChart.jsx       # Most common objections visualization
 src/components/LeadStatusBadge.jsx
+src/components/EODAutoFill.jsx          # Auto-populated EOD with edit/confirm
 ```
 
 **Task order:**
-1. Closer EOD Form (creates data) — all fields, dynamic call entries, setter_lead linking, mobile-friendly
-2. Setter EOD Form — all fields, dynamic lead entries, self-assessment, mobile-friendly
-3. Lead Attribution Manager — filterable table, inline status updates, summary stats
-4. Closer Overview + Detail pages — cards, gauges, revenue, attribution from setters, trend, call log
-5. Setter Overview + Detail pages — conversion gauges, activity, attribution metrics, comparison, trend
+1. Fathom API service — fetch meetings, match to closers via GHL calendar booking email
+2. GHL calendar service — fetch daily events for auto-EOD generation
+3. Auto-EOD review page — pre-filled from GHL + Wavv data, closer/setter reviews and confirms
+4. Closer Overview — cards with ascension rate, PIF rate, close rate per closer
+5. Closer Detail — gauges, Fathom transcript feed, objection analysis (Claude), PIF count, revenue
+6. Setter Overview — company-level: total dials, leads called, MCs, sets, conversion rates
+7. Setter Detail — individual: same metrics, show rate per setter, auto-bookings vs manual sets
+8. Lead Attribution — filterable table, inline status updates, summary stats
+9. Objection analysis — batch Fathom transcripts through Claude API, categorize per closer, store results
+
+**Closer-specific metrics:**
+- Ascension rate (trials → monthly retainer)
+- PIF rate (pay-in-full count and % of closes)
+- Most common objections from Fathom transcripts (Claude-analyzed)
+- Show rate, close rate, avg deal size
+
+**Setter-specific metrics:**
+- Total dials, total leads called, MCs, sets (from Wavv tags via GHL)
+- Conversion rate at company level AND per individual setter
+- Show rate per setter (what % of THIS setter's sets showed)
+- Auto-bookings vs manual sets per setter
+
+**Fathom → Closer matching logic:**
+1. Pull GHL calendar events for strategy calendars (closer calls)
+2. Each event has contact email from the booking
+3. Pull Fathom meetings via API
+4. Match by: invitee email on Fathom meeting = contact email on GHL booking
+5. Map to closer by: GHL event `assignedTo` → closer's `ghl_user_id`
+
+**Auto-EOD logic:**
+- Closer: GHL calendar events → count booked/showed/no-show + Fathom transcripts for outcomes
+- Setter: Wavv tag diff (today's new tags vs yesterday's snapshot) → dials/pickups/MCs/sets
+- Both: pre-fill the form, let the person review, edit if needed, hit confirm
+- Fallback: if API data is incomplete, show empty fields for manual entry
 
 **Only dependency:** Import `getColor()` from Will's metricCalculations.js. If Will hasn't pushed yet, stub it locally.
 
@@ -691,12 +816,13 @@ src/components/LeadStatusBadge.jsx
 
 Both merge their feature branches into `main` via PRs, then collaborate on:
 
-1. Wire Overview team cards to actual closer/setter EOD data
-2. Test full flow: CSV import → EOD submit → attribution → dashboards
+1. Wire Overview funnel to actual API data (Meta → GHL → closer outcomes)
+2. Test full flow: API sync → auto-EOD → review/confirm → attribution → dashboards
 3. Verify traffic lights against benchmarks
-4. Mobile test EOD forms
-5. Fix styling inconsistencies
-6. Add CORS headers to Flask app (`dashboard.optdigital.io`) for `/api/setter-analytics` cross-origin calls
+4. Mobile test EOD review forms
+5. Test Fathom transcript matching accuracy
+6. Fix styling inconsistencies
+7. Add CORS headers to Flask app (`dashboard.optdigital.io`) for `/api/setter-analytics` cross-origin calls
 
 ### Workflow Reminder
 ```bash
