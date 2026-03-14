@@ -1,8 +1,15 @@
 import { useState, useEffect } from 'react'
-import { Check, Edit3, Loader, Phone, PhoneOff } from 'lucide-react'
+import { Check, Edit3, Loader, ChevronDown, ChevronUp, MessageSquare } from 'lucide-react'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useEODSubmit } from '../hooks/useEOD'
 import { supabase } from '../lib/supabase'
+
+const outcomeOptions = [
+  { value: 'no_show', label: 'No Show', color: 'text-danger' },
+  { value: 'showed', label: 'Showed', color: 'text-opt-yellow' },
+  { value: 'not_closed', label: 'Not Closed', color: 'text-text-400' },
+  { value: 'closed', label: 'Closed', color: 'text-success' },
+]
 
 export default function EODReview() {
   const [tab, setTab] = useState('closer')
@@ -10,29 +17,29 @@ export default function EODReview() {
   const [selectedMember, setSelectedMember] = useState('')
   const [calls, setCalls] = useState([])
   const [loadingCalls, setLoadingCalls] = useState(false)
+  const [expandedCall, setExpandedCall] = useState(null)
+  const [closerNotes, setCloserNotes] = useState('')
   const { members: closers } = useTeamMembers('closer')
   const { members: setters } = useTeamMembers('setter')
   const { submitCloserEOD, submitSetterEOD, submitting } = useEODSubmit()
 
   const today = new Date().toISOString().split('T')[0]
 
-  // Pull booked calls for selected closer from setter_leads
+  // Pull booked calls + try to match Fathom transcripts
   useEffect(() => {
-    if (tab !== 'closer' || !selectedMember) {
-      setCalls([])
-      return
-    }
+    if (tab !== 'closer' || !selectedMember) { setCalls([]); return }
 
     async function loadCalls() {
       setLoadingCalls(true)
       setConfirmed(false)
+      setExpandedCall(null)
 
-      // Get calls booked for today (or recent 7 days with appointment_date)
       const since = new Date()
       since.setDate(since.getDate() - 7)
       const sinceStr = since.toISOString().split('T')[0]
 
-      const { data, error } = await supabase
+      // Fetch booked leads
+      const { data } = await supabase
         .from('setter_leads')
         .select('id, lead_name, setter_id, status, appointment_date, date_set, lead_source, revenue_attributed, setter:team_members!setter_leads_setter_id_fkey(name)')
         .eq('closer_id', selectedMember)
@@ -40,24 +47,44 @@ export default function EODReview() {
         .lte('appointment_date', today)
         .order('appointment_date', { ascending: false })
 
-      if (error) console.error('Failed to load calls:', error)
+      // Fetch Fathom transcripts for this closer in the same window
+      const { data: transcripts } = await supabase
+        .from('closer_transcripts')
+        .select('id, prospect_name, summary, meeting_date, duration_seconds')
+        .eq('closer_id', selectedMember)
+        .gte('meeting_date', sinceStr)
+        .order('meeting_date', { ascending: false })
 
-      // Build editable call rows with defaults from existing status
-      const rows = (data || []).map(lead => ({
-        lead_id: lead.id,
-        lead_name: lead.lead_name,
-        setter_name: lead.setter?.name || '—',
-        appointment_date: lead.appointment_date,
-        lead_source: lead.lead_source || '—',
-        call_type: lead.lead_source === 'auto' ? 'NC' : 'NC', // default, editable
-        showed: ['showed', 'closed', 'not_closed'].includes(lead.status),
-        offered: lead.status === 'closed' || lead.status === 'not_closed',
-        closed: lead.status === 'closed',
-        revenue: parseFloat(lead.revenue_attributed || 0),
-        cash_collected: 0,
-        existing_status: lead.status,
-        notes: '',
-      }))
+      // Build call rows with Fathom match attempt
+      const rows = (data || []).map(lead => {
+        // Try to match a transcript by name similarity + date
+        const matched = (transcripts || []).find(t =>
+          t.meeting_date === lead.appointment_date &&
+          t.prospect_name?.toLowerCase().includes(lead.lead_name?.split(' ')[0]?.toLowerCase())
+        )
+
+        const outcome = lead.status === 'closed' ? 'closed'
+          : lead.status === 'not_closed' ? 'not_closed'
+          : ['showed', 'closed', 'not_closed'].includes(lead.status) ? 'showed'
+          : lead.status === 'no_show' ? 'no_show'
+          : 'no_show'
+
+        return {
+          lead_id: lead.id,
+          lead_name: lead.lead_name,
+          setter_name: lead.setter?.name || '—',
+          appointment_date: lead.appointment_date,
+          lead_source: lead.lead_source || 'manual',
+          call_type: 'NC',
+          outcome,
+          revenue: parseFloat(lead.revenue_attributed || 0),
+          cash_collected: 0,
+          existing_status: lead.status,
+          notes: matched?.summary || '',
+          fathom_summary: matched?.summary || null,
+          fathom_duration: matched?.duration_seconds || null,
+        }
+      })
 
       setCalls(rows)
       setLoadingCalls(false)
@@ -70,19 +97,8 @@ export default function EODReview() {
     setCalls(prev => prev.map((c, i) => {
       if (i !== index) return c
       const updated = { ...c, [field]: value }
-      // Auto-cascade: if not showed, can't offer/close
-      if (field === 'showed' && !value) {
-        updated.offered = false
-        updated.closed = false
-        updated.revenue = 0
-        updated.cash_collected = 0
-      }
-      if (field === 'offered' && !value) {
-        updated.closed = false
-        updated.revenue = 0
-        updated.cash_collected = 0
-      }
-      if (field === 'closed' && !value) {
+      // Reset revenue/cash if not closed
+      if (field === 'outcome' && value !== 'closed') {
         updated.revenue = 0
         updated.cash_collected = 0
       }
@@ -90,51 +106,61 @@ export default function EODReview() {
     }))
   }
 
-  // Auto-computed summary from calls
-  const summary = calls.reduce((acc, c) => ({
-    nc_booked: acc.nc_booked + (c.call_type === 'NC' ? 1 : 0),
-    fu_booked: acc.fu_booked + (c.call_type === 'FU' ? 1 : 0),
-    nc_no_shows: acc.nc_no_shows + (c.call_type === 'NC' && !c.showed ? 1 : 0),
-    fu_no_shows: acc.fu_no_shows + (c.call_type === 'FU' && !c.showed ? 1 : 0),
-    live_nc_calls: acc.live_nc_calls + (c.call_type === 'NC' && c.showed ? 1 : 0),
-    live_fu_calls: acc.live_fu_calls + (c.call_type === 'FU' && c.showed ? 1 : 0),
-    offers: acc.offers + (c.offered ? 1 : 0),
-    closes: acc.closes + (c.closed ? 1 : 0),
-    total_revenue: acc.total_revenue + (c.revenue || 0),
-    total_cash_collected: acc.total_cash_collected + (c.cash_collected || 0),
-  }), { nc_booked: 0, fu_booked: 0, nc_no_shows: 0, fu_no_shows: 0, live_nc_calls: 0, live_fu_calls: 0, offers: 0, closes: 0, total_revenue: 0, total_cash_collected: 0 })
+  // Auto-computed summary
+  const summary = calls.reduce((acc, c) => {
+    const showed = ['showed', 'not_closed', 'closed'].includes(c.outcome)
+    return {
+      booked: acc.booked + 1,
+      showed: acc.showed + (showed ? 1 : 0),
+      noShows: acc.noShows + (c.outcome === 'no_show' ? 1 : 0),
+      offers: acc.offers + (['not_closed', 'closed'].includes(c.outcome) ? 1 : 0),
+      closes: acc.closes + (c.outcome === 'closed' ? 1 : 0),
+      revenue: acc.revenue + (c.revenue || 0),
+      cash: acc.cash + (c.cash_collected || 0),
+      nc: acc.nc + (c.call_type === 'NC' ? 1 : 0),
+      fu: acc.fu + (c.call_type === 'FU' ? 1 : 0),
+    }
+  }, { booked: 0, showed: 0, noShows: 0, offers: 0, closes: 0, revenue: 0, cash: 0, nc: 0, fu: 0 })
 
-  const [closerNotes, setCloserNotes] = useState('')
+  const showRate = summary.booked ? ((summary.showed / summary.booked) * 100).toFixed(0) : 0
+  const closeRate = summary.showed ? ((summary.closes / summary.showed) * 100).toFixed(0) : 0
 
   const handleConfirmCloser = async () => {
     if (!selectedMember) return alert('Select a closer first')
 
-    // Build closer_calls for the hook
+    const eodData = {
+      nc_booked: summary.nc,
+      fu_booked: summary.fu,
+      nc_no_shows: calls.filter(c => c.call_type === 'NC' && c.outcome === 'no_show').length,
+      fu_no_shows: calls.filter(c => c.call_type === 'FU' && c.outcome === 'no_show').length,
+      live_nc_calls: calls.filter(c => c.call_type === 'NC' && ['showed', 'not_closed', 'closed'].includes(c.outcome)).length,
+      live_fu_calls: calls.filter(c => c.call_type === 'FU' && ['showed', 'not_closed', 'closed'].includes(c.outcome)).length,
+      offers: summary.offers,
+      closes: summary.closes,
+      total_revenue: summary.revenue,
+      total_cash_collected: summary.cash,
+      notes: closerNotes,
+    }
+
     const callRows = calls.map(c => ({
       call_type: c.call_type,
       prospect_name: c.lead_name,
-      showed: c.showed,
-      outcome: c.closed ? 'closed' : c.offered ? 'not_closed' : c.showed ? 'showed' : 'no_show',
+      showed: ['showed', 'not_closed', 'closed'].includes(c.outcome),
+      outcome: c.outcome,
       revenue: c.revenue,
       cash_collected: c.cash_collected,
       setter_lead_id: c.lead_id,
       notes: c.notes,
     }))
 
-    const result = await submitCloserEOD(selectedMember, today, { ...summary, notes: closerNotes }, callRows)
+    const result = await submitCloserEOD(selectedMember, today, eodData, callRows)
 
     if (result.success) {
-      // Also update setter_leads statuses
       for (const c of calls) {
-        const newStatus = c.closed ? 'closed' : c.offered ? 'not_closed' : c.showed ? 'showed' : 'no_show'
-        if (newStatus !== c.existing_status) {
+        if (c.outcome !== c.existing_status) {
           await supabase
             .from('setter_leads')
-            .update({
-              status: newStatus,
-              revenue_attributed: c.revenue || 0,
-              updated_at: new Date().toISOString(),
-            })
+            .update({ status: c.outcome, revenue_attributed: c.revenue || 0, updated_at: new Date().toISOString() })
             .eq('id', c.lead_id)
         }
       }
@@ -160,218 +186,252 @@ export default function EODReview() {
   }
 
   const members = tab === 'closer' ? closers : setters
-
-  const numField = (label, key, data, update) => (
-    <div className="bg-bg-card border border-border-default rounded-lg p-3">
-      <label className="text-[11px] text-text-400 uppercase block mb-1">{label}</label>
-      <input
-        type="number"
-        value={data[key]}
-        onChange={e => update(key, parseInt(e.target.value) || 0)}
-        className="bg-bg-primary border border-border-default rounded px-2 py-1 text-lg font-bold w-full"
-      />
-    </div>
-  )
+  const selectedName = members.find(m => m.id === selectedMember)?.name || ''
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">EOD Review</h1>
-      </div>
-
-      {/* Tab + Member selector */}
-      <div className="flex items-center gap-3 mb-6 flex-wrap">
+      {/* Header row: title, tabs, selector, date */}
+      <div className="flex items-center gap-3 mb-5 flex-wrap">
+        <h1 className="text-xl font-bold mr-2">EOD Review</h1>
         <div className="flex gap-1">
-          <button
-            onClick={() => { setTab('closer'); setConfirmed(false); setSelectedMember('') }}
-            className={`px-4 py-2 rounded text-sm ${tab === 'closer' ? 'bg-opt-yellow text-bg-primary font-medium' : 'bg-bg-card text-text-secondary border border-border-default'}`}
-          >
-            Closer EOD
-          </button>
-          <button
-            onClick={() => { setTab('setter'); setConfirmed(false); setSelectedMember('') }}
-            className={`px-4 py-2 rounded text-sm ${tab === 'setter' ? 'bg-opt-yellow text-bg-primary font-medium' : 'bg-bg-card text-text-secondary border border-border-default'}`}
-          >
-            Setter EOD
-          </button>
+          {['closer', 'setter'].map(t => (
+            <button
+              key={t}
+              onClick={() => { setTab(t); setConfirmed(false); setSelectedMember('') }}
+              className={`px-3 py-1.5 rounded text-xs ${tab === t ? 'bg-opt-yellow text-bg-primary font-medium' : 'bg-bg-card text-text-secondary border border-border-default'}`}
+            >
+              {t === 'closer' ? 'Closer' : 'Setter'}
+            </button>
+          ))}
         </div>
-
         <select
           value={selectedMember}
           onChange={e => { setSelectedMember(e.target.value); setConfirmed(false) }}
-          className="bg-bg-card border border-border-default rounded px-3 py-2 text-sm text-text-primary"
+          className="bg-bg-card border border-border-default rounded px-3 py-1.5 text-sm text-text-primary"
         >
           <option value="">Select {tab}...</option>
           {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
-
-        <span className="text-sm text-text-400">{today}</span>
+        <span className="text-xs text-text-400 ml-auto">{today}</span>
       </div>
 
-      {/* Closer EOD — call-by-call review */}
+      {/* Closer EOD */}
       {tab === 'closer' && selectedMember && (
-        <div className="space-y-4">
-          <p className="text-xs text-text-400 flex items-center gap-1">
-            <Edit3 size={12} /> Calls booked in the last 7 days. Mark each call's outcome, then confirm.
-          </p>
-
+        <>
           {loadingCalls ? (
-            <div className="flex items-center justify-center h-32">
-              <Loader className="animate-spin text-opt-yellow" />
-            </div>
+            <div className="flex items-center justify-center h-32"><Loader className="animate-spin text-opt-yellow" /></div>
           ) : calls.length === 0 ? (
             <div className="bg-bg-card border border-border-default rounded-lg p-8 text-center text-text-400 text-sm">
-              No booked calls found for this closer in the last 7 days.
+              No booked calls found for {selectedName} in the last 7 days.
             </div>
           ) : (
-            <>
-              {/* Individual call cards */}
-              <div className="space-y-3">
-                {calls.map((call, i) => (
-                  <div key={call.lead_id} className="bg-bg-card border border-border-default rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        {call.showed ? (
-                          <Phone size={16} className="text-success" />
-                        ) : (
-                          <PhoneOff size={16} className="text-danger" />
-                        )}
-                        <div>
-                          <span className="font-medium text-sm">{call.lead_name}</span>
-                          <span className="text-xs text-text-400 ml-2">via {call.setter_name}</span>
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4">
+              {/* Left: call list */}
+              <div className="space-y-1">
+                <p className="text-[11px] text-text-400 uppercase mb-2">
+                  {calls.length} calls &middot; Mark outcomes below
+                </p>
+
+                {/* Table-style compact rows */}
+                <div className="bg-bg-card border border-border-default rounded-lg overflow-hidden">
+                  {/* Header */}
+                  <div className="grid grid-cols-[1fr_70px_110px_80px_80px] gap-2 px-3 py-2 text-[10px] text-text-400 uppercase border-b border-border-default">
+                    <span>Lead</span>
+                    <span>Type</span>
+                    <span>Outcome</span>
+                    <span className="text-right">Revenue</span>
+                    <span className="text-right">Cash</span>
+                  </div>
+
+                  {calls.map((call, i) => (
+                    <div key={call.lead_id}>
+                      <div
+                        className={`grid grid-cols-[1fr_70px_110px_80px_80px] gap-2 px-3 py-2 items-center text-sm border-b border-border-default/50 hover:bg-bg-card-hover transition-colors cursor-pointer ${
+                          call.outcome === 'closed' ? 'bg-success/5' : call.outcome === 'no_show' ? 'bg-danger/5' : ''
+                        }`}
+                        onClick={() => setExpandedCall(expandedCall === i ? null : i)}
+                      >
+                        {/* Lead name + setter */}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                            call.outcome === 'closed' ? 'bg-success' : call.outcome === 'no_show' ? 'bg-danger' : call.outcome === 'showed' ? 'bg-opt-yellow' : 'bg-text-400'
+                          }`} />
+                          <span className="font-medium truncate">{call.lead_name}</span>
+                          <span className="text-[10px] text-text-400 flex-shrink-0">{call.setter_name}</span>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-text-400">
-                        <span>{call.appointment_date}</span>
+
+                        {/* NC/FU */}
                         <select
                           value={call.call_type}
-                          onChange={e => updateCall(i, 'call_type', e.target.value)}
-                          className="bg-bg-primary border border-border-default rounded px-2 py-0.5 text-xs"
+                          onChange={e => { e.stopPropagation(); updateCall(i, 'call_type', e.target.value) }}
+                          onClick={e => e.stopPropagation()}
+                          className="bg-bg-primary border border-border-default rounded px-1.5 py-0.5 text-xs w-full"
                         >
                           <option value="NC">NC</option>
                           <option value="FU">FU</option>
                         </select>
+
+                        {/* Outcome */}
+                        <select
+                          value={call.outcome}
+                          onChange={e => { e.stopPropagation(); updateCall(i, 'outcome', e.target.value) }}
+                          onClick={e => e.stopPropagation()}
+                          className={`bg-bg-primary border border-border-default rounded px-1.5 py-0.5 text-xs w-full ${
+                            outcomeOptions.find(o => o.value === call.outcome)?.color || ''
+                          }`}
+                        >
+                          {outcomeOptions.map(o => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+
+                        {/* Revenue */}
+                        {call.outcome === 'closed' ? (
+                          <input
+                            type="number"
+                            value={call.revenue}
+                            onChange={e => { e.stopPropagation(); updateCall(i, 'revenue', parseFloat(e.target.value) || 0) }}
+                            onClick={e => e.stopPropagation()}
+                            className="bg-bg-primary border border-border-default rounded px-1.5 py-0.5 text-xs text-right w-full text-success"
+                            placeholder="0"
+                          />
+                        ) : (
+                          <span className="text-xs text-text-400 text-right">—</span>
+                        )}
+
+                        {/* Cash */}
+                        {call.outcome === 'closed' ? (
+                          <input
+                            type="number"
+                            value={call.cash_collected}
+                            onChange={e => { e.stopPropagation(); updateCall(i, 'cash_collected', parseFloat(e.target.value) || 0) }}
+                            onClick={e => e.stopPropagation()}
+                            className="bg-bg-primary border border-border-default rounded px-1.5 py-0.5 text-xs text-right w-full"
+                            placeholder="0"
+                          />
+                        ) : (
+                          <span className="text-xs text-text-400 text-right">—</span>
+                        )}
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-4 flex-wrap">
-                      {/* Showed toggle */}
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={call.showed}
-                          onChange={e => updateCall(i, 'showed', e.target.checked)}
-                          className="accent-opt-yellow"
-                        />
-                        <span className={`text-xs ${call.showed ? 'text-success' : 'text-danger'}`}>
-                          {call.showed ? 'Showed' : 'No Show'}
-                        </span>
-                      </label>
-
-                      {/* Offered toggle */}
-                      {call.showed && (
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={call.offered}
-                            onChange={e => updateCall(i, 'offered', e.target.checked)}
-                            className="accent-opt-yellow"
-                          />
-                          <span className="text-xs text-text-secondary">Offered</span>
-                        </label>
-                      )}
-
-                      {/* Closed toggle */}
-                      {call.offered && (
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={call.closed}
-                            onChange={e => updateCall(i, 'closed', e.target.checked)}
-                            className="accent-opt-yellow"
-                          />
-                          <span className={`text-xs ${call.closed ? 'text-success font-medium' : 'text-text-secondary'}`}>
-                            Closed
-                          </span>
-                        </label>
-                      )}
-
-                      {/* Revenue + Cash if closed */}
-                      {call.closed && (
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-text-400">$</span>
-                            <input
-                              type="number"
-                              value={call.revenue}
-                              onChange={e => updateCall(i, 'revenue', parseFloat(e.target.value) || 0)}
-                              placeholder="Revenue"
-                              className="bg-bg-primary border border-border-default rounded px-2 py-0.5 text-xs w-24"
+                      {/* Expanded: notes + Fathom summary */}
+                      {expandedCall === i && (
+                        <div className="px-3 py-2 bg-bg-primary border-b border-border-default/50 space-y-2">
+                          {call.fathom_summary && (
+                            <div className="flex items-start gap-2">
+                              <MessageSquare size={12} className="text-opt-yellow mt-0.5 flex-shrink-0" />
+                              <div>
+                                <p className="text-[10px] text-opt-yellow uppercase mb-0.5">
+                                  Fathom Summary {call.fathom_duration ? `(${Math.round(call.fathom_duration / 60)} min)` : ''}
+                                </p>
+                                <p className="text-xs text-text-secondary">{call.fathom_summary}</p>
+                              </div>
+                            </div>
+                          )}
+                          <div>
+                            <textarea
+                              value={call.notes}
+                              onChange={e => updateCall(i, 'notes', e.target.value)}
+                              placeholder="Add notes for this call..."
+                              className="bg-bg-card border border-border-default rounded px-2 py-1 text-xs w-full h-12 resize-none"
                             />
                           </div>
-                          <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-text-400">Cash</span>
-                            <input
-                              type="number"
-                              value={call.cash_collected}
-                              onChange={e => updateCall(i, 'cash_collected', parseFloat(e.target.value) || 0)}
-                              placeholder="Cash"
-                              className="bg-bg-primary border border-border-default rounded px-2 py-0.5 text-xs w-24"
-                            />
+                          <div className="flex gap-3 text-[10px] text-text-400">
+                            <span>Appt: {call.appointment_date}</span>
+                            <span>Source: {call.lead_source}</span>
                           </div>
                         </div>
                       )}
                     </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Auto-calculated summary */}
-              <div className="bg-bg-card border border-opt-yellow/20 rounded-lg p-4">
-                <h3 className="text-xs text-opt-yellow uppercase font-medium mb-3">Summary (auto-calculated)</h3>
-                <div className="grid grid-cols-3 md:grid-cols-5 gap-3 text-center">
-                  <div>
-                    <p className="text-lg font-bold">{summary.nc_booked + summary.fu_booked}</p>
-                    <p className="text-[10px] text-text-400 uppercase">Booked</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold">{summary.live_nc_calls + summary.live_fu_calls}</p>
-                    <p className="text-[10px] text-text-400 uppercase">Showed</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold text-danger">{summary.nc_no_shows + summary.fu_no_shows}</p>
-                    <p className="text-[10px] text-text-400 uppercase">No Shows</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold">{summary.offers}</p>
-                    <p className="text-[10px] text-text-400 uppercase">Offers</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold text-success">{summary.closes}</p>
-                    <p className="text-[10px] text-text-400 uppercase">Closes</p>
-                  </div>
+                  ))}
                 </div>
-                {summary.total_revenue > 0 && (
-                  <div className="flex gap-6 mt-3 pt-3 border-t border-border-default text-xs text-text-400">
-                    <span>Revenue: <strong className="text-success">${summary.total_revenue.toLocaleString()}</strong></span>
-                    <span>Cash: <strong className="text-opt-yellow">${summary.total_cash_collected.toLocaleString()}</strong></span>
-                  </div>
-                )}
+
+                {/* EOD notes */}
+                <div className="mt-3">
+                  <textarea
+                    value={closerNotes}
+                    onChange={e => setCloserNotes(e.target.value)}
+                    placeholder="Overall notes for today..."
+                    className="bg-bg-card border border-border-default rounded px-3 py-2 text-xs w-full h-14 resize-none"
+                  />
+                </div>
               </div>
 
-              {/* Notes */}
-              <div>
-                <label className="text-xs text-text-400 block mb-1">Notes</label>
-                <textarea
-                  value={closerNotes}
-                  onChange={e => setCloserNotes(e.target.value)}
-                  className="bg-bg-primary border border-border-default rounded px-3 py-1.5 text-sm w-full h-16 resize-none"
-                  placeholder="Any notes for today..."
-                />
+              {/* Right: summary sidebar */}
+              <div className="space-y-3">
+                <div className="bg-bg-card border border-border-default rounded-lg p-4 sticky top-20">
+                  <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">{selectedName}'s Day</h3>
+
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div className="text-center">
+                      <p className="text-2xl font-bold">{summary.booked}</p>
+                      <p className="text-[10px] text-text-400">Booked</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-2xl font-bold">{summary.showed}</p>
+                      <p className="text-[10px] text-text-400">Showed</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 mb-3">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-400">Show Rate</span>
+                      <span className={parseFloat(showRate) >= 70 ? 'text-success' : 'text-danger'}>{showRate}%</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-400">No Shows</span>
+                      <span className="text-danger">{summary.noShows}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-400">Offers</span>
+                      <span>{summary.offers}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-400">Closes</span>
+                      <span className="text-success font-medium">{summary.closes}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-400">Close Rate</span>
+                      <span className={parseFloat(closeRate) >= 25 ? 'text-success' : 'text-text-secondary'}>{closeRate}%</span>
+                    </div>
+                  </div>
+
+                  {(summary.revenue > 0 || summary.cash > 0) && (
+                    <div className="border-t border-border-default pt-3 space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-text-400">Revenue</span>
+                        <span className="text-success font-medium">${summary.revenue.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-text-400">Cash</span>
+                        <span className="text-opt-yellow font-medium">${summary.cash.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="border-t border-border-default pt-3 mt-3 flex gap-3 text-[10px] text-text-400">
+                    <span>NC: {summary.nc}</span>
+                    <span>FU: {summary.fu}</span>
+                  </div>
+
+                  {/* Confirm button */}
+                  <button
+                    onClick={handleConfirmCloser}
+                    disabled={confirmed || submitting}
+                    className={`w-full mt-4 flex items-center justify-center gap-2 px-4 py-2 rounded font-medium text-sm transition-colors ${
+                      confirmed
+                        ? 'bg-success/20 text-success border border-success/30'
+                        : 'bg-opt-yellow text-bg-primary hover:bg-opt-yellow/90'
+                    }`}
+                  >
+                    {submitting ? <Loader size={14} className="animate-spin" /> : <Check size={14} />}
+                    {confirmed ? 'Confirmed' : submitting ? 'Saving...' : 'Confirm EOD'}
+                  </button>
+                </div>
               </div>
-            </>
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {tab === 'closer' && !selectedMember && (
@@ -380,30 +440,39 @@ export default function EODReview() {
         </div>
       )}
 
-      {/* Setter EOD — manual entry */}
+      {/* Setter EOD */}
       {tab === 'setter' && selectedMember && (
         <div className="space-y-4">
-          <p className="text-xs text-text-400 flex items-center gap-1">
-            <Edit3 size={12} /> Enter today's activity numbers, then confirm.
-          </p>
           <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-            {numField('Leads Worked', 'total_leads', setterData, updateSetter)}
-            {numField('Outbound Calls', 'outbound_calls', setterData, updateSetter)}
-            {numField('Pickups', 'pickups', setterData, updateSetter)}
-            {numField('MCs', 'meaningful_conversations', setterData, updateSetter)}
-            {numField('Sets', 'sets', setterData, updateSetter)}
-            {numField('Reschedules', 'reschedules', setterData, updateSetter)}
+            {[
+              ['Leads Worked', 'total_leads'],
+              ['Outbound Calls', 'outbound_calls'],
+              ['Pickups', 'pickups'],
+              ['MCs', 'meaningful_conversations'],
+              ['Sets', 'sets'],
+              ['Reschedules', 'reschedules'],
+            ].map(([label, key]) => (
+              <div key={key} className="bg-bg-card border border-border-default rounded-lg p-3">
+                <label className="text-[11px] text-text-400 uppercase block mb-1">{label}</label>
+                <input
+                  type="number"
+                  value={setterData[key]}
+                  onChange={e => updateSetter(key, parseInt(e.target.value) || 0)}
+                  className="bg-bg-primary border border-border-default rounded px-2 py-1 text-lg font-bold w-full"
+                />
+              </div>
+            ))}
           </div>
-          <div className="bg-bg-card border border-border-default rounded-lg p-5">
+          <div className="bg-bg-card border border-border-default rounded-lg p-4">
             <h3 className="text-sm font-medium mb-3">Self Assessment</h3>
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-[80px_1fr_1fr] gap-3">
               <div>
-                <label className="text-xs text-text-400 block mb-1">Rating (1-10)</label>
+                <label className="text-xs text-text-400 block mb-1">Rating</label>
                 <input
                   type="number" min="1" max="10"
                   value={setterData.self_rating}
                   onChange={e => updateSetter('self_rating', parseInt(e.target.value) || 0)}
-                  className="bg-bg-primary border border-border-default rounded px-3 py-1.5 text-sm w-20"
+                  className="bg-bg-primary border border-border-default rounded px-2 py-1 text-sm w-full"
                 />
               </div>
               <div>
@@ -411,7 +480,7 @@ export default function EODReview() {
                 <textarea
                   value={setterData.what_went_well}
                   onChange={e => updateSetter('what_went_well', e.target.value)}
-                  className="bg-bg-primary border border-border-default rounded px-3 py-1.5 text-sm w-full h-16 resize-none"
+                  className="bg-bg-primary border border-border-default rounded px-2 py-1 text-xs w-full h-14 resize-none"
                 />
               </div>
               <div>
@@ -419,37 +488,29 @@ export default function EODReview() {
                 <textarea
                   value={setterData.what_went_poorly}
                   onChange={e => updateSetter('what_went_poorly', e.target.value)}
-                  className="bg-bg-primary border border-border-default rounded px-3 py-1.5 text-sm w-full h-16 resize-none"
+                  className="bg-bg-primary border border-border-default rounded px-2 py-1 text-xs w-full h-14 resize-none"
                 />
               </div>
             </div>
           </div>
+          <button
+            onClick={handleConfirmSetter}
+            disabled={confirmed || submitting}
+            className={`flex items-center gap-2 px-6 py-2 rounded font-medium text-sm transition-colors ${
+              confirmed
+                ? 'bg-success/20 text-success border border-success/30'
+                : 'bg-opt-yellow text-bg-primary hover:bg-opt-yellow/90'
+            }`}
+          >
+            {submitting ? <Loader size={14} className="animate-spin" /> : <Check size={14} />}
+            {confirmed ? 'Confirmed' : submitting ? 'Saving...' : 'Confirm EOD'}
+          </button>
         </div>
       )}
 
       {tab === 'setter' && !selectedMember && (
         <div className="bg-bg-card border border-border-default rounded-lg p-8 text-center text-text-400 text-sm">
           Select a setter to start their EOD.
-        </div>
-      )}
-
-      {/* Confirm button */}
-      {selectedMember && (
-        <div className="mt-6">
-          <button
-            onClick={tab === 'closer' ? handleConfirmCloser : handleConfirmSetter}
-            disabled={confirmed || submitting || !selectedMember || (tab === 'closer' && calls.length === 0)}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded font-medium text-sm transition-colors ${
-              confirmed
-                ? 'bg-success/20 text-success border border-success/30 cursor-default'
-                : !selectedMember || (tab === 'closer' && calls.length === 0)
-                ? 'bg-bg-card text-text-400 border border-border-default cursor-not-allowed'
-                : 'bg-opt-yellow text-bg-primary hover:bg-opt-yellow/90'
-            }`}
-          >
-            {submitting ? <Loader size={16} className="animate-spin" /> : <Check size={16} />}
-            {confirmed ? 'Confirmed' : submitting ? 'Saving...' : 'Confirm EOD Report'}
-          </button>
         </div>
       )}
     </div>
