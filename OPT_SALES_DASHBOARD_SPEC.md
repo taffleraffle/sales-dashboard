@@ -573,36 +573,81 @@ Will handles the initial project scaffolding since he's building the data layer 
 /sales/eod/closer         → Closer EOD Form
 /sales/eod/setter         → Setter EOD Form
 /sales/attribution        → Lead Attribution Manager
-/sales/import             → CSV Import
+/sales/settings           → API Keys & Sync Config
 ```
 
 **After setup:** Will pushes to `main`, Ben pulls, both branch off for their chunks.
 
 ---
 
-### CHUNK 1 — WILL: Marketing + Overview
+### CHUNK 1 — WILL: Marketing + Overview (API-Driven, No Manual Entry)
 
 **Branch:** `feature/marketing-overview`
 
-**Will builds:** Overview page, Marketing Performance page, CSV Import, metric calculations, benchmarks.
+**Philosophy: No manual data entry.** All marketing data is pulled automatically from APIs. No CSV uploads. The dashboard refreshes itself.
+
+**Will builds:** Overview page, Marketing Performance page, Meta Ads API integration, Hyros API integration (pull side), metric calculations, benchmarks, settings page.
 
 **Will's files (no overlap with Ben):**
 ```
 src/pages/SalesOverview.jsx
 src/pages/MarketingPerformance.jsx
-src/pages/CSVImport.jsx
+src/pages/SettingsPage.jsx              # API key config, test connection, manual sync
 src/hooks/useMarketingData.js
 src/hooks/useBenchmarks.js
-src/utils/csvParser.js
+src/services/metaAdsApi.js              # Meta Marketing API client
+src/services/hyrosApi.js                # Hyros reporting/pull API client
 src/utils/metricCalculations.js
 ```
 
+#### Data Sources
+
+**1. Meta Ads API** — daily ad performance (automated pull):
+- Ad spend (total + per campaign/ad set)
+- Impressions, clicks, CTR
+- Leads (form submissions)
+- CPL, CPC
+- Campaign/ad set breakdown
+- API: `https://graph.facebook.com/v21.0/act_{ad_account_id}/insights`
+- Auth: System User token (long-lived)
+- Env vars: `META_ADS_ACCESS_TOKEN`, `META_ADS_ACCOUNT_ID`
+
+**2. Hyros API** — revenue attribution (automated pull):
+- Revenue attributed per ad/campaign (which spend drove which sales)
+- ROAS per campaign/ad set
+- Conversion funnel: lead → call_booked → deal_closed → ascended
+- API: `https://api.hyros.com/v1/api`
+- Auth: `API-Key` header
+- Env var: `HYROS_API_KEY` (already exists)
+- NOTE: The existing Flask app only PUSHES events to Hyros. Will needs to build the PULL/reporting side.
+
+**3. GHL Pipeline Analytics** — funnel/dialer/speed-to-lead:
+- Consumed from existing Flask endpoint: `GET dashboard.optdigital.io/api/setter-analytics?days=N`
+- Cross-origin — needs CORS headers on Flask app (see Integration section)
+- NOT rebuilt — reused as-is
+
+#### Data Flow
+```
+Meta Ads API  →  Daily auto-sync  →  Supabase `marketing_daily`    →  Dashboard
+Hyros API     →  Daily auto-sync  →  Supabase `attribution_daily`  →  Dashboard
+GHL Analytics →  On-demand poll   →  Proxied from Flask app         →  Dashboard
+```
+
+#### Sync Strategy
+- Supabase Edge Function or cron syncs Meta + Hyros data daily (midnight UTC)
+- "Refresh Now" button on Settings page for manual sync
+- Dashboard reads from Supabase cache — instant loads, no waiting for API calls
+- Date range queries hit cached tables, not APIs directly
+
 **Task order:**
-1. CSV Import (seeds the data) — file upload, parse V6 format (see Appendix E), upsert to sales_tracker_entries
-2. metricCalculations.js — all derived formulas + getColor() + trend calculations
-3. Benchmarks hook — fetch/seed/update sales_benchmarks table
-4. Overview page — KPI cards, funnel viz, team quick-view, date selector
-5. Marketing page — trend charts, efficiency table, revenue breakdown, cancellation trends
+1. Meta Ads API service — auth, fetch daily insights, campaign breakdown, store in Supabase
+2. Hyros API service — auth, fetch attribution/revenue reporting data, store in Supabase
+3. Supabase tables: `marketing_daily` (spend/leads/impressions), `attribution_daily` (revenue/ROAS per campaign)
+4. Settings page — API key config, test connection buttons, manual sync trigger, last-synced timestamp
+5. metricCalculations.js — derived formulas (ROAS, CPA, CPL trends) + getColor() + trend calcs
+6. Benchmarks hook — fetch/seed/update sales_benchmarks table
+7. Overview page — KPI cards, funnel viz, team quick-view, date selector
+8. Marketing page — spend vs revenue charts, campaign breakdown, ROAS trends, CPL trends, Meta Ads drill-down
 
 **Zero dependencies on Ben's chunk.**
 
