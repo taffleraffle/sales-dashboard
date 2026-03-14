@@ -541,15 +541,26 @@ EOD forms must be fully mobile-friendly (closers/setters submit from phone). Sin
 
 ## 12. Build Plan — Chunked for Parallel Work (48 Hours)
 
-### Shared Setup (Either Person, ~1 Hour — Do First)
+### Who's Who
+
+| Person | Name | Role | Claude Instance |
+|--------|------|------|-----------------|
+| **Will** | Will (collaborator) | Person A — Marketing + Overview | Will's Claude |
+| **Ben** | Ben Hobbs (owner) | Person B — Closers + Setters + EOD + Attribution | Ben's Claude |
+
+---
+
+### Shared Setup — WILL does this first (~1 Hour)
+
+Will handles the initial project scaffolding since he's building the data layer (CSV import) that seeds everything. Ben can start immediately after Will pushes the setup commit.
 
 1. Init React + Vite project
-2. Tailwind CSS with design tokens
-3. Supabase client utility
+2. Tailwind CSS with design tokens (Section 11)
+3. Supabase client utility (`src/lib/supabase.js`)
 4. React Router with route structure
 5. Shared components: KPICard, Gauge, DateRangeSelector, DataTable, getColor()
-6. SQL migrations for all tables
-7. Push to GitHub
+6. SQL migrations for all tables (Section 10) — run in Supabase SQL Editor
+7. Push to GitHub on `main` branch
 
 **Routes:**
 ```
@@ -565,13 +576,17 @@ EOD forms must be fully mobile-friendly (closers/setters submit from phone). Sin
 /sales/import             → CSV Import
 ```
 
+**After setup:** Will pushes to `main`, Ben pulls, both branch off for their chunks.
+
 ---
 
-### CHUNK 1 — Person A: Marketing + Overview
+### CHUNK 1 — WILL: Marketing + Overview
 
-**You build:** Overview page, Marketing Performance page, CSV Import, metric calculations, benchmarks.
+**Branch:** `feature/marketing-overview`
 
-**Your files (no overlap with Person B):**
+**Will builds:** Overview page, Marketing Performance page, CSV Import, metric calculations, benchmarks.
+
+**Will's files (no overlap with Ben):**
 ```
 src/pages/SalesOverview.jsx
 src/pages/MarketingPerformance.jsx
@@ -583,21 +598,23 @@ src/utils/metricCalculations.js
 ```
 
 **Task order:**
-1. CSV Import (seeds the data) — file upload, parse V6 format, upsert to sales_tracker_entries
+1. CSV Import (seeds the data) — file upload, parse V6 format (see Appendix E), upsert to sales_tracker_entries
 2. metricCalculations.js — all derived formulas + getColor() + trend calculations
 3. Benchmarks hook — fetch/seed/update sales_benchmarks table
 4. Overview page — KPI cards, funnel viz, team quick-view, date selector
 5. Marketing page — trend charts, efficiency table, revenue breakdown, cancellation trends
 
-**Zero dependencies on Person B.**
+**Zero dependencies on Ben's chunk.**
 
 ---
 
-### CHUNK 2 — Person B: Closers + Setters + EOD + Attribution
+### CHUNK 2 — BEN: Closers + Setters + EOD + Attribution
 
-**You build:** All closer pages, all setter pages, both EOD forms, lead attribution manager.
+**Branch:** `feature/closers-setters-eod`
 
-**Your files (no overlap with Person A):**
+**Ben builds:** All closer pages, all setter pages, both EOD forms, lead attribution manager.
+
+**Ben's files (no overlap with Will):**
 ```
 src/pages/CloserOverview.jsx
 src/pages/CloserDetail.jsx
@@ -621,17 +638,36 @@ src/components/LeadStatusBadge.jsx
 4. Closer Overview + Detail pages — cards, gauges, revenue, attribution from setters, trend, call log
 5. Setter Overview + Detail pages — conversion gauges, activity, attribution metrics, comparison, trend
 
-**Only dependency:** Import `getColor()` from Person A's metricCalculations.js. If not available yet, stub it locally.
+**Only dependency:** Import `getColor()` from Will's metricCalculations.js. If Will hasn't pushed yet, stub it locally.
 
 ---
 
-### Integration (Final ~6 Hours)
+### Integration — BOTH (Final ~6 Hours)
+
+Both merge their feature branches into `main` via PRs, then collaborate on:
 
 1. Wire Overview team cards to actual closer/setter EOD data
 2. Test full flow: CSV import → EOD submit → attribution → dashboards
 3. Verify traffic lights against benchmarks
 4. Mobile test EOD forms
 5. Fix styling inconsistencies
+6. Add CORS headers to Flask app (`dashboard.optdigital.io`) for `/api/setter-analytics` cross-origin calls
+
+### Workflow Reminder
+```bash
+# Will does setup first:
+git clone https://github.com/taffleraffle/sales-dashboard.git
+# ... scaffold, push to main ...
+
+# Ben pulls, then branches:
+git pull origin main
+git checkout -b feature/closers-setters-eod
+
+# Will branches:
+git checkout -b feature/marketing-overview
+
+# When done, open PRs to main
+```
 
 ---
 
