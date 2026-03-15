@@ -35,9 +35,6 @@ credentials/
 *.pem
 *.key
 
-# Scripts with local credentials (dev-only)
-scripts/
-
 # Database
 *.db
 *.sqlite3

@@ -21,14 +21,9 @@ class ErrorBoundary extends Component {
   render() {
     if (this.state.error) return (
       <div style={{ padding: 40, color: '#ff6b6b', fontFamily: 'monospace' }}>
-        <h2>Something went wrong</h2>
+        <h2>Runtime Error</h2>
         <pre style={{ whiteSpace: 'pre-wrap' }}>{this.state.error.message}</pre>
-        {import.meta.env.DEV && (
-          <pre style={{ whiteSpace: 'pre-wrap', color: '#999', fontSize: 12 }}>{this.state.error.stack}</pre>
-        )}
-        <button onClick={() => window.location.reload()} style={{ marginTop: 16, padding: '8px 16px', background: '#333', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}>
-          Reload Page
-        </button>
+        <pre style={{ whiteSpace: 'pre-wrap', color: '#999', fontSize: 12 }}>{this.state.error.stack}</pre>
       </div>
     )
     return this.props.children
