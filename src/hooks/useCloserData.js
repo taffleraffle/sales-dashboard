@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { sinceDate } from '../lib/dateUtils'
 
 export function useCloserEODs(closerId, days = 30) {
   const [reports, setReports] = useState([])
@@ -7,13 +8,10 @@ export function useCloserEODs(closerId, days = 30) {
 
   useEffect(() => {
     async function fetch() {
-      const since = new Date()
-      since.setDate(since.getDate() - days)
-
       let query = supabase
         .from('closer_eod_reports')
         .select('*, closer:team_members(name)')
-        .gte('report_date', since.toISOString().split('T')[0])
+        .gte('report_date', sinceDate(days))
         .order('report_date', { ascending: false })
 
       if (closerId) query = query.eq('closer_id', closerId)
@@ -54,15 +52,17 @@ export function useCloserTranscripts(closerId) {
   return { transcripts, loading }
 }
 
-export function useObjectionAnalysis(closerId) {
+export function useObjectionAnalysis(closerId, days = 30) {
   const [objections, setObjections] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function fetch() {
+      setLoading(true)
       let query = supabase
         .from('objection_analysis')
         .select('*')
+        .gte('period_start', sinceDate(days))
         .order('occurrence_count', { ascending: false })
 
       if (closerId) query = query.eq('closer_id', closerId)
@@ -73,7 +73,7 @@ export function useObjectionAnalysis(closerId) {
       setLoading(false)
     }
     fetch()
-  }, [closerId])
+  }, [closerId, days])
 
   return { objections, loading }
 }
@@ -91,8 +91,12 @@ export function useCloserStats(closerId, days = 30) {
       closes: acc.closes + (r.closes || 0),
       revenue: acc.revenue + parseFloat(r.total_revenue || 0),
       cash: acc.cash + parseFloat(r.total_cash_collected || 0),
+      ascensions: acc.ascensions + (r.deposits || 0),
+      ascendCash: acc.ascendCash + parseFloat(r.ascend_cash || 0),
+      ascendRevenue: acc.ascendRevenue + parseFloat(r.ascend_revenue || 0),
+      reschedules: acc.reschedules + (r.reschedules || 0),
     }),
-    { ncBooked: 0, fuBooked: 0, noShows: 0, liveCalls: 0, offers: 0, closes: 0, revenue: 0, cash: 0 }
+    { ncBooked: 0, fuBooked: 0, noShows: 0, liveCalls: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascensions: 0, ascendCash: 0, ascendRevenue: 0, reschedules: 0 }
   )
 
   const totalBooked = totals.ncBooked + totals.fuBooked
@@ -102,5 +106,6 @@ export function useCloserStats(closerId, days = 30) {
     showRate: totalBooked ? ((totals.liveCalls / totalBooked) * 100).toFixed(1) : 0,
     offerRate: totals.liveCalls ? ((totals.offers / totals.liveCalls) * 100).toFixed(1) : 0,
     closeRate: totals.liveCalls ? ((totals.closes / totals.liveCalls) * 100).toFixed(1) : 0,
+    rescheduleRate: totalBooked ? ((totals.reschedules / totalBooked) * 100).toFixed(1) : 0,
   }
 }

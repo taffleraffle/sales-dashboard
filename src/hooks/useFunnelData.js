@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { sinceDate } from '../lib/dateUtils'
 
 export function useFunnelData(days = 30) {
   const [data, setData] = useState({ leads: 0, bookings: 0, shows: 0, closes: 0, autoBookings: 0, manualSets: 0, autoShows: 0, autoCloses: 0, manualShows: 0, manualCloses: 0 })
@@ -7,14 +8,10 @@ export function useFunnelData(days = 30) {
 
   useEffect(() => {
     async function load() {
-      const since = new Date()
-      since.setDate(since.getDate() - days)
-      const sinceStr = since.toISOString().split('T')[0]
-
       const { data: leads } = await supabase
         .from('setter_leads')
         .select('id, status, lead_source, revenue_attributed')
-        .gte('date_set', sinceStr)
+        .gte('date_set', sinceDate(days))
 
       const all = leads || []
       const auto = all.filter(l => l.lead_source === 'auto')

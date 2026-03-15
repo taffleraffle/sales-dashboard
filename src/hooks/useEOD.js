@@ -35,6 +35,8 @@ export function useEODSubmit() {
           outcome: c.outcome,
           revenue: c.revenue || 0,
           cash_collected: c.cash_collected || 0,
+          offered: c.offered || false,
+          offered_finance: c.offered_finance || false,
           notes: c.notes || '',
         }))
         const { error: callError } = await supabase.from('closer_calls').insert(callRows)

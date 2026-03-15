@@ -1,17 +1,22 @@
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, ArrowUpRight } from 'lucide-react'
 import { getColor } from '../utils/metricCalculations'
 
-export default function KPICard({ label, value, subtitle, target, direction, trend, className = '' }) {
+export default function KPICard({ label, value, subtitle, target, direction, trend, className = '', highlight = false }) {
   const colorClass = target != null ? getColor(parseFloat(value), target, direction) : 'text-text-primary'
 
   return (
-    <div className={`bg-bg-card border border-border-default rounded-lg p-4 ${className}`}>
-      <p className="text-[11px] uppercase tracking-wider text-text-400 mb-1">{label}</p>
-      <p className={`text-2xl font-bold ${colorClass}`}>{value ?? '—'}</p>
-      <div className="flex items-center gap-2 mt-1">
+    <div className={`relative bg-bg-card border border-border-default rounded-2xl p-5 transition-all duration-200 hover:border-border-default/60 ${highlight ? 'border-opt-yellow/40 bg-opt-yellow-subtle' : ''} ${className}`}>
+      {/* Arrow link icon */}
+      <div className="absolute top-4 right-4">
+        <ArrowUpRight size={16} className={highlight ? 'text-opt-yellow' : 'text-text-400/50'} />
+      </div>
+
+      <p className="text-[11px] uppercase tracking-wider text-text-400 mb-2 font-medium">{label}</p>
+      <p className={`text-2xl font-bold tracking-tight ${colorClass}`}>{value ?? '—'}</p>
+      <div className="flex items-center gap-2 mt-1.5">
         {subtitle && <p className="text-xs text-text-secondary">{subtitle}</p>}
         {trend && (
-          <span className={`flex items-center gap-0.5 text-xs ${
+          <span className={`flex items-center gap-0.5 text-xs font-medium ${
             trend.direction === 'up' ? 'text-success' : trend.direction === 'down' ? 'text-danger' : 'text-text-400'
           }`}>
             {trend.direction === 'up' && <TrendingUp size={12} />}

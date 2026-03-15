@@ -12,51 +12,39 @@ async function fathomFetch(endpoint, params = {}) {
   return res.json()
 }
 
+/**
+ * Fetch meetings from Fathom API.
+ * Normalizes the response to consistent field names.
+ */
 export async function fetchMeetings(limit = 50) {
   const data = await fathomFetch('/meetings', {
     include_summary: 'true',
     include_action_items: 'true',
     limit: String(limit),
   })
-  return data.items || []
-}
 
-/**
- * Match Fathom meetings to closers by comparing invitee emails
- * against GHL calendar booking emails.
- */
-export function matchMeetingToCloser(meeting, closerGhlMap, calendarEvents) {
-  const inviteeEmails = (meeting.calendar_invitees || [])
-    .filter(i => i.is_external)
-    .map(i => i.email?.toLowerCase())
-    .filter(Boolean)
+  // Normalize Fathom's field names to what our sync code expects
+  return (data.items || []).map(m => {
+    const startTime = m.recording_start_time || m.scheduled_start_time || m.created_at
+    const endTime = m.recording_end_time || m.scheduled_end_time
+    const durationSecs = startTime && endTime
+      ? Math.round((new Date(endTime) - new Date(startTime)) / 1000)
+      : null
 
-  // Find a GHL calendar event with a matching contact email
-  for (const event of calendarEvents) {
-    const contactEmail = (event.contact?.email || '').toLowerCase()
-    if (!contactEmail) continue
-    if (inviteeEmails.includes(contactEmail)) {
-      // Match the GHL event's assignedTo to a closer
-      const assignedTo = event.assignedTo || event.assignedUserId || ''
-      const closer = closerGhlMap[assignedTo]
-      return {
-        closerId: closer?.id || null,
-        closerName: closer?.name || 'Unknown',
-        prospectEmail: contactEmail,
-        prospectName: event.contact?.name || meeting.title || 'Unknown',
-        calendarEventId: event.id,
-      }
+    return {
+      id: String(m.recording_id || m.id || ''),
+      meeting_id: String(m.recording_id || m.id || ''),
+      title: m.title || m.meeting_title || '',
+      start_time: startTime,
+      summary: m.default_summary?.markdown_formatted || m.summary || null,
+      duration_seconds: durationSecs,
+      share_url: m.share_url || m.url || null,
+      recording_url: m.url || m.share_url || null,
+      calendar_invitees: m.calendar_invitees || [],
+      recorded_by: m.recorded_by || null,
+      organizer_email: m.recorded_by?.email || null,
     }
-  }
-
-  // Fallback: try matching by meeting title containing prospect name
-  return {
-    closerId: null,
-    closerName: 'Unmatched',
-    prospectEmail: inviteeEmails[0] || '',
-    prospectName: meeting.title || 'Unknown',
-    calendarEventId: null,
-  }
+  })
 }
 
 export function formatDuration(seconds) {

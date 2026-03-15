@@ -1,3 +1,6 @@
+import { useState, useRef, useEffect } from 'react'
+import { Calendar, ChevronDown } from 'lucide-react'
+
 const presets = [
   { label: 'Today', days: 1 },
   { label: '7d', days: 7 },
@@ -5,22 +8,149 @@ const presets = [
   { label: 'MTD', days: 'mtd' },
 ]
 
+function isCustomRange(selected) {
+  return selected && typeof selected === 'object' && selected.from
+}
+
+function formatRangeLabel(selected) {
+  if (isCustomRange(selected)) {
+    const fmt = d => new Date(d + 'T00:00:00').toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })
+    return `${fmt(selected.from)} – ${fmt(selected.to)}`
+  }
+  return null
+}
+
 export default function DateRangeSelector({ selected, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const ref = useRef(null)
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const isPreset = (days) => {
+    if (isCustomRange(selected)) return false
+    return selected === days
+  }
+
+  const applyCustom = () => {
+    if (customFrom && customTo) {
+      onChange({ from: customFrom, to: customTo })
+      setOpen(false)
+    }
+  }
+
+  const customLabel = formatRangeLabel(selected)
+
   return (
-    <div className="flex gap-1">
-      {presets.map(({ label, days }) => (
+    <div className="relative" ref={ref}>
+      <div className="flex gap-1.5 bg-bg-card border border-border-default rounded-xl p-1">
+        {presets.map(({ label, days }) => (
+          <button
+            key={label}
+            onClick={() => { onChange(days); setOpen(false) }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+              isPreset(days)
+                ? 'bg-opt-yellow text-bg-primary shadow-sm'
+                : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+
+        {/* Custom range toggle */}
         <button
-          key={label}
-          onClick={() => onChange(days)}
-          className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-            selected === days
-              ? 'bg-opt-yellow text-bg-primary'
-              : 'bg-bg-card text-text-secondary hover:text-text-primary border border-border-default'
+          onClick={() => setOpen(!open)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+            isCustomRange(selected)
+              ? 'bg-opt-yellow text-bg-primary shadow-sm'
+              : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
           }`}
         >
-          {label}
+          <Calendar size={12} />
+          {customLabel || 'Custom'}
+          <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
-      ))}
+      </div>
+
+      {/* Custom dropdown */}
+      {open && (
+        <div className="absolute right-0 top-full mt-2 z-50 bg-bg-card border border-border-default rounded-2xl p-5 shadow-xl shadow-black/40 w-72">
+          <p className="text-[11px] text-text-400 uppercase tracking-wider font-medium mb-3">Custom Range</p>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-[11px] text-text-400 block mb-1">From</label>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={e => setCustomFrom(e.target.value)}
+                className="w-full bg-bg-primary border border-border-default rounded-xl px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/50 transition-colors [color-scheme:dark]"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-text-400 block mb-1">To</label>
+              <input
+                type="date"
+                value={customTo}
+                onChange={e => setCustomTo(e.target.value)}
+                className="w-full bg-bg-primary border border-border-default rounded-xl px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/50 transition-colors [color-scheme:dark]"
+              />
+            </div>
+          </div>
+
+          {/* Quick presets within dropdown */}
+          <div className="flex flex-wrap gap-1.5 mt-4 pt-3 border-t border-border-default">
+            {[
+              { label: 'Last 14d', from: 14 },
+              { label: 'Last 60d', from: 60 },
+              { label: 'Last 90d', from: 90 },
+              { label: 'This Quarter', quarter: true },
+            ].map(preset => {
+              const handleClick = () => {
+                const now = new Date()
+                const toStr = now.toISOString().split('T')[0]
+                let fromStr
+                if (preset.quarter) {
+                  const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)
+                  fromStr = qStart.toISOString().split('T')[0]
+                } else {
+                  const d = new Date()
+                  d.setDate(d.getDate() - preset.from)
+                  fromStr = d.toISOString().split('T')[0]
+                }
+                setCustomFrom(fromStr)
+                setCustomTo(toStr)
+                onChange({ from: fromStr, to: toStr })
+                setOpen(false)
+              }
+              return (
+                <button
+                  key={preset.label}
+                  onClick={handleClick}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-bg-primary text-text-400 border border-border-default hover:text-text-primary hover:border-opt-yellow/30 transition-all"
+                >
+                  {preset.label}
+                </button>
+              )
+            })}
+          </div>
+
+          <button
+            onClick={applyCustom}
+            disabled={!customFrom || !customTo}
+            className="mt-4 w-full py-2 rounded-xl text-xs font-semibold bg-opt-yellow text-bg-primary hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+          >
+            Apply Range
+          </button>
+        </div>
+      )}
     </div>
   )
 }

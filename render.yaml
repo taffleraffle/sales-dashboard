@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: opt-sales-dashboard
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_META_ADS_ACCOUNT_ID
+        sync: false
+      - key: VITE_META_ADS_ACCESS_TOKEN
+        sync: false
+      - key: VITE_HYROS_API_KEY
+        sync: false
+      - key: VITE_FATHOM_API_KEY
+        sync: false
+      - key: VITE_GHL_API_KEY
+        sync: false
+      - key: VITE_GHL_LOCATION_ID
+        sync: false
+      - key: VITE_NZD_TO_USD
+        sync: false

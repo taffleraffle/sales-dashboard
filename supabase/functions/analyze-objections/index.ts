@@ -20,14 +20,13 @@ serve(async (req) => {
 
     const { closer_id, days = 30 } = await req.json()
 
-    // Fetch recent transcripts for this closer (or all closers)
     const since = new Date()
     since.setDate(since.getDate() - days)
     const sinceStr = since.toISOString().split('T')[0]
 
     let query = supabase
       .from('closer_transcripts')
-      .select('id, closer_id, prospect_name, summary, meeting_date')
+      .select('id, closer_id, prospect_name, summary, meeting_date, transcript_url')
       .gte('meeting_date', sinceStr)
       .not('summary', 'is', null)
       .order('meeting_date', { ascending: false })
@@ -44,6 +43,12 @@ serve(async (req) => {
       )
     }
 
+    // Build a lookup for transcript references
+    const transcriptMap: Record<number, { name: string; date: string; url: string | null }> = {}
+    transcripts.forEach((t, i) => {
+      transcriptMap[i + 1] = { name: t.prospect_name, date: t.meeting_date, url: t.transcript_url }
+    })
+
     // Group transcripts by closer_id
     const byCloser: Record<string, typeof transcripts> = {}
     for (const t of transcripts) {
@@ -57,12 +62,16 @@ serve(async (req) => {
     for (const [cId, closerTranscripts] of Object.entries(byCloser)) {
       if (cId === 'unmatched') continue
 
-      // Build transcript summaries for Claude
+      // Build transcript summaries with numbered references
       const summaryText = closerTranscripts
         .map((t, i) => `[Call ${i + 1}] ${t.prospect_name} (${t.meeting_date}):\n${t.summary}`)
         .join('\n\n---\n\n')
 
-      // Call Claude to analyze objections
+      // Build reference list for Claude
+      const refList = closerTranscripts
+        .map((t, i) => `Call ${i + 1}: ${t.prospect_name} (${t.meeting_date})`)
+        .join('\n')
+
       const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -72,17 +81,23 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: 2000,
+          max_tokens: 3000,
           messages: [{
             role: 'user',
-            content: `Analyze these sales call summaries and identify the most common objections raised by prospects. For each objection category, provide:
-1. A short category name (e.g., "Price too high", "Need to think about it", "Already working with someone")
-2. How many times it appeared
-3. 1-2 direct quotes or paraphrases from the calls
-4. An estimated win rate (what % of the time the closer overcame this objection and closed)
+            content: `Analyze these sales call summaries and identify the most common objections raised by prospects.
+
+For each objection category, provide:
+1. A short category name (e.g., "Price too high", "Need to think about it")
+2. How many times it appeared across all calls
+3. Which specific calls it appeared in (use the call numbers: 1, 2, 3, etc.)
+4. 1-2 direct quotes or paraphrases from the calls
+5. An estimated win rate (% of times the closer overcame this objection and closed the deal)
+
+Call reference list:
+${refList}
 
 Return ONLY valid JSON as an array:
-[{"category": "...", "count": N, "quotes": ["...", "..."], "win_rate": N}]
+[{"category": "...", "count": N, "call_numbers": [1, 3], "quotes": ["...", "..."], "win_rate": N}]
 
 Here are the call summaries:
 
@@ -99,7 +114,6 @@ ${summaryText}`
       const claudeData = await claudeRes.json()
       const responseText = claudeData.content?.[0]?.text || ''
 
-      // Parse JSON from Claude's response
       let objections
       try {
         const jsonMatch = responseText.match(/\[[\s\S]*\]/)
@@ -109,12 +123,21 @@ ${summaryText}`
         continue
       }
 
-      // Calculate period
       const periodStart = sinceStr
       const periodEnd = new Date().toISOString().split('T')[0]
 
-      // Upsert objection analysis records
+      // Build call references for each objection
       for (const obj of objections) {
+        const callRefs = (obj.call_numbers || []).map((n: number) => {
+          const t = closerTranscripts[n - 1]
+          if (!t) return null
+          return {
+            prospect: t.prospect_name,
+            date: t.meeting_date,
+            url: t.transcript_url,
+          }
+        }).filter(Boolean)
+
         const { error: upsertErr } = await supabase
           .from('objection_analysis')
           .upsert({
@@ -125,6 +148,7 @@ ${summaryText}`
             occurrence_count: obj.count || 1,
             example_quotes: obj.quotes || [],
             win_rate: obj.win_rate ?? null,
+            call_references: callRefs,
           }, {
             onConflict: 'closer_id,period_start,period_end,objection_category',
           })
@@ -141,7 +165,7 @@ ${summaryText}`
     )
   } catch (err) {
     return new Response(
-      JSON.stringify({ error: err.message }),
+      JSON.stringify({ error: (err as Error).message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }

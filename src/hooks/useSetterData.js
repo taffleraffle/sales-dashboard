@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { sinceDate } from '../lib/dateUtils'
 
 export function useSetterEODs(setterId, days = 30) {
   const [reports, setReports] = useState([])
@@ -7,13 +8,10 @@ export function useSetterEODs(setterId, days = 30) {
 
   useEffect(() => {
     async function fetch() {
-      const since = new Date()
-      since.setDate(since.getDate() - days)
-
       let query = supabase
         .from('setter_eod_reports')
         .select('*, setter:team_members(name)')
-        .gte('report_date', since.toISOString().split('T')[0])
+        .gte('report_date', sinceDate(days))
         .order('report_date', { ascending: false })
 
       if (setterId) query = query.eq('setter_id', setterId)

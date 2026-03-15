@@ -1,31 +1,49 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { sinceDate } from '../lib/dateUtils'
+import { syncMetaAds } from '../services/metaAdsSync'
 
 export function useMarketingData(days = 30) {
   const [data, setData] = useState({ campaigns: [], totals: {}, daily: [] })
   const [loading, setLoading] = useState(true)
+  const [syncStatus, setSyncStatus] = useState(null)
 
   useEffect(() => {
     async function load() {
-      const since = new Date()
-      since.setDate(since.getDate() - days)
-      const sinceStr = since.toISOString().split('T')[0]
+      const since = sinceDate(days)
 
       // Fetch marketing_daily
       const { data: marketing } = await supabase
         .from('marketing_daily')
         .select('*')
-        .gte('date', sinceStr)
+        .gte('date', since)
         .order('date', { ascending: false })
 
       // Fetch attribution_daily
       const { data: attribution } = await supabase
         .from('attribution_daily')
         .select('*')
-        .gte('date', sinceStr)
+        .gte('date', since)
 
-      const rows = marketing || []
+      let rows = marketing || []
       const attRows = attribution || []
+
+      // Auto-sync from Meta Ads if table is empty
+      if (rows.length === 0 && import.meta.env.VITE_META_ADS_ACCESS_TOKEN) {
+        setSyncStatus('Syncing Meta Ads...')
+        try {
+          await syncMetaAds(days)
+          const { data: fresh } = await supabase
+            .from('marketing_daily')
+            .select('*')
+            .gte('date', since)
+            .order('date', { ascending: false })
+          rows = fresh || []
+        } catch (err) {
+          console.warn('Auto Meta sync failed:', err.message)
+        }
+        setSyncStatus(null)
+      }
 
       // Totals
       const totalSpend = rows.reduce((s, r) => s + parseFloat(r.spend || 0), 0)
@@ -90,5 +108,5 @@ export function useMarketingData(days = 30) {
     load()
   }, [days])
 
-  return { data, loading }
+  return { data, loading, syncStatus }
 }

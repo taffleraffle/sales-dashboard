@@ -1,0 +1,2 @@
+ALTER TABLE closer_eod_reports ADD COLUMN IF NOT EXISTS ascend_cash NUMERIC(10,2) DEFAULT 0;
+ALTER TABLE closer_eod_reports ADD COLUMN IF NOT EXISTS ascend_revenue NUMERIC(10,2) DEFAULT 0;

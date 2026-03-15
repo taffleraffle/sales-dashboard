@@ -1,47 +1,106 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, Target, TrendingUp, ClipboardCheck, Settings } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, User, Search, Bell } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
 
 const navItems = [
   { to: '/sales', icon: BarChart3, label: 'Overview', end: true },
-  { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
   { to: '/sales/closers', icon: UserCheck, label: 'Closers' },
   { to: '/sales/setters', icon: Users, label: 'Setters' },
-  { to: '/sales/attribution', icon: Target, label: 'Attribution' },
+  { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
   { to: '/sales/settings', icon: Settings, label: 'Settings' },
 ]
 
 export default function Layout() {
+  const { profile, signOut, isAdmin } = useAuth()
+
+  const roleLabel = isAdmin ? 'Admin' : profile?.role === 'closer' ? 'Closer' : profile?.role === 'setter' ? 'Setter' : 'Viewer'
+
   return (
-    <div className="min-h-screen bg-bg-primary">
-      {/* Top nav bar */}
-      <nav className="border-b border-border-default bg-bg-card/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-[1400px] mx-auto px-4 flex items-center h-14 gap-1">
-          <span className="text-opt-yellow font-bold text-lg mr-6 tracking-tight">OPT SALES</span>
+    <div className="min-h-screen bg-bg-primary flex">
+      {/* ── Left Sidebar ── */}
+      <aside className="w-16 bg-bg-sidebar border-r border-border-default flex flex-col items-center py-5 fixed top-0 left-0 h-screen z-50">
+        {/* Logo */}
+        <div className="w-9 h-9 rounded-full bg-opt-yellow flex items-center justify-center mb-8">
+          <BarChart3 size={18} className="text-bg-primary" />
+        </div>
+
+        {/* Nav Icons */}
+        <nav className="flex flex-col items-center gap-2 flex-1">
           {navItems.map(({ to, icon: Icon, label, end }) => (
             <NavLink
               key={to}
               to={to}
               end={end}
+              title={label}
               className={({ isActive }) =>
-                `flex items-center gap-1.5 px-3 py-1.5 rounded text-sm transition-colors ${
+                `group relative w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 ${
                   isActive
-                    ? 'bg-opt-yellow-muted text-opt-yellow'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-bg-card-hover'
+                    ? 'bg-opt-yellow text-bg-primary shadow-[0_0_20px_rgba(212,245,12,0.15)]'
+                    : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
                 }`
               }
             >
-              <Icon size={16} />
-              <span className="hidden sm:inline">{label}</span>
+              <Icon size={20} />
+              {/* Tooltip */}
+              <span className="absolute left-full ml-3 px-2.5 py-1 rounded-lg bg-bg-card border border-border-default text-xs text-text-primary whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity shadow-lg">
+                {label}
+              </span>
             </NavLink>
           ))}
-        </div>
-      </nav>
+        </nav>
 
-      {/* Page content */}
-      <main className="max-w-[1400px] mx-auto px-4 py-6">
-        <Outlet />
-      </main>
+        {/* Bottom: Sign out */}
+        <button
+          onClick={signOut}
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-text-400 hover:text-danger hover:bg-danger/10 transition-all"
+          title="Sign out"
+        >
+          <LogOut size={18} />
+        </button>
+      </aside>
+
+      {/* ── Main Content ── */}
+      <div className="flex-1 ml-16">
+        {/* Top bar */}
+        <header className="h-16 border-b border-border-default flex items-center justify-between px-8 sticky top-0 bg-bg-primary/80 backdrop-blur-xl z-40">
+          {/* Search */}
+          <div className="flex items-center gap-2 bg-bg-card border border-border-default rounded-xl px-4 py-2 w-72">
+            <Search size={15} className="text-text-400" />
+            <input
+              type="text"
+              placeholder="Search..."
+              className="bg-transparent text-sm text-text-primary placeholder-text-400 outline-none w-full"
+            />
+          </div>
+
+          {/* Right side */}
+          <div className="flex items-center gap-4">
+            {/* Notification bell */}
+            <button className="w-9 h-9 rounded-xl bg-bg-card border border-border-default flex items-center justify-center text-text-400 hover:text-text-primary transition-colors">
+              <Bell size={16} />
+            </button>
+
+            {/* User profile */}
+            {profile && (
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-opt-yellow/15 border border-opt-yellow/30 flex items-center justify-center">
+                  <User size={15} className="text-opt-yellow" />
+                </div>
+                <div className="hidden md:block">
+                  <p className="text-sm font-medium text-text-primary leading-tight">{profile.name}</p>
+                  <p className="text-[11px] text-text-400">{roleLabel}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {/* Page content */}
+        <main className="max-w-[1440px] mx-auto px-8 py-6">
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }
