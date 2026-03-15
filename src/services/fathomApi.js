@@ -1,15 +1,7 @@
-const FATHOM_API_KEY = import.meta.env.VITE_FATHOM_API_KEY
-const BASE_URL = 'https://api.fathom.ai/external/v1'
+import { apiProxy } from '../lib/apiProxy'
 
 async function fathomFetch(endpoint, params = {}) {
-  const url = new URL(`${BASE_URL}${endpoint}`)
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
-
-  const res = await fetch(url, {
-    headers: { 'X-Api-Key': FATHOM_API_KEY },
-  })
-  if (!res.ok) throw new Error(`Fathom API ${res.status}: ${await res.text()}`)
-  return res.json()
+  return apiProxy('fathom', 'fetch', { endpoint, queryParams: params })
 }
 
 /**

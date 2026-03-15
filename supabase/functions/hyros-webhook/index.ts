@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_ORIGIN') || '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
@@ -14,6 +14,18 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+
+    // Verify webhook secret if configured
+    const webhookSecret = Deno.env.get('HYROS_WEBHOOK_SECRET')
+    if (webhookSecret) {
+      const providedSecret = req.headers.get('x-webhook-secret') || new URL(req.url).searchParams.get('secret')
+      if (providedSecret !== webhookSecret) {
+        return new Response(JSON.stringify({ error: 'Invalid webhook secret' }), {
+          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     const supabase = createClient(supabaseUrl, supabaseKey)
 
     const payload = await req.json()

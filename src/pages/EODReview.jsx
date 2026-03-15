@@ -4,6 +4,7 @@ import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useEODSubmit } from '../hooks/useEOD'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { apiProxy } from '../lib/apiProxy'
 import { fetchCloserCalendar, syncGHLAppointments } from '../services/ghlCalendar'
 
 const closingOutcomes = [
@@ -56,9 +57,6 @@ function LeadPicker({ onSelect, onClose }) {
     if (search.length < 2) { setResults([]); return }
     const timer = setTimeout(async () => {
       setLoading(true)
-      const ghlKey = import.meta.env.VITE_GHL_API_KEY
-      const ghlLoc = import.meta.env.VITE_GHL_LOCATION_ID
-
       // Search all three sources in parallel
       const [leadsRes, ghlRes, ghlContactsRes] = await Promise.all([
         supabase
@@ -73,12 +71,9 @@ function LeadPicker({ onSelect, onClose }) {
           .ilike('contact_name', `%${search}%`)
           .order('appointment_date', { ascending: false })
           .limit(15),
-        // Always search GHL contacts API for live pipeline leads
-        (ghlKey && ghlLoc) ? fetch(
-          `https://services.leadconnectorhq.com/contacts/?${new URLSearchParams({ locationId: ghlLoc, query: search, limit: '20' })}`,
-          { headers: { 'Authorization': `Bearer ${ghlKey}`, 'Version': '2021-07-28' } }
-        ).then(r => r.ok ? r.json() : { contacts: [] }).catch(() => ({ contacts: [] }))
-        : Promise.resolve({ contacts: [] }),
+        // Search GHL contacts API via server-side proxy
+        apiProxy('ghl', 'contact_search', { query: search })
+          .catch(() => ({ contacts: [] })),
       ])
 
       const leads = (leadsRes.data || []).map(l => ({ ...l, _source: 'lead' }))
@@ -209,30 +204,20 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
       const seen = new Set(leads.map(l => l.lead_name?.toLowerCase()))
       const combined = [...leads, ...ghl.filter(g => !seen.has(g.lead_name?.toLowerCase()))]
 
-      // If no local results, try GHL contacts API
+      // If no local results, try GHL contacts API via proxy
       if (combined.length === 0) {
-        const ghlKey = import.meta.env.VITE_GHL_API_KEY
-        const ghlLoc = import.meta.env.VITE_GHL_LOCATION_ID
-        if (ghlKey && ghlLoc) {
-          try {
-            const params = new URLSearchParams({ locationId: ghlLoc, query: search, limit: '8' })
-            const res = await fetch(`https://services.leadconnectorhq.com/contacts/?${params}`, {
-              headers: { 'Authorization': `Bearer ${ghlKey}`, 'Version': '2021-07-28' },
-            })
-            if (res.ok) {
-              const json = await res.json()
-              ;(json.contacts || []).forEach(c => combined.push({
-                id: c.id,
-                lead_name: `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || 'Unknown',
-                appointment_date: null,
-                lead_source: 'ghl',
-                contact_email: c.email || '',
-                contact_phone: c.phone || '',
-                _source: 'ghl_live',
-              }))
-            }
-          } catch {}
-        }
+        try {
+          const json = await apiProxy('ghl', 'contact_search', { query: search })
+          ;(json.contacts || []).forEach(c => combined.push({
+            id: c.id,
+            lead_name: `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || 'Unknown',
+            appointment_date: null,
+            lead_source: 'ghl',
+            contact_email: c.email || '',
+            contact_phone: c.phone || '',
+            _source: 'ghl_live',
+          }))
+        } catch {}
       }
 
       combined.sort((a, b) => (b.appointment_date || '').localeCompare(a.appointment_date || ''))

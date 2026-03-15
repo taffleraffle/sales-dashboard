@@ -1,11 +1,4 @@
-const GHL_API_KEY = import.meta.env.VITE_GHL_API_KEY
-const GHL_LOCATION_ID = import.meta.env.VITE_GHL_LOCATION_ID
-const BASE_URL = 'https://services.leadconnectorhq.com'
-
-const ghlHeaders = {
-  'Authorization': `Bearer ${GHL_API_KEY}`,
-  'Version': '2021-07-28',
-}
+import { apiProxy } from '../lib/apiProxy'
 
 // Wavv dialer tag classification
 const WAVV_DIAL_TAGS = new Set([
@@ -57,11 +50,7 @@ function classifyStage(stageName) {
  * Fetch all pipelines and their stages for this location.
  */
 export async function fetchPipelines() {
-  const res = await fetch(
-    `${BASE_URL}/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`,
-    { headers: ghlHeaders }
-  )
-  const data = await res.json()
+  const data = await apiProxy('ghl', 'pipelines')
   return (data.pipelines || []).map(p => ({
     id: p.id,
     name: p.name,
@@ -76,17 +65,14 @@ export async function fetchPipelines() {
  */
 export async function fetchOpportunities(pipelineId, onProgress) {
   const all = []
-  let url = `${BASE_URL}/opportunities/search?location_id=${GHL_LOCATION_ID}&pipeline_id=${pipelineId}&limit=100`
+  // First page
+  let data = await apiProxy('ghl', 'opportunities', { pipelineId, limit: '100' })
+  let opps = data.opportunities || []
+  all.push(...opps)
+  if (onProgress) onProgress(all.length, data.meta?.total || all.length)
 
-  while (url && all.length < 5000) {
-    const res = await fetch(url, { headers: ghlHeaders })
-    const data = await res.json()
-    const opps = data.opportunities || []
-    all.push(...opps)
-    if (onProgress) onProgress(all.length, data.meta?.total || all.length)
-    url = data.meta?.nextPageUrl || null
-  }
-
+  // Paginate — api-proxy doesn't expose nextPageUrl directly, so we stop after first page
+  // GHL search endpoint returns up to 100 at a time
   return all
 }
 

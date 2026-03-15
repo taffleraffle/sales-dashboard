@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': Deno.env.get('ALLOWED_ORIGIN') || '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
@@ -34,15 +34,15 @@ serve(async (req) => {
       })
     }
 
-    // Check caller is admin
+    // Check caller is admin (check both team_members and user_profiles)
     const adminClient = createClient(supabaseUrl, supabaseServiceKey)
-    const { data: callerProfile } = await adminClient
-      .from('team_members')
-      .select('role')
-      .eq('auth_user_id', caller.id)
-      .single()
+    const [{ data: teamProfile }, { data: userProfile }] = await Promise.all([
+      adminClient.from('team_members').select('role').eq('auth_user_id', caller.id).single(),
+      adminClient.from('user_profiles').select('role').eq('auth_user_id', caller.id).single(),
+    ])
 
-    if (callerProfile?.role !== 'admin') {
+    const isAdmin = teamProfile?.role === 'admin' || userProfile?.role === 'admin'
+    if (!isAdmin) {
       return new Response(JSON.stringify({ error: 'Admin access required' }), {
         status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
