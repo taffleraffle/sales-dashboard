@@ -510,7 +510,7 @@ export default function MarketingPerformance() {
   const [metaSyncing, setMetaSyncing] = useState(false)
   const [metaStatus, setMetaStatus] = useState(null)
   const fileRef = useRef(null)
-  const hasMetaCreds = true // API keys are now server-side via edge function
+  const hasMetaCreds = !!(import.meta.env.VITE_META_ADS_ACCESS_TOKEN && import.meta.env.VITE_META_ADS_ACCOUNT_ID)
 
   const rangeEntries = useMemo(() => filterByDays(entries, range), [entries, range])
   const mtdEntries = useMemo(() => filterByDays(entries, 'mtd'), [entries])

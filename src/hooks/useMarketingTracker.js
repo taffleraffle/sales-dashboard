@@ -35,7 +35,8 @@ export function useMarketingTracker({ autoSync = false } = {}) {
       // Then try Meta/GHL sync (may fail due to expired tokens)
       try {
         const { syncMetaToTracker } = await import('../services/metaAdsSync')
-        await syncMetaToTracker(90, { pullFresh: true })
+        const hasMetaCreds = !!(import.meta.env.VITE_META_ADS_ACCESS_TOKEN && import.meta.env.VITE_META_ADS_ACCOUNT_ID)
+        if (hasMetaCreds) await syncMetaToTracker(90, { pullFresh: true })
       } catch (err) { console.error('Meta sync failed:', err) }
       await load()
       setSyncing(false)

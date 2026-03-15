@@ -9,10 +9,10 @@ import { analyzeObjections } from '../services/objectionAnalysis'
 import { syncGHLAppointments } from '../services/ghlCalendar'
 
 const apiConfigs = [
-  { key: 'meta', label: 'Meta Ads API', description: 'Pulls ad spend, CPL, CPC, impressions, leads' },
-  { key: 'hyros', label: 'Hyros API', description: 'Pulls revenue attribution, ROAS per campaign' },
-  { key: 'fathom', label: 'Fathom API', description: 'Pulls call transcripts for objection analysis' },
-  { key: 'ghl', label: 'GHL Calendar', description: 'Pulls closer calendar appointments for EOD review' },
+  { key: 'meta', label: 'Meta Ads API', envVar: 'VITE_META_ADS_ACCESS_TOKEN', description: 'Pulls ad spend, CPL, CPC, impressions, leads' },
+  { key: 'hyros', label: 'Hyros API', envVar: 'VITE_HYROS_API_KEY', description: 'Pulls revenue attribution, ROAS per campaign' },
+  { key: 'fathom', label: 'Fathom API', envVar: 'VITE_FATHOM_API_KEY', description: 'Pulls call transcripts for objection analysis' },
+  { key: 'ghl', label: 'GHL Calendar', envVar: 'VITE_GHL_API_KEY', description: 'Pulls closer calendar appointments for EOD review' },
 ]
 
 export default function SettingsPage() {
@@ -20,8 +20,10 @@ export default function SettingsPage() {
   const [syncing, setSyncing] = useState(null)
   const [lastResult, setLastResult] = useState(null)
 
-  // API keys are now server-side only — status is checked by attempting a sync
-  const getStatus = () => true
+  const getStatus = (envVar) => {
+    const val = import.meta.env[envVar]
+    return val && val.length > 0
+  }
 
   const [ghlProgress, setGhlProgress] = useState('')
 

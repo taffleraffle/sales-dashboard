@@ -1,5 +1,13 @@
 import { supabase } from '../lib/supabase'
-import { apiProxy } from '../lib/apiProxy'
+
+const GHL_API_KEY = import.meta.env.VITE_GHL_API_KEY
+const GHL_LOCATION_ID = import.meta.env.VITE_GHL_LOCATION_ID
+const BASE_URL = 'https://services.leadconnectorhq.com'
+
+const ghlHeaders = {
+  'Authorization': `Bearer ${GHL_API_KEY}`,
+  'Version': '2021-07-28',
+}
 
 /**
  * Sync all GHL appointments for a date range to Supabase.
@@ -12,6 +20,10 @@ import { apiProxy } from '../lib/apiProxy'
  * @returns {{ synced: number, scanned: number }}
  */
 export async function syncGHLAppointments(startDate, endDate, onProgress = () => {}) {
+  if (!GHL_API_KEY || !GHL_LOCATION_ID) {
+    throw new Error('GHL API key or Location ID not configured')
+  }
+
   // Get team members with GHL user IDs for mapping
   const { data: teamMembers } = await supabase
     .from('team_members')
@@ -23,24 +35,28 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
     if (m.ghl_user_id) userIdToCloser[m.ghl_user_id] = m.id
   }
 
-  // Paginate through ALL contacts in the location via server-side proxy
+  // Paginate through ALL contacts in the location
   let allContacts = []
   let startAfterId = null
+  let startAfter = null
   let page = 0
 
   onProgress('Fetching contacts...')
 
   while (page < 20) { // Max 2000 contacts
-    const reqParams = { limit: '100' }
-    if (startAfterId) reqParams.startAfterId = startAfterId
-
-    let json
-    try {
-      json = await apiProxy('ghl', 'contacts', reqParams)
-    } catch {
-      break
+    const params = new URLSearchParams({
+      locationId: GHL_LOCATION_ID,
+      limit: '100',
+    })
+    if (startAfterId) {
+      params.set('startAfterId', startAfterId)
+      params.set('startAfter', String(startAfter))
     }
 
+    const res = await fetch(`${BASE_URL}/contacts/?${params}`, { headers: ghlHeaders })
+    if (!res.ok) break
+
+    const json = await res.json()
     const contacts = json.contacts || []
     allContacts = allContacts.concat(contacts)
 
@@ -48,6 +64,7 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
 
     if (!json.meta?.nextPageUrl || contacts.length === 0) break
     startAfterId = json.meta.startAfterId
+    startAfter = json.meta.startAfter
     page++
   }
 
@@ -63,7 +80,12 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
     const results = await Promise.all(
       batch.map(async (contact) => {
         try {
-          const json = await apiProxy('ghl', 'appointments', { contactId: contact.id })
+          const res = await fetch(
+            `${BASE_URL}/contacts/${contact.id}/appointments`,
+            { headers: ghlHeaders }
+          )
+          if (!res.ok) return []
+          const json = await res.json()
           return (json.events || [])
             .filter(e => {
               const st = e.startTime || ''
@@ -165,7 +187,7 @@ export async function fetchCloserCalendar(closerId, dateStr) {
 
     if (!error && cached && cached.length > 0) {
       // If cache is stale, trigger background re-sync
-      if (isCacheStale(cached)) {
+      if (isCacheStale(cached) && GHL_API_KEY && GHL_LOCATION_ID) {
         const syncKey = `${dateStr}`
         if (!syncInProgress.has(syncKey)) {
           syncInProgress.add(syncKey)
@@ -192,8 +214,8 @@ export async function fetchCloserCalendar(closerId, dateStr) {
       return { source: 'ghl', events }
     }
 
-    // No cache — auto-sync from GHL
-    {
+    // No cache — auto-sync from GHL if configured
+    if (GHL_API_KEY && GHL_LOCATION_ID) {
       const syncKey = `${dateStr}`
       if (!syncInProgress.has(syncKey)) {
         syncInProgress.add(syncKey)

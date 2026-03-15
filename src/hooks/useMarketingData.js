@@ -29,7 +29,7 @@ export function useMarketingData(days = 30) {
       const attRows = attribution || []
 
       // Auto-sync from Meta Ads if table is empty
-      if (rows.length === 0) {
+      if (rows.length === 0 && import.meta.env.VITE_META_ADS_ACCESS_TOKEN) {
         setSyncStatus('Syncing Meta Ads...')
         try {
           await syncMetaAds(days)
