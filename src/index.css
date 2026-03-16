@@ -80,6 +80,34 @@ body {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* ── Mobile Responsive Fixes ── */
+@media (max-width: 768px) {
+  /* Force horizontal scroll on all tables instead of breaking layout */
+  table {
+    min-width: max-content;
+  }
+
+  /* Ensure tap targets are at least 44px */
+  button, a[role="button"], .tap-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Prevent content from touching screen edges */
+  .mobile-padded {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+
+/* Stack KPI cards to 1 column on very small screens */
+@media (max-width: 480px) {
+  /* Override 2-col grids on tiny phones */
+  .grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Splash screen loading bar */
 @keyframes load-bar {
   0% { width: 0; }

@@ -10,7 +10,7 @@ import { supabase } from '../lib/supabase'
 import { sinceDate } from '../lib/dateUtils'
 import { fetchAllPipelineSummaries, computeSpeedToLead } from '../services/ghlPipeline'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
-import { Loader, ChevronDown, Plus } from 'lucide-react'
+import { Loader, ChevronDown, Plus, ChevronUp } from 'lucide-react'
 
 export default function SetterOverview() {
   const [range, setRange] = useState(30)
@@ -26,6 +26,7 @@ export default function SetterOverview() {
   const [stlOpen, setStlOpen] = useState(false)
   const [stlCalls, setStlCalls] = useState(null)
   const [autoBookings, setAutoBookings] = useState([])
+  const [showAllLeads, setShowAllLeads] = useState(false)
 
   // Fetch auto-bookings from GHL Introductory Call calendars
   useEffect(() => {
@@ -729,7 +730,7 @@ export default function SetterOverview() {
                     </tr>
                   </thead>
                   <tbody>
-                    {ghlLeads.slice(0, 50).map(opp => (
+                    {ghlLeads.slice(0, showAllLeads ? 50 : 10).map(opp => (
                       <tr key={opp.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50">
                         <td className="px-3 py-1.5 font-medium">{opp.contact?.name || opp.name || '—'}</td>
                         <td className="px-3 py-1.5 text-text-400 truncate max-w-[140px]">{opp.contact?.companyName || '—'}</td>
@@ -759,6 +760,14 @@ export default function SetterOverview() {
                   </tbody>
                 </table>
               </div>
+              {ghlLeads.length > 10 && (
+                <button
+                  onClick={() => setShowAllLeads(v => !v)}
+                  className="w-full py-3 text-xs font-medium text-opt-yellow hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default"
+                >
+                  {showAllLeads ? <><ChevronUp size={14} /> Show less</> : <><ChevronDown size={14} /> Show all {Math.min(ghlLeads.length, 50)} leads</>}
+                </button>
+              )}
             </div>
           </>
         )

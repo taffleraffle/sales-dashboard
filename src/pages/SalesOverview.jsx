@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import KPICard from '../components/KPICard'
 import DateRangeSelector from '../components/DateRangeSelector'
-import { Loader, Phone, DollarSign, Target, BarChart3, Zap, Users, TrendingUp, Award, Clock, ArrowUpRight, ChevronDown, Check, X } from 'lucide-react'
+import { Loader, Phone, DollarSign, Target, BarChart3, Zap, Users, TrendingUp, Award, Clock, ArrowUpRight, ChevronDown, ChevronUp, Check, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs } from '../hooks/useCloserData'
@@ -94,6 +94,8 @@ export default function SalesOverview() {
   const { reports: setterReports } = useSetterEODs(null, range)
   const { entries: marketingEntries } = useMarketingTracker({ autoSync: true })
   const { leads: recentLeads, refresh: refreshLeads } = useLeadAttribution(range)
+
+  const [showAllRecentLeads, setShowAllRecentLeads] = useState(false)
 
   const toggleContacted = async (leadId, current) => {
     await supabase.from('setter_leads').update({ contacted: !current }).eq('id', leadId)
@@ -586,7 +588,7 @@ export default function SalesOverview() {
               </tr>
             </thead>
             <tbody>
-              {recentLeads.slice(0, 15).map(lead => (
+              {recentLeads.slice(0, showAllRecentLeads ? 15 : 5).map(lead => (
                 <tr key={lead.id} className="border-t border-border-default/40 hover:bg-bg-card-hover transition-colors">
                   <td className="py-3 px-4 font-medium text-text-primary">{lead.lead_name || '—'}</td>
                   <td className="py-3 px-4 text-text-secondary text-xs">{lead.lead_source || '—'}</td>
@@ -623,6 +625,14 @@ export default function SalesOverview() {
             </tbody>
           </table>
         </div>
+        {recentLeads.length > 5 && (
+          <button
+            onClick={() => setShowAllRecentLeads(v => !v)}
+            className="w-full py-3 text-xs font-medium text-opt-yellow hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default"
+          >
+            {showAllRecentLeads ? <><ChevronUp size={14} /> Show less</> : <><ChevronDown size={14} /> Show all {recentLeads.length} leads</>}
+          </button>
+        )}
       </div>
       </>}
     </div>
