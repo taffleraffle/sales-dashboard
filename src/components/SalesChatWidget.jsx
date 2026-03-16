@@ -188,7 +188,7 @@ export default function SalesChatWidget() {
   }
 
   const widgetSize = expanded
-    ? 'fixed inset-4 md:inset-8 z-[100]'
+    ? 'fixed inset-0 z-[100]'
     : 'fixed bottom-20 md:bottom-6 right-4 md:right-6 w-[calc(100vw-2rem)] md:w-[480px] h-[70vh] md:h-[600px] z-[100]'
 
   return (
@@ -205,7 +205,7 @@ export default function SalesChatWidget() {
 
       {/* Chat panel */}
       {open && (
-        <div className={`${widgetSize} flex flex-col bg-bg-card border border-border-default rounded-2xl shadow-2xl overflow-hidden`}>
+        <div className={`${widgetSize} flex flex-col bg-bg-card border border-border-default shadow-2xl overflow-hidden ${expanded ? 'rounded-none' : 'rounded-2xl'}`}>
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-bg-sidebar shrink-0">
             <div className="flex items-center gap-2.5">

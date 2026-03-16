@@ -1329,8 +1329,19 @@ export default function EODReview() {
     if (!selectedMember || syncing) return
     setSyncing(true)
     try {
-      // 1. Sync GHL appointments from API
-      await syncGHLAppointments(selectedDate, selectedDate)
+      // 1. Sync GHL appointments from API + trigger Fathom transcript sync
+      await Promise.all([
+        syncGHLAppointments(selectedDate, selectedDate),
+        // Trigger Fathom sync edge function to pull latest transcripts
+        fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-fathom`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: '{}',
+        }).catch(() => {}), // Don't block if sync fails
+      ])
 
       // 2. Re-fetch all three sources: calendar, setter_leads, Fathom transcripts
       const [calendarResult, leadsRes, transcriptsRes] = await Promise.all([
