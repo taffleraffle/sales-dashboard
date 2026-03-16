@@ -3,6 +3,7 @@ import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketin
 import { syncMetaToTracker } from '../services/metaAdsSync'
 import DateRangeSelector from '../components/DateRangeSelector'
 import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check, RefreshCw } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 const toLocalDateStr = (d) => {
   const y = d.getFullYear()
@@ -540,29 +541,85 @@ function downloadTemplate() {
 }
 
 function CSVImportModal({ onClose, onImport }) {
-  const [csvText, setCsvText] = useState('')
   const [preview, setPreview] = useState(null)
   const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(false)
   const fileInputRef = useRef(null)
+
+  const colLabels = {
+    adspend: 'Spend', leads: 'Leads', qualified_bookings: 'Q.Book', calls_on_calendar: 'Booked',
+    live_calls: 'Live', new_live_calls: 'New Live', net_live_calls: 'Net Live', reschedules: 'Resch',
+    offers: 'Offers', closes: 'Closes', trial_cash: 'T.Cash', trial_revenue: 'T.Rev',
+    ascensions: 'Asc', ascend_cash: 'A.Cash', ascend_revenue: 'A.Rev',
+    finance_offers: 'Fin.Ofr', finance_accepted: 'Fin.Acc', ar_collected: 'AR',
+    auto_bookings: 'A.Book', no_shows: 'No Show', notes: 'Notes',
+  }
+
+  const fmtVal = (v, col) => {
+    if (v === undefined || v === null) return '—'
+    if (['adspend','trial_cash','trial_revenue','ascend_cash','ascend_revenue','ar_collected','refund_amount'].includes(col))
+      return `$${Number(v).toLocaleString()}`
+    return String(v)
+  }
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const text = await file.text()
-    setCsvText(text)
+    setLoading(true)
+    setError(null)
     try {
-      const rows = parseCSV(text)
-      if (!rows.length) { setError('No valid rows found. Check the CSV format.'); setPreview(null); return }
-      setError(null)
-      // Build preview: which columns were matched, date range, row count
+      const rows = parseCSV(await file.text())
+      if (!rows.length) { setError('No valid rows found. Check the CSV format.'); setPreview(null); setLoading(false); return }
+
+      // Get all columns from CSV
       const cols = new Set()
       for (const r of rows) Object.keys(r).forEach(k => k !== 'date' && cols.add(k))
+      const colList = [...cols]
       const dates = rows.map(r => r.date).sort()
-      setPreview({ rows, cols: [...cols], dateRange: [dates[0], dates[dates.length - 1]] })
+
+      // Fetch existing entries for these dates
+      const { data: existing } = await supabase
+        .from('marketing_tracker')
+        .select('*')
+        .in('date', rows.map(r => r.date))
+      const existingMap = {}
+      for (const e of (existing || [])) existingMap[e.date] = e
+
+      // Build diff: for each row, show what's changing
+      let newCount = 0
+      let overwriteCount = 0
+      const changes = []
+
+      for (const row of rows) {
+        const ex = existingMap[row.date]
+        if (!ex) {
+          newCount++
+          changes.push({ date: row.date, type: 'new', row })
+        } else {
+          const diffs = []
+          for (const col of colList) {
+            if (row[col] === undefined) continue
+            const oldVal = ex[col] ?? 0
+            const newVal = row[col]
+            if (Number(oldVal) !== Number(newVal) && !(col === 'notes' && oldVal === newVal)) {
+              diffs.push({ col, old: oldVal, new: newVal })
+            }
+          }
+          if (diffs.length > 0) {
+            overwriteCount++
+            changes.push({ date: row.date, type: 'update', row, diffs })
+          } else {
+            changes.push({ date: row.date, type: 'unchanged', row })
+          }
+        }
+      }
+
+      setPreview({ rows, cols: colList, dateRange: [dates[0], dates[dates.length - 1]], changes, newCount, overwriteCount })
     } catch (err) {
       setError('Parse error: ' + err.message)
       setPreview(null)
     }
+    setLoading(false)
   }
 
   const handleImport = () => {
@@ -570,18 +627,9 @@ function CSVImportModal({ onClose, onImport }) {
     onImport(preview.rows)
   }
 
-  const colLabels = {
-    adspend: 'Ad Spend', leads: 'Leads', qualified_bookings: 'Q. Bookings', calls_on_calendar: 'Booked',
-    live_calls: 'Live Calls', new_live_calls: 'New Live', net_live_calls: 'Net Live', reschedules: 'Reschedules',
-    offers: 'Offers', closes: 'Closes', trial_cash: 'Trial Cash', trial_revenue: 'Trial Revenue',
-    ascensions: 'Ascensions', ascend_cash: 'Ascend Cash', ascend_revenue: 'Ascend Revenue',
-    finance_offers: 'Finance Offers', finance_accepted: 'Finance Accepted', ar_collected: 'AR Collected',
-    auto_bookings: 'Auto Bookings', no_shows: 'No Shows', notes: 'Notes',
-  }
-
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl w-[560px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-bg-card border border-border-default rounded-2xl w-[640px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-default">
           <div className="flex items-center gap-2">
             <Upload size={16} className="text-opt-yellow" />
@@ -598,7 +646,7 @@ function CSVImportModal({ onClose, onImport }) {
           >
             <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleFile} className="hidden" />
             <Upload size={24} className="mx-auto text-text-400 mb-2" />
-            <p className="text-sm text-text-secondary">Click to upload a CSV file</p>
+            <p className="text-sm text-text-secondary">{preview ? 'Upload a different file' : 'Click to upload a CSV file'}</p>
             <p className="text-[10px] text-text-400 mt-1">Supports .csv and .tsv — dates, spend, leads, live calls, closes, ascensions, etc.</p>
           </div>
 
@@ -607,23 +655,21 @@ function CSVImportModal({ onClose, onImport }) {
             Download CSV template with all supported columns
           </button>
 
-          {/* Error */}
+          {loading && <div className="flex items-center justify-center py-4"><Loader size={16} className="animate-spin text-opt-yellow" /><span className="text-xs text-text-400 ml-2">Comparing with existing data...</span></div>}
+
           {error && <p className="text-xs text-danger bg-danger/10 rounded-lg px-3 py-2">{error}</p>}
 
-          {/* Preview */}
+          {/* Preview with diff */}
           {preview && (
             <div className="space-y-3">
+              {/* Summary */}
               <div className="bg-bg-primary rounded-xl p-3">
-                <h4 className="text-xs font-semibold text-opt-yellow mb-2">Import Preview</h4>
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div>
-                    <span className="text-text-400">Rows:</span>
-                    <span className="ml-1 font-medium">{preview.rows.length}</span>
-                  </div>
-                  <div className="col-span-2">
-                    <span className="text-text-400">Date range:</span>
-                    <span className="ml-1 font-medium">{preview.dateRange[0]} → {preview.dateRange[1]}</span>
-                  </div>
+                <h4 className="text-xs font-semibold text-opt-yellow mb-2">Import Summary</h4>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                  <div><span className="text-text-400">Rows:</span> <strong>{preview.rows.length}</strong></div>
+                  <div><span className="text-text-400">Date range:</span> <strong>{preview.dateRange[0]} → {preview.dateRange[1]}</strong></div>
+                  <div><span className="text-text-400">New entries:</span> <strong className="text-success">{preview.newCount}</strong></div>
+                  <div><span className="text-text-400">Will overwrite:</span> <strong className={preview.overwriteCount > 0 ? 'text-opt-yellow' : ''}>{preview.overwriteCount}</strong></div>
                 </div>
                 <div className="mt-2">
                   <span className="text-[10px] text-text-400">Matched columns:</span>
@@ -635,48 +681,73 @@ function CSVImportModal({ onClose, onImport }) {
                 </div>
               </div>
 
-              {/* Sample rows */}
-              <div className="bg-bg-primary rounded-xl p-3">
-                <h4 className="text-xs font-semibold text-text-400 mb-2">First 5 rows</h4>
-                <div className="overflow-x-auto">
-                  <table className="text-[10px] w-full">
-                    <thead>
-                      <tr>
-                        <th className="text-left px-1.5 py-1 text-text-400">Date</th>
-                        {preview.cols.slice(0, 8).map(c => (
-                          <th key={c} className="text-right px-1.5 py-1 text-text-400">{colLabels[c] || c}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {preview.rows.slice(0, 5).map((r, i) => (
-                        <tr key={i} className="border-t border-border-default/30">
-                          <td className="px-1.5 py-1 text-text-primary">{r.date}</td>
+              {/* Overwrite diff */}
+              {preview.overwriteCount > 0 && (
+                <div className="bg-bg-primary rounded-xl p-3">
+                  <h4 className="text-xs font-semibold text-opt-yellow mb-2">Values Being Overwritten</h4>
+                  <p className="text-[10px] text-text-400 mb-2">CSV data will replace these existing values:</p>
+                  <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                    {preview.changes.filter(c => c.type === 'update').map((c, i) => (
+                      <div key={i} className="bg-bg-card rounded-lg px-3 py-2 border border-border-default/50">
+                        <span className="text-[10px] font-semibold text-text-primary">{c.date}</span>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                          {c.diffs.map((d, j) => (
+                            <span key={j} className="text-[10px]">
+                              <span className="text-text-400">{colLabels[d.col] || d.col}: </span>
+                              <span className="text-danger line-through">{fmtVal(d.old, d.col)}</span>
+                              <span className="text-text-400 mx-0.5">→</span>
+                              <span className="text-success font-medium">{fmtVal(d.new, d.col)}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* New entries preview */}
+              {preview.newCount > 0 && (
+                <div className="bg-bg-primary rounded-xl p-3">
+                  <h4 className="text-xs font-semibold text-success mb-2">New Entries ({preview.newCount})</h4>
+                  <div className="overflow-x-auto">
+                    <table className="text-[10px] w-full">
+                      <thead>
+                        <tr>
+                          <th className="text-left px-1.5 py-1 text-text-400">Date</th>
                           {preview.cols.slice(0, 8).map(c => (
-                            <td key={c} className="text-right px-1.5 py-1">{r[c] ?? '—'}</td>
+                            <th key={c} className="text-right px-1.5 py-1 text-text-400">{colLabels[c] || c}</th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {preview.changes.filter(c => c.type === 'new').slice(0, 5).map((c, i) => (
+                          <tr key={i} className="border-t border-border-default/30">
+                            <td className="px-1.5 py-1 text-text-primary">{c.date}</td>
+                            {preview.cols.slice(0, 8).map(col => (
+                              <td key={col} className="text-right px-1.5 py-1">{fmtVal(c.row[col], col)}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {preview.newCount > 5 && <p className="text-[9px] text-text-400 mt-1">+ {preview.newCount - 5} more new entries</p>}
+                  </div>
                 </div>
-                {preview.cols.length > 8 && (
-                  <p className="text-[9px] text-text-400 mt-1">+ {preview.cols.length - 8} more columns</p>
-                )}
+              )}
+
+              {/* Confirmation */}
+              <div className="text-[10px] bg-opt-yellow/5 border border-opt-yellow/20 rounded-lg px-3 py-2">
+                <strong className="text-opt-yellow">CSV data takes priority.</strong>
+                <span className="text-text-400"> All values from the CSV will override existing data for matching dates. Columns not in the CSV will be left unchanged.</span>
               </div>
 
-              {/* Warning */}
-              <p className="text-[10px] text-text-400 bg-opt-yellow/5 border border-opt-yellow/20 rounded-lg px-3 py-2">
-                Existing entries for matching dates will be <strong>updated</strong> (merged, not overwritten). New dates will be created. Empty cells in the CSV are skipped.
-              </p>
-
-              {/* Import button */}
               <button
                 onClick={handleImport}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-opt-yellow text-bg-primary font-semibold text-sm hover:brightness-110 transition-all"
               >
-                <Upload size={14} />
-                Import {preview.rows.length} entries
+                <Check size={14} />
+                Confirm Import — {preview.rows.length} entries
               </button>
             </div>
           )}
