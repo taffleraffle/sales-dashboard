@@ -174,10 +174,10 @@ export default function SetterDetail() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-xl font-bold">{member.name}</h1>
-          <p className="text-sm text-text-400">Setter Performance</p>
+          <h1 className="text-lg sm:text-xl font-bold">{member.name}</h1>
+          <p className="text-xs sm:text-sm text-text-400">Setter Performance</p>
         </div>
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
@@ -196,7 +196,7 @@ export default function SetterDetail() {
 
       {/* WAVV Enrichment Stats */}
       {hasWavvData && (
-        <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
           <KPICard label="Avg Call Duration" value={wavvUser.avgDuration < 60 ? `${wavvUser.avgDuration}s` : `${Math.round(wavvUser.avgDuration / 60)}m ${wavvUser.avgDuration % 60}s`} subtitle="answered calls only" />
           <KPICard label="Calls/Contact" value={`${wavvUser.avgCallsPerContact}x`} subtitle={`${wavvUser.uniqueContacts} contacts`} />
           <KPICard label="Dials/Set" value={mySets > 0 ? (effectiveDials / mySets).toFixed(1) : '—'} />

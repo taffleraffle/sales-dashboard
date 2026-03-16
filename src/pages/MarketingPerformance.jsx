@@ -555,9 +555,9 @@ export default function MarketingPerformance() {
   return (
     <div>
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Marketing Performance</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Marketing Performance</h1>
           <p className="text-xs text-text-400">
             {entries.length} entries
             {syncing && <span className="ml-2 text-opt-yellow"><Loader size={10} className="inline animate-spin mr-1" />Syncing APIs...</span>}
@@ -584,7 +584,7 @@ export default function MarketingPerformance() {
           <span className="text-xs text-text-secondary">{metaSyncing ? 'Syncing...' : 'Sync Data'}</span>
         </button>
         {metaStatus && <span className="text-xs text-opt-yellow">{metaStatus}</span>}
-        <div className="ml-auto flex gap-2">
+        <div className="sm:ml-auto flex gap-2">
           <button onClick={() => setShowBenchmarks(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs text-text-secondary border border-border-default rounded-2xl hover:bg-bg-card-hover transition-colors">
             <SlidersHorizontal size={14} /> Benchmarks
           </button>

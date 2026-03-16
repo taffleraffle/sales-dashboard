@@ -205,10 +205,10 @@ export default function SalesOverview() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Sales Overview</h1>
-          <p className="text-sm text-text-400 mt-1">Performance dashboard</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Sales Overview</h1>
+          <p className="text-xs sm:text-sm text-text-400 mt-0.5 sm:mt-1">Performance dashboard</p>
         </div>
         <div className="flex items-center gap-4">
           {isLoading && <Loader size={16} className="animate-spin text-opt-yellow" />}
@@ -259,8 +259,8 @@ export default function SalesOverview() {
       {/* ═══ TWO-COLUMN: Funnel + Rates ═══ */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Sales Funnel */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-6">
-          <div className="flex items-center justify-between mb-5">
+        <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-4 sm:mb-5">
             <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
               <BarChart3 size={16} className="text-opt-yellow" /> Sales Funnel
             </h2>
@@ -309,17 +309,17 @@ export default function SalesOverview() {
         </div>
 
         {/* Key Rates */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-6">
-          <h2 className="text-sm font-semibold text-text-primary mb-5 flex items-center gap-2">
+        <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+          <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
             <Target size={16} className="text-opt-yellow" /> Key Rates
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <RateGauge label="Show Rate" value={parseFloat(showRate)} target={70} />
             <RateGauge label="Offer Rate" value={parseFloat(offerRate)} target={80} />
             <RateGauge label="Close Rate" value={parseFloat(closeRate)} target={25} max={50} />
             <RateGauge label="Reschedule" value={parseFloat(rescheduleRate)} target={15} max={40} />
           </div>
-          <div className="grid grid-cols-4 gap-3 mt-5 pt-4 border-t border-border-default text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-border-default text-center">
             <div>
               <p className="text-[10px] text-text-400 uppercase font-medium">No Shows</p>
               <p className={`text-lg font-bold ${parseFloat(noShowRate) <= 25 ? 'text-success' : 'text-danger'}`}>{noShowRate}%</p>
@@ -343,10 +343,10 @@ export default function SalesOverview() {
       </div>
 
       {/* ═══ CASH BREAKDOWN + MARKETING ═══ */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Cash Breakdown */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-6">
-          <h2 className="text-sm font-semibold text-text-primary mb-5 flex items-center gap-2">
+        <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+          <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
             <DollarSign size={16} className="text-opt-yellow" /> Cash Breakdown
           </h2>
           <div className="space-y-4">
@@ -385,8 +385,8 @@ export default function SalesOverview() {
 
         {/* Marketing metrics */}
         {mkt.adspend > 0 && (
-          <div className="bg-bg-card border border-border-default rounded-2xl p-6">
-            <h2 className="text-sm font-semibold text-text-primary mb-5 flex items-center gap-2">
+          <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+            <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
               <TrendingUp size={16} className="text-opt-yellow" /> Marketing
             </h2>
             <div className="space-y-4">
@@ -417,8 +417,8 @@ export default function SalesOverview() {
         )}
 
         {/* WAVV Dialer */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-6">
-          <h2 className="text-sm font-semibold text-text-primary mb-5 flex items-center gap-2">
+        <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+          <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
             <Phone size={16} className="text-opt-yellow" /> Dialer Activity
           </h2>
           <div className="grid grid-cols-2 gap-4">
@@ -442,7 +442,7 @@ export default function SalesOverview() {
 
       {/* ═══ CLOSER LEADERBOARD ═══ */}
       <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-border-default flex items-center justify-between">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-border-default flex items-center justify-between">
           <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
             <Award size={16} className="text-opt-yellow" /> Closer Leaderboard
           </h2>
@@ -505,7 +505,7 @@ export default function SalesOverview() {
 
       {/* ═══ SETTER LEADERBOARD ═══ */}
       <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-border-default flex items-center justify-between">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-border-default flex items-center justify-between">
           <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
             <Phone size={16} className="text-opt-yellow" /> Setter Leaderboard
           </h2>
@@ -566,8 +566,8 @@ export default function SalesOverview() {
         </div>
       </div>
       {/* ── Recent Leads ── */}
-      <div className="bg-bg-card border border-border-default rounded-2xl p-6">
-        <div className="flex items-center justify-between mb-5">
+      <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+        <div className="flex items-center justify-between mb-4 sm:mb-5">
           <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
             <Users size={16} className="text-opt-yellow" /> Recent Leads
           </h2>

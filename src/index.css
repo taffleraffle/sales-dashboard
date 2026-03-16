@@ -71,6 +71,15 @@ body {
 /* Tabular nums for data */
 .tabular-nums { font-variant-numeric: tabular-nums; }
 
+/* Safe area padding for mobile bottom nav */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Hide scrollbar but keep scrolling */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
 /* Splash screen loading bar */
 @keyframes load-bar {
   0% { width: 0; }

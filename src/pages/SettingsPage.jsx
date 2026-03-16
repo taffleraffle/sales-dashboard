@@ -73,8 +73,8 @@ export default function SettingsPage() {
           const connected = getStatus(api.envVar)
           const result = lastResult?.key === api.key ? lastResult : null
           return (
-            <div key={api.key} className="bg-bg-card border border-border-default rounded-2xl p-5">
-              <div className="flex items-center justify-between">
+            <div key={api.key} className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     {connected ? (
@@ -525,7 +525,7 @@ function TeamMembersSection() {
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="text-[11px] text-text-400 block mb-1">Email</label>
                 <input

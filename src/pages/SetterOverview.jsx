@@ -268,8 +268,8 @@ export default function SetterOverview() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">Setter Performance</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Setter Performance</h1>
         <div className="flex items-center gap-3">
           <Link to="/sales/eod?tab=setter" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-opt-yellow text-bg-primary text-xs font-semibold hover:brightness-110 transition-colors">
             <Plus size={14} />

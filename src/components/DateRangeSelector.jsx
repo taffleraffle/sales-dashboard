@@ -49,12 +49,12 @@ export default function DateRangeSelector({ selected, onChange }) {
 
   return (
     <div className="relative" ref={ref}>
-      <div className="flex gap-1.5 bg-bg-card border border-border-default rounded-xl p-1">
+      <div className="flex gap-1.5 bg-bg-card border border-border-default rounded-xl p-1 overflow-x-auto no-scrollbar">
         {presets.map(({ label, days }) => (
           <button
             key={label}
             onClick={() => { onChange(days); setOpen(false) }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+            className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium transition-all duration-200 whitespace-nowrap shrink-0 ${
               isPreset(days)
                 ? 'bg-opt-yellow text-bg-primary shadow-sm'
                 : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
@@ -67,14 +67,15 @@ export default function DateRangeSelector({ selected, onChange }) {
         {/* Custom range toggle */}
         <button
           onClick={() => setOpen(!open)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+          className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium transition-all duration-200 whitespace-nowrap shrink-0 ${
             isCustomRange(selected)
               ? 'bg-opt-yellow text-bg-primary shadow-sm'
               : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
           }`}
         >
           <Calendar size={12} />
-          {customLabel || 'Custom'}
+          <span className="hidden sm:inline">{customLabel || 'Custom'}</span>
+          <span className="sm:hidden">{customLabel ? customLabel.substring(0, 10) : 'Custom'}</span>
           <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
       </div>

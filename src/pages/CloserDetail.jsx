@@ -133,16 +133,16 @@ export default function CloserDetail() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-xl font-bold">{member.name}</h1>
-          <p className="text-sm text-text-400">Closer Performance</p>
+          <h1 className="text-lg sm:text-xl font-bold">{member.name}</h1>
+          <p className="text-xs sm:text-sm text-text-400">Closer Performance</p>
         </div>
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
         <KPICard label="Booked" value={stats.totalBooked} subtitle={`${stats.ncBooked} NC / ${stats.fuBooked} FU`} />
         <KPICard label="Live Calls" value={stats.liveCalls} />
         <KPICard label="No Shows" value={stats.noShows} />

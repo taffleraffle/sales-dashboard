@@ -685,7 +685,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
                             <span className="text-xs font-medium">{dateLabel}</span>
                             <span className="text-[10px] text-text-400">Rating: {eod.self_rating || '—'}/10</span>
                           </div>
-                          <div className="grid grid-cols-6 gap-2 text-center">
+                          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
                             {[
                               ['Leads', eod.total_leads],
                               ['Dials', eod.outbound_calls],
@@ -1355,15 +1355,15 @@ export default function EODReview() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">End of Day</h1>
-          <p className="text-sm text-text-400 mt-1">{eodStarted ? 'File your daily report' : 'Review and submit EOD reports'}</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">End of Day</h1>
+          <p className="text-xs sm:text-sm text-text-400 mt-0.5 sm:mt-1">{eodStarted ? 'File your daily report' : 'Review and submit EOD reports'}</p>
         </div>
         {!eodStarted && (
           <button
             onClick={() => setEodStarted(true)}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-opt-yellow text-bg-primary font-semibold text-sm hover:brightness-110 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
+            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-opt-yellow text-bg-primary font-semibold text-sm hover:brightness-110 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
           >
             <Plus size={16} />
             New EOD

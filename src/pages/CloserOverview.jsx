@@ -74,10 +74,10 @@ export default function CloserOverview() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">Closer Performance</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Closer Performance</h1>
         <div className="flex items-center gap-3">
-          <Link to="/sales/eod?tab=closer" className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-opt-yellow text-bg-primary text-xs font-semibold hover:brightness-110 transition-all">
+          <Link to="/sales/eod?tab=closer" className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl bg-opt-yellow text-bg-primary text-xs font-semibold hover:brightness-110 transition-all">
             <Plus size={14} />
             New EOD
           </Link>
@@ -98,7 +98,7 @@ export default function CloserOverview() {
       </div>
 
       {/* Company Conversion Gauges */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
         <Gauge label="Show Rate" value={companyShowRate} target={70} />
         <Gauge label="Resched Rate" value={companyRescheduleRate} target={10} max={100} />
         <Gauge label="Offer Rate" value={companyOfferRate} target={80} />

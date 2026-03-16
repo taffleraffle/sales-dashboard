@@ -18,8 +18,8 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-bg-primary flex">
-      {/* ── Left Sidebar ── */}
-      <aside className="w-16 bg-bg-sidebar border-r border-border-default flex flex-col items-center py-5 fixed top-0 left-0 h-screen z-50">
+      {/* ── Left Sidebar (desktop only) ── */}
+      <aside className="hidden md:flex w-16 bg-bg-sidebar border-r border-border-default flex-col items-center py-5 fixed top-0 left-0 h-screen z-50">
         {/* Logo */}
         <div className="w-9 h-9 rounded-full bg-opt-yellow flex items-center justify-center mb-8">
           <BarChart3 size={18} className="text-bg-primary" />
@@ -60,12 +60,47 @@ export default function Layout() {
         </button>
       </aside>
 
+      {/* ── Mobile Bottom Nav ── */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-bg-sidebar/95 backdrop-blur-xl border-t border-border-default safe-bottom">
+        <div className="flex items-center justify-around px-2 py-1.5">
+          {navItems.map(({ to, icon: Icon, label, end }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              className={({ isActive }) =>
+                `flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all ${
+                  isActive
+                    ? 'text-opt-yellow'
+                    : 'text-text-400'
+                }`
+              }
+            >
+              <Icon size={20} />
+              <span className="text-[9px] font-medium leading-none">{label}</span>
+            </NavLink>
+          ))}
+          <button
+            onClick={signOut}
+            className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl text-text-400"
+          >
+            <LogOut size={20} />
+            <span className="text-[9px] font-medium leading-none">Exit</span>
+          </button>
+        </div>
+      </nav>
+
       {/* ── Main Content ── */}
-      <div className="flex-1 ml-16">
+      <div className="flex-1 md:ml-16">
         {/* Top bar */}
-        <header className="h-16 border-b border-border-default flex items-center justify-between px-8 sticky top-0 bg-bg-primary/80 backdrop-blur-xl z-40">
+        <header className="h-14 md:h-16 border-b border-border-default flex items-center justify-between px-4 md:px-8 sticky top-0 bg-bg-primary/80 backdrop-blur-xl z-40">
+          {/* Logo (mobile only) */}
+          <div className="md:hidden w-8 h-8 rounded-full bg-opt-yellow flex items-center justify-center shrink-0">
+            <BarChart3 size={15} className="text-bg-primary" />
+          </div>
+
           {/* Search */}
-          <div className="flex items-center gap-2 bg-bg-card border border-border-default rounded-xl px-4 py-2 w-72">
+          <div className="hidden sm:flex items-center gap-2 bg-bg-card border border-border-default rounded-xl px-4 py-2 w-48 md:w-72">
             <Search size={15} className="text-text-400" />
             <input
               type="text"
@@ -75,7 +110,12 @@ export default function Layout() {
           </div>
 
           {/* Right side */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 md:gap-4">
+            {/* Search icon (mobile) */}
+            <button className="sm:hidden w-9 h-9 rounded-xl bg-bg-card border border-border-default flex items-center justify-center text-text-400 hover:text-text-primary transition-colors">
+              <Search size={16} />
+            </button>
+
             {/* Notification bell */}
             <button className="w-9 h-9 rounded-xl bg-bg-card border border-border-default flex items-center justify-center text-text-400 hover:text-text-primary transition-colors">
               <Bell size={16} />
@@ -97,7 +137,7 @@ export default function Layout() {
         </header>
 
         {/* Page content */}
-        <main className="max-w-[1440px] mx-auto px-8 py-6">
+        <main className="max-w-[1440px] mx-auto px-4 md:px-8 py-4 md:py-6 pb-20 md:pb-6">
           <Outlet />
         </main>
       </div>
