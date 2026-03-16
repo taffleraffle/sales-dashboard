@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import KPICard from '../components/KPICard'
 import DateRangeSelector from '../components/DateRangeSelector'
-import { Loader, Phone, DollarSign, Target, BarChart3, Zap, Users, TrendingUp, Award, Clock, ArrowUpRight, ChevronDown, ChevronUp, Check, X } from 'lucide-react'
+import { Loader, Phone, DollarSign, Target, BarChart3, Zap, Users, TrendingUp, Award, Clock, ArrowUpRight, ChevronDown, ChevronUp, Check, X, Trophy } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs } from '../hooks/useCloserData'
@@ -13,6 +13,142 @@ import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketin
 import { useLeadAttribution } from '../hooks/useLeadAttribution'
 import { supabase } from '../lib/supabase'
 import { getColor } from '../utils/metricCalculations'
+
+/* ── Confetti Canvas ── */
+function Confetti({ active }) {
+  const canvasRef = useRef(null)
+
+  useEffect(() => {
+    if (!active) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    canvas.width = window.innerWidth
+    canvas.height = window.innerHeight
+
+    const colors = ['#d4f50c', '#facc15', '#22c55e', '#3b82f6', '#a855f7', '#ef4444', '#f97316', '#06b6d4', '#ffffff']
+    const pieces = []
+    for (let i = 0; i < 150; i++) {
+      pieces.push({
+        x: Math.random() * canvas.width,
+        y: -20 - Math.random() * canvas.height * 0.5,
+        w: 4 + Math.random() * 8,
+        h: 6 + Math.random() * 12,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        vx: (Math.random() - 0.5) * 4,
+        vy: 2 + Math.random() * 4,
+        spin: (Math.random() - 0.5) * 0.2,
+        angle: Math.random() * Math.PI * 2,
+        opacity: 1,
+      })
+    }
+
+    let frame
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      let alive = false
+      for (const p of pieces) {
+        p.x += p.vx
+        p.y += p.vy
+        p.vy += 0.08
+        p.vx *= 0.99
+        p.angle += p.spin
+        if (p.y > canvas.height + 50) {
+          p.opacity -= 0.02
+        }
+        if (p.opacity <= 0) continue
+        alive = true
+        ctx.save()
+        ctx.globalAlpha = p.opacity
+        ctx.translate(p.x, p.y)
+        ctx.rotate(p.angle)
+        ctx.fillStyle = p.color
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h)
+        ctx.restore()
+      }
+      if (alive) frame = requestAnimationFrame(animate)
+    }
+    frame = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(frame)
+  }, [active])
+
+  if (!active) return null
+  return <canvas ref={canvasRef} className="fixed inset-0 z-[200] pointer-events-none" />
+}
+
+/* ── Close Celebration Banner ── */
+function CloseCelebration({ closes, onDismiss }) {
+  const [visible, setVisible] = useState(false)
+  const [showConfetti, setShowConfetti] = useState(false)
+
+  useEffect(() => {
+    if (!closes?.length) return
+    // Stagger: confetti first, then banner slides in
+    setShowConfetti(true)
+    const t1 = setTimeout(() => setVisible(true), 300)
+    const t2 = setTimeout(() => setShowConfetti(false), 4000)
+    const t3 = setTimeout(() => { setVisible(false); setTimeout(onDismiss, 500) }, 8000)
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
+  }, [closes, onDismiss])
+
+  if (!closes?.length) return null
+
+  const totalCash = closes.reduce((s, c) => s + (c.cash_collected || 0), 0)
+  const totalRevenue = closes.reduce((s, c) => s + (c.revenue || 0), 0)
+
+  return (
+    <>
+      <Confetti active={showConfetti} />
+      <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[190] transition-all duration-700 ease-out ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-8'}`}>
+        <div className="bg-bg-card border-2 border-success/40 rounded-2xl shadow-[0_0_40px_rgba(34,197,94,0.2)] px-6 py-4 max-w-lg">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-full bg-success/20 flex items-center justify-center shrink-0">
+              <Trophy size={20} className="text-success" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-success">
+                {closes.length === 1 ? 'New Close Today!' : `${closes.length} Closes Today!`}
+              </h3>
+              <p className="text-[10px] text-text-400">
+                {totalCash > 0 && `$${totalCash.toLocaleString()} cash collected`}
+                {totalCash > 0 && totalRevenue > 0 && ' · '}
+                {totalRevenue > 0 && `$${totalRevenue.toLocaleString()} revenue`}
+              </p>
+            </div>
+            <button onClick={() => { setVisible(false); setTimeout(onDismiss, 500) }} className="ml-auto text-text-400 hover:text-text-primary">
+              <X size={14} />
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {closes.map((c, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between bg-bg-primary rounded-xl px-3 py-2 transition-all duration-500"
+                style={{ animationDelay: `${i * 200 + 500}ms`, animation: 'slideInRight 0.5s ease-out forwards', opacity: 0, transform: 'translateX(20px)' }}
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-success/15 flex items-center justify-center">
+                    <Check size={12} className="text-success" />
+                  </div>
+                  <span className="text-sm font-medium">{c.prospect_name}</span>
+                </div>
+                <div className="text-right">
+                  {c.cash_collected > 0 && <span className="text-xs font-semibold text-opt-yellow">${c.cash_collected.toLocaleString()}</span>}
+                  {c.revenue > 0 && <span className="text-[10px] text-text-400 ml-1.5">(${c.revenue.toLocaleString()})</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <style>{`
+        @keyframes slideInRight {
+          to { opacity: 1; transform: translateX(0); }
+        }
+      `}</style>
+    </>
+  )
+}
 
 /* ── Rate Gauge (semi-circle) ── */
 function RateGauge({ label, value, target, max = 100, suffix = '%' }) {
@@ -96,6 +232,38 @@ export default function SalesOverview() {
   const { leads: recentLeads, refresh: refreshLeads } = useLeadAttribution(range)
 
   const [showAllRecentLeads, setShowAllRecentLeads] = useState(false)
+
+  // ── Celebration: check for today's closes ──
+  const [todayCloses, setTodayCloses] = useState(null)
+  const [showCelebration, setShowCelebration] = useState(false)
+
+  useEffect(() => {
+    // Only show once per session
+    if (sessionStorage.getItem('celebration_shown')) return
+    async function checkTodayCloses() {
+      const today = new Date().toISOString().split('T')[0]
+      // Get today's closer EOD report IDs
+      const { data: todayEods } = await supabase
+        .from('closer_eod_reports')
+        .select('id')
+        .eq('report_date', today)
+      if (!todayEods?.length) return
+
+      // Get closed calls from today's reports
+      const { data: closedCalls } = await supabase
+        .from('closer_calls')
+        .select('prospect_name, revenue, cash_collected, outcome')
+        .in('eod_report_id', todayEods.map(e => e.id))
+        .eq('outcome', 'closed')
+
+      if (closedCalls?.length) {
+        setTodayCloses(closedCalls)
+        setShowCelebration(true)
+        sessionStorage.setItem('celebration_shown', '1')
+      }
+    }
+    checkTodayCloses()
+  }, [])
 
   const toggleContacted = async (leadId, current) => {
     await supabase.from('setter_leads').update({ contacted: !current }).eq('id', leadId)
@@ -206,6 +374,14 @@ export default function SalesOverview() {
 
   return (
     <div className="space-y-6">
+      {/* Close Celebration */}
+      {showCelebration && (
+        <CloseCelebration
+          closes={todayCloses}
+          onDismiss={() => setShowCelebration(false)}
+        />
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>

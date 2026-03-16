@@ -62,11 +62,26 @@ export default function SalesChatWidget() {
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
+  const messagesContainerRef = useRef(null)
+  const userScrolledUpRef = useRef(false)
+
   const scrollToBottom = useCallback(() => {
+    if (userScrolledUpRef.current) return
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [])
 
+  // Track if user has scrolled up
+  const handleScroll = useCallback(() => {
+    const el = messagesContainerRef.current
+    if (!el) return
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    userScrolledUpRef.current = distFromBottom > 80
+  }, [])
+
+  // Auto-scroll only when near bottom
   useEffect(() => { if (open) scrollToBottom() }, [messages, streamingText, open, scrollToBottom])
+  // Reset scroll lock when new user message is sent
+  useEffect(() => { userScrolledUpRef.current = false }, [messages.length])
   useEffect(() => { if (open) inputRef.current?.focus() }, [open])
 
   const contextRef = useRef(null)
@@ -233,7 +248,7 @@ export default function SalesChatWidget() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
+          <div ref={messagesContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
             {messages.length === 0 && !streaming && (
               <div className="space-y-4 pt-2">
                 <div className="text-center">
