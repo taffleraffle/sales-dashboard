@@ -75,8 +75,7 @@ function Section({ title, children, cols = 6 }) {
 function MTDFunnel({ stats }) {
   const steps = [
     { label: 'Leads', value: stats.leads },
-    { label: 'Auto Books', value: stats.auto_bookings },
-    { label: 'Qual Books', value: stats.qualified_bookings },
+    { label: 'Booked', value: stats.qualified_bookings },
     { label: 'Live Calls', value: stats.live_calls },
     { label: 'Offers', value: stats.offers },
     { label: 'Closes', value: stats.closes },
@@ -124,10 +123,8 @@ function TrailingTable({ entries }) {
     { label: 'Spend', k: 'adspend', f: f$ },
     { label: 'Leads', k: 'leads', f: fN },
     { label: 'CPL', k: 'cpl', f: f$ },
-    { label: 'A.Book', k: 'auto_bookings', f: fN },
-    { label: 'Q.Book', k: 'qualified_bookings', f: fN },
-    { label: 'L→Q%', k: 'lead_to_booking_pct', f: fP },
-    { label: 'Cal', k: 'calls_on_calendar', f: fN },
+    { label: 'Booked', k: 'qualified_bookings', f: fN },
+    { label: 'L→B%', k: 'lead_to_booking_pct', f: fP },
     { label: 'Live', k: 'live_calls', f: fN },
     { label: 'Show%', k: 'show_rate', f: fP },
     { label: 'Offers', k: 'offers', f: fN },
@@ -217,7 +214,7 @@ function DailyTracker({ entries, onDelete, onSave }) {
       className="w-14 bg-bg-primary border border-opt-yellow/50 rounded px-1 py-0.5 text-[11px] text-text-primary text-right" />
   )
 
-  const getCalls = e => e.calls_on_calendar || ((e.net_new_calls || 0) + (e.net_fu_calls || 0))
+  const getCalls = e => e.qualified_bookings || e.calls_on_calendar || ((e.net_new_calls || 0) + (e.net_fu_calls || 0))
   const getLive = e => e.live_calls || e.net_live_calls || 0
 
   // Color helpers for table cells
@@ -229,11 +226,9 @@ function DailyTracker({ entries, onDelete, onSave }) {
     { k: 'adspend', label: 'Spend', fmt: f$ },
     { k: 'leads', label: 'Leads', fmt: fN },
     { k: null, label: 'CPL', calc: e => e.leads > 0 ? f$(parseFloat(e.adspend || 0) / e.leads) : '-' },
-    { k: 'auto_bookings', label: 'A.Book', fmt: fN },
-    { k: 'qualified_bookings', label: 'Q.Book', fmt: fN },
-    { k: null, label: 'L→Q%', calc: e => fmtP(e.qualified_bookings, e.leads),
+    { k: 'qualified_bookings', label: 'Booked', fmt: fN },
+    { k: null, label: 'L→B%', calc: e => fmtP(e.qualified_bookings, e.leads),
       color: e => e.leads > 0 ? clrRate((e.qualified_bookings || 0) / e.leads * 100, 15, 8) : '' },
-    { k: 'calls_on_calendar', label: 'Booked', fmt: fN, get: getCalls },
     { k: null, label: 'Live', calc: e => fN(getLive(e)) },
     { k: null, label: 'Show%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(getLive(e), cal) : '-' },
       color: e => { const cal = getCalls(e); return cal > 0 ? clrRate(getLive(e) / cal * 100, 70, 50) : '' } },
@@ -879,16 +874,14 @@ export default function MarketingPerformance() {
         <KPI label="Total Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} />
         <KPI label="Total Leads" value={stats.leads} format="n" trailing={stats30.leads} />
         <KPI label="Cost Per Lead" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} />
-        <KPI label="Auto Bookings" value={stats.auto_bookings} format="n" trailing={stats30.auto_bookings} />
-        <KPI label="Cost Per Auto Booking" value={stats.cost_per_auto_booking} format="$" trailing={stats30.cost_per_auto_booking} />
-        <KPI label="Qualified Bookings" value={stats.qualified_bookings} format="n" trailing={stats30.qualified_bookings} />
-        <KPI label="Lead → Qual Booking %" value={stats.lead_to_booking_pct} format="%" benchmark={bm.lead_to_booking} trailing={stats30.lead_to_booking_pct} />
-        <KPI label="Cost Per Qual Booking" value={stats.cpb} format="$" benchmark={bm.cpb} trailing={stats30.cpb} />
+        <KPI label="Booked" value={stats.qualified_bookings} format="n" trailing={stats30.qualified_bookings} />
+        <KPI label="Lead → Booking %" value={stats.lead_to_booking_pct} format="%" benchmark={bm.lead_to_booking} trailing={stats30.lead_to_booking_pct} />
+        <KPI label="Cost Per Booking" value={stats.cpb} format="$" benchmark={bm.cpb} trailing={stats30.cpb} />
       </Section>
 
       {/* Calls & Show Rates */}
       <Section title="Calls & Show Rates" cols={7}>
-        <KPI label="Booked Calls" value={stats.calls_on_calendar} format="n" />
+        <KPI label="Booked Calls" value={stats.qualified_bookings} format="n" />
         <KPI label="Live Calls" value={stats.live_calls} format="n" />
         <KPI label="No Shows" value={stats.no_shows} format="n" />
         <KPI label="Rescheduled" value={stats.reschedules} format="n" />

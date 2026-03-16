@@ -241,12 +241,12 @@ export function computeMarketingStats(entries) {
     cpb: t.qualified_bookings > 0 ? t.adspend / t.qualified_bookings : 0,
     cost_per_auto_booking: t.auto_bookings > 0 ? t.adspend / t.auto_bookings : 0,
 
-    // Show & no-show rates
-    show_rate: t.calls_on_calendar > 0 ? (t.live_calls / t.calls_on_calendar) * 100 : 0,
-    no_shows: t.calls_on_calendar > 0 ? t.calls_on_calendar - t.live_calls : 0,
-    no_show_rate: t.calls_on_calendar > 0 ? ((t.calls_on_calendar - t.live_calls) / t.calls_on_calendar) * 100 : 0,
+    // Show & no-show rates (based on qualified_bookings as the single booking metric)
+    show_rate: t.qualified_bookings > 0 ? (t.live_calls / t.qualified_bookings) * 100 : 0,
+    no_shows: t.qualified_bookings > 0 ? t.qualified_bookings - t.live_calls : 0,
+    no_show_rate: t.qualified_bookings > 0 ? ((t.qualified_bookings - t.live_calls) / t.qualified_bookings) * 100 : 0,
     reschedules: t.reschedules,
-    reschedule_rate: t.calls_on_calendar > 0 ? (t.reschedules / t.calls_on_calendar) * 100 : 0,
+    reschedule_rate: t.qualified_bookings > 0 ? (t.reschedules / t.qualified_bookings) * 100 : 0,
     cost_per_live_call: t.live_calls > 0 ? t.adspend / t.live_calls : 0,
 
     // Offer & close
