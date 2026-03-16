@@ -237,6 +237,8 @@ function DailyTracker({ entries, onDelete, onSave }) {
     { k: null, label: 'Show%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(getLive(e), cal) : '-' },
       color: e => { const cal = getCalls(e); return cal > 0 ? clrRate(getLive(e) / cal * 100, 70, 50) : '' } },
     { k: 'reschedules', label: 'Resch', fmt: fN, color: e => (e.reschedules || 0) > 0 ? 'text-blue-400' : '' },
+    { k: null, label: 'R%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(e.reschedules, cal) : '-' },
+      color: e => { const cal = getCalls(e); return cal > 0 && (e.reschedules || 0) > 0 ? 'text-blue-400' : '' } },
     { k: 'offers', label: 'Offer', fmt: fN },
     { k: null, label: 'Ofr%', calc: e => getLive(e) > 0 ? fmtP(e.offers, getLive(e)) : '-',
       color: e => getLive(e) > 0 ? clrRate((e.offers || 0) / getLive(e) * 100, 80, 60) : '' },
