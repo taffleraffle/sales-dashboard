@@ -266,15 +266,25 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
     ...Object.keys(qualBookingsByDate),
   ])
 
-  // Step 6: upsert each date into marketing_tracker
+  // Step 6: fetch existing rows to merge (preserve closes, cash, etc.)
+  const allDatesList = [...allDates]
+  const { data: existingRows } = allDatesList.length > 0
+    ? await supabase.from('marketing_tracker').select('*').in('date', allDatesList)
+    : { data: [] }
+  const existingMap = {}
+  for (const row of (existingRows || [])) existingMap[row.date] = row
+
+  // Step 7: upsert each date — merge with existing data, never wipe other fields
   let upserted = 0
   for (const date of allDates) {
+    const existing = existingMap[date] || {}
     const record = {
+      ...existing,
       date,
-      adspend: byDate[date]?.adspend || 0,
-      leads: leadsByDate[date] || 0,
-      auto_bookings: autoBookingsByDate[date] || 0,
-      qualified_bookings: qualBookingsByDate[date] || 0,
+      adspend: byDate[date]?.adspend || existing.adspend || 0,
+      leads: leadsByDate[date] || existing.leads || 0,
+      auto_bookings: autoBookingsByDate[date] || existing.auto_bookings || 0,
+      qualified_bookings: qualBookingsByDate[date] || existing.qualified_bookings || 0,
       updated_at: new Date().toISOString(),
     }
     const { error } = await supabase
