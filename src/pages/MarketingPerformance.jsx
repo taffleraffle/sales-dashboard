@@ -520,7 +520,10 @@ function parseCSV(text) {
         } else if (mapped === 'notes') {
           row[mapped] = vals[j]
         } else {
-          row[mapped] = Number(vals[j].replace(/[$,%x"]/g, '')) || 0
+          const num = Number(vals[j].replace(/[$,%x"]/g, '')) || 0
+          // Dollar fields stay as decimals, everything else must be integer
+          const dollarFields = ['adspend','trial_cash','trial_revenue','ascend_cash','ascend_revenue','ar_collected','ar_defaulted','refund_amount']
+          row[mapped] = dollarFields.includes(mapped) ? num : Math.round(num)
         }
       }
     })
