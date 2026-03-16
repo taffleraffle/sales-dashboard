@@ -461,45 +461,229 @@ function BenchmarksModal({ benchmarks, onSave, onClose }) {
 }
 
 // ── CSV Parser ─────────────────────────────────────────────────────
+const CSV_COL_MAP = {
+  date: 'date', adspend: 'adspend', ad_spend: 'adspend', spend: 'adspend', total_adspend: 'adspend',
+  leads: 'leads', total_leads: 'leads', new_leads: 'leads',
+  auto_bookings: 'auto_bookings', auto_booking: 'auto_bookings',
+  qualified_bookings: 'qualified_bookings', bookings: 'qualified_bookings', total_qualified_bookings: 'qualified_bookings', q_bookings: 'qualified_bookings',
+  calls_on_calendar: 'calls_on_calendar', calendar_calls: 'calls_on_calendar', booked: 'calls_on_calendar', booked_calls: 'calls_on_calendar',
+  live_calls: 'live_calls', live_calls_taken: 'live_calls', live: 'live_calls', shows: 'live_calls', showed: 'live_calls',
+  new_live_calls: 'new_live_calls', net_live_calls: 'net_live_calls',
+  offers: 'offers', offers_made: 'offers',
+  closes: 'closes', total_closes: 'closes', closed: 'closes',
+  reschedules: 'reschedules', rescheduled: 'reschedules', resch: 'reschedules',
+  trial_cash: 'trial_cash', total_trial_cash_collected: 'trial_cash', trial_cash_collected: 'trial_cash', cash: 'trial_cash', cash_collected: 'trial_cash',
+  trial_revenue: 'trial_revenue', trial_contracted_revenue_generated: 'trial_revenue', trial_contracted_revenue: 'trial_revenue', revenue: 'trial_revenue',
+  ascensions: 'ascensions', total_ascensions: 'ascensions', ascended: 'ascensions',
+  ascend_cash: 'ascend_cash', total_ascend_cash_collected: 'ascend_cash', ascend_cash_collected: 'ascend_cash',
+  ascend_revenue: 'ascend_revenue', contracted_revenue_generated: 'ascend_revenue', ascend_contracted_revenue: 'ascend_revenue',
+  finance_offers: 'finance_offers', finance_accepted: 'finance_accepted',
+  monthly_offers: 'monthly_offers', monthly_accepted: 'monthly_accepted',
+  ar_collected: 'ar_collected', total_ar_collected: 'ar_collected',
+  ar_defaulted: 'ar_defaulted', total_defaulted: 'ar_defaulted',
+  refund_count: 'refund_count', no_of_refunds__disputes: 'refund_count', refunds: 'refund_count',
+  refund_amount: 'refund_amount', total_refunds__disputes_amount: 'refund_amount',
+  no_shows: 'no_shows', noshow: 'no_shows', no_show: 'no_shows',
+  cancelled_dtf: 'cancelled_dtf', cancelled_by_prospect: 'cancelled_by_prospect',
+  net_new_calls: 'net_new_calls', net_fu_calls: 'net_fu_calls',
+  notes: 'notes',
+}
+
+const CSV_TEMPLATE_COLS = ['date','adspend','leads','qualified_bookings','calls_on_calendar','live_calls','reschedules','offers','closes','trial_cash','trial_revenue','ascensions','ascend_cash','ascend_revenue','finance_offers','finance_accepted','ar_collected','notes']
+
 function parseCSV(text) {
+  // Handle both comma and tab delimited
   const lines = text.trim().split('\n')
   if (lines.length < 2) return []
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''))
-  const colMap = {
-    date: 'date', adspend: 'adspend', ad_spend: 'adspend', spend: 'adspend', total_adspend: 'adspend',
-    leads: 'leads', total_leads: 'leads',
-    auto_bookings: 'auto_bookings', auto_booking: 'auto_bookings',
-    qualified_bookings: 'qualified_bookings', bookings: 'qualified_bookings', total_qualified_bookings: 'qualified_bookings',
-    calls_on_calendar: 'calls_on_calendar', calendar_calls: 'calls_on_calendar',
-    live_calls: 'live_calls', live_calls_taken: 'live_calls',
-    offers: 'offers', offers_made: 'offers',
-    closes: 'closes', total_closes: 'closes',
-    trial_cash: 'trial_cash', total_trial_cash_collected: 'trial_cash', trial_cash_collected: 'trial_cash',
-    trial_revenue: 'trial_revenue', trial_contracted_revenue_generated: 'trial_revenue', trial_contracted_revenue: 'trial_revenue',
-    ascensions: 'ascensions', total_ascensions: 'ascensions',
-    ascend_cash: 'ascend_cash', total_ascend_cash_collected: 'ascend_cash', ascend_cash_collected: 'ascend_cash',
-    ascend_revenue: 'ascend_revenue', contracted_revenue_generated: 'ascend_revenue', ascend_contracted_revenue: 'ascend_revenue',
-    finance_offers: 'finance_offers', finance_accepted: 'finance_accepted',
-    monthly_offers: 'monthly_offers', monthly_accepted: 'monthly_accepted',
-    ar_collected: 'ar_collected', total_ar_collected: 'ar_collected',
-    ar_defaulted: 'ar_defaulted', total_defaulted: 'ar_defaulted',
-    refund_count: 'refund_count', no_of_refunds__disputes: 'refund_count', refunds: 'refund_count',
-    refund_amount: 'refund_amount', total_refunds__disputes_amount: 'refund_amount',
-  }
+  const delimiter = lines[0].includes('\t') ? '\t' : ','
+  const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''))
   const rows = []
   for (let i = 1; i < lines.length; i++) {
-    const vals = lines[i].split(',').map(v => v.trim())
+    const vals = lines[i].split(delimiter).map(v => v.trim())
     if (vals.length < 2) continue
     const row = {}
     headers.forEach((h, j) => {
-      const mapped = colMap[h]
+      const mapped = CSV_COL_MAP[h]
       if (mapped && vals[j] !== undefined && vals[j] !== '') {
-        row[mapped] = mapped === 'date' ? vals[j] : Number(vals[j].replace(/[$,%x]/g, ''))
+        if (mapped === 'date') {
+          // Normalize date formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD
+          let d = vals[j]
+          if (d.includes('/')) {
+            const parts = d.split('/')
+            if (parts[2]?.length === 4) {
+              // Could be DD/MM/YYYY or MM/DD/YYYY — assume DD/MM for non-US
+              d = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`
+            }
+          }
+          row.date = d
+        } else if (mapped === 'notes') {
+          row[mapped] = vals[j]
+        } else {
+          row[mapped] = Number(vals[j].replace(/[$,%x"]/g, '')) || 0
+        }
       }
     })
     if (row.date) rows.push(row)
   }
   return rows
+}
+
+function downloadTemplate() {
+  const csv = CSV_TEMPLATE_COLS.join(',') + '\n2026-01-01,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,\n'
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'marketing_tracker_template.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function CSVImportModal({ onClose, onImport }) {
+  const [csvText, setCsvText] = useState('')
+  const [preview, setPreview] = useState(null)
+  const [error, setError] = useState(null)
+  const fileInputRef = useRef(null)
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const text = await file.text()
+    setCsvText(text)
+    try {
+      const rows = parseCSV(text)
+      if (!rows.length) { setError('No valid rows found. Check the CSV format.'); setPreview(null); return }
+      setError(null)
+      // Build preview: which columns were matched, date range, row count
+      const cols = new Set()
+      for (const r of rows) Object.keys(r).forEach(k => k !== 'date' && cols.add(k))
+      const dates = rows.map(r => r.date).sort()
+      setPreview({ rows, cols: [...cols], dateRange: [dates[0], dates[dates.length - 1]] })
+    } catch (err) {
+      setError('Parse error: ' + err.message)
+      setPreview(null)
+    }
+  }
+
+  const handleImport = () => {
+    if (!preview?.rows?.length) return
+    onImport(preview.rows)
+  }
+
+  const colLabels = {
+    adspend: 'Ad Spend', leads: 'Leads', qualified_bookings: 'Q. Bookings', calls_on_calendar: 'Booked',
+    live_calls: 'Live Calls', new_live_calls: 'New Live', net_live_calls: 'Net Live', reschedules: 'Reschedules',
+    offers: 'Offers', closes: 'Closes', trial_cash: 'Trial Cash', trial_revenue: 'Trial Revenue',
+    ascensions: 'Ascensions', ascend_cash: 'Ascend Cash', ascend_revenue: 'Ascend Revenue',
+    finance_offers: 'Finance Offers', finance_accepted: 'Finance Accepted', ar_collected: 'AR Collected',
+    auto_bookings: 'Auto Bookings', no_shows: 'No Shows', notes: 'Notes',
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-bg-card border border-border-default rounded-2xl w-[560px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-default">
+          <div className="flex items-center gap-2">
+            <Upload size={16} className="text-opt-yellow" />
+            <h3 className="text-sm font-semibold">Import Historical Data</h3>
+          </div>
+          <button onClick={onClose} className="text-text-400 hover:text-text-primary"><X size={14} /></button>
+        </div>
+
+        <div className="p-5 space-y-4 overflow-y-auto max-h-[calc(85vh-60px)]">
+          {/* Upload area */}
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="border-2 border-dashed border-border-default rounded-xl p-6 text-center cursor-pointer hover:border-opt-yellow/40 transition-colors"
+          >
+            <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleFile} className="hidden" />
+            <Upload size={24} className="mx-auto text-text-400 mb-2" />
+            <p className="text-sm text-text-secondary">Click to upload a CSV file</p>
+            <p className="text-[10px] text-text-400 mt-1">Supports .csv and .tsv — dates, spend, leads, live calls, closes, ascensions, etc.</p>
+          </div>
+
+          {/* Template download */}
+          <button onClick={downloadTemplate} className="text-[11px] text-opt-yellow hover:underline">
+            Download CSV template with all supported columns
+          </button>
+
+          {/* Error */}
+          {error && <p className="text-xs text-danger bg-danger/10 rounded-lg px-3 py-2">{error}</p>}
+
+          {/* Preview */}
+          {preview && (
+            <div className="space-y-3">
+              <div className="bg-bg-primary rounded-xl p-3">
+                <h4 className="text-xs font-semibold text-opt-yellow mb-2">Import Preview</h4>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <span className="text-text-400">Rows:</span>
+                    <span className="ml-1 font-medium">{preview.rows.length}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-text-400">Date range:</span>
+                    <span className="ml-1 font-medium">{preview.dateRange[0]} → {preview.dateRange[1]}</span>
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <span className="text-[10px] text-text-400">Matched columns:</span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {preview.cols.map(c => (
+                      <span key={c} className="text-[10px] px-1.5 py-0.5 rounded bg-success/15 text-success">{colLabels[c] || c}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Sample rows */}
+              <div className="bg-bg-primary rounded-xl p-3">
+                <h4 className="text-xs font-semibold text-text-400 mb-2">First 5 rows</h4>
+                <div className="overflow-x-auto">
+                  <table className="text-[10px] w-full">
+                    <thead>
+                      <tr>
+                        <th className="text-left px-1.5 py-1 text-text-400">Date</th>
+                        {preview.cols.slice(0, 8).map(c => (
+                          <th key={c} className="text-right px-1.5 py-1 text-text-400">{colLabels[c] || c}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.rows.slice(0, 5).map((r, i) => (
+                        <tr key={i} className="border-t border-border-default/30">
+                          <td className="px-1.5 py-1 text-text-primary">{r.date}</td>
+                          {preview.cols.slice(0, 8).map(c => (
+                            <td key={c} className="text-right px-1.5 py-1">{r[c] ?? '—'}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {preview.cols.length > 8 && (
+                  <p className="text-[9px] text-text-400 mt-1">+ {preview.cols.length - 8} more columns</p>
+                )}
+              </div>
+
+              {/* Warning */}
+              <p className="text-[10px] text-text-400 bg-opt-yellow/5 border border-opt-yellow/20 rounded-lg px-3 py-2">
+                Existing entries for matching dates will be <strong>updated</strong> (merged, not overwritten). New dates will be created. Empty cells in the CSV are skipped.
+              </p>
+
+              {/* Import button */}
+              <button
+                onClick={handleImport}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-opt-yellow text-bg-primary font-semibold text-sm hover:brightness-110 transition-all"
+              >
+                <Upload size={14} />
+                Import {preview.rows.length} entries
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ── Main Page ──────────────────────────────────────────────────────
@@ -509,6 +693,7 @@ export default function MarketingPerformance() {
   const [showAddEntry, setShowAddEntry] = useState(false)
   const [showBenchmarks, setShowBenchmarks] = useState(false)
   const [importStatus, setImportStatus] = useState(null)
+  const [showImportModal, setShowImportModal] = useState(false)
   const [metaSyncing, setMetaSyncing] = useState(false)
   const [metaStatus, setMetaStatus] = useState(null)
   const fileRef = useRef(null)
@@ -534,6 +719,17 @@ export default function MarketingPerformance() {
     } catch (err) { setImportStatus('Failed: ' + err.message) }
     if (fileRef.current) fileRef.current.value = ''
     setTimeout(() => setImportStatus(null), 3000)
+  }
+
+  const handleModalImport = async (rows) => {
+    setShowImportModal(false)
+    setImportStatus(`Importing ${rows.length} rows...`)
+    try {
+      await upsertMany(rows)
+      setImportStatus(`Imported ${rows.length} entries`)
+      await reload()
+    } catch (err) { setImportStatus('Failed: ' + err.message) }
+    setTimeout(() => setImportStatus(null), 4000)
   }
 
   const handleMetaSync = async () => {
@@ -570,11 +766,13 @@ export default function MarketingPerformance() {
 
       {/* Action bar */}
       <div className="flex flex-wrap items-center gap-3 mb-5">
-        <label className="flex items-center gap-2 bg-bg-card border border-border-default rounded-2xl px-3 py-2 cursor-pointer hover:bg-bg-card-hover transition-colors">
-          <input type="file" accept=".csv" ref={fileRef} onChange={handleCSV} className="hidden" />
+        <button
+          onClick={() => setShowImportModal(true)}
+          className="flex items-center gap-2 bg-bg-card border border-border-default rounded-2xl px-3 py-2 hover:bg-bg-card-hover transition-colors"
+        >
           <Upload size={14} className="text-text-400" />
           <span className="text-xs text-text-secondary">Import CSV</span>
-        </label>
+        </button>
         {importStatus && <span className="text-xs text-opt-yellow">{importStatus}</span>}
         <button
           onClick={handleMetaSync}
@@ -685,6 +883,7 @@ export default function MarketingPerformance() {
       {/* Modals */}
       {showAddEntry && <AddEntryModal onSave={upsertEntry} onClose={() => setShowAddEntry(false)} />}
       {showBenchmarks && <BenchmarksModal benchmarks={benchmarks} onSave={updateBenchmark} onClose={() => setShowBenchmarks(false)} />}
+      {showImportModal && <CSVImportModal onImport={handleModalImport} onClose={() => setShowImportModal(false)} />}
     </div>
   )
 }
