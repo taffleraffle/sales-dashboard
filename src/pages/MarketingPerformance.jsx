@@ -520,7 +520,11 @@ function parseCSV(text) {
         } else if (mapped === 'notes') {
           row[mapped] = vals[j]
         } else {
-          const num = Number(vals[j].replace(/[$,%x"]/g, '')) || 0
+          const raw = vals[j].replace(/[$,%x"]/g, '').trim()
+          // Skip empty cells and zeros — don't overwrite existing data with nothing
+          if (raw === '' || raw === '-') return
+          const num = Number(raw)
+          if (isNaN(num)) return
           // Dollar fields stay as decimals, everything else must be integer
           const dollarFields = ['adspend','trial_cash','trial_revenue','ascend_cash','ascend_revenue','ar_collected','ar_defaulted','refund_amount']
           row[mapped] = dollarFields.includes(mapped) ? num : Math.round(num)
@@ -742,7 +746,7 @@ function CSVImportModal({ onClose, onImport }) {
               {/* Confirmation */}
               <div className="text-[10px] bg-opt-yellow/5 border border-opt-yellow/20 rounded-lg px-3 py-2">
                 <strong className="text-opt-yellow">CSV data takes priority.</strong>
-                <span className="text-text-400"> All values from the CSV will override existing data for matching dates. Columns not in the CSV will be left unchanged.</span>
+                <span className="text-text-400"> Non-empty CSV values will override existing data. Empty cells and zeros in the CSV are skipped — they won't wipe existing data.</span>
               </div>
 
               <button
