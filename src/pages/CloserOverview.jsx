@@ -86,7 +86,7 @@ export default function CloserOverview() {
       </div>
 
       {/* Company-Level KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3 mb-6">
         <KPICard label="Booked" value={totalBooked} subtitle={`${companyTotals.ncBooked} NC / ${companyTotals.fuBooked} FU`} />
         <KPICard label="Live Calls" value={companyTotals.liveCalls} subtitle={`${companyTotals.liveNC} NC / ${companyTotals.liveFU} FU`} />
         <KPICard label="No Shows" value={totalNoShows} />
@@ -98,7 +98,7 @@ export default function CloserOverview() {
       </div>
 
       {/* Company Conversion Gauges */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-3 mb-6">
         <Gauge label="Show Rate" value={companyShowRate} target={70} />
         <Gauge label="Resched Rate" value={companyRescheduleRate} target={10} max={100} />
         <Gauge label="Offer Rate" value={companyOfferRate} target={80} />
@@ -120,17 +120,17 @@ export default function CloserOverview() {
             <Link
               key={c.id}
               to={`/sales/closers/${c.id}`}
-              className="bg-bg-card border border-border-default rounded-2xl p-6 hover:bg-bg-card-hover transition-all block"
+              className="bg-bg-card border border-border-default rounded-2xl p-3 sm:p-6 hover:bg-bg-card-hover transition-all block"
             >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold">{c.name}</h3>
-                <div className="flex gap-3 text-xs text-text-400">
+              <div className="flex items-center justify-between mb-3 sm:mb-4">
+                <h3 className="text-base sm:text-lg font-bold">{c.name}</h3>
+                <div className="flex gap-2 sm:gap-3 text-[10px] sm:text-xs text-text-400">
                   <span>{c.closes} closes</span>
                   <span className="text-success">${c.revenue.toLocaleString()}</span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3 sm:mb-4">
                 <Gauge label="Show Rate" value={c.showRate} target={70} />
                 <Gauge label="Close Rate" value={c.closeRate} target={25} />
                 <Gauge label="Offer Rate" value={c.offerRate} target={80} />

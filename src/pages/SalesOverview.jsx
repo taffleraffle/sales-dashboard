@@ -15,7 +15,7 @@ import { supabase } from '../lib/supabase'
 import { getColor } from '../utils/metricCalculations'
 
 /* ── Rate Gauge (semi-circle) ── */
-function RateGauge({ label, value, target, max = 100, suffix = '%', size = 120 }) {
+function RateGauge({ label, value, target, max = 100, suffix = '%' }) {
   const pct = Math.min(value / max, 1)
   const radius = 38
   const circumference = Math.PI * radius
@@ -24,13 +24,13 @@ function RateGauge({ label, value, target, max = 100, suffix = '%', size = 120 }
 
   return (
     <div className="flex flex-col items-center">
-      <svg width={size} height={size * 0.55} viewBox="0 0 100 55">
+      <svg className="w-[80px] h-[44px] sm:w-[120px] sm:h-[66px]" viewBox="0 0 100 55">
         <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#222" strokeWidth="7" strokeLinecap="round" />
         <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke={color} strokeWidth="7" strokeLinecap="round" strokeDasharray={`${strokeDash} ${circumference}`} />
         <text x="50" y="44" textAnchor="middle" fill="#f0f0f0" fontSize="15" fontWeight="bold" fontFamily="Inter, sans-serif">{value}{suffix}</text>
       </svg>
-      <p className="text-[10px] text-text-400 uppercase tracking-wider mt-1 font-medium">{label}</p>
-      <p className="text-[9px] text-text-400">target {target}{suffix}</p>
+      <p className="text-[9px] sm:text-[10px] text-text-400 uppercase tracking-wider mt-1 font-medium">{label}</p>
+      <p className="text-[8px] sm:text-[9px] text-text-400">target {target}{suffix}</p>
     </div>
   )
 }
@@ -47,16 +47,16 @@ function FunnelStep({ label, count, prevCount, isFirst, maxCount, stepIndex, tot
   const height = 52 - stepIndex * 2
 
   return (
-    <div className="flex-1 flex flex-col items-center gap-1.5">
-      {!isFirst && <span className="text-[10px] text-success font-semibold">{convPct}%</span>}
-      {isFirst && <div className="h-4" />}
+    <div className="flex-1 flex flex-col items-center gap-1 sm:gap-1.5 min-w-0">
+      {!isFirst && <span className="text-[9px] sm:text-[10px] text-success font-semibold">{convPct}%</span>}
+      {isFirst && <div className="h-3 sm:h-4" />}
       <div
-        className="w-full bg-opt-yellow/10 border border-opt-yellow/20 rounded-xl flex items-center justify-center transition-all duration-500"
-        style={{ height: `${height}px` }}
+        className="w-full bg-opt-yellow/10 border border-opt-yellow/20 rounded-lg sm:rounded-xl flex items-center justify-center transition-all duration-500"
+        style={{ height: `${Math.max(height - 8, 36)}px` }}
       >
-        <span className="text-base font-bold text-text-primary">{count}</span>
+        <span className="text-sm sm:text-base font-bold text-text-primary">{count}</span>
       </div>
-      <p className="text-[10px] text-text-400 uppercase tracking-wider font-medium">{label}</p>
+      <p className="text-[8px] sm:text-[10px] text-text-400 uppercase tracking-wider font-medium truncate max-w-full">{label}</p>
     </div>
   )
 }
@@ -237,7 +237,7 @@ export default function SalesOverview() {
       {!dataReady ? null : <>
 
       {/* ═══ HERO KPIs ═══ */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
         <KPICard label="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} subtitle={`${ct.closes} closes`} highlight />
         <KPICard label="Total Cash" value={`$${totalCash.toLocaleString()}`} subtitle={totalRevenue > 0 ? `${((totalCash / totalRevenue) * 100).toFixed(0)}% collected` : ''} />
         <KPICard label="Show Rate" value={`${showRate}%`} target={70} direction="above" subtitle={`${ct.liveCalls}/${ct.booked}`} />
@@ -245,7 +245,7 @@ export default function SalesOverview() {
       </div>
 
       {/* Secondary KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3">
         <KPICard label="Trial Cash" value={`$${ct.cash.toLocaleString()}`} subtitle={`$${ct.revenue.toLocaleString()} rev`} />
         <KPICard label="Ascend Cash" value={`$${ct.ascendCash.toLocaleString()}`} subtitle={`${ct.ascensions} ascensions`} />
         <KPICard label="Close Rate" value={`${closeRate}%`} target={25} direction="above" subtitle={`${ct.closes}/${ct.liveCalls}`} />
@@ -272,7 +272,7 @@ export default function SalesOverview() {
               </>}
             </div>
           </div>
-          <div className="flex items-end gap-2">
+          <div className="flex items-end gap-1 sm:gap-2">
             {['leads','bookings','shows','offers','closes'].map((key, i, arr) => (
               <FunnelStep key={key} label={key} count={funnel[key]}
                 prevCount={i > 0 ? funnel[arr[i - 1]] : null} isFirst={i === 0} maxCount={funnel.leads}
@@ -321,31 +321,31 @@ export default function SalesOverview() {
             <RateGauge label="Close Rate" value={parseFloat(closeRate)} target={25} max={50} />
             <RateGauge label="Reschedule" value={parseFloat(rescheduleRate)} target={15} max={40} />
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-border-default text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mt-4 sm:mt-5 pt-3 sm:pt-4 border-t border-border-default text-center">
             <div>
-              <p className="text-[10px] text-text-400 uppercase font-medium">No Shows</p>
-              <p className={`text-lg font-bold ${parseFloat(noShowRate) <= 25 ? 'text-success' : 'text-danger'}`}>{noShowRate}%</p>
-              <p className="text-[10px] text-text-400">{ct.noShows} missed</p>
+              <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">No Shows</p>
+              <p className={`text-base sm:text-lg font-bold ${parseFloat(noShowRate) <= 25 ? 'text-success' : 'text-danger'}`}>{noShowRate}%</p>
+              <p className="text-[9px] sm:text-[10px] text-text-400">{ct.noShows} missed</p>
             </div>
             <div>
-              <p className="text-[10px] text-text-400 uppercase font-medium">Resched</p>
-              <p className="text-lg font-bold text-warning">{ct.reschedules}</p>
+              <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">Resched</p>
+              <p className="text-base sm:text-lg font-bold text-warning">{ct.reschedules}</p>
             </div>
             <div>
-              <p className="text-[10px] text-text-400 uppercase font-medium">Ascend %</p>
-              <p className="text-lg font-bold">{ct.closes ? ((ct.ascensions / ct.closes) * 100).toFixed(0) : 0}%</p>
-              <p className="text-[10px] text-text-400">{ct.ascensions}/{ct.closes}</p>
+              <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">Ascend %</p>
+              <p className="text-base sm:text-lg font-bold">{ct.closes ? ((ct.ascensions / ct.closes) * 100).toFixed(0) : 0}%</p>
+              <p className="text-[9px] sm:text-[10px] text-text-400">{ct.ascensions}/{ct.closes}</p>
             </div>
             <div>
-              <p className="text-[10px] text-text-400 uppercase font-medium">Avg Deal</p>
-              <p className="text-lg font-bold text-success">${ct.closes ? Math.round(totalRevenue / ct.closes).toLocaleString() : 0}</p>
+              <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">Avg Deal</p>
+              <p className="text-base sm:text-lg font-bold text-success">${ct.closes ? Math.round(totalRevenue / ct.closes).toLocaleString() : 0}</p>
             </div>
           </div>
         </div>
       </div>
 
       {/* ═══ CASH BREAKDOWN + MARKETING ═══ */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Cash Breakdown */}
         <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
           <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
@@ -405,14 +405,14 @@ export default function SalesOverview() {
                 </div>
               ))}
             </div>
-            <div className="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-border-default text-center">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 mt-4 sm:mt-5 pt-3 sm:pt-4 border-t border-border-default text-center">
               <div>
-                <p className="text-[10px] text-text-400 uppercase font-medium">FE ROAS</p>
-                <p className={`text-xl font-bold ${feRoas >= 1 ? 'text-success' : 'text-danger'}`}>{feRoas.toFixed(2)}x</p>
+                <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">FE ROAS</p>
+                <p className={`text-lg sm:text-xl font-bold ${feRoas >= 1 ? 'text-success' : 'text-danger'}`}>{feRoas.toFixed(2)}x</p>
               </div>
               <div>
-                <p className="text-[10px] text-text-400 uppercase font-medium">NET ROAS</p>
-                <p className={`text-xl font-bold ${netRoas >= 1 ? 'text-success' : 'text-danger'}`}>{netRoas.toFixed(2)}x</p>
+                <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">NET ROAS</p>
+                <p className={`text-lg sm:text-xl font-bold ${netRoas >= 1 ? 'text-success' : 'text-danger'}`}>{netRoas.toFixed(2)}x</p>
               </div>
             </div>
           </div>
@@ -433,8 +433,8 @@ export default function SalesOverview() {
               { label: 'Dials/MC', val: wt.mcs ? (wt.dials / wt.mcs).toFixed(0) : '—', raw: true, sub: null, accent: true },
             ].map(m => (
               <div key={m.label} className="text-center py-2">
-                <p className={`text-xl font-bold ${m.accent ? 'text-opt-yellow' : ''}`}>{m.raw ? m.val : m.val.toLocaleString()}</p>
-                <p className="text-[10px] text-text-400 uppercase font-medium mt-0.5">{m.label}</p>
+                <p className={`text-base sm:text-xl font-bold ${m.accent ? 'text-opt-yellow' : ''}`}>{m.raw ? m.val : m.val.toLocaleString()}</p>
+                <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium mt-0.5">{m.label}</p>
                 {m.sub && <p className="text-[10px] text-text-400">{m.sub}</p>}
               </div>
             ))}
@@ -444,7 +444,7 @@ export default function SalesOverview() {
 
       {/* ═══ CLOSER LEADERBOARD ═══ */}
       <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
-        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-border-default flex items-center justify-between">
+        <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border-default flex items-center justify-between">
           <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
             <Award size={16} className="text-opt-yellow" /> Closer Leaderboard
           </h2>
@@ -453,51 +453,51 @@ export default function SalesOverview() {
           </Link>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-xs sm:text-sm">
             <thead>
               <tr className="bg-bg-primary/30 text-[10px] text-text-400 uppercase tracking-wider">
-                <th className="py-3 px-4 text-left w-10"></th>
-                <th className="py-3 px-4 text-left">Closer</th>
-                <th className="py-3 px-4 text-right">Live</th>
-                <th className="py-3 px-4 text-right">Closes</th>
-                <th className="py-3 px-4 text-right">Show%</th>
-                <th className="py-3 px-4 text-right">Offer%</th>
-                <th className="py-3 px-4 text-right">Close%</th>
-                <th className="py-3 px-4 text-right">Trial $</th>
-                <th className="py-3 px-4 text-right">Ascend $</th>
-                <th className="py-3 px-4 text-right">Total Cash</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-left w-8 sm:w-10"></th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-left">Closer</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Live</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Closes</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Show%</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Offer%</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Close%</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Trial $</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Ascend $</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Total Cash</th>
               </tr>
             </thead>
             <tbody>
               {closerBoard.map((c, i) => (
                 <tr key={c.id} className={`border-t border-border-default/40 hover:bg-bg-card-hover transition-colors ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}>
-                  <td className="py-3 px-4"><RankBadge rank={i + 1} /></td>
-                  <td className="py-3 px-4">
-                    <Link to={`/sales/closers/${c.id}`} className="font-medium text-text-primary hover:text-opt-yellow transition-colors">{c.name}</Link>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4"><RankBadge rank={i + 1} /></td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4">
+                    <Link to={`/sales/closers/${c.id}`} className="font-medium text-text-primary hover:text-opt-yellow transition-colors whitespace-nowrap">{c.name}</Link>
                   </td>
-                  <td className="py-3 px-4 text-right tabular-nums">{c.live}</td>
-                  <td className="py-3 px-4 text-right tabular-nums font-semibold">{c.closes}</td>
-                  <td className={`py-3 px-4 text-right tabular-nums font-medium ${getColor(parseFloat(c.showPct), 70, 'above')}`}>{c.showPct}%</td>
-                  <td className={`py-3 px-4 text-right tabular-nums font-medium ${getColor(parseFloat(c.offerPct), 80, 'above')}`}>{c.offerPct}%</td>
-                  <td className={`py-3 px-4 text-right tabular-nums font-medium ${getColor(parseFloat(c.closePct), 25, 'above')}`}>{c.closePct}%</td>
-                  <td className="py-3 px-4 text-right tabular-nums">${c.cash.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right tabular-nums text-blue-400">${c.ascendCash.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right tabular-nums font-bold text-success">${c.totalCash.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{c.live}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-semibold">{c.closes}</td>
+                  <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-medium ${getColor(parseFloat(c.showPct), 70, 'above')}`}>{c.showPct}%</td>
+                  <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-medium ${getColor(parseFloat(c.offerPct), 80, 'above')}`}>{c.offerPct}%</td>
+                  <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-medium ${getColor(parseFloat(c.closePct), 25, 'above')}`}>{c.closePct}%</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums whitespace-nowrap">${c.cash.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums text-blue-400 whitespace-nowrap">${c.ascendCash.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-bold text-success whitespace-nowrap">${c.totalCash.toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
             {closerBoard.length > 1 && (
               <tfoot>
                 <tr className="border-t-2 border-border-default bg-bg-primary/20 font-medium">
-                  <td className="py-3 px-4" colSpan={2}>Team</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{ct.liveCalls}</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{ct.closes}</td>
-                  <td className={`py-3 px-4 text-right tabular-nums ${getColor(parseFloat(showRate), 70, 'above')}`}>{showRate}%</td>
-                  <td className={`py-3 px-4 text-right tabular-nums ${getColor(parseFloat(offerRate), 80, 'above')}`}>{offerRate}%</td>
-                  <td className={`py-3 px-4 text-right tabular-nums ${getColor(parseFloat(closeRate), 25, 'above')}`}>{closeRate}%</td>
-                  <td className="py-3 px-4 text-right tabular-nums">${ct.cash.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right tabular-nums text-blue-400">${ct.ascendCash.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right tabular-nums font-bold text-success">${totalCash.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4" colSpan={2}>Team</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{ct.liveCalls}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{ct.closes}</td>
+                  <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums ${getColor(parseFloat(showRate), 70, 'above')}`}>{showRate}%</td>
+                  <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums ${getColor(parseFloat(offerRate), 80, 'above')}`}>{offerRate}%</td>
+                  <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums ${getColor(parseFloat(closeRate), 25, 'above')}`}>{closeRate}%</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums whitespace-nowrap">${ct.cash.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums text-blue-400 whitespace-nowrap">${ct.ascendCash.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-bold text-success whitespace-nowrap">${totalCash.toLocaleString()}</td>
                 </tr>
               </tfoot>
             )}
@@ -507,7 +507,7 @@ export default function SalesOverview() {
 
       {/* ═══ SETTER LEADERBOARD ═══ */}
       <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
-        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-border-default flex items-center justify-between">
+        <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border-default flex items-center justify-between">
           <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
             <Phone size={16} className="text-opt-yellow" /> Setter Leaderboard
           </h2>
@@ -516,51 +516,51 @@ export default function SalesOverview() {
           </Link>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-xs sm:text-sm">
             <thead>
               <tr className="bg-bg-primary/30 text-[10px] text-text-400 uppercase tracking-wider">
-                <th className="py-3 px-4 text-left w-10"></th>
-                <th className="py-3 px-4 text-left">Setter</th>
-                <th className="py-3 px-4 text-right">Dials</th>
-                <th className="py-3 px-4 text-right">Pickups</th>
-                <th className="py-3 px-4 text-right">MCs</th>
-                <th className="py-3 px-4 text-right">Contacts</th>
-                <th className="py-3 px-4 text-right">Pickup%</th>
-                <th className="py-3 px-4 text-right">MC%</th>
-                <th className="py-3 px-4 text-right">Avg Dur</th>
-                <th className="py-3 px-4 text-right">Sets</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-left w-8 sm:w-10"></th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-left">Setter</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Dials</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Pickups</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">MCs</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Contacts</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Pickup%</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">MC%</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Avg Dur</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Sets</th>
               </tr>
             </thead>
             <tbody>
               {setterBoard.map((s, i) => (
                 <tr key={s.id} className={`border-t border-border-default/40 hover:bg-bg-card-hover transition-colors ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}>
-                  <td className="py-3 px-4"><RankBadge rank={i + 1} /></td>
-                  <td className="py-3 px-4">
-                    <Link to={`/sales/setters/${s.id}`} className="font-medium text-text-primary hover:text-opt-yellow transition-colors">{s.name}</Link>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4"><RankBadge rank={i + 1} /></td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4">
+                    <Link to={`/sales/setters/${s.id}`} className="font-medium text-text-primary hover:text-opt-yellow transition-colors whitespace-nowrap">{s.name}</Link>
                   </td>
-                  <td className="py-3 px-4 text-right tabular-nums font-semibold">{s.dials.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{s.pickups.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{s.mcs}</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{s.contacts}</td>
-                  <td className="py-3 px-4 text-right tabular-nums font-medium">{s.pickupPct}%</td>
-                  <td className="py-3 px-4 text-right tabular-nums font-medium">{s.mcPct}%</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{s.avgDur > 0 ? `${Math.floor(s.avgDur / 60)}:${String(s.avgDur % 60).padStart(2, '0')}` : '—'}</td>
-                  <td className="py-3 px-4 text-right tabular-nums font-bold text-opt-yellow">{s.sets}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-semibold">{s.dials.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{s.pickups.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{s.mcs}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{s.contacts}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-medium">{s.pickupPct}%</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-medium">{s.mcPct}%</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums whitespace-nowrap">{s.avgDur > 0 ? `${Math.floor(s.avgDur / 60)}:${String(s.avgDur % 60).padStart(2, '0')}` : '—'}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-bold text-opt-yellow">{s.sets}</td>
                 </tr>
               ))}
             </tbody>
             {setterBoard.length > 1 && (
               <tfoot>
                 <tr className="border-t-2 border-border-default bg-bg-primary/20 font-medium">
-                  <td className="py-3 px-4" colSpan={2}>Team</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{wt.dials.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{wt.pickups.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{wt.mcs}</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{wavvAgg?.uniqueContacts || 0}</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{wt.dials ? ((wt.pickups / wt.dials) * 100).toFixed(1) : 0}%</td>
-                  <td className="py-3 px-4 text-right tabular-nums">{wt.dials ? ((wt.mcs / wt.dials) * 100).toFixed(1) : 0}%</td>
-                  <td className="py-3 px-4 text-right tabular-nums">—</td>
-                  <td className="py-3 px-4 text-right tabular-nums font-bold text-opt-yellow">{setterBoard.reduce((a, s) => a + s.sets, 0)}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4" colSpan={2}>Team</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{wt.dials.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{wt.pickups.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{wt.mcs}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{wavvAgg?.uniqueContacts || 0}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{wt.dials ? ((wt.pickups / wt.dials) * 100).toFixed(1) : 0}%</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{wt.dials ? ((wt.mcs / wt.dials) * 100).toFixed(1) : 0}%</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">—</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-bold text-opt-yellow">{setterBoard.reduce((a, s) => a + s.sets, 0)}</td>
                 </tr>
               </tfoot>
             )}
@@ -576,28 +576,28 @@ export default function SalesOverview() {
           <span className="text-[11px] text-text-400">{recentLeads.length} leads</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-xs sm:text-sm">
             <thead>
-              <tr className="text-[11px] text-text-400 uppercase tracking-wider">
-                <th className="py-2 px-4 text-left">Lead</th>
-                <th className="py-2 px-4 text-left">Source</th>
-                <th className="py-2 px-4 text-left">Setter</th>
-                <th className="py-2 px-4 text-left">Date Set</th>
-                <th className="py-2 px-4 text-left">Status</th>
-                <th className="py-2 px-4 text-center">Contacted</th>
+              <tr className="text-[10px] sm:text-[11px] text-text-400 uppercase tracking-wider">
+                <th className="py-2 px-2 sm:px-4 text-left">Lead</th>
+                <th className="py-2 px-2 sm:px-4 text-left">Source</th>
+                <th className="py-2 px-2 sm:px-4 text-left">Setter</th>
+                <th className="py-2 px-2 sm:px-4 text-left">Date Set</th>
+                <th className="py-2 px-2 sm:px-4 text-left">Status</th>
+                <th className="py-2 px-2 sm:px-4 text-center">Contacted</th>
               </tr>
             </thead>
             <tbody>
               {recentLeads.slice(0, showAllRecentLeads ? 15 : 5).map(lead => (
                 <tr key={lead.id} className="border-t border-border-default/40 hover:bg-bg-card-hover transition-colors">
-                  <td className="py-3 px-4 font-medium text-text-primary">{lead.lead_name || '—'}</td>
-                  <td className="py-3 px-4 text-text-secondary text-xs">{lead.lead_source || '—'}</td>
-                  <td className="py-3 px-4 text-text-secondary text-xs">{lead.setter_name}</td>
-                  <td className="py-3 px-4 text-text-400 text-xs tabular-nums">
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-text-primary whitespace-nowrap">{lead.lead_name || '—'}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-text-secondary text-xs whitespace-nowrap">{lead.lead_source || '—'}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-text-secondary text-xs whitespace-nowrap">{lead.setter_name}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-text-400 text-xs tabular-nums whitespace-nowrap">
                     {lead.date_set ? new Date(lead.date_set + 'T00:00:00').toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' }) : '—'}
                   </td>
-                  <td className="py-3 px-4">
-                    <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                  <td className="py-2 sm:py-3 px-2 sm:px-4">
+                    <span className={`text-[10px] sm:text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${
                       lead.status === 'closed' ? 'bg-success/15 text-success' :
                       lead.status === 'showed' ? 'bg-blue-500/15 text-blue-400' :
                       lead.status === 'no_show' ? 'bg-danger/15 text-danger' :
@@ -605,7 +605,7 @@ export default function SalesOverview() {
                       'bg-bg-primary text-text-400'
                     }`}>{lead.status?.replace('_', ' ') || 'pending'}</span>
                   </td>
-                  <td className="py-3 px-4 text-center">
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-center">
                     <button
                       onClick={() => toggleContacted(lead.id, lead.contacted)}
                       className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${

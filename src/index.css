@@ -82,9 +82,24 @@ body {
 
 /* ── Mobile Responsive Fixes ── */
 @media (max-width: 768px) {
+  /* Prevent horizontal overflow at the page level */
+  body {
+    overflow-x: hidden;
+  }
+
+  main, [class*="max-w-"] {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
   /* Force horizontal scroll on all tables instead of breaking layout */
   table {
     min-width: max-content;
+  }
+
+  /* Smooth horizontal scrolling for table wrappers */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
   }
 
   /* Ensure tap targets are at least 44px */
@@ -97,14 +112,6 @@ body {
   .mobile-padded {
     padding-left: 12px;
     padding-right: 12px;
-  }
-}
-
-/* Stack KPI cards to 1 column on very small screens */
-@media (max-width: 480px) {
-  /* Override 2-col grids on tiny phones */
-  .grid-cols-2 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

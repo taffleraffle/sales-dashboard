@@ -281,7 +281,7 @@ export default function SetterOverview() {
       </div>
 
       {/* Company-Level KPIs - two rows */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3 mb-6">
         <KPICard label="Total Dials" value={companyActivity.dials.toLocaleString()} />
         <KPICard label="Leads Worked" value={companyActivity.leads.toLocaleString()} />
         <KPICard label="MCs" value={companyActivity.mcs} />
@@ -293,7 +293,7 @@ export default function SetterOverview() {
       </div>
 
       {/* Company conversion gauges */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 mb-6">
         <Gauge label="Pickup Rate" value={parseFloat(pickupRate)} target={30} />
         <Gauge label="Show Rate" value={parseFloat(showRate)} target={70} />
         <Gauge label="Close Rate" value={parseFloat(closeRate)} target={25} />
@@ -302,7 +302,7 @@ export default function SetterOverview() {
 
       {/* Blanket Conversion Rates */}
       <h2 className="text-sm font-medium text-text-secondary mb-3">Conversion Rates</h2>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 mb-6">
         <Gauge label="Lead → Set" value={companyRates.leadToSet} target={5} max={50} />
         <Gauge label="Lead → Close" value={companyRates.leadToClose} target={2} max={20} />
         <Gauge label="Call → Set" value={companyRates.callToSet} target={3} max={20} />
@@ -450,9 +450,9 @@ export default function SetterOverview() {
             const fmtRate = (num, den) => den > 0 ? ((num / den) * 100).toFixed(1) : '—'
             return (
               <div key={pipe.id} className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">
+                <div className="px-3 sm:px-4 py-3 border-b border-border-default flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-0">
                   <h3 className="text-sm font-bold text-text-primary">{pipe.name}</h3>
-                  <div className="flex gap-4 text-xs text-text-400">
+                  <div className="flex flex-wrap gap-2 sm:gap-4 text-[10px] sm:text-xs text-text-400">
                     <span>{s.total.toLocaleString()} leads</span>
                     <span>{tw.dials.toLocaleString()} dials</span>
                     <span>{tw.pickups} pickups</span>
@@ -541,14 +541,14 @@ export default function SetterOverview() {
             <Link
               key={s.id}
               to={`/sales/setters/${s.id}`}
-              className="bg-bg-card border border-border-default rounded-2xl p-5 hover:bg-bg-card-hover transition-colors block"
+              className="bg-bg-card border border-border-default rounded-2xl p-3 sm:p-5 hover:bg-bg-card-hover transition-colors block"
             >
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-3 sm:mb-4">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-bold">{s.name}</h3>
+                  <h3 className="text-base sm:text-lg font-bold">{s.name}</h3>
                   {s.dataSource === 'wavv' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/15 text-success">WAVV</span>}
                 </div>
-                <div className="flex gap-3 text-xs text-text-400">
+                <div className="flex gap-2 sm:gap-3 text-[10px] sm:text-xs text-text-400">
                   <span>{s.totalSets} sets</span>
                   <span className="text-success">{s.closed} closed</span>
                   <span className="text-danger">{s.noShows} NS</span>
@@ -556,7 +556,7 @@ export default function SetterOverview() {
               </div>
 
               {/* Gauges */}
-              <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3 sm:mb-4">
                 <Gauge label="Show Rate" value={s.showRate} target={70} />
                 <Gauge label="Close Rate" value={s.closeRate} target={25} />
                 <Gauge label="Pickup %" value={s.pickupRate} target={30} />
