@@ -430,7 +430,7 @@ export default function SalesOverview() {
           <KPICard label="Ad Spend" value={`$${mkt.adspend.toLocaleString()}`} />
           <KPICard label="FE ROAS" value={`${feRoas.toFixed(2)}x`} subtitle="trial / spend" />
           <KPICard label="NET ROAS" value={`${netRoas.toFixed(2)}x`} subtitle="all / spend" />
-          <KPICard label="CPA" value={ct.closes > 0 ? `$${(mkt.adspend / ct.closes).toFixed(0)}` : '—'} />
+          <KPICard label="CPA" value={ct.closes > 0 ? `$${Math.round(mkt.adspend / ct.closes).toLocaleString()}` : '—'} />
         </>}
       </div>
 
@@ -569,8 +569,8 @@ export default function SalesOverview() {
             </h2>
             <div className="space-y-4">
               {[
-                { label: 'CPL', value: `$${cpl.toFixed(0)}`, sub: `${mkt.leads} leads` },
-                { label: 'CPBC', value: cpbc > 0 ? `$${cpbc.toFixed(0)}` : '—', sub: `${ct.booked} booked` },
+                { label: 'CPL', value: `$${Math.round(cpl).toLocaleString()}`, sub: `${mkt.leads} leads` },
+                { label: 'CPBC', value: cpbc > 0 ? `$${Math.round(cpbc).toLocaleString()}` : '—', sub: `${ct.booked} booked` },
               ].map(r => (
                 <div key={r.label} className="flex items-center justify-between">
                   <div>
