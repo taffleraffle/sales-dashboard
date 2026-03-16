@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, User, Search, Bell, MoreHorizontal, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import SalesChatWidget from './SalesChatWidget'
 
 const navItems = [
   { to: '/sales', icon: BarChart3, label: 'Overview', end: true },
@@ -185,6 +186,9 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Sales Intelligence Chat */}
+      <SalesChatWidget />
     </div>
   )
 }

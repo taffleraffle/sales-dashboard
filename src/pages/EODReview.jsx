@@ -169,6 +169,445 @@ function LeadPicker({ onSelect, onClose }) {
   )
 }
 
+// Retroactive deal updater — search past calls and update outcome/revenue
+function DealUpdater({ closerId, onClose, onSaved }) {
+  const [search, setSearch] = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [selected, setSelected] = useState(null)
+  const [outcome, setOutcome] = useState('closed')
+  const [revenue, setRevenue] = useState(0)
+  const [cashCollected, setCashCollected] = useState(0)
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const inputRef = useRef(null)
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  // Search past calls for this closer
+  useEffect(() => {
+    if (search.length < 2) { setResults([]); return }
+    const timer = setTimeout(async () => {
+      setLoading(true)
+      // Search closer_calls + setter_leads + ghl_appointments for this closer
+      const [callsRes, leadsRes, ghlRes] = await Promise.all([
+        supabase
+          .from('closer_calls')
+          .select('id, prospect_name, outcome, revenue, cash_collected, call_type, notes, ghl_event_id, setter_lead_id, created_at, eod_report_id, eod:closer_eod_reports!closer_calls_eod_report_id_fkey(report_date, closer_id)')
+          .eq('eod.closer_id', closerId)
+          .ilike('prospect_name', `%${search}%`)
+          .order('created_at', { ascending: false })
+          .limit(20),
+        supabase
+          .from('setter_leads')
+          .select('id, lead_name, date_set, appointment_date, status, revenue_attributed, lead_source, setter:team_members!setter_leads_setter_id_fkey(name)')
+          .eq('closer_id', closerId)
+          .ilike('lead_name', `%${search}%`)
+          .order('appointment_date', { ascending: false })
+          .limit(15),
+        supabase
+          .from('ghl_appointments')
+          .select('id, ghl_event_id, contact_name, appointment_date, contact_email, contact_phone, outcome, revenue')
+          .eq('closer_id', closerId)
+          .ilike('contact_name', `%${search}%`)
+          .order('appointment_date', { ascending: false })
+          .limit(15),
+      ])
+
+      const combined = []
+      const seen = new Set()
+
+      // Closer calls (past EOD submissions)
+      for (const c of (callsRes.data || [])) {
+        if (!c.eod) continue
+        const key = `call-${c.id}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        combined.push({
+          type: 'closer_call',
+          id: c.id,
+          name: c.prospect_name,
+          date: c.eod.report_date,
+          outcome: c.outcome,
+          revenue: c.revenue || 0,
+          cash_collected: c.cash_collected || 0,
+          call_type: c.call_type,
+          notes: c.notes || '',
+          ghl_event_id: c.ghl_event_id,
+          setter_lead_id: c.setter_lead_id,
+          eod_report_id: c.eod_report_id,
+          _label: c.outcome === 'closed' ? 'Closed' : c.outcome === 'not_closed' ? 'Not Closed' : c.outcome === 'no_show' ? 'No Show' : c.outcome === 'rescheduled' ? 'Rescheduled' : c.outcome,
+        })
+      }
+
+      // Setter leads assigned to this closer (may not have a closer_call yet)
+      for (const l of (leadsRes.data || [])) {
+        const nameKey = l.lead_name?.toLowerCase().trim()
+        if (combined.some(c => c.name?.toLowerCase().trim() === nameKey && c.date === l.appointment_date)) continue
+        combined.push({
+          type: 'setter_lead',
+          id: l.id,
+          name: l.lead_name,
+          date: l.appointment_date || l.date_set,
+          outcome: l.status,
+          revenue: l.revenue_attributed || 0,
+          cash_collected: 0,
+          setter_name: l.setter?.name || null,
+          lead_source: l.lead_source,
+          _label: l.status === 'closed' ? 'Closed' : l.status === 'not_closed' ? 'Not Closed' : l.status === 'no_show' ? 'No Show' : l.status || 'Set',
+        })
+      }
+
+      // GHL appointments (may not have been submitted in an EOD yet)
+      for (const g of (ghlRes.data || [])) {
+        const nameKey = g.contact_name?.toLowerCase().trim()
+        if (combined.some(c => c.name?.toLowerCase().trim() === nameKey && c.date === g.appointment_date)) continue
+        combined.push({
+          type: 'ghl_appointment',
+          id: g.id,
+          name: g.contact_name,
+          date: g.appointment_date,
+          outcome: g.outcome || 'unknown',
+          revenue: g.revenue || 0,
+          cash_collected: 0,
+          ghl_event_id: g.ghl_event_id,
+          _label: g.outcome || 'No outcome',
+        })
+      }
+
+      combined.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+      setResults(combined)
+      setLoading(false)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search, closerId])
+
+  const handleSelect = (item) => {
+    setSelected(item)
+    setOutcome(item.outcome === 'closed' ? 'closed' : 'closed')
+    setRevenue(item.revenue || 0)
+    setCashCollected(item.cash_collected || 0)
+    setNotes(item.notes || '')
+  }
+
+  const handleSave = async () => {
+    if (!selected) return
+    setSaving(true)
+
+    try {
+      const originalDate = selected.date
+
+      // 1. Update the closer_call record if it exists
+      if (selected.type === 'closer_call') {
+        await supabase
+          .from('closer_calls')
+          .update({
+            outcome,
+            revenue: parseFloat(revenue) || 0,
+            cash_collected: parseFloat(cashCollected) || 0,
+            notes,
+          })
+          .eq('id', selected.id)
+
+        // Update the parent closer_eod_report aggregates
+        if (selected.eod_report_id) {
+          const { data: reportCalls } = await supabase
+            .from('closer_calls')
+            .select('call_type, outcome, revenue, cash_collected, offered_finance')
+            .eq('eod_report_id', selected.eod_report_id)
+
+          if (reportCalls) {
+            const agg = reportCalls.reduce((a, c) => {
+              const isAsc = c.call_type === 'ascension'
+              const isLive = isAsc ? true : ['not_closed', 'closed'].includes(c.outcome)
+              return {
+                nc_booked: a.nc_booked + (c.call_type === 'new_call' ? 1 : 0),
+                fu_booked: a.fu_booked + (c.call_type === 'follow_up' ? 1 : 0),
+                nc_no_shows: a.nc_no_shows + (c.call_type === 'new_call' && c.outcome === 'no_show' ? 1 : 0),
+                fu_no_shows: a.fu_no_shows + (c.call_type === 'follow_up' && c.outcome === 'no_show' ? 1 : 0),
+                live_nc_calls: a.live_nc_calls + (c.call_type === 'new_call' && ['not_closed', 'closed'].includes(c.outcome) ? 1 : 0),
+                live_fu_calls: a.live_fu_calls + (c.call_type === 'follow_up' && ['not_closed', 'closed'].includes(c.outcome) ? 1 : 0),
+                reschedules: a.reschedules + (c.outcome === 'rescheduled' ? 1 : 0),
+                offers: a.offers + (c.offered ? 1 : 0),
+                closes: a.closes + (c.outcome === 'closed' ? 1 : 0),
+                deposits: a.deposits + (c.outcome === 'ascended' ? 1 : 0),
+                total_revenue: a.total_revenue + (isAsc ? 0 : parseFloat(c.revenue || 0)),
+                total_cash_collected: a.total_cash_collected + (isAsc ? 0 : parseFloat(c.cash_collected || 0)),
+                ascend_cash: a.ascend_cash + (isAsc ? parseFloat(c.cash_collected || 0) : 0),
+                ascend_revenue: a.ascend_revenue + (isAsc ? parseFloat(c.revenue || 0) : 0),
+              }
+            }, { nc_booked: 0, fu_booked: 0, nc_no_shows: 0, fu_no_shows: 0, live_nc_calls: 0, live_fu_calls: 0, reschedules: 0, offers: 0, closes: 0, deposits: 0, total_revenue: 0, total_cash_collected: 0, ascend_cash: 0, ascend_revenue: 0 })
+
+            await supabase
+              .from('closer_eod_reports')
+              .update({ ...agg, updated_at: new Date().toISOString() })
+              .eq('id', selected.eod_report_id)
+          }
+        }
+      }
+
+      // 2. Update setter_lead if linked
+      const setterLeadId = selected.setter_lead_id || (selected.type === 'setter_lead' ? selected.id : null)
+      if (setterLeadId) {
+        await supabase
+          .from('setter_leads')
+          .update({
+            status: outcome,
+            revenue_attributed: parseFloat(revenue) || 0,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', setterLeadId)
+      }
+
+      // 3. Update ghl_appointment if linked
+      const ghlEventId = selected.ghl_event_id || (selected.type === 'ghl_appointment' ? selected.ghl_event_id : null)
+      if (ghlEventId) {
+        await supabase
+          .from('ghl_appointments')
+          .update({
+            outcome,
+            revenue: parseFloat(revenue) || 0,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('ghl_event_id', ghlEventId)
+      }
+
+      // 4. Re-sync marketing_tracker for the original date
+      if (originalDate) {
+        try {
+          const [{ data: allEODs }] = await Promise.all([
+            supabase.from('closer_eod_reports').select('*').eq('report_date', originalDate),
+          ])
+          const reportIds = allEODs?.map(r => r.id) || []
+          const { data: allCalls } = reportIds.length
+            ? await supabase.from('closer_calls').select('call_type, revenue, cash_collected, outcome, offered_finance').in('eod_report_id', reportIds)
+            : { data: [] }
+
+          if (allEODs?.length) {
+            const agg = allEODs.reduce((a, r) => ({
+              offers: a.offers + (r.offers || 0),
+              closes: a.closes + (r.closes || 0),
+              trial_cash: a.trial_cash + parseFloat(r.total_cash_collected || 0),
+              trial_revenue: a.trial_revenue + parseFloat(r.total_revenue || 0),
+              ascensions: a.ascensions + (r.deposits || 0),
+              live_calls: a.live_calls + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
+              booked: a.booked + (r.nc_booked || 0) + (r.fu_booked || 0),
+              reschedules: a.reschedules + (r.reschedules || 0),
+            }), { offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0, ascensions: 0, live_calls: 0, booked: 0, reschedules: 0 })
+
+            const callAgg = (allCalls || []).reduce((a, c) => ({
+              ascCash: a.ascCash + (c.call_type === 'ascension' ? parseFloat(c.cash_collected || 0) : 0),
+              ascRevenue: a.ascRevenue + (c.call_type === 'ascension' ? parseFloat(c.revenue || 0) : 0),
+              financeOffers: a.financeOffers + (c.call_type === 'ascension' && c.offered_finance ? 1 : 0),
+              financeAccepted: a.financeAccepted + (c.call_type === 'ascension' && c.offered_finance && ['closed', 'ascended'].includes(c.outcome) ? 1 : 0),
+            }), { ascCash: 0, ascRevenue: 0, financeOffers: 0, financeAccepted: 0 })
+
+            const { data: existingRows } = await supabase
+              .from('marketing_tracker')
+              .select('*')
+              .eq('date', originalDate)
+              .limit(1)
+
+            await supabase.from('marketing_tracker').upsert({
+              ...(existingRows?.[0] || {}),
+              date: originalDate,
+              offers: agg.offers,
+              closes: agg.closes,
+              trial_cash: agg.trial_cash,
+              trial_revenue: agg.trial_revenue,
+              ascensions: agg.ascensions,
+              ascend_cash: callAgg.ascCash,
+              ascend_revenue: callAgg.ascRevenue,
+              finance_offers: callAgg.financeOffers,
+              finance_accepted: callAgg.financeAccepted,
+              live_calls: agg.live_calls,
+              calls_on_calendar: agg.booked,
+              reschedules: agg.reschedules,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'date' })
+          }
+        } catch (syncErr) {
+          console.error('Marketing tracker re-sync failed:', syncErr)
+        }
+      }
+
+      setSaved(true)
+      if (onSaved) onSaved()
+    } catch (err) {
+      console.error('Deal update failed:', err)
+      alert('Failed to update deal: ' + err.message)
+    }
+    setSaving(false)
+  }
+
+  const outcomeColor = (o) => o === 'closed' ? 'text-success' : o === 'not_closed' ? 'text-text-400' : o === 'no_show' ? 'text-danger' : o === 'rescheduled' ? 'text-blue-400' : 'text-text-400'
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-bg-card border border-border-default rounded-2xl w-[480px] max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
+          <div className="flex items-center gap-2">
+            <Edit3 size={14} className="text-opt-yellow" />
+            <span className="text-sm font-semibold">Update Deal</span>
+          </div>
+          <button onClick={onClose} className="text-text-400 hover:text-text-primary"><X size={14} /></button>
+        </div>
+
+        {saved ? (
+          <div className="p-8 text-center">
+            <div className="text-3xl mb-2">&#10003;</div>
+            <p className="text-sm font-medium text-success mb-1">Deal updated successfully</p>
+            <p className="text-xs text-text-400">Stats have been retroactively updated for {selected?.date}</p>
+            <button onClick={onClose} className="mt-4 px-4 py-2 rounded-xl bg-opt-yellow text-bg-primary text-sm font-semibold hover:brightness-110 transition-all">Done</button>
+          </div>
+        ) : !selected ? (
+          <>
+            {/* Search */}
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border-default">
+              <Search size={14} className="text-text-400" />
+              <input
+                ref={inputRef}
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search past calls by lead name..."
+                className="bg-transparent text-sm flex-1 outline-none text-text-primary"
+              />
+              {loading && <Loader size={14} className="animate-spin text-text-400" />}
+            </div>
+
+            {/* Results */}
+            <div className="overflow-y-auto max-h-[60vh]">
+              {search.length < 2 && (
+                <div className="p-6 text-center text-text-400 text-xs">Search for a lead name to find past calls to update</div>
+              )}
+              {!loading && search.length >= 2 && results.length === 0 && (
+                <div className="p-6 text-center text-text-400 text-xs">No past calls found for this lead</div>
+              )}
+              {results.map((item, i) => (
+                <button
+                  key={`${item.type}-${item.id}-${i}`}
+                  onClick={() => handleSelect(item)}
+                  className="w-full text-left px-4 py-3 hover:bg-bg-card-hover border-b border-border-default/30 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{item.name}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                        item.outcome === 'closed' ? 'bg-success/15 text-success' :
+                        item.outcome === 'not_closed' ? 'bg-text-400/10 text-text-400' :
+                        item.outcome === 'no_show' ? 'bg-danger/15 text-danger' :
+                        item.outcome === 'rescheduled' ? 'bg-blue-500/15 text-blue-400' :
+                        'bg-text-400/10 text-text-400'
+                      }`}>{item._label}</span>
+                    </div>
+                    <span className="text-[10px] text-text-400">{item.date || 'No date'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[10px] text-text-400">
+                      {item.type === 'closer_call' ? 'EOD Call' : item.type === 'setter_lead' ? 'Setter Lead' : 'GHL Appt'}
+                      {item.setter_name ? ` · Set by ${item.setter_name}` : ''}
+                      {item.revenue ? ` · $${parseFloat(item.revenue).toLocaleString()}` : ''}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="p-4 space-y-4">
+            {/* Selected deal header */}
+            <div className="bg-bg-primary rounded-xl p-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-semibold">{selected.name}</span>
+                <button onClick={() => setSelected(null)} className="text-[10px] text-text-400 hover:text-opt-yellow">Change</button>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-text-400">
+                <span>Original date: {selected.date}</span>
+                <span>·</span>
+                <span className={outcomeColor(selected.outcome)}>Was: {selected._label}</span>
+                {selected.revenue > 0 && <><span>·</span><span>${parseFloat(selected.revenue).toLocaleString()}</span></>}
+              </div>
+            </div>
+
+            {/* New outcome */}
+            <div>
+              <label className="text-[10px] text-text-400 uppercase font-medium mb-1.5 block">New Outcome</label>
+              <div className="flex gap-1.5">
+                {closingOutcomes.map(o => (
+                  <button
+                    key={o.value}
+                    onClick={() => setOutcome(o.value)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      outcome === o.value
+                        ? o.value === 'closed' ? 'bg-success/20 text-success ring-1 ring-success/40'
+                        : o.value === 'not_closed' ? 'bg-text-400/15 text-text-primary ring-1 ring-text-400/30'
+                        : o.value === 'rescheduled' ? 'bg-blue-500/20 text-blue-400 ring-1 ring-blue-400/40'
+                        : 'bg-danger/20 text-danger ring-1 ring-danger/40'
+                        : 'bg-bg-primary text-text-400 hover:text-text-primary'
+                    }`}
+                  >{o.label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Revenue + Cash */}
+            {['closed', 'ascended'].includes(outcome) && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] text-text-400 uppercase font-medium mb-1.5 block">Cash Collected ($)</label>
+                  <input
+                    type="number"
+                    value={cashCollected}
+                    onChange={e => setCashCollected(e.target.value)}
+                    className="w-full bg-bg-primary border border-border-default rounded-lg px-3 py-2 text-sm"
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-text-400 uppercase font-medium mb-1.5 block">Revenue / Contract ($)</label>
+                  <input
+                    type="number"
+                    value={revenue}
+                    onChange={e => setRevenue(e.target.value)}
+                    className="w-full bg-bg-primary border border-border-default rounded-lg px-3 py-2 text-sm"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            <div>
+              <label className="text-[10px] text-text-400 uppercase font-medium mb-1.5 block">Notes</label>
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Follow-up details, how the deal closed..."
+                className="w-full bg-bg-primary border border-border-default rounded-lg px-3 py-2 text-sm h-20 resize-y"
+              />
+            </div>
+
+            {/* Save */}
+            <div className="flex items-center justify-between pt-2 border-t border-border-default">
+              <p className="text-[10px] text-text-400">This will update stats for <strong>{selected.date}</strong></p>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-opt-yellow text-bg-primary font-semibold text-sm hover:brightness-110 transition-all disabled:opacity-50"
+              >
+                {saving ? <Loader size={14} className="animate-spin" /> : <Check size={14} />}
+                {saving ? 'Updating...' : 'Update Deal'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // Inline lead search for setter set assignments
 function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
   const [search, setSearch] = useState('')
@@ -181,19 +620,29 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
     if (search.length < 2) { setResults([]); return }
     const timer = setTimeout(async () => {
       setLoading(true)
-      const [leadsRes, ghlRes] = await Promise.all([
+      const ghlKey = import.meta.env.VITE_GHL_API_KEY
+      const ghlLoc = import.meta.env.VITE_GHL_LOCATION_ID
+
+      // Search all three sources in parallel (same as closer LeadPicker)
+      const [leadsRes, ghlRes, ghlContactsRes] = await Promise.all([
         supabase
           .from('setter_leads')
           .select('id, lead_name, appointment_date, lead_source')
           .ilike('lead_name', `%${search}%`)
           .order('appointment_date', { ascending: false })
-          .limit(6),
+          .limit(10),
         supabase
           .from('ghl_appointments')
           .select('id, ghl_event_id, contact_name, appointment_date, contact_email, contact_phone')
           .ilike('contact_name', `%${search}%`)
           .order('appointment_date', { ascending: false })
-          .limit(6),
+          .limit(10),
+        // Always search GHL contacts API for live pipeline leads
+        (ghlKey && ghlLoc) ? fetch(
+          `https://services.leadconnectorhq.com/contacts/?${new URLSearchParams({ locationId: ghlLoc, query: search, limit: '15' })}`,
+          { headers: { 'Authorization': `Bearer ${ghlKey}`, 'Version': '2021-07-28' } }
+        ).then(r => r.ok ? r.json() : { contacts: [] }).catch(() => ({ contacts: [] }))
+        : Promise.resolve({ contacts: [] }),
       ])
       const leads = (leadsRes.data || []).map(l => ({ ...l, _source: 'lead' }))
       const ghl = (ghlRes.data || []).map(g => ({
@@ -206,37 +655,31 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
         contact_phone: g.contact_phone,
         _source: 'ghl',
       }))
-      const seen = new Set(leads.map(l => l.lead_name?.toLowerCase()))
-      const combined = [...leads, ...ghl.filter(g => !seen.has(g.lead_name?.toLowerCase()))]
+      const ghlLive = (ghlContactsRes.contacts || []).map(c => ({
+        id: c.id,
+        lead_name: `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || 'Unknown',
+        appointment_date: null,
+        lead_source: 'ghl',
+        contact_email: c.email || '',
+        contact_phone: c.phone || '',
+        _source: 'ghl_live',
+      }))
 
-      // If no local results, try GHL contacts API
-      if (combined.length === 0) {
-        const ghlKey = import.meta.env.VITE_GHL_API_KEY
-        const ghlLoc = import.meta.env.VITE_GHL_LOCATION_ID
-        if (ghlKey && ghlLoc) {
-          try {
-            const params = new URLSearchParams({ locationId: ghlLoc, query: search, limit: '8' })
-            const res = await fetch(`https://services.leadconnectorhq.com/contacts/?${params}`, {
-              headers: { 'Authorization': `Bearer ${ghlKey}`, 'Version': '2021-07-28' },
-            })
-            if (res.ok) {
-              const json = await res.json()
-              ;(json.contacts || []).forEach(c => combined.push({
-                id: c.id,
-                lead_name: `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || 'Unknown',
-                appointment_date: null,
-                lead_source: 'ghl',
-                contact_email: c.email || '',
-                contact_phone: c.phone || '',
-                _source: 'ghl_live',
-              }))
-            }
-          } catch {}
+      // Deduplicate: setter_leads > ghl_appointments > ghl_live contacts
+      const seen = new Set()
+      const combined = []
+      for (const list of [leads, ghl, ghlLive]) {
+        for (const item of list) {
+          const key = item.lead_name?.toLowerCase().trim()
+          if (key && !seen.has(key)) {
+            seen.add(key)
+            combined.push(item)
+          }
         }
       }
 
       combined.sort((a, b) => (b.appointment_date || '').localeCompare(a.appointment_date || ''))
-      setResults(combined.slice(0, 8))
+      setResults(combined.slice(0, 10))
       setLoading(false)
     }, 300)
     return () => clearTimeout(timer)
@@ -298,11 +741,11 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
                 <span className={`text-[9px] px-1 py-0.5 rounded font-medium ${
                   lead._source === 'ghl' || lead._source === 'ghl_live' ? 'bg-success/15 text-success' : 'bg-blue-500/15 text-blue-400'
                 }`}>
-                  {lead._source === 'ghl_live' ? 'GHL' : lead._source === 'ghl' ? 'GHL' : 'Lead'}
+                  {lead._source === 'ghl_live' ? 'GHL Contact' : lead._source === 'ghl' ? 'GHL' : 'Lead'}
                 </span>
               </div>
               <span className="text-[10px] text-text-400">
-                {lead.appointment_date || 'No date'}{lead.lead_source ? ` · ${lead.lead_source}` : ''}
+                {lead.appointment_date || 'No appt date'}{lead.lead_source ? ` · ${lead.lead_source}` : ''}{lead.contact_email ? ` · ${lead.contact_email}` : ''}{lead.contact_phone ? ` · ${lead.contact_phone}` : ''}
               </span>
             </button>
           ))}
@@ -313,7 +756,7 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
 }
 
 // Setter Dashboard with pipeline stats + EOD form
-function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, submitting, setLeadsForSets, setRescheduleLeadsForParent }) {
+function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0 }) {
   const [pipeline, setPipeline] = useState({ set: 0, booked: 0, showed: 0, closed: 0, noShow: 0, cancelled: 0, revenue: 0, total: 0 })
   const [weeklyStats, setWeeklyStats] = useState({ sets: 0, shows: 0, closes: 0, revenue: 0, showRate: 0, closeRate: 0 })
   const [loading, setLoading] = useState(true)
@@ -357,7 +800,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
     setWavvApplied(false)
     setWavvStats(null)
     if (setterId) loadWavv()
-  }, [setterId, selectedDate])
+  }, [setterId, selectedDate, refreshKey])
 
   // Auto-apply WAVV data to setter fields (always pre-fill, setter can override)
   useEffect(() => {
@@ -843,6 +1286,8 @@ export default function EODReview() {
   const [calendarSource, setCalendarSource] = useState(null)
   const [syncing, setSyncing] = useState(false)
   const [showLeadPicker, setShowLeadPicker] = useState(false)
+  const [showDealUpdater, setShowDealUpdater] = useState(false)
+  const [setterRefreshKey, setSetterRefreshKey] = useState(0)
   const [closerHistory, setCloserHistory] = useState([])
   const [showCloserHistory, setShowCloserHistory] = useState(true)
   const [allEodHistory, setAllEodHistory] = useState([])
@@ -880,54 +1325,147 @@ export default function EODReview() {
     }])
   }
 
-  const handleRefreshGHL = async () => {
+  const handleRefreshCloser = async () => {
     if (!selectedMember || syncing) return
     setSyncing(true)
     try {
+      // 1. Sync GHL appointments from API
       await syncGHLAppointments(selectedDate, selectedDate)
-      // Re-fetch after sync
-      const { source, events } = await fetchCloserCalendar(selectedMember, selectedDate)
+
+      // 2. Re-fetch all three sources: calendar, setter_leads, Fathom transcripts
+      const [calendarResult, leadsRes, transcriptsRes] = await Promise.all([
+        fetchCloserCalendar(selectedMember, selectedDate),
+        supabase
+          .from('setter_leads')
+          .select('id, lead_name, setter:team_members!setter_leads_setter_id_fkey(name), lead_source, status, revenue_attributed, date_set')
+          .eq('closer_id', selectedMember)
+          .eq('appointment_date', selectedDate),
+        supabase
+          .from('closer_transcripts')
+          .select('id, prospect_name, summary, meeting_date, duration_seconds')
+          .eq('closer_id', selectedMember)
+          .eq('meeting_date', selectedDate)
+          .then(res => res, () => ({ data: [] })),
+      ])
+
+      const { source, events } = calendarResult
+      const setterLeads = leadsRes.data || []
+      const transcripts = transcriptsRes.data || []
       setCalendarSource(source)
-      const rows = events.map((evt) => {
-        // Format time in ET (GHL location timezone)
-        const startTime = evt.start_time ? (() => {
-          try {
-            const d = new Date(evt.start_time)
-            if (isNaN(d.getTime())) return null
-            return d.toLocaleTimeString('en-US', {
-              hour: 'numeric', minute: '2-digit',
-              timeZone: 'America/Indiana/Indianapolis',
-            })
-          } catch { return null }
-        })() : null
+
+      // Helper: format GHL time string to readable time in ET
+      const formatTime = (timeStr) => {
+        if (!timeStr) return null
+        try {
+          const d = new Date(timeStr)
+          if (isNaN(d.getTime())) return null
+          return d.toLocaleTimeString('en-US', {
+            hour: 'numeric', minute: '2-digit',
+            timeZone: 'America/Indiana/Indianapolis',
+          })
+        } catch { return null }
+      }
+
+      // Helper: match transcript by first name
+      const findTranscript = (name) => {
+        const first = name?.split(' ')[0]?.toLowerCase()
+        if (!first || first.length < 2) return null
+        return transcripts.find(t => t.prospect_name?.toLowerCase().includes(first)) || null
+      }
+
+      const truncateSummary = (text) => {
+        if (!text) return ''
+        const cleaned = text.replace(/[{}]/g, '').replace(/#{1,6}\s*/g, '').replace(/\*\*/g, '').trim()
+        const sentences = cleaned.split(/(?<=[.!?])\s+/).slice(0, 5)
+        return sentences.join(' ')
+      }
+
+      // 3. Build rows from calendar events, matching setter_leads + transcripts
+      const matchedLeadIds = new Set()
+      const calendarRows = events.map(evt => {
+        const firstName = evt.contact_name?.split(' ')[0]?.toLowerCase()
+        const matchedLead = setterLeads.find(l =>
+          l.lead_name?.toLowerCase().includes(firstName) ||
+          (firstName?.length > 2 && l.lead_name?.toLowerCase().split(' ')[0] === firstName)
+        )
+        if (matchedLead) matchedLeadIds.add(matchedLead.id)
+
+        const transcript = findTranscript(evt.contact_name)
+        const outcome = evt.existing_status === 'closed' ? 'closed'
+          : evt.existing_status === 'not_closed' ? 'not_closed'
+          : ['showed', 'closed', 'not_closed'].includes(evt.existing_status) ? 'showed'
+          : evt.existing_status === 'no_show' ? 'no_show'
+          : null
+
         return {
-          lead_id: evt.lead_id || null,
+          lead_id: matchedLead?.id || evt.lead_id || null,
           ghl_event_id: evt.ghl_event_id || null,
           lead_name: evt.contact_name,
-          setter_name: evt.setter_name || '—',
+          setter_name: matchedLead?.setter?.name || evt.setter_name || '—',
           appointment_date: selectedDate,
-          start_time: startTime,
+          start_time: formatTime(evt.start_time),
           calendar_name: evt.calendar_name || '',
-          lead_source: evt.lead_source || (source === 'ghl' ? 'ghl' : 'manual'),
+          lead_source: matchedLead?.lead_source || evt.lead_source || (source === 'ghl' ? 'ghl' : 'manual'),
           call_type: 'new_call',
-          outcome: evt.existing_status || 'no_show',
-          revenue: evt.revenue_attributed || 0,
+          outcome: outcome || (matchedLead?.status && matchedLead.status !== 'booked' ? matchedLead.status : 'no_show'),
+          revenue: matchedLead?.revenue_attributed || evt.revenue_attributed || 0,
           cash_collected: 0,
           existing_status: evt.existing_status || evt.status || null,
-          notes: evt.notes || '',
-          fathom_summary: null,
-          fathom_duration: null,
+          notes: truncateSummary(transcript?.summary) || evt.notes || '',
+          fathom_summary: transcript?.summary || null,
+          fathom_duration: transcript?.duration_seconds || null,
           contact_email: evt.contact_email || '',
           contact_phone: evt.contact_phone || '',
           ascended: false,
           offered_finance: false,
+          _rowSource: 'calendar',
         }
       })
-      setCalls(rows)
+
+      // 4. Add unmatched setter_leads
+      const leadOnlyRows = setterLeads
+        .filter(l => !matchedLeadIds.has(l.id))
+        .map(lead => {
+          const transcript = findTranscript(lead.lead_name)
+          return {
+            lead_id: lead.id,
+            ghl_event_id: null,
+            lead_name: lead.lead_name,
+            setter_name: lead.setter?.name || '—',
+            appointment_date: selectedDate,
+            start_time: null,
+            calendar_name: '',
+            lead_source: lead.lead_source || 'manual',
+            call_type: 'new_call',
+            outcome: lead.status && lead.status !== 'booked' && lead.status !== 'set' ? lead.status : 'no_show',
+            revenue: parseFloat(lead.revenue_attributed || 0),
+            cash_collected: 0,
+            existing_status: lead.status || null,
+            notes: truncateSummary(transcript?.summary) || '',
+            fathom_summary: transcript?.summary || null,
+            fathom_duration: transcript?.duration_seconds || null,
+            contact_email: '',
+            contact_phone: '',
+            ascended: false,
+            offered_finance: false,
+            _rowSource: 'lead',
+          }
+        })
+
+      setCalls([...calendarRows, ...leadOnlyRows])
     } catch (err) {
-      console.error('GHL sync failed:', err)
+      console.error('Refresh failed:', err)
     }
     setSyncing(false)
+  }
+
+  const handleRefreshSetter = async () => {
+    if (!selectedMember || syncing) return
+    setSyncing(true)
+    // Bump refresh key to trigger WAVV re-fetch inside SetterDashboard
+    setSetterRefreshKey(k => k + 1)
+    // Small delay to let the useEffect fire, then clear syncing
+    setTimeout(() => setSyncing(false), 1500)
   }
 
   // Load all-team EOD history when no member is selected
@@ -1527,15 +2065,15 @@ export default function EODReview() {
             Jump to today
           </button>
         )}
-        {tab === 'closer' && selectedMember && (
+        {selectedMember && (
           <button
-            onClick={handleRefreshGHL}
+            onClick={tab === 'closer' ? handleRefreshCloser : handleRefreshSetter}
             disabled={syncing}
             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-text-400 hover:text-opt-yellow border border-border-default hover:border-opt-yellow/30 ml-auto disabled:opacity-50"
-            title="Sync appointments from GHL"
+            title={tab === 'closer' ? 'Refresh calendar, Fathom transcripts & leads' : 'Refresh WAVV dials & stats'}
           >
             <RefreshCw size={10} className={syncing ? 'animate-spin' : ''} />
-            {syncing ? 'Syncing GHL...' : 'Sync GHL'}
+            {syncing ? 'Refreshing...' : 'Refresh'}
           </button>
         )}
       </div>
@@ -1606,13 +2144,22 @@ export default function EODReview() {
           ) : calls.length === 0 ? (
             <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400 text-sm">
               <p>No booked calls for {selectedName} on {formatDateLabel(selectedDate).split(' — ').pop() || selectedDate}.</p>
-              <button
-                onClick={() => setShowLeadPicker(true)}
-                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-opt-yellow border border-opt-yellow/30 hover:bg-opt-yellow/10 transition-colors"
-              >
-                <Plus size={12} />
-                Add Call Manually
-              </button>
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <button
+                  onClick={() => setShowLeadPicker(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-opt-yellow border border-opt-yellow/30 hover:bg-opt-yellow/10 transition-colors"
+                >
+                  <Plus size={12} />
+                  Add Call Manually
+                </button>
+                <button
+                  onClick={() => setShowDealUpdater(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-success border border-success/30 hover:bg-success/10 transition-colors"
+                >
+                  <Edit3 size={12} />
+                  Update Deal
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4">
@@ -1796,14 +2343,23 @@ export default function EODReview() {
                   )})}
                 </div>
 
-                {/* Add Call button */}
-                <button
-                  onClick={() => setShowLeadPicker(true)}
-                  className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-opt-yellow border border-dashed border-border-default hover:border-opt-yellow/30 transition-colors"
-                >
-                  <Plus size={12} />
-                  Add Call
-                </button>
+                {/* Add Call + Update Deal buttons */}
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    onClick={() => setShowLeadPicker(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-opt-yellow border border-dashed border-border-default hover:border-opt-yellow/30 transition-colors"
+                  >
+                    <Plus size={12} />
+                    Add Call
+                  </button>
+                  <button
+                    onClick={() => setShowDealUpdater(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-success border border-dashed border-border-default hover:border-success/30 transition-colors"
+                  >
+                    <Edit3 size={12} />
+                    Update Deal
+                  </button>
+                </div>
 
                 {/* EOD notes */}
                 <div className="mt-3">
@@ -2167,6 +2723,7 @@ export default function EODReview() {
           submitting={submitting}
           setLeadsForSets={setSetterSetLeads}
           setRescheduleLeadsForParent={setSetterRescheduleLeads}
+          refreshKey={setterRefreshKey}
         />
       )}
 
@@ -2315,6 +2872,18 @@ export default function EODReview() {
         <LeadPicker
           onSelect={addManualCall}
           onClose={() => setShowLeadPicker(false)}
+        />
+      )}
+
+      {showDealUpdater && (
+        <DealUpdater
+          closerId={selectedMember}
+          onClose={() => setShowDealUpdater(false)}
+          onSaved={() => {
+            // Refresh calls for current date view
+            setLoadingCalls(true)
+            setTimeout(() => setLoadingCalls(false), 100)
+          }}
         />
       )}
     </div>

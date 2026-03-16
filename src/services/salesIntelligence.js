@@ -1,0 +1,248 @@
+import { supabase } from '../lib/supabase'
+
+const GHL_BASE = 'https://services.leadconnectorhq.com'
+const GHL_KEY = import.meta.env.VITE_GHL_API_KEY
+const GHL_LOC = import.meta.env.VITE_GHL_LOCATION_ID
+const SCIO_PIPELINE = 'ZN1DW9S9qS540PNAXSxa'
+
+const ghlHeaders = { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28' }
+
+async function fetchGHLLeads(since) {
+  const leads = []
+  if (!GHL_KEY || !GHL_LOC) return leads
+  try {
+    let url = `${GHL_BASE}/opportunities/search?location_id=${GHL_LOC}&pipeline_id=${SCIO_PIPELINE}&limit=100`
+    while (url && leads.length < 3000) {
+      const res = await fetch(url, { headers: ghlHeaders })
+      const data = await res.json()
+      for (const o of (data.opportunities || [])) {
+        if (o.createdAt && new Date(o.createdAt) >= since) {
+          leads.push({
+            name: o.contact?.name || o.name || 'Unknown',
+            createdAt: o.createdAt,
+            status: o.status,
+            monetaryValue: o.monetaryValue || 0,
+            source: o.source || '',
+          })
+        }
+      }
+      url = data.meta?.nextPageUrl || null
+    }
+  } catch {}
+  return leads
+}
+
+export async function buildSalesContext() {
+  const now = new Date()
+  const today = now.toISOString().split('T')[0]
+  const d7 = new Date(now); d7.setDate(d7.getDate() - 7)
+  const d30 = new Date(now); d30.setDate(d30.getDate() - 30)
+  const d90 = new Date(now); d90.setDate(d90.getDate() - 90)
+  const d7s = d7.toISOString().split('T')[0]
+  const d30s = d30.toISOString().split('T')[0]
+  const d90s = d90.toISOString().split('T')[0]
+
+  // Parallel fetch all data sources
+  const [
+    teamRes, closerEodRes, setterEodRes, setterLeadsRes,
+    wavvRes, marketingRes, benchmarksRes, appointmentsRes,
+    transcriptsRes, closerCallsRes, ghlLeads,
+  ] = await Promise.all([
+    supabase.from('team_members').select('id, name, role, email, wavv_user_id, is_active').eq('is_active', true),
+    supabase.from('closer_eod_reports').select('*, closer:team_members(name)')
+      .gte('report_date', d30s).eq('is_confirmed', true).order('report_date', { ascending: false }),
+    supabase.from('setter_eod_reports').select('*, setter:team_members(name)')
+      .gte('report_date', d30s).eq('is_confirmed', true).order('report_date', { ascending: false }),
+    supabase.from('setter_leads')
+      .select('id, setter_id, closer_id, lead_name, lead_source, date_set, appointment_date, status, revenue_attributed')
+      .gte('date_set', d90s).order('date_set', { ascending: false }).limit(500),
+    supabase.from('wavv_calls').select('user_id, call_duration, started_at')
+      .gte('started_at', d30.toISOString()).order('started_at', { ascending: false }).limit(5000),
+    supabase.from('marketing_tracker').select('*')
+      .gte('date', d90s).order('date', { ascending: false }),
+    supabase.from('marketing_benchmarks').select('metric, value'),
+    supabase.from('ghl_appointments').select('closer_id, contact_name, appointment_date, outcome, revenue, calendar_name')
+      .gte('appointment_date', d30s).order('appointment_date', { ascending: false }).limit(500),
+    supabase.from('closer_transcripts').select('closer_id, prospect_name, meeting_date, duration_seconds, summary, outcome')
+      .gte('meeting_date', d30s).order('meeting_date', { ascending: false }).limit(100),
+    supabase.from('closer_calls').select('prospect_name, call_type, outcome, revenue, cash_collected, created_at')
+      .gte('created_at', d30.toISOString()).order('created_at', { ascending: false }).limit(500),
+    fetchGHLLeads(d90),
+  ])
+
+  const team = teamRes.data || []
+  const closerEods = closerEodRes.data || []
+  const setterEods = setterEodRes.data || []
+  const setterLeads = setterLeadsRes.data || []
+  const wavvCalls = wavvRes.data || []
+  const marketing = marketingRes.data || []
+  const benchmarks = benchmarksRes.data || []
+  const transcripts = transcriptsRes.data || []
+  const closerCalls = closerCallsRes.data || []
+
+  // ── Aggregations ──
+
+  // WAVV by user
+  const wavvByUser = {}
+  const wavvByDate = {}
+  for (const c of wavvCalls) {
+    const uid = c.user_id || 'unknown'
+    if (!wavvByUser[uid]) wavvByUser[uid] = { dials: 0, pickups: 0, mcs: 0 }
+    wavvByUser[uid].dials++
+    if ((c.call_duration || 0) > 15) wavvByUser[uid].pickups++
+    if ((c.call_duration || 0) >= 60) wavvByUser[uid].mcs++
+    const day = c.started_at?.split('T')[0]
+    if (day) wavvByDate[day] = (wavvByDate[day] || 0) + 1
+  }
+
+  // Leads by hour / day
+  const leadsByHour = new Array(24).fill(0)
+  const leadsByDay = {}
+  const leadsByDayOfWeek = new Array(7).fill(0)
+  for (const l of ghlLeads) {
+    const d = new Date(l.createdAt)
+    const eastern = new Date(d.getTime() - 5 * 60 * 60 * 1000)
+    leadsByHour[eastern.getUTCHours()]++
+    const day = eastern.toISOString().split('T')[0]
+    leadsByDay[day] = (leadsByDay[day] || 0) + 1
+    leadsByDayOfWeek[eastern.getUTCDay()]++
+  }
+
+  // Closer performance
+  const closerPerf = {}
+  for (const eod of closerEods) {
+    const name = eod.closer?.name || 'Unknown'
+    if (!closerPerf[name]) closerPerf[name] = { booked: 0, live: 0, closes: 0, revenue: 0, cash: 0, noShows: 0, offers: 0, days: 0, reschedules: 0, ascensions: 0, ascendCash: 0 }
+    closerPerf[name].booked += (eod.nc_booked || 0) + (eod.fu_booked || 0)
+    closerPerf[name].live += (eod.live_nc_calls || 0) + (eod.live_fu_calls || 0)
+    closerPerf[name].closes += eod.closes || 0
+    closerPerf[name].revenue += parseFloat(eod.total_revenue || 0)
+    closerPerf[name].cash += parseFloat(eod.total_cash_collected || 0)
+    closerPerf[name].noShows += (eod.nc_no_shows || 0) + (eod.fu_no_shows || 0)
+    closerPerf[name].offers += eod.offers || 0
+    closerPerf[name].reschedules += eod.reschedules || 0
+    closerPerf[name].ascensions += eod.deposits || 0
+    closerPerf[name].ascendCash += parseFloat(eod.ascend_cash || 0)
+    closerPerf[name].days++
+  }
+
+  // Setter performance
+  const setterPerf = {}
+  for (const eod of setterEods) {
+    const name = eod.setter?.name || 'Unknown'
+    if (!setterPerf[name]) setterPerf[name] = { dials: 0, pickups: 0, mcs: 0, sets: 0, reschedules: 0, totalLeads: 0, days: 0 }
+    setterPerf[name].dials += eod.outbound_calls || 0
+    setterPerf[name].pickups += eod.pickups || 0
+    setterPerf[name].mcs += eod.meaningful_conversations || 0
+    setterPerf[name].sets += eod.sets || 0
+    setterPerf[name].reschedules += eod.reschedules || 0
+    setterPerf[name].totalLeads += eod.total_leads || 0
+    setterPerf[name].days++
+  }
+
+  // Lead pipeline
+  const leadPipeline = { set: 0, booked: 0, showed: 0, closed: 0, noShow: 0, rescheduled: 0, totalRevenue: 0 }
+  for (const l of setterLeads) {
+    if (l.status === 'set') leadPipeline.set++
+    else if (l.status === 'booked') leadPipeline.booked++
+    else if (l.status === 'showed' || l.status === 'not_closed') leadPipeline.showed++
+    else if (l.status === 'closed') { leadPipeline.closed++; leadPipeline.totalRevenue += parseFloat(l.revenue_attributed || 0) }
+    else if (l.status === 'no_show') leadPipeline.noShow++
+    else if (l.status === 'rescheduled') leadPipeline.rescheduled++
+  }
+
+  // Marketing funnel (30d)
+  const mktg30 = marketing.filter(m => m.date >= d30s)
+  const mktgTotals = mktg30.reduce((a, m) => ({
+    adspend: a.adspend + parseFloat(m.adspend || 0),
+    leads: a.leads + (m.leads || 0),
+    bookings: a.bookings + (m.qualified_bookings || 0),
+    offers: a.offers + (m.offers || 0),
+    closes: a.closes + (m.closes || 0),
+    trialCash: a.trialCash + parseFloat(m.trial_cash || 0),
+    trialRevenue: a.trialRevenue + parseFloat(m.trial_revenue || 0),
+    ascensions: a.ascensions + (m.ascensions || 0),
+    ascendCash: a.ascendCash + parseFloat(m.ascend_cash || 0),
+    ascendRevenue: a.ascendRevenue + parseFloat(m.ascend_revenue || 0),
+    liveCalls: a.liveCalls + (m.new_live_calls || 0),
+  }), { adspend: 0, leads: 0, bookings: 0, offers: 0, closes: 0, trialCash: 0, trialRevenue: 0, ascensions: 0, ascendCash: 0, ascendRevenue: 0, liveCalls: 0 })
+
+  // ── Build the system prompt ──
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+  return `You are the OPT Digital Sales Intelligence Assistant. You have access to comprehensive, real-time data about the entire sales operation. Today's date is ${today}.
+
+FORMATTING RULES:
+- Use markdown tables for comparisons
+- Bold key numbers and metrics
+- Specify timezone (US Eastern / ET) for time-based data
+- Be direct and analytical — this is for sales leadership
+- Compare periods when discussing trends (this week vs last, etc.)
+- When asked about a specific person, give their full stats
+- Always include context — don't just give a number, explain what it means
+
+## TEAM
+${team.map(m => `- ${m.name} (${m.role})${m.wavv_user_id ? ` [WAVV: ${m.wavv_user_id}]` : ''}`).join('\n')}
+
+## GHL PIPELINE — LAST 90 DAYS
+Total leads: **${ghlLeads.length}**
+
+### Lead Volume by Day (last 30 days):
+${Object.entries(leadsByDay).sort().slice(-30).map(([d, c]) => `${d}: ${c}`).join('\n')}
+
+### Lead Creation by Hour (ET, last 90 days):
+${leadsByHour.map((c, h) => `${h.toString().padStart(2, '0')}:00 — ${c} leads`).join('\n')}
+
+### Lead Creation by Day of Week (last 90 days):
+${dayNames.map((n, i) => `${n}: ${leadsByDayOfWeek[i]}`).join(', ')}
+
+## WAVV DIALER — LAST 30 DAYS
+Total calls: **${wavvCalls.length}**
+${Object.entries(wavvByUser).map(([uid, s]) => {
+    const member = team.find(m => m.wavv_user_id === uid)
+    return `${member?.name || uid}: ${s.dials} dials, ${s.pickups} pickups (${s.dials ? ((s.pickups / s.dials) * 100).toFixed(1) : 0}%), ${s.mcs} MCs (${s.dials ? ((s.mcs / s.dials) * 100).toFixed(1) : 0}%)`
+  }).join('\n')}
+
+### Daily WAVV volume (last 14 days):
+${Object.entries(wavvByDate).sort().slice(-14).map(([d, c]) => `${d}: ${c} calls`).join('\n')}
+
+## CLOSER PERFORMANCE — LAST 30 DAYS
+${Object.entries(closerPerf).map(([name, p]) => `### ${name} (${p.days} days reported)
+Booked: ${p.booked} | Live: ${p.live} | Closes: ${p.closes} | No Shows: ${p.noShows} | Reschedules: ${p.reschedules}
+Show Rate: ${p.booked ? ((p.live / p.booked) * 100).toFixed(0) : 0}% | Close Rate: ${p.live ? ((p.closes / p.live) * 100).toFixed(0) : 0}% | Offer Rate: ${p.live ? ((p.offers / p.live) * 100).toFixed(0) : 0}%
+Revenue: $${p.revenue.toLocaleString()} | Cash: $${p.cash.toLocaleString()}
+Ascensions: ${p.ascensions} | Ascend Cash: $${p.ascendCash.toLocaleString()}`).join('\n\n')}
+
+## SETTER PERFORMANCE — LAST 30 DAYS
+${Object.entries(setterPerf).map(([name, p]) => `### ${name} (${p.days} days reported)
+Dials: ${p.dials} | Pickups: ${p.pickups} | MCs: ${p.mcs} | Sets: ${p.sets} | Reschedules: ${p.reschedules}
+Pickup Rate: ${p.dials ? ((p.pickups / p.dials) * 100).toFixed(1) : 0}% | MC Rate: ${p.dials ? ((p.mcs / p.dials) * 100).toFixed(1) : 0}% | Dials/Set: ${p.sets ? (p.dials / p.sets).toFixed(0) : 'N/A'}
+Total Leads Assigned: ${p.totalLeads}`).join('\n\n')}
+
+## SETTER LEAD PIPELINE (last 90 days)
+Set: ${leadPipeline.set} | Booked: ${leadPipeline.booked} | Showed: ${leadPipeline.showed} | Closed: ${leadPipeline.closed} | No Show: ${leadPipeline.noShow} | Rescheduled: ${leadPipeline.rescheduled}
+Total Revenue from Closed: $${leadPipeline.totalRevenue.toLocaleString()}
+
+## MARKETING FUNNEL — LAST 30 DAYS
+Ad Spend: $${mktgTotals.adspend.toLocaleString()} | Leads: ${mktgTotals.leads} | Bookings: ${mktgTotals.bookings}
+CPL: $${mktgTotals.leads ? (mktgTotals.adspend / mktgTotals.leads).toFixed(2) : 'N/A'}
+Offers: ${mktgTotals.offers} | Closes: ${mktgTotals.closes}
+Trial Cash: $${mktgTotals.trialCash.toLocaleString()} | Trial Revenue: $${mktgTotals.trialRevenue.toLocaleString()}
+Ascensions: ${mktgTotals.ascensions} | Ascend Cash: $${mktgTotals.ascendCash.toLocaleString()} | Ascend Revenue: $${mktgTotals.ascendRevenue.toLocaleString()}
+Live Calls: ${mktgTotals.liveCalls}
+${mktgTotals.closes ? `CPA (Trial): $${(mktgTotals.adspend / mktgTotals.closes).toFixed(2)}` : ''}
+${mktgTotals.adspend ? `ROAS (Trial Cash): ${(mktgTotals.trialCash / mktgTotals.adspend).toFixed(2)}x` : ''}
+
+### Daily Marketing Data (last 14 days):
+${mktg30.slice(0, 14).map(m => `${m.date}: spend=$${parseFloat(m.adspend || 0).toFixed(0)} leads=${m.leads || 0} bookings=${m.qualified_bookings || 0} offers=${m.offers || 0} closes=${m.closes || 0} cash=$${parseFloat(m.trial_cash || 0).toFixed(0)}`).join('\n')}
+
+## BENCHMARKS (targets)
+${benchmarks.map(b => `${b.metric}: ${b.value}`).join('\n')}
+
+## RECENT CLOSER CALLS (last 30 days, sample)
+${closerCalls.slice(0, 40).map(c => `${c.created_at?.split('T')[0]} | ${c.prospect_name} | ${c.call_type} | ${c.outcome} | rev=$${c.revenue || 0} cash=$${c.cash_collected || 0}`).join('\n')}
+
+## FATHOM TRANSCRIPTS (last 30 days)
+${transcripts.slice(0, 15).map(t => `${t.meeting_date} | ${t.prospect_name} | ${t.duration_seconds}s | ${t.outcome || 'N/A'}`).join('\n')}
+${transcripts.filter(t => t.summary).slice(0, 3).map(t => `\n### Call: ${t.prospect_name} (${t.meeting_date})\n${t.summary?.slice(0, 300)}`).join('\n')}`
+}
