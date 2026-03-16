@@ -130,8 +130,10 @@ export default function SalesChatWidget() {
       )
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(err.error || 'Chat request failed')
+        const errText = await res.text().catch(() => res.statusText)
+        let errMsg
+        try { errMsg = JSON.parse(errText).error } catch { errMsg = errText }
+        throw new Error(errMsg || `HTTP ${res.status}`)
       }
 
       // Parse SSE stream from Claude
@@ -167,7 +169,7 @@ export default function SalesChatWidget() {
         setMessages(prev => [...prev, { role: 'assistant', content: fullText }])
       }
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}. Make sure the sales-chat edge function is deployed with ANTHROPIC_API_KEY, GHL_API_KEY, and GHL_LOCATION_ID env vars.` }])
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }])
     }
     setStreamingText('')
     setStreaming(false)
