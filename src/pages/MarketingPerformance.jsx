@@ -911,16 +911,16 @@ export default function MarketingPerformance() {
       </Section>
 
       {/* Calls & Show Rates */}
-      <Section title="Calls & Show Rates" cols={5}>
-        <KPI label="Booked Calls" value={stats.qualified_bookings} format="n" />
-        <KPI label="Live Calls" value={stats.live_calls} format="n" />
+      <Section title="Calls & Show Rates" cols={9}>
+        <KPI label="Booked" value={stats.qualified_bookings} format="n" />
+        <KPI label="Live" value={stats.live_calls} format="n" />
         <KPI label="No Shows" value={stats.no_shows} format="n" />
         <KPI label="Cancelled" value={stats.cancels} format="n" />
-        <KPI label="Rescheduled" value={stats.reschedules} format="n" />
-        <KPI label="Gross Show Rate" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} />
-        <KPI label="Net Show Rate" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} />
-        <KPI label="Reschedule Rate" value={stats.reschedule_rate} format="%" />
-        <KPI label="Cost Per Live Call" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} />
+        <KPI label="Resch" value={stats.reschedules} format="n" />
+        <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} />
+        <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} />
+        <KPI label="Resch%" value={stats.reschedule_rate} format="%" />
+        <KPI label="Cost/Live" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} />
       </Section>
 
       {/* Offers & Closes */}
