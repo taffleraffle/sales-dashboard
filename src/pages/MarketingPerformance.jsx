@@ -64,6 +64,7 @@ const colsMap = {
   6: 'lg:grid-cols-6',
   7: 'lg:grid-cols-7',
   8: 'lg:grid-cols-8',
+  9: 'lg:grid-cols-9',
 }
 
 function Section({ title, children, cols = 6 }) {
@@ -910,7 +911,7 @@ export default function MarketingPerformance() {
       </Section>
 
       {/* Calls & Show Rates */}
-      <Section title="Calls & Show Rates" cols={9}>
+      <Section title="Calls & Show Rates" cols={5}>
         <KPI label="Booked Calls" value={stats.qualified_bookings} format="n" />
         <KPI label="Live Calls" value={stats.live_calls} format="n" />
         <KPI label="No Shows" value={stats.no_shows} format="n" />
