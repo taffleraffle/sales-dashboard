@@ -18,6 +18,10 @@ function filterByDays(entries, days) {
     const start = toLocalDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
     return entries.filter(e => e.date >= start)
   }
+  // Custom range: { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }
+  if (days && typeof days === 'object' && days.from) {
+    return entries.filter(e => e.date >= days.from && e.date <= days.to)
+  }
   const since = new Date()
   since.setDate(since.getDate() - days)
   return entries.filter(e => e.date >= toLocalDateStr(since))
