@@ -10,6 +10,7 @@ import { useSetterEODs } from '../hooks/useSetterData'
 import { useFunnelData } from '../hooks/useFunnelData'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { fetchAllPipelineSummaries, computeSpeedToLead } from '../services/ghlPipeline'
+import { rangeToDays } from '../lib/dateUtils'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { useLeadAttribution } from '../hooks/useLeadAttribution'
 import { supabase } from '../lib/supabase'
@@ -224,13 +225,14 @@ export default function SalesOverview() {
   const [stl, setStl] = useState(null)
   const [stlLoading, setStlLoading] = useState(true)
 
-  const { data: funnelData, loading: loadingFunnel } = useFunnelData(range)
+  const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
+  const { data: funnelData, loading: loadingFunnel } = useFunnelData(days)
   const { members: closers } = useTeamMembers('closer')
   const { members: setters } = useTeamMembers('setter')
-  const { reports: closerReports } = useCloserEODs(null, range)
-  const { reports: setterReports } = useSetterEODs(null, range)
-  const { entries: marketingEntries } = useMarketingTracker({ autoSync: true })
-  const { leads: recentLeads, refresh: refreshLeads } = useLeadAttribution(range)
+  const { reports: closerReports } = useCloserEODs(null, days)
+  const { reports: setterReports } = useSetterEODs(null, days)
+  const { entries: marketingEntries } = useMarketingTracker()
+  const { leads: recentLeads, refresh: refreshLeads } = useLeadAttribution(days)
 
   const [showAllRecentLeads, setShowAllRecentLeads] = useState(false)
 
@@ -294,15 +296,15 @@ export default function SalesOverview() {
   // WAVV aggregates
   useEffect(() => {
     setWavvLoading(true)
-    fetchWavvAggregates(range).then(data => { setWavvAgg(data); setWavvLoading(false) })
-  }, [range])
+    fetchWavvAggregates(days).then(data => { setWavvAgg(data); setWavvLoading(false) })
+  }, [days])
 
   // Speed to Lead
   useEffect(() => {
     setStlLoading(true)
     Promise.all([
       fetchAllPipelineSummaries(() => {}),
-      fetchWavvCallsForSTL(range),
+      fetchWavvCallsForSTL(days),
     ]).then(([pipelines, calls]) => {
       const opps = pipelines.flatMap(p => p.summary?.opportunities || [])
       if (opps.length > 0 && calls.length > 0) {
@@ -312,7 +314,7 @@ export default function SalesOverview() {
       }
       setStlLoading(false)
     }).catch(() => setStlLoading(false))
-  }, [range])
+  }, [days])
 
   // Filter marketing entries by range
   const sinceStr = (() => {
