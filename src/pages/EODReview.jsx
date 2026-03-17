@@ -757,7 +757,7 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
 }
 
 // Setter Dashboard with pipeline stats + EOD form
-function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0 }) {
+function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, setConfirmed, submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0 }) {
   const [pipeline, setPipeline] = useState({ set: 0, booked: 0, showed: 0, closed: 0, noShow: 0, cancelled: 0, revenue: 0, total: 0 })
   const [weeklyStats, setWeeklyStats] = useState({ sets: 0, shows: 0, closes: 0, revenue: 0, showRate: 0, closeRate: 0 })
   const [loading, setLoading] = useState(true)
@@ -938,22 +938,54 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
     <div className="space-y-4">
       {/* Confirmation banner */}
       {confirmed && (
-        <div className="bg-success/10 border border-success/30 rounded-2xl p-4 flex items-center gap-3">
-          <Check size={20} className="text-success flex-shrink-0" />
-          <div className="flex-1">
-            <p className="text-sm font-medium text-success">EOD Submitted Successfully</p>
-            <p className="text-xs text-text-400 mt-0.5">
-              {selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()} &mdash;
-              {setterData.outbound_calls} dials, {setterData.pickups} pickups, {setterData.meaningful_conversations} MCs, {setterData.sets} sets
-              {setterData.reschedules > 0 && `, ${setterData.reschedules} reschedules`}
-              {setterData.self_rating && ` &middot; Rating: ${setterData.self_rating}/10`}
-            </p>
+        <div className="bg-bg-card border border-success/30 rounded-2xl p-6 mb-2">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-success/15 flex items-center justify-center">
+                <Check size={20} className="text-success" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-success">EOD Submitted</p>
+                <p className="text-xs text-text-400">{selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setConfirmed(false)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-opt-yellow border border-border-default hover:border-opt-yellow/30 transition-colors"
+            >
+              <Edit3 size={12} />
+              Edit
+            </button>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+            {[
+              ['Leads', setterData.total_leads],
+              ['Dials', setterData.outbound_calls],
+              ['Pickups', setterData.pickups],
+              ['MCs', setterData.meaningful_conversations],
+              ['Sets', setterData.sets, 'text-success'],
+              ['Reschedules', setterData.reschedules],
+            ].map(([label, val, color]) => (
+              <div key={label} className="text-center p-3 bg-bg-primary rounded-2xl">
+                <p className={`text-xl font-bold ${color || ''}`}>{val || 0}</p>
+                <p className="text-[10px] text-text-400 uppercase">{label}</p>
+              </div>
+            ))}
+          </div>
+          {(setterData.what_went_well || setterData.what_went_poorly) && (
+            <div className="flex gap-4 mt-3 pt-3 border-t border-border-default text-xs">
+              {setterData.what_went_well && <div className="flex-1"><span className="text-text-400">Went well: </span><span className="text-text-secondary">{setterData.what_went_well}</span></div>}
+              {setterData.what_went_poorly && <div className="flex-1"><span className="text-text-400">Could improve: </span><span className="text-text-secondary">{setterData.what_went_poorly}</span></div>}
+            </div>
+          )}
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border-default text-xs text-text-400">
+            <span>Rating: <strong className="text-text-primary">{setterData.self_rating}/10</strong></span>
           </div>
         </div>
       )}
 
-      {/* Pipeline KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
+      {/* Pipeline KPIs — always show */}
+      {!confirmed && <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
         {[
           ['Sets (30d)', pipeline.total, ''],
           ['Pending', pipeline.set, 'text-opt-yellow'],
@@ -969,9 +1001,9 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
             <p className="text-[10px] text-text-400 uppercase">{label}</p>
           </div>
         ))}
-      </div>
+      </div>}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
+      {!confirmed && <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
         {/* Left: EOD form */}
         <div className="space-y-4">
           {/* Activity inputs */}
@@ -1238,7 +1270,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
             </div>
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   )
 }
@@ -1870,6 +1902,43 @@ export default function EODReview() {
   const updateSetter = (key, val) => setSetterData(d => ({ ...d, [key]: val }))
   const [setterSetLeads, setSetterSetLeads] = useState([])
   const [setterRescheduleLeads, setSetterRescheduleLeads] = useState([])
+
+  // Load existing setter EOD data into form when viewing a past date
+  useEffect(() => {
+    if (tab !== 'setter' || !selectedMember) return
+    async function loadExistingSetterEOD() {
+      const { data } = await supabase
+        .from('setter_eod_reports')
+        .select('*')
+        .eq('setter_id', selectedMember)
+        .eq('report_date', selectedDate)
+        .limit(1)
+      if (data?.[0]) {
+        const eod = data[0]
+        setSetterData({
+          total_leads: eod.total_leads || 0,
+          outbound_calls: eod.outbound_calls || 0,
+          pickups: eod.pickups || 0,
+          meaningful_conversations: eod.meaningful_conversations || 0,
+          sets: eod.sets || 0,
+          reschedules: eod.reschedules || 0,
+          self_rating: eod.self_rating || 7,
+          what_went_well: eod.what_went_well || '',
+          what_went_poorly: eod.what_went_poorly || '',
+        })
+        if (eod.is_confirmed) setConfirmed(true)
+      } else {
+        // Reset form for new EOD
+        setSetterData({
+          total_leads: 0, outbound_calls: 0, pickups: 0,
+          meaningful_conversations: 0, sets: 0, reschedules: 0,
+          self_rating: 7, what_went_well: '', what_went_poorly: '',
+        })
+        setConfirmed(false)
+      }
+    }
+    loadExistingSetterEOD()
+  }, [tab, selectedMember, selectedDate])
 
   const handleConfirmSetter = async () => {
     if (!selectedMember) return alert('Select a setter first')
@@ -2838,6 +2907,7 @@ export default function EODReview() {
           updateSetter={updateSetter}
           handleConfirmSetter={handleConfirmSetter}
           confirmed={confirmed}
+          setConfirmed={setConfirmed}
           submitting={submitting}
           setLeadsForSets={setSetterSetLeads}
           setRescheduleLeadsForParent={setSetterRescheduleLeads}
@@ -2910,7 +2980,7 @@ export default function EODReview() {
                       <tr><td colSpan={8} className="px-3 py-6 text-center text-text-400">No EODs submitted for this date yet</td></tr>
                     ) : allEodHistory.filter(e => e.report_date === selectedDate).map(eod => (
                       <tr key={eod.id} className={`border-b border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer ${(eod.sets || 0) > 0 ? 'bg-success/5' : ''}`}
-                        onClick={() => { setSelectedMember(eod.setter_id); setConfirmed(false) }}
+                        onClick={() => { setSelectedMember(eod.setter_id); setConfirmed(!!eod.is_confirmed) }}
                       >
                         <td className="px-3 py-2 font-medium text-opt-yellow">{eod.setter?.name || '—'}</td>
                         <td className="px-3 py-2 text-right">{eod.total_leads || 0}</td>
@@ -2961,7 +3031,7 @@ export default function EODReview() {
                   <tbody>
                     {allEodHistory.filter(e => e.report_date !== selectedDate).map(eod => (
                       <tr key={eod.id} className={`border-b border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer ${(eod.sets || 0) > 0 ? 'bg-success/5' : ''}`}
-                        onClick={() => { setSelectedMember(eod.setter_id); setSelectedDate(eod.report_date); setConfirmed(false) }}
+                        onClick={() => { setSelectedMember(eod.setter_id); setSelectedDate(eod.report_date); setConfirmed(!!eod.is_confirmed) }}
                       >
                         <td className="px-3 py-2.5 text-text-400">{formatDateLabel(eod.report_date)}</td>
                         <td className="px-3 py-2.5 text-opt-yellow font-medium">{eod.setter?.name || '—'}</td>
