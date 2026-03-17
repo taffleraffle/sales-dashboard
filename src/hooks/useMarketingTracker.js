@@ -27,16 +27,17 @@ export function useMarketingTracker({ autoSync = false } = {}) {
 
   useEffect(() => {
     if (!autoSync) { load(); return }
-    // Load existing data first, then sync in background and reload
+    // Load existing data first, then sync only recent data (last 30 days)
+    // Historical data is managed via CSV import — never overwrite it
     load().then(async () => {
       setSyncing(true)
-      // Always sync EOD data first (fast, local)
+      // Sync EOD data (only touches dates with confirmed closer EODs)
       try { await syncEODToTracker() } catch (err) { console.error('EOD sync failed:', err) }
-      // Then try Meta/GHL sync (may fail due to expired tokens)
+      // Meta/GHL sync — only last 30 days to avoid touching historical CSV data
       try {
         const { syncMetaToTracker } = await import('../services/metaAdsSync')
         const hasMetaCreds = !!(import.meta.env.VITE_META_ADS_ACCESS_TOKEN && import.meta.env.VITE_META_ADS_ACCOUNT_ID)
-        if (hasMetaCreds) await syncMetaToTracker(90, { pullFresh: true })
+        if (hasMetaCreds) await syncMetaToTracker(30, { pullFresh: true })
       } catch (err) { console.error('Meta sync failed:', err) }
       await load()
       setSyncing(false)
