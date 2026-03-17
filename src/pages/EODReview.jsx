@@ -757,7 +757,7 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
 }
 
 // Setter Dashboard with pipeline stats + EOD form
-function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, setConfirmed, savedSetterLeads = [], submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0 }) {
+function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, setConfirmed, savedSetterLeads = [], initialSetLeads = [], initialRescheduleLeads = [], submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0 }) {
   const [pipeline, setPipeline] = useState({ set: 0, booked: 0, showed: 0, closed: 0, noShow: 0, cancelled: 0, revenue: 0, total: 0 })
   const [weeklyStats, setWeeklyStats] = useState({ sets: 0, shows: 0, closes: 0, revenue: 0, showRate: 0, closeRate: 0 })
   const [loading, setLoading] = useState(true)
@@ -812,7 +812,22 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
     setWavvApplied(true)
   }, [wavvStats, wavvApplied])
 
-  // Sync set leads count with sets field
+  // Pre-fill leads from saved data when loading a confirmed EOD
+  const [leadsInitialized, setLeadsInitialized] = useState(false)
+  useEffect(() => {
+    if (initialSetLeads.length > 0 && !leadsInitialized) {
+      setSetLeads(initialSetLeads)
+      setLeadsInitialized(true)
+    }
+    if (initialRescheduleLeads.length > 0 && !leadsInitialized) {
+      setRescheduleLeads(initialRescheduleLeads)
+    }
+  }, [initialSetLeads, initialRescheduleLeads])
+
+  // Reset initialization flag when member/date changes
+  useEffect(() => { setLeadsInitialized(false) }, [setterId, selectedDate])
+
+  // Sync set leads count with sets field (only pad/trim, don't overwrite saved leads)
   useEffect(() => {
     const count = setterData.sets || 0
     setSetLeads(prev => {
@@ -1968,7 +1983,7 @@ export default function EODReview() {
         })
         if (eod.is_confirmed) setConfirmed(true)
 
-        // Load assigned leads for this EOD
+        // Load assigned leads for this EOD (read-only view + pre-fill edit form)
         const { data: leads } = await supabase
           .from('setter_leads')
           .select('id, lead_name, lead_source, date_set, appointment_date, status, closer:team_members!setter_leads_closer_id_fkey(name)')
@@ -1976,6 +1991,11 @@ export default function EODReview() {
           .eq('date_set', selectedDate)
           .order('id')
         setSavedSetterLeads(leads || [])
+        // Pre-fill the edit form's lead assignments
+        const setLeadsList = (leads || []).filter(l => l.status === 'set' || l.status === 'booked' || l.status === 'showed' || l.status === 'closed' || l.status === 'not_closed' || l.status === 'no_show')
+        const reschLeadsList = (leads || []).filter(l => l.status === 'rescheduled')
+        setSetterSetLeads(setLeadsList.map(l => ({ id: l.id, lead_name: l.lead_name, lead_source: l.lead_source, appointment_date: l.appointment_date, _source: 'lead' })))
+        setSetterRescheduleLeads(reschLeadsList.map(l => ({ id: l.id, lead_name: l.lead_name, lead_source: l.lead_source, _source: 'lead' })))
       } else {
         setSetterData({
           total_leads: 0, outbound_calls: 0, pickups: 0,
@@ -3002,6 +3022,8 @@ export default function EODReview() {
           confirmed={confirmed}
           setConfirmed={setConfirmed}
           savedSetterLeads={savedSetterLeads}
+          initialSetLeads={setterSetLeads}
+          initialRescheduleLeads={setterRescheduleLeads}
           submitting={submitting}
           setLeadsForSets={setSetterSetLeads}
           setRescheduleLeadsForParent={setSetterRescheduleLeads}
