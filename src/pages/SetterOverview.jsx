@@ -15,6 +15,7 @@ import { Loader, ChevronDown, Plus, ChevronUp } from 'lucide-react'
 export default function SetterOverview() {
   const [range, setRange] = useState(30)
   const { members: setters, loading: loadingMembers } = useTeamMembers('setter')
+  const { members: closers } = useTeamMembers('closer')
   const { reports, loading: loadingReports } = useSetterEODs(null, range)
   const [allLeads, setAllLeads] = useState([])
   const [loadingLeads, setLoadingLeads] = useState(true)
@@ -26,24 +27,25 @@ export default function SetterOverview() {
   const [stlOpen, setStlOpen] = useState(false)
   const [stlCalls, setStlCalls] = useState(null)
   const [autoBookings, setAutoBookings] = useState([])
+  const [allAppointments, setAllAppointments] = useState([])
   const [showAllLeads, setShowAllLeads] = useState(false)
 
-  // Fetch auto-bookings from GHL Introductory Call calendars
+  // Fetch appointments from GHL calendars
   useEffect(() => {
-    async function fetchAutoBookings() {
+    async function fetchAppointments() {
       const INTRO_CALENDARS = [
         '5omixNmtgmGMWQfEL0fs', 'C5NRRAjwsy43nOyU6izQ',
         'GpYh75LaFEJgpHYkZfN9', 'okWMyvLhnJ7sbuvSIzok', 'MvYStrHFsRTpunwTXIqT',
       ]
       const { data } = await supabase
         .from('ghl_appointments')
-        .select('ghl_event_id, closer_id, ghl_user_id, contact_name, appointment_date, booked_at, calendar_name, appointment_status, outcome')
+        .select('ghl_event_id, closer_id, ghl_user_id, ghl_contact_id, contact_name, contact_phone, appointment_date, booked_at, calendar_name, appointment_status, outcome, start_time')
         .gte('booked_at', `${sinceDate(range)} 00:00:00`)
         .neq('appointment_status', 'cancelled')
-        .in('calendar_name', INTRO_CALENDARS)
-      setAutoBookings(data || [])
+      setAllAppointments(data || [])
+      setAutoBookings((data || []).filter(a => INTRO_CALENDARS.includes(a.calendar_name)))
     }
-    fetchAutoBookings()
+    fetchAppointments()
   }, [range])
 
   // Fetch all GHL pipelines with summaries on mount and range change
@@ -264,7 +266,7 @@ export default function SetterOverview() {
   // Speed to Lead — only computed when STL calls are loaded (lazy)
   const allOpps = pipelineData.flatMap(p => p.summary.opportunities || [])
   const stl = allOpps.length > 0 && stlCalls && stlCalls.length > 0
-    ? computeSpeedToLead(allOpps, stlCalls)
+    ? computeSpeedToLead(allOpps, stlCalls, allAppointments)
     : null
 
   return (
@@ -402,9 +404,17 @@ export default function SetterOverview() {
                       {stl.allLeads.slice(0, 50).map((l, i) => {
                         const tzOpts = { timeZone: 'America/Indiana/Indianapolis', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
                         const setterName = l.setterId ? (setters.find(s => s.wavv_user_id === l.setterId)?.name || '—') : '—'
+                        const closerName = l.bookingCloserId ? (closers.find(c => c.id === l.bookingCloserId || c.ghl_user_id === l.bookingCloserId)?.name || null) : null
                         return (
-                          <tr key={i} className={`border-b border-border-default/30 ${l.uncalled ? 'bg-danger/5' : ''}`}>
-                            <td className="px-3 py-1.5 font-medium text-text-primary">{l.name}</td>
+                          <tr key={i} className={`border-b border-border-default/30 ${l.uncalled ? 'bg-danger/5' : ''} ${l.hasBooking ? 'bg-cyan-500/5' : ''}`}>
+                            <td className="px-3 py-1.5">
+                              <span className="font-medium text-text-primary">{l.name}</span>
+                              {l.hasBooking && (
+                                <span className="ml-2 text-[9px] font-medium px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400">
+                                  BOOKED{l.bookingDate ? ` · ${l.bookingDate}` : ''}{closerName ? ` · ${closerName}` : ''}
+                                </span>
+                              )}
+                            </td>
                             <td className="px-3 py-1.5 text-opt-yellow">{setterName}</td>
                             <td className="px-3 py-1.5 text-text-400">{new Date(l.created).toLocaleString('en-US', tzOpts)}</td>
                             <td className="px-3 py-1.5 text-text-400">{l.calledAt ? new Date(l.calledAt).toLocaleString('en-US', tzOpts) : <span className="text-danger text-[10px] font-medium px-1.5 py-0.5 rounded bg-danger/10">NOT CALLED</span>}</td>

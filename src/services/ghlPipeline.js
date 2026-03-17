@@ -221,7 +221,18 @@ export async function fetchAllPipelineSummaries(onProgress) {
  * @param {Array} wavvCalls - WAVV call rows from Supabase (with phone_number, started_at)
  * @returns {Object} Speed to lead stats
  */
-export function computeSpeedToLead(opportunities, wavvCalls) {
+export function computeSpeedToLead(opportunities, wavvCalls, appointments = []) {
+  // Build map of contact phone/id → appointment info
+  const appointmentByPhone = {}
+  const appointmentByContactId = {}
+  for (const a of appointments) {
+    if (a.contact_phone) {
+      const phone = normalizePhone(a.contact_phone)
+      if (phone) appointmentByPhone[phone] = a
+    }
+    if (a.ghl_contact_id) appointmentByContactId[a.ghl_contact_id] = a
+  }
+
   // Build map of phone → earliest wavv call
   const firstCallByPhone = {}
   for (const c of wavvCalls) {
@@ -247,15 +258,27 @@ export function computeSpeedToLead(opportunities, wavvCalls) {
 
   const uncalledLeads = []
 
+  // Helper to get booking info for a lead
+  const getBooking = (phone, contactId) => {
+    const appt = (phone && appointmentByPhone[phone]) || (contactId && appointmentByContactId[contactId]) || null
+    if (!appt) return { hasBooking: false, bookingCalendar: null, bookingDate: null, bookingCloserId: null }
+    return {
+      hasBooking: true,
+      bookingCalendar: appt.calendar_name || 'Booked',
+      bookingDate: appt.appointment_date || appt.start_time?.split('T')[0] || null,
+      bookingCloserId: appt.closer_id || appt.ghl_user_id || null,
+    }
+  }
+
   for (const opp of opportunities) {
     const phone = normalizePhone(opp.contact?.phone)
     const createdAt = opp.createdAt ? new Date(opp.createdAt).getTime() : null
     if (!createdAt) continue
 
     const firstCall = phone ? firstCallByPhone[phone] : null
+    const booking = getBooking(phone, opp.contact?.id)
 
     if (!firstCall || !phone) {
-      // Lead has NOT been called yet
       uncalledLeads.push({
         name: opp.contact?.name || 'Unknown',
         phone: phone || '',
@@ -265,11 +288,11 @@ export function computeSpeedToLead(opportunities, wavvCalls) {
         responseDisplay: 'Not Called',
         setterId: null,
         uncalled: true,
+        ...booking,
       })
       continue
     }
 
-    // Only count if call was AFTER the lead was created (within reason — allow 1hr before for timing quirks)
     const diffSecs = (firstCall - createdAt) / 1000
     if (diffSecs < -3600) {
       uncalledLeads.push({
@@ -281,6 +304,7 @@ export function computeSpeedToLead(opportunities, wavvCalls) {
         responseDisplay: 'Not Called',
         setterId: null,
         uncalled: true,
+        ...booking,
       })
       continue
     }
@@ -297,6 +321,7 @@ export function computeSpeedToLead(opportunities, wavvCalls) {
       responseDisplay: fmtDuration(secs),
       setterId: userId || null,
       uncalled: false,
+      ...booking,
     })
 
     // Per-setter
