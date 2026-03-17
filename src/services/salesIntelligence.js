@@ -19,6 +19,7 @@ async function fetchGHLLeads(since) {
         if (o.createdAt && new Date(o.createdAt) >= since) {
           leads.push({
             name: o.contact?.name || o.name || 'Unknown',
+            phone: o.contact?.phone || '',
             createdAt: o.createdAt,
             status: o.status,
             monetaryValue: o.monetaryValue || 0,
@@ -56,7 +57,7 @@ export async function buildSalesContext() {
     supabase.from('setter_leads')
       .select('id, setter_id, closer_id, lead_name, lead_source, date_set, appointment_date, status, revenue_attributed')
       .gte('date_set', d90s).order('date_set', { ascending: false }).limit(500),
-    supabase.from('wavv_calls').select('user_id, call_duration, started_at')
+    supabase.from('wavv_calls').select('user_id, call_duration, started_at, phone_number, contact_name')
       .gte('started_at', d30.toISOString()).order('started_at', { ascending: false }).limit(5000),
     supabase.from('marketing_tracker').select('*')
       .gte('date', d90s).order('date', { ascending: false }),
@@ -238,6 +239,57 @@ ${mktg30.slice(0, 14).map(m => `${m.date}: spend=$${parseFloat(m.adspend || 0).t
 
 ## BENCHMARKS (targets)
 ${benchmarks.map(b => `${b.metric}: ${b.value}`).join('\n')}
+
+## SPEED TO LEAD (last 30 days)
+${(() => {
+    // Normalize phone for matching
+    const norm = p => (p || '').replace(/\D/g, '').slice(-10)
+    // Build phone → first call timestamp + duration
+    const firstCallByPhone = {}
+    const callInfoByPhone = {}
+    for (const c of wavvCalls) {
+      const phone = norm(c.phone_number)
+      if (!phone) continue
+      const ts = new Date(c.started_at).getTime()
+      if (!firstCallByPhone[phone] || ts < firstCallByPhone[phone]) {
+        firstCallByPhone[phone] = ts
+      }
+      if (!callInfoByPhone[phone]) callInfoByPhone[phone] = { dur: 0, count: 0, user: c.user_id }
+      callInfoByPhone[phone].dur += c.call_duration || 0
+      callInfoByPhone[phone].count++
+    }
+    // Match leads to calls
+    const stlResults = []
+    const uncalled = []
+    for (const l of ghlLeads) {
+      const phone = norm(l.phone || '')
+      const created = new Date(l.createdAt).getTime()
+      if (!phone) { uncalled.push(l); continue }
+      const firstCall = firstCallByPhone[phone]
+      if (!firstCall) { uncalled.push(l); continue }
+      const diffSecs = (firstCall - created) / 1000
+      if (diffSecs < -3600) { uncalled.push(l); continue }
+      const secs = Math.max(0, diffSecs)
+      const info = callInfoByPhone[phone] || {}
+      const setter = team.find(m => m.wavv_user_id === info.user)
+      stlResults.push({ name: l.name, secs, dur: info.dur || 0, setter: setter?.name || 'Unknown', created: l.createdAt })
+    }
+    stlResults.sort((a, b) => new Date(b.created) - new Date(a.created))
+    const fmtDur = s => s >= 3600 ? `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m` : s >= 60 ? `${Math.floor(s/60)}m ${Math.round(s%60)}s` : `${Math.round(s)}s`
+    const times = stlResults.map(r => r.secs)
+    const avg = times.length ? times.reduce((a,b)=>a+b,0)/times.length : 0
+    const under5m = times.filter(t => t < 300).length
+    const under1h = times.filter(t => t < 3600).length
+    return `Total leads: ${ghlLeads.length} | Matched with calls: ${stlResults.length} | Not called: ${uncalled.length}
+Average STL: ${fmtDur(avg)} | Median: ${times.length ? fmtDur(times.sort((a,b)=>a-b)[Math.floor(times.length/2)]) : 'N/A'}
+Under 5 min: ${under5m} (${times.length ? ((under5m/times.length)*100).toFixed(1) : 0}%) | Under 1 hour: ${under1h} (${times.length ? ((under1h/times.length)*100).toFixed(1) : 0}%)
+
+### Recent leads with response times (last 20):
+${stlResults.slice(0, 20).map(r => `${new Date(r.created).toISOString().slice(0,16).replace('T',' ')} | ${r.name} | STL: ${fmtDur(r.secs)} | Talk: ${fmtDur(r.dur)} | Setter: ${r.setter}`).join('\n')}
+
+### Uncalled leads (last 10):
+${uncalled.slice(0, 10).map(l => `${new Date(l.createdAt).toISOString().slice(0,16).replace('T',' ')} | ${l.name} | NOT CALLED`).join('\n')}`
+  })()}
 
 ## RECENT CLOSER CALLS (last 30 days, sample)
 ${closerCalls.slice(0, 40).map(c => `${c.created_at?.split('T')[0]} | ${c.prospect_name} | ${c.call_type} | ${c.outcome} | rev=$${c.revenue || 0} cash=$${c.cash_collected || 0}`).join('\n')}
