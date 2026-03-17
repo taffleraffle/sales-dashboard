@@ -951,90 +951,136 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
 
   return (
     <div className="space-y-4">
-      {/* Confirmation banner */}
-      {confirmed && (<>
-        <div className="bg-bg-card border border-success/30 rounded-2xl p-6 mb-2">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-success/15 flex items-center justify-center">
-                <Check size={20} className="text-success" />
+      {/* Confirmed: View mode — full read-only detail */}
+      {confirmed && (
+        <div className="space-y-4">
+          {/* Header with View/Edit buttons */}
+          <div className="bg-bg-card border border-success/30 rounded-2xl p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-success/15 flex items-center justify-center">
+                  <Check size={16} className="text-success" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-success">EOD Submitted</p>
+                  <p className="text-xs text-text-400">{selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-medium text-success">EOD Submitted</p>
-                <p className="text-xs text-text-400">{selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()}</p>
-              </div>
+              <button
+                onClick={() => setConfirmed(false)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-opt-yellow border border-border-default hover:border-opt-yellow/30 transition-colors"
+              >
+                <Edit3 size={12} />
+                Edit
+              </button>
             </div>
-            <button
-              onClick={() => setConfirmed(false)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-opt-yellow border border-border-default hover:border-opt-yellow/30 transition-colors"
-            >
-              <Edit3 size={12} />
-              Edit
-            </button>
           </div>
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-            {[
-              ['Leads', setterData.total_leads],
-              ['Dials', setterData.outbound_calls],
-              ['Pickups', setterData.pickups],
-              ['MCs', setterData.meaningful_conversations],
-              ['Sets', setterData.sets, 'text-success'],
-              ['Reschedules', setterData.reschedules],
-            ].map(([label, val, color]) => (
-              <div key={label} className="text-center p-3 bg-bg-primary rounded-2xl">
-                <p className={`text-xl font-bold ${color || ''}`}>{val || 0}</p>
-                <p className="text-[10px] text-text-400 uppercase">{label}</p>
+
+          {/* Activity — read-only cards matching edit layout */}
+          <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+            <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">
+              {selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()} &middot; Activity
+            </h3>
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+              {[
+                ['Leads Worked', setterData.total_leads],
+                ['Dials', setterData.outbound_calls],
+                ['Pickups', setterData.pickups],
+                ['MCs', setterData.meaningful_conversations],
+                ['Sets', setterData.sets, 'text-success'],
+                ['Reschedules', setterData.reschedules, setterData.reschedules > 0 ? 'text-blue-400' : ''],
+              ].map(([label, val, color]) => (
+                <div key={label}>
+                  <label className="text-[10px] text-text-400 uppercase block mb-1">{label}</label>
+                  <div className={`bg-bg-primary border border-border-default rounded px-2 py-1.5 text-lg font-bold w-full text-center ${color || ''}`}>
+                    {val || 0}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Sets — assigned leads read-only */}
+          {savedSetterLeads.filter(l => l.status !== 'rescheduled').length > 0 && (
+            <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+              <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">
+                Sets ({savedSetterLeads.filter(l => l.status !== 'rescheduled').length})
+              </h3>
+              <div className="space-y-2">
+                {savedSetterLeads.filter(l => l.status !== 'rescheduled').map((lead, i) => {
+                  const statusBadge = lead.status === 'set' ? { label: 'Set', cls: 'bg-success/15 text-success' }
+                    : lead.status === 'showed' || lead.status === 'not_closed' ? { label: 'Showed', cls: 'bg-opt-yellow/15 text-opt-yellow' }
+                    : lead.status === 'closed' ? { label: 'Closed', cls: 'bg-success/15 text-success' }
+                    : lead.status === 'no_show' ? { label: 'No Show', cls: 'bg-danger/15 text-danger' }
+                    : { label: lead.status || 'Set', cls: 'bg-success/15 text-success' }
+                  return (
+                    <div key={lead.id} className="bg-bg-primary border border-border-default rounded-xl px-4 py-2.5 flex items-center gap-3">
+                      <span className="text-[10px] text-opt-yellow font-semibold w-12">Set {i + 1}:</span>
+                      <span className="font-medium text-sm">{lead.lead_name}</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${statusBadge.cls}`}>{statusBadge.label}</span>
+                      {lead.lead_source && lead.lead_source !== 'manual' && (
+                        <span className="text-[10px] text-text-400 bg-bg-card px-1.5 py-0.5 rounded">{lead.lead_source === 'ghl' ? 'GHL' : lead.lead_source}</span>
+                      )}
+                      {lead.appointment_date && (
+                        <span className="text-[10px] text-text-400 ml-auto">Appt: {lead.appointment_date}</span>
+                      )}
+                      {lead.closer?.name && (
+                        <span className="text-[10px] text-text-400">→ {lead.closer.name}</span>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
-            ))}
-          </div>
-          {(setterData.what_went_well || setterData.what_went_poorly) && (
-            <div className="flex gap-4 mt-3 pt-3 border-t border-border-default text-xs">
-              {setterData.what_went_well && <div className="flex-1"><span className="text-text-400">Went well: </span><span className="text-text-secondary">{setterData.what_went_well}</span></div>}
-              {setterData.what_went_poorly && <div className="flex-1"><span className="text-text-400">Could improve: </span><span className="text-text-secondary">{setterData.what_went_poorly}</span></div>}
             </div>
           )}
-          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border-default text-xs text-text-400">
-            <span>Rating: <strong className="text-text-primary">{setterData.self_rating}/10</strong></span>
-          </div>
-        </div>
 
-        {/* Leads set + rescheduled — read-only detail */}
-        {savedSetterLeads.length > 0 && (
-          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
-            <div className="px-5 py-3 border-b border-border-default">
-              <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                Leads ({savedSetterLeads.length})
-              </p>
-            </div>
-            <div className="divide-y divide-border-default/30">
-              {savedSetterLeads.map(lead => {
-                const statusBadge = lead.status === 'set' ? { label: 'Set', cls: 'bg-success/15 text-success' }
-                  : lead.status === 'rescheduled' ? { label: 'Rescheduled', cls: 'bg-blue-500/15 text-blue-400' }
-                  : lead.status === 'showed' || lead.status === 'not_closed' ? { label: 'Showed', cls: 'bg-opt-yellow/15 text-opt-yellow' }
-                  : lead.status === 'closed' ? { label: 'Closed', cls: 'bg-success/15 text-success' }
-                  : lead.status === 'no_show' ? { label: 'No Show', cls: 'bg-danger/15 text-danger' }
-                  : lead.status === 'cancelled' ? { label: 'Cancelled', cls: 'bg-text-400/15 text-text-400' }
-                  : { label: lead.status || '—', cls: 'bg-text-400/15 text-text-400' }
-                return (
-                  <div key={lead.id} className="px-5 py-3 flex items-center gap-3">
-                    <span className="font-medium text-sm min-w-[140px]">{lead.lead_name}</span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${statusBadge.cls}`}>{statusBadge.label}</span>
-                    {lead.lead_source && lead.lead_source !== 'manual' && (
-                      <span className="text-[10px] text-text-400 bg-bg-primary px-1.5 py-0.5 rounded">{lead.lead_source === 'ghl' ? 'GHL' : lead.lead_source}</span>
-                    )}
+          {/* Reschedules — read-only */}
+          {savedSetterLeads.filter(l => l.status === 'rescheduled').length > 0 && (
+            <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+              <h3 className="text-[11px] text-blue-400 uppercase font-medium mb-3">
+                Reschedules ({savedSetterLeads.filter(l => l.status === 'rescheduled').length})
+              </h3>
+              <div className="space-y-2">
+                {savedSetterLeads.filter(l => l.status === 'rescheduled').map((lead, i) => (
+                  <div key={lead.id} className="bg-bg-primary border border-border-default rounded-xl px-4 py-2.5 flex items-center gap-3">
+                    <span className="text-[10px] text-blue-400 font-semibold w-16">Resched {i + 1}:</span>
+                    <span className="font-medium text-sm">{lead.lead_name}</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-500/15 text-blue-400">Rescheduled</span>
                     {lead.appointment_date && (
                       <span className="text-[10px] text-text-400 ml-auto">Appt: {lead.appointment_date}</span>
                     )}
-                    {lead.closer?.name && (
-                      <span className="text-[10px] text-text-400">→ {lead.closer.name}</span>
-                    )}
                   </div>
-                )
-              })}
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Self Assessment — read-only */}
+          <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+            <h3 className="text-[11px] text-text-400 uppercase font-medium mb-3">Self Assessment</h3>
+            <div className="flex items-start gap-6">
+              <div>
+                <label className="text-[10px] text-text-400 uppercase block mb-1">Rating</label>
+                <div className="bg-bg-primary border border-border-default rounded px-3 py-1.5 text-lg font-bold text-center w-14">
+                  {setterData.self_rating || 7}
+                </div>
+              </div>
+              {setterData.what_went_well && (
+                <div className="flex-1">
+                  <label className="text-[10px] text-text-400 uppercase block mb-1">What went well?</label>
+                  <p className="text-sm text-text-secondary bg-bg-primary border border-border-default rounded px-3 py-2 min-h-[56px]">{setterData.what_went_well}</p>
+                </div>
+              )}
+              {setterData.what_went_poorly && (
+                <div className="flex-1">
+                  <label className="text-[10px] text-text-400 uppercase block mb-1">What could improve?</label>
+                  <p className="text-sm text-text-secondary bg-bg-primary border border-border-default rounded px-3 py-2 min-h-[56px]">{setterData.what_went_poorly}</p>
+                </div>
+              )}
             </div>
           </div>
-        )}
-      </>)}
+        </div>
+      )}
 
       {/* Pipeline KPIs — always show */}
       {!confirmed && <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
