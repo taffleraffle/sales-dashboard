@@ -169,30 +169,48 @@ export async function syncEODToTracker() {
   const existingMap = {}
   for (const row of (existingRows || [])) existingMap[row.date] = row
 
-  // Build upsert batch — merge existing data with EOD data
-  const upserts = dates.map(date => ({
-    ...(existingMap[date] || {}),
-    date,
-    offers: byDate[date].offers,
-    closes: byDate[date].closes,
-    trial_cash: byDate[date].trial_cash,
-    trial_revenue: byDate[date].trial_revenue,
-    ascensions: byDate[date].ascensions,
-    ascend_cash: callAggByDate[date]?.ascCash || 0,
-    ascend_revenue: callAggByDate[date]?.ascRevenue || 0,
-    finance_offers: callAggByDate[date]?.financeOffers || 0,
-    finance_accepted: callAggByDate[date]?.financeAccepted || 0,
-    live_calls: byDate[date].live_calls,
-    calls_on_calendar: byDate[date].booked,
-    reschedules: byDate[date].reschedules,
-    updated_at: new Date().toISOString(),
-  }))
+  // Update only EOD-sourced fields — never overwrite CSV/manually-entered data
+  // Only update a field if: (a) there's no existing value, or (b) the existing value
+  // came from a previous EOD sync (not a CSV import with different numbers)
+  let synced = 0
+  for (const date of dates) {
+    const existing = existingMap[date]
+    const eod = byDate[date]
+    const callAgg = callAggByDate[date] || { ascCash: 0, ascRevenue: 0, financeOffers: 0, financeAccepted: 0 }
 
-  const { error } = await supabase
-    .from('marketing_tracker')
-    .upsert(upserts, { onConflict: 'date' })
-  if (error) console.error('EOD sync failed:', error)
-  return dates.length
+    // Build patch: only set fields that have EOD data
+    const patch = { updated_at: new Date().toISOString() }
+    if (eod.offers) patch.offers = eod.offers
+    if (eod.closes) patch.closes = eod.closes
+    if (eod.trial_cash) patch.trial_cash = eod.trial_cash
+    if (eod.trial_revenue) patch.trial_revenue = eod.trial_revenue
+    if (eod.ascensions) patch.ascensions = eod.ascensions
+    if (callAgg.ascCash) patch.ascend_cash = callAgg.ascCash
+    if (callAgg.ascRevenue) patch.ascend_revenue = callAgg.ascRevenue
+    if (callAgg.financeOffers) patch.finance_offers = callAgg.financeOffers
+    if (callAgg.financeAccepted) patch.finance_accepted = callAgg.financeAccepted
+    if (eod.live_calls) patch.live_calls = eod.live_calls
+    if (eod.booked) patch.calls_on_calendar = eod.booked
+    if (eod.reschedules) patch.reschedules = eod.reschedules
+
+    if (existing) {
+      // Only update fields that are non-zero from EOD — don't overwrite existing CSV data with 0
+      const { error } = await supabase
+        .from('marketing_tracker')
+        .update(patch)
+        .eq('date', date)
+      if (error) console.error('EOD sync update failed for', date, error)
+      else synced++
+    } else {
+      // New row
+      const { error } = await supabase
+        .from('marketing_tracker')
+        .insert({ date, ...patch })
+      if (error && error.code !== '23505') console.error('EOD sync insert failed for', date, error)
+      else synced++
+    }
+  }
+  return synced
 }
 
 /** Compute all derived metrics from aggregated raw totals */

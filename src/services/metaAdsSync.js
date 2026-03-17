@@ -274,25 +274,48 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
   const existingMap = {}
   for (const row of (existingRows || [])) existingMap[row.date] = row
 
-  // Step 7: upsert each date — merge with existing data, never wipe other fields
+  // Step 7: upsert each date — ONLY update adspend, leads, auto_bookings
+  // qualified_bookings only set if no existing value (CSV/manual data takes priority)
   let upserted = 0
   for (const date of allDates) {
-    const existing = existingMap[date] || {}
-    const record = {
-      ...existing,
-      date,
-      adspend: byDate[date]?.adspend || existing.adspend || 0,
-      leads: leadsByDate[date] || existing.leads || 0,
-      auto_bookings: autoBookingsByDate[date] || existing.auto_bookings || 0,
-      qualified_bookings: qualBookingsByDate[date] || existing.qualified_bookings || 0,
-      updated_at: new Date().toISOString(),
-    }
-    const { error } = await supabase
-      .from('marketing_tracker')
-      .upsert(record, { onConflict: 'date', ignoreDuplicates: false })
-    if (error) {
-      console.error('Tracker upsert error for', date, error)
+    const existing = existingMap[date]
+
+    if (existing) {
+      // Row exists — only PATCH the auto-sync fields, never touch manually-entered data
+      const patch = { updated_at: new Date().toISOString() }
+      if (byDate[date]?.adspend) patch.adspend = byDate[date].adspend
+      if (leadsByDate[date]) patch.leads = leadsByDate[date]
+      if (autoBookingsByDate[date]) patch.auto_bookings = autoBookingsByDate[date]
+      // Only update qualified_bookings if the existing row has no value
+      if (!existing.qualified_bookings && qualBookingsByDate[date]) patch.qualified_bookings = qualBookingsByDate[date]
+
+      const { error } = await supabase
+        .from('marketing_tracker')
+        .update(patch)
+        .eq('date', date)
+      if (error) console.error('Tracker update error for', date, error)
+      else upserted++
     } else {
+      // New row — insert with all available data
+      const record = {
+        date,
+        adspend: byDate[date]?.adspend || 0,
+        leads: leadsByDate[date] || 0,
+        auto_bookings: autoBookingsByDate[date] || 0,
+        qualified_bookings: qualBookingsByDate[date] || 0,
+        updated_at: new Date().toISOString(),
+      }
+      const { error } = await supabase
+        .from('marketing_tracker')
+        .insert(record)
+      if (error) {
+        // May already exist from race condition — try patch instead
+        if (error.code === '23505') {
+          await supabase.from('marketing_tracker').update({ adspend: record.adspend, leads: record.leads, updated_at: record.updated_at }).eq('date', date)
+        } else {
+          console.error('Tracker insert error for', date, error)
+        }
+      }
       upserted++
     }
   }
