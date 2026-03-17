@@ -239,8 +239,9 @@ function DailyTracker({ entries, onDelete, onSave }) {
     { k: 'adspend', label: 'Spend', fmt: f$ },
     { k: 'leads', label: 'Leads', fmt: fN },
     { k: null, label: 'CPL', calc: e => e.leads > 0 ? f$(parseFloat(e.adspend || 0) / e.leads) : '-' },
-    { k: 'qualified_bookings', label: 'Booked', fmt: fN },
-    { k: null, label: 'L→B%', calc: e => fmtP(e.qualified_bookings, e.leads),
+    { k: 'auto_bookings', label: 'A.Book', fmt: fN },
+    { k: 'qualified_bookings', label: 'Q.Book', fmt: fN },
+    { k: null, label: 'L→Q%', calc: e => fmtP(e.qualified_bookings, e.leads),
       color: e => e.leads > 0 ? clrRate((e.qualified_bookings || 0) / e.leads * 100, 15, 8) : '' },
     { k: 'live_calls', label: 'Live', fmt: fN },
     { k: null, label: 'Gr.Show%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(getLive(e), cal) : '-' },
@@ -902,12 +903,14 @@ export default function MarketingPerformance() {
 
       {/* Spend & Lead Acquisition */}
       <Section title="Spend & Lead Acquisition" cols={8}>
-        <KPI label="Total Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} />
-        <KPI label="Total Leads" value={stats.leads} format="n" trailing={stats30.leads} />
-        <KPI label="Cost Per Lead" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} />
-        <KPI label="Booked" value={stats.qualified_bookings} format="n" trailing={stats30.qualified_bookings} />
-        <KPI label="Lead → Booking %" value={stats.lead_to_booking_pct} format="%" benchmark={bm.lead_to_booking} trailing={stats30.lead_to_booking_pct} />
-        <KPI label="Cost Per Booking" value={stats.cpb} format="$" benchmark={bm.cpb} trailing={stats30.cpb} />
+        <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} />
+        <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} />
+        <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} />
+        <KPI label="A.Books" value={stats.auto_bookings} format="n" trailing={stats30.auto_bookings} />
+        <KPI label="Cost/A.Book" value={stats.cost_per_auto_booking} format="$" trailing={stats30.cost_per_auto_booking} />
+        <KPI label="Q.Books" value={stats.qualified_bookings} format="n" trailing={stats30.qualified_bookings} />
+        <KPI label="L→Q%" value={stats.lead_to_booking_pct} format="%" benchmark={bm.lead_to_booking} trailing={stats30.lead_to_booking_pct} />
+        <KPI label="Cost/Q.Book" value={stats.cpb} format="$" benchmark={bm.cpb} trailing={stats30.cpb} />
       </Section>
 
       {/* Calls & Show Rates */}
