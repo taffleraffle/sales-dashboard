@@ -239,7 +239,7 @@ function DailyTracker({ entries, onDelete, onSave }) {
     { k: 'qualified_bookings', label: 'Booked', fmt: fN },
     { k: null, label: 'L→B%', calc: e => fmtP(e.qualified_bookings, e.leads),
       color: e => e.leads > 0 ? clrRate((e.qualified_bookings || 0) / e.leads * 100, 15, 8) : '' },
-    { k: null, label: 'Live', calc: e => fN(getLive(e)) },
+    { k: 'live_calls', label: 'Live', fmt: fN },
     { k: null, label: 'Show%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(getLive(e), cal) : '-' },
       color: e => { const cal = getCalls(e); return cal > 0 ? clrRate(getLive(e) / cal * 100, 70, 50) : '' } },
     { k: 'reschedules', label: 'Resch', fmt: fN, color: e => (e.reschedules || 0) > 0 ? 'text-blue-400' : '' },
