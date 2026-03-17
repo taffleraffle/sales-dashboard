@@ -36,15 +36,26 @@ const fX = v => (v == null || isNaN(v)) ? '—' : `${v.toFixed(2)}x`
 const fN = v => (v == null || isNaN(v)) ? '—' : v.toLocaleString()
 const fmt = (v, format) => format === '$' ? f$(v) : format === '%' ? fP(v) : format === 'x' ? fX(v) : fN(v)
 
-// ── KPI Card with benchmark ────────────────────────────────────────
-function KPI({ label, value, format, benchmark, trailing }) {
+// ── KPI Card with benchmark + info tooltip ────────────────────────
+function KPI({ label, value, format, benchmark, trailing, tip }) {
   const lowerIsBetter = format === '$' && !label.includes('ROAS') && !label.includes('Cash') && !label.includes('Revenue') && !label.includes('AR')
   const isGood = benchmark != null && value !== 0 && (lowerIsBetter ? value <= benchmark : value >= benchmark)
   const isBad = benchmark != null && value !== 0 && !isGood
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl p-3">
-      <p className="text-[9px] uppercase tracking-wider text-text-400 mb-0.5 leading-tight truncate">{label}</p>
+    <div className="bg-bg-card border border-border-default rounded-2xl p-3 relative group">
+      <div className="flex items-center gap-1">
+        <p className="text-[9px] uppercase tracking-wider text-text-400 mb-0.5 leading-tight truncate">{label}</p>
+        {tip && (
+          <div className="relative">
+            <span className="text-[8px] text-text-400/50 cursor-help mb-0.5">&#9432;</span>
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] border border-border-default text-[10px] text-text-secondary whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl">
+              {tip}
+              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-[#1a1a1a]" />
+            </div>
+          </div>
+        )}
+      </div>
       <p className={`text-lg font-bold leading-tight ${value === 0 ? 'text-text-400' : isGood ? 'text-success' : isBad ? 'text-danger' : 'text-text-primary'}`}>
         {fmt(value, format)}
       </p>
@@ -903,74 +914,74 @@ export default function MarketingPerformance() {
 
       {/* Spend & Lead Acquisition */}
       <Section title="Spend & Lead Acquisition" cols={8}>
-        <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} />
-        <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} />
-        <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} />
-        <KPI label="A.Books" value={stats.auto_bookings} format="n" trailing={stats30.auto_bookings} />
-        <KPI label="Cost/A.Book" value={stats.cost_per_auto_booking} format="$" trailing={stats30.cost_per_auto_booking} />
-        <KPI label="Q.Books" value={stats.qualified_bookings} format="n" trailing={stats30.qualified_bookings} />
-        <KPI label="L→Q%" value={stats.lead_to_booking_pct} format="%" benchmark={bm.lead_to_booking} trailing={stats30.lead_to_booking_pct} />
-        <KPI label="Cost/Q.Book" value={stats.cpb} format="$" benchmark={bm.cpb} trailing={stats30.cpb} />
+        <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} tip="Total Meta Ads spend (converted to USD)" />
+        <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} tip="New leads from GHL pipeline" />
+        <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} tip="Cost Per Lead = Adspend / Leads" />
+        <KPI label="A.Books" value={stats.auto_bookings} format="n" trailing={stats30.auto_bookings} tip="Auto bookings from Intro Call calendars" />
+        <KPI label="Cost/A.Book" value={stats.cost_per_auto_booking} format="$" trailing={stats30.cost_per_auto_booking} tip="Cost Per Auto Booking = Adspend / Auto Bookings" />
+        <KPI label="Q.Books" value={stats.qualified_bookings} format="n" trailing={stats30.qualified_bookings} tip="Strategy Call bookings (deduped per contact)" />
+        <KPI label="L→Q%" value={stats.lead_to_booking_pct} format="%" benchmark={bm.lead_to_booking} trailing={stats30.lead_to_booking_pct} tip="Lead to Qual Booking % = Q.Books / Leads" />
+        <KPI label="Cost/Q.Book" value={stats.cpb} format="$" benchmark={bm.cpb} trailing={stats30.cpb} tip="Cost Per Qual Booking = Adspend / Q.Books" />
       </Section>
 
       {/* Calls & Show Rates */}
       <Section title="Calls & Show Rates" cols={9}>
-        <KPI label="Booked" value={stats.qualified_bookings} format="n" />
-        <KPI label="Live" value={stats.live_calls} format="n" />
-        <KPI label="No Shows" value={stats.no_shows} format="n" />
-        <KPI label="Cancelled" value={stats.cancels} format="n" />
-        <KPI label="Resch" value={stats.reschedules} format="n" />
-        <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} />
-        <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} />
-        <KPI label="Resch%" value={stats.reschedule_rate} format="%" />
-        <KPI label="Cost/Live" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} />
+        <KPI label="Booked" value={stats.qualified_bookings} format="n" tip="Total calls booked on calendar" />
+        <KPI label="Live" value={stats.live_calls} format="n" tip="Calls that actually happened (showed)" />
+        <KPI label="No Shows" value={stats.no_shows} format="n" tip="Booked - Live - Cancelled - Rescheduled" />
+        <KPI label="Cancelled" value={stats.cancels} format="n" tip="Cancelled DTF + Cancelled by Prospect" />
+        <KPI label="Resch" value={stats.reschedules} format="n" tip="Calls rescheduled to another date" />
+        <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} tip="Live / Booked (includes all no-shows)" />
+        <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} tip="Live / (Booked - Cancels - Reschedules)" />
+        <KPI label="Resch%" value={stats.reschedule_rate} format="%" tip="Reschedules / Booked" />
+        <KPI label="Cost/Live" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} tip="Adspend / Live Calls" />
       </Section>
 
       {/* Offers & Closes */}
       <Section title="Offers & Closes" cols={6}>
-        <KPI label="Offers Made" value={stats.offers} format="n" />
-        <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} />
-        <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" />
-        <KPI label="Total Closes" value={stats.closes} format="n" />
-        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} />
-        <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} />
+        <KPI label="Offers Made" value={stats.offers} format="n" tip="Number of offers made on live calls" />
+        <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} tip="Offers / Live Calls" />
+        <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" tip="Adspend / Offers" />
+        <KPI label="Total Closes" value={stats.closes} format="n" tip="Deals closed (trial sign-ups)" />
+        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} tip="Closes / Live Calls" />
+        <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} tip="Cost Per Acquisition = Adspend / Closes" />
       </Section>
 
       {/* Trial Financials */}
       <Section title="Trial Financials" cols={4}>
-        <KPI label="Trial Cash Collected" value={stats.trial_cash} format="$" />
-        <KPI label="Trial Contracted Rev" value={stats.trial_revenue} format="$" />
-        <KPI label="Cash Collected %" value={stats.trial_cash_pct} format="%" benchmark={bm.trial_uf_cash_pct} trailing={stats30.trial_cash_pct} />
-        <KPI label="Trial FE Cash ROAS" value={stats.trial_fe_roas} format="x" benchmark={bm.trial_fe_roas} trailing={stats30.trial_fe_roas} />
+        <KPI label="Trial Cash Collected" value={stats.trial_cash} format="$" tip="Cash collected upfront from trial closes" />
+        <KPI label="Trial Contracted Rev" value={stats.trial_revenue} format="$" tip="Total contracted revenue from trial closes" />
+        <KPI label="Cash Collected %" value={stats.trial_cash_pct} format="%" benchmark={bm.trial_uf_cash_pct} trailing={stats30.trial_cash_pct} tip="Trial Cash / Trial Revenue" />
+        <KPI label="Trial FE Cash ROAS" value={stats.trial_fe_roas} format="x" benchmark={bm.trial_fe_roas} trailing={stats30.trial_fe_roas} tip="Trial Cash / Adspend" />
       </Section>
 
       {/* Ascension */}
       <Section title="Ascension" cols={8}>
-        <KPI label="Total Ascensions" value={stats.ascensions} format="n" />
-        <KPI label="Ascension Rate" value={stats.ascend_rate} format="%" benchmark={bm.ascend_rate} trailing={stats30.ascend_rate} />
-        <KPI label="CPA (Ascend)" value={stats.cpa_ascend} format="$" benchmark={bm.cpa_ascend} />
-        <KPI label="Ascend Cash" value={stats.ascend_cash} format="$" />
-        <KPI label="Ascend Revenue" value={stats.ascend_revenue} format="$" />
-        <KPI label="% Cash Collected" value={stats.ascend_cash_pct} format="%" benchmark={bm.ascend_uf_cash_pct} trailing={stats30.ascend_cash_pct} />
-        <KPI label="Finance Offers" value={stats.finance_offers} format="n" />
-        <KPI label="Finance %" value={stats.finance_pct} format="%" />
+        <KPI label="Total Ascensions" value={stats.ascensions} format="n" tip="Trial clients who ascended to full package" />
+        <KPI label="Ascension Rate" value={stats.ascend_rate} format="%" benchmark={bm.ascend_rate} trailing={stats30.ascend_rate} tip="Ascensions / Trial Closes" />
+        <KPI label="CPA (Ascend)" value={stats.cpa_ascend} format="$" benchmark={bm.cpa_ascend} tip="Adspend / Ascensions" />
+        <KPI label="Ascend Cash" value={stats.ascend_cash} format="$" tip="Cash collected from ascension deals" />
+        <KPI label="Ascend Revenue" value={stats.ascend_revenue} format="$" tip="Contracted revenue from ascension deals" />
+        <KPI label="% Cash Collected" value={stats.ascend_cash_pct} format="%" benchmark={bm.ascend_uf_cash_pct} trailing={stats30.ascend_cash_pct} tip="Ascend Cash / Ascend Revenue" />
+        <KPI label="Finance Offers" value={stats.finance_offers} format="n" tip="Ascension clients offered finance" />
+        <KPI label="Finance %" value={stats.finance_pct} format="%" tip="Finance Accepted / Ascensions" />
       </Section>
 
       {/* ROAS Overview */}
       <Section title="ROAS Overview" cols={4}>
-        <KPI label="All Cash Collected" value={stats.all_cash} format="$" />
-        <KPI label="Net FE Cash ROAS" value={stats.net_fe_roas} format="x" benchmark={bm.net_fe_roas} trailing={stats30.net_fe_roas} />
-        <KPI label="Revenue ROAS" value={stats.revenue_roas} format="x" benchmark={bm.revenue_roas} trailing={stats30.revenue_roas} />
-        <KPI label="All Cash ROAS" value={stats.all_cash_roas} format="x" benchmark={bm.all_cash_roas} trailing={stats30.all_cash_roas} />
+        <KPI label="All Cash Collected" value={stats.all_cash} format="$" tip="Trial Cash + Ascend Cash + AR Collected" />
+        <KPI label="Net FE Cash ROAS" value={stats.net_fe_roas} format="x" benchmark={bm.net_fe_roas} trailing={stats30.net_fe_roas} tip="(Trial Cash + Ascend Cash) / Adspend" />
+        <KPI label="Revenue ROAS" value={stats.revenue_roas} format="x" benchmark={bm.revenue_roas} trailing={stats30.revenue_roas} tip="(Trial Rev + Ascend Rev) / Adspend" />
+        <KPI label="All Cash ROAS" value={stats.all_cash_roas} format="x" benchmark={bm.all_cash_roas} trailing={stats30.all_cash_roas} tip="(Trial + Ascend + AR Cash) / Adspend" />
       </Section>
 
       {/* AR & Refunds */}
       <Section title="AR & Refunds" cols={6}>
-        <KPI label="AR Collected" value={stats.ar_collected} format="$" />
-        <KPI label="AR Defaulted" value={stats.ar_defaulted} format="$" />
-        <KPI label="AR Success Rate" value={stats.ar_success_rate} format="%" benchmark={bm.ar_success_rate} />
-        <KPI label="Refunds/Disputes (#)" value={stats.refund_count} format="n" />
-        <KPI label="Refunds Amount" value={stats.refund_amount} format="$" />
+        <KPI label="AR Collected" value={stats.ar_collected} format="$" tip="Accounts receivable payments collected" />
+        <KPI label="AR Defaulted" value={stats.ar_defaulted} format="$" tip="Accounts receivable payments defaulted" />
+        <KPI label="AR Success Rate" value={stats.ar_success_rate} format="%" benchmark={bm.ar_success_rate} tip="AR Collected / (AR Collected + AR Defaulted)" />
+        <KPI label="Refunds/Disputes (#)" value={stats.refund_count} format="n" tip="Number of refunds or disputes" />
+        <KPI label="Refunds Amount" value={stats.refund_amount} format="$" tip="Total dollar amount refunded" />
         <KPI label="All Cash Collected" value={stats.all_cash} format="$" />
       </Section>
 
