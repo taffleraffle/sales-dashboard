@@ -757,7 +757,7 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
 }
 
 // Setter Dashboard with pipeline stats + EOD form
-function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, setConfirmed, savedSetterLeads = [], initialSetLeads = [], initialRescheduleLeads = [], submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0 }) {
+function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, setConfirmed, savedSetterLeads = [], initialSetLeads = [], initialRescheduleLeads = [], eodExists = null, filingNew = false, setFilingNew, submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0 }) {
   const [pipeline, setPipeline] = useState({ set: 0, booked: 0, showed: 0, closed: 0, noShow: 0, cancelled: 0, revenue: 0, total: 0 })
   const [weeklyStats, setWeeklyStats] = useState({ sets: 0, shows: 0, closes: 0, revenue: 0, showRate: 0, closeRate: 0 })
   const [loading, setLoading] = useState(true)
@@ -1082,8 +1082,22 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
         </div>
       )}
 
+      {/* No EOD available for this date */}
+      {!confirmed && eodExists === false && !filingNew && (
+        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center">
+          <p className="text-text-400 text-sm mb-3">No end of day submitted for {selectedName} on {formatDateLabel(selectedDate).split(' — ').pop() || selectedDate}.</p>
+          <button
+            onClick={() => setFilingNew(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium bg-opt-yellow text-bg-primary hover:bg-opt-yellow/80 transition-colors"
+          >
+            <Plus size={14} />
+            File EOD
+          </button>
+        </div>
+      )}
+
       {/* Pipeline KPIs — always show */}
-      {!confirmed && <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
+      {!confirmed && (eodExists !== false || filingNew) && <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
         {[
           ['Sets (30d)', pipeline.total, ''],
           ['Pending', pipeline.set, 'text-opt-yellow'],
@@ -1101,7 +1115,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
         ))}
       </div>}
 
-      {!confirmed && <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
+      {!confirmed && (eodExists !== false || filingNew) && <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
         {/* Left: EOD form */}
         <div className="space-y-4">
           {/* Activity inputs */}
@@ -2003,10 +2017,14 @@ export default function EODReview() {
 
   // Saved leads for read-only view
   const [savedSetterLeads, setSavedSetterLeads] = useState([])
+  const [setterEodExists, setSetterEodExists] = useState(null) // null=loading, true/false
+  const [setterFilingNew, setSetterFilingNew] = useState(false) // user clicked "File EOD"
 
   // Load existing setter EOD data + assigned leads when viewing a past date
   useEffect(() => {
     if (tab !== 'setter' || !selectedMember) return
+    setSetterEodExists(null)
+    setSetterFilingNew(false)
     async function loadExistingSetterEOD() {
       const { data } = await supabase
         .from('setter_eod_reports')
@@ -2016,6 +2034,7 @@ export default function EODReview() {
         .limit(1)
       if (data?.[0]) {
         const eod = data[0]
+        setSetterEodExists(true)
         setSetterData({
           total_leads: eod.total_leads || 0,
           outbound_calls: eod.outbound_calls || 0,
@@ -2028,6 +2047,7 @@ export default function EODReview() {
           what_went_poorly: eod.what_went_poorly || '',
         })
         if (eod.is_confirmed) setConfirmed(true)
+        else setConfirmed(false)
 
         // Load assigned leads for this EOD (read-only view + pre-fill edit form)
         const { data: leads } = await supabase
@@ -2043,12 +2063,15 @@ export default function EODReview() {
         setSetterSetLeads(setLeadsList.map(l => ({ id: l.id, lead_name: l.lead_name, lead_source: l.lead_source, appointment_date: l.appointment_date, _source: 'lead' })))
         setSetterRescheduleLeads(reschLeadsList.map(l => ({ id: l.id, lead_name: l.lead_name, lead_source: l.lead_source, _source: 'lead' })))
       } else {
+        setSetterEodExists(false)
         setSetterData({
           total_leads: 0, outbound_calls: 0, pickups: 0,
           meaningful_conversations: 0, sets: 0, reschedules: 0,
           self_rating: 7, what_went_well: '', what_went_poorly: '',
         })
         setSavedSetterLeads([])
+        setSetterSetLeads([])
+        setSetterRescheduleLeads([])
         setConfirmed(false)
       }
     }
@@ -3070,6 +3093,9 @@ export default function EODReview() {
           savedSetterLeads={savedSetterLeads}
           initialSetLeads={setterSetLeads}
           initialRescheduleLeads={setterRescheduleLeads}
+          eodExists={setterEodExists}
+          filingNew={setterFilingNew}
+          setFilingNew={setSetterFilingNew}
           submitting={submitting}
           setLeadsForSets={setSetterSetLeads}
           setRescheduleLeadsForParent={setSetterRescheduleLeads}
