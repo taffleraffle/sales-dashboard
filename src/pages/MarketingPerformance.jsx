@@ -771,7 +771,7 @@ function CSVImportModal({ onClose, onImport }) {
 
 // ── Main Page ──────────────────────────────────────────────────────
 export default function MarketingPerformance() {
-  const { entries, benchmarks, loading, syncing, upsertEntry, upsertMany, updateBenchmark, deleteEntry, reload } = useMarketingTracker({ autoSync: true })
+  const { entries, benchmarks, loading, upsertEntry, upsertMany, updateBenchmark, deleteEntry, reload } = useMarketingTracker()
   const [range, setRange] = useState(30)
   const [showAddEntry, setShowAddEntry] = useState(false)
   const [showBenchmarks, setShowBenchmarks] = useState(false)
@@ -817,9 +817,13 @@ export default function MarketingPerformance() {
 
   const handleMetaSync = async () => {
     setMetaSyncing(true)
-    setMetaStatus('Pulling data from Meta Ads & GHL...')
+    setMetaStatus('Syncing EOD reports + Meta Ads + GHL...')
     try {
-      const result = await syncMetaToTracker(range === 'mtd' ? 30 : range)
+      // Sync closer EOD data first
+      const { syncEODToTracker } = await import('../hooks/useMarketingTracker')
+      await syncEODToTracker()
+      // Then sync Meta Ads + GHL (only last 30 days)
+      const result = await syncMetaToTracker(30)
       setMetaStatus(result.message)
       await reload()
     } catch (err) {
@@ -841,7 +845,7 @@ export default function MarketingPerformance() {
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Marketing Performance</h1>
           <p className="text-xs text-text-400">
             {entries.length} entries
-            {syncing && <span className="ml-2 text-opt-yellow"><Loader size={10} className="inline animate-spin mr-1" />Syncing APIs...</span>}
+            {metaSyncing && <span className="ml-2 text-opt-yellow"><Loader size={10} className="inline animate-spin mr-1" />Syncing...</span>}
           </p>
         </div>
         <DateRangeSelector selected={range} onChange={setRange} />
