@@ -383,7 +383,7 @@ export default function SetterOverview() {
           {stl.leads.length > 0 && (
             <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
               <button onClick={() => setStlOpen(!stlOpen)} className="w-full px-4 py-2 border-b border-border-default flex items-center justify-between hover:bg-bg-card-hover/50 transition-colors">
-                <span className="text-xs font-medium text-text-secondary">Recent Leads — Response Times ({stl.leads.length})</span>
+                <span className="text-xs font-medium text-text-secondary">Recent Leads — Response Times ({stl.allLeads.length}){stl.notCalled > 0 && <span className="ml-2 text-danger">{stl.notCalled} not called</span>}</span>
                 <ChevronDown size={14} className={`text-text-400 transition-transform ${stlOpen ? 'rotate-180' : ''}`} />
               </button>
               {stlOpen && (
@@ -399,16 +399,16 @@ export default function SetterOverview() {
                       </tr>
                     </thead>
                     <tbody>
-                      {stl.leads.slice(0, 25).map((l, i) => {
+                      {stl.allLeads.slice(0, 50).map((l, i) => {
                         const tzOpts = { timeZone: 'America/Indiana/Indianapolis', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
                         const setterName = l.setterId ? (setters.find(s => s.wavv_user_id === l.setterId)?.name || '—') : '—'
                         return (
-                          <tr key={i} className="border-b border-border-default/30">
+                          <tr key={i} className={`border-b border-border-default/30 ${l.uncalled ? 'bg-danger/5' : ''}`}>
                             <td className="px-3 py-1.5 font-medium text-text-primary">{l.name}</td>
                             <td className="px-3 py-1.5 text-opt-yellow">{setterName}</td>
                             <td className="px-3 py-1.5 text-text-400">{new Date(l.created).toLocaleString('en-US', tzOpts)}</td>
-                            <td className="px-3 py-1.5 text-text-400">{l.calledAt ? new Date(l.calledAt).toLocaleString('en-US', tzOpts) : '—'}</td>
-                            <td className={`px-3 py-1.5 text-right font-medium ${l.responseSecs < 300 ? 'text-success' : l.responseSecs < 3600 ? 'text-opt-yellow' : 'text-danger'}`}>
+                            <td className="px-3 py-1.5 text-text-400">{l.calledAt ? new Date(l.calledAt).toLocaleString('en-US', tzOpts) : <span className="text-danger text-[10px] font-medium px-1.5 py-0.5 rounded bg-danger/10">NOT CALLED</span>}</td>
+                            <td className={`px-3 py-1.5 text-right font-medium ${l.uncalled ? 'text-danger' : l.responseSecs < 300 ? 'text-success' : l.responseSecs < 3600 ? 'text-opt-yellow' : 'text-danger'}`}>
                               {l.responseDisplay}
                             </td>
                           </tr>

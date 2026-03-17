@@ -233,6 +233,26 @@ export default function SalesOverview() {
 
   const [showAllRecentLeads, setShowAllRecentLeads] = useState(false)
 
+  // ── Pending EOD: check who hasn't submitted today ──
+  const [pendingEOD, setPendingEOD] = useState({ closers: [], setters: [] })
+
+  useEffect(() => {
+    async function checkPending() {
+      const today = new Date().toISOString().split('T')[0]
+      const [closerEods, setterEods] = await Promise.all([
+        supabase.from('closer_eod_reports').select('closer_id').eq('report_date', today).eq('is_confirmed', true),
+        supabase.from('setter_eod_reports').select('setter_id').eq('report_date', today).eq('is_confirmed', true),
+      ])
+      const submittedCloserIds = new Set((closerEods.data || []).map(r => r.closer_id))
+      const submittedSetterIds = new Set((setterEods.data || []).map(r => r.setter_id))
+      setPendingEOD({
+        closers: closers.filter(c => !submittedCloserIds.has(c.id)),
+        setters: setters.filter(s => !submittedSetterIds.has(s.id)),
+      })
+    }
+    if (closers.length || setters.length) checkPending()
+  }, [closers, setters])
+
   // ── Celebration: check for today's closes ──
   const [todayCloses, setTodayCloses] = useState(null)
   const [showCelebration, setShowCelebration] = useState(false)
@@ -407,6 +427,26 @@ export default function SalesOverview() {
             <div className="bg-bg-card border border-border-default rounded-2xl h-64" />
             <div className="bg-bg-card border border-border-default rounded-2xl h-64" />
           </div>
+        </div>
+      )}
+
+      {/* Pending EOD */}
+      {(pendingEOD.closers.length > 0 || pendingEOD.setters.length > 0) && (
+        <div className="bg-bg-card border border-opt-yellow/20 rounded-2xl px-4 py-3 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Clock size={14} className="text-opt-yellow" />
+            <span className="text-xs font-medium text-opt-yellow">Pending EOD Today</span>
+          </div>
+          {pendingEOD.closers.map(c => (
+            <Link key={c.id} to={`/sales/eod?tab=closer&member=${c.id}`} className="text-[11px] px-2 py-1 rounded-lg bg-bg-primary border border-border-default text-text-secondary hover:border-opt-yellow/30 hover:text-text-primary transition-colors">
+              {c.name} <span className="text-text-400">(closer)</span>
+            </Link>
+          ))}
+          {pendingEOD.setters.map(s => (
+            <Link key={s.id} to={`/sales/eod?tab=setter&member=${s.id}`} className="text-[11px] px-2 py-1 rounded-lg bg-bg-primary border border-border-default text-text-secondary hover:border-opt-yellow/30 hover:text-text-primary transition-colors">
+              {s.name} <span className="text-text-400">(setter)</span>
+            </Link>
+          ))}
         </div>
       )}
 

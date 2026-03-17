@@ -245,17 +245,45 @@ export function computeSpeedToLead(opportunities, wavvCalls) {
     if (phone && c.user_id) phoneToUser[phone] = c.user_id
   }
 
+  const uncalledLeads = []
+
   for (const opp of opportunities) {
     const phone = normalizePhone(opp.contact?.phone)
     const createdAt = opp.createdAt ? new Date(opp.createdAt).getTime() : null
-    if (!phone || !createdAt) continue
+    if (!createdAt) continue
 
-    const firstCall = firstCallByPhone[phone]
-    if (!firstCall) continue
+    const firstCall = phone ? firstCallByPhone[phone] : null
+
+    if (!firstCall || !phone) {
+      // Lead has NOT been called yet
+      uncalledLeads.push({
+        name: opp.contact?.name || 'Unknown',
+        phone: phone || '',
+        created: opp.createdAt,
+        calledAt: null,
+        responseSecs: null,
+        responseDisplay: 'Not Called',
+        setterId: null,
+        uncalled: true,
+      })
+      continue
+    }
 
     // Only count if call was AFTER the lead was created (within reason — allow 1hr before for timing quirks)
     const diffSecs = (firstCall - createdAt) / 1000
-    if (diffSecs < -3600) continue // call was way before lead created, skip
+    if (diffSecs < -3600) {
+      uncalledLeads.push({
+        name: opp.contact?.name || 'Unknown',
+        phone,
+        created: opp.createdAt,
+        calledAt: null,
+        responseSecs: null,
+        responseDisplay: 'Not Called',
+        setterId: null,
+        uncalled: true,
+      })
+      continue
+    }
 
     const secs = Math.max(0, diffSecs)
     times.push(secs)
@@ -268,6 +296,7 @@ export function computeSpeedToLead(opportunities, wavvCalls) {
       responseSecs: Math.round(secs),
       responseDisplay: fmtDuration(secs),
       setterId: userId || null,
+      uncalled: false,
     })
 
     // Per-setter
@@ -284,6 +313,9 @@ export function computeSpeedToLead(opportunities, wavvCalls) {
 
   times.sort((a, b) => a - b)
   leads.sort((a, b) => new Date(b.created) - new Date(a.created))
+  uncalledLeads.sort((a, b) => new Date(b.created) - new Date(a.created))
+  // All leads: called first (sorted by newest), then uncalled (sorted by newest)
+  const allLeads = [...leads, ...uncalledLeads].sort((a, b) => new Date(b.created) - new Date(a.created))
 
   const avg = times.length > 0 ? times.reduce((s, t) => s + t, 0) / times.length : 0
   const median = times.length > 0 ? times[Math.floor(times.length / 2)] : 0
@@ -293,7 +325,9 @@ export function computeSpeedToLead(opportunities, wavvCalls) {
   return {
     totalLeads: opportunities.length,
     worked: times.length,
+    notCalled: uncalledLeads.length,
     leads,
+    allLeads,
     avgSecs: Math.round(avg),
     avgDisplay: fmtDuration(avg),
     medianSecs: Math.round(median),
