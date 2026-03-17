@@ -233,19 +233,33 @@ function DailyTracker({ entries, onDelete, onSave }) {
     setSaving(false)
     setEditDate(null)
   }
-  const EditCell = ({ field }) => (
-    <input
-      type="text"
-      inputMode="decimal"
-      value={editForm[field] ?? ''}
-      onChange={e => setEditForm(p => ({ ...p, [field]: e.target.value }))}
-      onBlur={e => {
-        const v = e.target.value.trim()
-        setEditForm(p => ({ ...p, [field]: v === '' ? 0 : Number(v) || 0 }))
-      }}
-      className="w-16 bg-bg-primary border border-opt-yellow/50 rounded px-1.5 py-0.5 text-[11px] text-text-primary text-right"
-    />
-  )
+  const editGroups = [
+    { label: 'Spend & Leads', fields: [
+      { k: 'adspend', l: 'Ad Spend ($)' }, { k: 'leads', l: 'Leads' },
+    ]},
+    { label: 'Bookings', fields: [
+      { k: 'auto_bookings', l: 'Auto Books' }, { k: 'qualified_bookings', l: 'Qual Books' },
+    ]},
+    { label: 'Calls', fields: [
+      { k: 'live_calls', l: 'Live Calls' }, { k: 'reschedules', l: 'Reschedules' },
+      { k: 'cancelled_dtf', l: 'Cancel DTF' }, { k: 'cancelled_by_prospect', l: 'Cancel Prospect' },
+    ]},
+    { label: 'Offers & Closes', fields: [
+      { k: 'offers', l: 'Offers' }, { k: 'closes', l: 'Closes' },
+    ]},
+    { label: 'Trial Financials', fields: [
+      { k: 'trial_cash', l: 'Trial Cash ($)' }, { k: 'trial_revenue', l: 'Trial Revenue ($)' },
+    ]},
+    { label: 'Ascension', fields: [
+      { k: 'ascensions', l: 'Ascensions' }, { k: 'ascend_cash', l: 'Ascend Cash ($)' },
+      { k: 'ascend_revenue', l: 'Ascend Revenue ($)' },
+      { k: 'finance_offers', l: 'Finance Offers' }, { k: 'finance_accepted', l: 'Finance Accepted' },
+    ]},
+    { label: 'AR & Refunds', fields: [
+      { k: 'ar_collected', l: 'AR Collected ($)' }, { k: 'ar_defaulted', l: 'AR Defaulted ($)' },
+      { k: 'refund_count', l: 'Refunds (#)' }, { k: 'refund_amount', l: 'Refund Amt ($)' },
+    ]},
+  ]
 
   const getCalls = e => e.qualified_bookings || e.calls_on_calendar || ((e.net_new_calls || 0) + (e.net_fu_calls || 0))
   const getLive = e => e.live_calls || e.net_live_calls || 0
@@ -321,31 +335,9 @@ function DailyTracker({ entries, onDelete, onSave }) {
           <tbody>
             {filtered.map(e => {
               const isEd = editDate === e.date
-              if (isEd) {
-                return (
-                  <tr key={e.date} className="border-b border-opt-yellow/20 bg-opt-yellow/5 h-[34px]">
-                    <td className="px-2 py-1.5 font-medium text-opt-yellow sticky left-0 bg-opt-yellow/5 z-10 whitespace-nowrap">{e.date}</td>
-                    {dataCols.map((c, i) => (
-                      <td key={i} className="px-1 py-1.5 text-right">
-                        {c.k && editableFields.includes(c.k) ? <EditCell field={c.k} /> : <span className="text-text-400">—</span>}
-                      </td>
-                    ))}
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button onClick={saveEdit} disabled={saving} className="w-6 h-6 rounded-md bg-success/15 text-success hover:bg-success/25 flex items-center justify-center transition-colors disabled:opacity-50">
-                          <Check size={12} />
-                        </button>
-                        <button onClick={() => setEditDate(null)} className="w-6 h-6 rounded-md bg-bg-primary text-text-400 hover:text-text-primary hover:bg-bg-card-hover flex items-center justify-center transition-colors">
-                          <X size={12} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              }
               return (
-                <tr key={e.date} className="border-b border-border-default/30 hover:bg-bg-card-hover/50 group">
-                  <td className="px-2 py-1 font-medium text-text-primary whitespace-nowrap sticky left-0 bg-bg-card group-hover:bg-bg-card-hover/50 z-10">{e.date}</td>
+                <tr key={e.date} className={`border-b border-border-default/30 hover:bg-bg-card-hover/50 group ${isEd ? 'bg-opt-yellow/5 border-opt-yellow/20' : ''}`}>
+                  <td className={`px-2 py-1 font-medium whitespace-nowrap sticky left-0 z-10 ${isEd ? 'text-opt-yellow bg-opt-yellow/5' : 'text-text-primary bg-bg-card group-hover:bg-bg-card-hover/50'}`}>{e.date}</td>
                   {dataCols.map((c, i) => {
                     let val
                     if (c.calc) {
@@ -371,6 +363,52 @@ function DailyTracker({ entries, onDelete, onSave }) {
           </tbody>
         </table>
       </div>
+
+      {/* Edit panel */}
+      {editDate && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setEditDate(null)}>
+          <div className="bg-bg-card border border-border-default rounded-2xl w-[520px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border-default">
+              <div className="flex items-center gap-2">
+                <Edit3 size={14} className="text-opt-yellow" />
+                <h3 className="text-sm font-semibold">Edit {editDate}</h3>
+              </div>
+              <button onClick={() => setEditDate(null)} className="text-text-400 hover:text-text-primary"><X size={14} /></button>
+            </div>
+            <div className="p-5 overflow-y-auto max-h-[calc(85vh-110px)] space-y-4">
+              {editGroups.map(g => (
+                <div key={g.label}>
+                  <p className="text-[9px] uppercase tracking-widest text-text-400 font-medium mb-2">{g.label}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {g.fields.map(f => (
+                      <div key={f.k} className="flex items-center gap-2">
+                        <label className="text-[10px] text-text-400 w-24 shrink-0 truncate">{f.l}</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={editForm[f.k] ?? ''}
+                          onChange={e => setEditForm(p => ({ ...p, [f.k]: e.target.value }))}
+                          onBlur={e => {
+                            const v = e.target.value.trim()
+                            setEditForm(p => ({ ...p, [f.k]: v === '' ? 0 : Number(v) || 0 }))
+                          }}
+                          className="flex-1 bg-bg-primary border border-border-default rounded-lg px-2.5 py-1.5 text-xs text-text-primary text-right focus:border-opt-yellow/50 outline-none transition-colors"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border-default">
+              <button onClick={() => setEditDate(null)} className="px-4 py-1.5 text-xs text-text-400 border border-border-default rounded-lg hover:bg-bg-card-hover transition-colors">Cancel</button>
+              <button onClick={saveEdit} disabled={saving} className="px-5 py-1.5 text-xs font-semibold bg-opt-yellow text-bg-primary rounded-lg hover:brightness-110 disabled:opacity-50 transition-all">
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
