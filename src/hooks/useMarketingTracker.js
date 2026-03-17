@@ -256,6 +256,7 @@ export function computeMarketingStats(entries) {
     cpa_trial: t.closes > 0 ? t.adspend / t.closes : 0,
 
     // Trial financials
+    trial_cash_pct: t.trial_revenue > 0 ? (t.trial_cash / t.trial_revenue) * 100 : 0,
     trial_fe_roas: t.adspend > 0 ? t.trial_cash / t.adspend : 0,
 
     // Ascension

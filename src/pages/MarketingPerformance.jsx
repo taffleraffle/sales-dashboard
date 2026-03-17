@@ -207,8 +207,14 @@ function DailyTracker({ entries, onDelete, onSave }) {
 
   const fmtP = (n, d) => d > 0 ? `${((n / d) * 100).toFixed(0)}%` : '-'
 
+  const [saving, setSaving] = useState(false)
   const startEdit = e => { setEditDate(e.date); setEditForm({ ...e }) }
-  const saveEdit = async () => { await onSave(editForm); setEditDate(null) }
+  const saveEdit = async () => {
+    setSaving(true)
+    try { await onSave(editForm) } catch (err) { console.error('Save failed:', err) }
+    setSaving(false)
+    setEditDate(null)
+  }
   const EditCell = ({ field }) => (
     <input type="number" value={editForm[field] ?? ''} onChange={e => setEditForm(p => ({ ...p, [field]: Number(e.target.value || 0) }))}
       className="w-14 bg-bg-primary border border-opt-yellow/50 rounded px-1 py-0.5 text-[11px] text-text-primary text-right" />
@@ -409,11 +415,15 @@ function AddEntryModal({ onSave, onClose }) {
 // ── Benchmarks Modal ───────────────────────────────────────────────
 const benchmarkDefs = [
   { key: 'cpl', label: 'CPL ($)' }, { key: 'lead_to_booking', label: 'Lead→Booking %' },
-  { key: 'cpb', label: 'CPB ($)' }, { key: 'show_rate', label: 'Show Rate %' },
+  { key: 'cpb', label: 'Cost Per Booking ($)' },
+  { key: 'show_rate_new', label: 'Show Rate %' },
+  { key: 'cost_per_live_call', label: 'Cost Per Live Call ($)' },
   { key: 'offer_rate', label: 'Offer Rate %' },
   { key: 'close_rate', label: 'Close Rate %' }, { key: 'cpa_trial', label: 'CPA Trial ($)' },
   { key: 'trial_fe_roas', label: 'Trial FE ROAS (x)' },
+  { key: 'trial_uf_cash_pct', label: 'Trial Cash Collected %' },
   { key: 'ascend_rate', label: 'Ascend Rate %' }, { key: 'cpa_ascend', label: 'CPA Ascend ($)' },
+  { key: 'ascend_uf_cash_pct', label: 'Ascend Cash Collected %' },
   { key: 'net_fe_roas', label: 'Net FE ROAS (x)' },
   { key: 'revenue_roas', label: 'Revenue ROAS (x)' }, { key: 'all_cash_roas', label: 'All Cash ROAS (x)' },
   { key: 'ar_success_rate', label: 'AR Success Rate %' },
@@ -885,9 +895,9 @@ export default function MarketingPerformance() {
         <KPI label="Live Calls" value={stats.live_calls} format="n" />
         <KPI label="No Shows" value={stats.no_shows} format="n" />
         <KPI label="Rescheduled" value={stats.reschedules} format="n" />
-        <KPI label="Show Rate" value={stats.show_rate} format="%" benchmark={bm.show_rate} trailing={stats30.show_rate} />
+        <KPI label="Show Rate" value={stats.show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.show_rate} />
         <KPI label="Reschedule Rate" value={stats.reschedule_rate} format="%" />
-        <KPI label="Cost Per Live Call" value={stats.cost_per_live_call} format="$" />
+        <KPI label="Cost Per Live Call" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} />
       </Section>
 
       {/* Offers & Closes */}
@@ -901,9 +911,10 @@ export default function MarketingPerformance() {
       </Section>
 
       {/* Trial Financials */}
-      <Section title="Trial Financials" cols={3}>
+      <Section title="Trial Financials" cols={4}>
         <KPI label="Trial Cash Collected" value={stats.trial_cash} format="$" />
         <KPI label="Trial Contracted Rev" value={stats.trial_revenue} format="$" />
+        <KPI label="Cash Collected %" value={stats.trial_cash_pct} format="%" benchmark={bm.trial_uf_cash_pct} trailing={stats30.trial_cash_pct} />
         <KPI label="Trial FE Cash ROAS" value={stats.trial_fe_roas} format="x" benchmark={bm.trial_fe_roas} trailing={stats30.trial_fe_roas} />
       </Section>
 
@@ -914,13 +925,14 @@ export default function MarketingPerformance() {
         <KPI label="CPA (Ascend)" value={stats.cpa_ascend} format="$" benchmark={bm.cpa_ascend} />
         <KPI label="Ascend Cash" value={stats.ascend_cash} format="$" />
         <KPI label="Ascend Revenue" value={stats.ascend_revenue} format="$" />
-        <KPI label="% Cash Collected" value={stats.ascend_cash_pct} format="%" />
+        <KPI label="% Cash Collected" value={stats.ascend_cash_pct} format="%" benchmark={bm.ascend_uf_cash_pct} trailing={stats30.ascend_cash_pct} />
         <KPI label="Finance Offers" value={stats.finance_offers} format="n" />
         <KPI label="Finance %" value={stats.finance_pct} format="%" />
       </Section>
 
       {/* ROAS Overview */}
-      <Section title="ROAS Overview" cols={3}>
+      <Section title="ROAS Overview" cols={4}>
+        <KPI label="All Cash Collected" value={stats.all_cash} format="$" />
         <KPI label="Net FE Cash ROAS" value={stats.net_fe_roas} format="x" benchmark={bm.net_fe_roas} trailing={stats30.net_fe_roas} />
         <KPI label="Revenue ROAS" value={stats.revenue_roas} format="x" benchmark={bm.revenue_roas} trailing={stats30.revenue_roas} />
         <KPI label="All Cash ROAS" value={stats.all_cash_roas} format="x" benchmark={bm.all_cash_roas} trailing={stats30.all_cash_roas} />
