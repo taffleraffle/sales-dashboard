@@ -233,15 +233,20 @@ export function computeSpeedToLead(opportunities, wavvCalls, appointments = []) 
     if (a.ghl_contact_id) appointmentByContactId[a.ghl_contact_id] = a
   }
 
-  // Build map of phone → earliest wavv call
+  // Build map of phone → earliest wavv call + total call duration
   const firstCallByPhone = {}
+  const callStatsByPhone = {}  // phone → { totalDuration, callCount }
   for (const c of wavvCalls) {
     const phone = normalizePhone(c.phone_number)
     if (!phone) continue
     const ts = new Date(c.started_at).getTime()
+    const dur = c.call_duration || 0
     if (!firstCallByPhone[phone] || ts < firstCallByPhone[phone]) {
       firstCallByPhone[phone] = ts
     }
+    if (!callStatsByPhone[phone]) callStatsByPhone[phone] = { totalDuration: 0, callCount: 0 }
+    callStatsByPhone[phone].totalDuration += dur
+    callStatsByPhone[phone].callCount++
   }
 
   const times = []       // response times in seconds
@@ -258,12 +263,20 @@ export function computeSpeedToLead(opportunities, wavvCalls, appointments = []) 
 
   const uncalledLeads = []
 
+  const INTRO_CALENDARS = new Set([
+    '5omixNmtgmGMWQfEL0fs', 'C5NRRAjwsy43nOyU6izQ',
+    'GpYh75LaFEJgpHYkZfN9', 'okWMyvLhnJ7sbuvSIzok', 'MvYStrHFsRTpunwTXIqT',
+  ])
+
   // Helper to get booking info for a lead
   const getBooking = (phone, contactId) => {
     const appt = (phone && appointmentByPhone[phone]) || (contactId && appointmentByContactId[contactId]) || null
-    if (!appt) return { hasBooking: false, bookingCalendar: null, bookingDate: null, bookingCloserId: null }
+    if (!appt) return { hasBooking: false, isAutoBooking: false, isStrategyBooking: false, bookingCalendar: null, bookingDate: null, bookingCloserId: null }
+    const isAuto = INTRO_CALENDARS.has(appt.calendar_name)
     return {
       hasBooking: true,
+      isAutoBooking: isAuto,
+      isStrategyBooking: !isAuto,
       bookingCalendar: appt.calendar_name || 'Booked',
       bookingDate: appt.appointment_date || appt.start_time?.split('T')[0] || null,
       bookingCloserId: appt.closer_id || appt.ghl_user_id || null,
@@ -312,6 +325,7 @@ export function computeSpeedToLead(opportunities, wavvCalls, appointments = []) 
     const secs = Math.max(0, diffSecs)
     times.push(secs)
     const userId = phoneToUser[phone]
+    const cStats = callStatsByPhone[phone] || { totalDuration: 0, callCount: 0 }
     leads.push({
       name: opp.contact?.name || 'Unknown',
       phone,
@@ -321,6 +335,9 @@ export function computeSpeedToLead(opportunities, wavvCalls, appointments = []) 
       responseDisplay: fmtDuration(secs),
       setterId: userId || null,
       uncalled: false,
+      talkTime: cStats.totalDuration,
+      talkTimeDisplay: fmtDuration(cStats.totalDuration),
+      callCount: cStats.callCount,
       ...booking,
     })
 

@@ -397,6 +397,7 @@ export default function SetterOverview() {
                         <th className="px-3 py-2 text-left">Setter</th>
                         <th className="px-3 py-2 text-left">Entered Pipeline</th>
                         <th className="px-3 py-2 text-left">Called At</th>
+                        <th className="px-3 py-2 text-right">Talk Time</th>
                         <th className="px-3 py-2 text-right">Response Time</th>
                       </tr>
                     </thead>
@@ -409,15 +410,23 @@ export default function SetterOverview() {
                           <tr key={i} className={`border-b border-border-default/30 ${l.uncalled ? 'bg-danger/5' : ''} ${l.hasBooking ? 'bg-cyan-500/5' : ''}`}>
                             <td className="px-3 py-1.5">
                               <span className="font-medium text-text-primary">{l.name}</span>
-                              {l.hasBooking && (
-                                <span className="ml-2 text-[9px] font-medium px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400">
-                                  BOOKED{l.bookingDate ? ` · ${l.bookingDate}` : ''}{closerName ? ` · ${closerName}` : ''}
+                              {l.isAutoBooking && (
+                                <span className="ml-2 text-[9px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400">
+                                  AUTO BOOKED{l.bookingDate ? ` · ${l.bookingDate}` : ''}{closerName ? ` · ${closerName}` : ''}
+                                </span>
+                              )}
+                              {l.isStrategyBooking && (
+                                <span className="ml-2 text-[9px] font-medium px-1.5 py-0.5 rounded bg-success/15 text-success">
+                                  SET CALL{l.bookingDate ? ` · ${l.bookingDate}` : ''}{closerName ? ` · ${closerName}` : ''}
                                 </span>
                               )}
                             </td>
                             <td className="px-3 py-1.5 text-opt-yellow">{setterName}</td>
                             <td className="px-3 py-1.5 text-text-400">{new Date(l.created).toLocaleString('en-US', tzOpts)}</td>
                             <td className="px-3 py-1.5 text-text-400">{l.calledAt ? new Date(l.calledAt).toLocaleString('en-US', tzOpts) : <span className="text-danger text-[10px] font-medium px-1.5 py-0.5 rounded bg-danger/10">NOT CALLED</span>}</td>
+                            <td className={`px-3 py-1.5 text-right ${l.talkTime > 60 ? 'text-success' : l.talkTime > 0 ? 'text-text-400' : 'text-text-400'}`}>
+                              {l.talkTime > 0 ? <><span className="font-medium">{l.talkTimeDisplay}</span>{l.callCount > 1 && <span className="text-[9px] text-text-400 ml-1">({l.callCount})</span>}</> : '—'}
+                            </td>
                             <td className={`px-3 py-1.5 text-right font-medium ${l.uncalled ? 'text-danger' : l.responseSecs < 300 ? 'text-success' : l.responseSecs < 3600 ? 'text-opt-yellow' : 'text-danger'}`}>
                               {l.responseDisplay}
                             </td>
