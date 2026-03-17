@@ -234,8 +234,17 @@ function DailyTracker({ entries, onDelete, onSave }) {
     setEditDate(null)
   }
   const EditCell = ({ field }) => (
-    <input type="number" value={editForm[field] ?? ''} onChange={e => setEditForm(p => ({ ...p, [field]: Number(e.target.value || 0) }))}
-      className="w-14 bg-bg-primary border border-opt-yellow/50 rounded px-1 py-0.5 text-[11px] text-text-primary text-right" />
+    <input
+      type="text"
+      inputMode="decimal"
+      value={editForm[field] ?? ''}
+      onChange={e => setEditForm(p => ({ ...p, [field]: e.target.value }))}
+      onBlur={e => {
+        const v = e.target.value.trim()
+        setEditForm(p => ({ ...p, [field]: v === '' ? 0 : Number(v) || 0 }))
+      }}
+      className="w-16 bg-bg-primary border border-opt-yellow/50 rounded px-1.5 py-0.5 text-[11px] text-text-primary text-right"
+    />
   )
 
   const getCalls = e => e.qualified_bookings || e.calls_on_calendar || ((e.net_new_calls || 0) + (e.net_fu_calls || 0))
