@@ -226,9 +226,12 @@ export function computeMarketingStats(entries) {
     refund_count: a.refund_count + (r.refund_count || 0),
     refund_amount: a.refund_amount + parseFloat(r.refund_amount || 0),
     reschedules: a.reschedules + (r.reschedules || 0),
+    cancelled_dtf: a.cancelled_dtf + (r.cancelled_dtf || 0),
+    cancelled_by_prospect: a.cancelled_by_prospect + (r.cancelled_by_prospect || 0),
   }), {
     adspend: 0, leads: 0, auto_bookings: 0, qualified_bookings: 0,
     calls_on_calendar: 0, live_calls: 0, reschedules: 0,
+    cancelled_dtf: 0, cancelled_by_prospect: 0,
     offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0,
     ascensions: 0, ascend_cash: 0, ascend_revenue: 0,
     finance_offers: 0, finance_accepted: 0, monthly_offers: 0, monthly_accepted: 0,
@@ -247,10 +250,18 @@ export function computeMarketingStats(entries) {
     cpb: t.qualified_bookings > 0 ? t.adspend / t.qualified_bookings : 0,
     cost_per_auto_booking: t.auto_bookings > 0 ? t.adspend / t.auto_bookings : 0,
 
-    // Show & no-show rates (based on qualified_bookings as the single booking metric)
+    // Show rates
+    // Gross = live / booked (raw — just no-shows)
+    // Net = live / (booked - cancels - reschedules) (only people expected to show)
+    cancels: t.cancelled_dtf + t.cancelled_by_prospect,
+    gross_show_rate: t.qualified_bookings > 0 ? (t.live_calls / t.qualified_bookings) * 100 : 0,
+    net_show_rate: (() => {
+      const net = t.qualified_bookings - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules
+      return net > 0 ? (t.live_calls / net) * 100 : 0
+    })(),
     show_rate: t.qualified_bookings > 0 ? (t.live_calls / t.qualified_bookings) * 100 : 0,
-    no_shows: t.qualified_bookings > 0 ? t.qualified_bookings - t.live_calls : 0,
-    no_show_rate: t.qualified_bookings > 0 ? ((t.qualified_bookings - t.live_calls) / t.qualified_bookings) * 100 : 0,
+    no_shows: t.qualified_bookings > 0 ? t.qualified_bookings - t.live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules : 0,
+    no_show_rate: t.qualified_bookings > 0 ? ((t.qualified_bookings - t.live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules) / t.qualified_bookings) * 100 : 0,
     reschedules: t.reschedules,
     reschedule_rate: t.qualified_bookings > 0 ? (t.reschedules / t.qualified_bookings) * 100 : 0,
     cost_per_live_call: t.live_calls > 0 ? t.adspend / t.live_calls : 0,

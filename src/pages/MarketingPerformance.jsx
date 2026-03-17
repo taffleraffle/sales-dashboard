@@ -242,8 +242,10 @@ function DailyTracker({ entries, onDelete, onSave }) {
     { k: null, label: 'L→B%', calc: e => fmtP(e.qualified_bookings, e.leads),
       color: e => e.leads > 0 ? clrRate((e.qualified_bookings || 0) / e.leads * 100, 15, 8) : '' },
     { k: 'live_calls', label: 'Live', fmt: fN },
-    { k: null, label: 'Show%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(getLive(e), cal) : '-' },
+    { k: null, label: 'Gr.Show%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(getLive(e), cal) : '-' },
       color: e => { const cal = getCalls(e); return cal > 0 ? clrRate(getLive(e) / cal * 100, 70, 50) : '' } },
+    { k: null, label: 'Net Show%', calc: e => { const net = getCalls(e) - (e.cancelled_dtf || 0) - (e.cancelled_by_prospect || 0) - (e.reschedules || 0); return net > 0 ? fmtP(getLive(e), net) : '-' },
+      color: e => { const net = getCalls(e) - (e.cancelled_dtf || 0) - (e.cancelled_by_prospect || 0) - (e.reschedules || 0); return net > 0 ? clrRate(getLive(e) / net * 100, 80, 60) : '' } },
     { k: 'reschedules', label: 'Resch', fmt: fN, color: e => (e.reschedules || 0) > 0 ? 'text-blue-400' : '' },
     { k: null, label: 'R%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(e.reschedules, cal) : '-' },
       color: e => { const cal = getCalls(e); return cal > 0 && (e.reschedules || 0) > 0 ? 'text-blue-400' : '' } },
@@ -266,7 +268,7 @@ function DailyTracker({ entries, onDelete, onSave }) {
   ]
 
   const editableFields = ['adspend', 'leads', 'auto_bookings', 'qualified_bookings',
-    'calls_on_calendar', 'live_calls', 'offers', 'closes', 'reschedules',
+    'calls_on_calendar', 'live_calls', 'cancelled_dtf', 'cancelled_by_prospect', 'offers', 'closes', 'reschedules',
     'trial_cash', 'trial_revenue', 'ascensions', 'ascend_cash', 'ascend_revenue',
     'finance_offers', 'finance_accepted', 'monthly_offers', 'monthly_accepted',
     'ar_collected', 'ar_defaulted', 'refund_count', 'refund_amount']
@@ -908,12 +910,14 @@ export default function MarketingPerformance() {
       </Section>
 
       {/* Calls & Show Rates */}
-      <Section title="Calls & Show Rates" cols={7}>
+      <Section title="Calls & Show Rates" cols={9}>
         <KPI label="Booked Calls" value={stats.qualified_bookings} format="n" />
         <KPI label="Live Calls" value={stats.live_calls} format="n" />
         <KPI label="No Shows" value={stats.no_shows} format="n" />
+        <KPI label="Cancelled" value={stats.cancels} format="n" />
         <KPI label="Rescheduled" value={stats.reschedules} format="n" />
-        <KPI label="Show Rate" value={stats.show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.show_rate} />
+        <KPI label="Gross Show Rate" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} />
+        <KPI label="Net Show Rate" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} />
         <KPI label="Reschedule Rate" value={stats.reschedule_rate} format="%" />
         <KPI label="Cost Per Live Call" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} />
       </Section>
