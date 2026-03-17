@@ -1534,6 +1534,45 @@ export default function EODReview() {
 
       if (existingEOD?.[0]?.is_confirmed) {
         setConfirmed(true)
+        // Load saved closer_calls for read-only view
+        const { data: savedCalls } = await supabase
+          .from('closer_calls')
+          .select('*')
+          .eq('eod_report_id', existingEOD[0].id)
+          .order('id', { ascending: true })
+        if (savedCalls?.length) {
+          // Also load the EOD notes
+          const { data: eodData } = await supabase
+            .from('closer_eod_reports')
+            .select('notes')
+            .eq('id', existingEOD[0].id)
+            .single()
+          setCloserNotes(eodData?.notes || '')
+          setCalls(savedCalls.map(c => ({
+            lead_id: c.lead_id || null,
+            ghl_event_id: c.ghl_event_id || null,
+            lead_name: c.prospect_name || 'Unknown',
+            setter_name: c.setter_name || '—',
+            appointment_date: selectedDate,
+            start_time: c.start_time || null,
+            calendar_name: c.calendar_name || '',
+            lead_source: c.lead_source || '',
+            call_type: c.call_type || 'new_call',
+            outcome: c.outcome || 'no_show',
+            revenue: parseFloat(c.revenue || 0),
+            cash_collected: parseFloat(c.cash_collected || 0),
+            offered: ['closed', 'not_closed'].includes(c.outcome),
+            ascended: c.outcome === 'ascended',
+            offered_finance: c.offered_finance || false,
+            notes: c.notes || '',
+            fathom_summary: c.fathom_summary || null,
+            fathom_duration: c.fathom_duration || null,
+            contact_email: c.contact_email || '',
+            contact_phone: c.contact_phone || '',
+          })))
+          setLoadingCalls(false)
+          return  // Skip live calendar fetch — we have saved data
+        }
       } else {
         setConfirmed(false)
       }
@@ -1979,7 +2018,8 @@ export default function EODReview() {
                             setSelectedMember(eod.closer_id || eod.setter_id)
                             setSelectedDate(eod.report_date)
                             setEodStarted(true)
-                            setConfirmed(false)
+                            // Respect confirmed status — show read-only if already submitted
+                            setConfirmed(!!eod.is_confirmed)
                           }}
                         >
                           <td className="py-2 px-4 text-text-secondary">{formatDateLabel(eod.report_date)}</td>
@@ -2093,61 +2133,127 @@ export default function EODReview() {
       {/* Closer EOD */}
       {tab === 'closer' && selectedMember && (
         <>
-          {/* Confirmed state — clean summary with Edit button */}
+          {/* Confirmed state — read-only summary + call details with Edit button */}
           {confirmed && (
-            <div className="bg-bg-card border border-success/30 rounded-2xl p-6 mb-4">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-success/15 flex items-center justify-center">
-                    <Check size={20} className="text-success" />
+            <div className="space-y-4 mb-4">
+              <div className="bg-bg-card border border-success/30 rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-success/15 flex items-center justify-center">
+                      <Check size={20} className="text-success" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-success">EOD Submitted</p>
+                      <p className="text-xs text-text-400">{selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-success">EOD Submitted</p>
-                    <p className="text-xs text-text-400">{selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()}</p>
+                  {(isAdmin || (profile?.teamMemberId === selectedMember)) && (
+                    <button
+                      onClick={() => setConfirmed(false)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-opt-yellow border border-border-default hover:border-opt-yellow/30 transition-colors"
+                    >
+                      <Edit3 size={12} />
+                      Edit
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                    <p className="text-xl font-bold">{summary.booked}</p>
+                    <p className="text-[10px] text-text-400 uppercase">Booked</p>
+                  </div>
+                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                    <p className="text-xl font-bold">{summary.showed}</p>
+                    <p className="text-[10px] text-text-400 uppercase">Live Calls</p>
+                  </div>
+                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                    <p className="text-xl font-bold text-danger">{summary.noShows}</p>
+                    <p className="text-[10px] text-text-400 uppercase">No Shows</p>
+                  </div>
+                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                    <p className="text-xl font-bold text-blue-400">{summary.rescheduled}</p>
+                    <p className="text-[10px] text-text-400 uppercase">Rescheduled</p>
+                  </div>
+                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                    <p className="text-xl font-bold">{summary.offers}</p>
+                    <p className="text-[10px] text-text-400 uppercase">Offers</p>
+                  </div>
+                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                    <p className="text-xl font-bold text-success">{summary.closes}</p>
+                    <p className="text-[10px] text-text-400 uppercase">Closes</p>
+                  </div>
+                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                    <p className="text-xl font-bold text-opt-yellow">${summary.cash.toLocaleString()}</p>
+                    <p className="text-[10px] text-text-400 uppercase">Cash</p>
+                  </div>
+                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                    <p className="text-xl font-bold text-success">${summary.revenue.toLocaleString()}</p>
+                    <p className="text-[10px] text-text-400 uppercase">Revenue</p>
                   </div>
                 </div>
-                {isAdmin && (
-                  <button
-                    onClick={() => setConfirmed(false)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-opt-yellow border border-border-default hover:border-opt-yellow/30 transition-colors"
-                  >
-                    <Edit3 size={12} />
-                    Edit
-                  </button>
-                )}
+
+                <div className="flex flex-wrap gap-4 mt-3 pt-3 border-t border-border-default text-xs text-text-400">
+                  {summary.ascendCash > 0 && <span>Ascend Cash: <strong className="text-cyan-400">${summary.ascendCash.toLocaleString()}</strong></span>}
+                  {summary.contractValue > 0 && <span>Ascend Revenue: <strong className="text-cyan-400">${summary.contractValue.toLocaleString()}</strong></span>}
+                  {summary.ascensions > 0 && <span>Ascended: <strong className="text-cyan-400">{summary.ascensions}/{summary.ascensionCalls}</strong></span>}
+                  <span>Show Rate: <strong className={parseFloat(showRate) >= 70 ? 'text-success' : 'text-danger'}>{showRate}%</strong></span>
+                  <span>Offer Rate: <strong className={parseFloat(offerRate) >= 80 ? 'text-success' : 'text-text-secondary'}>{offerRate}%</strong></span>
+                  <span>Close Rate: <strong className={parseFloat(closeRate) >= 25 ? 'text-success' : 'text-text-secondary'}>{closeRate}%</strong></span>
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="text-center p-3 bg-bg-primary rounded-2xl">
-                  <p className="text-xl font-bold">{summary.booked}</p>
-                  <p className="text-[10px] text-text-400 uppercase">Booked</p>
-                </div>
-                <div className="text-center p-3 bg-bg-primary rounded-2xl">
-                  <p className="text-xl font-bold">{summary.showed}</p>
-                  <p className="text-[10px] text-text-400 uppercase">Live Calls</p>
-                </div>
-                <div className="text-center p-3 bg-bg-primary rounded-2xl">
-                  <p className="text-xl font-bold text-success">{summary.closes}</p>
-                  <p className="text-[10px] text-text-400 uppercase">Closes</p>
-                </div>
-                <div className="text-center p-3 bg-bg-primary rounded-2xl">
-                  <p className="text-xl font-bold text-opt-yellow">${summary.cash.toLocaleString()}</p>
-                  <p className="text-[10px] text-text-400 uppercase">Cash</p>
-                </div>
-              </div>
+              {/* Read-only call details */}
+              {calls.length > 0 && (
+                <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+                  <div className="px-5 py-3 border-b border-border-default">
+                    <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider">{calls.length} Calls</p>
+                  </div>
+                  <div className="divide-y divide-border-default/30">
+                    {calls.map((call, i) => {
+                      const isAsc = call.call_type === 'ascension'
+                      const outcomeBadge = call.outcome === 'closed' ? { label: 'Closed', cls: 'bg-success/15 text-success' }
+                        : call.outcome === 'ascended' ? { label: 'Ascended', cls: 'bg-cyan-500/15 text-cyan-400' }
+                        : call.outcome === 'no_show' ? { label: 'No Show', cls: 'bg-danger/15 text-danger' }
+                        : call.outcome === 'rescheduled' ? { label: 'Rescheduled', cls: 'bg-blue-500/15 text-blue-400' }
+                        : call.outcome === 'not_closed' ? { label: 'Not Closed', cls: 'bg-text-400/15 text-text-400' }
+                        : call.outcome === 'not_ascended' ? { label: "Didn't Ascend", cls: 'bg-text-400/15 text-text-400' }
+                        : { label: call.outcome || '—', cls: 'bg-text-400/15 text-text-400' }
+                      const typeBadge = isAsc ? { label: 'ASC', cls: 'text-cyan-400' }
+                        : call.call_type === 'follow_up' ? { label: 'FU', cls: 'text-purple-400' }
+                        : { label: 'NC', cls: 'text-opt-yellow' }
 
-              <div className="flex flex-wrap gap-4 mt-3 pt-3 border-t border-border-default text-xs text-text-400">
-                {summary.offers > 0 && <span>Offers: <strong className="text-text-primary">{summary.offers}</strong></span>}
-                {summary.revenue > 0 && <span>Trial Revenue: <strong className="text-success">${summary.revenue.toLocaleString()}</strong></span>}
-                {summary.ascendCash > 0 && <span>Ascend Cash: <strong className="text-cyan-400">${summary.ascendCash.toLocaleString()}</strong></span>}
-                {summary.contractValue > 0 && <span>Ascend Revenue: <strong className="text-cyan-400">${summary.contractValue.toLocaleString()}</strong></span>}
-                {summary.ascensions > 0 && <span>Ascended: <strong className="text-cyan-400">{summary.ascensions}/{summary.ascensionCalls}</strong></span>}
-                {summary.rescheduled > 0 && <span>Rescheduled: <strong className="text-blue-400">{summary.rescheduled}</strong></span>}
-                {summary.noShows > 0 && <span>No Shows: <strong className="text-danger">{summary.noShows}</strong></span>}
-                <span>Show Rate: <strong className={parseFloat(showRate) >= 70 ? 'text-success' : 'text-danger'}>{showRate}%</strong></span>
-                <span>Offer Rate: <strong className={parseFloat(offerRate) >= 80 ? 'text-success' : 'text-text-secondary'}>{offerRate}%</strong></span>
-                <span>Close Rate: <strong className={parseFloat(closeRate) >= 25 ? 'text-success' : 'text-text-secondary'}>{closeRate}%</strong></span>
-              </div>
+                      return (
+                        <div key={call.ghl_event_id || call.lead_id || `ro-${i}`} className="px-5 py-3 flex items-center gap-3">
+                          <span className={`text-[10px] font-semibold ${typeBadge.cls} w-6`}>{typeBadge.label}</span>
+                          <span className="font-medium text-sm min-w-[120px]">{call.lead_name}</span>
+                          {call.start_time && <span className="text-xs text-text-400 font-mono">{call.start_time}</span>}
+                          {call.setter_name && call.setter_name !== '—' && (
+                            <span className="text-[10px] text-text-400 bg-bg-primary px-1.5 py-0.5 rounded">{call.setter_name}</span>
+                          )}
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${outcomeBadge.cls}`}>{outcomeBadge.label}</span>
+                          <div className="ml-auto flex items-center gap-3 text-xs">
+                            {(call.revenue > 0 || call.cash_collected > 0) && (
+                              <>
+                                {call.cash_collected > 0 && <span className="text-opt-yellow font-medium">${parseFloat(call.cash_collected).toLocaleString()} cash</span>}
+                                {call.revenue > 0 && <span className="text-success">${parseFloat(call.revenue).toLocaleString()} rev</span>}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Notes */}
+              {closerNotes && (
+                <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+                  <p className="text-[10px] text-text-400 uppercase mb-1">Notes</p>
+                  <p className="text-sm text-text-secondary">{closerNotes}</p>
+                </div>
+              )}
             </div>
           )}
 

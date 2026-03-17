@@ -29,6 +29,35 @@ function filterByDays(entries, days) {
   return entries.filter(e => e.date >= toLocalDateStr(since))
 }
 
+// Get the previous equivalent period for comparison
+function filterPreviousPeriod(entries, days) {
+  const now = new Date()
+  if (days === 'mtd') {
+    // Previous month's same MTD window
+    const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const prevEnd = new Date(now.getFullYear(), now.getMonth() - 1, Math.min(now.getDate(), new Date(now.getFullYear(), now.getMonth(), 0).getDate()))
+    const from = toLocalDateStr(prevMonth)
+    const to = toLocalDateStr(prevEnd)
+    return entries.filter(e => e.date >= from && e.date <= to)
+  }
+  if (days && typeof days === 'object' && days.from) {
+    const fromDate = new Date(days.from + 'T12:00:00')
+    const toDate = new Date(days.to + 'T12:00:00')
+    const span = Math.round((toDate - fromDate) / 86400000) + 1
+    const prevEnd = new Date(fromDate)
+    prevEnd.setDate(prevEnd.getDate() - 1)
+    const prevStart = new Date(prevEnd)
+    prevStart.setDate(prevStart.getDate() - span + 1)
+    return entries.filter(e => e.date >= toLocalDateStr(prevStart) && e.date <= toLocalDateStr(prevEnd))
+  }
+  // Numeric days: e.g. 30d selected → previous 30d is day -60 to day -31
+  const end = new Date()
+  end.setDate(end.getDate() - days)
+  const start = new Date()
+  start.setDate(start.getDate() - days * 2)
+  return entries.filter(e => e.date >= toLocalDateStr(start) && e.date < toLocalDateStr(end))
+}
+
 // ── Formatters ─────────────────────────────────────────────────────
 const f$ = v => (v == null || isNaN(v)) ? '—' : `$${Math.round(v).toLocaleString()}`
 const fP = v => (v == null || isNaN(v)) ? '—' : `${v.toFixed(1)}%`
@@ -36,16 +65,37 @@ const fX = v => (v == null || isNaN(v)) ? '—' : `${v.toFixed(2)}x`
 const fN = v => (v == null || isNaN(v)) ? '—' : v.toLocaleString()
 const fmt = (v, format) => format === '$' ? f$(v) : format === '%' ? fP(v) : format === 'x' ? fX(v) : fN(v)
 
-// ── KPI Card with benchmark + info tooltip ────────────────────────
-function KPI({ label, value, format, benchmark, trailing, tip }) {
+// ── KPI Card with benchmark + info tooltip + period arrow ─────────
+function KPI({ label, value, format, benchmark, trailing, prev, tip, whatIf }) {
   const lowerIsBetter = format === '$' && !label.includes('ROAS') && !label.includes('Cash') && !label.includes('Revenue') && !label.includes('AR')
   const isGood = benchmark != null && value !== 0 && (lowerIsBetter ? value <= benchmark : value >= benchmark)
   const isBad = benchmark != null && value !== 0 && !isGood
 
+  // Period-over-period arrow
+  let arrow = null
+  if (prev != null && prev !== 0 && value !== 0) {
+    const pctChange = ((value - prev) / prev) * 100
+    const improved = lowerIsBetter ? value < prev : value > prev
+    const worsened = lowerIsBetter ? value > prev : value < prev
+    if (Math.abs(pctChange) >= 0.5) {
+      arrow = (
+        <span className={`inline-flex items-center gap-0.5 text-[9px] font-medium ${improved ? 'text-success' : worsened ? 'text-danger' : 'text-text-400'}`}>
+          {improved ? '▲' : worsened ? '▼' : '—'}
+          {Math.abs(pctChange).toFixed(0)}%
+        </span>
+      )
+    }
+  }
+
+  // What-if delta
+  const displayValue = whatIf != null ? whatIf : value
+  const hasWhatIfDelta = whatIf != null && Math.abs(whatIf - value) > 0.01
+
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl p-3 relative group">
+    <div className={`bg-bg-card border rounded-2xl p-3 relative group ${hasWhatIfDelta ? 'border-opt-yellow/40' : 'border-border-default'}`}>
       <div className="flex items-center gap-1">
         <p className="text-[9px] uppercase tracking-wider text-text-400 mb-0.5 leading-tight truncate">{label}</p>
+        {arrow}
         {tip && (
           <div className="relative">
             <span className="text-[8px] text-text-400/50 cursor-help mb-0.5">&#9432;</span>
@@ -56,8 +106,13 @@ function KPI({ label, value, format, benchmark, trailing, tip }) {
           </div>
         )}
       </div>
-      <p className={`text-lg font-bold leading-tight ${value === 0 ? 'text-text-400' : isGood ? 'text-success' : isBad ? 'text-danger' : 'text-text-primary'}`}>
-        {fmt(value, format)}
+      <p className={`text-lg font-bold leading-tight ${displayValue === 0 ? 'text-text-400' : isGood ? 'text-success' : isBad ? 'text-danger' : 'text-text-primary'}`}>
+        {fmt(displayValue, format)}
+        {hasWhatIfDelta && (
+          <span className={`text-[10px] font-normal ml-1.5 ${(whatIf > value) === !lowerIsBetter ? 'text-success' : 'text-danger'}`}>
+            ({whatIf > value ? '+' : ''}{fmt(whatIf - value, format === '%' ? '%' : format === 'x' ? 'x' : '$')})
+          </span>
+        )}
       </p>
       <div className="flex items-center gap-2 mt-0.5">
         {trailing != null && <span className="text-[9px] text-text-400">30d: {fmt(trailing, format)}</span>}
@@ -860,10 +915,55 @@ export default function MarketingPerformance() {
 
   const rangeEntries = useMemo(() => filterByDays(entries, range), [entries, range])
   const mtdEntries = useMemo(() => filterByDays(entries, 'mtd'), [entries])
+  const prevEntries = useMemo(() => filterPreviousPeriod(entries, range), [entries, range])
   const stats = useMemo(() => computeMarketingStats(rangeEntries), [rangeEntries])
   const stats30 = useMemo(() => computeMarketingStats(filterByDays(entries, 30)), [entries])
   const statsMTD = useMemo(() => computeMarketingStats(mtdEntries), [mtdEntries])
+  const statsPrev = useMemo(() => computeMarketingStats(prevEntries), [prevEntries])
   const bm = benchmarks
+
+  // What-If state
+  const [whatIfActive, setWhatIfActive] = useState(false)
+  const [whatIfOverrides, setWhatIfOverrides] = useState({})
+  const whatIfStats = useMemo(() => {
+    if (!whatIfActive || !Object.keys(whatIfOverrides).length) return null
+    // Build a fake single-entry array with the overridden totals
+    const base = { ...stats }
+    Object.entries(whatIfOverrides).forEach(([k, v]) => { if (v !== '' && v != null) base[k] = parseFloat(v) })
+    // Recompute derived metrics from raw totals
+    const t = base
+    const all_cash = t.trial_cash + t.ascend_cash + t.ar_collected
+    return {
+      ...t,
+      cpl: t.leads > 0 ? t.adspend / t.leads : 0,
+      lead_to_booking_pct: t.leads > 0 ? (t.qualified_bookings / t.leads) * 100 : 0,
+      cpb: t.qualified_bookings > 0 ? t.adspend / t.qualified_bookings : 0,
+      cost_per_auto_booking: t.auto_bookings > 0 ? t.adspend / t.auto_bookings : 0,
+      cancels: t.cancelled_dtf + t.cancelled_by_prospect,
+      gross_show_rate: t.qualified_bookings > 0 ? (t.live_calls / t.qualified_bookings) * 100 : 0,
+      net_show_rate: (() => { const net = t.qualified_bookings - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules; return net > 0 ? (t.live_calls / net) * 100 : 0 })(),
+      no_shows: t.qualified_bookings - t.live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules,
+      reschedule_rate: t.qualified_bookings > 0 ? (t.reschedules / t.qualified_bookings) * 100 : 0,
+      cost_per_live_call: t.live_calls > 0 ? t.adspend / t.live_calls : 0,
+      offer_rate: t.live_calls > 0 ? (t.offers / t.live_calls) * 100 : 0,
+      cost_per_offer: t.offers > 0 ? t.adspend / t.offers : 0,
+      close_rate: t.live_calls > 0 ? (t.closes / t.live_calls) * 100 : 0,
+      cpa_trial: t.closes > 0 ? t.adspend / t.closes : 0,
+      trial_cash_pct: t.trial_revenue > 0 ? (t.trial_cash / t.trial_revenue) * 100 : 0,
+      trial_fe_roas: t.adspend > 0 ? t.trial_cash / t.adspend : 0,
+      ascend_rate: t.closes > 0 ? (t.ascensions / t.closes) * 100 : 0,
+      cpa_ascend: t.ascensions > 0 ? t.adspend / t.ascensions : 0,
+      ascend_cash_pct: t.ascend_revenue > 0 ? (t.ascend_cash / t.ascend_revenue) * 100 : 0,
+      finance_pct: t.ascensions > 0 ? (t.finance_accepted / t.ascensions) * 100 : 0,
+      net_fe_roas: t.adspend > 0 ? (t.trial_cash + t.ascend_cash) / t.adspend : 0,
+      revenue_roas: t.adspend > 0 ? (t.trial_revenue + t.ascend_revenue) / t.adspend : 0,
+      ar_success_rate: (t.ar_collected + t.ar_defaulted) > 0 ? (t.ar_collected / (t.ar_collected + t.ar_defaulted)) * 100 : 0,
+      all_cash,
+      all_cash_roas: t.adspend > 0 ? all_cash / t.adspend : 0,
+    }
+  }, [whatIfActive, whatIfOverrides, stats])
+  const wf = whatIfStats // shorthand
+  const sp = statsPrev // shorthand for prev period
 
   const handleCSV = async (e) => {
     const file = e.target.files?.[0]
@@ -948,6 +1048,12 @@ export default function MarketingPerformance() {
         </button>
         {metaStatus && <span className="text-xs text-opt-yellow">{metaStatus}</span>}
         <div className="sm:ml-auto flex gap-2">
+          <button
+            onClick={() => { setWhatIfActive(!whatIfActive); if (whatIfActive) setWhatIfOverrides({}) }}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs border rounded-2xl transition-colors ${whatIfActive ? 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow' : 'text-text-secondary border-border-default hover:bg-bg-card-hover'}`}
+          >
+            <Edit3 size={14} /> What-If
+          </button>
           <button onClick={() => setShowBenchmarks(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs text-text-secondary border border-border-default rounded-2xl hover:bg-bg-card-hover transition-colors">
             <SlidersHorizontal size={14} /> Benchmarks
           </button>
@@ -957,79 +1063,115 @@ export default function MarketingPerformance() {
         </div>
       </div>
 
+      {/* ═══ What-If Input Bar ═══ */}
+      {whatIfActive && (
+        <div className="bg-bg-card border border-opt-yellow/30 rounded-2xl p-3 mb-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Edit3 size={14} className="text-opt-yellow" />
+            <span className="text-xs font-medium text-opt-yellow">What-If Forecast</span>
+            <span className="text-[10px] text-text-400 ml-1">Adjust inputs to see projected KPIs — changes are not saved</span>
+            <button onClick={() => setWhatIfOverrides({})} className="ml-auto text-[10px] text-text-400 hover:text-text-secondary">Reset</button>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+            {[
+              ['adspend', 'Adspend', '$'],
+              ['leads', 'Leads', '#'],
+              ['qualified_bookings', 'Q.Books', '#'],
+              ['live_calls', 'Live Calls', '#'],
+              ['offers', 'Offers', '#'],
+              ['closes', 'Closes', '#'],
+              ['trial_cash', 'Trial Cash', '$'],
+              ['ascensions', 'Ascensions', '#'],
+              ['ascend_cash', 'Asc Cash', '$'],
+            ].map(([key, label, prefix]) => (
+              <div key={key} className="flex flex-col gap-0.5">
+                <label className="text-[8px] uppercase text-text-400">{label}</label>
+                <input
+                  type="number"
+                  placeholder={Math.round(stats[key] || 0)}
+                  value={whatIfOverrides[key] ?? ''}
+                  onChange={e => setWhatIfOverrides(prev => ({ ...prev, [key]: e.target.value }))}
+                  className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ═══ KPI Sections ═══ */}
 
       {/* Spend & Lead Acquisition */}
       <Section title="Spend & Lead Acquisition" cols={8}>
-        <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} tip="Total Meta Ads spend (converted to USD)" />
-        <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} tip="New leads from GHL pipeline" />
-        <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} tip="Cost Per Lead = Adspend / Leads" />
-        <KPI label="A.Books" value={stats.auto_bookings} format="n" trailing={stats30.auto_bookings} tip="Auto bookings from Intro Call calendars" />
-        <KPI label="Cost/A.Book" value={stats.cost_per_auto_booking} format="$" trailing={stats30.cost_per_auto_booking} tip="Cost Per Auto Booking = Adspend / Auto Bookings" />
-        <KPI label="Q.Books" value={stats.qualified_bookings} format="n" trailing={stats30.qualified_bookings} tip="Strategy Call bookings (deduped per contact)" />
-        <KPI label="L→Q%" value={stats.lead_to_booking_pct} format="%" benchmark={bm.lead_to_booking} trailing={stats30.lead_to_booking_pct} tip="Lead to Qual Booking % = Q.Books / Leads" />
-        <KPI label="Cost/Q.Book" value={stats.cpb} format="$" benchmark={bm.cpb} trailing={stats30.cpb} tip="Cost Per Qual Booking = Adspend / Q.Books" />
+        <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={wf?.adspend} tip="Total Meta Ads spend (converted to USD)" />
+        <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={wf?.leads} tip="New leads from GHL pipeline" />
+        <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={wf?.cpl} tip="Cost Per Lead = Adspend / Leads" />
+        <KPI label="A.Books" value={stats.auto_bookings} format="n" trailing={stats30.auto_bookings} prev={sp.auto_bookings} whatIf={wf?.auto_bookings} tip="Auto bookings from Intro Call calendars" />
+        <KPI label="Cost/A.Book" value={stats.cost_per_auto_booking} format="$" trailing={stats30.cost_per_auto_booking} prev={sp.cost_per_auto_booking} whatIf={wf?.cost_per_auto_booking} tip="Cost Per Auto Booking = Adspend / Auto Bookings" />
+        <KPI label="Q.Books" value={stats.qualified_bookings} format="n" trailing={stats30.qualified_bookings} prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Strategy Call bookings (deduped per contact)" />
+        <KPI label="L→Q%" value={stats.lead_to_booking_pct} format="%" benchmark={bm.lead_to_booking} trailing={stats30.lead_to_booking_pct} prev={sp.lead_to_booking_pct} whatIf={wf?.lead_to_booking_pct} tip="Lead to Qual Booking % = Q.Books / Leads" />
+        <KPI label="Cost/Q.Book" value={stats.cpb} format="$" benchmark={bm.cpb} trailing={stats30.cpb} prev={sp.cpb} whatIf={wf?.cpb} tip="Cost Per Qual Booking = Adspend / Q.Books" />
       </Section>
 
       {/* Calls & Show Rates */}
       <Section title="Calls & Show Rates" cols={9}>
-        <KPI label="Booked" value={stats.qualified_bookings} format="n" tip="Total calls booked on calendar" />
-        <KPI label="Live" value={stats.live_calls} format="n" tip="Calls that actually happened (showed)" />
-        <KPI label="No Shows" value={stats.no_shows} format="n" tip="Booked - Live - Cancelled - Rescheduled" />
-        <KPI label="Cancelled" value={stats.cancels} format="n" tip="Cancelled DTF + Cancelled by Prospect" />
-        <KPI label="Resch" value={stats.reschedules} format="n" tip="Calls rescheduled to another date" />
-        <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} tip="Live / Booked (includes all no-shows)" />
-        <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} tip="Live / (Booked - Cancels - Reschedules)" />
-        <KPI label="Resch%" value={stats.reschedule_rate} format="%" tip="Reschedules / Booked" />
-        <KPI label="Cost/Live" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} tip="Adspend / Live Calls" />
+        <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar" />
+        <KPI label="Live" value={stats.live_calls} format="n" prev={sp.live_calls} whatIf={wf?.live_calls} tip="Calls that actually happened (showed)" />
+        <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="Booked - Live - Cancelled - Rescheduled" />
+        <KPI label="Cancelled" value={stats.cancels} format="n" prev={sp.cancels} tip="Cancelled DTF + Cancelled by Prospect" />
+        <KPI label="Resch" value={stats.reschedules} format="n" prev={sp.reschedules} tip="Calls rescheduled to another date" />
+        <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Live / Booked (includes all no-shows)" />
+        <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Live / (Booked - Cancels - Reschedules)" />
+        <KPI label="Resch%" value={stats.reschedule_rate} format="%" prev={sp.reschedule_rate} tip="Reschedules / Booked" />
+        <KPI label="Cost/Live" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} prev={sp.cost_per_live_call} whatIf={wf?.cost_per_live_call} tip="Adspend / Live Calls" />
       </Section>
 
       {/* Offers & Closes */}
       <Section title="Offers & Closes" cols={6}>
-        <KPI label="Offers Made" value={stats.offers} format="n" tip="Number of offers made on live calls" />
-        <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} tip="Offers / Live Calls" />
-        <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" tip="Adspend / Offers" />
-        <KPI label="Total Closes" value={stats.closes} format="n" tip="Deals closed (trial sign-ups)" />
-        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} tip="Closes / Live Calls" />
-        <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} tip="Cost Per Acquisition = Adspend / Closes" />
+        <KPI label="Offers Made" value={stats.offers} format="n" prev={sp.offers} whatIf={wf?.offers} tip="Number of offers made on live calls" />
+        <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} prev={sp.offer_rate} whatIf={wf?.offer_rate} tip="Offers / Live Calls" />
+        <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" prev={sp.cost_per_offer} whatIf={wf?.cost_per_offer} tip="Adspend / Offers" />
+        <KPI label="Total Closes" value={stats.closes} format="n" prev={sp.closes} whatIf={wf?.closes} tip="Deals closed (trial sign-ups)" />
+        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={wf?.close_rate} tip="Closes / Live Calls" />
+        <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} prev={sp.cpa_trial} whatIf={wf?.cpa_trial} tip="Cost Per Acquisition = Adspend / Closes" />
       </Section>
 
       {/* Trial Financials */}
       <Section title="Trial Financials" cols={4}>
-        <KPI label="Trial Cash Collected" value={stats.trial_cash} format="$" tip="Cash collected upfront from trial closes" />
-        <KPI label="Trial Contracted Rev" value={stats.trial_revenue} format="$" tip="Total contracted revenue from trial closes" />
-        <KPI label="Cash Collected %" value={stats.trial_cash_pct} format="%" benchmark={bm.trial_uf_cash_pct} trailing={stats30.trial_cash_pct} tip="Trial Cash / Trial Revenue" />
-        <KPI label="Trial FE Cash ROAS" value={stats.trial_fe_roas} format="x" benchmark={bm.trial_fe_roas} trailing={stats30.trial_fe_roas} tip="Trial Cash / Adspend" />
+        <KPI label="Trial Cash Collected" value={stats.trial_cash} format="$" prev={sp.trial_cash} whatIf={wf?.trial_cash} tip="Cash collected upfront from trial closes" />
+        <KPI label="Trial Contracted Rev" value={stats.trial_revenue} format="$" prev={sp.trial_revenue} whatIf={wf?.trial_revenue} tip="Total contracted revenue from trial closes" />
+        <KPI label="Cash Collected %" value={stats.trial_cash_pct} format="%" benchmark={bm.trial_uf_cash_pct} trailing={stats30.trial_cash_pct} prev={sp.trial_cash_pct} whatIf={wf?.trial_cash_pct} tip="Trial Cash / Trial Revenue" />
+        <KPI label="Trial FE Cash ROAS" value={stats.trial_fe_roas} format="x" benchmark={bm.trial_fe_roas} trailing={stats30.trial_fe_roas} prev={sp.trial_fe_roas} whatIf={wf?.trial_fe_roas} tip="Trial Cash / Adspend" />
       </Section>
 
       {/* Ascension */}
       <Section title="Ascension" cols={8}>
-        <KPI label="Total Ascensions" value={stats.ascensions} format="n" tip="Trial clients who ascended to full package" />
-        <KPI label="Ascension Rate" value={stats.ascend_rate} format="%" benchmark={bm.ascend_rate} trailing={stats30.ascend_rate} tip="Ascensions / Trial Closes" />
-        <KPI label="CPA (Ascend)" value={stats.cpa_ascend} format="$" benchmark={bm.cpa_ascend} tip="Adspend / Ascensions" />
-        <KPI label="Ascend Cash" value={stats.ascend_cash} format="$" tip="Cash collected from ascension deals" />
-        <KPI label="Ascend Revenue" value={stats.ascend_revenue} format="$" tip="Contracted revenue from ascension deals" />
-        <KPI label="% Cash Collected" value={stats.ascend_cash_pct} format="%" benchmark={bm.ascend_uf_cash_pct} trailing={stats30.ascend_cash_pct} tip="Ascend Cash / Ascend Revenue" />
-        <KPI label="Finance Offers" value={stats.finance_offers} format="n" tip="Ascension clients offered finance" />
-        <KPI label="Finance %" value={stats.finance_pct} format="%" tip="Finance Accepted / Ascensions" />
+        <KPI label="Total Ascensions" value={stats.ascensions} format="n" prev={sp.ascensions} whatIf={wf?.ascensions} tip="Trial clients who ascended to full package" />
+        <KPI label="Ascension Rate" value={stats.ascend_rate} format="%" benchmark={bm.ascend_rate} trailing={stats30.ascend_rate} prev={sp.ascend_rate} whatIf={wf?.ascend_rate} tip="Ascensions / Trial Closes" />
+        <KPI label="CPA (Ascend)" value={stats.cpa_ascend} format="$" benchmark={bm.cpa_ascend} prev={sp.cpa_ascend} whatIf={wf?.cpa_ascend} tip="Adspend / Ascensions" />
+        <KPI label="Ascend Cash" value={stats.ascend_cash} format="$" prev={sp.ascend_cash} whatIf={wf?.ascend_cash} tip="Cash collected from ascension deals" />
+        <KPI label="Ascend Revenue" value={stats.ascend_revenue} format="$" prev={sp.ascend_revenue} whatIf={wf?.ascend_revenue} tip="Contracted revenue from ascension deals" />
+        <KPI label="% Cash Collected" value={stats.ascend_cash_pct} format="%" benchmark={bm.ascend_uf_cash_pct} trailing={stats30.ascend_cash_pct} prev={sp.ascend_cash_pct} whatIf={wf?.ascend_cash_pct} tip="Ascend Cash / Ascend Revenue" />
+        <KPI label="Finance Offers" value={stats.finance_offers} format="n" prev={sp.finance_offers} tip="Ascension clients offered finance" />
+        <KPI label="Finance %" value={stats.finance_pct} format="%" prev={sp.finance_pct} tip="Finance Accepted / Ascensions" />
       </Section>
 
       {/* ROAS Overview */}
       <Section title="ROAS Overview" cols={4}>
-        <KPI label="All Cash Collected" value={stats.all_cash} format="$" tip="Trial Cash + Ascend Cash + AR Collected" />
-        <KPI label="Net FE Cash ROAS" value={stats.net_fe_roas} format="x" benchmark={bm.net_fe_roas} trailing={stats30.net_fe_roas} tip="(Trial Cash + Ascend Cash) / Adspend" />
-        <KPI label="Revenue ROAS" value={stats.revenue_roas} format="x" benchmark={bm.revenue_roas} trailing={stats30.revenue_roas} tip="(Trial Rev + Ascend Rev) / Adspend" />
-        <KPI label="All Cash ROAS" value={stats.all_cash_roas} format="x" benchmark={bm.all_cash_roas} trailing={stats30.all_cash_roas} tip="(Trial + Ascend + AR Cash) / Adspend" />
+        <KPI label="All Cash Collected" value={stats.all_cash} format="$" prev={sp.all_cash} whatIf={wf?.all_cash} tip="Trial Cash + Ascend Cash + AR Collected" />
+        <KPI label="Net FE Cash ROAS" value={stats.net_fe_roas} format="x" benchmark={bm.net_fe_roas} trailing={stats30.net_fe_roas} prev={sp.net_fe_roas} whatIf={wf?.net_fe_roas} tip="(Trial Cash + Ascend Cash) / Adspend" />
+        <KPI label="Revenue ROAS" value={stats.revenue_roas} format="x" benchmark={bm.revenue_roas} trailing={stats30.revenue_roas} prev={sp.revenue_roas} whatIf={wf?.revenue_roas} tip="(Trial Rev + Ascend Rev) / Adspend" />
+        <KPI label="All Cash ROAS" value={stats.all_cash_roas} format="x" benchmark={bm.all_cash_roas} trailing={stats30.all_cash_roas} prev={sp.all_cash_roas} whatIf={wf?.all_cash_roas} tip="(Trial + Ascend + AR Cash) / Adspend" />
       </Section>
 
       {/* AR & Refunds */}
       <Section title="AR & Refunds" cols={6}>
-        <KPI label="AR Collected" value={stats.ar_collected} format="$" tip="Accounts receivable payments collected" />
-        <KPI label="AR Defaulted" value={stats.ar_defaulted} format="$" tip="Accounts receivable payments defaulted" />
-        <KPI label="AR Success Rate" value={stats.ar_success_rate} format="%" benchmark={bm.ar_success_rate} tip="AR Collected / (AR Collected + AR Defaulted)" />
-        <KPI label="Refunds/Disputes (#)" value={stats.refund_count} format="n" tip="Number of refunds or disputes" />
-        <KPI label="Refunds Amount" value={stats.refund_amount} format="$" tip="Total dollar amount refunded" />
-        <KPI label="All Cash Collected" value={stats.all_cash} format="$" />
+        <KPI label="AR Collected" value={stats.ar_collected} format="$" prev={sp.ar_collected} tip="Accounts receivable payments collected" />
+        <KPI label="AR Defaulted" value={stats.ar_defaulted} format="$" prev={sp.ar_defaulted} tip="Accounts receivable payments defaulted" />
+        <KPI label="AR Success Rate" value={stats.ar_success_rate} format="%" benchmark={bm.ar_success_rate} prev={sp.ar_success_rate} tip="AR Collected / (AR Collected + AR Defaulted)" />
+        <KPI label="Refunds/Disputes (#)" value={stats.refund_count} format="n" prev={sp.refund_count} tip="Number of refunds or disputes" />
+        <KPI label="Refunds Amount" value={stats.refund_amount} format="$" prev={sp.refund_amount} tip="Total dollar amount refunded" />
+        <KPI label="All Cash Collected" value={stats.all_cash} format="$" prev={sp.all_cash} />
       </Section>
 
       {/* MTD Funnel */}
