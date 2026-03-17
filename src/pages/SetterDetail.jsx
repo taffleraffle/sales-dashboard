@@ -7,7 +7,7 @@ import DataTable from '../components/DataTable'
 import LeadStatusBadge from '../components/LeadStatusBadge'
 import { Loader, ChevronDown } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { sinceDate } from '../lib/dateUtils'
+import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { useSetterStats, useSetterEODs } from '../hooks/useSetterData'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { fetchAllPipelineSummaries, computeSpeedToLead } from '../services/ghlPipeline'
@@ -16,11 +16,12 @@ export default function SetterDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [range, setRange] = useState(30)
+  const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const [member, setMember] = useState(null)
   const [leads, setLeads] = useState([])
-  const stats = useSetterStats(id, range)
-  const { reports: myEodReports } = useSetterEODs(id, range)
-  const { reports: allReports } = useSetterEODs(null, range)
+  const stats = useSetterStats(id, days)
+  const { reports: myEodReports } = useSetterEODs(id, days)
+  const { reports: allReports } = useSetterEODs(null, days)
   const [showEodHistory, setShowEodHistory] = useState(false)
   const [allLeads, setAllLeads] = useState([])
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
@@ -58,7 +59,7 @@ export default function SetterDetail() {
 
   // Fetch WAVV aggregates (fast)
   useEffect(() => {
-    fetchWavvAggregates(range).then(setWavvAgg)
+    fetchWavvAggregates(days).then(setWavvAgg)
   }, [range])
 
   // Fetch recent calls for this setter (last 50, for the table)
@@ -86,7 +87,7 @@ export default function SetterDetail() {
     const allOpps = pipelineData.flatMap(p => p.summary.opportunities || [])
     if (allOpps.length === 0) { setLoadingSTL(false); return }
 
-    fetchWavvCallsForSTL(range).then(calls => {
+    fetchWavvCallsForSTL(days).then(calls => {
       if (calls.length > 0) {
         const result = computeSpeedToLead(allOpps, calls)
         setCompanyStl(result)

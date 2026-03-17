@@ -7,16 +7,17 @@ import DataTable from '../components/DataTable'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { supabase } from '../lib/supabase'
-import { sinceDate } from '../lib/dateUtils'
+import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { fetchAllPipelineSummaries, computeSpeedToLead } from '../services/ghlPipeline'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { Loader, ChevronDown, Plus, ChevronUp } from 'lucide-react'
 
 export default function SetterOverview() {
   const [range, setRange] = useState(30)
+  const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const { members: setters, loading: loadingMembers } = useTeamMembers('setter')
   const { members: closers } = useTeamMembers('closer')
-  const { reports, loading: loadingReports } = useSetterEODs(null, range)
+  const { reports, loading: loadingReports } = useSetterEODs(null, days)
   const [allLeads, setAllLeads] = useState([])
   const [loadingLeads, setLoadingLeads] = useState(true)
   const [pipelineData, setPipelineData] = useState([])
@@ -68,7 +69,7 @@ export default function SetterOverview() {
   useEffect(() => {
     setWavvLoaded(false)
     setStlCalls(null) // reset STL on range change
-    fetchWavvAggregates(range).then(agg => {
+    fetchWavvAggregates(days).then(agg => {
       setWavvAgg(agg)
       setWavvLoaded(true)
     }).catch(() => setWavvLoaded(true))
@@ -76,7 +77,7 @@ export default function SetterOverview() {
 
   // Fetch STL calls eagerly on mount/range change
   useEffect(() => {
-    fetchWavvCallsForSTL(range).then(setStlCalls).catch(() => setStlCalls([]))
+    fetchWavvCallsForSTL(days).then(setStlCalls).catch(() => setStlCalls([]))
   }, [range])
 
   // Fetch all setter_leads for the date range

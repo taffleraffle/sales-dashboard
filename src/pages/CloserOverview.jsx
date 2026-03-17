@@ -6,11 +6,13 @@ import Gauge from '../components/Gauge'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs } from '../hooks/useCloserData'
 import { Loader, Plus } from 'lucide-react'
+import { rangeToDays } from '../lib/dateUtils'
 
 export default function CloserOverview() {
   const [range, setRange] = useState(30)
+  const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const { members: closers, loading: loadingMembers } = useTeamMembers('closer')
-  const { reports, loading: loadingReports } = useCloserEODs(null, range)
+  const { reports, loading: loadingReports } = useCloserEODs(null, days)
 
   if (loadingMembers) {
     return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>

@@ -8,20 +8,22 @@ import { supabase } from '../lib/supabase'
 import { useCloserStats, useCloserEODs, useCloserTranscripts, useObjectionAnalysis } from '../hooks/useCloserData'
 import { analyzeObjections } from '../services/objectionAnalysis'
 import { syncFathomTranscripts } from '../services/fathomSync'
+import { rangeToDays } from '../lib/dateUtils'
 
 export default function CloserDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [range, setRange] = useState(30)
+  const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const [member, setMember] = useState(null)
   const [freshObjections, setFreshObjections] = useState(null)
   const [showEodHistory, setShowEodHistory] = useState(false)
   const syncedRef = useRef(false)
-  const stats = useCloserStats(id, range)
-  const { reports: myReports } = useCloserEODs(id, range)
-  const { reports: allReports } = useCloserEODs(null, range)
+  const stats = useCloserStats(id, days)
+  const { reports: myReports } = useCloserEODs(id, days)
+  const { reports: allReports } = useCloserEODs(null, days)
   const { transcripts, loading: loadingTranscripts } = useCloserTranscripts(id)
-  const { objections: storedObjections, loading: loadingObjections } = useObjectionAnalysis(id, range)
+  const { objections: storedObjections, loading: loadingObjections } = useObjectionAnalysis(id, days)
 
   const rawObjections = freshObjections || storedObjections
   const [objections, setObjections] = useState([])
@@ -85,7 +87,7 @@ export default function CloserDetail() {
   useEffect(() => {
     if (loadingObjections || loadingTranscripts) return
     if (transcripts.length > 0 && storedObjections.length === 0) {
-      analyzeObjections(id, range)
+      analyzeObjections(id, days)
         .then(() => {
           supabase
             .from('objection_analysis')
@@ -96,7 +98,7 @@ export default function CloserDetail() {
         })
         .catch(() => {})
     }
-  }, [id, range, loadingObjections, loadingTranscripts, transcripts.length, storedObjections.length])
+  }, [id, days, loadingObjections, loadingTranscripts, transcripts.length, storedObjections.length])
 
   // Company-wide averages from all closer EODs
   const companyTotals = allReports.reduce((acc, r) => ({
@@ -232,7 +234,7 @@ export default function CloserDetail() {
         <div className="flex items-center gap-2 mb-4">
           <AlertTriangle size={16} className="text-warning" />
           <h2 className="text-sm font-medium">Most Common Objections</h2>
-          <span className="text-xs text-text-400 ml-auto">Last {range} days &middot; Auto-analyzed from Fathom</span>
+          <span className="text-xs text-text-400 ml-auto">Last {days} days &middot; Auto-analyzed from Fathom</span>
         </div>
         {loadingObjections ? (
           <p className="text-text-400 text-sm py-4 text-center">Loading...</p>
