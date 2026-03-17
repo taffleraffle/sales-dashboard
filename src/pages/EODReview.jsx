@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Check, Edit3, Loader, ChevronLeft, ChevronRight, MessageSquare, Calendar, RefreshCw, Plus, Search, X, Zap, Lock } from 'lucide-react'
+import { Check, Edit3, Loader, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, Calendar, RefreshCw, Plus, Search, X, Zap, Lock } from 'lucide-react'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useEODSubmit } from '../hooks/useEOD'
 import { useAuth } from '../contexts/AuthContext'
@@ -757,7 +757,7 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
 }
 
 // Setter Dashboard with pipeline stats + EOD form
-function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, setConfirmed, submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0 }) {
+function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, setConfirmed, savedSetterLeads = [], submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0 }) {
   const [pipeline, setPipeline] = useState({ set: 0, booked: 0, showed: 0, closed: 0, noShow: 0, cancelled: 0, revenue: 0, total: 0 })
   const [weeklyStats, setWeeklyStats] = useState({ sets: 0, shows: 0, closes: 0, revenue: 0, showRate: 0, closeRate: 0 })
   const [loading, setLoading] = useState(true)
@@ -937,7 +937,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
   return (
     <div className="space-y-4">
       {/* Confirmation banner */}
-      {confirmed && (
+      {confirmed && (<>
         <div className="bg-bg-card border border-success/30 rounded-2xl p-6 mb-2">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
@@ -982,7 +982,44 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
             <span>Rating: <strong className="text-text-primary">{setterData.self_rating}/10</strong></span>
           </div>
         </div>
-      )}
+
+        {/* Leads set + rescheduled — read-only detail */}
+        {savedSetterLeads.length > 0 && (
+          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+            <div className="px-5 py-3 border-b border-border-default">
+              <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                Leads ({savedSetterLeads.length})
+              </p>
+            </div>
+            <div className="divide-y divide-border-default/30">
+              {savedSetterLeads.map(lead => {
+                const statusBadge = lead.status === 'set' ? { label: 'Set', cls: 'bg-success/15 text-success' }
+                  : lead.status === 'rescheduled' ? { label: 'Rescheduled', cls: 'bg-blue-500/15 text-blue-400' }
+                  : lead.status === 'showed' || lead.status === 'not_closed' ? { label: 'Showed', cls: 'bg-opt-yellow/15 text-opt-yellow' }
+                  : lead.status === 'closed' ? { label: 'Closed', cls: 'bg-success/15 text-success' }
+                  : lead.status === 'no_show' ? { label: 'No Show', cls: 'bg-danger/15 text-danger' }
+                  : lead.status === 'cancelled' ? { label: 'Cancelled', cls: 'bg-text-400/15 text-text-400' }
+                  : { label: lead.status || '—', cls: 'bg-text-400/15 text-text-400' }
+                return (
+                  <div key={lead.id} className="px-5 py-3 flex items-center gap-3">
+                    <span className="font-medium text-sm min-w-[140px]">{lead.lead_name}</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${statusBadge.cls}`}>{statusBadge.label}</span>
+                    {lead.lead_source && lead.lead_source !== 'manual' && (
+                      <span className="text-[10px] text-text-400 bg-bg-primary px-1.5 py-0.5 rounded">{lead.lead_source === 'ghl' ? 'GHL' : lead.lead_source}</span>
+                    )}
+                    {lead.appointment_date && (
+                      <span className="text-[10px] text-text-400 ml-auto">Appt: {lead.appointment_date}</span>
+                    )}
+                    {lead.closer?.name && (
+                      <span className="text-[10px] text-text-400">→ {lead.closer.name}</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </>)}
 
       {/* Pipeline KPIs — always show */}
       {!confirmed && <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
@@ -1903,7 +1940,10 @@ export default function EODReview() {
   const [setterSetLeads, setSetterSetLeads] = useState([])
   const [setterRescheduleLeads, setSetterRescheduleLeads] = useState([])
 
-  // Load existing setter EOD data into form when viewing a past date
+  // Saved leads for read-only view
+  const [savedSetterLeads, setSavedSetterLeads] = useState([])
+
+  // Load existing setter EOD data + assigned leads when viewing a past date
   useEffect(() => {
     if (tab !== 'setter' || !selectedMember) return
     async function loadExistingSetterEOD() {
@@ -1927,13 +1967,22 @@ export default function EODReview() {
           what_went_poorly: eod.what_went_poorly || '',
         })
         if (eod.is_confirmed) setConfirmed(true)
+
+        // Load assigned leads for this EOD
+        const { data: leads } = await supabase
+          .from('setter_leads')
+          .select('id, lead_name, lead_source, date_set, appointment_date, status, closer:team_members!setter_leads_closer_id_fkey(name)')
+          .eq('setter_id', selectedMember)
+          .eq('date_set', selectedDate)
+          .order('id')
+        setSavedSetterLeads(leads || [])
       } else {
-        // Reset form for new EOD
         setSetterData({
           total_leads: 0, outbound_calls: 0, pickups: 0,
           meaningful_conversations: 0, sets: 0, reschedules: 0,
           self_rating: 7, what_went_well: '', what_went_poorly: '',
         })
+        setSavedSetterLeads([])
         setConfirmed(false)
       }
     }
@@ -2272,7 +2321,7 @@ export default function EODReview() {
                 </div>
               </div>
 
-              {/* Read-only call details */}
+              {/* Read-only call details — expandable */}
               {calls.length > 0 && (
                 <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
                   <div className="px-5 py-3 border-b border-border-default">
@@ -2280,6 +2329,7 @@ export default function EODReview() {
                   </div>
                   <div className="divide-y divide-border-default/30">
                     {calls.map((call, i) => {
+                      const key = call.ghl_event_id || call.lead_id || `ro-${i}`
                       const isAsc = call.call_type === 'ascension'
                       const outcomeBadge = call.outcome === 'closed' ? { label: 'Closed', cls: 'bg-success/15 text-success' }
                         : call.outcome === 'ascended' ? { label: 'Ascended', cls: 'bg-cyan-500/15 text-cyan-400' }
@@ -2291,24 +2341,67 @@ export default function EODReview() {
                       const typeBadge = isAsc ? { label: 'ASC', cls: 'text-cyan-400' }
                         : call.call_type === 'follow_up' ? { label: 'FU', cls: 'text-purple-400' }
                         : { label: 'NC', cls: 'text-opt-yellow' }
+                      const isExpanded = expandedCall === key
+                      const hasDetail = call.notes || call.fathom_summary || call.contact_email || call.contact_phone
 
                       return (
-                        <div key={call.ghl_event_id || call.lead_id || `ro-${i}`} className="px-5 py-3 flex items-center gap-3">
-                          <span className={`text-[10px] font-semibold ${typeBadge.cls} w-6`}>{typeBadge.label}</span>
-                          <span className="font-medium text-sm min-w-[120px]">{call.lead_name}</span>
-                          {call.start_time && <span className="text-xs text-text-400 font-mono">{call.start_time}</span>}
-                          {call.setter_name && call.setter_name !== '—' && (
-                            <span className="text-[10px] text-text-400 bg-bg-primary px-1.5 py-0.5 rounded">{call.setter_name}</span>
-                          )}
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${outcomeBadge.cls}`}>{outcomeBadge.label}</span>
-                          <div className="ml-auto flex items-center gap-3 text-xs">
-                            {(call.revenue > 0 || call.cash_collected > 0) && (
-                              <>
-                                {call.cash_collected > 0 && <span className="text-opt-yellow font-medium">${parseFloat(call.cash_collected).toLocaleString()} cash</span>}
-                                {call.revenue > 0 && <span className="text-success">${parseFloat(call.revenue).toLocaleString()} rev</span>}
-                              </>
+                        <div key={key}>
+                          <div
+                            className="px-5 py-3 flex items-center gap-3 cursor-pointer hover:bg-bg-card-hover/50 transition-colors"
+                            onClick={() => setExpandedCall(isExpanded ? null : key)}
+                          >
+                            <ChevronDown size={12} className={`text-text-400 transition-transform flex-shrink-0 ${isExpanded ? '' : '-rotate-90'}`} />
+                            <span className={`text-[10px] font-semibold ${typeBadge.cls} w-6`}>{typeBadge.label}</span>
+                            <span className="font-medium text-sm min-w-[120px]">{call.lead_name}</span>
+                            {call.start_time && <span className="text-xs text-text-400 font-mono">{call.start_time}</span>}
+                            {call.setter_name && call.setter_name !== '—' && (
+                              <span className="text-[10px] text-text-400 bg-bg-primary px-1.5 py-0.5 rounded">{call.setter_name}</span>
                             )}
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${outcomeBadge.cls}`}>{outcomeBadge.label}</span>
+                            <div className="ml-auto flex items-center gap-3 text-xs">
+                              {call.cash_collected > 0 && <span className="text-opt-yellow font-medium">${parseFloat(call.cash_collected).toLocaleString()} cash</span>}
+                              {call.revenue > 0 && <span className="text-success">${parseFloat(call.revenue).toLocaleString()} rev</span>}
+                              {call.fathom_summary && <MessageSquare size={10} className="text-text-400" />}
+                            </div>
                           </div>
+                          {isExpanded && (
+                            <div className="px-5 pb-3 pl-12 space-y-2">
+                              {/* Contact info */}
+                              {(call.contact_email || call.contact_phone) && (
+                                <div className="flex gap-4 text-xs text-text-400">
+                                  {call.contact_email && <span>Email: <strong className="text-text-secondary">{call.contact_email}</strong></span>}
+                                  {call.contact_phone && <span>Phone: <strong className="text-text-secondary">{call.contact_phone}</strong></span>}
+                                </div>
+                              )}
+                              {/* Financials */}
+                              {(call.revenue > 0 || call.cash_collected > 0) && (
+                                <div className="flex gap-4 text-xs">
+                                  <span className="text-text-400">Revenue: <strong className="text-success">${parseFloat(call.revenue || 0).toLocaleString()}</strong></span>
+                                  <span className="text-text-400">Cash: <strong className="text-opt-yellow">${parseFloat(call.cash_collected || 0).toLocaleString()}</strong></span>
+                                </div>
+                              )}
+                              {/* Fathom summary */}
+                              {call.fathom_summary && (
+                                <div className="bg-bg-primary rounded-xl p-3">
+                                  <p className="text-[10px] text-text-400 uppercase mb-1 flex items-center gap-1">
+                                    <MessageSquare size={10} /> Fathom Summary
+                                    {call.fathom_duration && <span className="ml-1">({Math.round(call.fathom_duration / 60)}m)</span>}
+                                  </p>
+                                  <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">{call.fathom_summary}</p>
+                                </div>
+                              )}
+                              {/* Notes */}
+                              {call.notes && !call.fathom_summary && (
+                                <div className="text-xs text-text-400">
+                                  <span className="uppercase text-[10px]">Notes: </span>
+                                  <span className="text-text-secondary">{call.notes}</span>
+                                </div>
+                              )}
+                              {!hasDetail && (
+                                <p className="text-[10px] text-text-400 italic">No additional details recorded</p>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )
                     })}
@@ -2908,6 +3001,7 @@ export default function EODReview() {
           handleConfirmSetter={handleConfirmSetter}
           confirmed={confirmed}
           setConfirmed={setConfirmed}
+          savedSetterLeads={savedSetterLeads}
           submitting={submitting}
           setLeadsForSets={setSetterSetLeads}
           setRescheduleLeadsForParent={setSetterRescheduleLeads}
