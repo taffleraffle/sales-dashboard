@@ -5,6 +5,8 @@ import DateRangeSelector from '../components/DateRangeSelector'
 import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
+import { todayET } from '../lib/dateUtils'
+
 const toLocalDateStr = (d) => {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -376,7 +378,7 @@ const manualFields = [
 ]
 
 function AddEntryModal({ onSave, onClose }) {
-  const [form, setForm] = useState({ date: toLocalDateStr(new Date()) })
+  const [form, setForm] = useState({ date: todayET() })
   const [saving, setSaving] = useState(false)
   const handleSubmit = async (e) => {
     e.preventDefault()

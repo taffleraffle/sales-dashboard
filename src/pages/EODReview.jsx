@@ -23,6 +23,8 @@ function getOutcomeOptions(callType) {
   return closingOutcomes
 }
 
+import { todayET } from '../lib/dateUtils'
+
 // Format a Date object as YYYY-MM-DD in local timezone (avoids UTC shift from toISOString)
 const toLocalDateStr = (d) => {
   const y = d.getFullYear()
@@ -33,8 +35,7 @@ const toLocalDateStr = (d) => {
 
 const formatDateLabel = (dateStr) => {
   const d = new Date(dateStr + 'T12:00:00')
-  const today = new Date()
-  today.setHours(12, 0, 0, 0)
+  const today = new Date(todayET() + 'T12:00:00')
   const diff = Math.round((today - d) / 86400000)
   const weekday = d.toLocaleDateString('en-US', { weekday: 'short' })
   const month = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -1264,7 +1265,7 @@ export default function EODReview() {
   })
   const [selectedDate, setSelectedDate] = useState(() => {
     const params = new URLSearchParams(window.location.search)
-    return params.get('date') || toLocalDateStr(new Date())
+    return params.get('date') || todayET()
   })
   const [calls, setCalls] = useState([])
   const [loadingCalls, setLoadingCalls] = useState(false)
@@ -1274,7 +1275,7 @@ export default function EODReview() {
   const { members: setters } = useTeamMembers('setter')
   const { submitCloserEOD, submitSetterEOD, submitting } = useEODSubmit()
 
-  const today = toLocalDateStr(new Date())
+  const today = todayET()
 
   const shiftDate = (days) => {
     const d = new Date(selectedDate + 'T12:00:00')
@@ -1293,10 +1294,10 @@ export default function EODReview() {
   const [allEodHistory, setAllEodHistory] = useState([])
   const [loadingAllHistory, setLoadingAllHistory] = useState(false)
   const [historyFrom, setHistoryFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 7)
+    const d = new Date(todayET() + 'T12:00:00'); d.setDate(d.getDate() - 7)
     return toLocalDateStr(d)
   })
-  const [historyTo, setHistoryTo] = useState(() => toLocalDateStr(new Date()))
+  const [historyTo, setHistoryTo] = useState(() => todayET())
 
   const addManualCall = (lead) => {
     setShowLeadPicker(false)

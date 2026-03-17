@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { todayET } from '../lib/dateUtils'
 import KPICard from '../components/KPICard'
 import DateRangeSelector from '../components/DateRangeSelector'
 import { Loader, Phone, DollarSign, Target, BarChart3, Zap, Users, TrendingUp, Award, Clock, ArrowUpRight, ChevronDown, ChevronUp, Check, X, Trophy } from 'lucide-react'
@@ -238,7 +239,7 @@ export default function SalesOverview() {
 
   useEffect(() => {
     async function checkPending() {
-      const today = new Date().toISOString().split('T')[0]
+      const today = todayET()
       const [closerEods, setterEods] = await Promise.all([
         supabase.from('closer_eod_reports').select('closer_id').eq('report_date', today).eq('is_confirmed', true),
         supabase.from('setter_eod_reports').select('setter_id').eq('report_date', today).eq('is_confirmed', true),
@@ -261,7 +262,7 @@ export default function SalesOverview() {
     // Only show once per session
     if (sessionStorage.getItem('celebration_shown')) return
     async function checkTodayCloses() {
-      const today = new Date().toISOString().split('T')[0]
+      const today = todayET()
       // Get today's closer EOD report IDs
       const { data: todayEods } = await supabase
         .from('closer_eod_reports')

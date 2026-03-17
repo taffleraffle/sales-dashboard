@@ -41,3 +41,11 @@ export function toLocalDateStr(d) {
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
 }
+
+/**
+ * Get today's date in US Eastern timezone (YYYY-MM-DD).
+ * The sales team operates in US Eastern, so "today" should always be ET.
+ */
+export function todayET() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+}
