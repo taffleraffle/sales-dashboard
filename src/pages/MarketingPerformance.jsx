@@ -67,7 +67,10 @@ const fmt = (v, format) => format === '$' ? f$(v) : format === '%' ? fP(v) : for
 
 // ── KPI Card with benchmark + info tooltip + period arrow ─────────
 function KPI({ label, value, format, benchmark, trailing, prev, tip, whatIf }) {
-  const lowerIsBetter = format === '$' && !label.includes('ROAS') && !label.includes('Cash') && !label.includes('Revenue') && !label.includes('AR')
+  // Cost metrics where lower = better (CPL, CPB, CPA, Cost/Live, Cost Per Offer)
+  const costLabels = ['CPL', 'Cost/', 'CPA', 'Resch%']
+  const lowerIsBetter = costLabels.some(c => label.includes(c))
+  // Only color red/green if there's a benchmark to compare against
   const isGood = benchmark != null && value !== 0 && (lowerIsBetter ? value <= benchmark : value >= benchmark)
   const isBad = benchmark != null && value !== 0 && !isGood
 
