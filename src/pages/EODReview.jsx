@@ -981,7 +981,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
             <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">
               {selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()} &middot; Activity
             </h3>
-            <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
               {[
                 ['Leads Worked', setterData.total_leads],
                 ['Dials', setterData.outbound_calls],
@@ -1014,7 +1014,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
                     : lead.status === 'no_show' ? { label: 'No Show', cls: 'bg-danger/15 text-danger' }
                     : { label: lead.status || 'Set', cls: 'bg-success/15 text-success' }
                   return (
-                    <div key={lead.id} className="bg-bg-primary border border-border-default rounded-xl px-4 py-2.5 flex items-center gap-3">
+                    <div key={lead.id} className="bg-bg-primary border border-border-default rounded-xl px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-2 sm:gap-3">
                       <span className="text-[10px] text-opt-yellow font-semibold w-12">Set {i + 1}:</span>
                       <span className="font-medium text-sm">{lead.lead_name}</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${statusBadge.cls}`}>{statusBadge.label}</span>
@@ -1042,7 +1042,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
               </h3>
               <div className="space-y-2">
                 {savedSetterLeads.filter(l => l.status === 'rescheduled').map((lead, i) => (
-                  <div key={lead.id} className="bg-bg-primary border border-border-default rounded-xl px-4 py-2.5 flex items-center gap-3">
+                  <div key={lead.id} className="bg-bg-primary border border-border-default rounded-xl px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-2 sm:gap-3">
                     <span className="text-[10px] text-blue-400 font-semibold w-16">Resched {i + 1}:</span>
                     <span className="font-medium text-sm">{lead.lead_name}</span>
                     <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-500/15 text-blue-400">Rescheduled</span>
@@ -1058,7 +1058,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           {/* Self Assessment — read-only */}
           <div className="bg-bg-card border border-border-default rounded-2xl p-4">
             <h3 className="text-[11px] text-text-400 uppercase font-medium mb-3">Self Assessment</h3>
-            <div className="flex items-start gap-6">
+            <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-6">
               <div>
                 <label className="text-[10px] text-text-400 uppercase block mb-1">Rating</label>
                 <div className="bg-bg-primary border border-border-default rounded px-3 py-1.5 text-lg font-bold text-center w-14">
@@ -1131,7 +1131,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
               {[
                 ['Leads Worked', 'total_leads'],
                 ['Dials', 'outbound_calls'],
@@ -2365,7 +2365,7 @@ export default function EODReview() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
                   <div className="text-center p-3 bg-bg-primary rounded-2xl">
                     <p className="text-xl font-bold">{summary.booked}</p>
                     <p className="text-[10px] text-text-400 uppercase">Booked</p>
@@ -2436,7 +2436,7 @@ export default function EODReview() {
                       return (
                         <div key={key}>
                           <div
-                            className="px-5 py-3 flex items-center gap-3 cursor-pointer hover:bg-bg-card-hover/50 transition-colors"
+                            className="px-3 sm:px-5 py-3 flex flex-wrap items-center gap-2 sm:gap-3 cursor-pointer hover:bg-bg-card-hover/50 transition-colors"
                             onClick={() => setExpandedCall(isExpanded ? null : key)}
                           >
                             <ChevronDown size={12} className={`text-text-400 transition-transform flex-shrink-0 ${isExpanded ? '' : '-rotate-90'}`} />

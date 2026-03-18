@@ -206,7 +206,7 @@ export default function SalesChatWidget() {
 
   const widgetSize = expanded
     ? 'fixed inset-0 z-[100]'
-    : 'fixed bottom-20 md:bottom-6 right-4 md:right-6 w-[calc(100vw-2rem)] md:w-[480px] h-[70vh] md:h-[600px] z-[100]'
+    : 'fixed bottom-4 sm:bottom-6 right-2 sm:right-6 w-[calc(100vw-1rem)] sm:w-[480px] h-[60vh] sm:h-[600px] z-[100]'
 
   return (
     <>
@@ -214,7 +214,7 @@ export default function SalesChatWidget() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-[100] w-14 h-14 rounded-full bg-opt-yellow text-bg-primary shadow-[0_0_30px_rgba(212,245,12,0.3)] hover:shadow-[0_0_40px_rgba(212,245,12,0.5)] flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+          className="fixed bottom-4 sm:bottom-6 right-4 sm:right-6 z-[100] w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-opt-yellow text-bg-primary shadow-[0_0_30px_rgba(212,245,12,0.3)] hover:shadow-[0_0_40px_rgba(212,245,12,0.5)] flex items-center justify-center transition-all hover:scale-105 active:scale-95"
         >
           <MessageSquare size={24} />
         </button>
@@ -266,7 +266,7 @@ export default function SalesChatWidget() {
                     <button
                       key={i}
                       onClick={() => sendMessage(q)}
-                      className="w-full text-left px-3 py-2 rounded-xl bg-bg-primary border border-border-default hover:border-opt-yellow/30 hover:bg-bg-card-hover text-xs text-text-secondary transition-colors"
+                      className="w-full text-left px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-bg-primary border border-border-default hover:border-opt-yellow/30 hover:bg-bg-card-hover text-[11px] sm:text-xs text-text-secondary transition-colors line-clamp-2"
                     >
                       {q}
                     </button>

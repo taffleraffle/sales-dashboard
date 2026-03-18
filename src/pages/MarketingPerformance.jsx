@@ -425,7 +425,7 @@ function DailyTracker({ entries, onDelete, onSave }) {
       {/* Edit panel */}
       {editDate && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setEditDate(null)}>
-          <div className="bg-bg-card border border-border-default rounded-2xl w-[520px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="bg-bg-card border border-border-default rounded-2xl w-[calc(100vw-2rem)] max-w-[520px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-border-default">
               <div className="flex items-center gap-2">
                 <Edit3 size={14} className="text-opt-yellow" />
@@ -775,7 +775,7 @@ function CSVImportModal({ onClose, onImport }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl w-[640px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-bg-card border border-border-default rounded-2xl w-[calc(100vw-2rem)] max-w-[640px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-default">
           <div className="flex items-center gap-2">
             <Upload size={16} className="text-opt-yellow" />
@@ -1144,7 +1144,7 @@ export default function MarketingPerformance() {
             <span className="text-[10px] text-text-400 ml-1">Adjust any value — changes cascade through the funnel automatically</span>
             <button onClick={() => { setWhatIfOverrides({}); setWhatIfDraft({}) }} className="ml-auto text-[10px] text-text-400 hover:text-text-secondary">Reset</button>
           </div>
-          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-2">
             {[
               ['adspend', 'Adspend', '$', stats.adspend],
               ['leads', 'Leads', '#', stats.leads],
@@ -1166,7 +1166,7 @@ export default function MarketingPerformance() {
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
             {[
               ['show_rate', 'Show Rate %', '%', stats.gross_show_rate],
               ['offer_rate', 'Offer Rate %', '%', stats.offer_rate],
