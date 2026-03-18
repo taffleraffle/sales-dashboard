@@ -66,7 +66,7 @@ export async function buildSalesContext() {
       .gte('appointment_date', d30s).order('appointment_date', { ascending: false }).limit(500),
     supabase.from('closer_transcripts').select('closer_id, prospect_name, meeting_date, duration_seconds, summary, outcome')
       .gte('meeting_date', d30s).order('meeting_date', { ascending: false }).limit(100),
-    supabase.from('closer_calls').select('prospect_name, call_type, outcome, revenue, cash_collected, created_at')
+    supabase.from('closer_calls').select('prospect_name, call_type, outcome, revenue, cash_collected, created_at, eod_report:closer_eod_reports!closer_calls_eod_report_id_fkey(report_date)')
       .gte('created_at', d30.toISOString()).order('created_at', { ascending: false }).limit(500),
     fetchGHLLeads(d90),
   ])
@@ -297,12 +297,17 @@ ${(() => {
   const STRAT_CALS = new Set(['9yoQVPBkNX4tWYmcDkf3','cEyqCFAsPLDkUV8n982h','HDsTrgpsFOXw9V4AkZGq','aQsmGwANALCwJBI7G9vT','StLqrES6WMO8f3Obdu9d','3mLE6t6rCKDdIuIfvP9j'])
   const appts = (appointmentsRes.data || []).filter(a => a.start_time && a.appointment_status !== 'cancelled' && STRAT_CALS.has(a.calendar_name))
 
-  // Build a lookup from closer_calls outcomes by matching prospect name + date
+  // Build a lookup from closer_calls outcomes by matching prospect name + report date
   const callOutcomes = {}
   for (const c of closerCalls) {
-    const date = c.created_at?.split('T')[0]
-    const name = c.prospect_name?.toLowerCase().split(' ')[0]
-    if (date && name) callOutcomes[`${date}:${name}`] = { outcome: c.outcome, revenue: parseFloat(c.revenue || 0), cash: parseFloat(c.cash_collected || 0) }
+    // Use EOD report_date (actual appointment date), not created_at (when record was saved)
+    const date = c.eod_report?.report_date || c.created_at?.split('T')[0]
+    // Extract first name, ignoring calendar suffixes like "- RemodelerConnect Strategy Call"
+    const cleanName = (c.prospect_name || '').split(/\s*-\s*/)[0].trim()
+    const firstName = cleanName.toLowerCase().split(/\s+/)[0]
+    if (date && firstName && !firstName.startsWith('historical')) {
+      callOutcomes[`${date}:${firstName}`] = { outcome: c.outcome, revenue: parseFloat(c.revenue || 0), cash: parseFloat(c.cash_collected || 0) }
+    }
   }
 
   const byHour = {}
@@ -316,8 +321,9 @@ ${(() => {
     if (!byHour[hour]) byHour[hour] = { total: 0, showed: 0, closed: 0, noShow: 0, rescheduled: 0, revenue: 0 }
     byHour[hour].total++
 
-    // Match appointment to closer_call outcome by name + date
-    const firstName = a.contact_name?.toLowerCase().split(/[\s-]/)[0]
+    // Match appointment to closer_call outcome by first name + date
+    const cleanApptName = (a.contact_name || '').split(/\s*-\s*/)[0].trim()
+    const firstName = cleanApptName.toLowerCase().split(/\s+/)[0]
     const callMatch = callOutcomes[`${a.appointment_date}:${firstName}`]
     const outcome = a.outcome || callMatch?.outcome || null
 
