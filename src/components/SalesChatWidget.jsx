@@ -204,25 +204,22 @@ export default function SalesChatWidget() {
     setStreamingText('')
   }
 
-  const widgetSize = expanded
-    ? 'fixed inset-0 z-[100]'
-    : 'fixed bottom-4 sm:bottom-6 right-2 sm:right-6 w-[calc(100vw-1rem)] sm:w-[480px] h-[60vh] sm:h-[600px] z-[100]'
-
   return (
     <>
-      {/* Toggle button */}
+      {/* Side tab — fixed to right edge, vertically centered */}
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-4 sm:bottom-6 right-4 sm:right-6 z-[100] w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-opt-yellow text-bg-primary shadow-[0_0_30px_rgba(212,245,12,0.3)] hover:shadow-[0_0_40px_rgba(212,245,12,0.5)] flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+          className="fixed right-0 top-1/2 -translate-y-1/2 z-[60] bg-opt-yellow text-bg-primary rounded-l-xl px-1.5 py-3 shadow-[0_0_20px_rgba(212,245,12,0.2)] hover:shadow-[0_0_30px_rgba(212,245,12,0.4)] hover:px-2.5 transition-all"
+          title="Sales Intelligence"
         >
-          <MessageSquare size={24} />
+          <MessageSquare size={18} />
         </button>
       )}
 
-      {/* Chat panel */}
+      {/* Chat panel — slides from right */}
       {open && (
-        <div className={`${widgetSize} flex flex-col bg-bg-card border border-border-default shadow-2xl overflow-hidden ${expanded ? 'rounded-none' : 'rounded-2xl'}`}>
+        <div className={`fixed top-0 right-0 h-full z-[100] flex flex-col bg-bg-card border-l border-border-default shadow-2xl transition-all ${expanded ? 'w-full' : 'w-[calc(100vw-3rem)] sm:w-[420px] md:w-[480px]'}`}>
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-bg-sidebar shrink-0">
             <div className="flex items-center gap-2.5">
