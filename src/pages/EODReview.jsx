@@ -793,7 +793,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
       let dials = 0, pickups = 0, mcs = 0
       for (const c of calls) {
         dials++
-        if ((c.call_duration || 0) > 15) pickups++
+        if ((c.call_duration || 0) > 45) pickups++
         if ((c.call_duration || 0) >= 60) mcs++
       }
       setWavvStats({ dials, pickups, mcs })

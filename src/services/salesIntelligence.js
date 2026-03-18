@@ -90,7 +90,7 @@ export async function buildSalesContext() {
     const uid = c.user_id || 'unknown'
     if (!wavvByUser[uid]) wavvByUser[uid] = { dials: 0, pickups: 0, mcs: 0 }
     wavvByUser[uid].dials++
-    if ((c.call_duration || 0) > 15) wavvByUser[uid].pickups++
+    if ((c.call_duration || 0) > 45) wavvByUser[uid].pickups++
     if ((c.call_duration || 0) >= 60) wavvByUser[uid].mcs++
     const day = c.started_at?.split('T')[0]
     if (day) wavvByDate[day] = (wavvByDate[day] || 0) + 1

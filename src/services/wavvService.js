@@ -4,14 +4,14 @@ import { sinceDate } from '../lib/dateUtils'
 /**
  * Classify a call by duration:
  * - Any call = 1 dial
- * - duration > 15s = pickup (someone answered — filters out voicemails/hangups)
+ * - duration > 45s = pickup (someone answered — filters out voicemails/short rings)
  * - duration >= 60s = meaningful conversation (matches WAVV "Outbound Conversations" = calls > 1 min)
  * Note: "sets" are NOT derived from call duration — they come from setter_leads or EOD reports only.
  */
 function classifyCall(duration) {
   const d = duration || 0
   return {
-    pickup: d > 15,
+    pickup: d > 45,
     mc: d >= 60,
   }
 }

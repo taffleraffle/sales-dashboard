@@ -292,8 +292,8 @@ export default function SetterDetail() {
                     {grouped.map(g => {
                       const bestCall = g.calls.reduce((best, c) => (c.call_duration || 0) > (best.call_duration || 0) ? c : best, g.calls[0])
                       const bestDur = bestCall.call_duration || 0
-                      const bestType = bestDur >= 60 ? 'MC' : bestDur > 0 ? 'Pickup' : 'No Answer'
-                      const bestColor = bestDur >= 60 ? 'text-success' : bestDur > 0 ? 'text-opt-yellow' : 'text-text-400'
+                      const bestType = bestDur >= 60 ? 'MC' : bestDur > 45 ? 'Pickup' : 'No Answer'
+                      const bestColor = bestDur >= 60 ? 'text-success' : bestDur > 45 ? 'text-opt-yellow' : 'text-text-400'
                       const lastCall = g.calls[0] // already sorted desc
                       const isExpanded = expandedCall === g.key
                       const hasMultiple = g.calls.length > 1
@@ -334,8 +334,8 @@ export default function SetterDetail() {
                           </tr>
                           {isExpanded && g.calls.map((c, ci) => {
                             const dur = c.call_duration || 0
-                            const type = dur >= 60 ? 'MC' : dur > 0 ? 'Pickup' : 'No Answer'
-                            const typeColor = dur >= 60 ? 'text-success' : dur > 0 ? 'text-opt-yellow' : 'text-text-400'
+                            const type = dur >= 60 ? 'MC' : dur > 45 ? 'Pickup' : 'No Answer'
+                            const typeColor = dur >= 60 ? 'text-success' : dur > 45 ? 'text-opt-yellow' : 'text-text-400'
                             return (
                               <tr key={ci} className="bg-bg-primary/50 border-b border-border-default/20">
                                 <td className="px-3 py-1"></td>
