@@ -4,14 +4,16 @@ import { supabase } from '../lib/supabase'
 import { buildSalesContext } from '../services/salesIntelligence'
 
 const SUGGESTED_QUESTIONS = [
-  'What time of day do most leads come in?',
-  'How are the setters performing this week?',
+  'What time of day has the best show rate?',
+  'What time of day has the best close rate?',
   'What are our close rates and show rates?',
   'Give me a full funnel breakdown for the last 30 days',
+  'How are the setters performing this week?',
   'How many dials has each setter done this week?',
   'What is our cost per acquisition?',
   'Compare closer performance this month',
   'What day of the week gets the most leads?',
+  'What is our speed to lead average?',
 ]
 
 function parseMarkdown(text) {
