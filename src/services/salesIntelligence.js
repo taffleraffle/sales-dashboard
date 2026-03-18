@@ -316,7 +316,8 @@ ${(() => {
     try {
       const d = new Date(a.start_time)
       if (isNaN(d.getTime())) continue
-      hour = parseInt(d.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'America/New_York' }))
+      // GHL stores local time (ET) with fake +00:00 offset — use UTC hour directly as ET
+      hour = d.getUTCHours()
     } catch { continue }
     if (!byHour[hour]) byHour[hour] = { total: 0, showed: 0, closed: 0, noShow: 0, rescheduled: 0, revenue: 0 }
     byHour[hour].total++
