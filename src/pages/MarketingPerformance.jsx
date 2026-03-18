@@ -922,44 +922,104 @@ export default function MarketingPerformance() {
   const statsPrev = useMemo(() => computeMarketingStats(prevEntries), [prevEntries])
   const bm = benchmarks
 
-  // What-If state
+  // What-If state — cascading funnel forecast
   const [whatIfActive, setWhatIfActive] = useState(false)
   const [whatIfOverrides, setWhatIfOverrides] = useState({})
   const whatIfStats = useMemo(() => {
     if (!whatIfActive || !Object.keys(whatIfOverrides).length) return null
-    // Build a fake single-entry array with the overridden totals
-    const base = { ...stats }
-    Object.entries(whatIfOverrides).forEach(([k, v]) => { if (v !== '' && v != null) base[k] = parseFloat(v) })
-    // Recompute derived metrics from raw totals
-    const t = base
-    const all_cash = t.trial_cash + t.ascend_cash + t.ar_collected
+    const o = whatIfOverrides
+    const get = (key) => (o[key] !== '' && o[key] != null) ? parseFloat(o[key]) : null
+
+    // Current rates from actual data (used as defaults for cascading)
+    const curShowRate = stats.qualified_bookings > 0 ? stats.live_calls / stats.qualified_bookings : 0.5
+    const curOfferRate = stats.live_calls > 0 ? stats.offers / stats.live_calls : 0.8
+    const curCloseRate = stats.live_calls > 0 ? stats.closes / stats.live_calls : 0.25
+    const curAscendRate = stats.closes > 0 ? stats.ascensions / stats.closes : 0.5
+    const curAvgTrialCash = stats.closes > 0 ? stats.trial_cash / stats.closes : 1000
+    const curAvgTrialRev = stats.closes > 0 ? stats.trial_revenue / stats.closes : 1000
+    const curAvgAscCash = stats.ascensions > 0 ? stats.ascend_cash / stats.ascensions : 3000
+    const curAvgAscRev = stats.ascensions > 0 ? stats.ascend_revenue / stats.ascensions : 9000
+
+    // Cascade: each level uses override if provided, else derives from upstream
+    const adspend = get('adspend') ?? stats.adspend
+    const leads = get('leads') ?? stats.leads
+    const qualified_bookings = get('qualified_bookings') ?? stats.qualified_bookings
+
+    // Show rate: override percentage or keep current
+    const showRateOverride = get('show_rate')
+    const showRate = showRateOverride != null ? showRateOverride / 100 : curShowRate
+
+    // Live calls: override directly, OR cascade from bookings * show rate
+    const live_calls = get('live_calls') ?? (get('qualified_bookings') != null || showRateOverride != null
+      ? Math.round(qualified_bookings * showRate)
+      : stats.live_calls)
+
+    // Offer rate
+    const offerRateOverride = get('offer_rate')
+    const offerRate = offerRateOverride != null ? offerRateOverride / 100 : curOfferRate
+    const offers = get('offers') ?? (get('live_calls') != null || get('qualified_bookings') != null || offerRateOverride != null
+      ? Math.round(live_calls * offerRate)
+      : stats.offers)
+
+    // Close rate
+    const closeRateOverride = get('close_rate')
+    const closeRate = closeRateOverride != null ? closeRateOverride / 100 : curCloseRate
+    const closes = get('closes') ?? (get('live_calls') != null || get('qualified_bookings') != null || closeRateOverride != null
+      ? Math.round(live_calls * closeRate)
+      : stats.closes)
+
+    // Trial financials
+    const trial_cash = get('trial_cash') ?? (closes !== stats.closes ? Math.round(closes * curAvgTrialCash) : stats.trial_cash)
+    const trial_revenue = get('trial_revenue') ?? (closes !== stats.closes ? Math.round(closes * curAvgTrialRev) : stats.trial_revenue)
+
+    // Ascension
+    const ascendRateOverride = get('ascend_rate')
+    const ascRate = ascendRateOverride != null ? ascendRateOverride / 100 : curAscendRate
+    const ascensions = get('ascensions') ?? (closes !== stats.closes || ascendRateOverride != null
+      ? Math.round(closes * ascRate)
+      : stats.ascensions)
+    const ascend_cash = get('ascend_cash') ?? (ascensions !== stats.ascensions ? Math.round(ascensions * curAvgAscCash) : stats.ascend_cash)
+    const ascend_revenue = get('ascend_revenue') ?? (ascensions !== stats.ascensions ? Math.round(ascensions * curAvgAscRev) : stats.ascend_revenue)
+
+    // Non-cascading fields
+    const reschedules = stats.reschedules
+    const cancels = stats.cancels || 0
+    const ar_collected = stats.ar_collected
+    const ar_defaulted = stats.ar_defaulted
+    const auto_bookings = get('auto_bookings') ?? stats.auto_bookings
+
+    const all_cash = trial_cash + ascend_cash + ar_collected
     return {
-      ...t,
-      cpl: t.leads > 0 ? t.adspend / t.leads : 0,
-      lead_to_booking_pct: t.leads > 0 ? (t.qualified_bookings / t.leads) * 100 : 0,
-      cpb: t.qualified_bookings > 0 ? t.adspend / t.qualified_bookings : 0,
-      cost_per_auto_booking: t.auto_bookings > 0 ? t.adspend / t.auto_bookings : 0,
-      cancels: t.cancelled_dtf + t.cancelled_by_prospect,
-      gross_show_rate: t.qualified_bookings > 0 ? (t.live_calls / t.qualified_bookings) * 100 : 0,
-      net_show_rate: (() => { const net = t.qualified_bookings - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules; return net > 0 ? (t.live_calls / net) * 100 : 0 })(),
-      no_shows: t.qualified_bookings - t.live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules,
-      reschedule_rate: t.qualified_bookings > 0 ? (t.reschedules / t.qualified_bookings) * 100 : 0,
-      cost_per_live_call: t.live_calls > 0 ? t.adspend / t.live_calls : 0,
-      offer_rate: t.live_calls > 0 ? (t.offers / t.live_calls) * 100 : 0,
-      cost_per_offer: t.offers > 0 ? t.adspend / t.offers : 0,
-      close_rate: t.live_calls > 0 ? (t.closes / t.live_calls) * 100 : 0,
-      cpa_trial: t.closes > 0 ? t.adspend / t.closes : 0,
-      trial_cash_pct: t.trial_revenue > 0 ? (t.trial_cash / t.trial_revenue) * 100 : 0,
-      trial_fe_roas: t.adspend > 0 ? t.trial_cash / t.adspend : 0,
-      ascend_rate: t.closes > 0 ? (t.ascensions / t.closes) * 100 : 0,
-      cpa_ascend: t.ascensions > 0 ? t.adspend / t.ascensions : 0,
-      ascend_cash_pct: t.ascend_revenue > 0 ? (t.ascend_cash / t.ascend_revenue) * 100 : 0,
-      finance_pct: t.ascensions > 0 ? (t.finance_accepted / t.ascensions) * 100 : 0,
-      net_fe_roas: t.adspend > 0 ? (t.trial_cash + t.ascend_cash) / t.adspend : 0,
-      revenue_roas: t.adspend > 0 ? (t.trial_revenue + t.ascend_revenue) / t.adspend : 0,
-      ar_success_rate: (t.ar_collected + t.ar_defaulted) > 0 ? (t.ar_collected / (t.ar_collected + t.ar_defaulted)) * 100 : 0,
+      adspend, leads, auto_bookings, qualified_bookings, live_calls, offers, closes,
+      trial_cash, trial_revenue, ascensions, ascend_cash, ascend_revenue,
+      reschedules, cancels, ar_collected, ar_defaulted,
+      cancelled_dtf: stats.cancelled_dtf || 0, cancelled_by_prospect: stats.cancelled_by_prospect || 0,
+      finance_offers: stats.finance_offers, finance_accepted: stats.finance_accepted,
+      // Derived
+      cpl: leads > 0 ? adspend / leads : 0,
+      lead_to_booking_pct: leads > 0 ? (qualified_bookings / leads) * 100 : 0,
+      cpb: qualified_bookings > 0 ? adspend / qualified_bookings : 0,
+      cost_per_auto_booking: auto_bookings > 0 ? adspend / auto_bookings : 0,
+      gross_show_rate: qualified_bookings > 0 ? (live_calls / qualified_bookings) * 100 : 0,
+      net_show_rate: (() => { const net = qualified_bookings - cancels - reschedules; return net > 0 ? (live_calls / net) * 100 : 0 })(),
+      no_shows: Math.max(0, qualified_bookings - live_calls - cancels - reschedules),
+      reschedule_rate: qualified_bookings > 0 ? (reschedules / qualified_bookings) * 100 : 0,
+      cost_per_live_call: live_calls > 0 ? adspend / live_calls : 0,
+      offer_rate: live_calls > 0 ? (offers / live_calls) * 100 : 0,
+      cost_per_offer: offers > 0 ? adspend / offers : 0,
+      close_rate: live_calls > 0 ? (closes / live_calls) * 100 : 0,
+      cpa_trial: closes > 0 ? adspend / closes : 0,
+      trial_cash_pct: trial_revenue > 0 ? (trial_cash / trial_revenue) * 100 : 0,
+      trial_fe_roas: adspend > 0 ? trial_cash / adspend : 0,
+      ascend_rate: closes > 0 ? (ascensions / closes) * 100 : 0,
+      cpa_ascend: ascensions > 0 ? adspend / ascensions : 0,
+      ascend_cash_pct: ascend_revenue > 0 ? (ascend_cash / ascend_revenue) * 100 : 0,
+      finance_pct: ascensions > 0 ? (stats.finance_accepted / ascensions) * 100 : 0,
+      net_fe_roas: adspend > 0 ? (trial_cash + ascend_cash) / adspend : 0,
+      revenue_roas: adspend > 0 ? (trial_revenue + ascend_revenue) / adspend : 0,
+      ar_success_rate: (ar_collected + ar_defaulted) > 0 ? (ar_collected / (ar_collected + ar_defaulted)) * 100 : 0,
       all_cash,
-      all_cash_roas: t.adspend > 0 ? all_cash / t.adspend : 0,
+      all_cash_roas: adspend > 0 ? all_cash / adspend : 0,
     }
   }, [whatIfActive, whatIfOverrides, stats])
   const wf = whatIfStats // shorthand
@@ -1069,29 +1129,49 @@ export default function MarketingPerformance() {
           <div className="flex items-center gap-2 mb-2">
             <Edit3 size={14} className="text-opt-yellow" />
             <span className="text-xs font-medium text-opt-yellow">What-If Forecast</span>
-            <span className="text-[10px] text-text-400 ml-1">Adjust inputs to see projected KPIs — changes are not saved</span>
+            <span className="text-[10px] text-text-400 ml-1">Adjust any value — changes cascade through the funnel automatically</span>
             <button onClick={() => setWhatIfOverrides({})} className="ml-auto text-[10px] text-text-400 hover:text-text-secondary">Reset</button>
           </div>
-          <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-2">
             {[
-              ['adspend', 'Adspend', '$'],
-              ['leads', 'Leads', '#'],
-              ['qualified_bookings', 'Q.Books', '#'],
-              ['live_calls', 'Live Calls', '#'],
-              ['offers', 'Offers', '#'],
-              ['closes', 'Closes', '#'],
-              ['trial_cash', 'Trial Cash', '$'],
-              ['ascensions', 'Ascensions', '#'],
-              ['ascend_cash', 'Asc Cash', '$'],
-            ].map(([key, label, prefix]) => (
+              ['adspend', 'Adspend', '$', stats.adspend],
+              ['leads', 'Leads', '#', stats.leads],
+              ['qualified_bookings', 'Q.Books', '#', stats.qualified_bookings],
+              ['live_calls', 'Live Calls', '#', stats.live_calls],
+              ['offers', 'Offers', '#', stats.offers],
+              ['closes', 'Closes', '#', stats.closes],
+              ['ascensions', 'Ascensions', '#', stats.ascensions],
+            ].map(([key, label, prefix, current]) => (
               <div key={key} className="flex flex-col gap-0.5">
                 <label className="text-[8px] uppercase text-text-400">{label}</label>
                 <input
                   type="number"
-                  placeholder={Math.round(stats[key] || 0)}
+                  placeholder={Math.round(current || 0)}
                   value={whatIfOverrides[key] ?? ''}
                   onChange={e => setWhatIfOverrides(prev => ({ ...prev, [key]: e.target.value }))}
                   className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {[
+              ['show_rate', 'Show Rate %', '%', stats.gross_show_rate],
+              ['offer_rate', 'Offer Rate %', '%', stats.offer_rate],
+              ['close_rate', 'Close Rate %', '%', stats.close_rate],
+              ['ascend_rate', 'Ascend Rate %', '%', stats.ascend_rate],
+              ['trial_cash', 'Trial Cash', '$', stats.trial_cash],
+              ['ascend_cash', 'Asc Cash', '$', stats.ascend_cash],
+              ['trial_revenue', 'Trial Rev', '$', stats.trial_revenue],
+            ].map(([key, label, prefix, current]) => (
+              <div key={key} className="flex flex-col gap-0.5">
+                <label className="text-[8px] uppercase text-text-400">{label} <span className="text-text-400/50">{prefix === '%' ? `(${(current || 0).toFixed(0)}%)` : ''}</span></label>
+                <input
+                  type="number"
+                  placeholder={prefix === '%' ? (current || 0).toFixed(0) : Math.round(current || 0)}
+                  value={whatIfOverrides[key] ?? ''}
+                  onChange={e => setWhatIfOverrides(prev => ({ ...prev, [key]: e.target.value }))}
+                  className={`bg-bg-primary border rounded-lg px-2 py-1 text-xs text-text-primary w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${prefix === '%' ? 'border-opt-yellow/20' : 'border-border-default'}`}
                 />
               </div>
             ))}
