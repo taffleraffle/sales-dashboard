@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
@@ -26,6 +26,7 @@ export default function SetterDetail() {
   const [allLeads, setAllLeads] = useState([])
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
   const [recentCalls, setRecentCalls] = useState([])
+  const [expandedCall, setExpandedCall] = useState(null)
   const [stl, setStl] = useState(null)
   const [companyStl, setCompanyStl] = useState(null)
   const [loadingSTL, setLoadingSTL] = useState(true)
@@ -224,43 +225,89 @@ export default function SetterDetail() {
         </div>
       )}
 
-      {/* Recent Leads Contacted — from WAVV calls */}
-      {recentCalls.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-sm font-medium text-text-secondary mb-3">Recent Leads Contacted ({recentCalls.length})</h2>
-          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
-            <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-bg-card z-10">
-                  <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
-                    <th className="px-3 py-2 text-left">Contact</th>
-                    <th className="px-3 py-2 text-left">Phone</th>
-                    <th className="px-3 py-2 text-left">Called At</th>
-                    <th className="px-3 py-2 text-right">Duration</th>
-                    <th className="px-3 py-2 text-right">Type</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentCalls.map((c, i) => {
-                    const dur = c.call_duration || 0
-                    const type = dur >= 60 ? 'MC' : dur > 0 ? 'Pickup' : 'No Answer'
-                    const typeColor = dur >= 60 ? 'text-success' : dur > 0 ? 'text-opt-yellow' : 'text-text-400'
-                    return (
-                      <tr key={i} className="border-b border-border-default/30 hover:bg-bg-card-hover/50">
-                        <td className="px-3 py-1.5 font-medium text-text-primary">{c.contact_name || '—'}</td>
-                        <td className="px-3 py-1.5 text-text-400">{c.phone_number || '—'}</td>
-                        <td className="px-3 py-1.5 text-text-400">{new Date(c.started_at).toLocaleString('en-US', tzOpts)}</td>
-                        <td className="px-3 py-1.5 text-right text-text-primary">{fmtDuration(dur)}</td>
-                        <td className={`px-3 py-1.5 text-right font-medium ${typeColor}`}>{type}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+      {/* Recent Leads Contacted — from WAVV calls, grouped by contact */}
+      {recentCalls.length > 0 && (() => {
+        // Group calls by phone number (or contact name if no phone)
+        const grouped = []
+        const seen = new Map()
+        for (const c of recentCalls) {
+          const key = c.phone_number || c.contact_name || `anon-${Math.random()}`
+          if (seen.has(key)) {
+            seen.get(key).calls.push(c)
+          } else {
+            const group = { key, name: c.contact_name || '—', phone: c.phone_number || '—', calls: [c] }
+            seen.set(key, group)
+            grouped.push(group)
+          }
+        }
+        return (
+          <div className="mb-6">
+            <h2 className="text-sm font-medium text-text-secondary mb-3">Recent Leads Contacted ({grouped.length} contacts, {recentCalls.length} calls)</h2>
+            <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+              <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-bg-card z-10">
+                    <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
+                      <th className="px-3 py-2 text-left w-6"></th>
+                      <th className="px-3 py-2 text-left">Contact</th>
+                      <th className="px-3 py-2 text-left">Phone</th>
+                      <th className="px-3 py-2 text-left">Last Called</th>
+                      <th className="px-3 py-2 text-right">Best Call</th>
+                      <th className="px-3 py-2 text-right">Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grouped.map(g => {
+                      const bestCall = g.calls.reduce((best, c) => (c.call_duration || 0) > (best.call_duration || 0) ? c : best, g.calls[0])
+                      const bestDur = bestCall.call_duration || 0
+                      const bestType = bestDur >= 60 ? 'MC' : bestDur > 0 ? 'Pickup' : 'No Answer'
+                      const bestColor = bestDur >= 60 ? 'text-success' : bestDur > 0 ? 'text-opt-yellow' : 'text-text-400'
+                      const lastCall = g.calls[0] // already sorted desc
+                      const isExpanded = expandedCall === g.key
+                      const hasMultiple = g.calls.length > 1
+                      return (
+                        <React.Fragment key={g.key}>
+                          <tr
+                            className={`border-b border-border-default/30 hover:bg-bg-card-hover/50 ${hasMultiple ? 'cursor-pointer' : ''}`}
+                            onClick={() => hasMultiple && setExpandedCall(isExpanded ? null : g.key)}
+                          >
+                            <td className="px-3 py-1.5 text-text-400">
+                              {hasMultiple && <ChevronDown size={10} className={`transition-transform ${isExpanded ? '' : '-rotate-90'}`} />}
+                            </td>
+                            <td className="px-3 py-1.5 font-medium text-text-primary">
+                              {g.name}
+                              {hasMultiple && <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-text-400/15 text-text-400">x{g.calls.length}</span>}
+                            </td>
+                            <td className="px-3 py-1.5 text-text-400">{g.phone}</td>
+                            <td className="px-3 py-1.5 text-text-400">{new Date(lastCall.started_at).toLocaleString('en-US', tzOpts)}</td>
+                            <td className="px-3 py-1.5 text-right text-text-primary">{fmtDuration(bestDur)}</td>
+                            <td className={`px-3 py-1.5 text-right font-medium ${bestColor}`}>{bestType}</td>
+                          </tr>
+                          {isExpanded && g.calls.map((c, ci) => {
+                            const dur = c.call_duration || 0
+                            const type = dur >= 60 ? 'MC' : dur > 0 ? 'Pickup' : 'No Answer'
+                            const typeColor = dur >= 60 ? 'text-success' : dur > 0 ? 'text-opt-yellow' : 'text-text-400'
+                            return (
+                              <tr key={ci} className="bg-bg-primary/50 border-b border-border-default/20">
+                                <td className="px-3 py-1"></td>
+                                <td className="px-3 py-1 text-text-400 text-[10px] pl-8">Call {ci + 1}</td>
+                                <td className="px-3 py-1"></td>
+                                <td className="px-3 py-1 text-text-400">{new Date(c.started_at).toLocaleString('en-US', tzOpts)}</td>
+                                <td className="px-3 py-1 text-right text-text-primary">{fmtDuration(dur)}</td>
+                                <td className={`px-3 py-1 text-right font-medium ${typeColor}`}>{type}</td>
+                              </tr>
+                            )
+                          })}
+                        </React.Fragment>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* EOD History */}
       {myEodReports.length > 0 && (
