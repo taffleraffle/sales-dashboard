@@ -115,7 +115,7 @@ export default function SetterDetail() {
     sets: acc.sets + (r.sets || 0),
   }), { dials: 0, leads: 0, pickups: 0, mcs: 0, sets: 0 })
 
-  const totalCompanySets = allLeads.length
+  const totalCompanySets = Math.max(allLeads.length, companyActivity.sets)
   const companyClosedLeads = allLeads.filter(l => l.status === 'closed')
   const companyShowedLeads = allLeads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.status))
   const companyResolvedLeads = allLeads.filter(l => ['showed', 'closed', 'not_closed', 'no_show'].includes(l.status))
@@ -144,8 +144,9 @@ export default function SetterDetail() {
   const effectiveLeads = hasWavvData ? wavvUser.uniqueContacts : stats.totalLeads
   const effectivePickupRate = effectiveDials > 0 ? parseFloat(((effectivePickups / effectiveDials) * 100).toFixed(1)) : 0
 
-  // Sets come from setter_leads, not EOD
-  const mySets = leads.length
+  // Sets: use EOD totals if higher than setter_leads count (historical data)
+  const eodSets = myEodReports.reduce((s, r) => s + (r.sets || 0), 0)
+  const mySets = Math.max(leads.length, eodSets)
 
   const myRates = {
     leadToSet: effectiveLeads > 0 ? parseFloat(((mySets / effectiveLeads) * 100).toFixed(1)) : 0,
