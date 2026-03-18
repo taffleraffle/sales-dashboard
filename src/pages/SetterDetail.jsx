@@ -27,6 +27,8 @@ export default function SetterDetail() {
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
   const [recentCalls, setRecentCalls] = useState([])
   const [expandedCall, setExpandedCall] = useState(null)
+  const [callsFrom, setCallsFrom] = useState(() => sinceDate(range))
+  const [callsTo, setCallsTo] = useState(() => new Date().toISOString().split('T')[0])
   const [stl, setStl] = useState(null)
   const [companyStl, setCompanyStl] = useState(null)
   const [loadingSTL, setLoadingSTL] = useState(true)
@@ -63,18 +65,23 @@ export default function SetterDetail() {
     fetchWavvAggregates(days).then(setWavvAgg)
   }, [range])
 
-  // Fetch recent calls for this setter (last 50, for the table)
+  // Fetch recent calls for this setter using date range
   useEffect(() => {
     if (!member?.wavv_user_id) return
-    supabase
+    let query = supabase
       .from('wavv_calls')
       .select('contact_name, phone_number, started_at, call_duration')
       .eq('user_id', member.wavv_user_id)
-      .gte('started_at', `${sinceDate(range)}T00:00:00`)
+      .gte('started_at', `${callsFrom}T00:00:00`)
+    if (callsTo) query = query.lte('started_at', `${callsTo}T23:59:59`)
+    query
       .order('started_at', { ascending: false })
-      .limit(50)
+      .limit(200)
       .then(({ data }) => setRecentCalls(data || []))
-  }, [member, range])
+  }, [member, callsFrom, callsTo])
+
+  // Sync date range when page range selector changes
+  useEffect(() => { setCallsFrom(sinceDate(range)) }, [range])
 
   // Fetch GHL pipeline data once (not on range change)
   useEffect(() => {
@@ -258,16 +265,13 @@ export default function SetterDetail() {
           <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-medium text-text-secondary">Recent Leads Contacted ({grouped.length} contacts, {recentCalls.length} calls)</h2>
-              <div className="flex items-center gap-2">
-                <input type="date" className="bg-bg-card border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary" defaultValue={sinceDate(range)} onChange={e => {
-                  const d = e.target.value;
-                  if (d && member?.wavv_user_id) {
-                    supabase.from('wavv_calls').select('contact_name, phone_number, started_at, call_duration')
-                      .eq('user_id', member.wavv_user_id).gte('started_at', `${d}T00:00:00`)
-                      .order('started_at', { ascending: false }).limit(100)
-                      .then(({ data }) => setRecentCalls(data || []));
-                  }
-                }} />
+              <div className="flex items-center gap-1.5 text-[10px] text-text-400">
+                <span>From</span>
+                <input type="date" value={callsFrom} onChange={e => setCallsFrom(e.target.value)}
+                  className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary" />
+                <span>to</span>
+                <input type="date" value={callsTo} onChange={e => setCallsTo(e.target.value)}
+                  className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary" />
               </div>
             </div>
             <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
