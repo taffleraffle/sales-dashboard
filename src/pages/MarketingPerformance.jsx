@@ -922,9 +922,18 @@ export default function MarketingPerformance() {
   const statsPrev = useMemo(() => computeMarketingStats(prevEntries), [prevEntries])
   const bm = benchmarks
 
-  // What-If state — cascading funnel forecast
+  // What-If state — cascading funnel forecast (debounced to avoid lag)
   const [whatIfActive, setWhatIfActive] = useState(false)
   const [whatIfOverrides, setWhatIfOverrides] = useState({})
+  const [whatIfDraft, setWhatIfDraft] = useState({})
+  const whatIfTimer = useRef(null)
+  const updateWhatIf = (key, value) => {
+    setWhatIfDraft(prev => ({ ...prev, [key]: value }))
+    clearTimeout(whatIfTimer.current)
+    whatIfTimer.current = setTimeout(() => {
+      setWhatIfOverrides(prev => ({ ...prev, [key]: value }))
+    }, 300)
+  }
   const whatIfStats = useMemo(() => {
     if (!whatIfActive || !Object.keys(whatIfOverrides).length) return null
     const o = whatIfOverrides
@@ -1109,7 +1118,7 @@ export default function MarketingPerformance() {
         {metaStatus && <span className="text-xs text-opt-yellow">{metaStatus}</span>}
         <div className="sm:ml-auto flex gap-2">
           <button
-            onClick={() => { setWhatIfActive(!whatIfActive); if (whatIfActive) setWhatIfOverrides({}) }}
+            onClick={() => { setWhatIfActive(!whatIfActive); if (whatIfActive) { setWhatIfOverrides({}); setWhatIfDraft({}) } }}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs border rounded-2xl transition-colors ${whatIfActive ? 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow' : 'text-text-secondary border-border-default hover:bg-bg-card-hover'}`}
           >
             <Edit3 size={14} /> What-If
@@ -1130,7 +1139,7 @@ export default function MarketingPerformance() {
             <Edit3 size={14} className="text-opt-yellow" />
             <span className="text-xs font-medium text-opt-yellow">What-If Forecast</span>
             <span className="text-[10px] text-text-400 ml-1">Adjust any value — changes cascade through the funnel automatically</span>
-            <button onClick={() => setWhatIfOverrides({})} className="ml-auto text-[10px] text-text-400 hover:text-text-secondary">Reset</button>
+            <button onClick={() => { setWhatIfOverrides({}); setWhatIfDraft({}) }} className="ml-auto text-[10px] text-text-400 hover:text-text-secondary">Reset</button>
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-2">
             {[
@@ -1147,8 +1156,8 @@ export default function MarketingPerformance() {
                 <input
                   type="number"
                   placeholder={Math.round(current || 0)}
-                  value={whatIfOverrides[key] ?? ''}
-                  onChange={e => setWhatIfOverrides(prev => ({ ...prev, [key]: e.target.value }))}
+                  value={whatIfDraft[key] ?? ''}
+                  onChange={e => updateWhatIf(key, e.target.value)}
                   className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
               </div>
@@ -1169,8 +1178,8 @@ export default function MarketingPerformance() {
                 <input
                   type="number"
                   placeholder={prefix === '%' ? (current || 0).toFixed(0) : Math.round(current || 0)}
-                  value={whatIfOverrides[key] ?? ''}
-                  onChange={e => setWhatIfOverrides(prev => ({ ...prev, [key]: e.target.value }))}
+                  value={whatIfDraft[key] ?? ''}
+                  onChange={e => updateWhatIf(key, e.target.value)}
                   className={`bg-bg-primary border rounded-lg px-2 py-1 text-xs text-text-primary w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${prefix === '%' ? 'border-opt-yellow/20' : 'border-border-default'}`}
                 />
               </div>
