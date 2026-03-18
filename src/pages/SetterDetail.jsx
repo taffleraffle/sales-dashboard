@@ -227,6 +227,20 @@ export default function SetterDetail() {
 
       {/* Recent Leads Contacted — from WAVV calls, grouped by contact */}
       {recentCalls.length > 0 && (() => {
+        // Build phone → pipeline/stage lookup from GHL data
+        const normPhone = p => p ? p.replace(/\D/g, '').slice(-10) : null
+        const phoneToPipeline = {}
+        if (pipelineData) {
+          for (const p of pipelineData) {
+            const stageMap = {}
+            if (p.stages) p.stages.forEach(s => { stageMap[s.id] = s.name?.replace(/[🔵🟡🟢🔴🟣🟠]/g, '').trim() })
+            for (const opp of (p.summary?.opportunities || [])) {
+              const ph = normPhone(opp.contact?.phone)
+              if (ph) phoneToPipeline[ph] = { pipeline: p.name, stage: stageMap[opp.pipelineStageId] || 'Unknown' }
+            }
+          }
+        }
+
         // Group calls by phone number (or contact name if no phone)
         const grouped = []
         const seen = new Map()
@@ -251,6 +265,7 @@ export default function SetterDetail() {
                       <th className="px-3 py-2 text-left w-6"></th>
                       <th className="px-3 py-2 text-left">Contact</th>
                       <th className="px-3 py-2 text-left">Phone</th>
+                      <th className="px-3 py-2 text-left">Pipeline / Stage</th>
                       <th className="px-3 py-2 text-left">Last Called</th>
                       <th className="px-3 py-2 text-right">Best Call</th>
                       <th className="px-3 py-2 text-right">Result</th>
@@ -265,6 +280,15 @@ export default function SetterDetail() {
                       const lastCall = g.calls[0] // already sorted desc
                       const isExpanded = expandedCall === g.key
                       const hasMultiple = g.calls.length > 1
+                      const pipeInfo = phoneToPipeline[normPhone(g.phone)]
+                      const stageColor = pipeInfo?.stage ? (
+                        /new lead|triage/i.test(pipeInfo.stage) ? 'text-blue-400'
+                        : /contact|booked/i.test(pipeInfo.stage) ? 'text-opt-yellow'
+                        : /set call|strategy/i.test(pipeInfo.stage) ? 'text-success'
+                        : /no show|lost|dead/i.test(pipeInfo.stage) ? 'text-danger'
+                        : /nurture|follow/i.test(pipeInfo.stage) ? 'text-purple-400'
+                        : 'text-text-400'
+                      ) : 'text-text-400'
                       return (
                         <React.Fragment key={g.key}>
                           <tr
@@ -279,6 +303,14 @@ export default function SetterDetail() {
                               {hasMultiple && <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-text-400/15 text-text-400">x{g.calls.length}</span>}
                             </td>
                             <td className="px-3 py-1.5 text-text-400">{g.phone}</td>
+                            <td className="px-3 py-1.5">
+                              {pipeInfo ? (
+                                <div className="flex flex-col">
+                                  <span className="text-[10px] text-text-400 truncate max-w-[140px]">{pipeInfo.pipeline}</span>
+                                  <span className={`text-[10px] font-medium ${stageColor}`}>{pipeInfo.stage}</span>
+                                </div>
+                              ) : <span className="text-text-400">—</span>}
+                            </td>
                             <td className="px-3 py-1.5 text-text-400">{new Date(lastCall.started_at).toLocaleString('en-US', tzOpts)}</td>
                             <td className="px-3 py-1.5 text-right text-text-primary">{fmtDuration(bestDur)}</td>
                             <td className={`px-3 py-1.5 text-right font-medium ${bestColor}`}>{bestType}</td>
@@ -291,6 +323,7 @@ export default function SetterDetail() {
                               <tr key={ci} className="bg-bg-primary/50 border-b border-border-default/20">
                                 <td className="px-3 py-1"></td>
                                 <td className="px-3 py-1 text-text-400 text-[10px] pl-8">Call {ci + 1}</td>
+                                <td className="px-3 py-1"></td>
                                 <td className="px-3 py-1"></td>
                                 <td className="px-3 py-1 text-text-400">{new Date(c.started_at).toLocaleString('en-US', tzOpts)}</td>
                                 <td className="px-3 py-1 text-right text-text-primary">{fmtDuration(dur)}</td>
