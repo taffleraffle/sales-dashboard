@@ -256,7 +256,20 @@ export default function SetterDetail() {
         }
         return (
           <div className="mb-6">
-            <h2 className="text-sm font-medium text-text-secondary mb-3">Recent Leads Contacted ({grouped.length} contacts, {recentCalls.length} calls)</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-medium text-text-secondary">Recent Leads Contacted ({grouped.length} contacts, {recentCalls.length} calls)</h2>
+              <div className="flex items-center gap-2">
+                <input type="date" className="bg-bg-card border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary" defaultValue={sinceDate(range)} onChange={e => {
+                  const d = e.target.value;
+                  if (d && member?.wavv_user_id) {
+                    supabase.from('wavv_calls').select('contact_name, phone_number, started_at, call_duration')
+                      .eq('user_id', member.wavv_user_id).gte('started_at', `${d}T00:00:00`)
+                      .order('started_at', { ascending: false }).limit(100)
+                      .then(({ data }) => setRecentCalls(data || []));
+                  }
+                }} />
+              </div>
+            </div>
             <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
               <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
                 <table className="w-full text-xs">
