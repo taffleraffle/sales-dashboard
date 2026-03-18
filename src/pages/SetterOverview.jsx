@@ -221,6 +221,9 @@ export default function SetterOverview() {
     const myResolved = myLeads.filter(l => ['showed', 'not_closed', 'closed', 'no_show'].includes(l.status))
     const myRevenue = myLeads.reduce((s, l) => s + parseFloat(l.revenue_attributed || 0), 0)
 
+    // Use EOD sets total (more accurate than setter_leads count for historical data)
+    const eodSets = eod.sets
+
     // Per-pipeline breakdown for this setter
     const pipelineSources = {}
     myLeads.forEach(l => {
@@ -241,18 +244,19 @@ export default function SetterOverview() {
       pickups,
       mcs,
       pickupRate: dials ? parseFloat(((pickups / dials) * 100).toFixed(1)) : 0,
-      leadsPerSet: myLeads.length > 0 ? parseFloat((eod.leads / myLeads.length).toFixed(1)) : 0,
-      callsPerSet: myLeads.length > 0 ? parseFloat((dials / myLeads.length).toFixed(1)) : 0,
-      pickupsPerSet: myLeads.length > 0 ? parseFloat((pickups / myLeads.length).toFixed(1)) : 0,
+      // Use whichever sets count is higher — EOD totals or setter_leads records
+      totalSets: eodSets > myLeads.length ? eodSets : myLeads.length,
+      leadsPerSet: (eodSets || myLeads.length) > 0 ? parseFloat((eod.leads / (eodSets || myLeads.length)).toFixed(1)) : 0,
+      callsPerSet: (eodSets || myLeads.length) > 0 ? parseFloat((dials / (eodSets || myLeads.length)).toFixed(1)) : 0,
+      pickupsPerSet: (eodSets || myLeads.length) > 0 ? parseFloat((pickups / (eodSets || myLeads.length)).toFixed(1)) : 0,
       // Pipeline
-      totalSets: myLeads.length,
       showed: myShowed.length,
       closed: myClosed.length,
       noShows: myNoShow.length,
       revenue: myRevenue,
       showRate: myResolved.length > 0 ? parseFloat(((myShowed.length / myResolved.length) * 100).toFixed(1)) : 0,
       closeRate: myShowed.length > 0 ? parseFloat(((myClosed.length / myShowed.length) * 100).toFixed(1)) : 0,
-      dialsPerSet: myLeads.length > 0 ? parseFloat((dials / myLeads.length).toFixed(1)) : 0,
+      dialsPerSet: (eodSets || myLeads.length) > 0 ? parseFloat((dials / (eodSets || myLeads.length)).toFixed(1)) : 0,
       topPipelines,
       // Auto bookings
       autoBookingCount: autoBookingsBySetter[setter.id]?.count || 0,
