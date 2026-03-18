@@ -293,38 +293,61 @@ ${uncalled.slice(0, 10).map(l => `${new Date(l.createdAt).toISOString().slice(0,
 
 ## APPOINTMENT TIME ANALYSIS — SHOW & CLOSE RATES BY HOUR
 ${(() => {
-  const appts = (appointmentsRes.data || []).filter(a => a.start_time && a.appointment_status !== 'cancelled')
+  // Strategy call calendar IDs (qualified bookings — the ones that matter for show/close)
+  const STRAT_CALS = new Set(['9yoQVPBkNX4tWYmcDkf3','cEyqCFAsPLDkUV8n982h','HDsTrgpsFOXw9V4AkZGq','aQsmGwANALCwJBI7G9vT','StLqrES6WMO8f3Obdu9d','3mLE6t6rCKDdIuIfvP9j'])
+  const appts = (appointmentsRes.data || []).filter(a => a.start_time && a.appointment_status !== 'cancelled' && STRAT_CALS.has(a.calendar_name))
+
+  // Build a lookup from closer_calls outcomes by matching prospect name + date
+  const callOutcomes = {}
+  for (const c of closerCalls) {
+    const date = c.created_at?.split('T')[0]
+    const name = c.prospect_name?.toLowerCase().split(' ')[0]
+    if (date && name) callOutcomes[`${date}:${name}`] = { outcome: c.outcome, revenue: parseFloat(c.revenue || 0), cash: parseFloat(c.cash_collected || 0) }
+  }
+
   const byHour = {}
   for (const a of appts) {
     let hour
     try {
       const d = new Date(a.start_time)
       if (isNaN(d.getTime())) continue
-      // Convert to ET
       hour = parseInt(d.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'America/New_York' }))
     } catch { continue }
     if (!byHour[hour]) byHour[hour] = { total: 0, showed: 0, closed: 0, noShow: 0, rescheduled: 0, revenue: 0 }
     byHour[hour].total++
-    if (a.outcome === 'closed') { byHour[hour].showed++; byHour[hour].closed++; byHour[hour].revenue += parseFloat(a.revenue || 0) }
-    else if (a.outcome === 'not_closed') { byHour[hour].showed++ }
-    else if (a.outcome === 'no_show') { byHour[hour].noShow++ }
-    else if (a.outcome === 'rescheduled') { byHour[hour].rescheduled++ }
-    else { byHour[hour].showed++ } // default to showed if outcome exists but isn't categorized
+
+    // Match appointment to closer_call outcome by name + date
+    const firstName = a.contact_name?.toLowerCase().split(/[\s-]/)[0]
+    const callMatch = callOutcomes[`${a.appointment_date}:${firstName}`]
+    const outcome = a.outcome || callMatch?.outcome || null
+
+    if (outcome === 'closed' || outcome === 'ascended') {
+      byHour[hour].showed++; byHour[hour].closed++; byHour[hour].revenue += callMatch?.revenue || parseFloat(a.revenue || 0)
+    } else if (outcome === 'not_closed') {
+      byHour[hour].showed++
+    } else if (outcome === 'no_show') {
+      byHour[hour].noShow++
+    } else if (outcome === 'rescheduled') {
+      byHour[hour].rescheduled++
+    }
+    // If no outcome at all (future appt or unprocessed), don't count as showed
   }
   const hours = Object.keys(byHour).map(Number).sort((a,b) => a-b)
   if (!hours.length) return 'No appointment time data available.'
   const fmt12 = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h-12} PM`
-  return `Total appointments analyzed: ${appts.length}
-Hour (ET) | Booked | Showed | Closed | Show% | Close% | Revenue
+  const totalProcessed = hours.reduce((s, h) => s + byHour[h].showed + byHour[h].noShow + byHour[h].rescheduled, 0)
+  return `Strategy call appointments: ${appts.length} total, ${totalProcessed} with outcomes
+Hour (ET) | Booked | Showed | Closed | NoShow | Resch | Show% | Close% | Revenue
 ${hours.map(h => {
     const d = byHour[h]
-    const showPct = d.total > 0 ? ((d.showed / d.total) * 100).toFixed(0) : '0'
-    const closePct = d.showed > 0 ? ((d.closed / d.showed) * 100).toFixed(0) : '0'
-    return `${fmt12(h).padEnd(8)} | ${String(d.total).padStart(6)} | ${String(d.showed).padStart(6)} | ${String(d.closed).padStart(6)} | ${showPct.padStart(5)}% | ${closePct.padStart(6)}% | $${d.revenue.toLocaleString()}`
+    const processed = d.showed + d.noShow + d.rescheduled
+    const showPct = processed > 0 ? ((d.showed / processed) * 100).toFixed(0) : '—'
+    const closePct = d.showed > 0 ? ((d.closed / d.showed) * 100).toFixed(0) : '—'
+    return `${fmt12(h).padEnd(8)} | ${String(d.total).padStart(6)} | ${String(d.showed).padStart(6)} | ${String(d.closed).padStart(6)} | ${String(d.noShow).padStart(6)} | ${String(d.rescheduled).padStart(5)} | ${String(showPct).padStart(5)}${showPct !== '—' ? '%' : ' '} | ${String(closePct).padStart(6)}${closePct !== '—' ? '%' : ' '} | $${d.revenue.toLocaleString()}`
   }).join('\n')}
 
-Best show rate hours: ${hours.filter(h => byHour[h].total >= 3).sort((a,b) => (byHour[b].showed/byHour[b].total) - (byHour[a].showed/byHour[a].total)).slice(0,3).map(h => `${fmt12(h)} (${((byHour[h].showed/byHour[h].total)*100).toFixed(0)}%)`).join(', ') || 'Not enough data'}
-Best close rate hours: ${hours.filter(h => byHour[h].showed >= 2).sort((a,b) => (byHour[b].closed/byHour[b].showed) - (byHour[a].closed/byHour[a].showed)).slice(0,3).map(h => `${fmt12(h)} (${((byHour[h].closed/byHour[h].showed)*100).toFixed(0)}%)`).join(', ') || 'Not enough data'}`
+Best show rate hours (min 3 processed): ${hours.filter(h => (byHour[h].showed + byHour[h].noShow + byHour[h].rescheduled) >= 3).sort((a,b) => {const aP=byHour[a],bP=byHour[b];return(bP.showed/(bP.showed+bP.noShow+bP.rescheduled))-(aP.showed/(aP.showed+aP.noShow+aP.rescheduled))}).slice(0,3).map(h => {const d=byHour[h],p=d.showed+d.noShow+d.rescheduled;return`${fmt12(h)} (${((d.showed/p)*100).toFixed(0)}% of ${p})`}).join(', ') || 'Not enough data'}
+Best close rate hours (min 2 showed): ${hours.filter(h => byHour[h].showed >= 2).sort((a,b) => (byHour[b].closed/byHour[b].showed) - (byHour[a].closed/byHour[a].showed)).slice(0,3).map(h => `${fmt12(h)} (${((byHour[h].closed/byHour[h].showed)*100).toFixed(0)}% of ${byHour[h].showed})`).join(', ') || 'Not enough data'}`
 })()}
 
 ## RECENT CLOSER CALLS (last 30 days, sample)
