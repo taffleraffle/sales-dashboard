@@ -128,9 +128,11 @@ export default function SetterDetail() {
         const myCalls = calls.filter(c => member.wavv_user_id && c.user_id === member.wavv_user_id)
         // Filter opportunities to this setter's working hours for their individual STL
         const mySchedule = schedules[member.wavv_user_id]
+        const STL_TZ = 'America/Indiana/Indianapolis'
+        const getHourInTz = ts => parseInt(new Date(ts).toLocaleString('en-US', { timeZone: STL_TZ, hour: 'numeric', hour12: false }))
         const myOpps = mySchedule
           ? stlOpps.filter(o => {
-              const hour = new Date(o.createdAt).getHours()
+              const hour = getHourInTz(o.createdAt)
               return hour >= mySchedule.startHour && hour < mySchedule.endHour
             })
           : stlOpps

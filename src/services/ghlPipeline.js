@@ -236,6 +236,12 @@ export function buildSetterSchedules(members = []) {
   return map
 }
 
+const STL_TIMEZONE = 'America/Indiana/Indianapolis'
+
+function getHourInTz(ts) {
+  return parseInt(new Date(ts).toLocaleString('en-US', { timeZone: STL_TIMEZONE, hour: 'numeric', hour12: false }))
+}
+
 export function computeSpeedToLead(opportunities, wavvCalls, appointments = [], setterSchedules = {}) {
   // Build map of contact phone/id → appointment info
   const appointmentByPhone = {}
@@ -361,7 +367,7 @@ export function computeSpeedToLead(opportunities, wavvCalls, appointments = [], 
       const schedule = setterSchedules[userId]
       let inSchedule = true
       if (schedule) {
-        const createdHour = new Date(createdAt).getHours()
+        const createdHour = getHourInTz(createdAt)
         if (createdHour < schedule.startHour || createdHour >= schedule.endHour) {
           inSchedule = false
         }
