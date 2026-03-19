@@ -5,12 +5,12 @@ import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import DataTable from '../components/DataTable'
 import LeadStatusBadge from '../components/LeadStatusBadge'
-import { Loader, ChevronDown, Edit3 } from 'lucide-react'
+import { Loader, ChevronDown, Edit3, Clock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { useSetterStats, useSetterEODs } from '../hooks/useSetterData'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
-import { fetchAllPipelineSummaries, computeSpeedToLead } from '../services/ghlPipeline'
+import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
 
 export default function SetterDetail() {
   const { id } = useParams()
@@ -38,11 +38,23 @@ export default function SetterDetail() {
   const [companyStl, setCompanyStl] = useState(null)
   const [loadingSTL, setLoadingSTL] = useState(true)
   const [pipelineData, setPipelineData] = useState(null)
+  const [stlDays, setStlDays] = useState(() => {
+    try { return parseInt(localStorage.getItem('stl_days')) || 4 } catch { return 4 }
+  })
+  const [stlStartHour, setStlStartHour] = useState(null)
+  const [stlEndHour, setStlEndHour] = useState(null)
+  const [savingStlHours, setSavingStlHours] = useState(false)
 
   // Fetch member info
   useEffect(() => {
     supabase.from('team_members').select('*').eq('id', id).single()
-      .then(({ data }) => setMember(data))
+      .then(({ data }) => {
+        setMember(data)
+        if (data) {
+          setStlStartHour(data.stl_start_hour ?? '')
+          setStlEndHour(data.stl_end_hour ?? '')
+        }
+      })
   }, [id])
 
   // Fetch this setter's leads
@@ -93,23 +105,40 @@ export default function SetterDetail() {
     fetchAllPipelineSummaries(() => {}).then(setPipelineData)
   }, [])
 
-  // Compute STL when pipeline + member are ready
+  // Compute STL when pipeline + member + config are ready
   useEffect(() => {
     if (!pipelineData || !member) return
     setLoadingSTL(true)
     const allOpps = pipelineData.flatMap(p => p.summary.opportunities || [])
-    if (allOpps.length === 0) { setLoadingSTL(false); return }
+    // Filter opportunities to the configured STL window
+    const stlCutoff = new Date(Date.now() - stlDays * 86400000).getTime()
+    const stlOpps = allOpps.filter(o => o.createdAt && new Date(o.createdAt).getTime() >= stlCutoff)
+    if (stlOpps.length === 0) { setLoadingSTL(false); return }
 
-    fetchWavvCallsForSTL(days).then(calls => {
+    // Build schedule map using current hour values (from state, which tracks DB + edits)
+    const hasSchedule = stlStartHour !== '' && stlEndHour !== '' && stlStartHour != null && stlEndHour != null
+    const schedules = hasSchedule && member.wavv_user_id
+      ? { [member.wavv_user_id]: { startHour: parseInt(stlStartHour), endHour: parseInt(stlEndHour) } }
+      : {}
+
+    fetchWavvCallsForSTL(stlDays).then(calls => {
       if (calls.length > 0) {
-        const result = computeSpeedToLead(allOpps, calls)
+        const result = computeSpeedToLead(stlOpps, calls, [], schedules)
         setCompanyStl(result)
         const myCalls = calls.filter(c => member.wavv_user_id && c.user_id === member.wavv_user_id)
-        setStl(myCalls.length > 0 ? computeSpeedToLead(allOpps, myCalls) : result)
+        // Filter opportunities to this setter's working hours for their individual STL
+        const mySchedule = schedules[member.wavv_user_id]
+        const myOpps = mySchedule
+          ? stlOpps.filter(o => {
+              const hour = new Date(o.createdAt).getHours()
+              return hour >= mySchedule.startHour && hour < mySchedule.endHour
+            })
+          : stlOpps
+        setStl(myCalls.length > 0 ? computeSpeedToLead(myOpps, myCalls, [], schedules) : result)
       }
       setLoadingSTL(false)
     })
-  }, [pipelineData, member, range])
+  }, [pipelineData, member, stlDays, stlStartHour, stlEndHour])
 
   // Company-wide averages from all EODs
   const companyActivity = allReports.reduce((acc, r) => ({
@@ -206,8 +235,27 @@ export default function SetterDetail() {
         const kpis = [
           { key: 'leads_day', label: 'Leads/Day', value: dailyLeads, target: kpiTargets.leads_day, format: 'n', desc: `${Math.round(dailyLeads)} avg over ${eodDays} days` },
           { key: 'sets_day', label: 'Sets/Day', value: dailySets, target: kpiTargets.sets_day, format: 'n', desc: `${dailySets.toFixed(1)} avg over ${eodDays} days` },
-          { key: 'stl_pct', label: 'STL < 5min', value: stlPct, target: kpiTargets.stl_pct, format: '%', desc: stl ? `${stl.under5m} of ${stl.worked} leads` : 'loading...' },
+          { key: 'stl_pct', label: 'STL < 5min', value: stlPct, target: kpiTargets.stl_pct, format: '%', desc: stl ? `${stl.under5m} of ${stl.worked} leads (last ${stlDays}d)` : 'loading...' },
         ]
+
+        const fmtHour = h => {
+          if (h === '' || h == null) return '—'
+          const n = parseInt(h)
+          if (n === 0) return '12am'
+          if (n < 12) return `${n}am`
+          if (n === 12) return '12pm'
+          return `${n - 12}pm`
+        }
+
+        const saveStlHours = async (start, end) => {
+          if (!member) return
+          setSavingStlHours(true)
+          const updates = { stl_start_hour: start !== '' ? parseInt(start) : null, stl_end_hour: end !== '' ? parseInt(end) : null }
+          await supabase.from('team_members').update(updates).eq('id', member.id)
+          setMember(prev => ({ ...prev, ...updates }))
+          setSavingStlHours(false)
+        }
+
         return (
           <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-6">
             <div className="flex items-center justify-between mb-3">
@@ -259,6 +307,71 @@ export default function SetterDetail() {
                   </div>
                 )
               })}
+            </div>
+
+            {/* STL Configuration — always visible */}
+            <div className="mt-4 pt-3 border-t border-border-default/50">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Clock size={11} className="text-opt-yellow" />
+                <span className="text-[11px] text-opt-yellow uppercase font-medium">Speed to Lead Config</span>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[10px] text-text-400 block mb-1">Start Hour</label>
+                  <select
+                    value={stlStartHour ?? ''}
+                    onChange={e => {
+                      const val = e.target.value
+                      setStlStartHour(val === '' ? '' : parseInt(val))
+                      saveStlHours(val, stlEndHour)
+                    }}
+                    className="w-full px-2 py-1.5 rounded text-xs bg-bg-primary border border-border-default text-text-primary"
+                  >
+                    <option value="">Off</option>
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <option key={i} value={i}>{i === 0 ? '12am' : i < 12 ? `${i}am` : i === 12 ? '12pm' : `${i-12}pm`}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-text-400 block mb-1">End Hour</label>
+                  <select
+                    value={stlEndHour ?? ''}
+                    onChange={e => {
+                      const val = e.target.value
+                      setStlEndHour(val === '' ? '' : parseInt(val))
+                      saveStlHours(stlStartHour, val)
+                    }}
+                    className="w-full px-2 py-1.5 rounded text-xs bg-bg-primary border border-border-default text-text-primary"
+                  >
+                    <option value="">Off</option>
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <option key={i} value={i}>{i === 0 ? '12am' : i < 12 ? `${i}am` : i === 12 ? '12pm' : `${i-12}pm`}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-text-400 block mb-1">STL Window</label>
+                  <select
+                    value={stlDays}
+                    onChange={e => {
+                      const val = parseInt(e.target.value)
+                      setStlDays(val)
+                      localStorage.setItem('stl_days', val)
+                    }}
+                    className="w-full px-2 py-1.5 rounded text-xs bg-bg-primary border border-border-default text-text-primary"
+                  >
+                    <option value={1}>Last 1 day</option>
+                    <option value={2}>Last 2 days</option>
+                    <option value={3}>Last 3 days</option>
+                    <option value={4}>Last 4 days</option>
+                    <option value={7}>Last 7 days</option>
+                    <option value={14}>Last 14 days</option>
+                    <option value={30}>Last 30 days</option>
+                  </select>
+                </div>
+              </div>
+              {savingStlHours && <p className="text-[9px] text-opt-yellow mt-1">Saving...</p>}
             </div>
           </div>
         )

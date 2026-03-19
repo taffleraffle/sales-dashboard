@@ -9,7 +9,7 @@ import { useCloserEODs } from '../hooks/useCloserData'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { useFunnelData } from '../hooks/useFunnelData'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
-import { fetchAllPipelineSummaries, computeSpeedToLead } from '../services/ghlPipeline'
+import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
 import { rangeToDays } from '../lib/dateUtils'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { useLeadAttribution } from '../hooks/useLeadAttribution'
@@ -299,22 +299,26 @@ export default function SalesOverview() {
     fetchWavvAggregates(days).then(data => { setWavvAgg(data); setWavvLoading(false) })
   }, [days])
 
-  // Speed to Lead
+  // Speed to Lead (4-day window with per-setter working-hour filter)
+  const STL_DAYS = 4
+  const stlSchedules = buildSetterSchedules(setters)
   useEffect(() => {
     setStlLoading(true)
     Promise.all([
       fetchAllPipelineSummaries(() => {}),
-      fetchWavvCallsForSTL(days),
+      fetchWavvCallsForSTL(STL_DAYS),
     ]).then(([pipelines, calls]) => {
       const opps = pipelines.flatMap(p => p.summary?.opportunities || [])
-      if (opps.length > 0 && calls.length > 0) {
-        setStl(computeSpeedToLead(opps, calls))
+      const stlCutoff = new Date(Date.now() - STL_DAYS * 86400000).getTime()
+      const stlOpps = opps.filter(o => o.createdAt && new Date(o.createdAt).getTime() >= stlCutoff)
+      if (stlOpps.length > 0 && calls.length > 0) {
+        setStl(computeSpeedToLead(stlOpps, calls, [], stlSchedules))
       } else {
         setStl(null)
       }
       setStlLoading(false)
     }).catch(() => setStlLoading(false))
-  }, [days])
+  }, [setters.length])
 
   // Filter marketing entries by range
   const sinceStr = (() => {

@@ -221,7 +221,22 @@ export async function fetchAllPipelineSummaries(onProgress) {
  * @param {Array} wavvCalls - WAVV call rows from Supabase (with phone_number, started_at)
  * @returns {Object} Speed to lead stats
  */
-export function computeSpeedToLead(opportunities, wavvCalls, appointments = []) {
+/**
+ * Build a wavv_user_id → { startHour, endHour } map from team_members array.
+ * Reads stl_start_hour / stl_end_hour columns set via Settings page.
+ */
+export function buildSetterSchedules(members = []) {
+  const map = {}
+  for (const m of members) {
+    if (!m.wavv_user_id) continue
+    if (m.stl_start_hour != null && m.stl_end_hour != null) {
+      map[m.wavv_user_id] = { startHour: m.stl_start_hour, endHour: m.stl_end_hour }
+    }
+  }
+  return map
+}
+
+export function computeSpeedToLead(opportunities, wavvCalls, appointments = [], setterSchedules = {}) {
   // Build map of contact phone/id → appointment info
   const appointmentByPhone = {}
   const appointmentByContactId = {}
@@ -341,10 +356,20 @@ export function computeSpeedToLead(opportunities, wavvCalls, appointments = []) 
       ...booking,
     })
 
-    // Per-setter
+    // Per-setter (filter by working hours if schedule defined)
     if (userId) {
-      if (!perSetter[userId]) perSetter[userId] = []
-      perSetter[userId].push(secs)
+      const schedule = setterSchedules[userId]
+      let inSchedule = true
+      if (schedule) {
+        const createdHour = new Date(createdAt).getHours()
+        if (createdHour < schedule.startHour || createdHour >= schedule.endHour) {
+          inSchedule = false
+        }
+      }
+      if (inSchedule) {
+        if (!perSetter[userId]) perSetter[userId] = []
+        perSetter[userId].push(secs)
+      }
     }
 
     // Daily

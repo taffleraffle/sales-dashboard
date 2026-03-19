@@ -8,7 +8,7 @@ import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { supabase } from '../lib/supabase'
 import { sinceDate, rangeToDays } from '../lib/dateUtils'
-import { fetchAllPipelineSummaries, computeSpeedToLead } from '../services/ghlPipeline'
+import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { Loader, ChevronDown, Plus, ChevronUp } from 'lucide-react'
 
@@ -75,10 +75,11 @@ export default function SetterOverview() {
     }).catch(() => setWavvLoaded(true))
   }, [range])
 
-  // Fetch STL calls eagerly on mount/range change
+  // Fetch STL calls — always use last 4 days for STL window
+  const STL_DAYS = 4
   useEffect(() => {
-    fetchWavvCallsForSTL(days).then(setStlCalls).catch(() => setStlCalls([]))
-  }, [range])
+    fetchWavvCallsForSTL(STL_DAYS).then(setStlCalls).catch(() => setStlCalls([]))
+  }, [])
 
   // Fetch all setter_leads for the date range
   useEffect(() => {
@@ -268,10 +269,14 @@ export default function SetterOverview() {
     }
   })
 
-  // Speed to Lead — only computed when STL calls are loaded (lazy)
+  // Speed to Lead — only computed when STL calls are loaded (4-day window)
+  const stlSchedules = buildSetterSchedules(setters)
   const allOpps = pipelineData.flatMap(p => p.summary.opportunities || [])
-  const stl = allOpps.length > 0 && stlCalls && stlCalls.length > 0
-    ? computeSpeedToLead(allOpps, stlCalls, allAppointments)
+  // Filter opportunities to last 4 days for STL
+  const stlCutoff = new Date(Date.now() - STL_DAYS * 86400000).getTime()
+  const stlOpps = allOpps.filter(o => o.createdAt && new Date(o.createdAt).getTime() >= stlCutoff)
+  const stl = stlOpps.length > 0 && stlCalls && stlCalls.length > 0
+    ? computeSpeedToLead(stlOpps, stlCalls, allAppointments, stlSchedules)
     : null
 
   return (

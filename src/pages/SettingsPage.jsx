@@ -561,6 +561,34 @@ function TeamMembersSection() {
                 </datalist>
               </div>
             </div>
+            {m.role === 'setter' && (
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label className="text-[11px] text-text-400 block mb-1">STL Start Hour (e.g. 9 = 9am)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="23"
+                    value={getVal(m, 'stl_start_hour')}
+                    onChange={e => updateField(m.id, 'stl_start_hour', e.target.value ? parseInt(e.target.value) : null)}
+                    placeholder="e.g. 9"
+                    className="w-full px-2 py-1.5 rounded text-xs bg-bg-primary border border-border-default text-text-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-text-400 block mb-1">STL End Hour (e.g. 17 = 5pm)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="23"
+                    value={getVal(m, 'stl_end_hour')}
+                    onChange={e => updateField(m.id, 'stl_end_hour', e.target.value ? parseInt(e.target.value) : null)}
+                    placeholder="e.g. 17"
+                    className="w-full px-2 py-1.5 rounded text-xs bg-bg-primary border border-border-default text-text-primary"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
