@@ -192,6 +192,50 @@ export default function SetterDetail() {
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
 
+      {/* KPI Targets — daily progress */}
+      {(() => {
+        const eodDays = myEodReports.length || 1
+        const dailyDials = effectiveDials / eodDays
+        const dailySets = mySets / eodDays
+        const dailyLeads = effectiveLeads / eodDays
+        const stlPct = stl ? stl.pctUnder5m : 0
+        const kpis = [
+          { label: 'Dials/Day', value: dailyDials, target: 70, format: 'n', desc: `${Math.round(dailyDials)} avg over ${eodDays} days` },
+          { label: 'Sets/Day', value: dailySets, target: 3, format: 'n', desc: `${dailySets.toFixed(1)} avg over ${eodDays} days` },
+          { label: 'Leads/Day', value: dailyLeads, target: 40, format: 'n', desc: `${Math.round(dailyLeads)} avg over ${eodDays} days` },
+          { label: 'STL < 5min', value: stlPct, target: 80, format: '%', desc: stl ? `${stl.under5m} of ${stl.worked} leads` : 'loading...' },
+        ]
+        return (
+          <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-6">
+            <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">Daily KPI Targets</h3>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {kpis.map(k => {
+                const pct = Math.min((k.value / k.target) * 100, 100)
+                const isHit = k.value >= k.target
+                const isClose = pct >= 70
+                const color = isHit ? 'bg-success' : isClose ? 'bg-opt-yellow' : 'bg-danger'
+                const textColor = isHit ? 'text-success' : isClose ? 'text-opt-yellow' : 'text-danger'
+                return (
+                  <div key={k.label}>
+                    <div className="flex items-baseline justify-between mb-1">
+                      <span className="text-[10px] text-text-400 uppercase">{k.label}</span>
+                      <span className={`text-sm font-bold ${textColor}`}>
+                        {k.format === '%' ? `${Math.round(k.value)}%` : k.value.toFixed(1)}
+                        <span className="text-[10px] text-text-400 font-normal ml-1">/ {k.target}{k.format === '%' ? '%' : ''}</span>
+                      </span>
+                    </div>
+                    <div className="h-2 bg-bg-primary rounded-full overflow-hidden mb-1">
+                      <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <p className="text-[9px] text-text-400">{k.desc}{isHit ? ' — Target hit' : ` — ${(100 - pct).toFixed(0)}% behind`}</p>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Activity KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
         <KPICard label="Total Dials" value={effectiveDials.toLocaleString()} subtitle={hasWavvData ? 'WAVV' : ''} />
@@ -283,7 +327,7 @@ export default function SetterDetail() {
                       <th className="px-3 py-2 text-left w-6"></th>
                       <th className="px-3 py-2 text-left">Contact</th>
                       <th className="px-3 py-2 text-left">Phone</th>
-                      <th className="px-3 py-2 text-left">Pipeline / Stage</th>
+                      <th className="px-3 py-2 text-left">Current Stage</th>
                       <th className="px-3 py-2 text-left">Last Called</th>
                       <th className="px-3 py-2 text-right">Best Call</th>
                       <th className="px-3 py-2 text-right">Result</th>
