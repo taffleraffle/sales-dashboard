@@ -5,7 +5,7 @@ import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import DataTable from '../components/DataTable'
 import LeadStatusBadge from '../components/LeadStatusBadge'
-import { Loader, ChevronDown } from 'lucide-react'
+import { Loader, ChevronDown, Edit3 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { useSetterStats, useSetterEODs } from '../hooks/useSetterData'
@@ -27,6 +27,11 @@ export default function SetterDetail() {
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
   const [recentCalls, setRecentCalls] = useState([])
   const [expandedCall, setExpandedCall] = useState(null)
+  const [editingKpis, setEditingKpis] = useState(false)
+  const [kpiTargets, setKpiTargets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('setter_kpi_targets')) || { leads_day: 70, sets_day: 3, stl_pct: 80 } }
+    catch { return { leads_day: 70, sets_day: 3, stl_pct: 80 } }
+  })
   const [callsFrom, setCallsFrom] = useState(() => sinceDate(range))
   const [callsTo, setCallsTo] = useState(() => new Date().toISOString().split('T')[0])
   const [stl, setStl] = useState(null)
@@ -195,39 +200,62 @@ export default function SetterDetail() {
       {/* KPI Targets — daily progress */}
       {(() => {
         const eodDays = myEodReports.length || 1
-        const dailyDials = effectiveDials / eodDays
         const dailySets = mySets / eodDays
         const dailyLeads = effectiveLeads / eodDays
         const stlPct = stl ? stl.pctUnder5m : 0
         const kpis = [
-          { label: 'Dials/Day', value: dailyDials, target: 70, format: 'n', desc: `${Math.round(dailyDials)} avg over ${eodDays} days` },
-          { label: 'Sets/Day', value: dailySets, target: 3, format: 'n', desc: `${dailySets.toFixed(1)} avg over ${eodDays} days` },
-          { label: 'Leads/Day', value: dailyLeads, target: 40, format: 'n', desc: `${Math.round(dailyLeads)} avg over ${eodDays} days` },
-          { label: 'STL < 5min', value: stlPct, target: 80, format: '%', desc: stl ? `${stl.under5m} of ${stl.worked} leads` : 'loading...' },
+          { key: 'leads_day', label: 'Leads/Day', value: dailyLeads, target: kpiTargets.leads_day, format: 'n', desc: `${Math.round(dailyLeads)} avg over ${eodDays} days` },
+          { key: 'sets_day', label: 'Sets/Day', value: dailySets, target: kpiTargets.sets_day, format: 'n', desc: `${dailySets.toFixed(1)} avg over ${eodDays} days` },
+          { key: 'stl_pct', label: 'STL < 5min', value: stlPct, target: kpiTargets.stl_pct, format: '%', desc: stl ? `${stl.under5m} of ${stl.worked} leads` : 'loading...' },
         ]
         return (
           <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-6">
-            <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">Daily KPI Targets</h3>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-[11px] text-opt-yellow uppercase font-medium">Daily KPI Targets</h3>
+              <button
+                onClick={() => setEditingKpis(!editingKpis)}
+                className="text-[10px] text-text-400 hover:text-opt-yellow transition-colors flex items-center gap-1"
+              >
+                <Edit3 size={10} />
+                {editingKpis ? 'Done' : 'Edit Targets'}
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {kpis.map(k => {
-                const pct = Math.min((k.value / k.target) * 100, 100)
+                const pct = k.target > 0 ? Math.min((k.value / k.target) * 100, 100) : 0
                 const isHit = k.value >= k.target
                 const isClose = pct >= 70
                 const color = isHit ? 'bg-success' : isClose ? 'bg-opt-yellow' : 'bg-danger'
                 const textColor = isHit ? 'text-success' : isClose ? 'text-opt-yellow' : 'text-danger'
                 return (
-                  <div key={k.label}>
+                  <div key={k.key}>
                     <div className="flex items-baseline justify-between mb-1">
                       <span className="text-[10px] text-text-400 uppercase">{k.label}</span>
-                      <span className={`text-sm font-bold ${textColor}`}>
-                        {k.format === '%' ? `${Math.round(k.value)}%` : k.value.toFixed(1)}
-                        <span className="text-[10px] text-text-400 font-normal ml-1">/ {k.target}{k.format === '%' ? '%' : ''}</span>
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-sm font-bold ${textColor}`}>
+                          {k.format === '%' ? `${Math.round(k.value)}%` : k.value.toFixed(1)}
+                        </span>
+                        <span className="text-[10px] text-text-400">/</span>
+                        {editingKpis ? (
+                          <input
+                            type="number"
+                            value={kpiTargets[k.key]}
+                            onChange={e => {
+                              const val = parseFloat(e.target.value) || 0
+                              setKpiTargets(prev => ({ ...prev, [k.key]: val }))
+                              localStorage.setItem('setter_kpi_targets', JSON.stringify({ ...kpiTargets, [k.key]: val }))
+                            }}
+                            className="w-12 bg-bg-primary border border-opt-yellow/30 rounded px-1 py-0.5 text-[11px] text-text-primary text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                        ) : (
+                          <span className="text-[10px] text-text-400">{k.target}{k.format === '%' ? '%' : ''}</span>
+                        )}
+                      </div>
                     </div>
                     <div className="h-2 bg-bg-primary rounded-full overflow-hidden mb-1">
                       <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
                     </div>
-                    <p className="text-[9px] text-text-400">{k.desc}{isHit ? ' — Target hit' : ` — ${(100 - pct).toFixed(0)}% behind`}</p>
+                    <p className="text-[9px] text-text-400">{k.desc}{isHit ? ' — Target hit' : pct > 0 ? ` — ${(100 - pct).toFixed(0)}% behind` : ''}</p>
                   </div>
                 )
               })}
