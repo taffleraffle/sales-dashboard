@@ -36,6 +36,36 @@ export function useMarketingTracker({ autoSync = false } = {}) {
       .from('marketing_tracker')
       .upsert({ ...entry, updated_at: new Date().toISOString() }, { onConflict: 'date' })
     if (error) throw error
+
+    // Reverse-sync closer-related fields to closer_eod_reports
+    // so the closer detail page reflects marketing dashboard edits
+    const closerKeys = ['offers', 'closes', 'trial_cash', 'trial_revenue', 'live_calls', 'reschedules']
+    const hasCloserData = closerKeys.some(k => entry[k] != null && entry[k] !== '')
+    if (hasCloserData && entry.date) {
+      const { data: closers } = await supabase
+        .from('team_members')
+        .select('id')
+        .eq('role', 'closer')
+        .eq('is_active', true)
+      if (closers?.length === 1) {
+        const patch = {
+          closer_id: closers[0].id,
+          report_date: entry.date,
+          is_confirmed: true,
+          updated_at: new Date().toISOString(),
+        }
+        if (entry.offers != null) patch.offers = parseInt(entry.offers) || 0
+        if (entry.closes != null) patch.closes = parseInt(entry.closes) || 0
+        if (entry.trial_cash != null) patch.total_cash_collected = parseFloat(entry.trial_cash) || 0
+        if (entry.trial_revenue != null) patch.total_revenue = parseFloat(entry.trial_revenue) || 0
+        if (entry.live_calls != null) patch.live_nc_calls = parseInt(entry.live_calls) || 0
+        if (entry.reschedules != null) patch.reschedules = parseInt(entry.reschedules) || 0
+        await supabase
+          .from('closer_eod_reports')
+          .upsert(patch, { onConflict: 'closer_id,report_date' })
+      }
+    }
+
     await load()
   }
 

@@ -299,26 +299,23 @@ export default function SalesOverview() {
     fetchWavvAggregates(days).then(data => { setWavvAgg(data); setWavvLoading(false) })
   }, [days])
 
-  // Speed to Lead (4-day window with per-setter working-hour filter)
-  const STL_DAYS = 4
+  // Speed to Lead (selected range, with per-setter working-hour filter)
   const stlSchedules = buildSetterSchedules(setters)
   useEffect(() => {
     setStlLoading(true)
     Promise.all([
       fetchAllPipelineSummaries(() => {}),
-      fetchWavvCallsForSTL(STL_DAYS),
+      fetchWavvCallsForSTL(days),
     ]).then(([pipelines, calls]) => {
       const opps = pipelines.flatMap(p => p.summary?.opportunities || [])
-      const stlCutoff = new Date(Date.now() - STL_DAYS * 86400000).getTime()
-      const stlOpps = opps.filter(o => o.createdAt && new Date(o.createdAt).getTime() >= stlCutoff)
-      if (stlOpps.length > 0 && calls.length > 0) {
-        setStl(computeSpeedToLead(stlOpps, calls, [], stlSchedules))
+      if (opps.length > 0 && calls.length > 0) {
+        setStl(computeSpeedToLead(opps, calls, [], stlSchedules))
       } else {
         setStl(null)
       }
       setStlLoading(false)
     }).catch(() => setStlLoading(false))
-  }, [setters.length])
+  }, [days])
 
   // Filter marketing entries by range
   const sinceStr = (() => {
