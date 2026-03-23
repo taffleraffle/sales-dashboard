@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef, useMemo, memo, useCallback, startTransition } from 'react'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { syncMetaToTracker } from '../services/metaAdsSync'
 import DateRangeSelector from '../components/DateRangeSelector'
@@ -66,7 +66,7 @@ const fN = v => (v == null || isNaN(v)) ? '—' : v.toLocaleString()
 const fmt = (v, format) => format === '$' ? f$(v) : format === '%' ? fP(v) : format === 'x' ? fX(v) : fN(v)
 
 // ── KPI Card with benchmark + info tooltip + period arrow ─────────
-function KPI({ label, value, format, benchmark, trailing, prev, tip, whatIf }) {
+const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev, tip, whatIf }) {
   // Cost metrics where lower = better (CPL, CPB, CPA, Cost/Live, Cost Per Offer)
   const costLabels = ['CPL', 'Cost/', 'CPA', 'Resch%']
   const lowerIsBetter = costLabels.some(c => label.includes(c))
@@ -123,7 +123,7 @@ function KPI({ label, value, format, benchmark, trailing, prev, tip, whatIf }) {
       </div>
     </div>
   )
-}
+})
 
 // ── Section Header ─────────────────────────────────────────────────
 const colsMap = {
@@ -256,7 +256,7 @@ function TrailingTable({ entries }) {
 }
 
 // ── Daily Tracker ──────────────────────────────────────────────────
-function DailyTracker({ entries, onDelete, onSave }) {
+const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [sortKey, setSortKey] = useState('date')
@@ -469,7 +469,7 @@ function DailyTracker({ entries, onDelete, onSave }) {
       )}
     </div>
   )
-}
+})
 
 // ── Add Entry Modal ─────────────────────────────────────────────────
 const manualFields = [
@@ -930,13 +930,15 @@ export default function MarketingPerformance() {
   const [whatIfOverrides, setWhatIfOverrides] = useState({})
   const [whatIfDraft, setWhatIfDraft] = useState({})
   const whatIfTimer = useRef(null)
-  const updateWhatIf = (key, value) => {
+  const updateWhatIf = useCallback((key, value) => {
     setWhatIfDraft(prev => ({ ...prev, [key]: value }))
     clearTimeout(whatIfTimer.current)
     whatIfTimer.current = setTimeout(() => {
-      setWhatIfOverrides(prev => ({ ...prev, [key]: value }))
-    }, 300)
-  }
+      startTransition(() => {
+        setWhatIfOverrides(prev => ({ ...prev, [key]: value }))
+      })
+    }, 400)
+  }, [])
   const whatIfStats = useMemo(() => {
     if (!whatIfActive || !Object.keys(whatIfOverrides).length) return null
     const o = whatIfOverrides
@@ -1092,7 +1094,7 @@ export default function MarketingPerformance() {
     setTimeout(() => setMetaStatus(null), 5000)
   }
 
-  const handleDelete = async (date) => { if (confirm(`Delete ${date}?`)) await deleteEntry(date) }
+  const handleDelete = useCallback(async (date) => { if (confirm(`Delete ${date}?`)) await deleteEntry(date) }, [deleteEntry])
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
 
@@ -1132,7 +1134,7 @@ export default function MarketingPerformance() {
         {metaStatus && <span className="text-xs text-opt-yellow">{metaStatus}</span>}
         <div className="sm:ml-auto flex gap-2">
           <button
-            onClick={() => { setWhatIfActive(!whatIfActive); if (whatIfActive) { setWhatIfOverrides({}); setWhatIfDraft({}) } }}
+            onClick={() => { startTransition(() => { setWhatIfActive(!whatIfActive); if (whatIfActive) { setWhatIfOverrides({}); setWhatIfDraft({}) } }) }}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs border rounded-2xl transition-colors ${whatIfActive ? 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow' : 'text-text-secondary border-border-default hover:bg-bg-card-hover'}`}
           >
             <Edit3 size={14} /> What-If
