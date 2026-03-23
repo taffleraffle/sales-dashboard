@@ -32,7 +32,16 @@ export async function syncMetaAds(days = 30) {
   })
 
   const url = `${BASE_URL}/act_${ACCOUNT_ID}/insights?${params}`
-  const res = await fetch(url)
+  const metaController = new AbortController()
+  const metaTimeout = setTimeout(() => metaController.abort(), 20000)
+  let res
+  try {
+    res = await fetch(url, { signal: metaController.signal })
+  } catch (e) {
+    clearTimeout(metaTimeout)
+    throw new Error(`Meta Ads API request failed: ${e.message}`)
+  }
+  clearTimeout(metaTimeout)
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(`Meta Ads API error: ${err.error?.message || res.status}`)
@@ -170,10 +179,20 @@ async function fetchGHLLeadsByDate(sinceStr) {
       params.set('startAfterId', startAfterId)
       params.set('startAfter', String(startAfter))
     }
-    const res = await fetch(
-      `https://services.leadconnectorhq.com/opportunities/search?${params}`,
-      { headers: GHL_HEADERS }
-    )
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    let res
+    try {
+      res = await fetch(
+        `https://services.leadconnectorhq.com/opportunities/search?${params}`,
+        { headers: GHL_HEADERS, signal: controller.signal }
+      )
+    } catch (e) {
+      console.warn(`GHL pipeline fetch aborted on page ${page}:`, e.message)
+      break
+    } finally {
+      clearTimeout(timeout)
+    }
     if (!res.ok) break
     const json = await res.json()
     const opps = json.opportunities || []

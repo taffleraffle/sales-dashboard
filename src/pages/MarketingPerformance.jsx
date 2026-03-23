@@ -362,7 +362,7 @@ function DailyTracker({ entries, onDelete, onSave }) {
   ]
 
   const editableFields = ['adspend', 'leads', 'auto_bookings', 'qualified_bookings',
-    'calls_on_calendar', 'live_calls', 'cancelled_dtf', 'cancelled_by_prospect', 'offers', 'closes', 'reschedules',
+    'calls_on_calendar', 'live_calls', 'no_shows', 'cancelled_dtf', 'cancelled_by_prospect', 'offers', 'closes', 'reschedules',
     'trial_cash', 'trial_revenue', 'ascensions', 'ascend_cash', 'ascend_revenue',
     'finance_offers', 'finance_accepted', 'monthly_offers', 'monthly_accepted',
     'ar_collected', 'ar_defaulted', 'refund_count', 'refund_amount']
@@ -1014,7 +1014,7 @@ export default function MarketingPerformance() {
       cost_per_auto_booking: auto_bookings > 0 ? adspend / auto_bookings : 0,
       gross_show_rate: qualified_bookings > 0 ? (live_calls / qualified_bookings) * 100 : 0,
       net_show_rate: (() => { const net = qualified_bookings - cancels - reschedules; return net > 0 ? (live_calls / net) * 100 : 0 })(),
-      no_shows: Math.max(0, qualified_bookings - live_calls - cancels - reschedules),
+      no_shows: (stats.no_shows > 0 && qualified_bookings === stats.qualified_bookings) ? stats.no_shows : Math.max(0, qualified_bookings - live_calls - cancels - reschedules),
       reschedule_rate: qualified_bookings > 0 ? (reschedules / qualified_bookings) * 100 : 0,
       cost_per_live_call: live_calls > 0 ? adspend / live_calls : 0,
       offer_rate: live_calls > 0 ? (offers / live_calls) * 100 : 0,
@@ -1065,20 +1065,31 @@ export default function MarketingPerformance() {
 
   const handleMetaSync = async () => {
     setMetaSyncing(true)
-    setMetaStatus('Syncing EOD reports + Meta Ads + GHL...')
     try {
-      // Sync closer EOD data first
+      // Step 1: Sync closer EOD data
+      setMetaStatus('Step 1/3: Syncing closer EOD reports...')
       const { syncEODToTracker } = await import('../hooks/useMarketingTracker')
-      await syncEODToTracker()
-      // Then sync Meta Ads + GHL (only last 30 days)
-      const result = await syncMetaToTracker(30)
-      setMetaStatus(result.message)
+      const eodCount = await syncEODToTracker()
+      setMetaStatus(`Step 1/3 done: ${eodCount || 0} EOD days synced. Syncing Meta Ads...`)
+
+      // Step 2: Sync Meta Ads (with 30s timeout)
+      let metaResult = { days: 0, message: 'Skipped' }
+      try {
+        const metaPromise = syncMetaToTracker(30)
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Meta/GHL sync timed out after 60s')), 60000))
+        metaResult = await Promise.race([metaPromise, timeoutPromise])
+      } catch (metaErr) {
+        console.warn('Meta/GHL sync issue:', metaErr.message)
+        setMetaStatus(`EOD synced. Meta/GHL: ${metaErr.message}. Loading data...`)
+      }
+
       await reload()
+      setMetaStatus(metaResult.message || `Synced ${eodCount || 0} EOD days`)
     } catch (err) {
       setMetaStatus('Sync failed: ' + err.message)
     }
     setMetaSyncing(false)
-    setTimeout(() => setMetaStatus(null), 4000)
+    setTimeout(() => setMetaStatus(null), 5000)
   }
 
   const handleDelete = async (date) => { if (confirm(`Delete ${date}?`)) await deleteEntry(date) }
@@ -1209,7 +1220,7 @@ export default function MarketingPerformance() {
       <Section title="Calls & Show Rates" cols={9}>
         <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar" />
         <KPI label="Live" value={stats.live_calls} format="n" prev={sp.live_calls} whatIf={wf?.live_calls} tip="Calls that actually happened (showed)" />
-        <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="Booked - Live - Cancelled - Rescheduled" />
+        <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="From closer EOD reports (NC + FU no-shows)" />
         <KPI label="Cancelled" value={stats.cancels} format="n" prev={sp.cancels} tip="Cancelled DTF + Cancelled by Prospect" />
         <KPI label="Resch" value={stats.reschedules} format="n" prev={sp.reschedules} tip="Calls rescheduled to another date" />
         <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Live / Booked (includes all no-shows)" />

@@ -106,20 +106,23 @@ export function useMarketingTracker({ autoSync = false } = {}) {
 export async function fetchCloserEODTotals(sinceDate) {
   const { data } = await supabase
     .from('closer_eod_reports')
-    .select('report_date, nc_booked, fu_booked, live_nc_calls, live_fu_calls, offers, closes')
+    .select('report_date, nc_booked, fu_booked, nc_no_shows, fu_no_shows, live_nc_calls, live_fu_calls, offers, closes, reschedules')
     .gte('report_date', sinceDate)
     .order('report_date', { ascending: false })
 
   const byDate = {}
   for (const r of (data || [])) {
     const d = r.report_date
-    if (!byDate[d]) byDate[d] = { nc_booked: 0, fu_booked: 0, live_nc: 0, live_fu: 0, offers: 0, closes: 0 }
+    if (!byDate[d]) byDate[d] = { nc_booked: 0, fu_booked: 0, nc_no_shows: 0, fu_no_shows: 0, live_nc: 0, live_fu: 0, offers: 0, closes: 0, reschedules: 0 }
     byDate[d].nc_booked += r.nc_booked || 0
     byDate[d].fu_booked += r.fu_booked || 0
+    byDate[d].nc_no_shows += r.nc_no_shows || 0
+    byDate[d].fu_no_shows += r.fu_no_shows || 0
     byDate[d].live_nc += r.live_nc_calls || 0
     byDate[d].live_fu += r.live_fu_calls || 0
     byDate[d].offers += r.offers || 0
     byDate[d].closes += r.closes || 0
+    byDate[d].reschedules += r.reschedules || 0
   }
   return byDate
 }
@@ -132,7 +135,7 @@ export async function fetchCloserEODTotals(sinceDate) {
 export async function syncEODToTracker() {
   const { data: eods } = await supabase
     .from('closer_eod_reports')
-    .select('id, report_date, offers, closes, total_cash_collected, total_revenue, deposits, live_nc_calls, live_fu_calls, nc_booked, fu_booked, reschedules')
+    .select('id, report_date, offers, closes, total_cash_collected, total_revenue, deposits, live_nc_calls, live_fu_calls, nc_booked, fu_booked, nc_no_shows, fu_no_shows, reschedules')
     .eq('is_confirmed', true)
 
   if (!eods?.length) return 0
@@ -142,7 +145,7 @@ export async function syncEODToTracker() {
   const reportIdsByDate = {}
   for (const r of eods) {
     const d = r.report_date
-    if (!byDate[d]) byDate[d] = { offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0, ascensions: 0, live_calls: 0, booked: 0, reschedules: 0 }
+    if (!byDate[d]) byDate[d] = { offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0, ascensions: 0, live_calls: 0, booked: 0, no_shows: 0, reschedules: 0 }
     if (!reportIdsByDate[d]) reportIdsByDate[d] = []
     reportIdsByDate[d].push(r.id)
     byDate[d].offers += r.offers || 0
@@ -152,6 +155,7 @@ export async function syncEODToTracker() {
     byDate[d].ascensions += r.deposits || 0
     byDate[d].live_calls += (r.live_nc_calls || 0) + (r.live_fu_calls || 0)
     byDate[d].booked += (r.nc_booked || 0) + (r.fu_booked || 0)
+    byDate[d].no_shows += (r.nc_no_shows || 0) + (r.fu_no_shows || 0)
     byDate[d].reschedules += r.reschedules || 0
   }
 
@@ -209,6 +213,10 @@ export async function syncEODToTracker() {
     if (callAgg.financeAccepted) patch.finance_accepted = callAgg.financeAccepted
     if (eod.live_calls) patch.live_calls = eod.live_calls
     if (eod.booked) patch.calls_on_calendar = eod.booked
+    // EOD booked calls ARE the qualified bookings — always overwrite GHL calendar count
+    // because the closer's report is the source of truth for their actual day
+    if (eod.booked) patch.qualified_bookings = eod.booked
+    if (eod.no_shows) patch.no_shows = eod.no_shows
     if (eod.reschedules) patch.reschedules = eod.reschedules
 
     if (existing) {
@@ -240,6 +248,7 @@ export function computeMarketingStats(entries) {
     qualified_bookings: a.qualified_bookings + (r.qualified_bookings || 0),
     calls_on_calendar: a.calls_on_calendar + (r.calls_on_calendar || (r.net_new_calls || 0) + (r.net_fu_calls || 0)),
     live_calls: a.live_calls + (r.live_calls || r.net_live_calls || 0),
+    no_shows: a.no_shows + (r.no_shows || 0),
     offers: a.offers + (r.offers || 0),
     closes: a.closes + (r.closes || 0),
     trial_cash: a.trial_cash + parseFloat(r.trial_cash || 0),
@@ -260,7 +269,7 @@ export function computeMarketingStats(entries) {
     cancelled_by_prospect: a.cancelled_by_prospect + (r.cancelled_by_prospect || 0),
   }), {
     adspend: 0, leads: 0, auto_bookings: 0, qualified_bookings: 0,
-    calls_on_calendar: 0, live_calls: 0, reschedules: 0,
+    calls_on_calendar: 0, live_calls: 0, no_shows: 0, reschedules: 0,
     cancelled_dtf: 0, cancelled_by_prospect: 0,
     offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0,
     ascensions: 0, ascend_cash: 0, ascend_revenue: 0,
@@ -290,8 +299,12 @@ export function computeMarketingStats(entries) {
       return net > 0 ? (t.live_calls / net) * 100 : 0
     })(),
     show_rate: t.qualified_bookings > 0 ? (t.live_calls / t.qualified_bookings) * 100 : 0,
-    no_shows: t.qualified_bookings > 0 ? t.qualified_bookings - t.live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules : 0,
-    no_show_rate: t.qualified_bookings > 0 ? ((t.qualified_bookings - t.live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules) / t.qualified_bookings) * 100 : 0,
+    // Use actual no-shows from closer EOD when available; derive only as fallback
+    no_shows: t.no_shows > 0 ? t.no_shows : Math.max(0, t.qualified_bookings - t.live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules),
+    no_show_rate: (() => {
+      const ns = t.no_shows > 0 ? t.no_shows : Math.max(0, t.qualified_bookings - t.live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules)
+      return t.qualified_bookings > 0 ? (ns / t.qualified_bookings) * 100 : 0
+    })(),
     reschedules: t.reschedules,
     reschedule_rate: t.qualified_bookings > 0 ? (t.reschedules / t.qualified_bookings) * 100 : 0,
     cost_per_live_call: t.live_calls > 0 ? t.adspend / t.live_calls : 0,
