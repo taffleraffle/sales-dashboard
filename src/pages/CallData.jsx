@@ -31,8 +31,14 @@ function parseMarkdown(text) {
 }
 
 // ── Outcome badge ──
-const outcomeBadge = (outcome) => {
-  if (!outcome) return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-primary text-text-400 border border-border-default">pending</span>
+const outcomeBadge = (outcome, memberRole) => {
+  if (!outcome) {
+    // Show "Sales Call" in amber if the member is a closer, generic "Pending" otherwise
+    if (memberRole === 'closer') {
+      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-400/15 text-amber-400 border border-amber-400/30">sales call</span>
+    }
+    return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-400/15 text-purple-400 border border-purple-400/30">pending</span>
+  }
   const colors = {
     closed: 'bg-success/15 text-success border-success/30',
     ascended: 'bg-success/15 text-success border-success/30',
@@ -74,7 +80,7 @@ function TranscriptCard({ t }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium text-text-primary truncate">{t.prospect_name || 'Unknown'}</span>
-            {outcomeBadge(t.outcome)}
+            {outcomeBadge(t.outcome, t.member?.role)}
             {sourceBadge}
           </div>
           <div className="flex items-center gap-3 mt-1 text-[11px] text-text-400">
@@ -301,9 +307,9 @@ export default function CallData() {
       </div>
 
       {/* Two-panel layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
         {/* Left: Transcript list */}
-        <div className="lg:col-span-3 space-y-2">
+        <div className="flex-1 min-w-0 space-y-2">
           {loading ? (
             <div className="flex items-center justify-center py-16 text-text-400">
               <Loader size={20} className="animate-spin mr-2" />Loading...
@@ -332,7 +338,7 @@ export default function CallData() {
         </div>
 
         {/* Right: AI Chat */}
-        <div className="lg:col-span-2 bg-bg-card border border-border-default rounded-2xl flex flex-col h-[600px] lg:sticky lg:top-4">
+        <div className="w-full lg:w-[380px] xl:w-[420px] shrink-0 bg-bg-card border border-border-default rounded-2xl flex flex-col h-[600px] lg:sticky lg:top-4 self-start">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default shrink-0">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-full bg-opt-yellow/15 flex items-center justify-center">

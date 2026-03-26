@@ -1,8 +1,8 @@
 import { supabase } from '../lib/supabase'
 
 /**
- * Build a system prompt containing transcript summaries for the AI chat.
- * Sends full summaries (capped at 1500 chars each, 40 transcripts max).
+ * Build a system prompt containing FULL transcript summaries for the AI chat.
+ * No truncation — sends the complete Fathom summary for each call.
  */
 export async function buildTranscriptContext({ memberId, sinceDate, untilDate } = {}) {
   let query = supabase
@@ -29,7 +29,7 @@ export async function buildTranscriptContext({ memberId, sinceDate, untilDate } 
   }
 
   const transcriptBlocks = transcripts.map((t, i) => {
-    const summary = (t.summary || '').slice(0, 1500)
+    const summary = t.summary || ''
     const member = t.member?.name || 'Unassigned'
     const outcome = t.outcome || 'unknown'
     return `### Call #${i + 1}: ${t.prospect_name || 'Unknown'} — ${member} — ${t.meeting_date} — ${fmtDur(t.duration_seconds)} — ${outcome}

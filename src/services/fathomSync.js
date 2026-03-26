@@ -47,9 +47,25 @@ export async function syncFathomAllMembers() {
     if (m.email) emailMap[m.email.toLowerCase()] = m
   }
 
-  let synced = 0, skipped = 0
+  // Internal meeting patterns to skip
+  const INTERNAL_TITLE_PATTERNS = [/^impromptu/i, /^standup/i, /^team\s+meeting/i, /^internal/i]
+  const teamEmails = new Set(Object.keys(emailMap))
+
+  let synced = 0, skipped = 0, filtered = 0
   for (const m of meetings) {
     if (existingIds.has(m.id)) { skipped++; continue }
+
+    // Skip internal meetings by title
+    const title = m.title || ''
+    if (INTERNAL_TITLE_PATTERNS.some(p => p.test(title))) { filtered++; continue }
+
+    // Skip meetings where the prospect is actually an internal team member
+    const external = (m.calendar_invitees || []).find(i => i.is_external)
+    const prospectEmail = external?.email?.toLowerCase() || null
+    if (prospectEmail && teamEmails.has(prospectEmail)) { filtered++; continue }
+
+    // Skip meetings with no external invitees and a generic title (likely internal)
+    if (!external && !title.includes(' - ') && (m.calendar_invitees || []).length <= 2) { filtered++; continue }
 
     // Match team member from calendar invitees (internal) or recorded_by
     let memberId = null
@@ -64,10 +80,8 @@ export async function syncFathomAllMembers() {
       if (match) memberId = match.id
     }
 
-    // Extract prospect (first external invitee)
-    const external = (m.calendar_invitees || []).find(i => i.is_external)
+    // Prospect name/email from the external invitee we already found
     const prospectName = external?.name || m.title || 'Unknown'
-    const prospectEmail = external?.email || null
 
     const { error } = await supabase.from('closer_transcripts').insert({
       closer_id: memberId,
@@ -89,5 +103,5 @@ export async function syncFathomAllMembers() {
     }
   }
 
-  return { synced, skipped, total: meetings.length, message: `Synced ${synced} new calls (${skipped} already existed)` }
+  return { synced, skipped, filtered, total: meetings.length, message: `Synced ${synced} new calls (${skipped} existing, ${filtered} internal filtered)` }
 }
