@@ -47,8 +47,17 @@ export async function syncFathomAllMembers() {
     if (m.email) emailMap[m.email.toLowerCase()] = m
   }
 
-  // Internal meeting patterns to skip
+  // Internal meeting patterns to skip (by title)
   const INTERNAL_TITLE_PATTERNS = [/^impromptu/i, /^standup/i, /^team\s+meeting/i, /^internal/i]
+  // Non-sales summary patterns (interviews, internal syncs, staff onboarding)
+  const NON_SALES_SUMMARY_PATTERNS = [
+    /interview.*role/i, /screening.*interview/i, /hiring/i, /job.*candidate/i,
+    /account manager role/i, /role at opt/i,
+    /troubleshoot.*bot/i, /troubleshoot.*optimus/i,
+    /onboard.*payment process/i, /onboard.*team best practice/i,
+  ]
+  // Known internal contact emails (not prospects)
+  const INTERNAL_CONTACTS = new Set(['jaketaroquin@gmail.com', 'kenleejobhunting@gmail.com', 'valeriabadillo234@gmail.com'])
   const teamEmails = new Set(Object.keys(emailMap))
 
   let synced = 0, skipped = 0, filtered = 0
@@ -64,8 +73,15 @@ export async function syncFathomAllMembers() {
     const prospectEmail = external?.email?.toLowerCase() || null
     if (prospectEmail && teamEmails.has(prospectEmail)) { filtered++; continue }
 
+    // Skip known internal contacts
+    if (prospectEmail && INTERNAL_CONTACTS.has(prospectEmail)) { filtered++; continue }
+
     // Skip meetings with no external invitees and a generic title (likely internal)
     if (!external && !title.includes(' - ') && (m.calendar_invitees || []).length <= 2) { filtered++; continue }
+
+    // Skip if summary indicates non-sales (interview, internal troubleshooting, staff onboarding)
+    const summaryPreview = (m.summary || '').slice(0, 400)
+    if (NON_SALES_SUMMARY_PATTERNS.some(p => p.test(summaryPreview))) { filtered++; continue }
 
     // Match team member from calendar invitees (internal) or recorded_by
     let memberId = null
