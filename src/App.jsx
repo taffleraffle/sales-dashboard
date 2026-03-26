@@ -10,6 +10,7 @@ import SetterOverview from './pages/SetterOverview'
 import SetterDetail from './pages/SetterDetail'
 import EODReview from './pages/EODReview'
 import MarketingPerformance from './pages/MarketingPerformance'
+import CallData from './pages/CallData'
 import SettingsPage from './pages/SettingsPage'
 import SetPasswordPage from './pages/SetPasswordPage'
 import SplashScreen from './components/SplashScreen'
@@ -70,6 +71,7 @@ export default function App() {
               <Route path="/sales/setters/:id" element={<SetterDetail />} />
               <Route path="/sales/marketing" element={<MarketingPerformance />} />
               <Route path="/sales/eod" element={<EODReview />} />
+              <Route path="/sales/call-data" element={<CallData />} />
               <Route path="/sales/settings" element={<SettingsPage />} />
             </Route>
           </Routes>
