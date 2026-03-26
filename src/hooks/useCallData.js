@@ -43,8 +43,9 @@ export function useCallData({ search = '', memberId = '', sinceDate = '', untilD
 
 /**
  * Aggregate stats for the Call Data page header.
+ * Respects the current date filter so stats update when you change the range.
  */
-export function useCallStats() {
+export function useCallStats(sinceDate = '') {
   const [stats, setStats] = useState({ totalCalls: 0, totalHours: 0, callsThisWeek: 0, memberCount: 0 })
   const [loading, setLoading] = useState(true)
 
@@ -55,8 +56,11 @@ export function useCallStats() {
       weekAgo.setDate(weekAgo.getDate() - 7)
       const weekStr = weekAgo.toISOString().split('T')[0]
 
+      let allQuery = supabase.from('closer_transcripts').select('duration_seconds, closer_id')
+      if (sinceDate) allQuery = allQuery.gte('meeting_date', sinceDate)
+
       const [allRes, weekRes] = await Promise.all([
-        supabase.from('closer_transcripts').select('duration_seconds, closer_id'),
+        allQuery,
         supabase.from('closer_transcripts').select('id').gte('meeting_date', weekStr),
       ])
 
@@ -73,7 +77,7 @@ export function useCallStats() {
       setLoading(false)
     }
     load()
-  }, [])
+  }, [sinceDate])
 
   return { stats, loading }
 }

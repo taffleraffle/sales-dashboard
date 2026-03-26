@@ -119,12 +119,11 @@ function TranscriptCard({ t }) {
 // ── Main Page ──
 export default function CallData() {
   const { members } = useTeamMembers()
-  const { stats } = useCallStats()
 
   // Filters
   const [search, setSearch] = useState('')
   const [memberId, setMemberId] = useState('')
-  const [dateRange, setDateRange] = useState('30')
+  const [dateRange, setDateRange] = useState('90')
   const [outcome, setOutcome] = useState('')
   const [page, setPage] = useState(0)
   const PAGE_SIZE = 50
@@ -132,6 +131,9 @@ export default function CallData() {
   const sinceDate = dateRange === 'all' ? '' : (() => {
     const d = new Date(); d.setDate(d.getDate() - parseInt(dateRange)); return d.toISOString().split('T')[0]
   })()
+
+  // Stats respect the current date filter
+  const { stats } = useCallStats(sinceDate)
 
   const { transcripts, total, loading, reload } = useCallData({
     search, memberId, sinceDate, outcome,

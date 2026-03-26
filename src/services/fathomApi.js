@@ -13,8 +13,33 @@ async function fathomFetch(endpoint, params = {}) {
 }
 
 /**
- * Fetch meetings from Fathom API.
- * Normalizes the response to consistent field names.
+ * Normalize a single Fathom meeting record to consistent field names.
+ */
+function normalizeMeeting(m) {
+    const startTime = m.recording_start_time || m.scheduled_start_time || m.created_at
+    const endTime = m.recording_end_time || m.scheduled_end_time
+    const durationSecs = startTime && endTime
+      ? Math.round((new Date(endTime) - new Date(startTime)) / 1000)
+      : null
+
+  return {
+    id: String(m.recording_id || m.id || ''),
+    meeting_id: String(m.recording_id || m.id || ''),
+    title: m.title || m.meeting_title || '',
+    start_time: startTime,
+    summary: m.default_summary?.markdown_formatted || m.summary || null,
+    duration_seconds: durationSecs,
+    share_url: m.share_url || m.url || null,
+    recording_url: m.url || m.share_url || null,
+    calendar_invitees: m.calendar_invitees || [],
+    recorded_by: m.recorded_by || null,
+    organizer_email: m.recorded_by?.email || null,
+  }
+}
+
+/**
+ * Fetch meetings from Fathom API with pagination.
+ * Fetches all pages until sinceDate is reached or no more results.
  */
 export async function fetchMeetings(limit = 50) {
   const data = await fathomFetch('/meetings', {
@@ -22,29 +47,43 @@ export async function fetchMeetings(limit = 50) {
     include_action_items: 'true',
     limit: String(limit),
   })
+  return (data.items || []).map(normalizeMeeting)
+}
 
-  // Normalize Fathom's field names to what our sync code expects
-  return (data.items || []).map(m => {
-    const startTime = m.recording_start_time || m.scheduled_start_time || m.created_at
-    const endTime = m.recording_end_time || m.scheduled_end_time
-    const durationSecs = startTime && endTime
-      ? Math.round((new Date(endTime) - new Date(startTime)) / 1000)
-      : null
+/**
+ * Fetch ALL meetings from Fathom going back to a specific date.
+ * Uses cursor pagination to get complete history.
+ */
+export async function fetchAllMeetingsSince(sinceDate = '2025-12-01') {
+  const allMeetings = []
+  let cursor = null
+  const sinceTs = new Date(sinceDate).getTime()
 
-    return {
-      id: String(m.recording_id || m.id || ''),
-      meeting_id: String(m.recording_id || m.id || ''),
-      title: m.title || m.meeting_title || '',
-      start_time: startTime,
-      summary: m.default_summary?.markdown_formatted || m.summary || null,
-      duration_seconds: durationSecs,
-      share_url: m.share_url || m.url || null,
-      recording_url: m.url || m.share_url || null,
-      calendar_invitees: m.calendar_invitees || [],
-      recorded_by: m.recorded_by || null,
-      organizer_email: m.recorded_by?.email || null,
+  for (let page = 0; page < 20; page++) {
+    const params = {
+      include_summary: 'true',
+      include_action_items: 'true',
+      limit: '100',
     }
-  })
+    if (cursor) params.cursor = cursor
+
+    const data = await fathomFetch('/meetings', params)
+    const items = data.items || []
+    if (items.length === 0) break
+
+    const normalized = items.map(normalizeMeeting)
+    for (const m of normalized) {
+      const meetingTs = m.start_time ? new Date(m.start_time).getTime() : Date.now()
+      if (meetingTs < sinceTs) return allMeetings // reached our cutoff
+      allMeetings.push(m)
+    }
+
+    // Check for next page cursor
+    cursor = data.cursor || data.next_cursor || null
+    if (!cursor) break
+  }
+
+  return allMeetings
 }
 
 export function formatDuration(seconds) {
