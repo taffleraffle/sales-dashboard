@@ -163,9 +163,24 @@ export default function CallData() {
   const [chatStreaming, setChatStreaming] = useState(false)
   const [chatStreamText, setChatStreamText] = useState('')
   const chatEndRef = useRef(null)
+  const chatContainerRef = useRef(null)
   const chatContextRef = useRef(null)
+  const userScrolledUpRef = useRef(false)
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatMessages, chatStreamText])
+  // Track if user has scrolled up in chat
+  const handleChatScroll = () => {
+    const el = chatContainerRef.current
+    if (!el) return
+    userScrolledUpRef.current = el.scrollHeight - el.scrollTop - el.clientHeight > 60
+  }
+
+  // Auto-scroll only when user is near the bottom
+  useEffect(() => {
+    if (!userScrolledUpRef.current) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages, chatStreamText])
+
+  // Reset scroll lock when user sends a new message
+  useEffect(() => { userScrolledUpRef.current = false }, [chatMessages.length])
 
   // Invalidate context when filters change
   useEffect(() => { chatContextRef.current = null }, [memberId, sinceDate])
@@ -339,8 +354,8 @@ export default function CallData() {
           )}
         </div>
 
-        {/* Right: AI Chat */}
-        <div className="w-full lg:w-[380px] xl:w-[420px] shrink-0 bg-bg-card border border-border-default rounded-2xl flex flex-col h-[600px] lg:sticky lg:top-4 self-start">
+        {/* Right: AI Chat — sticky from header to bottom of viewport */}
+        <div className="w-full lg:w-[380px] xl:w-[420px] shrink-0 bg-bg-card border border-border-default rounded-2xl flex flex-col lg:sticky lg:top-2 self-start" style={{ maxHeight: 'calc(100vh - 1.5rem)' }}>
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default shrink-0">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-full bg-opt-yellow/15 flex items-center justify-center">
@@ -359,7 +374,7 @@ export default function CallData() {
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
+          <div ref={chatContainerRef} onScroll={handleChatScroll} className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
             {chatMessages.length === 0 && !chatStreaming && (
               <div className="space-y-3 pt-1">
                 <p className="text-[10px] text-text-400 uppercase font-medium">Try asking...</p>

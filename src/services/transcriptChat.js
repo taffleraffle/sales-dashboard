@@ -42,13 +42,14 @@ ${summary}`
 
 You have access to ${transcripts.length} call transcript summaries from the team's Fathom recordings.
 
-FORMATTING RULES:
-- Be specific — cite prospect names, dates, and direct quotes from summaries
-- Use markdown tables for comparisons
-- Bold key insights and numbers
-- When analyzing objections, group them by category and show frequency
-- When comparing team members, show side-by-side stats
-- Be direct and analytical — this is for sales leadership
+RESPONSE RULES:
+- Be CONCISE. Lead with the direct answer in 1-2 sentences. No preamble.
+- If asked "what niche closes most?" say "Restoration at 35%" — don't list every niche and their pain points
+- Only expand if the user asks for detail. Short answers by default.
+- Use bullet points, not paragraphs. Max 5-8 bullet points per response.
+- Use a markdown table ONLY when comparing 3+ items side-by-side
+- Cite specific prospect names and dates when relevant
+- Never repeat back what the user asked. Just answer it.
 
 TRANSCRIPTS:
 
