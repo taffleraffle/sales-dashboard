@@ -48,24 +48,21 @@ export async function syncFathomAllMembers() {
   const danielId = danielRes.data.id
   const existingIds = new Set((existingRes.data || []).map(r => r.fathom_meeting_id))
 
-  // Internal team emails — calls with these are not sales calls
+  // Only skip calls where the prospect is an OPT team member (internal-to-internal)
   const INTERNAL_EMAILS = new Set([
     'josh@optdigital.io', 'ben@opt.co.nz', 'ed@opt.co.nz',
     'jaketaroquin@gmail.com',
   ])
-  // Known internal people (by name, lowercase)
-  const INTERNAL_NAMES = ['dennis deheza', 'jeffrey benson', 'joshua woolever', 'josh warren',
-    'lizette habenicht', 'jason hubilla', 'jacob scott', 'daniel / ben', 'daniel/ben', 'ben windisch']
-  // Non-sales summary patterns
+  // Only skip calls that are clearly internal team syncs (Daniel/Ben 1:1s, Dennis team calls)
+  const INTERNAL_NAMES = ['daniel / ben', 'daniel/ben', 'ben windisch', 'dennis deheza']
+  // Only skip summary content that is unambiguously NOT a prospect call
   const NON_SALES_PATTERNS = [
     /team (wins|call|meeting|sync|huddle|standup)/i,
-    /weekly (wins|review|sync|meeting|huddle)/i,
-    /process (constraints|updates|improvement)/i,
-    /team morale/i, /pipeline review|team review/i,
-    /interview|screening|hiring|candidate|role at/i,
-    /troubleshoot|bug fix|optimus|bot (issue|error)/i,
-    /training session|coaching session|role.?play/i,
-    /1\/?1|one.on.one/i, /call review|review.*calls/i,
+    /weekly (wins|review|sync)/i,
+    /process (constraints|updates)/i, /team morale/i,
+    /interview.*role|screening.*interview|hiring.*candidate/i,
+    /troubleshoot.*optimus|troubleshoot.*bot/i,
+    /\b1\/1\b|one.on.one with (ben|josh|ed)/i,
   ]
 
   let synced = 0, skipped = 0, filtered = 0
