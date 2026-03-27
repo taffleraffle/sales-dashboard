@@ -52,34 +52,36 @@ export async function fetchMeetings(limit = 50) {
 
 /**
  * Fetch ALL meetings from Fathom going back to a specific date.
- * Uses cursor pagination to get complete history.
+ * Fathom returns ~10 items per page with next_cursor pagination.
+ * Max 100 pages (should cover ~1000 meetings / several months).
  */
 export async function fetchAllMeetingsSince(sinceDate = '2025-12-01') {
   const allMeetings = []
   let cursor = null
   const sinceTs = new Date(sinceDate).getTime()
 
-  for (let page = 0; page < 20; page++) {
+  for (let page = 0; page < 100; page++) {
     const params = {
       include_summary: 'true',
       include_action_items: 'true',
-      limit: '100',
+      limit: '50',
     }
-    if (cursor) params.cursor = cursor
+    if (cursor) params.next_cursor = cursor
 
     const data = await fathomFetch('/meetings', params)
     const items = data.items || []
     if (items.length === 0) break
 
     const normalized = items.map(normalizeMeeting)
+    let reachedCutoff = false
     for (const m of normalized) {
       const meetingTs = m.start_time ? new Date(m.start_time).getTime() : Date.now()
-      if (meetingTs < sinceTs) return allMeetings // reached our cutoff
+      if (meetingTs < sinceTs) { reachedCutoff = true; break }
       allMeetings.push(m)
     }
+    if (reachedCutoff) break
 
-    // Check for next page cursor
-    cursor = data.cursor || data.next_cursor || null
+    cursor = data.next_cursor || null
     if (!cursor) break
   }
 
