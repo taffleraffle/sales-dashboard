@@ -66,7 +66,7 @@ export async function fetchAllMeetingsSince(sinceDate = '2025-12-01') {
       include_action_items: 'true',
       limit: '50',
     }
-    if (cursor) params.next_cursor = cursor
+    if (cursor) params.cursor = cursor
 
     const data = await fathomFetch('/meetings', params)
     const items = data.items || []
