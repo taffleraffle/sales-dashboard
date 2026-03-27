@@ -48,6 +48,26 @@ export async function syncFathomAllMembers() {
   const danielId = danielRes.data.id
   const existingIds = new Set((existingRes.data || []).map(r => r.fathom_meeting_id))
 
+  // Internal team emails — calls with these are not sales calls
+  const INTERNAL_EMAILS = new Set([
+    'josh@optdigital.io', 'ben@opt.co.nz', 'ed@opt.co.nz',
+    'jaketaroquin@gmail.com',
+  ])
+  // Known internal people (by name, lowercase)
+  const INTERNAL_NAMES = ['dennis deheza', 'jeffrey benson', 'joshua woolever', 'josh warren',
+    'lizette habenicht', 'jason hubilla', 'jacob scott', 'daniel / ben', 'daniel/ben', 'ben windisch']
+  // Non-sales summary patterns
+  const NON_SALES_PATTERNS = [
+    /team (wins|call|meeting|sync|huddle|standup)/i,
+    /weekly (wins|review|sync|meeting|huddle)/i,
+    /process (constraints|updates|improvement)/i,
+    /team morale/i, /pipeline review|team review/i,
+    /interview|screening|hiring|candidate|role at/i,
+    /troubleshoot|bug fix|optimus|bot (issue|error)/i,
+    /training session|coaching session|role.?play/i,
+    /1\/?1|one.on.one/i, /call review|review.*calls/i,
+  ]
+
   let synced = 0, skipped = 0, filtered = 0
   for (const m of meetings) {
     if (existingIds.has(m.id)) { skipped++; continue }
@@ -57,13 +77,20 @@ export async function syncFathomAllMembers() {
       ...(m.calendar_invitees || []).map(i => (i.email || '').toLowerCase()),
       (m.organizer_email || '').toLowerCase(),
     ]
-    const isDanielCall = allEmails.includes(DANIEL_EMAIL)
-    if (!isDanielCall) { filtered++; continue }
+    if (!allEmails.includes(DANIEL_EMAIL)) { filtered++; continue }
 
     // Extract prospect (first external invitee)
     const external = (m.calendar_invitees || []).find(i => i.is_external)
     const prospectName = external?.name || m.title || 'Unknown'
-    const prospectEmail = external?.email || null
+    const prospectEmail = (external?.email || '').toLowerCase()
+
+    // Skip internal team calls
+    if (INTERNAL_EMAILS.has(prospectEmail)) { filtered++; continue }
+    if (INTERNAL_NAMES.some(n => prospectName.toLowerCase().includes(n))) { filtered++; continue }
+
+    // Skip non-sales calls by summary content
+    const summaryPreview = (m.summary || '').slice(0, 500)
+    if (NON_SALES_PATTERNS.some(p => p.test(summaryPreview))) { filtered++; continue }
 
     const { error } = await supabase.from('closer_transcripts').insert({
       closer_id: danielId,
