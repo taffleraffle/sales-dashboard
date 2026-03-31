@@ -71,21 +71,23 @@ async function fetchContactPhone(contactId) {
 }
 
 /**
- * Check a single contact's GHL conversation for any inbound reply.
+ * Check a single contact's GHL conversation for inbound replies within 24h of appointment.
+ * Returns which channels they replied on (SMS, email, call).
  */
-async function checkContactEngagement(ghlContactId) {
-  if (!ghlContactId) return { hasInbound: false, lastOutboundDate: null }
+async function checkContactEngagement(ghlContactId, apptTime) {
+  const empty = { hasInbound: false, lastOutboundDate: null, channels: [] }
+  if (!ghlContactId) return empty
 
   try {
     const convRes = await fetch(
       `${GHL_BASE}/conversations/search?locationId=${GHL_LOCATION_ID}&contactId=${ghlContactId}`,
       { headers: ghlHeaders }
     )
-    if (!convRes.ok) return { hasInbound: false, lastOutboundDate: null }
+    if (!convRes.ok) return empty
 
     const convData = await convRes.json()
     const conv = convData.conversations?.[0]
-    if (!conv) return { hasInbound: false, lastOutboundDate: null }
+    if (!conv) return empty
 
     const lastOutboundDate = conv.lastMessageDate ? new Date(conv.lastMessageDate) : null
 
@@ -93,15 +95,35 @@ async function checkContactEngagement(ghlContactId) {
       `${GHL_BASE}/conversations/${conv.id}/messages`,
       { headers: ghlHeaders }
     )
-    if (!msgRes.ok) return { hasInbound: false, lastOutboundDate }
+    if (!msgRes.ok) return { hasInbound: false, lastOutboundDate, channels: [] }
 
     const msgData = await msgRes.json()
     const messages = msgData.messages?.messages || []
-    const hasInbound = messages.some(m => m.direction === 'inbound')
 
-    return { hasInbound, lastOutboundDate }
+    // Only count inbound messages within 24h before the appointment
+    const cutoff = new Date(apptTime.getTime() - 24 * 3600000)
+    const recentInbound = messages.filter(m =>
+      m.direction === 'inbound' && new Date(m.dateAdded) >= cutoff
+    )
+
+    // Classify channels
+    const channels = new Set()
+    for (const m of recentInbound) {
+      const t = (m.messageType || '').toUpperCase()
+      if (t.includes('SMS') || t.includes('TYPE_SMS')) channels.add('SMS')
+      else if (t.includes('EMAIL') || t.includes('TYPE_EMAIL')) channels.add('Email')
+      else if (t.includes('CALL') || t.includes('TYPE_CALL') || t.includes('CUSTOM_CALL')) channels.add('Call')
+      else if (t.includes('FB') || t.includes('FACEBOOK') || t.includes('IG')) channels.add('Social')
+      else channels.add('SMS') // default to SMS for unknown text-based
+    }
+
+    return {
+      hasInbound: recentInbound.length > 0,
+      lastOutboundDate,
+      channels: [...channels],
+    }
   } catch {
-    return { hasInbound: false, lastOutboundDate: null }
+    return empty
   }
 }
 
@@ -140,9 +162,13 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
       const longestCall = normalizedPhone ? (wavvByPhone[normalizedPhone] || 0) : 0
       const hasCall = longestCall > 30
 
-      const { hasInbound, lastOutboundDate } = await checkContactEngagement(appt.ghl_contact_id)
-
       const apptTime = new Date(appt.startTime)
+      const { hasInbound, lastOutboundDate, channels } = await checkContactEngagement(appt.ghl_contact_id, apptTime)
+
+      // Add 'Call' channel if they had a 30s+ WAVV call
+      const allChannels = [...channels]
+      if (hasCall && !allChannels.includes('Call')) allChannels.push('Call')
+
       const hoursUntil = (apptTime - now) / 3600000
       const tier = hoursUntil <= 24 ? 'critical' : hoursUntil <= 48 ? 'warning' : 'monitor'
 
@@ -156,6 +182,7 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
         longestCall,
         lastOutboundDate,
         engaged,
+        channels: allChannels,
         tier: engaged ? 'confirmed' : tier,
         hoursUntil: Math.round(hoursUntil),
         apptTime,

@@ -1,4 +1,5 @@
-import { Loader, Calendar, Phone, CheckCircle } from 'lucide-react'
+import { useState } from 'react'
+import { Loader, Calendar, Phone, CheckCircle, ChevronDown, MessageSquare, Mail, PhoneCall } from 'lucide-react'
 
 const tierStyles = {
   critical: 'bg-danger/10 border-l-2 border-danger',
@@ -45,6 +46,47 @@ function formatDuration(secs) {
   if (!secs || secs <= 0) return '—'
   if (secs < 60) return `${secs}s`
   return `${Math.floor(secs / 60)}m ${secs % 60}s`
+}
+
+const channelIcons = {
+  Call: PhoneCall,
+  SMS: MessageSquare,
+  Email: Mail,
+  Social: MessageSquare,
+}
+
+function ChannelDropdown({ channels }) {
+  const [open, setOpen] = useState(false)
+
+  if (!channels.length) {
+    return <span className="text-danger text-[10px] font-medium">None</span>
+  }
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-success text-[10px] font-medium hover:text-opt-yellow transition-colors"
+      >
+        <CheckCircle size={10} />
+        {channels.length} channel{channels.length > 1 ? 's' : ''}
+        <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 left-0 bg-bg-card border border-border-default rounded-lg shadow-lg py-1 min-w-[120px]">
+          {channels.map(ch => {
+            const Icon = channelIcons[ch] || MessageSquare
+            return (
+              <div key={ch} className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-text-primary">
+                <Icon size={11} className="text-success" />
+                {ch}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function EndangeredLeadsTable({ leads, loading }) {
@@ -107,7 +149,7 @@ export default function EndangeredLeadsTable({ leads, loading }) {
               <th className="px-3 py-2 text-left">Appointment</th>
               <th className="px-3 py-2 text-left">Time Left</th>
               <th className="px-3 py-2 text-left">Best Call</th>
-              <th className="px-3 py-2 text-left">Replied</th>
+              <th className="px-3 py-2 text-left">Engagement</th>
               <th className="px-3 py-2 text-left">Status</th>
             </tr>
           </thead>
@@ -137,11 +179,7 @@ export default function EndangeredLeadsTable({ leads, loading }) {
                   </span>
                 </td>
                 <td className="px-3 py-2">
-                  {lead.hasInbound ? (
-                    <span className="text-success flex items-center gap-1"><CheckCircle size={10} /> Yes</span>
-                  ) : (
-                    <span className="text-text-400">No</span>
-                  )}
+                  <ChannelDropdown channels={lead.channels || []} />
                 </td>
                 <td className="px-3 py-2">
                   <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${tierBadge[lead.tier]}`}>
