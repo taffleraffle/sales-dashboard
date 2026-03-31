@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Loader, Calendar, Phone, CheckCircle, ChevronDown, MessageSquare, Mail, PhoneCall, ArrowDownLeft, ArrowUpRight } from 'lucide-react'
+import { Loader, Calendar, Phone, CheckCircle, ChevronDown, MessageSquare, Mail, PhoneCall, ArrowDownLeft, ArrowUpRight, AlertTriangle } from 'lucide-react'
 
 const tierStyles = {
   critical: 'bg-danger/10 border-l-2 border-danger',
   warning: 'bg-warning/10 border-l-2 border-warning',
   monitor: 'bg-blue-500/5 border-l-2 border-blue-500/40',
   confirmed: '',
+  cancel_risk: 'bg-danger/10 border-l-2 border-danger',
 }
 
 const tierBadge = {
@@ -13,6 +14,7 @@ const tierBadge = {
   warning: 'bg-warning/15 text-warning border-warning/30',
   monitor: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
   confirmed: 'bg-success/15 text-success border-success/30',
+  cancel_risk: 'bg-danger/15 text-danger border-danger/30',
 }
 
 const tierLabel = {
@@ -20,6 +22,7 @@ const tierLabel = {
   warning: 'Warning',
   monitor: 'Monitor',
   confirmed: 'Confirmed',
+  cancel_risk: 'Cancel Risk',
 }
 
 const channelIcons = {
@@ -94,8 +97,9 @@ export default function EndangeredLeadsTable({ leads, loading }) {
     )
   }
 
-  const endangered = leads.filter(l => !l.engaged)
-  const confirmed = leads.filter(l => l.engaged)
+  const cancelRisk = leads.filter(l => l.tier === 'cancel_risk')
+  const endangered = leads.filter(l => !l.engaged && l.tier !== 'cancel_risk')
+  const confirmed = leads.filter(l => l.engaged && l.tier !== 'cancel_risk')
 
   return (
     <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
@@ -105,9 +109,14 @@ export default function EndangeredLeadsTable({ leads, loading }) {
           <h2 className="text-sm font-medium text-text-secondary">Upcoming Strategy Calls ({leads.length})</h2>
         </div>
         <div className="flex items-center gap-2 text-[10px]">
+          {cancelRisk.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-danger/15 text-danger font-medium flex items-center gap-1">
+              <AlertTriangle size={9} /> {cancelRisk.length} cancel risk
+            </span>
+          )}
           {endangered.length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-danger/15 text-danger font-medium">
-              {endangered.length} at risk
+            <span className="px-2 py-0.5 rounded-full bg-warning/15 text-warning font-medium">
+              {endangered.length} no engagement
             </span>
           )}
           {confirmed.length > 0 && (
@@ -194,7 +203,16 @@ export default function EndangeredLeadsTable({ leads, loading }) {
                   {isExpanded && (
                     <tr key={`${id}-detail`} className="bg-bg-primary/50">
                       <td colSpan={8} className="px-4 py-3">
-                        <div className="text-[10px] text-opt-yellow uppercase font-medium mb-2">Activity Timeline (last 24h)</div>
+                        {lead.cancelRisk && (
+                          <div className="flex items-start gap-2 px-3 py-2 mb-2 rounded-lg bg-danger/10 border border-danger/20">
+                            <AlertTriangle size={12} className="text-danger shrink-0 mt-0.5" />
+                            <div>
+                              <span className="text-[11px] font-medium text-danger">AI Alert: Likely No-Show</span>
+                              <p className="text-[10px] text-text-400 mt-0.5">{lead.cancelRisk}</p>
+                            </div>
+                          </div>
+                        )}
+                        <div className="text-[10px] text-opt-yellow uppercase font-medium mb-2">Inbound Responses (last 24h)</div>
                         {activity.length === 0 ? (
                           <p className="text-[11px] text-text-400 italic">No activity found in the last 24 hours.</p>
                         ) : (
@@ -202,24 +220,37 @@ export default function EndangeredLeadsTable({ leads, loading }) {
                             {activity.map((a, ai) => {
                               const Icon = channelIcons[a.channel] || MessageSquare
                               const isInbound = a.direction === 'inbound'
-                              const DirIcon = isInbound ? ArrowDownLeft : ArrowUpRight
+                              const isContext = a.isContext
                               return (
-                                <div key={ai} className={`flex items-start gap-2 px-3 py-1.5 rounded-lg ${isInbound ? 'bg-success/5 border border-success/10' : 'bg-bg-card border border-border-default/30'}`}>
+                                <div key={ai} className={`flex items-start gap-2 px-3 py-1.5 rounded-lg ${
+                                  isInbound
+                                    ? a.risk?.isRisk
+                                      ? 'bg-danger/10 border border-danger/20'
+                                      : 'bg-success/5 border border-success/10'
+                                    : 'bg-bg-card/50 border border-border-default/20'
+                                }`}>
                                   <div className="flex items-center gap-1 shrink-0 mt-0.5">
-                                    <DirIcon size={10} className={isInbound ? 'text-success' : 'text-text-400'} />
-                                    <Icon size={11} className={channelColors[a.channel] || 'text-text-400'} />
+                                    {isInbound ? <ArrowDownLeft size={10} className={a.risk?.isRisk ? 'text-danger' : 'text-success'} /> : <ArrowUpRight size={10} className="text-text-400" />}
+                                    <Icon size={11} className={isInbound ? (a.risk?.isRisk ? 'text-danger' : channelColors[a.channel]) : 'text-text-400'} />
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
-                                      <span className={`text-[10px] font-medium ${isInbound ? 'text-success' : 'text-text-400'}`}>
-                                        {isInbound ? 'Inbound' : 'Outbound'} {a.channel}
+                                      <span className={`text-[10px] font-medium ${
+                                        isInbound ? (a.risk?.isRisk ? 'text-danger' : 'text-success') : 'text-text-400'
+                                      }`}>
+                                        {isContext ? 'They replied to →' : isInbound ? `Inbound ${a.channel}` : `Outbound ${a.channel}`}
                                       </span>
                                       <span className="text-[9px] text-text-400">
                                         {new Date(a.date).toLocaleString('en-US', tzOpts)}
                                       </span>
+                                      {a.risk?.isRisk && (
+                                        <span className="text-[9px] text-danger font-medium flex items-center gap-0.5">
+                                          <AlertTriangle size={8} /> Cancel/Reschedule
+                                        </span>
+                                      )}
                                     </div>
                                     {a.body && (
-                                      <p className="text-[11px] text-text-secondary mt-0.5 truncate">{a.body}</p>
+                                      <p className={`text-[11px] mt-0.5 ${isContext ? 'text-text-400 italic' : 'text-text-secondary'}`}>{a.body}</p>
                                     )}
                                   </div>
                                 </div>

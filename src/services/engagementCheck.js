@@ -6,6 +6,27 @@ const ghlHeaders = {
   'Version': '2021-07-28',
 }
 
+const CANCEL_PATTERNS = [
+  /\b(cancel|reschedule|can'?t make|won'?t make|not going to make|not able|unable|have to push|move|postpone|rain ?check)\b/i,
+  /\b(family emergency|something came up|won'?t be able|busy that day|conflict|out of town|sick|hospital)\b/i,
+  /\b(don'?t think i can|need to (cancel|reschedule|move)|another time|different day|change the)\b/i,
+]
+
+/**
+ * Analyze inbound message for cancellation/reschedule intent.
+ * Returns { isRisk: boolean, reason: string }
+ */
+function analyzeMessageRisk(body) {
+  if (!body) return { isRisk: false, reason: null }
+  for (const pattern of CANCEL_PATTERNS) {
+    const match = body.match(pattern)
+    if (match) {
+      return { isRisk: true, reason: `"${match[0]}" detected — likely cancellation or reschedule` }
+    }
+  }
+  return { isRisk: false, reason: null }
+}
+
 function normalizePhone(phone) {
   if (!phone) return null
   return phone.replace(/\D/g, '').slice(-10)
@@ -75,7 +96,7 @@ async function fetchContactPhone(contactId) {
  * Returns which channels they replied on (SMS, email, call).
  */
 async function checkContactEngagement(ghlContactId, apptTime) {
-  const empty = { hasInbound: false, lastOutboundDate: null, channels: [], activity: [] }
+  const empty = { hasInbound: false, lastOutboundDate: null, channels: [], activity: [], cancelRisk: null }
   if (!ghlContactId) return empty
 
   try {
@@ -106,22 +127,41 @@ async function checkContactEngagement(ghlContactId, apptTime) {
       m.direction === 'inbound' && new Date(m.dateAdded) >= cutoff
     )
 
-    // Build detailed activity log from recent messages (inbound + outbound, last 24h)
-    const recentAll = messages.filter(m => new Date(m.dateAdded) >= cutoff)
-    const activity = recentAll.map(m => {
+    // Build activity: inbound messages + the outbound message they replied to (context)
+    const allSorted = [...messages].sort((a, b) => new Date(a.dateAdded) - new Date(b.dateAdded))
+    const classifyChannel = (m) => {
       const t = (m.messageType || '').toUpperCase()
-      let channel = 'SMS'
-      if (t.includes('EMAIL') || t.includes('TYPE_EMAIL')) channel = 'Email'
-      else if (t.includes('CALL') || t.includes('TYPE_CALL') || t.includes('CUSTOM_CALL')) channel = 'Call'
-      else if (t.includes('FB') || t.includes('FACEBOOK') || t.includes('IG')) channel = 'Social'
-      return {
-        direction: m.direction,
-        channel,
-        body: (m.body || '').substring(0, 200),
-        date: m.dateAdded,
-        status: m.status,
+      if (t.includes('EMAIL') || t.includes('TYPE_EMAIL')) return 'Email'
+      if (t.includes('CALL') || t.includes('TYPE_CALL') || t.includes('CUSTOM_CALL')) return 'Call'
+      if (t.includes('FB') || t.includes('FACEBOOK') || t.includes('IG')) return 'Social'
+      return 'SMS'
+    }
+    const activity = []
+    for (let i = 0; i < allSorted.length; i++) {
+      const m = allSorted[i]
+      if (m.direction !== 'inbound' || new Date(m.dateAdded) < cutoff) continue
+      // Find the outbound message right before this inbound (what they replied to)
+      if (i > 0 && allSorted[i - 1].direction === 'outbound') {
+        const prev = allSorted[i - 1]
+        activity.push({
+          direction: 'outbound',
+          channel: classifyChannel(prev),
+          body: (prev.body || '').substring(0, 200),
+          date: prev.dateAdded,
+          isContext: true,
+        })
       }
-    }).sort((a, b) => new Date(b.date) - new Date(a.date))
+      const inboundBody = (m.body || '').substring(0, 300)
+      const risk = analyzeMessageRisk(inboundBody)
+      activity.push({
+        direction: 'inbound',
+        channel: classifyChannel(m),
+        body: inboundBody,
+        date: m.dateAdded,
+        risk,
+      })
+    }
+    activity.sort((a, b) => new Date(b.date) - new Date(a.date))
 
     // Classify channels from inbound only
     const channels = new Set()
@@ -134,11 +174,16 @@ async function checkContactEngagement(ghlContactId, apptTime) {
       else channels.add('SMS')
     }
 
+    // Check if any inbound message has cancellation/reschedule risk
+    const riskMessages = activity.filter(a => a.risk?.isRisk)
+    const cancelRisk = riskMessages.length > 0 ? riskMessages[0].risk.reason : null
+
     return {
       hasInbound: recentInbound.length > 0,
       lastOutboundDate,
       channels: [...channels],
       activity,
+      cancelRisk,
     }
   } catch {
     return empty
@@ -178,10 +223,10 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
       const phone = await fetchContactPhone(appt.ghl_contact_id)
       const normalizedPhone = normalizePhone(phone)
       const longestCall = normalizedPhone ? (wavvByPhone[normalizedPhone] || 0) : 0
-      const hasCall = longestCall > 30
+      const hasCall = longestCall > 40
 
       const apptTime = new Date(appt.startTime)
-      const { hasInbound, lastOutboundDate, channels, activity } = await checkContactEngagement(appt.ghl_contact_id, apptTime)
+      const { hasInbound, lastOutboundDate, channels, activity, cancelRisk } = await checkContactEngagement(appt.ghl_contact_id, apptTime)
 
       // Add 'Call' channel if they had a 30s+ WAVV call
       const allChannels = [...channels]
@@ -195,9 +240,9 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
           activity.push({
             direction: 'outbound',
             channel: 'Call',
-            body: `WAVV call — ${wc.call_duration}s${wc.call_duration > 30 ? ' (connected)' : ''}`,
+            body: `WAVV call — ${wc.call_duration}s${wc.call_duration > 40 ? ' (connected)' : ''}`,
             date: wc.started_at || new Date().toISOString(),
-            status: wc.call_duration > 30 ? 'connected' : 'no-answer',
+            status: wc.call_duration > 40 ? 'connected' : 'no-answer',
           })
         }
         activity.sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -218,7 +263,8 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
         engaged,
         channels: allChannels,
         activity,
-        tier: engaged ? 'confirmed' : tier,
+        cancelRisk,
+        tier: cancelRisk ? 'cancel_risk' : engaged ? 'confirmed' : tier,
         hoursUntil: Math.round(hoursUntil),
         apptTime,
       }
