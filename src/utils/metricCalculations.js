@@ -55,33 +55,43 @@ export function trend(current, previous) {
   }
 }
 
-export function computeShowRate(leads, closerCalls = []) {
-  // Build a lookup of closer_call outcomes keyed by setter_lead_id
-  const callOutcomes = {}
-  for (const c of closerCalls) {
-    if (c.setter_lead_id) callOutcomes[c.setter_lead_id] = c
-  }
+/**
+ * Compute show rate for setter leads using closer EOD daily aggregates.
+ *
+ * For each setter_lead with an appointment_date, looks up the closer EOD stats
+ * for that date and uses the daily show rate (live_calls / booked) to weight
+ * whether that lead likely showed. This matches the SalesOverview methodology.
+ *
+ * @param {Array} leads - setter_leads with { appointment_date }
+ * @param {Object} dateStats - { [date]: { booked, live, noShows } } from closer EODs
+ * @returns {{ showRate, showedCount, noShowCount, resolved }}
+ */
+export function computeShowRate(leads, dateStats = {}) {
+  let weightedShows = 0
+  let weightedTotal = 0
 
-  let showed = 0
-  let noShows = 0
-  let rescheduled = 0
-
+  // Group leads by appointment_date
+  const byDate = {}
   for (const lead of leads) {
-    // Use closer_call outcome if linked, otherwise fall back to setter_leads.status
-    const call = callOutcomes[lead.id]
-    const outcome = call ? call.outcome : lead.status
-
-    if (['showed', 'closed', 'not_closed'].includes(outcome)) showed++
-    else if (outcome === 'no_show') noShows++
-    else if (outcome === 'rescheduled') rescheduled++
-    // 'set' / null / other = unresolved, skip
+    if (!lead.appointment_date) continue
+    byDate[lead.appointment_date] = (byDate[lead.appointment_date] || 0) + 1
   }
 
-  const resolved = showed + noShows
+  for (const [date, count] of Object.entries(byDate)) {
+    const ds = dateStats[date]
+    if (!ds || ds.booked === 0) continue
+    // Cap show rate at 100% (some dates have live > booked due to walk-ins/data quirks)
+    const dateShowRate = Math.min(ds.live / ds.booked, 1)
+    weightedShows += count * dateShowRate
+    weightedTotal += count
+  }
+
+  const showedCount = Math.round(weightedShows)
+  const noShowCount = Math.max(0, weightedTotal - showedCount)
   return {
-    showRate: resolved > 0 ? Number(((showed / resolved) * 100).toFixed(1)) : 0,
-    showedCount: showed,
-    noShowCount: noShows,
-    resolved,
+    showRate: weightedTotal > 0 ? Number(((weightedShows / weightedTotal) * 100).toFixed(1)) : 0,
+    showedCount,
+    noShowCount,
+    resolved: weightedTotal,
   }
 }

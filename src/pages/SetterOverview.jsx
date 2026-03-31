@@ -31,7 +31,7 @@ export default function SetterOverview() {
   const [autoBookings, setAutoBookings] = useState([])
   const [allAppointments, setAllAppointments] = useState([])
   const [showAllLeads, setShowAllLeads] = useState(false)
-  const [closerCalls, setCloserCalls] = useState([])
+  const [dateStats, setDateStats] = useState({})
 
   // Fetch appointments from GHL calendars
   useEffect(() => {
@@ -98,21 +98,23 @@ export default function SetterOverview() {
     fetchLeads()
   }, [range])
 
-  // Fetch closer_calls linked to setter_leads (for accurate show rates)
+  // Fetch closer EOD aggregates for show rate calculation
   useEffect(() => {
-    if (!allLeads.length) { setCloserCalls([]); return }
-    const leadIds = allLeads.map(l => l.id)
-    const batchSize = 300
-    const batches = []
-    for (let i = 0; i < leadIds.length; i += batchSize) {
-      batches.push(leadIds.slice(i, i + batchSize))
-    }
-    Promise.all(batches.map(batch =>
-      supabase.from('closer_calls').select('setter_lead_id, outcome, showed').in('setter_lead_id', batch)
-    )).then(results => {
-      setCloserCalls(results.flatMap(r => r.data || []))
-    })
-  }, [allLeads])
+    supabase
+      .from('closer_eod_reports')
+      .select('report_date, nc_booked, nc_no_shows, live_nc_calls, fu_booked, fu_no_shows, live_fu_calls')
+      .gte('report_date', sinceDate(range))
+      .then(({ data }) => {
+        const stats = {}
+        for (const e of (data || [])) {
+          if (!stats[e.report_date]) stats[e.report_date] = { booked: 0, noShows: 0, live: 0 }
+          stats[e.report_date].booked += (e.nc_booked || 0) + (e.fu_booked || 0)
+          stats[e.report_date].noShows += (e.nc_no_shows || 0) + (e.fu_no_shows || 0)
+          stats[e.report_date].live += (e.live_nc_calls || 0) + (e.live_fu_calls || 0)
+        }
+        setDateStats(stats)
+      })
+  }, [range])
 
   if (loadingMembers || loadingLeads || loadingReports) {
     return (
@@ -137,7 +139,7 @@ export default function SetterOverview() {
   const closedLeads = allLeads.filter(l => l.status === 'closed')
   const noShowLeads = allLeads.filter(l => l.status === 'no_show')
   const totalRevenue = allLeads.reduce((s, l) => s + parseFloat(l.revenue_attributed || 0), 0)
-  const { showRate: showRateVal } = computeShowRate(allLeads, closerCalls)
+  const { showRate: showRateVal } = computeShowRate(allLeads, dateStats)
   const showRate = showRateVal
   const closeRate = showedLeads.length > 0 ? ((closedLeads.length / showedLeads.length) * 100).toFixed(1) : 0
 
@@ -179,8 +181,8 @@ export default function SetterOverview() {
   const autoLeads = allLeads.filter(l => l.lead_source === 'auto')
   const manualLeads = allLeads.filter(l => l.lead_source !== 'auto')
   const showStatuses = ['showed', 'closed', 'not_closed']
-  const autoShowResult = computeShowRate(autoLeads, closerCalls)
-  const manualShowResult = computeShowRate(manualLeads, closerCalls)
+  const autoShowResult = computeShowRate(autoLeads, dateStats)
+  const manualShowResult = computeShowRate(manualLeads, dateStats)
   const booking = {
     autoTotal: autoLeads.length,
     autoShows: autoLeads.filter(l => showStatuses.includes(l.status)).length,
@@ -236,7 +238,7 @@ export default function SetterOverview() {
     const myShowed = myLeads.filter(l => ['showed', 'not_closed', 'closed'].includes(l.status))
     const myClosed = myLeads.filter(l => l.status === 'closed')
     const myNoShow = myLeads.filter(l => l.status === 'no_show')
-    const myShowResult = computeShowRate(myLeads, closerCalls)
+    const myShowResult = computeShowRate(myLeads, dateStats)
     const myRevenue = myLeads.reduce((s, l) => s + parseFloat(l.revenue_attributed || 0), 0)
 
     // Use EOD sets total (more accurate than setter_leads count for historical data)
