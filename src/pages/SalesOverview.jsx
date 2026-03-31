@@ -239,8 +239,6 @@ export default function SalesOverview() {
   const [showAllRecentLeads, setShowAllRecentLeads] = useState(false)
   const [endangeredLeads, setEndangeredLeads] = useState([])
   const [loadingEndangered, setLoadingEndangered] = useState(false)
-  const [ghlAppointments, setGhlAppointments] = useState([])
-  const [recentWavvCalls, setRecentWavvCalls] = useState([])
 
   // ── Pending EOD: check who hasn't submitted today ──
   const [pendingEOD, setPendingEOD] = useState({ closers: [], setters: [] })
@@ -299,31 +297,21 @@ export default function SalesOverview() {
     refreshLeads()
   }
 
-  // Fetch ghl_appointments + WAVV calls for endangered leads
+  // Fetch WAVV calls and check endangered leads (live from GHL)
   useEffect(() => {
-    supabase
-      .from('ghl_appointments')
-      .select('ghl_event_id, ghl_contact_id, contact_name, contact_phone, appointment_date, start_time, appointment_status, outcome')
-      .neq('appointment_status', 'cancelled')
-      .gte('appointment_date', todayET())
-      .then(({ data }) => setGhlAppointments(data || []))
-
+    setLoadingEndangered(true)
     const since = new Date()
     since.setDate(since.getDate() - 7)
     supabase
       .from('wavv_calls')
       .select('phone_number, call_duration')
       .gte('started_at', since.toISOString())
-      .then(({ data }) => setRecentWavvCalls(data || []))
+      .then(({ data }) => {
+        checkEndangeredLeads(data || [])
+          .then(setEndangeredLeads)
+          .finally(() => setLoadingEndangered(false))
+      })
   }, [])
-
-  useEffect(() => {
-    if (!ghlAppointments.length) return
-    setLoadingEndangered(true)
-    checkEndangeredLeads(ghlAppointments, recentWavvCalls)
-      .then(setEndangeredLeads)
-      .finally(() => setLoadingEndangered(false))
-  }, [ghlAppointments, recentWavvCalls])
 
   // WAVV aggregates
   useEffect(() => {

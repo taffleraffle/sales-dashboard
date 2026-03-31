@@ -11,11 +11,69 @@ function normalizePhone(phone) {
   return phone.replace(/\D/g, '').slice(-10)
 }
 
+/**
+ * Fetch upcoming appointments live from GHL calendars (next 7 days).
+ * Returns events with contactId, title, startTime, calendarName.
+ */
+export async function fetchUpcomingAppointments() {
+  const now = Date.now()
+  const in7d = now + 7 * 24 * 3600000
+
+  // Get all calendars
+  const calRes = await fetch(`${GHL_BASE}/calendars/?locationId=${GHL_LOCATION_ID}`, { headers: ghlHeaders })
+  if (!calRes.ok) return []
+  const { calendars } = await calRes.json()
+
+  // Fetch events from all calendars in parallel
+  const results = await Promise.allSettled(
+    calendars.map(async (cal) => {
+      const r = await fetch(
+        `${GHL_BASE}/calendars/events?locationId=${GHL_LOCATION_ID}&calendarId=${cal.id}&startTime=${now}&endTime=${in7d}`,
+        { headers: ghlHeaders }
+      )
+      if (!r.ok) return []
+      const d = await r.json()
+      return (d.events || [])
+        .filter(e => e.appointmentStatus !== 'cancelled' && !e.deleted)
+        .map(e => ({
+          ghl_event_id: e.id,
+          ghl_contact_id: e.contactId,
+          contact_name: e.title || '(Unknown)',
+          startTime: e.startTime,
+          appointment_date: e.startTime?.split('T')[0],
+          calendarName: cal.name,
+          appointmentStatus: e.appointmentStatus,
+        }))
+    })
+  )
+
+  return results
+    .filter(r => r.status === 'fulfilled')
+    .flatMap(r => r.value)
+    .sort((a, b) => new Date(a.startTime) - new Date(b.startTime))
+}
+
+/**
+ * Fetch contact phone from GHL by contactId.
+ */
+async function fetchContactPhone(contactId) {
+  try {
+    const r = await fetch(`${GHL_BASE}/contacts/${contactId}`, { headers: ghlHeaders })
+    if (!r.ok) return null
+    const d = await r.json()
+    return d.contact?.phone || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Check a single contact's GHL conversation for any inbound reply.
+ */
 async function checkContactEngagement(ghlContactId) {
   if (!ghlContactId) return { hasInbound: false, lastOutboundDate: null }
 
   try {
-    // Step 1: Get conversation for this contact
     const convRes = await fetch(
       `${GHL_BASE}/conversations/search?locationId=${GHL_LOCATION_ID}&contactId=${ghlContactId}`,
       { headers: ghlHeaders }
@@ -28,7 +86,6 @@ async function checkContactEngagement(ghlContactId) {
 
     const lastOutboundDate = conv.lastMessageDate ? new Date(conv.lastMessageDate) : null
 
-    // Step 2: Get messages and check for any inbound
     const msgRes = await fetch(
       `${GHL_BASE}/conversations/${conv.id}/messages`,
       { headers: ghlHeaders }
@@ -46,14 +103,14 @@ async function checkContactEngagement(ghlContactId) {
 }
 
 /**
- * Check upcoming appointments for engagement signals.
- * Returns only UNENGAGED leads sorted by urgency.
+ * Fetch live upcoming appointments from GHL, check engagement signals,
+ * and return only UNENGAGED leads sorted by urgency.
  *
- * @param {Array} appointments - ghl_appointments with ghl_contact_id, contact_phone, appointment_date, start_time, contact_name
- * @param {Array} wavvCalls - wavv_calls rows with phone_number, call_duration
- * @returns {Array} endangered leads with engagement details
+ * @param {Array} wavvCalls - wavv_calls rows with phone_number, call_duration (pre-fetched)
+ * @param {function} onProgress - optional callback(message) for loading state
+ * @returns {Array} endangered leads
  */
-export async function checkEndangeredLeads(appointments, wavvCalls = []) {
+export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}) {
   // Build WAVV lookup: normalized phone → longest call duration
   const wavvByPhone = {}
   for (const c of wavvCalls) {
@@ -64,27 +121,25 @@ export async function checkEndangeredLeads(appointments, wavvCalls = []) {
     }
   }
 
+  onProgress('Fetching upcoming appointments from GHL...')
+  const appointments = await fetchUpcomingAppointments()
+  if (!appointments.length) return []
+
+  onProgress(`Checking engagement for ${appointments.length} upcoming leads...`)
   const now = new Date()
-  const in7d = new Date(now.getTime() + 7 * 24 * 3600000)
-
-  // Filter to next 7 days, no outcome yet
-  const upcoming = appointments.filter(a => {
-    const apptTime = new Date(a.appointment_date + 'T' + (a.start_time || '12:00:00'))
-    return apptTime > now && apptTime <= in7d && !a.outcome
-  })
-
-  if (!upcoming.length) return []
 
   // Check engagement for each appointment in parallel
   const results = await Promise.allSettled(
-    upcoming.map(async (appt) => {
-      const phone = normalizePhone(appt.contact_phone)
-      const longestCall = phone ? (wavvByPhone[phone] || 0) : 0
+    appointments.map(async (appt) => {
+      // Fetch contact phone from GHL
+      const phone = await fetchContactPhone(appt.ghl_contact_id)
+      const normalizedPhone = normalizePhone(phone)
+      const longestCall = normalizedPhone ? (wavvByPhone[normalizedPhone] || 0) : 0
       const hasCall = longestCall > 30
 
       const { hasInbound, lastOutboundDate } = await checkContactEngagement(appt.ghl_contact_id)
 
-      const apptTime = new Date(appt.appointment_date + 'T' + (appt.start_time || '12:00:00'))
+      const apptTime = new Date(appt.startTime)
       const hoursUntil = (apptTime - now) / 3600000
       const tier = hoursUntil <= 24 ? 'critical' : hoursUntil <= 48 ? 'warning' : 'monitor'
 
@@ -92,6 +147,7 @@ export async function checkEndangeredLeads(appointments, wavvCalls = []) {
 
       return {
         ...appt,
+        contact_phone: phone,
         hasInbound,
         hasCall,
         longestCall,

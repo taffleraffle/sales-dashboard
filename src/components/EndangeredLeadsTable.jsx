@@ -117,7 +117,7 @@ export default function EndangeredLeadsTable({ leads, loading }) {
                   </a>
                 </td>
                 <td className="px-3 py-2 text-text-400">
-                  {lead.appointment_date} {lead.start_time ? `@ ${lead.start_time}` : ''}
+                  {lead.startTime ? new Date(lead.startTime).toLocaleString('en-US', { timeZone: 'America/Indiana/Indianapolis', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : lead.appointment_date}
                 </td>
                 <td className="px-3 py-2">
                   <span className={lead.tier === 'critical' ? 'text-danger font-medium' : 'text-warning'}>

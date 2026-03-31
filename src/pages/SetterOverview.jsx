@@ -35,7 +35,6 @@ export default function SetterOverview() {
   const [showAllLeads, setShowAllLeads] = useState(false)
   const [endangeredLeads, setEndangeredLeads] = useState([])
   const [loadingEndangered, setLoadingEndangered] = useState(false)
-  const [recentWavvCalls, setRecentWavvCalls] = useState([])
   const [dateStats, setDateStats] = useState({})
 
   // Fetch appointments from GHL calendars
@@ -121,25 +120,21 @@ export default function SetterOverview() {
       })
   }, [range])
 
-  // Fetch recent WAVV calls (last 7 days) for endangered leads check
+  // Fetch recent WAVV calls and check endangered leads (live from GHL)
   useEffect(() => {
+    setLoadingEndangered(true)
     const since = new Date()
     since.setDate(since.getDate() - 7)
     supabase
       .from('wavv_calls')
       .select('phone_number, call_duration')
       .gte('started_at', since.toISOString())
-      .then(({ data }) => setRecentWavvCalls(data || []))
+      .then(({ data }) => {
+        checkEndangeredLeads(data || [])
+          .then(setEndangeredLeads)
+          .finally(() => setLoadingEndangered(false))
+      })
   }, [])
-
-  // Check endangered leads from upcoming appointments
-  useEffect(() => {
-    if (!allAppointments.length) return
-    setLoadingEndangered(true)
-    checkEndangeredLeads(allAppointments, recentWavvCalls)
-      .then(setEndangeredLeads)
-      .finally(() => setLoadingEndangered(false))
-  }, [allAppointments, recentWavvCalls])
 
   if (loadingMembers || loadingLeads || loadingReports) {
     return (
