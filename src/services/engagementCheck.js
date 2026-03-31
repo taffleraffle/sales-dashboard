@@ -156,7 +156,7 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
         longestCall,
         lastOutboundDate,
         engaged,
-        tier,
+        tier: engaged ? 'confirmed' : tier,
         hoursUntil: Math.round(hoursUntil),
         apptTime,
       }
@@ -164,7 +164,11 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
   )
 
   return results
-    .filter(r => r.status === 'fulfilled' && !r.value.engaged)
+    .filter(r => r.status === 'fulfilled')
     .map(r => r.value)
-    .sort((a, b) => a.apptTime - b.apptTime)
+    .sort((a, b) => {
+      // Endangered first, then by appointment time
+      if (a.engaged !== b.engaged) return a.engaged ? 1 : -1
+      return a.apptTime - b.apptTime
+    })
 }
