@@ -73,7 +73,7 @@ export default function SetterDetail() {
   useEffect(() => {
     supabase
       .from('setter_leads')
-      .select('id, setter_id, status, appointment_date')
+      .select('id, setter_id, status')
       .gte('date_set', sinceDate(range))
       .then(({ data }) => setAllLeads(data || []))
   }, [range])

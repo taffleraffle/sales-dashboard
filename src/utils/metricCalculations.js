@@ -56,24 +56,15 @@ export function trend(current, previous) {
 }
 
 export function computeShowRate(leads) {
-  // Cutoff = start of today in Eastern time — gives closers until EOD to log outcomes
-  const cutoff = new Date(new Date().toLocaleDateString('en-US', { timeZone: 'America/Indiana/Indianapolis' }))
-
   const showStatuses = ['showed', 'closed', 'not_closed']
   const showed = leads.filter(l => showStatuses.includes(l.status))
-  const explicitNoShows = leads.filter(l => l.status === 'no_show')
-  const implicitNoShows = leads.filter(l =>
-    l.status === 'set' && l.appointment_date && new Date(l.appointment_date) < cutoff
-  )
-
-  const numerator = showed.length
-  const denominator = showed.length + explicitNoShows.length + implicitNoShows.length
+  const noShows = leads.filter(l => l.status === 'no_show')
+  const resolved = showed.length + noShows.length
 
   return {
-    showRate: denominator > 0 ? Number(((numerator / denominator) * 100).toFixed(1)) : 0,
+    showRate: resolved > 0 ? Number(((showed.length / resolved) * 100).toFixed(1)) : 0,
     showedCount: showed.length,
-    noShowCount: explicitNoShows.length + implicitNoShows.length,
-    implicitNoShows: implicitNoShows.length,
-    denominator,
+    noShowCount: noShows.length,
+    resolved,
   }
 }
