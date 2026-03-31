@@ -65,13 +65,12 @@ export async function checkEndangeredLeads(appointments, wavvCalls = []) {
   }
 
   const now = new Date()
-  const in24h = new Date(now.getTime() + 24 * 3600000)
-  const in48h = new Date(now.getTime() + 48 * 3600000)
+  const in7d = new Date(now.getTime() + 7 * 24 * 3600000)
 
-  // Filter to next 48h, no outcome yet
+  // Filter to next 7 days, no outcome yet
   const upcoming = appointments.filter(a => {
     const apptTime = new Date(a.appointment_date + 'T' + (a.start_time || '12:00:00'))
-    return apptTime > now && apptTime <= in48h && !a.outcome
+    return apptTime > now && apptTime <= in7d && !a.outcome
   })
 
   if (!upcoming.length) return []
@@ -87,7 +86,7 @@ export async function checkEndangeredLeads(appointments, wavvCalls = []) {
 
       const apptTime = new Date(appt.appointment_date + 'T' + (appt.start_time || '12:00:00'))
       const hoursUntil = (apptTime - now) / 3600000
-      const tier = hoursUntil <= 24 ? 'critical' : 'warning'
+      const tier = hoursUntil <= 24 ? 'critical' : hoursUntil <= 48 ? 'warning' : 'monitor'
 
       const engaged = hasInbound || hasCall
 

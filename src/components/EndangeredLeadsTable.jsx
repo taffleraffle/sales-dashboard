@@ -3,11 +3,19 @@ import { Loader, AlertTriangle, Phone } from 'lucide-react'
 const tierStyles = {
   critical: 'bg-danger/10 border-l-2 border-danger',
   warning: 'bg-warning/10 border-l-2 border-warning',
+  monitor: 'bg-blue-500/5 border-l-2 border-blue-500/40',
 }
 
 const tierBadge = {
   critical: 'bg-danger/15 text-danger border-danger/30',
   warning: 'bg-warning/15 text-warning border-warning/30',
+  monitor: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+}
+
+const tierLabel = {
+  critical: 'Critical',
+  warning: 'Warning',
+  monitor: 'Monitor',
 }
 
 function formatTimeLeft(hours) {
@@ -44,10 +52,21 @@ export default function EndangeredLeadsTable({ leads, loading }) {
     )
   }
 
-  if (!leads || leads.length === 0) return null
+  if (!leads || leads.length === 0) {
+    return (
+      <div className="bg-bg-card border border-border-default rounded-2xl p-6 mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <AlertTriangle size={14} className="text-success" />
+          <h2 className="text-sm font-medium text-text-secondary">Endangered Leads</h2>
+        </div>
+        <p className="text-xs text-text-400 text-center py-4">No endangered leads — all upcoming appointments have engagement signals.</p>
+      </div>
+    )
+  }
 
   const criticalCount = leads.filter(l => l.tier === 'critical').length
   const warningCount = leads.filter(l => l.tier === 'warning').length
+  const monitorCount = leads.filter(l => l.tier === 'monitor').length
 
   return (
     <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
@@ -65,6 +84,11 @@ export default function EndangeredLeadsTable({ leads, loading }) {
           {warningCount > 0 && (
             <span className="px-2 py-0.5 rounded-full bg-warning/15 text-warning font-medium">
               {warningCount} warning
+            </span>
+          )}
+          {monitorCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">
+              {monitorCount} monitor
             </span>
           )}
         </div>
@@ -108,7 +132,7 @@ export default function EndangeredLeadsTable({ leads, loading }) {
                 </td>
                 <td className="px-3 py-2">
                   <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${tierBadge[lead.tier]}`}>
-                    {lead.tier === 'critical' ? 'Critical' : 'Warning'}
+                    {tierLabel[lead.tier]}
                   </span>
                 </td>
               </tr>
