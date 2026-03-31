@@ -11,6 +11,7 @@ import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { Loader, ChevronDown, Plus, ChevronUp } from 'lucide-react'
+import { computeShowRate } from '../utils/metricCalculations'
 
 export default function SetterOverview() {
   const [range, setRange] = useState(30)
@@ -119,8 +120,8 @@ export default function SetterOverview() {
   const closedLeads = allLeads.filter(l => l.status === 'closed')
   const noShowLeads = allLeads.filter(l => l.status === 'no_show')
   const totalRevenue = allLeads.reduce((s, l) => s + parseFloat(l.revenue_attributed || 0), 0)
-  const resolvedLeads = allLeads.filter(l => ['showed', 'not_closed', 'closed', 'no_show'].includes(l.status))
-  const showRate = resolvedLeads.length > 0 ? ((showedLeads.length / resolvedLeads.length) * 100).toFixed(1) : 0
+  const { showRate: showRateVal } = computeShowRate(allLeads)
+  const showRate = showRateVal
   const closeRate = showedLeads.length > 0 ? ((closedLeads.length / showedLeads.length) * 100).toFixed(1) : 0
 
   // Company-level activity — prefer WAVV data for dials/pickups/MCs, EOD for leads/sets/reschedules
@@ -161,21 +162,20 @@ export default function SetterOverview() {
   const autoLeads = allLeads.filter(l => l.lead_source === 'auto')
   const manualLeads = allLeads.filter(l => l.lead_source !== 'auto')
   const showStatuses = ['showed', 'closed', 'not_closed']
-  const resolvedStatuses = ['showed', 'closed', 'not_closed', 'no_show']
-  const autoResolved = autoLeads.filter(l => resolvedStatuses.includes(l.status))
-  const manualResolved = manualLeads.filter(l => resolvedStatuses.includes(l.status))
+  const autoShowResult = computeShowRate(autoLeads)
+  const manualShowResult = computeShowRate(manualLeads)
   const booking = {
     autoTotal: autoLeads.length,
     autoShows: autoLeads.filter(l => showStatuses.includes(l.status)).length,
     autoNoShows: autoLeads.filter(l => l.status === 'no_show').length,
     autoCloses: autoLeads.filter(l => l.status === 'closed').length,
-    autoShowRate: autoResolved.length > 0 ? parseFloat(((autoLeads.filter(l => showStatuses.includes(l.status)).length / autoResolved.length) * 100).toFixed(1)) : 0,
+    autoShowRate: autoShowResult.showRate,
     autoCloseRate: autoLeads.filter(l => showStatuses.includes(l.status)).length > 0 ? parseFloat(((autoLeads.filter(l => l.status === 'closed').length / autoLeads.filter(l => showStatuses.includes(l.status)).length) * 100).toFixed(1)) : 0,
     manualTotal: manualLeads.length,
     manualShows: manualLeads.filter(l => showStatuses.includes(l.status)).length,
     manualNoShows: manualLeads.filter(l => l.status === 'no_show').length,
     manualCloses: manualLeads.filter(l => l.status === 'closed').length,
-    manualShowRate: manualResolved.length > 0 ? parseFloat(((manualLeads.filter(l => showStatuses.includes(l.status)).length / manualResolved.length) * 100).toFixed(1)) : 0,
+    manualShowRate: manualShowResult.showRate,
     manualCloseRate: manualLeads.filter(l => showStatuses.includes(l.status)).length > 0 ? parseFloat(((manualLeads.filter(l => l.status === 'closed').length / manualLeads.filter(l => showStatuses.includes(l.status)).length) * 100).toFixed(1)) : 0,
   }
 
@@ -219,7 +219,7 @@ export default function SetterOverview() {
     const myShowed = myLeads.filter(l => ['showed', 'not_closed', 'closed'].includes(l.status))
     const myClosed = myLeads.filter(l => l.status === 'closed')
     const myNoShow = myLeads.filter(l => l.status === 'no_show')
-    const myResolved = myLeads.filter(l => ['showed', 'not_closed', 'closed', 'no_show'].includes(l.status))
+    const myShowResult = computeShowRate(myLeads)
     const myRevenue = myLeads.reduce((s, l) => s + parseFloat(l.revenue_attributed || 0), 0)
 
     // Use EOD sets total (more accurate than setter_leads count for historical data)
@@ -255,7 +255,7 @@ export default function SetterOverview() {
       closed: myClosed.length,
       noShows: myNoShow.length,
       revenue: myRevenue,
-      showRate: myResolved.length > 0 ? parseFloat(((myShowed.length / myResolved.length) * 100).toFixed(1)) : 0,
+      showRate: myShowResult.showRate,
       closeRate: myShowed.length > 0 ? parseFloat(((myClosed.length / myShowed.length) * 100).toFixed(1)) : 0,
       dialsPerSet: (eodSets || myLeads.length) > 0 ? parseFloat((dials / (eodSets || myLeads.length)).toFixed(1)) : 0,
       topPipelines,

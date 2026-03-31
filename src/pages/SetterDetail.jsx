@@ -11,6 +11,7 @@ import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { useSetterStats, useSetterEODs } from '../hooks/useSetterData'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
+import { computeShowRate } from '../utils/metricCalculations'
 
 export default function SetterDetail() {
   const { id } = useParams()
@@ -72,7 +73,7 @@ export default function SetterDetail() {
   useEffect(() => {
     supabase
       .from('setter_leads')
-      .select('id, setter_id, status')
+      .select('id, setter_id, status, appointment_date')
       .gte('date_set', sinceDate(range))
       .then(({ data }) => setAllLeads(data || []))
   }, [range])
@@ -154,7 +155,7 @@ export default function SetterDetail() {
   const totalCompanySets = Math.max(allLeads.length, companyActivity.sets)
   const companyClosedLeads = allLeads.filter(l => l.status === 'closed')
   const companyShowedLeads = allLeads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.status))
-  const companyResolvedLeads = allLeads.filter(l => ['showed', 'closed', 'not_closed', 'no_show'].includes(l.status))
+  const { showRate: companyShowRateVal } = computeShowRate(allLeads)
   const companyRates = {
     leadToSet: companyActivity.leads > 0 ? parseFloat(((totalCompanySets / companyActivity.leads) * 100).toFixed(1)) : 0,
     callToSet: companyActivity.dials > 0 ? parseFloat(((totalCompanySets / companyActivity.dials) * 100).toFixed(1)) : 0,
@@ -162,7 +163,7 @@ export default function SetterDetail() {
     mcToSet: companyActivity.mcs > 0 ? parseFloat(((totalCompanySets / companyActivity.mcs) * 100).toFixed(1)) : 0,
     pickupRate: companyActivity.dials > 0 ? parseFloat(((companyActivity.pickups / companyActivity.dials) * 100).toFixed(1)) : 0,
     closeRate: companyShowedLeads.length > 0 ? parseFloat(((companyClosedLeads.length / companyShowedLeads.length) * 100).toFixed(1)) : 0,
-    showRate: companyResolvedLeads.length > 0 ? parseFloat(((companyShowedLeads.length / companyResolvedLeads.length) * 100).toFixed(1)) : 0,
+    showRate: companyShowRateVal,
     leadToClose: companyActivity.leads > 0 ? parseFloat(((companyClosedLeads.length / companyActivity.leads) * 100).toFixed(1)) : 0,
   }
 
@@ -193,10 +194,9 @@ export default function SetterDetail() {
   }
 
   // Compute show/close rate from leads
-  const resolvedLeads = leads.filter(l => ['showed', 'closed', 'not_closed', 'no_show'].includes(l.status))
+  const { showRate } = computeShowRate(leads)
   const showedLeads = leads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.status))
   const closedLeads = leads.filter(l => l.status === 'closed')
-  const showRate = resolvedLeads.length ? parseFloat(((showedLeads.length / resolvedLeads.length) * 100).toFixed(1)) : 0
   const closeRate = showedLeads.length > 0 ? parseFloat(((closedLeads.length / showedLeads.length) * 100).toFixed(1)) : 0
   const leadToCloseRate = effectiveLeads > 0 ? parseFloat(((closedLeads.length / effectiveLeads) * 100).toFixed(1)) : 0
   const revenueAttributed = leads.reduce((sum, l) => sum + parseFloat(l.revenue_attributed || 0), 0)
