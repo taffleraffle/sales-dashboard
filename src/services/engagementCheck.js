@@ -24,9 +24,12 @@ export async function fetchUpcomingAppointments() {
   if (!calRes.ok) return []
   const { calendars } = await calRes.json()
 
-  // Fetch events from all calendars in parallel
+  // Only check strategy call calendars (not intro/auto-booked calls)
+  const strategyCals = calendars.filter(c => /strategy/i.test(c.name))
+
+  // Fetch events from strategy calendars in parallel
   const results = await Promise.allSettled(
-    calendars.map(async (cal) => {
+    strategyCals.map(async (cal) => {
       const r = await fetch(
         `${GHL_BASE}/calendars/events?locationId=${GHL_LOCATION_ID}&calendarId=${cal.id}&startTime=${now}&endTime=${in7d}`,
         { headers: ghlHeaders }
