@@ -29,6 +29,7 @@ export default function SetterDetail() {
   const [recentCalls, setRecentCalls] = useState([])
   const [expandedCall, setExpandedCall] = useState(null)
   const [dateStats, setDateStats] = useState({})
+  const [closerCallMap, setCloserCallMap] = useState({})
   const [editingKpis, setEditingKpis] = useState(false)
   const [kpiTargets, setKpiTargets] = useState(() => {
     try { return JSON.parse(localStorage.getItem('setter_kpi_targets')) || { leads_day: 70, sets_day: 3, stl_pct: 80 } }
@@ -94,6 +95,28 @@ export default function SetterDetail() {
           stats[e.report_date].live += (e.live_nc_calls || 0) + (e.live_fu_calls || 0)
         }
         setDateStats(stats)
+      })
+  }, [range])
+
+  // Fetch closer_calls with report dates for per-lead outcome matching
+  useEffect(() => {
+    supabase
+      .from('closer_calls')
+      .select('prospect_name, outcome, showed, eod_report_id, eod:closer_eod_reports!closer_calls_eod_report_id_fkey(report_date)')
+      .gte('created_at', sinceDate(range))
+      .then(({ data }) => {
+        // Build lookup: normalized name + report_date → outcome
+        const map = {}
+        for (const c of (data || [])) {
+          const date = c.eod?.report_date
+          if (!date) continue
+          const name = (c.prospect_name || '').toLowerCase().trim()
+            .replace(/\s*-\s*(remodeler|strategy|intro|call|connect|remodelingai|plumber|plumberconnect|electrician).*$/i, '')
+            .replace(/\s*x\s+\w+.*$/i, '')
+            .trim()
+          if (name) map[`${name}|${date}`] = c.outcome
+        }
+        setCloserCallMap(map)
       })
   }, [range])
 
@@ -212,10 +235,22 @@ export default function SetterDetail() {
     pickupRate: effectivePickupRate,
   }
 
+  // Enrich leads with closer call outcomes matched by name + appointment_date
+  const enrichedLeads = leads.map(l => {
+    if (l.status !== 'set') return { ...l, resolved_outcome: l.status }
+    if (!l.appointment_date) return { ...l, resolved_outcome: l.status }
+    const name = (l.lead_name || '').toLowerCase().trim()
+      .replace(/\s*-\s*(remodeler|strategy|intro|call|connect|remodelingai|plumber|plumberconnect|electrician).*$/i, '')
+      .replace(/\s*x\s+\w+.*$/i, '')
+      .trim()
+    const outcome = closerCallMap[`${name}|${l.appointment_date}`]
+    return { ...l, resolved_outcome: outcome || l.status }
+  })
+
   // Compute show/close rate from leads + closer EOD daily stats
   const { showRate } = computeShowRate(leads, dateStats)
-  const showedLeads = leads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.status))
-  const closedLeads = leads.filter(l => l.status === 'closed')
+  const showedLeads = enrichedLeads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.resolved_outcome))
+  const closedLeads = enrichedLeads.filter(l => l.resolved_outcome === 'closed')
   const closeRate = showedLeads.length > 0 ? parseFloat(((closedLeads.length / showedLeads.length) * 100).toFixed(1)) : 0
   const leadToCloseRate = effectiveLeads > 0 ? parseFloat(((closedLeads.length / effectiveLeads) * 100).toFixed(1)) : 0
   const revenueAttributed = leads.reduce((sum, l) => sum + parseFloat(l.revenue_attributed || 0), 0)
@@ -225,7 +260,7 @@ export default function SetterDetail() {
     { key: 'closer_name', label: 'Closer' },
     { key: 'date_set', label: 'Date Set' },
     { key: 'appointment_date', label: 'Appt Date' },
-    { key: 'status', label: 'Status', render: v => <LeadStatusBadge status={v} /> },
+    { key: 'resolved_outcome', label: 'Outcome', render: (v) => <LeadStatusBadge status={v} /> },
     { key: 'revenue_attributed', label: 'Revenue', align: 'right', render: v => v > 0 ? <span className="text-success">${parseFloat(v).toLocaleString()}</span> : '—' },
   ]
 
@@ -435,7 +470,7 @@ export default function SetterDetail() {
       {mySets > 0 && (
         <div className="mb-6">
           <h2 className="text-sm font-medium text-text-secondary mb-3">Recent Sets ({leads.length})</h2>
-          <DataTable columns={leadColumns} data={leads} emptyMessage="No sets yet" />
+          <DataTable columns={leadColumns} data={enrichedLeads} emptyMessage="No sets yet" />
         </div>
       )}
 
