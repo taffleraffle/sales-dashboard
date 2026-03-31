@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader, Calendar, Phone, CheckCircle, ChevronDown, MessageSquare, Mail, PhoneCall } from 'lucide-react'
+import { Loader, Calendar, Phone, CheckCircle, ChevronDown, MessageSquare, Mail, PhoneCall, ArrowDownLeft, ArrowUpRight } from 'lucide-react'
 
 const tierStyles = {
   critical: 'bg-danger/10 border-l-2 border-danger',
@@ -21,6 +21,22 @@ const tierLabel = {
   monitor: 'Monitor',
   confirmed: 'Confirmed',
 }
+
+const channelIcons = {
+  Call: PhoneCall,
+  SMS: MessageSquare,
+  Email: Mail,
+  Social: MessageSquare,
+}
+
+const channelColors = {
+  Call: 'text-blue-400',
+  SMS: 'text-opt-yellow',
+  Email: 'text-purple-400',
+  Social: 'text-pink-400',
+}
+
+const tzOpts = { timeZone: 'America/Indiana/Indianapolis', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
 
 function formatTimeLeft(hours) {
   if (hours < 1) return '<1h'
@@ -48,48 +64,9 @@ function formatDuration(secs) {
   return `${Math.floor(secs / 60)}m ${secs % 60}s`
 }
 
-const channelIcons = {
-  Call: PhoneCall,
-  SMS: MessageSquare,
-  Email: Mail,
-  Social: MessageSquare,
-}
-
-function ChannelDropdown({ channels }) {
-  const [open, setOpen] = useState(false)
-
-  if (!channels.length) {
-    return <span className="text-danger text-[10px] font-medium">None</span>
-  }
-
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 text-success text-[10px] font-medium hover:text-opt-yellow transition-colors"
-      >
-        <CheckCircle size={10} />
-        {channels.length} channel{channels.length > 1 ? 's' : ''}
-        <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="absolute z-20 mt-1 left-0 bg-bg-card border border-border-default rounded-lg shadow-lg py-1 min-w-[120px]">
-          {channels.map(ch => {
-            const Icon = channelIcons[ch] || MessageSquare
-            return (
-              <div key={ch} className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-text-primary">
-                <Icon size={11} className="text-success" />
-                {ch}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export default function EndangeredLeadsTable({ leads, loading }) {
+  const [expandedId, setExpandedId] = useState(null)
+
   if (loading) {
     return (
       <div className="bg-bg-card border border-border-default rounded-2xl p-6 mb-6">
@@ -144,50 +121,118 @@ export default function EndangeredLeadsTable({ leads, loading }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-bg-card text-text-400 uppercase text-[10px]">
+              <th className="px-3 py-2 text-left w-5"></th>
               <th className="px-3 py-2 text-left">Lead</th>
               <th className="px-3 py-2 text-left">Phone</th>
               <th className="px-3 py-2 text-left">Appointment</th>
               <th className="px-3 py-2 text-left">Time Left</th>
               <th className="px-3 py-2 text-left">Best Call</th>
-              <th className="px-3 py-2 text-left">Engagement</th>
+              <th className="px-3 py-2 text-left">Confirmed Via</th>
               <th className="px-3 py-2 text-left">Status</th>
             </tr>
           </thead>
           <tbody>
-            {leads.map((lead, i) => (
-              <tr key={lead.ghl_event_id || i} className={`border-t border-border-default/30 ${tierStyles[lead.tier]} hover:bg-bg-card-hover/50 transition-colors`}>
-                <td className="px-3 py-2 font-medium text-text-primary">{lead.contact_name}</td>
-                <td className="px-3 py-2 text-text-400">
-                  {lead.contact_phone ? (
-                    <a href={`tel:${lead.contact_phone}`} className="flex items-center gap-1 hover:text-opt-yellow transition-colors">
-                      <Phone size={10} />
-                      {formatPhone(lead.contact_phone)}
-                    </a>
-                  ) : '—'}
-                </td>
-                <td className="px-3 py-2 text-text-400">
-                  {lead.startTime ? new Date(lead.startTime).toLocaleString('en-US', { timeZone: 'America/Indiana/Indianapolis', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : lead.appointment_date}
-                </td>
-                <td className="px-3 py-2">
-                  <span className={lead.tier === 'critical' ? 'text-danger font-medium' : lead.tier === 'confirmed' ? 'text-text-400' : 'text-warning'}>
-                    {formatTimeLeft(lead.hoursUntil)}
-                  </span>
-                </td>
-                <td className="px-3 py-2">
-                  <span className={lead.longestCall >= 60 ? 'text-success' : lead.longestCall > 30 ? 'text-opt-yellow' : 'text-text-400'}>
-                    {formatDuration(lead.longestCall)}
-                  </span>
-                </td>
-                <td className="px-3 py-2">
-                  <ChannelDropdown channels={lead.channels || []} />
-                </td>
-                <td className="px-3 py-2">
-                  <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${tierBadge[lead.tier]}`}>
-                    {tierLabel[lead.tier]}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            {leads.map((lead, i) => {
+              const id = lead.ghl_event_id || i
+              const isExpanded = expandedId === id
+              const activity = lead.activity || []
+              return (
+                <>
+                  <tr
+                    key={id}
+                    onClick={() => setExpandedId(isExpanded ? null : id)}
+                    className={`border-t border-border-default/30 ${tierStyles[lead.tier]} hover:bg-bg-card-hover/50 transition-colors cursor-pointer`}
+                  >
+                    <td className="px-3 py-2 text-text-400">
+                      <ChevronDown size={10} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    </td>
+                    <td className="px-3 py-2 font-medium text-text-primary">{lead.contact_name}</td>
+                    <td className="px-3 py-2 text-text-400">
+                      {lead.contact_phone ? (
+                        <a href={`tel:${lead.contact_phone}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1 hover:text-opt-yellow transition-colors">
+                          <Phone size={10} />
+                          {formatPhone(lead.contact_phone)}
+                        </a>
+                      ) : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-text-400">
+                      {lead.startTime ? new Date(lead.startTime).toLocaleString('en-US', tzOpts) : lead.appointment_date}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={lead.tier === 'critical' ? 'text-danger font-medium' : lead.tier === 'confirmed' ? 'text-text-400' : 'text-warning'}>
+                        {formatTimeLeft(lead.hoursUntil)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={lead.longestCall >= 60 ? 'text-success' : lead.longestCall > 30 ? 'text-opt-yellow' : 'text-text-400'}>
+                        {formatDuration(lead.longestCall)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      {lead.channels?.length > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          {lead.channels.map(ch => {
+                            const Icon = channelIcons[ch] || MessageSquare
+                            return (
+                              <span key={ch} className={`flex items-center gap-0.5 ${channelColors[ch] || 'text-text-400'}`} title={ch}>
+                                <Icon size={11} />
+                                <span className="text-[10px]">{ch}</span>
+                              </span>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <span className="text-danger text-[10px] font-medium">None</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${tierBadge[lead.tier]}`}>
+                        {tierLabel[lead.tier]}
+                      </span>
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr key={`${id}-detail`} className="bg-bg-primary/50">
+                      <td colSpan={8} className="px-4 py-3">
+                        <div className="text-[10px] text-opt-yellow uppercase font-medium mb-2">Activity Timeline (last 24h)</div>
+                        {activity.length === 0 ? (
+                          <p className="text-[11px] text-text-400 italic">No activity found in the last 24 hours.</p>
+                        ) : (
+                          <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                            {activity.map((a, ai) => {
+                              const Icon = channelIcons[a.channel] || MessageSquare
+                              const isInbound = a.direction === 'inbound'
+                              const DirIcon = isInbound ? ArrowDownLeft : ArrowUpRight
+                              return (
+                                <div key={ai} className={`flex items-start gap-2 px-3 py-1.5 rounded-lg ${isInbound ? 'bg-success/5 border border-success/10' : 'bg-bg-card border border-border-default/30'}`}>
+                                  <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                                    <DirIcon size={10} className={isInbound ? 'text-success' : 'text-text-400'} />
+                                    <Icon size={11} className={channelColors[a.channel] || 'text-text-400'} />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className={`text-[10px] font-medium ${isInbound ? 'text-success' : 'text-text-400'}`}>
+                                        {isInbound ? 'Inbound' : 'Outbound'} {a.channel}
+                                      </span>
+                                      <span className="text-[9px] text-text-400">
+                                        {new Date(a.date).toLocaleString('en-US', tzOpts)}
+                                      </span>
+                                    </div>
+                                    {a.body && (
+                                      <p className="text-[11px] text-text-secondary mt-0.5 truncate">{a.body}</p>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </>
+              )
+            })}
           </tbody>
         </table>
       </div>

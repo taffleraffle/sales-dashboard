@@ -75,7 +75,7 @@ async function fetchContactPhone(contactId) {
  * Returns which channels they replied on (SMS, email, call).
  */
 async function checkContactEngagement(ghlContactId, apptTime) {
-  const empty = { hasInbound: false, lastOutboundDate: null, channels: [] }
+  const empty = { hasInbound: false, lastOutboundDate: null, channels: [], activity: [] }
   if (!ghlContactId) return empty
 
   try {
@@ -95,7 +95,7 @@ async function checkContactEngagement(ghlContactId, apptTime) {
       `${GHL_BASE}/conversations/${conv.id}/messages`,
       { headers: ghlHeaders }
     )
-    if (!msgRes.ok) return { hasInbound: false, lastOutboundDate, channels: [] }
+    if (!msgRes.ok) return { hasInbound: false, lastOutboundDate, channels: [], activity: [] }
 
     const msgData = await msgRes.json()
     const messages = msgData.messages?.messages || []
@@ -106,7 +106,24 @@ async function checkContactEngagement(ghlContactId, apptTime) {
       m.direction === 'inbound' && new Date(m.dateAdded) >= cutoff
     )
 
-    // Classify channels
+    // Build detailed activity log from recent messages (inbound + outbound, last 24h)
+    const recentAll = messages.filter(m => new Date(m.dateAdded) >= cutoff)
+    const activity = recentAll.map(m => {
+      const t = (m.messageType || '').toUpperCase()
+      let channel = 'SMS'
+      if (t.includes('EMAIL') || t.includes('TYPE_EMAIL')) channel = 'Email'
+      else if (t.includes('CALL') || t.includes('TYPE_CALL') || t.includes('CUSTOM_CALL')) channel = 'Call'
+      else if (t.includes('FB') || t.includes('FACEBOOK') || t.includes('IG')) channel = 'Social'
+      return {
+        direction: m.direction,
+        channel,
+        body: (m.body || '').substring(0, 200),
+        date: m.dateAdded,
+        status: m.status,
+      }
+    }).sort((a, b) => new Date(b.date) - new Date(a.date))
+
+    // Classify channels from inbound only
     const channels = new Set()
     for (const m of recentInbound) {
       const t = (m.messageType || '').toUpperCase()
@@ -114,13 +131,14 @@ async function checkContactEngagement(ghlContactId, apptTime) {
       else if (t.includes('EMAIL') || t.includes('TYPE_EMAIL')) channels.add('Email')
       else if (t.includes('CALL') || t.includes('TYPE_CALL') || t.includes('CUSTOM_CALL')) channels.add('Call')
       else if (t.includes('FB') || t.includes('FACEBOOK') || t.includes('IG')) channels.add('Social')
-      else channels.add('SMS') // default to SMS for unknown text-based
+      else channels.add('SMS')
     }
 
     return {
       hasInbound: recentInbound.length > 0,
       lastOutboundDate,
       channels: [...channels],
+      activity,
     }
   } catch {
     return empty
@@ -163,11 +181,27 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
       const hasCall = longestCall > 30
 
       const apptTime = new Date(appt.startTime)
-      const { hasInbound, lastOutboundDate, channels } = await checkContactEngagement(appt.ghl_contact_id, apptTime)
+      const { hasInbound, lastOutboundDate, channels, activity } = await checkContactEngagement(appt.ghl_contact_id, apptTime)
 
       // Add 'Call' channel if they had a 30s+ WAVV call
       const allChannels = [...channels]
       if (hasCall && !allChannels.includes('Call')) allChannels.push('Call')
+
+      // Add WAVV call detail to activity if we have one
+      if (normalizedPhone && wavvByPhone[normalizedPhone]) {
+        // Find matching WAVV calls for this phone
+        const phoneCalls = wavvCalls.filter(c => normalizePhone(c.phone_number) === normalizedPhone && c.call_duration > 0)
+        for (const wc of phoneCalls.slice(0, 5)) {
+          activity.push({
+            direction: 'outbound',
+            channel: 'Call',
+            body: `WAVV call — ${wc.call_duration}s${wc.call_duration > 30 ? ' (connected)' : ''}`,
+            date: wc.started_at || new Date().toISOString(),
+            status: wc.call_duration > 30 ? 'connected' : 'no-answer',
+          })
+        }
+        activity.sort((a, b) => new Date(b.date) - new Date(a.date))
+      }
 
       const hoursUntil = (apptTime - now) / 3600000
       const tier = hoursUntil <= 24 ? 'critical' : hoursUntil <= 48 ? 'warning' : 'monitor'
@@ -183,6 +217,7 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
         lastOutboundDate,
         engaged,
         channels: allChannels,
+        activity,
         tier: engaged ? 'confirmed' : tier,
         hoursUntil: Math.round(hoursUntil),
         apptTime,
