@@ -12,6 +12,8 @@ import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } f
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { Loader, ChevronDown, Plus, ChevronUp } from 'lucide-react'
 import { computeShowRate } from '../utils/metricCalculations'
+import { checkEndangeredLeads } from '../services/engagementCheck'
+import EndangeredLeadsTable from '../components/EndangeredLeadsTable'
 
 export default function SetterOverview() {
   const [range, setRange] = useState(30)
@@ -31,6 +33,9 @@ export default function SetterOverview() {
   const [autoBookings, setAutoBookings] = useState([])
   const [allAppointments, setAllAppointments] = useState([])
   const [showAllLeads, setShowAllLeads] = useState(false)
+  const [endangeredLeads, setEndangeredLeads] = useState([])
+  const [loadingEndangered, setLoadingEndangered] = useState(false)
+  const [recentWavvCalls, setRecentWavvCalls] = useState([])
   const [dateStats, setDateStats] = useState({})
 
   // Fetch appointments from GHL calendars
@@ -115,6 +120,26 @@ export default function SetterOverview() {
         setDateStats(stats)
       })
   }, [range])
+
+  // Fetch recent WAVV calls (last 7 days) for endangered leads check
+  useEffect(() => {
+    const since = new Date()
+    since.setDate(since.getDate() - 7)
+    supabase
+      .from('wavv_calls')
+      .select('phone_number, call_duration')
+      .gte('started_at', since.toISOString())
+      .then(({ data }) => setRecentWavvCalls(data || []))
+  }, [])
+
+  // Check endangered leads from upcoming appointments
+  useEffect(() => {
+    if (!allAppointments.length) return
+    setLoadingEndangered(true)
+    checkEndangeredLeads(allAppointments, recentWavvCalls)
+      .then(setEndangeredLeads)
+      .finally(() => setLoadingEndangered(false))
+  }, [allAppointments, recentWavvCalls])
 
   if (loadingMembers || loadingLeads || loadingReports) {
     return (
@@ -817,6 +842,9 @@ export default function SetterOverview() {
           </>
         )
       })()}
+
+      {/* Endangered Leads — upcoming appointments with no engagement */}
+      <EndangeredLeadsTable leads={endangeredLeads} loading={loadingEndangered} />
     </div>
   )
 }
