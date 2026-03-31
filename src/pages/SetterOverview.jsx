@@ -31,6 +31,7 @@ export default function SetterOverview() {
   const [autoBookings, setAutoBookings] = useState([])
   const [allAppointments, setAllAppointments] = useState([])
   const [showAllLeads, setShowAllLeads] = useState(false)
+  const [closerCalls, setCloserCalls] = useState([])
 
   // Fetch appointments from GHL calendars
   useEffect(() => {
@@ -97,6 +98,22 @@ export default function SetterOverview() {
     fetchLeads()
   }, [range])
 
+  // Fetch closer_calls linked to setter_leads (for accurate show rates)
+  useEffect(() => {
+    if (!allLeads.length) { setCloserCalls([]); return }
+    const leadIds = allLeads.map(l => l.id)
+    const batchSize = 300
+    const batches = []
+    for (let i = 0; i < leadIds.length; i += batchSize) {
+      batches.push(leadIds.slice(i, i + batchSize))
+    }
+    Promise.all(batches.map(batch =>
+      supabase.from('closer_calls').select('setter_lead_id, outcome, showed').in('setter_lead_id', batch)
+    )).then(results => {
+      setCloserCalls(results.flatMap(r => r.data || []))
+    })
+  }, [allLeads])
+
   if (loadingMembers || loadingLeads || loadingReports) {
     return (
       <div className="space-y-6 animate-pulse">
@@ -120,7 +137,7 @@ export default function SetterOverview() {
   const closedLeads = allLeads.filter(l => l.status === 'closed')
   const noShowLeads = allLeads.filter(l => l.status === 'no_show')
   const totalRevenue = allLeads.reduce((s, l) => s + parseFloat(l.revenue_attributed || 0), 0)
-  const { showRate: showRateVal } = computeShowRate(allLeads)
+  const { showRate: showRateVal } = computeShowRate(allLeads, closerCalls)
   const showRate = showRateVal
   const closeRate = showedLeads.length > 0 ? ((closedLeads.length / showedLeads.length) * 100).toFixed(1) : 0
 
@@ -162,8 +179,8 @@ export default function SetterOverview() {
   const autoLeads = allLeads.filter(l => l.lead_source === 'auto')
   const manualLeads = allLeads.filter(l => l.lead_source !== 'auto')
   const showStatuses = ['showed', 'closed', 'not_closed']
-  const autoShowResult = computeShowRate(autoLeads)
-  const manualShowResult = computeShowRate(manualLeads)
+  const autoShowResult = computeShowRate(autoLeads, closerCalls)
+  const manualShowResult = computeShowRate(manualLeads, closerCalls)
   const booking = {
     autoTotal: autoLeads.length,
     autoShows: autoLeads.filter(l => showStatuses.includes(l.status)).length,
@@ -219,7 +236,7 @@ export default function SetterOverview() {
     const myShowed = myLeads.filter(l => ['showed', 'not_closed', 'closed'].includes(l.status))
     const myClosed = myLeads.filter(l => l.status === 'closed')
     const myNoShow = myLeads.filter(l => l.status === 'no_show')
-    const myShowResult = computeShowRate(myLeads)
+    const myShowResult = computeShowRate(myLeads, closerCalls)
     const myRevenue = myLeads.reduce((s, l) => s + parseFloat(l.revenue_attributed || 0), 0)
 
     // Use EOD sets total (more accurate than setter_leads count for historical data)

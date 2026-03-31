@@ -28,6 +28,8 @@ export default function SetterDetail() {
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
   const [recentCalls, setRecentCalls] = useState([])
   const [expandedCall, setExpandedCall] = useState(null)
+  const [closerCalls, setCloserCalls] = useState([])
+  const [allCloserCalls, setAllCloserCalls] = useState([])
   const [editingKpis, setEditingKpis] = useState(false)
   const [kpiTargets, setKpiTargets] = useState(() => {
     try { return JSON.parse(localStorage.getItem('setter_kpi_targets')) || { leads_day: 70, sets_day: 3, stl_pct: 80 } }
@@ -77,6 +79,34 @@ export default function SetterDetail() {
       .gte('date_set', sinceDate(range))
       .then(({ data }) => setAllLeads(data || []))
   }, [range])
+
+  // Fetch closer_calls linked to this setter's leads (for accurate show rate)
+  useEffect(() => {
+    if (!leads.length) { setCloserCalls([]); return }
+    const leadIds = leads.map(l => l.id)
+    supabase
+      .from('closer_calls')
+      .select('setter_lead_id, outcome, showed')
+      .in('setter_lead_id', leadIds)
+      .then(({ data }) => setCloserCalls(data || []))
+  }, [leads])
+
+  // Fetch closer_calls for ALL setter leads (company average)
+  useEffect(() => {
+    if (!allLeads.length) { setAllCloserCalls([]); return }
+    const leadIds = allLeads.map(l => l.id)
+    // Supabase .in() has a limit, batch if needed
+    const batchSize = 300
+    const batches = []
+    for (let i = 0; i < leadIds.length; i += batchSize) {
+      batches.push(leadIds.slice(i, i + batchSize))
+    }
+    Promise.all(batches.map(batch =>
+      supabase.from('closer_calls').select('setter_lead_id, outcome, showed').in('setter_lead_id', batch)
+    )).then(results => {
+      setAllCloserCalls(results.flatMap(r => r.data || []))
+    })
+  }, [allLeads])
 
   // Fetch WAVV aggregates (fast)
   useEffect(() => {
@@ -155,7 +185,7 @@ export default function SetterDetail() {
   const totalCompanySets = Math.max(allLeads.length, companyActivity.sets)
   const companyClosedLeads = allLeads.filter(l => l.status === 'closed')
   const companyShowedLeads = allLeads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.status))
-  const { showRate: companyShowRateVal } = computeShowRate(allLeads)
+  const { showRate: companyShowRateVal } = computeShowRate(allLeads, allCloserCalls)
   const companyRates = {
     leadToSet: companyActivity.leads > 0 ? parseFloat(((totalCompanySets / companyActivity.leads) * 100).toFixed(1)) : 0,
     callToSet: companyActivity.dials > 0 ? parseFloat(((totalCompanySets / companyActivity.dials) * 100).toFixed(1)) : 0,
@@ -193,8 +223,8 @@ export default function SetterDetail() {
     pickupRate: effectivePickupRate,
   }
 
-  // Compute show/close rate from leads
-  const { showRate } = computeShowRate(leads)
+  // Compute show/close rate from leads + closer_calls
+  const { showRate } = computeShowRate(leads, closerCalls)
   const showedLeads = leads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.status))
   const closedLeads = leads.filter(l => l.status === 'closed')
   const closeRate = showedLeads.length > 0 ? parseFloat(((closedLeads.length / showedLeads.length) * 100).toFixed(1)) : 0

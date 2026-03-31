@@ -55,16 +55,33 @@ export function trend(current, previous) {
   }
 }
 
-export function computeShowRate(leads) {
-  const showStatuses = ['showed', 'closed', 'not_closed']
-  const showed = leads.filter(l => showStatuses.includes(l.status))
-  const noShows = leads.filter(l => l.status === 'no_show')
-  const resolved = showed.length + noShows.length
+export function computeShowRate(leads, closerCalls = []) {
+  // Build a lookup of closer_call outcomes keyed by setter_lead_id
+  const callOutcomes = {}
+  for (const c of closerCalls) {
+    if (c.setter_lead_id) callOutcomes[c.setter_lead_id] = c
+  }
 
+  let showed = 0
+  let noShows = 0
+  let rescheduled = 0
+
+  for (const lead of leads) {
+    // Use closer_call outcome if linked, otherwise fall back to setter_leads.status
+    const call = callOutcomes[lead.id]
+    const outcome = call ? call.outcome : lead.status
+
+    if (['showed', 'closed', 'not_closed'].includes(outcome)) showed++
+    else if (outcome === 'no_show') noShows++
+    else if (outcome === 'rescheduled') rescheduled++
+    // 'set' / null / other = unresolved, skip
+  }
+
+  const resolved = showed + noShows
   return {
-    showRate: resolved > 0 ? Number(((showed.length / resolved) * 100).toFixed(1)) : 0,
-    showedCount: showed.length,
-    noShowCount: noShows.length,
+    showRate: resolved > 0 ? Number(((showed / resolved) * 100).toFixed(1)) : 0,
+    showedCount: showed,
+    noShowCount: noShows,
     resolved,
   }
 }
