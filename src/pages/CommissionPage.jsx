@@ -267,36 +267,37 @@ export default function CommissionPage() {
     const memberByName = {}
     members.forEach(m => { memberByName[m.name.toLowerCase()] = m.id })
 
-    let imported = 0
-    for (const row of csvPreview.rows) {
-      if (!row.name) continue
-      const closerId = row.closer ? memberByName[row.closer.toLowerCase()] : null
-      const setterId = row.setter ? memberByName[row.setter.toLowerCase()] : null
-      const { error } = await supabase.from('clients').upsert({
-        name: row.name,
-        email: row.email || null,
-        phone: row.phone || null,
-        company_name: row.company_name || row.company || null,
-        closer_id: closerId || null,
-        setter_id: setterId || null,
-        stage: row.stage || 'trial',
-        trial_start_date: row.trial_start_date || row.trial_start || null,
-        ascension_date: row.ascension_date || null,
-        monthly_amount: parseFloat(row.monthly_amount) || 0,
-        trial_amount: parseFloat(row.trial_amount) || 0,
-        billing_day: parseInt(row.billing_day) || null,
-        next_billing_date: row.next_billing_date || null,
-        payment_count: parseInt(row.payment_count) || 0,
-        notes: row.notes || null,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'email', ignoreDuplicates: false })
-      if (!error) imported++
+    const rows = csvPreview.rows.filter(r => r.name)
+    const insertRows = rows.map(row => ({
+      name: row.name,
+      email: row.email || null,
+      phone: row.phone || null,
+      company_name: row.company_name || row.company || null,
+      closer_id: (row.closer ? memberByName[row.closer.toLowerCase()] : null) || null,
+      setter_id: (row.setter ? memberByName[row.setter.toLowerCase()] : null) || null,
+      stage: row.stage || 'trial',
+      trial_start_date: row.trial_start_date || row.trial_start || null,
+      ascension_date: row.ascension_date || null,
+      monthly_amount: parseFloat(row.monthly_amount) || 0,
+      trial_amount: parseFloat(row.trial_amount) || 0,
+      billing_day: parseInt(row.billing_day) || null,
+      next_billing_date: row.next_billing_date || null,
+      payment_count: parseInt(row.payment_count) || 0,
+      notes: row.notes || null,
+    }))
+
+    // Batch insert all at once
+    const { data, error } = await supabase.from('clients').insert(insertRows).select('id')
+    if (error) {
+      console.error('Import error:', error)
+      setImportStatus(`Error: ${error.message}`)
+    } else {
+      setImportStatus(`Imported ${data.length} of ${rows.length} clients`)
     }
 
-    setImportStatus(`Imported ${imported} of ${csvPreview.rows.length} clients`)
     setCsvPreview(null)
     refreshClients()
-    setTimeout(() => setImportStatus(null), 5000)
+    setTimeout(() => setImportStatus(null), 8000)
   }
 
   const handleAddClient = async () => {
@@ -647,7 +648,7 @@ export default function CommissionPage() {
             <h2 className="text-sm font-medium text-text-secondary">Client List</h2>
             <div className="flex items-center gap-2">
               {importStatus && <span className="text-[10px] text-success">{importStatus}</span>}
-              <input ref={fileRef} type="file" accept=".csv" onChange={handleCSVSelect} className="hidden" />
+              <input ref={fileRef} type="file" accept=".csv,.xls,.xlsx,.tsv,.txt" onChange={handleCSVSelect} className="hidden" />
               <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-400 rounded-lg hover:bg-bg-card-hover"><Download size={12} /> Template</button>
               <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-primary rounded-lg hover:bg-bg-card-hover"><Upload size={12} /> Import CSV</button>
               <button onClick={() => setShowAddClient(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Plus size={12} /> Add Client</button>
