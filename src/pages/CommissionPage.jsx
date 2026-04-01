@@ -612,85 +612,92 @@ Jane Doe,jane@janedoe.com,+15559876543,Doe Restoration,Daniel,Leandre,ascended,3
 
       {/* Settings Tab */}
       {activeTab === 'settings' && (
-        <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-border-default">
-            <h2 className="text-sm font-medium text-text-secondary">Commission Rates</h2>
-            <p className="text-[10px] text-text-400 mt-0.5">Configure base salary and commission percentages per team member</p>
+        <div>
+          <div className="mb-4">
+            <h2 className="text-sm font-medium text-text-secondary">Team Commission Settings</h2>
+            <p className="text-[10px] text-text-400 mt-0.5">Commission is earned on cash collected within the first 3 months of a client's trial start date.</p>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-bg-card text-text-400 uppercase text-[10px]">
-                  <th className="px-3 py-2 text-left">Name</th>
-                  <th className="px-3 py-2 text-left">Role</th>
-                  <th className="px-3 py-2 text-left">Pay Type</th>
-                  <th className="px-3 py-2 text-right">Base / Ramp $</th>
-                  <th className="px-3 py-2 text-right">Commission %</th>
-                  <th className="px-3 py-2 text-right">Ascension %</th>
-                  <th className="px-3 py-2 text-left">Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {members.map(m => {
-                  const s = settingsMap[m.id] || {}
-                  return (
-                    <tr key={m.id} className="border-t border-border-default/30">
-                      <td className="px-3 py-2 font-medium text-text-primary">{m.name}</td>
-                      <td className="px-3 py-2 text-text-400 capitalize">{m.role}</td>
-                      <td className="px-3 py-1">
-                        <select
-                          defaultValue={s.pay_type || 'base'}
-                          onChange={e => upsertSettings(m.id, { pay_type: e.target.value })}
-                          className="px-2 py-1 bg-bg-primary border border-border-default rounded text-xs text-text-primary"
-                        >
-                          <option value="base">Base</option>
-                          <option value="ramp">Ramp</option>
-                        </select>
-                      </td>
-                      <td className="px-3 py-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {members.map(m => {
+              const s = settingsMap[m.id] || {}
+              const isRamp = (s.pay_type || 'base') === 'ramp'
+              return (
+                <div key={m.id} className="bg-bg-card border border-border-default rounded-2xl p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-text-primary">{m.name}</h3>
+                      <span className="text-[10px] text-text-400 capitalize">{m.role}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-text-400">Pay Structure</span>
+                      <select
+                        defaultValue={s.pay_type || 'base'}
+                        onChange={e => upsertSettings(m.id, { pay_type: e.target.value })}
+                        className="px-3 py-1.5 bg-bg-primary border border-border-default rounded-lg text-xs text-text-primary font-medium"
+                      >
+                        <option value="base">Base + Commission</option>
+                        <option value="ramp">Ramp (Guaranteed Min)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Base salary or Ramp amount */}
+                    <div>
+                      <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1.5">
+                        {isRamp ? 'Guaranteed Monthly Minimum' : 'Monthly Base Salary'}
+                      </label>
+                      <p className="text-[9px] text-text-400 mb-1.5">
+                        {isRamp ? 'If commissions are below this, they get topped up to this amount' : 'Fixed monthly pay, commission is added on top'}
+                      </p>
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400 text-xs">$</span>
                         <input
                           type="number"
-                          defaultValue={(s.pay_type === 'ramp' ? s.ramp_amount : s.base_salary) || 0}
+                          defaultValue={isRamp ? (s.ramp_amount || 0) : (s.base_salary || 0)}
                           onBlur={e => {
                             const val = parseFloat(e.target.value) || 0
-                            const updates = (s.pay_type || 'base') === 'ramp' ? { ramp_amount: val } : { base_salary: val }
-                            upsertSettings(m.id, updates)
+                            upsertSettings(m.id, isRamp ? { ramp_amount: val } : { base_salary: val })
                           }}
-                          className="w-24 text-right px-2 py-1 bg-bg-primary border border-border-default rounded text-xs text-text-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          className="w-full pl-6 pr-3 py-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
-                      </td>
-                      <td className="px-3 py-1">
+                      </div>
+                    </div>
+
+                    {/* Commission rate */}
+                    <div>
+                      <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1.5">
+                        Commission Rate
+                      </label>
+                      <p className="text-[9px] text-text-400 mb-1.5">
+                        % of net cash collected on deals (months 0-3)
+                      </p>
+                      <div className="relative">
                         <input
                           type="number"
                           step="0.5"
                           defaultValue={s.commission_rate || 0}
                           onBlur={e => upsertSettings(m.id, { commission_rate: parseFloat(e.target.value) || 0 })}
-                          className="w-20 text-right px-2 py-1 bg-bg-primary border border-border-default rounded text-xs text-text-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          className="w-full pr-7 pl-3 py-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
-                      </td>
-                      <td className="px-3 py-1">
-                        <input
-                          type="number"
-                          step="0.5"
-                          defaultValue={s.ascension_rate || 0}
-                          onBlur={e => upsertSettings(m.id, { ascension_rate: parseFloat(e.target.value) || 0 })}
-                          className="w-20 text-right px-2 py-1 bg-bg-primary border border-border-default rounded text-xs text-text-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                      </td>
-                      <td className="px-3 py-1">
-                        <input
-                          type="text"
-                          defaultValue={s.notes || ''}
-                          onBlur={e => upsertSettings(m.id, { notes: e.target.value })}
-                          placeholder="Notes..."
-                          className="w-full px-2 py-1 bg-bg-primary border border-border-default rounded text-xs text-text-primary"
-                        />
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-400 text-xs">%</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notes */}
+                  <div className="mt-3">
+                    <input
+                      type="text"
+                      defaultValue={s.notes || ''}
+                      onBlur={e => upsertSettings(m.id, { notes: e.target.value })}
+                      placeholder="Notes (optional)..."
+                      className="w-full px-3 py-1.5 bg-bg-primary border border-border-default/50 rounded-lg text-[11px] text-text-400 placeholder:text-text-400/50"
+                    />
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
