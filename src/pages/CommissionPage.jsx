@@ -32,27 +32,23 @@ function SettingsCard({ member, saved, onSave }) {
   const [rampAmount, setRampAmount] = useState(saved.ramp_amount || 0)
   const [commissionRate, setCommissionRate] = useState(saved.commission_rate || 0)
   const [notes, setNotes] = useState(saved.notes || '')
-  const [saveStatus, setSaveStatus] = useState(null) // null | 'saving' | 'saved'
-  const timerRef = useRef(null)
+  const [saving, setSaving] = useState(false)
+  const [saved_, setSaved_] = useState(false)
 
   const isRamp = payType === 'ramp'
 
-  const autoSave = (updates) => {
-    setSaveStatus('saving')
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(async () => {
-      const allFields = {
-        pay_type: payType,
-        base_salary: baseSalary,
-        ramp_amount: rampAmount,
-        commission_rate: commissionRate,
-        notes,
-        ...updates,
-      }
-      const ok = await onSave(member.id, allFields)
-      setSaveStatus(ok ? 'saved' : null)
-      if (ok) setTimeout(() => setSaveStatus(null), 2000)
-    }, 600)
+  const handleSave = async () => {
+    setSaving(true)
+    setSaved_(false)
+    const ok = await onSave(member.id, {
+      pay_type: payType,
+      base_salary: baseSalary,
+      ramp_amount: rampAmount,
+      commission_rate: commissionRate,
+      notes,
+    })
+    setSaving(false)
+    if (ok) { setSaved_(true); setTimeout(() => setSaved_(false), 3000) }
   }
 
   const inputCls = 'w-full py-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:border-opt-yellow/50 focus:outline-none transition-colors'
@@ -64,18 +60,14 @@ function SettingsCard({ member, saved, onSave }) {
           <h3 className="text-sm font-bold text-text-primary">{member.name}</h3>
           <span className="text-[10px] text-text-400 capitalize">{member.role}</span>
         </div>
-        <div className="flex items-center gap-2">
-          {saveStatus === 'saving' && <span className="text-[10px] text-opt-yellow animate-pulse">Saving...</span>}
-          {saveStatus === 'saved' && <span className="text-[10px] text-success flex items-center gap-1"><Check size={10} /> Saved</span>}
-          <select
-            value={payType}
-            onChange={e => { setPayType(e.target.value); autoSave({ pay_type: e.target.value }) }}
-            className="px-3 py-1.5 bg-bg-primary border border-border-default rounded-lg text-xs text-text-primary font-medium"
-          >
-            <option value="base">Base + Commission</option>
-            <option value="ramp">Ramp (Guaranteed Min)</option>
-          </select>
-        </div>
+        <select
+          value={payType}
+          onChange={e => setPayType(e.target.value)}
+          className="px-3 py-1.5 bg-bg-primary border border-border-default rounded-lg text-xs text-text-primary font-medium"
+        >
+          <option value="base">Base + Commission</option>
+          <option value="ramp">Ramp (Guaranteed Min)</option>
+        </select>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -93,8 +85,7 @@ function SettingsCard({ member, saved, onSave }) {
               value={isRamp ? rampAmount : baseSalary}
               onChange={e => {
                 const val = parseFloat(e.target.value) || 0
-                if (isRamp) { setRampAmount(val); autoSave({ ramp_amount: val }) }
-                else { setBaseSalary(val); autoSave({ base_salary: val }) }
+                if (isRamp) setRampAmount(val); else setBaseSalary(val)
               }}
               className={`${inputCls} pl-6 pr-3`}
             />
@@ -113,7 +104,7 @@ function SettingsCard({ member, saved, onSave }) {
               type="number"
               step="0.5"
               value={commissionRate}
-              onChange={e => { const val = parseFloat(e.target.value) || 0; setCommissionRate(val); autoSave({ commission_rate: val }) }}
+              onChange={e => setCommissionRate(parseFloat(e.target.value) || 0)}
               className={`${inputCls} pl-3 pr-7`}
             />
             <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-400 text-xs">%</span>
@@ -125,10 +116,21 @@ function SettingsCard({ member, saved, onSave }) {
         <input
           type="text"
           value={notes}
-          onChange={e => { setNotes(e.target.value); autoSave({ notes: e.target.value }) }}
+          onChange={e => setNotes(e.target.value)}
           placeholder="Notes (optional)..."
           className="w-full px-3 py-1.5 bg-bg-primary border border-border-default/50 rounded-lg text-[11px] text-text-400 placeholder:text-text-400/50 focus:border-opt-yellow/50 focus:outline-none transition-colors"
         />
+      </div>
+
+      <div className="mt-4 flex items-center justify-between">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-5 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-50 flex items-center gap-1.5"
+        >
+          {saving ? <><Loader size={12} className="animate-spin" /> Saving...</> : <><Save size={12} /> Save Settings</>}
+        </button>
+        {saved_ && <span className="text-xs text-success flex items-center gap-1"><Check size={12} /> Saved</span>}
       </div>
     </div>
   )
