@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
+import CommissionWidget from '../components/CommissionWidget'
 import { AlertTriangle, Loader, ExternalLink, ChevronDown } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useCloserStats, useCloserEODs, useCloserTranscripts, useObjectionAnalysis } from '../hooks/useCloserData'
@@ -156,6 +157,9 @@ export default function CloserDetail() {
         <KPICard label="Avg Deal" value={`$${avgDealSize.toLocaleString()}`} />
         {avgFathomDuration > 0 && <KPICard label="Avg Talk Time" value={`${Math.round(avgFathomDuration / 60)}m`} subtitle={`${transcripts.length} calls`} />}
       </div>
+
+      {/* Commission */}
+      <CommissionWidget memberId={id} />
 
       {/* Conversion Gauges */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">

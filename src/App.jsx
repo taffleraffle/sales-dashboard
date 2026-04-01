@@ -12,6 +12,7 @@ import EODReview from './pages/EODReview'
 import MarketingPerformance from './pages/MarketingPerformance'
 import CallData from './pages/CallData'
 import SettingsPage from './pages/SettingsPage'
+import CommissionPage from './pages/CommissionPage'
 import SetPasswordPage from './pages/SetPasswordPage'
 import SplashScreen from './components/SplashScreen'
 import { Loader } from 'lucide-react'
@@ -72,6 +73,7 @@ export default function App() {
               <Route path="/sales/marketing" element={<MarketingPerformance />} />
               <Route path="/sales/eod" element={<EODReview />} />
               <Route path="/sales/call-data" element={<CallData />} />
+              <Route path="/sales/commissions" element={<CommissionPage />} />
               <Route path="/sales/settings" element={<SettingsPage />} />
             </Route>
           </Routes>

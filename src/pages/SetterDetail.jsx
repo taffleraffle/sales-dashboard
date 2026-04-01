@@ -12,6 +12,7 @@ import { useSetterStats, useSetterEODs } from '../hooks/useSetterData'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
 import { computeShowRate } from '../utils/metricCalculations'
+import CommissionWidget from '../components/CommissionWidget'
 
 export default function SetterDetail() {
   const { id } = useParams()
@@ -432,6 +433,9 @@ export default function SetterDetail() {
           </div>
         )
       })()}
+
+      {/* Commission */}
+      <CommissionWidget memberId={id} />
 
       {/* Activity KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">

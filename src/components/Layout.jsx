@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, User, Search, Bell, MoreHorizontal, X, Headphones } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, User, Search, Bell, MoreHorizontal, X, Headphones, DollarSign } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 
@@ -11,6 +11,7 @@ const navItems = [
   { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
   { to: '/sales/call-data', icon: Headphones, label: 'Call Data' },
+  { to: '/sales/commissions', icon: DollarSign, label: 'Commissions' },
   { to: '/sales/settings', icon: Settings, label: 'Settings' },
 ]
 
