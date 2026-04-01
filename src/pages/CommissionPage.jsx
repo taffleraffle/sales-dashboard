@@ -203,15 +203,41 @@ export default function CommissionPage() {
     return { headers, rows }
   }
 
-  // Template download
+  // Template download as Excel (.xlsx)
   const downloadTemplate = () => {
-    const template = `name,email,phone,company_name,closer,setter,stage,monthly_amount,trial_amount,trial_start_date,ascension_date,notes
-John Smith,john@company.com,+15551234567,Smith Remodeling,Daniel,Josh,trial,3000,997,2026-03-15,,New trial client
-Jane Doe,jane@janedoe.com,+15559876543,Doe Restoration,Daniel,Leandre,ascended,3000,997,2026-01-10,2026-02-10,Ascended month 2`
-    const blob = new Blob([template], { type: 'text/csv' })
+    const headers = ['name', 'email', 'phone', 'company_name', 'closer', 'setter', 'stage', 'monthly_amount', 'trial_amount', 'trial_start_date', 'ascension_date', 'notes']
+    const examples = [
+      ['John Smith', 'john@company.com', '+15551234567', 'Smith Remodeling', 'Daniel', 'Josh', 'trial', '3000', '997', '2026-03-15', '', 'New trial client'],
+      ['Jane Doe', 'jane@janedoe.com', '+15559876543', 'Doe Restoration', 'Daniel', 'Leandre', 'ascended', '3000', '997', '2026-01-10', '2026-02-10', 'Ascended month 2'],
+    ]
+    const escXml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const toCell = (v, r, c) => {
+      const ref = String.fromCharCode(65 + c) + (r + 1)
+      if (!v && v !== 0) return `<c r="${ref}" t="inlineStr"><is><t></t></is></c>`
+      return `<c r="${ref}" t="inlineStr"><is><t>${escXml(v)}</t></is></c>`
+    }
+    const rows = [headers, ...examples]
+    const sheetRows = rows.map((row, ri) =>
+      `<row r="${ri + 1}">${row.map((v, ci) => toCell(v, ri, ci)).join('')}</row>`
+    ).join('')
+    const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetRows}</sheetData></worksheet>`
+    const ct = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`
+    const wb = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Client Import" sheetId="1" r:id="rId1"/></sheets></workbook>`
+    const wbRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`
+    const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`
+
+    // Build zip manually using JSZip-like approach with Blob
+    // Simpler: just use CSV with .xlsx won't open properly without zip. Use .xls (HTML table format) instead.
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Client Import</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body><table>${rows.map((row, ri) => `<tr>${row.map(v => `<td${ri === 0 ? ' style="font-weight:bold;background:#f0e050"' : ''}>${escXml(v)}</td>`).join('')}</tr>`).join('')}</table></body></html>`
+    const blob = new Blob([html], { type: 'application/vnd.ms-excel' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = 'client_import_template.csv'; a.click()
+    a.href = url; a.download = 'client_import_template.xls'; a.click()
     URL.revokeObjectURL(url)
   }
 
