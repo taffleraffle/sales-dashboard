@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
-import { DollarSign, Upload, Check, X, ChevronDown, Loader, Search } from 'lucide-react'
+import { DollarSign, Upload, Check, X, ChevronDown, Loader, Search, ArrowRight } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCommissionSettings, useClients, usePayments, useCommissionLedger } from '../hooks/useCommissions'
 import { summarizeCommissions } from '../services/commissionCalc'
@@ -34,6 +35,7 @@ export default function CommissionPage() {
   const { clients, clientsMap, refresh: refreshClients } = useClients()
   const { payments, loading: loadingPayments, matchPayment } = usePayments(period)
   const { ledger, loading: loadingLedger, updateStatus, refresh: refreshLedger } = useCommissionLedger(null, period)
+  const navigate = useNavigate()
   const [importStatus, setImportStatus] = useState(null)
   const fileRef = useRef(null)
   const [matchingPaymentId, setMatchingPaymentId] = useState(null)
@@ -162,15 +164,15 @@ export default function CommissionPage() {
                 {members.map(m => {
                   const s = summaries[m.id] || { base_salary: settingsMap[m.id]?.base_salary || 0, trial_commission: 0, ascension_commission: 0, recurring_commission: 0, total_commission: 0, total_earnings: settingsMap[m.id]?.base_salary || 0 }
                   return (
-                    <tr key={m.id} className="border-t border-border-default/30 hover:bg-bg-card-hover/50">
-                      <td className="px-3 py-2 font-medium text-text-primary">{m.name}</td>
+                    <tr key={m.id} onClick={() => navigate(`/sales/commissions/${m.id}`)} className="border-t border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer">
+                      <td className="px-3 py-2 font-medium text-opt-yellow hover:underline">{m.name}</td>
                       <td className="px-3 py-2 text-text-400 capitalize">{m.role}</td>
                       <td className="px-3 py-2 text-right text-text-400">${s.base_salary.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right text-text-primary">${s.trial_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right text-text-primary">${s.ascension_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right text-text-primary">${s.recurring_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right font-medium text-opt-yellow">${s.total_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      <td className="px-3 py-2 text-right font-medium text-success">${s.total_earnings.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className="px-3 py-2 text-right font-medium text-success flex items-center justify-end gap-1">${s.total_earnings.toLocaleString('en-US', { minimumFractionDigits: 2 })} <ArrowRight size={10} className="text-text-400" /></td>
                     </tr>
                   )
                 })}
