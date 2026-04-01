@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { DollarSign, Upload, Check, X, ChevronDown, Loader, Search, ArrowRight } from 'lucide-react'
+import { DollarSign, Upload, Check, X, ChevronDown, Loader, Search, ArrowRight, Plus, Edit3, Save } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCommissionSettings, useClients, usePayments, useCommissionLedger } from '../hooks/useCommissions'
@@ -40,6 +40,12 @@ export default function CommissionPage() {
   const fileRef = useRef(null)
   const [matchingPaymentId, setMatchingPaymentId] = useState(null)
   const [searchClient, setSearchClient] = useState('')
+  const [showAddClient, setShowAddClient] = useState(false)
+  const [showAddPayment, setShowAddPayment] = useState(false)
+  const [editingClientId, setEditingClientId] = useState(null)
+  const [editClient, setEditClient] = useState({})
+  const [newClient, setNewClient] = useState({ name: '', email: '', phone: '', company_name: '', closer_id: '', setter_id: '', stage: 'trial', monthly_amount: '', trial_amount: '', trial_start_date: '', ascension_date: '' })
+  const [newPayment, setNewPayment] = useState({ customer_name: '', customer_email: '', amount: '', fee: '', source: 'stripe', payment_type: 'trial', payment_date: new Date().toISOString().split('T')[0], description: '' })
 
   const summaries = summarizeCommissions(ledger, settingsMap)
   const totalCommission = Object.values(summaries).reduce((s, m) => s + m.total_commission, 0)
@@ -102,6 +108,74 @@ export default function CommissionPage() {
     refreshClients()
     setTimeout(() => setImportStatus(null), 5000)
   }
+
+  const handleAddClient = async () => {
+    const { error } = await supabase.from('clients').insert({
+      ...newClient,
+      closer_id: newClient.closer_id || null,
+      setter_id: newClient.setter_id || null,
+      monthly_amount: parseFloat(newClient.monthly_amount) || 0,
+      trial_amount: parseFloat(newClient.trial_amount) || 0,
+      trial_start_date: newClient.trial_start_date || null,
+      ascension_date: newClient.ascension_date || null,
+    })
+    if (!error) {
+      setShowAddClient(false)
+      setNewClient({ name: '', email: '', phone: '', company_name: '', closer_id: '', setter_id: '', stage: 'trial', monthly_amount: '', trial_amount: '', trial_start_date: '', ascension_date: '' })
+      refreshClients()
+    }
+  }
+
+  const handleSaveClient = async (clientId) => {
+    const { error } = await supabase.from('clients').update({
+      ...editClient,
+      closer_id: editClient.closer_id || null,
+      setter_id: editClient.setter_id || null,
+      monthly_amount: parseFloat(editClient.monthly_amount) || 0,
+      trial_amount: parseFloat(editClient.trial_amount) || 0,
+      updated_at: new Date().toISOString(),
+    }).eq('id', clientId)
+    if (!error) {
+      setEditingClientId(null)
+      refreshClients()
+    }
+  }
+
+  const handleAddPayment = async () => {
+    const amount = parseFloat(newPayment.amount) || 0
+    const fee = parseFloat(newPayment.fee) || 0
+    const net = amount - fee
+
+    // Try auto-match by email
+    let clientId = null
+    let matched = false
+    if (newPayment.customer_email) {
+      const match = clients.find(c => c.email && c.email.toLowerCase() === newPayment.customer_email.toLowerCase())
+      if (match) { clientId = match.id; matched = true }
+    }
+
+    const { error } = await supabase.from('payments').insert({
+      source: newPayment.source || 'manual',
+      source_event_id: `manual_${Date.now()}`,
+      amount,
+      fee,
+      net_amount: net,
+      customer_email: newPayment.customer_email || null,
+      customer_name: newPayment.customer_name || null,
+      payment_date: newPayment.payment_date ? new Date(newPayment.payment_date).toISOString() : new Date().toISOString(),
+      payment_type: newPayment.payment_type || 'trial',
+      description: newPayment.description || null,
+      client_id: clientId,
+      matched,
+    })
+    if (!error) {
+      setShowAddPayment(false)
+      setNewPayment({ customer_name: '', customer_email: '', amount: '', fee: '', source: 'stripe', payment_type: 'trial', payment_date: new Date().toISOString().split('T')[0], description: '' })
+    }
+  }
+
+  const inputCls = 'w-full px-2 py-1.5 bg-bg-primary border border-border-default rounded text-xs text-text-primary'
+  const selectCls = 'w-full px-2 py-1.5 bg-bg-primary border border-border-default rounded text-xs text-text-primary'
 
   return (
     <div>
@@ -184,7 +258,38 @@ export default function CommissionPage() {
 
       {/* Payments Tab */}
       {activeTab === 'payments' && (
-        <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+        <div>
+          {/* Add Payment Modal */}
+          {showAddPayment && (
+            <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-text-secondary">Add Payment</h3>
+                <button onClick={() => setShowAddPayment(false)} className="text-text-400 hover:text-text-primary"><X size={14} /></button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                <div><label className="text-[10px] text-text-400 block mb-1">Customer Name</label><input value={newPayment.customer_name} onChange={e => setNewPayment(p => ({ ...p, customer_name: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Customer Email</label><input value={newPayment.customer_email} onChange={e => setNewPayment(p => ({ ...p, customer_email: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Amount ($)</label><input type="number" step="0.01" value={newPayment.amount} onChange={e => setNewPayment(p => ({ ...p, amount: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Fee ($)</label><input type="number" step="0.01" value={newPayment.fee} onChange={e => setNewPayment(p => ({ ...p, fee: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Source</label>
+                  <select value={newPayment.source} onChange={e => setNewPayment(p => ({ ...p, source: e.target.value }))} className={selectCls}>
+                    <option value="stripe">Stripe</option><option value="fanbasis">Fanbasis</option><option value="manual">Manual</option>
+                  </select></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Type</label>
+                  <select value={newPayment.payment_type} onChange={e => setNewPayment(p => ({ ...p, payment_type: e.target.value }))} className={selectCls}>
+                    <option value="trial">Trial</option><option value="monthly">Monthly</option><option value="ascension">Ascension</option><option value="pif">PIF</option><option value="one_time">One-Time</option>
+                  </select></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Payment Date</label><input type="date" value={newPayment.payment_date} onChange={e => setNewPayment(p => ({ ...p, payment_date: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Description</label><input value={newPayment.description} onChange={e => setNewPayment(p => ({ ...p, description: e.target.value }))} placeholder="Optional" className={inputCls} /></div>
+              </div>
+              <button onClick={handleAddPayment} className="px-4 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Save size={12} className="inline mr-1" />Save Payment</button>
+            </div>
+          )}
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-text-secondary">Payments — {period}</h2>
+            <button onClick={() => setShowAddPayment(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Plus size={12} /> Add Payment</button>
+          </div>
+          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -274,22 +379,53 @@ export default function CommissionPage() {
             </table>
           </div>
         </div>
+        </div>
       )}
 
       {/* Clients Tab */}
       {activeTab === 'clients' && (
         <div>
+          {/* Add Client Form */}
+          {showAddClient && (
+            <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-text-secondary">Add Client</h3>
+                <button onClick={() => setShowAddClient(false)} className="text-text-400 hover:text-text-primary"><X size={14} /></button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                <div><label className="text-[10px] text-text-400 block mb-1">Name *</label><input value={newClient.name} onChange={e => setNewClient(c => ({ ...c, name: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Email</label><input value={newClient.email} onChange={e => setNewClient(c => ({ ...c, email: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Phone</label><input value={newClient.phone} onChange={e => setNewClient(c => ({ ...c, phone: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Company</label><input value={newClient.company_name} onChange={e => setNewClient(c => ({ ...c, company_name: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Closer</label>
+                  <select value={newClient.closer_id} onChange={e => setNewClient(c => ({ ...c, closer_id: e.target.value }))} className={selectCls}>
+                    <option value="">—</option>
+                    {members.filter(m => m.role === 'closer').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Setter</label>
+                  <select value={newClient.setter_id} onChange={e => setNewClient(c => ({ ...c, setter_id: e.target.value }))} className={selectCls}>
+                    <option value="">—</option>
+                    {members.filter(m => m.role === 'setter').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Stage</label>
+                  <select value={newClient.stage} onChange={e => setNewClient(c => ({ ...c, stage: e.target.value }))} className={selectCls}>
+                    <option value="trial">Trial</option><option value="ascended">Ascended</option><option value="pif">PIF</option><option value="paused">Paused</option><option value="churned">Churned</option>
+                  </select></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Monthly $</label><input type="number" value={newClient.monthly_amount} onChange={e => setNewClient(c => ({ ...c, monthly_amount: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Trial $</label><input type="number" value={newClient.trial_amount} onChange={e => setNewClient(c => ({ ...c, trial_amount: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Trial Start</label><input type="date" value={newClient.trial_start_date} onChange={e => setNewClient(c => ({ ...c, trial_start_date: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Ascension Date</label><input type="date" value={newClient.ascension_date} onChange={e => setNewClient(c => ({ ...c, ascension_date: e.target.value }))} className={inputCls} /></div>
+              </div>
+              <button onClick={handleAddClient} disabled={!newClient.name} className="px-4 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-50"><Save size={12} className="inline mr-1" />Save Client</button>
+            </div>
+          )}
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-medium text-text-secondary">Client List</h2>
             <div className="flex items-center gap-2">
               {importStatus && <span className="text-[10px] text-success">{importStatus}</span>}
               <input ref={fileRef} type="file" accept=".csv" onChange={handleImportCSV} className="hidden" />
-              <button
-                onClick={() => fileRef.current?.click()}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90 transition-colors"
-              >
-                <Upload size={12} /> Import CSV
-              </button>
+              <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-primary rounded-lg hover:bg-bg-card-hover"><Upload size={12} /> Import CSV</button>
+              <button onClick={() => setShowAddClient(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Plus size={12} /> Add Client</button>
             </div>
           </div>
           <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
@@ -306,28 +442,66 @@ export default function CommissionPage() {
                     <th className="px-3 py-2 text-right">Monthly</th>
                     <th className="px-3 py-2 text-left">Trial Start</th>
                     <th className="px-3 py-2 text-left">Ascension</th>
+                    <th className="px-3 py-2 w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {clients.length === 0 ? (
-                    <tr><td colSpan={9} className="px-4 py-8 text-center text-text-400">No clients yet — import a CSV to get started</td></tr>
-                  ) : clients.map(c => (
-                    <tr key={c.id} className="border-t border-border-default/30 hover:bg-bg-card-hover/50">
-                      <td className="px-3 py-2 font-medium text-text-primary">{c.name}</td>
-                      <td className="px-3 py-2 text-text-400">{c.company_name || '—'}</td>
-                      <td className="px-3 py-2 text-text-400">{c.email || '—'}</td>
-                      <td className="px-3 py-2">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border capitalize ${STAGE_COLORS[c.stage] || STAGE_COLORS.trial}`}>
-                          {c.stage}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-text-400">{c.closer_name}</td>
-                      <td className="px-3 py-2 text-text-400">{c.setter_name}</td>
-                      <td className="px-3 py-2 text-right text-text-primary">${Number(c.monthly_amount).toLocaleString()}</td>
-                      <td className="px-3 py-2 text-text-400">{c.trial_start_date || '—'}</td>
-                      <td className="px-3 py-2 text-text-400">{c.ascension_date || '—'}</td>
-                    </tr>
-                  ))}
+                    <tr><td colSpan={10} className="px-4 py-8 text-center text-text-400">No clients yet — click Add Client or Import CSV to get started</td></tr>
+                  ) : clients.map(c => {
+                    const isEditing = editingClientId === c.id
+                    if (isEditing) {
+                      const ec = editClient
+                      return (
+                        <tr key={c.id} className="border-t border-border-default/30 bg-opt-yellow/5">
+                          <td className="px-2 py-1"><input value={ec.name || ''} onChange={e => setEditClient(x => ({ ...x, name: e.target.value }))} className={inputCls} /></td>
+                          <td className="px-2 py-1"><input value={ec.company_name || ''} onChange={e => setEditClient(x => ({ ...x, company_name: e.target.value }))} className={inputCls} /></td>
+                          <td className="px-2 py-1"><input value={ec.email || ''} onChange={e => setEditClient(x => ({ ...x, email: e.target.value }))} className={inputCls} /></td>
+                          <td className="px-2 py-1">
+                            <select value={ec.stage || 'trial'} onChange={e => setEditClient(x => ({ ...x, stage: e.target.value }))} className={selectCls}>
+                              <option value="trial">Trial</option><option value="ascended">Ascended</option><option value="pif">PIF</option><option value="paused">Paused</option><option value="churned">Churned</option>
+                            </select></td>
+                          <td className="px-2 py-1">
+                            <select value={ec.closer_id || ''} onChange={e => setEditClient(x => ({ ...x, closer_id: e.target.value }))} className={selectCls}>
+                              <option value="">—</option>{members.filter(m => m.role === 'closer').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                            </select></td>
+                          <td className="px-2 py-1">
+                            <select value={ec.setter_id || ''} onChange={e => setEditClient(x => ({ ...x, setter_id: e.target.value }))} className={selectCls}>
+                              <option value="">—</option>{members.filter(m => m.role === 'setter').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                            </select></td>
+                          <td className="px-2 py-1"><input type="number" value={ec.monthly_amount || ''} onChange={e => setEditClient(x => ({ ...x, monthly_amount: e.target.value }))} className={inputCls + ' text-right'} /></td>
+                          <td className="px-2 py-1"><input type="date" value={ec.trial_start_date || ''} onChange={e => setEditClient(x => ({ ...x, trial_start_date: e.target.value }))} className={inputCls} /></td>
+                          <td className="px-2 py-1"><input type="date" value={ec.ascension_date || ''} onChange={e => setEditClient(x => ({ ...x, ascension_date: e.target.value }))} className={inputCls} /></td>
+                          <td className="px-2 py-1">
+                            <div className="flex gap-1">
+                              <button onClick={() => handleSaveClient(c.id)} className="text-success hover:text-success/80"><Save size={12} /></button>
+                              <button onClick={() => setEditingClientId(null)} className="text-text-400 hover:text-text-primary"><X size={12} /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    }
+                    return (
+                      <tr key={c.id} className="border-t border-border-default/30 hover:bg-bg-card-hover/50">
+                        <td className="px-3 py-2 font-medium text-text-primary">{c.name}</td>
+                        <td className="px-3 py-2 text-text-400">{c.company_name || '—'}</td>
+                        <td className="px-3 py-2 text-text-400">{c.email || '—'}</td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border capitalize ${STAGE_COLORS[c.stage] || STAGE_COLORS.trial}`}>
+                            {c.stage}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-text-400">{c.closer_name}</td>
+                        <td className="px-3 py-2 text-text-400">{c.setter_name}</td>
+                        <td className="px-3 py-2 text-right text-text-primary">${Number(c.monthly_amount).toLocaleString()}</td>
+                        <td className="px-3 py-2 text-text-400">{c.trial_start_date || '—'}</td>
+                        <td className="px-3 py-2 text-text-400">{c.ascension_date || '—'}</td>
+                        <td className="px-3 py-2">
+                          <button onClick={() => { setEditingClientId(c.id); setEditClient({ name: c.name, email: c.email, phone: c.phone, company_name: c.company_name, closer_id: c.closer_id || '', setter_id: c.setter_id || '', stage: c.stage, monthly_amount: c.monthly_amount, trial_amount: c.trial_amount, trial_start_date: c.trial_start_date || '', ascension_date: c.ascension_date || '' }) }} className="text-text-400 hover:text-opt-yellow"><Edit3 size={12} /></button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
