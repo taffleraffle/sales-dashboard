@@ -420,6 +420,101 @@ function CommissionPageAdmin() {
     }
   }
 
+  const deleteClient = async (clientId) => {
+    if (!confirm('Delete this client? This cannot be undone.')) return
+    await supabase.from('commission_ledger').delete().eq('client_id', clientId)
+    await supabase.from('payments').update({ client_id: null, matched: false }).eq('client_id', clientId)
+    await supabase.from('clients').delete().eq('id', clientId)
+    refreshClients()
+    refreshLedger()
+  }
+
+  const generateCommissions = async () => {
+    if (!confirm('Generate commission entries from client payment data? This will create ledger entries based on each client\'s payment count and monthly amount.')) return
+    setImportStatus('Generating commissions...')
+    let created = 0
+
+    for (const client of clients) {
+      if (!client.closer_id && !client.setter_id) continue
+      const pc = client.payment_count || 0
+      if (pc === 0) continue
+
+      for (let pn = 0; pn < pc && pn < 4; pn++) {
+        const amount = pn === 0 ? (Number(client.trial_amount) || Number(client.monthly_amount) || 0) : (Number(client.monthly_amount) || 0)
+        if (amount === 0) continue
+
+        const commType = pn === 0 ? 'trial_close' : 'ascension'
+        // Estimate payment date from trial_start_date
+        const startDate = client.trial_start_date ? new Date(client.trial_start_date + 'T12:00:00') : new Date()
+        const payDate = new Date(startDate)
+        payDate.setMonth(payDate.getMonth() + pn)
+        const periodStr = `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, '0')}`
+
+        // Create payment record
+        const { data: payment } = await supabase.from('payments').insert({
+          source: 'manual',
+          source_event_id: `gen_${client.id}_${pn}`,
+          amount,
+          fee: 0,
+          net_amount: amount,
+          customer_name: client.name,
+          customer_email: client.email,
+          payment_date: payDate.toISOString(),
+          payment_type: pn === 0 ? 'trial' : 'monthly',
+          payment_number: pn,
+          client_id: client.id,
+          matched: true,
+        }).select('id').single()
+
+        if (!payment) continue
+
+        // Create commission for closer
+        if (client.closer_id) {
+          const cs = settingsMap[client.closer_id]
+          const rate = cs?.commission_rate || 0
+          if (rate > 0) {
+            await supabase.from('commission_ledger').insert({
+              member_id: client.closer_id,
+              payment_id: payment.id,
+              client_id: client.id,
+              period: periodStr,
+              commission_type: commType,
+              payment_amount: amount,
+              commission_rate: rate,
+              commission_amount: Number((amount * rate / 100).toFixed(2)),
+              status: 'pending',
+            })
+            created++
+          }
+        }
+
+        // Create commission for setter
+        if (client.setter_id) {
+          const cs = settingsMap[client.setter_id]
+          const rate = cs?.commission_rate || 0
+          if (rate > 0) {
+            await supabase.from('commission_ledger').insert({
+              member_id: client.setter_id,
+              payment_id: payment.id,
+              client_id: client.id,
+              period: periodStr,
+              commission_type: commType,
+              payment_amount: amount,
+              commission_rate: rate,
+              commission_amount: Number((amount * rate / 100).toFixed(2)),
+              status: 'pending',
+            })
+            created++
+          }
+        }
+      }
+    }
+
+    setImportStatus(`Generated ${created} commission entries`)
+    refreshLedger()
+    setTimeout(() => setImportStatus(null), 5000)
+  }
+
   const inputCls = 'w-full px-2 py-1.5 bg-bg-primary border border-border-default rounded text-xs text-text-primary'
   const selectCls = 'w-full px-2 py-1.5 bg-bg-primary border border-border-default rounded text-xs text-text-primary'
 
@@ -691,6 +786,9 @@ function CommissionPageAdmin() {
               <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-400 rounded-lg hover:bg-bg-card-hover"><Download size={12} /> Template</button>
               <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-primary rounded-lg hover:bg-bg-card-hover"><Upload size={12} /> Import CSV</button>
               <button onClick={() => setShowAddClient(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Plus size={12} /> Add Client</button>
+              {clients.length > 0 && (
+                <button onClick={generateCommissions} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-success/30 text-success rounded-lg hover:bg-success/10"><DollarSign size={12} /> Generate Commissions</button>
+              )}
             </div>
           </div>
           {/* CSV Preview Modal */}
@@ -840,7 +938,10 @@ function CommissionPageAdmin() {
                           })()}
                         </td>
                         <td className="px-3 py-2">
-                          <button onClick={() => { setEditingClientId(c.id); setEditClient({ name: c.name, email: c.email, phone: c.phone, company_name: c.company_name, closer_id: c.closer_id || '', setter_id: c.setter_id || '', stage: c.stage, monthly_amount: c.monthly_amount, trial_amount: c.trial_amount, trial_start_date: c.trial_start_date || '', ascension_date: c.ascension_date || '', billing_day: c.billing_day || '', next_billing_date: c.next_billing_date || '', payment_count: c.payment_count || 0 }) }} className="text-text-400 hover:text-opt-yellow"><Edit3 size={12} /></button>
+                          <div className="flex gap-1.5">
+                            <button onClick={() => { setEditingClientId(c.id); setEditClient({ name: c.name, email: c.email, phone: c.phone, company_name: c.company_name, closer_id: c.closer_id || '', setter_id: c.setter_id || '', stage: c.stage, monthly_amount: c.monthly_amount, trial_amount: c.trial_amount, trial_start_date: c.trial_start_date || '', ascension_date: c.ascension_date || '', billing_day: c.billing_day || '', next_billing_date: c.next_billing_date || '', payment_count: c.payment_count || 0 }) }} className="text-text-400 hover:text-opt-yellow"><Edit3 size={12} /></button>
+                            <button onClick={() => deleteClient(c.id)} className="text-text-400 hover:text-danger"><X size={12} /></button>
+                          </div>
                         </td>
                       </tr>
                     )
