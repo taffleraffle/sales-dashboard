@@ -28,9 +28,9 @@ function MonthPicker({ value, onChange }) {
 
 function SettingsCard({ member, saved, onSave }) {
   const [payType, setPayType] = useState(saved.pay_type || 'base')
-  const [baseSalary, setBaseSalary] = useState(saved.base_salary || 0)
-  const [rampAmount, setRampAmount] = useState(saved.ramp_amount || 0)
-  const [commissionRate, setCommissionRate] = useState(saved.commission_rate || 0)
+  const [baseSalary, setBaseSalary] = useState(String(saved.base_salary || ''))
+  const [rampAmount, setRampAmount] = useState(String(saved.ramp_amount || ''))
+  const [commissionRate, setCommissionRate] = useState(String(saved.commission_rate || ''))
   const [notes, setNotes] = useState(saved.notes || '')
   const [saving, setSaving] = useState(false)
   const [saved_, setSaved_] = useState(false)
@@ -42,9 +42,9 @@ function SettingsCard({ member, saved, onSave }) {
     setSaved_(false)
     const ok = await onSave(member.id, {
       pay_type: payType,
-      base_salary: baseSalary,
-      ramp_amount: rampAmount,
-      commission_rate: commissionRate,
+      base_salary: parseFloat(baseSalary) || 0,
+      ramp_amount: parseFloat(rampAmount) || 0,
+      commission_rate: parseFloat(commissionRate) || 0,
       notes,
     })
     setSaving(false)
@@ -84,8 +84,7 @@ function SettingsCard({ member, saved, onSave }) {
               type="number"
               value={isRamp ? rampAmount : baseSalary}
               onChange={e => {
-                const val = parseFloat(e.target.value) || 0
-                if (isRamp) setRampAmount(val); else setBaseSalary(val)
+                if (isRamp) setRampAmount(e.target.value); else setBaseSalary(e.target.value)
               }}
               className={`${inputCls} pl-6 pr-3`}
             />
@@ -104,7 +103,7 @@ function SettingsCard({ member, saved, onSave }) {
               type="number"
               step="0.5"
               value={commissionRate}
-              onChange={e => setCommissionRate(parseFloat(e.target.value) || 0)}
+              onChange={e => setCommissionRate(e.target.value)}
               className={`${inputCls} pl-3 pr-7`}
             />
             <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-400 text-xs">%</span>
@@ -160,7 +159,13 @@ export default function CommissionPage() {
 
   const summaries = summarizeCommissions(ledger, settingsMap)
   const totalCommission = Object.values(summaries).reduce((s, m) => s + m.total_commission, 0)
-  const totalEarnings = Object.values(summaries).reduce((s, m) => s + m.total_earnings, 0)
+  const totalEarnings = members.reduce((sum, m) => {
+    const ms = settingsMap[m.id] || {}
+    const isRamp = ms.pay_type === 'ramp'
+    const baseOrRamp = isRamp ? (ms.ramp_amount || 0) : (ms.base_salary || 0)
+    const comm = summaries[m.id]?.total_commission || 0
+    return sum + (isRamp ? Math.max(ms.ramp_amount || 0, comm) : baseOrRamp + comm)
+  }, 0)
   const totalPayments = payments.reduce((s, p) => s + Number(p.net_amount || 0), 0)
   const unmatchedCount = payments.filter(p => !p.matched).length
 
@@ -382,7 +387,7 @@ Jane Doe,jane@janedoe.com,+15559876543,Doe Restoration,Daniel,Leandre,ascended,3
                 <tr className="bg-bg-card text-text-400 uppercase text-[10px]">
                   <th className="px-3 py-2 text-left">Name</th>
                   <th className="px-3 py-2 text-left">Role</th>
-                  <th className="px-3 py-2 text-right">Base</th>
+                  <th className="px-3 py-2 text-right">Base / Ramp</th>
                   <th className="px-3 py-2 text-right">Trial</th>
                   <th className="px-3 py-2 text-right">Ascension</th>
                   <th className="px-3 py-2 text-right">Recurring</th>
@@ -392,12 +397,20 @@ Jane Doe,jane@janedoe.com,+15559876543,Doe Restoration,Daniel,Leandre,ascended,3
               </thead>
               <tbody>
                 {members.map(m => {
-                  const s = summaries[m.id] || { base_salary: settingsMap[m.id]?.base_salary || 0, trial_commission: 0, ascension_commission: 0, recurring_commission: 0, total_commission: 0, total_earnings: settingsMap[m.id]?.base_salary || 0 }
+                  const ms = settingsMap[m.id] || {}
+                  const isRamp = ms.pay_type === 'ramp'
+                  const baseOrRamp = isRamp ? (ms.ramp_amount || 0) : (ms.base_salary || 0)
+                  const raw = summaries[m.id] || { trial_commission: 0, ascension_commission: 0, recurring_commission: 0, total_commission: 0, entries: [] }
+                  const totalEarnings = isRamp ? Math.max(ms.ramp_amount || 0, raw.total_commission) : baseOrRamp + raw.total_commission
+                  const s = { ...raw, base_salary: baseOrRamp, total_earnings: totalEarnings, pay_type: ms.pay_type || 'base' }
                   return (
                     <tr key={m.id} onClick={() => navigate(`/sales/commissions/${m.id}`)} className="border-t border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer">
                       <td className="px-3 py-2 font-medium text-opt-yellow hover:underline">{m.name}</td>
                       <td className="px-3 py-2 text-text-400 capitalize">{m.role}</td>
-                      <td className="px-3 py-2 text-right text-text-400">${s.base_salary.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right text-text-400">
+                        ${s.base_salary.toLocaleString()}
+                        <span className="text-[9px] ml-1 text-text-400/60">{s.pay_type === 'ramp' ? 'ramp' : 'base'}</span>
+                      </td>
                       <td className="px-3 py-2 text-right text-text-primary">${s.trial_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right text-text-primary">${s.ascension_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right text-text-primary">${s.recurring_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
