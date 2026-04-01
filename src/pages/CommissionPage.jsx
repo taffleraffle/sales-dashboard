@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react'
 import { DollarSign, Upload, Check, X, ChevronDown, Loader, Search, ArrowRight, Plus, Edit3, Save, Download, Eye } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
+import CommissionDetail from './CommissionDetail'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCommissionSettings, useClients, usePayments, useCommissionLedger } from '../hooks/useCommissions'
 import { summarizeCommissions } from '../services/commissionCalc'
@@ -136,6 +138,18 @@ function SettingsCard({ member, saved, onSave }) {
 }
 
 export default function CommissionPage() {
+  const { isAdmin, profile } = useAuth()
+  const navigate = useNavigate()
+
+  // Non-admins go straight to their own commission page
+  if (!isAdmin && profile?.teamMemberId) {
+    return <CommissionDetail memberId={profile.teamMemberId} />
+  }
+
+  return <CommissionPageAdmin />
+}
+
+function CommissionPageAdmin() {
   const now = new Date()
   const [period, setPeriod] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [activeTab, setActiveTab] = useState('overview')
@@ -268,23 +282,29 @@ export default function CommissionPage() {
     members.forEach(m => { memberByName[m.name.toLowerCase()] = m.id })
 
     const rows = csvPreview.rows.filter(r => r.name)
-    // Convert dates from DD/MM/YYYY or MM/DD/YYYY to YYYY-MM-DD
+    // Convert dates from DD/MM/YYYY or MM/DD/YYYY to YYYY-MM-DD, validate result
     const parseDate = (v) => {
-      if (!v) return null
+      if (!v || !v.trim()) return null
+      v = v.trim()
+      let year, month, day
       // Already YYYY-MM-DD
-      if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v
-      // DD/MM/YYYY or D/M/YYYY
-      const slash = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/)
-      if (slash) {
-        const [, a, b, year] = slash
-        // If first number > 12, it must be day (DD/MM/YYYY)
-        if (parseInt(a) > 12) return `${year}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`
-        // If second number > 12, it must be day (MM/DD/YYYY)
-        if (parseInt(b) > 12) return `${year}-${a.padStart(2,'0')}-${b.padStart(2,'0')}`
-        // Ambiguous — assume DD/MM/YYYY (Australian/NZ format)
-        return `${year}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`
+      if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(v)) {
+        ;[year, month, day] = v.split('-').map(Number)
+      } else {
+        const slash = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/)
+        if (!slash) return null
+        const [, a, b, y] = slash.map(Number)
+        year = y
+        if (a > 12) { day = a; month = b } // DD/MM/YYYY
+        else if (b > 12) { month = a; day = b } // MM/DD/YYYY
+        else { day = a; month = b } // Ambiguous — assume DD/MM/YYYY
       }
-      return v
+      // Validate the date is real
+      const d = new Date(year, month - 1, day)
+      if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) {
+        return null // Invalid date like April 31
+      }
+      return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
     }
 
     const insertRows = rows.map(row => ({

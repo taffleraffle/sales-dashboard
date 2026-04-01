@@ -26,8 +26,9 @@ const STATUS_COLORS = {
   paid: 'bg-success/15 text-success border-success/30',
 }
 
-export default function CommissionDetail() {
-  const { id } = useParams()
+export default function CommissionDetail({ memberId: propId } = {}) {
+  const params = useParams()
+  const id = propId || params.id
   const navigate = useNavigate()
   const now = new Date()
   const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -82,12 +83,14 @@ export default function CommissionDetail() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/sales/commissions')} className="text-text-400 hover:text-text-primary">
-            <ArrowLeft size={18} />
-          </button>
+          {!propId && (
+            <button onClick={() => navigate('/sales/commissions')} className="text-text-400 hover:text-text-primary">
+              <ArrowLeft size={18} />
+            </button>
+          )}
           <div>
             <h1 className="text-lg sm:text-xl font-bold flex items-center gap-2">
-              <DollarSign size={20} className="text-opt-yellow" /> {member.name}
+              <DollarSign size={20} className="text-opt-yellow" /> {propId ? 'My Commission' : member.name}
             </h1>
             <p className="text-xs sm:text-sm text-text-400 capitalize">{member.role} — Commission Detail</p>
           </div>
