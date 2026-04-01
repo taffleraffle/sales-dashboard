@@ -186,6 +186,7 @@ export default function CommissionDetail() {
             <thead>
               <tr className="bg-bg-card text-text-400 uppercase text-[10px]">
                 <th className="px-3 py-2 text-left">Client</th>
+                <th className="px-3 py-2 text-left">Payment #</th>
                 <th className="px-3 py-2 text-left">Type</th>
                 <th className="px-3 py-2 text-left">Source</th>
                 <th className="px-3 py-2 text-left">Date</th>
@@ -197,9 +198,9 @@ export default function CommissionDetail() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-text-400">Loading...</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-text-400">Loading...</td></tr>
               ) : ledger.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-text-400">No commission entries for this period</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-text-400">No commission entries for this period</td></tr>
               ) : ledger.map(entry => (
                 <tr key={entry.id} className="border-t border-border-default/30 hover:bg-bg-card-hover/50">
                   <td className="px-3 py-2">
@@ -209,6 +210,13 @@ export default function CommissionDetail() {
                         <span className="block text-[10px] text-text-400">{entry.client.company_name}</span>
                       )}
                     </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {(() => {
+                      const pn = entry.payment?.payment_number
+                      const labels = { 0: 'Trial', 1: 'Month 1', 2: 'Month 2', 3: 'Month 3' }
+                      return <span className="text-[10px] font-medium text-text-primary">{pn != null ? (labels[pn] || `Month ${pn}`) : '—'}</span>
+                    })()}
                   </td>
                   <td className="px-3 py-2">
                     <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${TYPE_COLORS[entry.commission_type] || ''}`}>
@@ -250,7 +258,7 @@ export default function CommissionDetail() {
             {ledger.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-border-default bg-bg-card">
-                  <td colSpan={4} className="px-3 py-2 font-medium text-text-secondary text-right">Totals</td>
+                  <td colSpan={5} className="px-3 py-2 font-medium text-text-secondary text-right">Totals</td>
                   <td className="px-3 py-2 text-right font-bold text-text-primary">
                     ${ledger.reduce((s, e) => s + Number(e.payment_amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </td>

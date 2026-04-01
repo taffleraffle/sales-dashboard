@@ -153,7 +153,7 @@ export default function CommissionPage() {
   const [showAddPayment, setShowAddPayment] = useState(false)
   const [editingClientId, setEditingClientId] = useState(null)
   const [editClient, setEditClient] = useState({})
-  const [newClient, setNewClient] = useState({ name: '', email: '', phone: '', company_name: '', closer_id: '', setter_id: '', stage: 'trial', monthly_amount: '', trial_amount: '', trial_start_date: '', ascension_date: '' })
+  const [newClient, setNewClient] = useState({ name: '', email: '', phone: '', company_name: '', closer_id: '', setter_id: '', stage: 'trial', monthly_amount: '', trial_amount: '', trial_start_date: '', ascension_date: '', billing_day: '', next_billing_date: '', payment_count: '0' })
   const [newPayment, setNewPayment] = useState({ customer_name: '', customer_email: '', amount: '', fee: '', source: 'stripe', payment_type: 'trial', payment_date: new Date().toISOString().split('T')[0], description: '' })
   const [csvPreview, setCsvPreview] = useState(null) // { headers, rows, file }
 
@@ -205,10 +205,10 @@ export default function CommissionPage() {
 
   // Template download as Excel (.xlsx)
   const downloadTemplate = () => {
-    const headers = ['name', 'email', 'phone', 'company_name', 'closer', 'setter', 'stage', 'monthly_amount', 'trial_amount', 'trial_start_date', 'ascension_date', 'notes']
+    const headers = ['name', 'email', 'phone', 'company_name', 'closer', 'setter', 'stage', 'monthly_amount', 'trial_amount', 'trial_start_date', 'ascension_date', 'billing_day', 'next_billing_date', 'payment_count', 'notes']
     const examples = [
-      ['John Smith', 'john@company.com', '+15551234567', 'Smith Remodeling', 'Daniel', 'Josh', 'trial', '3000', '997', '2026-03-15', '', 'New trial client'],
-      ['Jane Doe', 'jane@janedoe.com', '+15559876543', 'Doe Restoration', 'Daniel', 'Leandre', 'ascended', '3000', '997', '2026-01-10', '2026-02-10', 'Ascended month 2'],
+      ['John Smith', 'john@company.com', '+15551234567', 'Smith Remodeling', 'Daniel', 'Josh', 'trial', '3000', '997', '2026-03-15', '', '15', '2026-04-15', '1', 'Trial paid, month 1 due Apr 15'],
+      ['Jane Doe', 'jane@janedoe.com', '+15559876543', 'Doe Restoration', 'Daniel', 'Leandre', 'ascended', '3000', '997', '2026-01-10', '2026-02-10', '10', '2026-04-10', '3', 'Month 3 payment due'],
     ]
     const escXml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     const toCell = (v, r, c) => {
@@ -284,6 +284,9 @@ export default function CommissionPage() {
         ascension_date: row.ascension_date || null,
         monthly_amount: parseFloat(row.monthly_amount) || 0,
         trial_amount: parseFloat(row.trial_amount) || 0,
+        billing_day: parseInt(row.billing_day) || null,
+        next_billing_date: row.next_billing_date || null,
+        payment_count: parseInt(row.payment_count) || 0,
         notes: row.notes || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'email', ignoreDuplicates: false })
@@ -298,13 +301,20 @@ export default function CommissionPage() {
 
   const handleAddClient = async () => {
     const { error } = await supabase.from('clients').insert({
-      ...newClient,
+      name: newClient.name,
+      email: newClient.email || null,
+      phone: newClient.phone || null,
+      company_name: newClient.company_name || null,
       closer_id: newClient.closer_id || null,
       setter_id: newClient.setter_id || null,
+      stage: newClient.stage || 'trial',
       monthly_amount: parseFloat(newClient.monthly_amount) || 0,
       trial_amount: parseFloat(newClient.trial_amount) || 0,
       trial_start_date: newClient.trial_start_date || null,
       ascension_date: newClient.ascension_date || null,
+      billing_day: parseInt(newClient.billing_day) || null,
+      next_billing_date: newClient.next_billing_date || null,
+      payment_count: parseInt(newClient.payment_count) || 0,
     })
     if (!error) {
       setShowAddClient(false)
@@ -315,11 +325,20 @@ export default function CommissionPage() {
 
   const handleSaveClient = async (clientId) => {
     const { error } = await supabase.from('clients').update({
-      ...editClient,
+      name: editClient.name,
+      email: editClient.email || null,
+      phone: editClient.phone || null,
+      company_name: editClient.company_name || null,
       closer_id: editClient.closer_id || null,
       setter_id: editClient.setter_id || null,
+      stage: editClient.stage || 'trial',
       monthly_amount: parseFloat(editClient.monthly_amount) || 0,
       trial_amount: parseFloat(editClient.trial_amount) || 0,
+      trial_start_date: editClient.trial_start_date || null,
+      ascension_date: editClient.ascension_date || null,
+      billing_day: parseInt(editClient.billing_day) || null,
+      next_billing_date: editClient.next_billing_date || null,
+      payment_count: parseInt(editClient.payment_count) || 0,
       updated_at: new Date().toISOString(),
     }).eq('id', clientId)
     if (!error) {
@@ -610,6 +629,16 @@ export default function CommissionPage() {
                 <div><label className="text-[10px] text-text-400 block mb-1">Trial $</label><input type="number" value={newClient.trial_amount} onChange={e => setNewClient(c => ({ ...c, trial_amount: e.target.value }))} className={inputCls} /></div>
                 <div><label className="text-[10px] text-text-400 block mb-1">Trial Start</label><input type="date" value={newClient.trial_start_date} onChange={e => setNewClient(c => ({ ...c, trial_start_date: e.target.value }))} className={inputCls} /></div>
                 <div><label className="text-[10px] text-text-400 block mb-1">Ascension Date</label><input type="date" value={newClient.ascension_date} onChange={e => setNewClient(c => ({ ...c, ascension_date: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Billing Day (1-28)</label><input type="number" min="1" max="28" value={newClient.billing_day || ''} onChange={e => setNewClient(c => ({ ...c, billing_day: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Next Billing Date</label><input type="date" value={newClient.next_billing_date || ''} onChange={e => setNewClient(c => ({ ...c, next_billing_date: e.target.value }))} className={inputCls} /></div>
+                <div><label className="text-[10px] text-text-400 block mb-1">Payments Received</label>
+                  <select value={newClient.payment_count || '0'} onChange={e => setNewClient(c => ({ ...c, payment_count: e.target.value }))} className={selectCls}>
+                    <option value="0">0 — No payments yet</option>
+                    <option value="1">1 — Trial paid</option>
+                    <option value="2">2 — Month 1 paid</option>
+                    <option value="3">3 — Month 2 paid</option>
+                    <option value="4">4 — Month 3 paid</option>
+                  </select></div>
               </div>
               <button onClick={handleAddClient} disabled={!newClient.name} className="px-4 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-50"><Save size={12} className="inline mr-1" />Save Client</button>
             </div>
@@ -690,14 +719,15 @@ export default function CommissionPage() {
                     <th className="px-3 py-2 text-left">Closer</th>
                     <th className="px-3 py-2 text-left">Setter</th>
                     <th className="px-3 py-2 text-right">Monthly</th>
-                    <th className="px-3 py-2 text-left">Trial Start</th>
-                    <th className="px-3 py-2 text-left">Ascension</th>
+                    <th className="px-3 py-2 text-left">Payment #</th>
+                    <th className="px-3 py-2 text-left">Next Billing</th>
+                    <th className="px-3 py-2 text-right">Forecast</th>
                     <th className="px-3 py-2 w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {clients.length === 0 ? (
-                    <tr><td colSpan={10} className="px-4 py-8 text-center text-text-400">No clients yet — click Add Client or Import CSV to get started</td></tr>
+                    <tr><td colSpan={11} className="px-4 py-8 text-center text-text-400">No clients yet — click Add Client or Import CSV to get started</td></tr>
                   ) : clients.map(c => {
                     const isEditing = editingClientId === c.id
                     if (isEditing) {
@@ -720,8 +750,12 @@ export default function CommissionPage() {
                               <option value="">—</option>{members.filter(m => m.role === 'setter').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                             </select></td>
                           <td className="px-2 py-1"><input type="number" value={ec.monthly_amount || ''} onChange={e => setEditClient(x => ({ ...x, monthly_amount: e.target.value }))} className={inputCls + ' text-right'} /></td>
-                          <td className="px-2 py-1"><input type="date" value={ec.trial_start_date || ''} onChange={e => setEditClient(x => ({ ...x, trial_start_date: e.target.value }))} className={inputCls} /></td>
-                          <td className="px-2 py-1"><input type="date" value={ec.ascension_date || ''} onChange={e => setEditClient(x => ({ ...x, ascension_date: e.target.value }))} className={inputCls} /></td>
+                          <td className="px-2 py-1">
+                            <select value={ec.payment_count || 0} onChange={e => setEditClient(x => ({ ...x, payment_count: e.target.value }))} className={selectCls}>
+                              <option value="0">None</option><option value="1">Trial</option><option value="2">Mo 1</option><option value="3">Mo 2</option><option value="4">Mo 3</option>
+                            </select></td>
+                          <td className="px-2 py-1"><input type="date" value={ec.next_billing_date || ''} onChange={e => setEditClient(x => ({ ...x, next_billing_date: e.target.value }))} className={inputCls} /></td>
+                          <td className="px-2 py-1"></td>
                           <td className="px-2 py-1">
                             <div className="flex gap-1">
                               <button onClick={() => handleSaveClient(c.id)} className="text-success hover:text-success/80"><Save size={12} /></button>
@@ -744,10 +778,29 @@ export default function CommissionPage() {
                         <td className="px-3 py-2 text-text-400">{c.closer_name}</td>
                         <td className="px-3 py-2 text-text-400">{c.setter_name}</td>
                         <td className="px-3 py-2 text-right text-text-primary">${Number(c.monthly_amount).toLocaleString()}</td>
-                        <td className="px-3 py-2 text-text-400">{c.trial_start_date || '—'}</td>
-                        <td className="px-3 py-2 text-text-400">{c.ascension_date || '—'}</td>
                         <td className="px-3 py-2">
-                          <button onClick={() => { setEditingClientId(c.id); setEditClient({ name: c.name, email: c.email, phone: c.phone, company_name: c.company_name, closer_id: c.closer_id || '', setter_id: c.setter_id || '', stage: c.stage, monthly_amount: c.monthly_amount, trial_amount: c.trial_amount, trial_start_date: c.trial_start_date || '', ascension_date: c.ascension_date || '' }) }} className="text-text-400 hover:text-opt-yellow"><Edit3 size={12} /></button>
+                          {(() => {
+                            const pc = c.payment_count || 0
+                            const labels = ['No payments', 'Trial', 'Month 1', 'Month 2', 'Month 3', 'Month 4+']
+                            const colors = ['text-danger', 'text-blue-400', 'text-opt-yellow', 'text-opt-yellow', 'text-success', 'text-success']
+                            return <span className={`text-[10px] font-medium ${colors[Math.min(pc, 5)]}`}>{labels[Math.min(pc, 5)]}</span>
+                          })()}
+                        </td>
+                        <td className="px-3 py-2 text-text-400 text-[10px]">
+                          {c.next_billing_date ? new Date(c.next_billing_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {(() => {
+                            const pc = c.payment_count || 0
+                            const remaining = Math.max(0, 4 - pc) // payments left in commission window (trial + 3 months)
+                            const forecast = remaining * Number(c.monthly_amount || 0)
+                            return forecast > 0
+                              ? <span className="text-opt-yellow text-[10px] font-medium">${forecast.toLocaleString()}</span>
+                              : <span className="text-text-400 text-[10px]">—</span>
+                          })()}
+                        </td>
+                        <td className="px-3 py-2">
+                          <button onClick={() => { setEditingClientId(c.id); setEditClient({ name: c.name, email: c.email, phone: c.phone, company_name: c.company_name, closer_id: c.closer_id || '', setter_id: c.setter_id || '', stage: c.stage, monthly_amount: c.monthly_amount, trial_amount: c.trial_amount, trial_start_date: c.trial_start_date || '', ascension_date: c.ascension_date || '', billing_day: c.billing_day || '', next_billing_date: c.next_billing_date || '', payment_count: c.payment_count || 0 }) }} className="text-text-400 hover:text-opt-yellow"><Edit3 size={12} /></button>
                         </td>
                       </tr>
                     )

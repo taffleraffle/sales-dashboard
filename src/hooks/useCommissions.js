@@ -100,7 +100,7 @@ export function useCommissionLedger(memberId, period) {
     setLoading(true)
     let query = supabase
       .from('commission_ledger')
-      .select('*, client:clients(name, company_name), member:team_members(name, role), payment:payments(amount, net_amount, source, payment_date, customer_name)')
+      .select('*, client:clients(name, company_name), member:team_members(name, role), payment:payments(amount, net_amount, source, payment_date, customer_name, payment_number)')
       .order('created_at', { ascending: false })
 
     if (memberId) query = query.eq('member_id', memberId)
