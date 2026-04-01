@@ -14,6 +14,7 @@ import CallData from './pages/CallData'
 import SettingsPage from './pages/SettingsPage'
 import CommissionPage from './pages/CommissionPage'
 import CommissionDetail from './pages/CommissionDetail'
+import SetterBot from './pages/SetterBot'
 import SetPasswordPage from './pages/SetPasswordPage'
 import SplashScreen from './components/SplashScreen'
 import { Loader } from 'lucide-react'
@@ -76,6 +77,7 @@ export default function App() {
               <Route path="/sales/call-data" element={<CallData />} />
               <Route path="/sales/commissions" element={<CommissionPage />} />
               <Route path="/sales/commissions/:id" element={<CommissionDetail />} />
+              <Route path="/sales/setter-bot" element={<SetterBot />} />
               <Route path="/sales/settings" element={<SettingsPage />} />
             </Route>
           </Routes>
