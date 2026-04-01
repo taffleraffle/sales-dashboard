@@ -268,6 +268,25 @@ export default function CommissionPage() {
     members.forEach(m => { memberByName[m.name.toLowerCase()] = m.id })
 
     const rows = csvPreview.rows.filter(r => r.name)
+    // Convert dates from DD/MM/YYYY or MM/DD/YYYY to YYYY-MM-DD
+    const parseDate = (v) => {
+      if (!v) return null
+      // Already YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v
+      // DD/MM/YYYY or D/M/YYYY
+      const slash = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/)
+      if (slash) {
+        const [, a, b, year] = slash
+        // If first number > 12, it must be day (DD/MM/YYYY)
+        if (parseInt(a) > 12) return `${year}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`
+        // If second number > 12, it must be day (MM/DD/YYYY)
+        if (parseInt(b) > 12) return `${year}-${a.padStart(2,'0')}-${b.padStart(2,'0')}`
+        // Ambiguous — assume DD/MM/YYYY (Australian/NZ format)
+        return `${year}-${b.padStart(2,'0')}-${a.padStart(2,'0')}`
+      }
+      return v
+    }
+
     const insertRows = rows.map(row => ({
       name: row.name,
       email: row.email || null,
@@ -276,12 +295,12 @@ export default function CommissionPage() {
       closer_id: (row.closer ? memberByName[row.closer.toLowerCase()] : null) || null,
       setter_id: (row.setter ? memberByName[row.setter.toLowerCase()] : null) || null,
       stage: row.stage || 'trial',
-      trial_start_date: row.trial_start_date || row.trial_start || null,
-      ascension_date: row.ascension_date || null,
+      trial_start_date: parseDate(row.trial_start_date || row.trial_start),
+      ascension_date: parseDate(row.ascension_date),
       monthly_amount: parseFloat(row.monthly_amount) || 0,
       trial_amount: parseFloat(row.trial_amount) || 0,
       billing_day: parseInt(row.billing_day) || null,
-      next_billing_date: row.next_billing_date || null,
+      next_billing_date: parseDate(row.next_billing_date),
       payment_count: parseInt(row.payment_count) || 0,
       notes: row.notes || null,
     }))
