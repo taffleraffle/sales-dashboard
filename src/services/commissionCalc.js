@@ -119,11 +119,34 @@ export function summarizeCommissions(ledger, settingsMap) {
     summary.entries.push(entry)
   }
 
-  // Calculate totals
+  // Calculate totals with ramp/base logic
   for (const m of Object.values(byMember)) {
+    const settings = settingsMap[m.member_id] || {}
     m.total_commission = m.trial_commission + m.ascension_commission + m.recurring_commission + m.bonus_commission
-    m.total_earnings = m.base_salary + m.total_commission
+    m.pay_type = settings.pay_type || 'base'
+    m.ramp_amount = settings.ramp_amount || 0
+
+    if (m.pay_type === 'ramp') {
+      // Ramp = guaranteed minimum. If commissions < ramp, top up. If commissions > ramp, keep full.
+      m.ramp_topup = Math.max(0, m.ramp_amount - m.total_commission)
+      m.total_earnings = Math.max(m.ramp_amount, m.total_commission)
+    } else {
+      // Base = fixed salary + commissions
+      m.ramp_topup = 0
+      m.total_earnings = m.base_salary + m.total_commission
+    }
   }
 
   return byMember
+}
+
+/**
+ * Check if a payment is within the 0-3 month commission window for a client.
+ */
+export function isInCommissionWindow(paymentDate, client) {
+  if (!client?.trial_start_date) return true // no start date = assume eligible
+  const start = new Date(client.trial_start_date)
+  const payment = new Date(paymentDate)
+  const monthsSince = (payment - start) / (30.44 * 86400000)
+  return monthsSince <= 4 // trial + 3 months (with buffer)
 }

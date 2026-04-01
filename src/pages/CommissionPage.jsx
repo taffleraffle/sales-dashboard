@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { DollarSign, Upload, Check, X, ChevronDown, Loader, Search, ArrowRight, Plus, Edit3, Save } from 'lucide-react'
+import { DollarSign, Upload, Check, X, ChevronDown, Loader, Search, ArrowRight, Plus, Edit3, Save, Download, Eye } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCommissionSettings, useClients, usePayments, useCommissionLedger } from '../hooks/useCommissions'
@@ -46,6 +46,7 @@ export default function CommissionPage() {
   const [editClient, setEditClient] = useState({})
   const [newClient, setNewClient] = useState({ name: '', email: '', phone: '', company_name: '', closer_id: '', setter_id: '', stage: 'trial', monthly_amount: '', trial_amount: '', trial_start_date: '', ascension_date: '' })
   const [newPayment, setNewPayment] = useState({ customer_name: '', customer_email: '', amount: '', fee: '', source: 'stripe', payment_type: 'trial', payment_date: new Date().toISOString().split('T')[0], description: '' })
+  const [csvPreview, setCsvPreview] = useState(null) // { headers, rows, file }
 
   const summaries = summarizeCommissions(ledger, settingsMap)
   const totalCommission = Object.values(summaries).reduce((s, m) => s + m.total_commission, 0)
@@ -60,30 +61,74 @@ export default function CommissionPage() {
     { key: 'settings', label: 'Settings' },
   ]
 
-  // CSV Import
-  const handleImportCSV = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setImportStatus('Importing...')
-
-    const text = await file.text()
-    const lines = text.split('\n').filter(l => l.trim())
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, '_'))
-
+  // CSV parser that handles quoted fields
+  const parseCSV = (text) => {
     const rows = []
+    let current = ''
+    let inQuotes = false
+    const lines = []
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i]
+      if (ch === '"') { inQuotes = !inQuotes; continue }
+      if (ch === '\n' && !inQuotes) { lines.push(current); current = ''; continue }
+      if (ch === '\r' && !inQuotes) continue
+      current += ch
+    }
+    if (current.trim()) lines.push(current)
+
+    if (lines.length < 2) return { headers: [], rows: [] }
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\s+/g, '_'))
     for (let i = 1; i < lines.length; i++) {
-      const vals = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''))
+      const vals = lines[i].split(',').map(v => v.trim())
+      if (!vals.some(v => v)) continue
       const row = {}
       headers.forEach((h, j) => { row[h] = vals[j] || null })
       rows.push(row)
     }
+    return { headers, rows }
+  }
 
-    // Match closer/setter by name
+  // Template download
+  const downloadTemplate = () => {
+    const template = `name,email,phone,company_name,closer,setter,stage,monthly_amount,trial_amount,trial_start_date,ascension_date,notes
+John Smith,john@company.com,+15551234567,Smith Remodeling,Daniel,Josh,trial,3000,997,2026-03-15,,New trial client
+Jane Doe,jane@janedoe.com,+15559876543,Doe Restoration,Daniel,Leandre,ascended,3000,997,2026-01-10,2026-02-10,Ascended month 2`
+    const blob = new Blob([template], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'client_import_template.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // CSV preview — parse file and show preview before importing
+  const handleCSVSelect = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const text = await file.text()
+    const { headers, rows } = parseCSV(text)
+    // Enrich with closer/setter match status
+    const memberByName = {}
+    members.forEach(m => { memberByName[m.name.toLowerCase()] = m.id })
+    const enriched = rows.map(row => ({
+      ...row,
+      _closerMatch: row.closer ? !!memberByName[row.closer.toLowerCase()] : true,
+      _setterMatch: row.setter ? !!memberByName[row.setter.toLowerCase()] : true,
+      _hasName: !!row.name,
+    }))
+    setCsvPreview({ headers, rows: enriched })
+    e.target.value = '' // reset file input
+  }
+
+  // Actually import after preview confirmation
+  const handleConfirmImport = async () => {
+    if (!csvPreview) return
+    setImportStatus('Importing...')
     const memberByName = {}
     members.forEach(m => { memberByName[m.name.toLowerCase()] = m.id })
 
     let imported = 0
-    for (const row of rows) {
+    for (const row of csvPreview.rows) {
+      if (!row.name) continue
       const closerId = row.closer ? memberByName[row.closer.toLowerCase()] : null
       const setterId = row.setter ? memberByName[row.setter.toLowerCase()] : null
       const { error } = await supabase.from('clients').upsert({
@@ -104,7 +149,8 @@ export default function CommissionPage() {
       if (!error) imported++
     }
 
-    setImportStatus(`Imported ${imported} of ${rows.length} clients`)
+    setImportStatus(`Imported ${imported} of ${csvPreview.rows.length} clients`)
+    setCsvPreview(null)
     refreshClients()
     setTimeout(() => setImportStatus(null), 5000)
   }
@@ -423,11 +469,66 @@ export default function CommissionPage() {
             <h2 className="text-sm font-medium text-text-secondary">Client List</h2>
             <div className="flex items-center gap-2">
               {importStatus && <span className="text-[10px] text-success">{importStatus}</span>}
-              <input ref={fileRef} type="file" accept=".csv" onChange={handleImportCSV} className="hidden" />
+              <input ref={fileRef} type="file" accept=".csv" onChange={handleCSVSelect} className="hidden" />
+              <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-400 rounded-lg hover:bg-bg-card-hover"><Download size={12} /> Template</button>
               <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-primary rounded-lg hover:bg-bg-card-hover"><Upload size={12} /> Import CSV</button>
               <button onClick={() => setShowAddClient(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Plus size={12} /> Add Client</button>
             </div>
           </div>
+          {/* CSV Preview Modal */}
+          {csvPreview && (
+            <div className="bg-bg-card border-2 border-opt-yellow/30 rounded-2xl overflow-hidden mb-4">
+              <div className="px-4 py-3 border-b border-border-default flex items-center justify-between bg-opt-yellow/5">
+                <div className="flex items-center gap-2">
+                  <Eye size={14} className="text-opt-yellow" />
+                  <h3 className="text-sm font-medium text-text-secondary">CSV Preview — {csvPreview.rows.length} rows</h3>
+                  {csvPreview.rows.some(r => !r._hasName) && (
+                    <span className="text-[10px] text-danger">({csvPreview.rows.filter(r => !r._hasName).length} missing name)</span>
+                  )}
+                  {csvPreview.rows.some(r => !r._closerMatch || !r._setterMatch) && (
+                    <span className="text-[10px] text-warning">({csvPreview.rows.filter(r => !r._closerMatch || !r._setterMatch).length} unmatched team)</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setCsvPreview(null)} className="px-3 py-1 text-xs text-text-400 hover:text-text-primary border border-border-default rounded-lg">Cancel</button>
+                  <button onClick={handleConfirmImport} className="px-4 py-1 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90">Import All ({csvPreview.rows.filter(r => r._hasName).length})</button>
+                </div>
+              </div>
+              <div className="overflow-x-auto max-h-[350px] overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-bg-card z-10">
+                    <tr className="text-text-400 uppercase text-[10px]">
+                      <th className="px-2 py-2 text-left w-6">#</th>
+                      {csvPreview.headers.map(h => <th key={h} className="px-2 py-2 text-left">{h}</th>)}
+                      <th className="px-2 py-2 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvPreview.rows.slice(0, 50).map((row, i) => (
+                      <tr key={i} className={`border-t border-border-default/30 ${!row._hasName ? 'bg-danger/5' : ''}`}>
+                        <td className="px-2 py-1.5 text-text-400">{i + 1}</td>
+                        {csvPreview.headers.map(h => (
+                          <td key={h} className={`px-2 py-1.5 ${
+                            h === 'closer' && !row._closerMatch ? 'text-warning' :
+                            h === 'setter' && !row._setterMatch ? 'text-warning' :
+                            h === 'name' && !row[h] ? 'text-danger' :
+                            'text-text-primary'
+                          }`}>{row[h] || '—'}</td>
+                        ))}
+                        <td className="px-2 py-1.5">
+                          {!row._hasName ? <span className="text-danger text-[10px]">Missing name</span> :
+                           !row._closerMatch ? <span className="text-warning text-[10px]">Closer not found</span> :
+                           !row._setterMatch ? <span className="text-warning text-[10px]">Setter not found</span> :
+                           <span className="text-success text-[10px]">Ready</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -522,7 +623,8 @@ export default function CommissionPage() {
                 <tr className="bg-bg-card text-text-400 uppercase text-[10px]">
                   <th className="px-3 py-2 text-left">Name</th>
                   <th className="px-3 py-2 text-left">Role</th>
-                  <th className="px-3 py-2 text-right">Base Salary</th>
+                  <th className="px-3 py-2 text-left">Pay Type</th>
+                  <th className="px-3 py-2 text-right">Base / Ramp $</th>
                   <th className="px-3 py-2 text-right">Commission %</th>
                   <th className="px-3 py-2 text-right">Ascension %</th>
                   <th className="px-3 py-2 text-left">Notes</th>
@@ -536,10 +638,24 @@ export default function CommissionPage() {
                       <td className="px-3 py-2 font-medium text-text-primary">{m.name}</td>
                       <td className="px-3 py-2 text-text-400 capitalize">{m.role}</td>
                       <td className="px-3 py-1">
+                        <select
+                          defaultValue={s.pay_type || 'base'}
+                          onChange={e => upsertSettings(m.id, { pay_type: e.target.value })}
+                          className="px-2 py-1 bg-bg-primary border border-border-default rounded text-xs text-text-primary"
+                        >
+                          <option value="base">Base</option>
+                          <option value="ramp">Ramp</option>
+                        </select>
+                      </td>
+                      <td className="px-3 py-1">
                         <input
                           type="number"
-                          defaultValue={s.base_salary || 0}
-                          onBlur={e => upsertSettings(m.id, { base_salary: parseFloat(e.target.value) || 0 })}
+                          defaultValue={(s.pay_type === 'ramp' ? s.ramp_amount : s.base_salary) || 0}
+                          onBlur={e => {
+                            const val = parseFloat(e.target.value) || 0
+                            const updates = (s.pay_type || 'base') === 'ramp' ? { ramp_amount: val } : { base_salary: val }
+                            upsertSettings(m.id, updates)
+                          }}
                           className="w-24 text-right px-2 py-1 bg-bg-primary border border-border-default rounded text-xs text-text-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
                       </td>
