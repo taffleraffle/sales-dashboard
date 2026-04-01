@@ -26,6 +26,114 @@ function MonthPicker({ value, onChange }) {
   )
 }
 
+function SettingsCard({ member, saved, onSave }) {
+  const [payType, setPayType] = useState(saved.pay_type || 'base')
+  const [baseSalary, setBaseSalary] = useState(saved.base_salary || 0)
+  const [rampAmount, setRampAmount] = useState(saved.ramp_amount || 0)
+  const [commissionRate, setCommissionRate] = useState(saved.commission_rate || 0)
+  const [notes, setNotes] = useState(saved.notes || '')
+  const [saveStatus, setSaveStatus] = useState(null) // null | 'saving' | 'saved'
+  const timerRef = useRef(null)
+
+  const isRamp = payType === 'ramp'
+
+  const autoSave = (updates) => {
+    setSaveStatus('saving')
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(async () => {
+      const allFields = {
+        pay_type: payType,
+        base_salary: baseSalary,
+        ramp_amount: rampAmount,
+        commission_rate: commissionRate,
+        notes,
+        ...updates,
+      }
+      const ok = await onSave(member.id, allFields)
+      setSaveStatus(ok ? 'saved' : null)
+      if (ok) setTimeout(() => setSaveStatus(null), 2000)
+    }, 600)
+  }
+
+  const inputCls = 'w-full py-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:border-opt-yellow/50 focus:outline-none transition-colors'
+
+  return (
+    <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-bold text-text-primary">{member.name}</h3>
+          <span className="text-[10px] text-text-400 capitalize">{member.role}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {saveStatus === 'saving' && <span className="text-[10px] text-opt-yellow animate-pulse">Saving...</span>}
+          {saveStatus === 'saved' && <span className="text-[10px] text-success flex items-center gap-1"><Check size={10} /> Saved</span>}
+          <select
+            value={payType}
+            onChange={e => { setPayType(e.target.value); autoSave({ pay_type: e.target.value }) }}
+            className="px-3 py-1.5 bg-bg-primary border border-border-default rounded-lg text-xs text-text-primary font-medium"
+          >
+            <option value="base">Base + Commission</option>
+            <option value="ramp">Ramp (Guaranteed Min)</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1.5">
+            {isRamp ? 'Monthly Ramp (Guaranteed Min)' : 'Monthly Base Salary'}
+          </label>
+          <p className="text-[9px] text-text-400 mb-1.5">
+            {isRamp ? 'Topped up if commissions are below this' : 'Fixed pay, commission added on top'}
+          </p>
+          <div className="relative">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400 text-xs">$</span>
+            <input
+              type="number"
+              value={isRamp ? rampAmount : baseSalary}
+              onChange={e => {
+                const val = parseFloat(e.target.value) || 0
+                if (isRamp) { setRampAmount(val); autoSave({ ramp_amount: val }) }
+                else { setBaseSalary(val); autoSave({ base_salary: val }) }
+              }}
+              className={`${inputCls} pl-6 pr-3`}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1.5">
+            Commission Rate
+          </label>
+          <p className="text-[9px] text-text-400 mb-1.5">
+            % of net cash collected (months 0-3)
+          </p>
+          <div className="relative">
+            <input
+              type="number"
+              step="0.5"
+              value={commissionRate}
+              onChange={e => { const val = parseFloat(e.target.value) || 0; setCommissionRate(val); autoSave({ commission_rate: val }) }}
+              className={`${inputCls} pl-3 pr-7`}
+            />
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-400 text-xs">%</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <input
+          type="text"
+          value={notes}
+          onChange={e => { setNotes(e.target.value); autoSave({ notes: e.target.value }) }}
+          placeholder="Notes (optional)..."
+          className="w-full px-3 py-1.5 bg-bg-primary border border-border-default/50 rounded-lg text-[11px] text-text-400 placeholder:text-text-400/50 focus:border-opt-yellow/50 focus:outline-none transition-colors"
+        />
+      </div>
+    </div>
+  )
+}
+
 export default function CommissionPage() {
   const now = new Date()
   const [period, setPeriod] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
@@ -615,89 +723,12 @@ Jane Doe,jane@janedoe.com,+15559876543,Doe Restoration,Daniel,Leandre,ascended,3
         <div>
           <div className="mb-4">
             <h2 className="text-sm font-medium text-text-secondary">Team Commission Settings</h2>
-            <p className="text-[10px] text-text-400 mt-0.5">Commission is earned on cash collected within the first 3 months of a client's trial start date.</p>
+            <p className="text-[10px] text-text-400 mt-0.5">Commission is earned on cash collected within the first 3 months of a client's trial start date. Changes auto-save.</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {members.map(m => {
-              const s = settingsMap[m.id] || {}
-              const isRamp = (s.pay_type || 'base') === 'ramp'
-              return (
-                <div key={m.id} className="bg-bg-card border border-border-default rounded-2xl p-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-sm font-bold text-text-primary">{m.name}</h3>
-                      <span className="text-[10px] text-text-400 capitalize">{m.role}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-text-400">Pay Structure</span>
-                      <select
-                        defaultValue={s.pay_type || 'base'}
-                        onChange={e => upsertSettings(m.id, { pay_type: e.target.value })}
-                        className="px-3 py-1.5 bg-bg-primary border border-border-default rounded-lg text-xs text-text-primary font-medium"
-                      >
-                        <option value="base">Base + Commission</option>
-                        <option value="ramp">Ramp (Guaranteed Min)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    {/* Base salary or Ramp amount */}
-                    <div>
-                      <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1.5">
-                        {isRamp ? 'Guaranteed Monthly Minimum' : 'Monthly Base Salary'}
-                      </label>
-                      <p className="text-[9px] text-text-400 mb-1.5">
-                        {isRamp ? 'If commissions are below this, they get topped up to this amount' : 'Fixed monthly pay, commission is added on top'}
-                      </p>
-                      <div className="relative">
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-400 text-xs">$</span>
-                        <input
-                          type="number"
-                          defaultValue={isRamp ? (s.ramp_amount || 0) : (s.base_salary || 0)}
-                          onBlur={e => {
-                            const val = parseFloat(e.target.value) || 0
-                            upsertSettings(m.id, isRamp ? { ramp_amount: val } : { base_salary: val })
-                          }}
-                          className="w-full pl-6 pr-3 py-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Commission rate */}
-                    <div>
-                      <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1.5">
-                        Commission Rate
-                      </label>
-                      <p className="text-[9px] text-text-400 mb-1.5">
-                        % of net cash collected on deals (months 0-3)
-                      </p>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          step="0.5"
-                          defaultValue={s.commission_rate || 0}
-                          onBlur={e => upsertSettings(m.id, { commission_rate: parseFloat(e.target.value) || 0 })}
-                          className="w-full pr-7 pl-3 py-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-400 text-xs">%</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Notes */}
-                  <div className="mt-3">
-                    <input
-                      type="text"
-                      defaultValue={s.notes || ''}
-                      onBlur={e => upsertSettings(m.id, { notes: e.target.value })}
-                      placeholder="Notes (optional)..."
-                      className="w-full px-3 py-1.5 bg-bg-primary border border-border-default/50 rounded-lg text-[11px] text-text-400 placeholder:text-text-400/50"
-                    />
-                  </div>
-                </div>
-              )
-            })}
+            {members.map(m => (
+              <SettingsCard key={m.id} member={m} saved={settingsMap[m.id] || {}} onSave={upsertSettings} />
+            ))}
           </div>
         </div>
       )}

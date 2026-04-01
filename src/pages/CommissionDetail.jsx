@@ -114,9 +114,12 @@ export default function CommissionDetail() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
-        <KPICard label="Base Salary" value={`$${(settings.base_salary || 0).toLocaleString()}`} subtitle="monthly" />
-        <KPICard label="Commission Rate" value={`${settings.commission_rate || 0}%`} subtitle="of net cash" />
-        <KPICard label="Ascension Rate" value={`${settings.ascension_rate || 0}%`} subtitle="recurring" />
+        <KPICard
+          label={(settings.pay_type || 'base') === 'ramp' ? 'Monthly Ramp' : 'Base Salary'}
+          value={`$${((settings.pay_type || 'base') === 'ramp' ? (settings.ramp_amount || 0) : (settings.base_salary || 0)).toLocaleString()}`}
+          subtitle={(settings.pay_type || 'base') === 'ramp' ? 'guaranteed minimum' : 'monthly fixed'}
+        />
+        <KPICard label="Commission Rate" value={`${settings.commission_rate || 0}%`} subtitle="of net cash (months 0-3)" />
         <KPICard label={showAllTime ? 'All-Time Commission' : `${period} Commission`} value={`$${(showAllTime ? allTimeTotals.total : summary.total_commission).toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${showAllTime ? allTimeTotals.deals : summary.entries.length} deals`} />
         <KPICard label={showAllTime ? 'All-Time Revenue' : `${period} Revenue`} value={`$${(showAllTime ? allTimeTotals.revenue : currentEntries.reduce((s, e) => s + Number(e.payment_amount || 0), 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle="attributed" />
         <KPICard label={showAllTime ? 'All-Time Earnings' : `${period} Earnings`} value={`$${(showAllTime ? allTimeTotals.total + (settings.base_salary || 0) : summary.total_earnings).toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle="base + commission" />
@@ -124,11 +127,20 @@ export default function CommissionDetail() {
 
       {/* Monthly Breakdown */}
       {!showAllTime && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <KPICard label="Trial Commission" value={`$${summary.trial_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${summary.entries.filter(e => e.commission_type === 'trial_close').length} deals`} />
-          <KPICard label="Ascension Commission" value={`$${summary.ascension_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${summary.entries.filter(e => e.commission_type === 'ascension').length} deals`} />
-          <KPICard label="Recurring Commission" value={`$${summary.recurring_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${summary.entries.filter(e => e.commission_type === 'recurring').length} deals`} />
-          <KPICard label="Total Earnings" value={`$${summary.total_earnings.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle="base + all commission" />
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+          <KPICard label="Commission Earned" value={`$${summary.total_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${summary.entries.length} deals`} />
+          {summary.pay_type === 'ramp' ? (
+            <KPICard
+              label="Ramp Top-Up"
+              value={summary.ramp_topup > 0 ? `+$${summary.ramp_topup.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '$0.00'}
+              subtitle={summary.ramp_topup > 0 ? `topped up to $${summary.ramp_amount.toLocaleString()} min` : 'commissions exceed ramp'}
+            />
+          ) : (
+            <KPICard label="Base Salary" value={`$${summary.base_salary.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle="fixed monthly" />
+          )}
+          <KPICard label="Trial Deals" value={`$${summary.trial_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${summary.entries.filter(e => e.commission_type === 'trial_close').length} closes`} />
+          <KPICard label="Ascension Deals" value={`$${summary.ascension_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${summary.entries.filter(e => e.commission_type === 'ascension').length} payments`} />
+          <KPICard label="Total Earnings" value={`$${summary.total_earnings.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={summary.pay_type === 'ramp' ? 'ramp or commission (higher)' : 'base + commission'} />
         </div>
       )}
 
