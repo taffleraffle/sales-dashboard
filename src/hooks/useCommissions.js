@@ -146,8 +146,8 @@ export function usePayments(period) {
     return true
   }
 
-  const refresh = () => {
-    setLoading(true)
+  const refresh = (silent) => {
+    if (!silent) setLoading(true)
     let query = supabase.from('payments')
       .select('*, client:clients(name, company_name, closer_id, setter_id)')
       .order('payment_date', { ascending: false })
@@ -157,15 +157,17 @@ export function usePayments(period) {
     query.then(({ data }) => { setPayments(data || []); setLoading(false) })
   }
 
-  return { payments, loading, matchPayment, unmatchPayment, refresh }
+  const silentRefresh = () => refresh(true)
+
+  return { payments, loading, matchPayment, unmatchPayment, refresh, silentRefresh }
 }
 
 export function useCommissionLedger(memberId, period) {
   const [ledger, setLedger] = useState([])
   const [loading, setLoading] = useState(true)
 
-  const fetch = useCallback(async () => {
-    setLoading(true)
+  const fetch = useCallback(async (silent) => {
+    if (!silent) setLoading(true)
     let query = supabase
       .from('commission_ledger')
       .select('*, client:clients(name, company_name), member:team_members(name, role), payment:payments(amount, net_amount, source, payment_date, customer_name, payment_number)')
@@ -186,11 +188,13 @@ export function useCommissionLedger(memberId, period) {
       .from('commission_ledger')
       .update({ status })
       .eq('id', entryId)
-    if (!error) await fetch()
+    if (!error) await fetch(true)
     return !error
   }
 
-  return { ledger, loading, updateStatus, refresh: fetch }
+  const silentRefresh = useCallback(() => fetch(true), [fetch])
+
+  return { ledger, loading, updateStatus, refresh: fetch, silentRefresh }
 }
 
 export function usePaymentBlacklist() {

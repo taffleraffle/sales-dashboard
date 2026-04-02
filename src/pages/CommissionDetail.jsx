@@ -134,187 +134,187 @@ export default function CommissionDetail({ memberId: propId } = {}) {
         const paidClientIds = new Set(currentEntries.map(e => e.client_id))
         const missingClients = memberClients.filter(c => !paidClientIds.has(c.id))
 
-        return (<>
+        const forecastedCommission = forecastedCash * (settings.commission_rate || 0) / 100
+
+        return (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             <KPICard label="Commission Rate" value={`${settings.commission_rate || 0}%`} subtitle="of net cash (months 0-3)" />
             <KPICard
               label={showAllTime ? 'All-Time Revenue' : 'Revenue Generated'}
               value={`$${actualCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
-              subtitle={`${showAllTime ? allTimeTotals.deals : currentEntries.length} deals`}
+              subtitle={`${showAllTime ? allTimeTotals.deals : currentEntries.length} collected`}
             />
             <KPICard label="Forecasted Cash" value={`$${forecastedCash.toLocaleString()}`} subtitle={`${memberClients.length} active clients`} />
-            <KPICard
-              label="Outstanding"
-              value={`${missingClients.length}`}
-              subtitle={missingClients.length > 0 ? 'clients haven\'t paid yet' : 'all clients paid'}
-            />
+            <KPICard label="Forecasted Commission" value={`$${forecastedCommission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`at ${settings.commission_rate || 0}%`} />
           </div>
-
-          {/* Outstanding clients — who hasn't paid this period */}
-          {!showAllTime && missingClients.length > 0 && (
-            <div className="bg-warning/5 border border-warning/20 rounded-2xl overflow-hidden mb-6">
-              <div className="px-4 py-2.5 border-b border-warning/20 flex items-center gap-2">
-                <span className="text-[10px] text-warning uppercase font-medium tracking-wider">Missing Payments — {period}</span>
-                <span className="text-[10px] text-text-400">{missingClients.length} clients expected but not yet collected</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-text-400 uppercase text-[10px] tracking-wider">
-                      <th className="px-3 py-2 text-left">Client</th>
-                      <th className="px-3 py-2 text-left">Company</th>
-                      <th className="px-3 py-2 text-right">Expected</th>
-                      <th className="px-3 py-2 text-left">Payment #</th>
-                      <th className="px-3 py-2 text-left">Next Billing</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {missingClients.map(c => (
-                      <tr key={c.id} className="border-t border-warning/10">
-                        <td className="px-3 py-2 font-medium text-text-primary">{c.name}</td>
-                        <td className="px-3 py-2 text-text-400">{c.company_name || '—'}</td>
-                        <td className="px-3 py-2 text-right text-warning font-medium">${Number(c.monthly_amount).toLocaleString()}</td>
-                        <td className="px-3 py-2 text-text-400">#{(c.payment_count || 0) + 1}</td>
-                        <td className="px-3 py-2 text-text-400">{c.next_billing_date ? new Date(c.next_billing_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </>)
+        )
       })()}
 
-      {/* 6-Month Trend */}
-      <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-6">
-        <div className="flex items-center gap-1.5 mb-3">
-          <TrendingUp size={12} className="text-opt-yellow" />
-          <span className="text-[10px] text-opt-yellow uppercase font-medium">Monthly Trend</span>
-        </div>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-          {periods.map(p => {
-            const pEntries = byPeriod[p] || []
-            const pSummary = summarizeCommissions(pEntries, settingsMap)[id]
-            const earnings = pSummary ? pSummary.total_earnings : (settings.base_salary || 0)
-            const commission = pSummary ? pSummary.total_commission : 0
-            const isCurrent = p === period
-            return (
-              <button
-                key={p}
-                onClick={() => { setPeriod(p); setShowAllTime(false) }}
-                className={`px-3 py-3 rounded-lg text-left transition-colors ${
-                  isCurrent ? 'bg-opt-yellow/10 border border-opt-yellow/20' : 'bg-bg-primary border border-border-default/30 hover:border-border-default'
-                }`}
-              >
-                <p className="text-[10px] text-text-400">{new Date(p + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}</p>
-                <p className="text-sm font-bold text-text-primary">${earnings.toLocaleString('en-US', { minimumFractionDigits: 0 })}</p>
-                <p className="text-[10px] text-success">${commission.toLocaleString('en-US', { minimumFractionDigits: 2 })} comm</p>
-              </button>
-            )
-          })}
-        </div>
-      </div>
+      {/* Unified Table: Collected + Forecasted */}
+      {(() => {
+        const memberClients = clients.filter(c =>
+          (c.closer_id === id || c.setter_id === id) &&
+          c.stage !== 'churned' &&
+          (c.payment_count || 0) < 4
+        )
+        const paidClientIds = new Set(currentEntries.map(e => e.client_id))
+        const forecastedClients = showAllTime ? [] : memberClients.filter(c => !paidClientIds.has(c.id))
+        const rate = settings.commission_rate || 0
 
-      {/* Deal-by-Deal Table */}
-      <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-border-default">
-          <h2 className="text-sm font-medium text-text-secondary">
-            {showAllTime ? 'All Deals' : `Deals — ${period}`} ({ledger.length})
-          </h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-bg-card text-text-400 uppercase text-[10px]">
-                <th className="px-3 py-2 text-left">Client</th>
-                <th className="px-3 py-2 text-left">Payment #</th>
-                <th className="px-3 py-2 text-left">Type</th>
-                <th className="px-3 py-2 text-left">Source</th>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-right">Cash Collected</th>
-                <th className="px-3 py-2 text-right">Rate</th>
-                <th className="px-3 py-2 text-right">Commission</th>
-                <th className="px-3 py-2 text-left">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-text-400">Loading...</td></tr>
-              ) : ledger.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-text-400">No commission entries for this period</td></tr>
-              ) : ledger.map(entry => (
-                <tr key={entry.id} className="border-t border-border-default/30 hover:bg-bg-card-hover/50">
-                  <td className="px-3 py-2">
-                    <div>
-                      <span className="font-medium text-text-primary">{entry.client?.name || '—'}</span>
-                      {entry.client?.company_name && (
-                        <span className="block text-[10px] text-text-400">{entry.client.company_name}</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    {(() => {
-                      const pn = entry.payment?.payment_number
-                      const labels = { 0: 'Trial', 1: 'Month 1', 2: 'Month 2', 3: 'Month 3' }
-                      return <span className="text-[10px] font-medium text-text-primary">{pn != null ? (labels[pn] || `Month ${pn}`) : '—'}</span>
-                    })()}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${TYPE_COLORS[entry.commission_type] || ''}`}>
-                      {TYPE_LABELS[entry.commission_type] || entry.commission_type}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-text-400">
-                    {entry.payment?.source || '—'}
-                  </td>
-                  <td className="px-3 py-2 text-text-400">
-                    {entry.payment?.payment_date
-                      ? new Date(entry.payment.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                      : '—'}
-                  </td>
-                  <td className="px-3 py-2 text-right text-text-primary font-medium">
-                    ${Number(entry.payment_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                  </td>
-                  <td className="px-3 py-2 text-right text-text-400">
-                    {entry.commission_rate}%
-                  </td>
-                  <td className="px-3 py-2 text-right font-medium text-success">
-                    ${Number(entry.commission_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                  </td>
-                  <td className="px-3 py-2">
-                    <button
-                      onClick={() => {
-                        const next = entry.status === 'pending' ? 'approved' : entry.status === 'approved' ? 'paid' : 'pending'
-                        updateStatus(entry.id, next)
-                      }}
-                      className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border cursor-pointer hover:opacity-80 ${STATUS_COLORS[entry.status] || ''}`}
-                      title="Click to cycle: pending → approved → paid"
-                    >
-                      {entry.status}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            {ledger.length > 0 && (
-              <tfoot>
-                <tr className="border-t-2 border-border-default bg-bg-card">
-                  <td colSpan={5} className="px-3 py-2 font-medium text-text-secondary text-right">Totals</td>
-                  <td className="px-3 py-2 text-right font-bold text-text-primary">
-                    ${ledger.reduce((s, e) => s + Number(e.payment_amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                  </td>
-                  <td className="px-3 py-2"></td>
-                  <td className="px-3 py-2 text-right font-bold text-success">
-                    ${ledger.reduce((s, e) => s + Number(e.commission_amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                  </td>
-                  <td className="px-3 py-2"></td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
+        const totalCollected = ledger.reduce((s, e) => s + Number(e.payment_amount || 0), 0)
+        const totalCommission = ledger.reduce((s, e) => s + Number(e.commission_amount || 0), 0)
+        const totalForecasted = forecastedClients.reduce((s, c) => s + Number(c.monthly_amount || 0), 0)
+        const totalForecastedComm = totalForecasted * rate / 100
+
+        return (
+          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">
+              <h2 className="text-sm font-medium text-text-secondary">
+                {showAllTime ? 'All Deals' : `Deals — ${period}`}
+              </h2>
+              <div className="flex items-center gap-3 text-[10px]">
+                <span className="text-success">{ledger.length} collected</span>
+                {forecastedClients.length > 0 && <span className="text-warning">{forecastedClients.length} forecasted</span>}
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-bg-card text-text-400 uppercase text-[10px] tracking-wider">
+                    <th className="px-3 py-2 text-left">Client</th>
+                    <th className="px-3 py-2 text-left">Payment #</th>
+                    <th className="px-3 py-2 text-left">Type</th>
+                    <th className="px-3 py-2 text-left">Date</th>
+                    <th className="px-3 py-2 text-right">Cash</th>
+                    <th className="px-3 py-2 text-right">Commission</th>
+                    <th className="px-3 py-2 text-left">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-text-400">Loading...</td></tr>
+                  ) : (ledger.length === 0 && forecastedClients.length === 0) ? (
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-text-400">No deals for this period</td></tr>
+                  ) : (<>
+                    {/* Actual collected deals */}
+                    {ledger.map(entry => (
+                      <tr key={entry.id} className="border-t border-border-default/30 hover:bg-bg-card-hover/50">
+                        <td className="px-3 py-2">
+                          <div>
+                            <span className="font-medium text-text-primary">{entry.client?.name || '—'}</span>
+                            {entry.client?.company_name && (
+                              <span className="block text-[10px] text-text-400">{entry.client.company_name}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          {(() => {
+                            const pn = entry.payment?.payment_number
+                            const labels = { 0: 'Trial', 1: 'Month 1', 2: 'Month 2', 3: 'Month 3' }
+                            return <span className="text-[10px] font-medium text-text-primary">{pn != null ? (labels[pn] || `Month ${pn}`) : '—'}</span>
+                          })()}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${TYPE_COLORS[entry.commission_type] || ''}`}>
+                            {TYPE_LABELS[entry.commission_type] || entry.commission_type}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-text-400">
+                          {entry.payment?.payment_date
+                            ? new Date(entry.payment.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                            : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right text-text-primary font-medium">
+                          ${Number(entry.payment_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2 text-right font-medium text-success">
+                          ${Number(entry.commission_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => {
+                              const next = entry.status === 'pending' ? 'approved' : entry.status === 'approved' ? 'paid' : 'pending'
+                              updateStatus(entry.id, next)
+                            }}
+                            className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border cursor-pointer hover:opacity-80 ${STATUS_COLORS[entry.status] || ''}`}
+                            title="Click to cycle: pending → approved → paid"
+                          >
+                            {entry.status}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* Forecasted payments — clients who haven't paid yet */}
+                    {forecastedClients.map(c => (
+                      <tr key={`forecast-${c.id}`} className="border-t border-warning/15 bg-warning/5">
+                        <td className="px-3 py-2">
+                          <div>
+                            <span className="font-medium text-text-primary">{c.name}</span>
+                            {c.company_name && (
+                              <span className="block text-[10px] text-text-400">{c.company_name}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="text-[10px] font-medium text-text-400">#{(c.payment_count || 0) + 1}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium border bg-warning/15 text-warning border-warning/30">
+                            Forecasted
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-text-400 text-[10px]">
+                          {c.next_billing_date ? new Date(c.next_billing_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right text-warning font-medium">
+                          ${Number(c.monthly_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2 text-right text-warning/60">
+                          ${(Number(c.monthly_amount || 0) * rate / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium border bg-warning/15 text-warning border-warning/30">
+                            awaiting
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </>)}
+                </tbody>
+                {(ledger.length > 0 || forecastedClients.length > 0) && (
+                  <tfoot>
+                    {ledger.length > 0 && (
+                      <tr className="border-t-2 border-border-default bg-bg-card">
+                        <td colSpan={4} className="px-3 py-2 font-medium text-text-secondary text-right">Collected</td>
+                        <td className="px-3 py-2 text-right font-bold text-text-primary">
+                          ${totalCollected.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2 text-right font-bold text-success">
+                          ${totalCommission.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2"></td>
+                      </tr>
+                    )}
+                    {forecastedClients.length > 0 && (
+                      <tr className="border-t border-warning/20 bg-warning/5">
+                        <td colSpan={4} className="px-3 py-2 font-medium text-warning text-right">Forecasted</td>
+                        <td className="px-3 py-2 text-right font-bold text-warning">
+                          ${totalForecasted.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2 text-right font-bold text-warning/60">
+                          ${totalForecastedComm.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-2"></td>
+                      </tr>
+                    )}
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
