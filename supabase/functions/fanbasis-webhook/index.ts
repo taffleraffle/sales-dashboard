@@ -16,13 +16,18 @@ serve(async (req) => {
 
     const payload = await req.json()
 
-    const amount = parseFloat(payload.amount || payload.total || 0)
-    const fee = Number((amount * 0.035).toFixed(2))
+    // Parse Fanbasis payload structure: buyer, item, subscription nested objects
+    const buyer = payload.buyer || {}
+    const item = payload.item || {}
+    const sub = payload.subscription || {}
+
+    const amount = parseFloat(payload.total_price || payload.unit_price || payload.amount || 0)
+    const fee = parseFloat(payload.application_fee_amount || 0) || Number((amount * 0.035).toFixed(2))
     const netAmount = Number((amount - fee).toFixed(2))
-    const email = payload.email || payload.customer_email || payload.buyer_email || null
-    const name = payload.name || payload.customer_name || payload.buyer_name || null
-    const phone = payload.phone || payload.customer_phone || null
-    const eventId = payload.id || payload.transaction_id || payload.payment_id || `fanbasis_${Date.now()}`
+    const email = buyer.email || payload.email || payload.customer_email || null
+    const name = buyer.name || payload.name || payload.customer_name || null
+    const phone = buyer.phone || payload.phone || null
+    const eventId = payload.payment_id || payload.id || `fanbasis_${Date.now()}`
     const paymentDate = payload.created_at || payload.payment_date || new Date().toISOString()
 
     // Match to client
@@ -30,11 +35,12 @@ serve(async (req) => {
       supabase, email, phone, name, ghlApiKey, ghlLocationId
     )
 
-    const desc = (payload.description || payload.product_name || '').toLowerCase()
-    const paymentType = desc.includes('trial') ? 'trial'
-      : desc.includes('pif') || desc.includes('pay in full') ? 'pif'
-      : desc.includes('ascen') ? 'ascension'
-      : 'monthly'
+    const itemTitle = (item.title || payload.description || '').toLowerCase()
+    const isSubscription = item.type === 'subscription' || !!sub.id
+    const paymentType = itemTitle.includes('trial') ? 'trial'
+      : itemTitle.includes('pif') || itemTitle.includes('pay in full') ? 'pif'
+      : isSubscription ? 'monthly'
+      : 'one_time'
 
     const { data: payment, error } = await supabase.from('payments').upsert({
       source: 'fanbasis',
