@@ -170,6 +170,8 @@ function CommissionPageAdmin() {
   const [newClient, setNewClient] = useState({ name: '', email: '', phone: '', company_name: '', closer_id: '', setter_id: '', stage: 'trial', monthly_amount: '', trial_amount: '', trial_start_date: '', ascension_date: '', billing_day: '', next_billing_date: '', payment_count: '0' })
   const [newPayment, setNewPayment] = useState({ customer_name: '', customer_email: '', amount: '', fee: '', source: 'stripe', payment_type: 'trial', payment_date: new Date().toISOString().split('T')[0], description: '' })
   const [csvPreview, setCsvPreview] = useState(null) // { headers, rows, file }
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState(null)
 
   const summaries = summarizeCommissions(ledger, settingsMap)
   const totalCommission = Object.values(summaries).reduce((s, m) => s + m.total_commission, 0)
@@ -515,6 +517,24 @@ function CommissionPageAdmin() {
     setTimeout(() => setImportStatus(null), 5000)
   }
 
+  const syncStripePayments = async () => {
+    setSyncing(true)
+    setSyncResult(null)
+    try {
+      const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/sync-stripe-payments?days=90&limit=100', {
+        headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` }
+      })
+      const data = await r.json()
+      if (data.error) throw new Error(data.error)
+      setSyncResult(`Synced ${data.synced} payments (${data.matched} matched, ${data.skipped} skipped)`)
+      refreshLedger()
+    } catch (err) {
+      setSyncResult(`Error: ${err.message}`)
+    }
+    setSyncing(false)
+    setTimeout(() => setSyncResult(null), 8000)
+  }
+
   const inputCls = 'w-full px-2 py-1.5 bg-bg-primary border border-border-default rounded text-xs text-text-primary'
   const selectCls = 'w-full px-2 py-1.5 bg-bg-primary border border-border-default rounded text-xs text-text-primary'
 
@@ -635,8 +655,16 @@ function CommissionPageAdmin() {
             </div>
           )}
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-medium text-text-secondary">Payments — {period}</h2>
-            <button onClick={() => setShowAddPayment(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Plus size={12} /> Add Payment</button>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium text-text-secondary">Payments — {period}</h2>
+              {syncResult && <span className="text-[10px] text-success">{syncResult}</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={syncStripePayments} disabled={syncing} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-purple-500/30 text-purple-400 rounded-lg hover:bg-purple-500/10 disabled:opacity-50">
+                {syncing ? <><Loader size={12} className="animate-spin" /> Syncing...</> : <><Download size={12} /> Sync Stripe</>}
+              </button>
+              <button onClick={() => setShowAddPayment(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Plus size={12} /> Add Payment</button>
+            </div>
           </div>
           <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
           <div className="overflow-x-auto">
