@@ -3,7 +3,8 @@ import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import { useEngagementData } from '../hooks/useEngagementData'
-import { Bot, Loader2, ChevronDown, ChevronUp, Filter } from 'lucide-react'
+import { useEngagementCadences } from '../hooks/useEngagementCadences'
+import { Bot, Loader2, ChevronDown, ChevronUp, Filter, Zap, Phone, RefreshCw, Check, Save } from 'lucide-react'
 
 const SEQ_COLORS = {
   pre_call: 'bg-emerald-500/20 text-emerald-400',
@@ -53,6 +54,223 @@ function formatTime(dateStr) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })
+}
+
+const CADENCE_ICONS = {
+  speed_to_lead: Zap,
+  call_confirmation: Phone,
+  re_engage: RefreshCw,
+}
+
+const CADENCE_SEQ_MAP = {
+  speed_to_lead: ['after_hours'],
+  call_confirmation: ['pre_call', 'non_responsive_confirm'],
+  re_engage: ['re_engage'],
+}
+
+function CadenceCard({ cadence, conversations, onSave }) {
+  const [target, setTarget] = useState(cadence.target || '')
+  const [goal, setGoal] = useState(cadence.goal || '')
+  const [instructions, setInstructions] = useState(cadence.instructions || '')
+  const [enabled, setEnabled] = useState(cadence.enabled)
+  const [rules, setRules] = useState(cadence.trigger_rules || {})
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+
+  const Icon = CADENCE_ICONS[cadence.name] || Zap
+  const seqTypes = CADENCE_SEQ_MAP[cadence.name] || []
+  const cadenceConvos = conversations.filter(c => seqTypes.includes(c.sequence_type))
+  const lastFired = cadenceConvos.length > 0 ? cadenceConvos[0]?.created_at : null
+
+  const hasChanges = target !== (cadence.target || '') ||
+    goal !== (cadence.goal || '') ||
+    instructions !== (cadence.instructions || '') ||
+    enabled !== cadence.enabled ||
+    JSON.stringify(rules) !== JSON.stringify(cadence.trigger_rules || {})
+
+  const handleSave = async () => {
+    setSaving(true)
+    const ok = await onSave(cadence.id, { target, goal, instructions, enabled, trigger_rules: rules })
+    setSaving(false)
+    if (ok) { setSaved(true); setTimeout(() => setSaved(false), 3000) }
+  }
+
+  const updateRule = (key, value) => setRules(prev => ({ ...prev, [key]: value }))
+
+  return (
+    <div className={`bg-bg-card border rounded-2xl p-5 transition-all ${enabled ? 'border-border-default' : 'border-border-default/40 opacity-60'}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${enabled ? 'bg-opt-yellow/10' : 'bg-text-400/10'}`}>
+            <Icon size={16} className={enabled ? 'text-opt-yellow' : 'text-text-400'} />
+          </div>
+          <div>
+            <p className="text-text-primary font-semibold text-sm">{cadence.display_name}</p>
+            <p className="text-text-400 text-[10px]">{cadenceConvos.length} leads processed{lastFired ? ` \u00b7 Last: ${timeAgo(lastFired)}` : ''}</p>
+          </div>
+          {expanded ? <ChevronUp size={14} className="text-text-400" /> : <ChevronDown size={14} className="text-text-400" />}
+        </div>
+        <button
+          onClick={() => { setEnabled(!enabled) }}
+          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all ${
+            enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+          }`}
+        >
+          {enabled ? 'ON' : 'OFF'}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="space-y-3 mt-3 pt-3 border-t border-border-default/50">
+          {/* Target */}
+          <div>
+            <label className="text-[10px] text-text-400 uppercase font-medium block mb-1.5">Target</label>
+            <input
+              value={target}
+              onChange={e => setTarget(e.target.value)}
+              className="w-full py-2 px-3 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-400 focus:outline-none focus:border-opt-yellow/40"
+              placeholder="Who does this cadence target..."
+            />
+          </div>
+
+          {/* Goal */}
+          <div>
+            <label className="text-[10px] text-text-400 uppercase font-medium block mb-1.5">Goal</label>
+            <input
+              value={goal}
+              onChange={e => setGoal(e.target.value)}
+              className="w-full py-2 px-3 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-400 focus:outline-none focus:border-opt-yellow/40"
+              placeholder="What is the bot trying to achieve..."
+            />
+          </div>
+
+          {/* Instructions */}
+          <div>
+            <label className="text-[10px] text-text-400 uppercase font-medium block mb-1.5">Instructions</label>
+            <textarea
+              value={instructions}
+              onChange={e => setInstructions(e.target.value)}
+              rows={3}
+              className="w-full py-2 px-3 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-400 focus:outline-none focus:border-opt-yellow/40 resize-none"
+              placeholder="Custom instructions for the AI..."
+            />
+          </div>
+
+          {/* Trigger Rules */}
+          <div>
+            <label className="text-[10px] text-text-400 uppercase font-medium block mb-2">Trigger Rules</label>
+            <div className="grid grid-cols-2 gap-3">
+              {cadence.name === 'speed_to_lead' && (
+                <>
+                  <div>
+                    <label className="text-[10px] text-text-400 block mb-1">After hours cutoff</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" min={0} max={23}
+                        value={rules.after_hours_cutoff ?? 17}
+                        onChange={e => updateRule('after_hours_cutoff', parseInt(e.target.value) || 17)}
+                        className="w-16 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
+                      />
+                      <span className="text-text-400 text-xs">({(rules.after_hours_cutoff ?? 17) > 12 ? `${(rules.after_hours_cutoff ?? 17) - 12}pm` : `${rules.after_hours_cutoff ?? 17}am`})</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-text-400 block mb-1">No contact timeout</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" min={1} max={60}
+                        value={rules.no_contact_minutes ?? 5}
+                        onChange={e => updateRule('no_contact_minutes', parseInt(e.target.value) || 5)}
+                        className="w-16 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
+                      />
+                      <span className="text-text-400 text-xs">minutes</span>
+                    </div>
+                  </div>
+                </>
+              )}
+              {cadence.name === 'call_confirmation' && (
+                <>
+                  <div>
+                    <label className="text-[10px] text-text-400 block mb-1">No reply threshold</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" min={1} max={72}
+                        value={rules.no_reply_hours ?? 24}
+                        onChange={e => updateRule('no_reply_hours', parseInt(e.target.value) || 24)}
+                        className="w-16 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
+                      />
+                      <span className="text-text-400 text-xs">hours before call</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-text-400 block mb-1">Non-responsive escalation</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" min={1} max={12}
+                        value={rules.non_responsive_at_hours ?? 4}
+                        onChange={e => updateRule('non_responsive_at_hours', parseInt(e.target.value) || 4)}
+                        className="w-16 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
+                      />
+                      <span className="text-text-400 text-xs">hours before call</span>
+                    </div>
+                  </div>
+                </>
+              )}
+              {cadence.name === 're_engage' && (
+                <>
+                  <div>
+                    <label className="text-[10px] text-text-400 block mb-1">Stale threshold</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" min={12} max={168}
+                        value={rules.stale_hours ?? 48}
+                        onChange={e => updateRule('stale_hours', parseInt(e.target.value) || 48)}
+                        className="w-16 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
+                      />
+                      <span className="text-text-400 text-xs">hours no reply</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-text-400 block mb-1">Step intervals</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={(rules.steps_days || [0, 2, 5]).join(', ')}
+                        onChange={e => updateRule('steps_days', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
+                        className="w-24 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
+                      />
+                      <span className="text-text-400 text-xs">days</span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Save */}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            {saved && (
+              <span className="flex items-center gap-1 text-xs text-success font-medium">
+                <Check size={12} /> Saved
+              </span>
+            )}
+            {hasChanges && (
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-50"
+              >
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ConversationRow({ convo }) {
@@ -136,6 +354,7 @@ export default function SetterBot() {
   const [leadFilter, setLeadFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const { conversations, stats, setterStats, loading } = useEngagementData(range)
+  const { cadences, update: updateCadence, loading: cadencesLoading } = useEngagementCadences()
 
   const filteredLeads = useMemo(() => {
     let filtered = [...conversations]
@@ -207,6 +426,17 @@ export default function SetterBot() {
         <Gauge label="Reply Rate" value={parseFloat(stats.replyRate) || 0} target={40} />
         <Gauge label="Booking Rate" value={parseFloat(stats.bookingRate) || 0} target={15} />
         <Gauge label="Handoff Rate" value={stats.total > 0 ? parseFloat(((stats.handedOff / stats.total) * 100).toFixed(1)) : 0} target={10} direction="below" />
+      </div>
+
+      {/* Cadences */}
+      <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Cadences</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {cadences.map(c => (
+          <CadenceCard key={c.id} cadence={c} conversations={conversations} onSave={updateCadence} />
+        ))}
+        {cadences.length === 0 && !cadencesLoading && (
+          <p className="text-text-400 text-sm col-span-3">No cadences configured</p>
+        )}
       </div>
 
       {/* Sequence Breakdown + Setter Cards Row */}
