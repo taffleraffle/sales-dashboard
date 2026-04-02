@@ -174,9 +174,14 @@ function CadenceCard({ cadence, conversations, onSave }) {
     if (ok) { setSaved(true); setTimeout(() => setSaved(false), 3000) }
   }
 
-  const toggleEnabled = () => {
+  const toggleEnabled = async () => {
     const next = !enabled
     setEnabled(next)
+    setSaving(true)
+    const ok = await onSave(cadence.id, { enabled: next, trigger_rules: rules })
+    setSaving(false)
+    setSaved(ok)
+    if (ok) setTimeout(() => setSaved(false), 3000)
   }
 
   const updateRule = (key, value) => setRules(prev => ({ ...prev, [key]: value }))
