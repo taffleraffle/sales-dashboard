@@ -84,21 +84,15 @@ export function usePayments(period) {
     })
   }, [period])
 
-  const matchPayment = async (paymentId, clientId, userEmail) => {
+  const matchPayment = async (paymentId, clientId) => {
     // Get the payment to find its Stripe customer ID
     const { data: payment } = await supabase
       .from('payments').select('metadata').eq('id', paymentId).single()
 
-    // Match this payment + set audit fields
+    // Match this payment
     const { error } = await supabase
       .from('payments')
-      .update({
-        client_id: clientId,
-        matched: true,
-        manually_matched: true,
-        matched_by: userEmail || null,
-        matched_at: new Date().toISOString(),
-      })
+      .update({ client_id: clientId, matched: true })
       .eq('id', paymentId)
     if (error) return false
 
@@ -127,19 +121,13 @@ export function usePayments(period) {
     return true
   }
 
-  const unmatchPayment = async (paymentId, userEmail) => {
+  const unmatchPayment = async (paymentId) => {
     // Unmatch the payment
     const { error } = await supabase
       .from('payments')
-      .update({
-        client_id: null,
-        matched: false,
-        manually_matched: true,
-        matched_by: userEmail || null,
-        matched_at: new Date().toISOString(),
-      })
+      .update({ client_id: null, matched: false })
       .eq('id', paymentId)
-    if (error) return false
+    if (error) { console.error('Unmatch error:', error); return false }
 
     // Delete commission_ledger entries for this payment
     await supabase.from('commission_ledger').delete().eq('payment_id', paymentId)

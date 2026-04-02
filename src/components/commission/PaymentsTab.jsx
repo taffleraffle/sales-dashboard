@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Plus, X, ChevronDown, Loader, Check, Save, Download } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
@@ -17,6 +17,22 @@ export default function PaymentsTab({
   const [unmatchingId, setUnmatchingId] = useState(null)
   const [matchingId, setMatchingId] = useState(null)
   const [searchClient, setSearchClient] = useState('')
+  const [dropdownPos, setDropdownPos] = useState(null)
+  const dropdownRef = useRef(null)
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!matchingPaymentId && !rematchingPaymentId) return
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setMatchingPaymentId(null)
+        setRematchingPaymentId(null)
+        setSearchClient('')
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [matchingPaymentId, rematchingPaymentId])
   const [newPayment, setNewPayment] = useState({
     customer_name: '', customer_email: '', amount: '', fee: '',
     source: 'stripe', payment_type: 'trial',
@@ -58,10 +74,11 @@ export default function PaymentsTab({
 
   const handleMatch = async (paymentId, clientId) => {
     setMatchingId(paymentId)
-    await matchPayment(paymentId, clientId, userEmail)
+    await matchPayment(paymentId, clientId)
     setMatchingPaymentId(null)
     setRematchingPaymentId(null)
     setSearchClient('')
+    setDropdownPos(null)
     setMatchingId(null)
     refreshPayments()
     refreshLedger()
@@ -69,40 +86,66 @@ export default function PaymentsTab({
 
   const handleUnmatch = async (paymentId) => {
     setUnmatchingId(paymentId)
-    await unmatchPayment(paymentId, userEmail)
+    const ok = await unmatchPayment(paymentId)
     setUnmatchingId(null)
-    refreshPayments()
-    refreshLedger()
+    if (ok) {
+      refreshPayments()
+      refreshLedger()
+    }
   }
 
-  const clientDropdown = (paymentId) => (
-    <div className="absolute z-20 mt-1 left-0 bg-bg-card border border-border-default rounded-xl shadow-lg py-1 min-w-[250px] max-h-[200px] overflow-y-auto slide-in-right">
+  const openDropdown = (e, paymentId, isRematch) => {
+    e.stopPropagation()
+    const rect = e.currentTarget.getBoundingClientRect()
+    const top = rect.bottom + 4
+    const left = Math.min(rect.left, window.innerWidth - 270)
+    const maxH = window.innerHeight - top - 16
+    setDropdownPos({ top, left, maxH: Math.min(maxH, 250) })
+    setSearchClient('')
+    if (isRematch) {
+      setRematchingPaymentId(rematchingPaymentId === paymentId ? null : paymentId)
+      setMatchingPaymentId(null)
+    } else {
+      setMatchingPaymentId(matchingPaymentId === paymentId ? null : paymentId)
+      setRematchingPaymentId(null)
+    }
+  }
+
+  const activeDropdownId = matchingPaymentId || rematchingPaymentId
+  const clientDropdownEl = activeDropdownId && dropdownPos ? (
+    <div
+      ref={dropdownRef}
+      className="fixed z-[200] bg-bg-card border border-border-default rounded-xl shadow-xl shadow-black/40 py-1 w-[260px]"
+      style={{ top: dropdownPos.top, left: dropdownPos.left, maxHeight: dropdownPos.maxH }}
+    >
       <div className="px-2 py-1">
         <input
           type="text"
           placeholder="Search clients..."
           value={searchClient}
           onChange={e => setSearchClient(e.target.value)}
-          className="w-full px-2 py-1 text-[11px] bg-bg-primary border border-border-default rounded-lg text-text-primary"
+          className="w-full px-2 py-1.5 text-[11px] bg-bg-primary border border-border-default rounded-lg text-text-primary"
           autoFocus
         />
       </div>
-      {clients
-        .filter(c => !searchClient || c.name.toLowerCase().includes(searchClient.toLowerCase()) || (c.company_name || '').toLowerCase().includes(searchClient.toLowerCase()))
-        .slice(0, 15)
-        .map(c => (
-          <button
-            key={c.id}
-            onClick={() => handleMatch(paymentId, c.id)}
-            disabled={matchingId === paymentId}
-            className="w-full text-left px-3 py-1.5 text-[11px] text-text-primary hover:bg-bg-card-hover flex items-center justify-between disabled:opacity-50"
-          >
-            {c.name}
-            <span className="text-text-400 text-[9px]">{c.company_name}</span>
-          </button>
-        ))}
+      <div className="overflow-y-auto" style={{ maxHeight: (dropdownPos.maxH || 200) - 40 }}>
+        {clients
+          .filter(c => !searchClient || c.name.toLowerCase().includes(searchClient.toLowerCase()) || (c.company_name || '').toLowerCase().includes(searchClient.toLowerCase()))
+          .slice(0, 20)
+          .map(c => (
+            <button
+              key={c.id}
+              onClick={() => handleMatch(activeDropdownId, c.id)}
+              disabled={matchingId === activeDropdownId}
+              className="w-full text-left px-3 py-1.5 text-[11px] text-text-primary hover:bg-bg-card-hover flex items-center justify-between disabled:opacity-50"
+            >
+              {c.name}
+              <span className="text-text-400 text-[9px]">{c.company_name}</span>
+            </button>
+          ))}
+      </div>
     </div>
-  )
+  ) : null
 
   return (
     <div>
@@ -199,41 +242,22 @@ export default function PaymentsTab({
                           {unmatchingId === p.id ? <Loader size={10} className="animate-spin" /> : <X size={12} />}
                         </button>
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setRematchingPaymentId(rematchingPaymentId === p.id ? null : p.id)
-                            setMatchingPaymentId(null)
-                            setSearchClient('')
-                          }}
+                          onClick={(e) => openDropdown(e, p.id, true)}
                           className="text-text-400 text-[9px] hover:text-opt-yellow transition-colors"
                           title="Change matched client"
                         >
                           <ChevronDown size={10} />
                         </button>
-                        {p.manually_matched && (
-                          <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium bg-warning/15 text-warning border border-warning/30">Manual</span>
-                        )}
-                        {/* Re-match dropdown */}
-                        {rematchingPaymentId === p.id && (
-                          <div className="relative">
-                            {clientDropdown(p.id)}
-                          </div>
-                        )}
                       </div>
                     ) : (
-                      <div className="relative">
+                      <div>
                         <button
-                          onClick={() => {
-                            setMatchingPaymentId(matchingPaymentId === p.id ? null : p.id)
-                            setRematchingPaymentId(null)
-                            setSearchClient('')
-                          }}
+                          onClick={(e) => openDropdown(e, p.id, false)}
                           disabled={matchingId === p.id}
                           className="text-warning text-[10px] font-medium flex items-center gap-1 hover:text-opt-yellow disabled:opacity-50 transition-colors"
                         >
                           {matchingId === p.id ? <Loader size={10} className="animate-spin" /> : <>Match <ChevronDown size={10} /></>}
                         </button>
-                        {matchingPaymentId === p.id && clientDropdown(p.id)}
                       </div>
                     )}
                   </td>
@@ -248,6 +272,9 @@ export default function PaymentsTab({
           </table>
         </div>
       </div>
+
+      {/* Fixed-position client match dropdown */}
+      {clientDropdownEl}
     </div>
   )
 }
