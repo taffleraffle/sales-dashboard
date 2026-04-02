@@ -153,6 +153,7 @@ function CadenceCard({ cadence, conversations, onSave }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [showDoc, setShowDoc] = useState(false)
 
   const Icon = CADENCE_ICONS[cadence.name] || Zap
   const description = CADENCE_DESCRIPTIONS[cadence.name] || ''
@@ -217,13 +218,33 @@ function CadenceCard({ cadence, conversations, onSave }) {
         </div>
       </div>
 
-      {/* Expand toggle */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full px-5 py-2 border-t border-border-default/50 flex items-center justify-center gap-1 text-[10px] text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-colors"
-      >
-        {expanded ? <><ChevronUp size={12} /> Hide trigger rules</> : <><ChevronDown size={12} /> Configure trigger rules</>}
-      </button>
+      {/* Action buttons */}
+      <div className="flex border-t border-border-default/50">
+        <button
+          onClick={() => { setShowDoc(!showDoc); if (!showDoc) setExpanded(false) }}
+          className={`flex-1 px-5 py-2.5 flex items-center justify-center gap-1.5 text-[10px] transition-colors border-r border-border-default/50 ${
+            showDoc ? 'text-opt-yellow bg-opt-yellow-subtle' : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
+          }`}
+        >
+          <AlertTriangle size={11} />
+          {showDoc ? 'Hide docs' : 'How it works'}
+        </button>
+        <button
+          onClick={() => { setExpanded(!expanded); if (!expanded) setShowDoc(false) }}
+          className={`flex-1 px-5 py-2.5 flex items-center justify-center gap-1.5 text-[10px] transition-colors ${
+            expanded ? 'text-opt-yellow bg-opt-yellow-subtle' : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
+          }`}
+        >
+          {expanded ? <><ChevronUp size={12} /> Hide settings</> : <><ChevronDown size={12} /> Configure</>}
+        </button>
+      </div>
+
+      {/* How it works doc */}
+      {showDoc && (
+        <div className="px-5 pb-5 pt-4 border-t border-border-default/50 bg-opt-yellow-subtle/30">
+          <CadenceDocPanel cadenceName={cadence.name} />
+        </div>
+      )}
 
       {expanded && (
         <div className="px-5 pb-5 pt-3 border-t border-border-default/50 bg-bg-primary/30">
