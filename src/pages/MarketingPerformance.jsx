@@ -916,6 +916,20 @@ export default function MarketingPerformance() {
   const fileRef = useRef(null)
   const hasMetaCreds = !!(import.meta.env.VITE_META_ADS_ACCESS_TOKEN && import.meta.env.VITE_META_ADS_ACCOUNT_ID)
 
+  // Auto-sync EOD data on page load (silent, no loading spinner)
+  const autoSyncRan = useRef(false)
+  useEffect(() => {
+    if (autoSyncRan.current || loading) return
+    autoSyncRan.current = true
+    ;(async () => {
+      try {
+        const { syncEODToTracker } = await import('../hooks/useMarketingTracker')
+        await syncEODToTracker()
+        await reload()
+      } catch (e) { console.warn('Auto-sync failed:', e) }
+    })()
+  }, [loading])
+
   const rangeEntries = useMemo(() => filterByDays(entries, range), [entries, range])
   const mtdEntries = useMemo(() => filterByDays(entries, 'mtd'), [entries])
   const prevEntries = useMemo(() => filterPreviousPeriod(entries, range), [entries, range])
