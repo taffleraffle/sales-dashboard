@@ -186,24 +186,29 @@ export default function PaymentsTab({
                   <td className="px-3 py-2 text-right font-medium text-success">${Number(p.net_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                   <td className="px-3 py-2">
                     {p.matched ? (
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-success text-[10px] flex items-center gap-1">
+                          <Check size={10} /> {p.client?.name || 'Matched'}
+                        </span>
                         <button
-                          onClick={() => {
+                          onClick={(e) => { e.stopPropagation(); handleUnmatch(p.id) }}
+                          disabled={unmatchingId === p.id}
+                          className="w-5 h-5 rounded flex items-center justify-center bg-danger/10 text-danger hover:bg-danger/25 transition-all disabled:opacity-30 shrink-0"
+                          title="Unmatch this payment"
+                        >
+                          {unmatchingId === p.id ? <Loader size={10} className="animate-spin" /> : <X size={12} />}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
                             setRematchingPaymentId(rematchingPaymentId === p.id ? null : p.id)
                             setMatchingPaymentId(null)
                             setSearchClient('')
                           }}
-                          className="text-success text-[10px] flex items-center gap-1 hover:text-opt-yellow transition-colors"
+                          className="text-text-400 text-[9px] hover:text-opt-yellow transition-colors"
+                          title="Change matched client"
                         >
-                          <Check size={10} /> {p.client?.name || 'Matched'}
-                        </button>
-                        <button
-                          onClick={() => handleUnmatch(p.id)}
-                          disabled={unmatchingId === p.id}
-                          className="text-text-400 hover:text-danger transition-colors disabled:opacity-30"
-                          title="Unmatch"
-                        >
-                          {unmatchingId === p.id ? <Loader size={10} className="animate-spin" /> : <X size={10} />}
+                          <ChevronDown size={10} />
                         </button>
                         {p.manually_matched && (
                           <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium bg-warning/15 text-warning border border-warning/30">Manual</span>
