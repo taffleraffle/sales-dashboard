@@ -199,6 +199,7 @@ export default function PaymentsTab({
                 <th className="px-3 py-2 text-left">Date</th>
                 <th className="px-3 py-2 text-left">Customer</th>
                 <th className="px-3 py-2 text-left">Email</th>
+                <th className="px-3 py-2 text-center">Pay #</th>
                 <th className="px-3 py-2 text-left">Invoice</th>
                 <th className="px-3 py-2 text-left">Source</th>
                 <th className="px-3 py-2 text-right">Amount</th>
@@ -209,14 +210,27 @@ export default function PaymentsTab({
             </thead>
             <tbody>
               {loadingPayments ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-text-400"><Loader size={14} className="animate-spin inline mr-2" />Loading...</td></tr>
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-text-400"><Loader size={14} className="animate-spin inline mr-2" />Loading...</td></tr>
               ) : payments.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-text-400">No payments for this period</td></tr>
-              ) : payments.map(p => (
-                <tr key={p.id} className={`border-t border-border-default/30 row-glow transition-all duration-150 ${!p.matched ? 'bg-warning/5' : ''} ${unmatchingId === p.id ? 'opacity-40' : ''}`}>
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-text-400">No payments for this period</td></tr>
+              ) : payments.map(p => {
+                const pn = p._paymentNumber
+                const pastWindow = pn && pn > 3
+                const pnLabels = { 1: 'Trial', 2: 'Mo 1', 3: 'Mo 2', 4: 'Mo 3' }
+                return (
+                <tr key={p.id} className={`border-t border-border-default/30 row-glow transition-all duration-150 ${pastWindow ? 'opacity-40' : ''} ${!p.matched ? 'bg-warning/5' : ''} ${unmatchingId === p.id ? 'opacity-40' : ''}`}>
                   <td className="px-3 py-2 text-text-400">{new Date(p.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
                   <td className="px-3 py-2 font-medium text-text-primary">{p.customer_name || '—'}</td>
                   <td className="px-3 py-2 text-text-400 text-[10px]">{p.customer_email || '—'}</td>
+                  <td className="px-3 py-2 text-center">
+                    {pn ? (
+                      <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                        pastWindow ? 'text-text-400 bg-text-400/10' :
+                        pn === 1 ? 'text-blue-400 bg-blue-500/15' :
+                        'text-opt-yellow bg-opt-yellow/15'
+                      }`}>{pnLabels[pn] || `#${pn}`}</span>
+                    ) : p.matched ? <span className="text-text-400 text-[10px]">—</span> : null}
+                  </td>
                   <td className="px-3 py-2 text-text-400 text-[10px]">{p.metadata?.invoice_number ? `#${p.metadata.invoice_number}` : (p.description || '—')}</td>
                   <td className="px-3 py-2">
                     <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${
@@ -267,7 +281,7 @@ export default function PaymentsTab({
                     }`}>{p.matched ? 'Matched' : 'Unmatched'}</span>
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>

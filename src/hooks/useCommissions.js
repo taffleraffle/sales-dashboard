@@ -65,6 +65,40 @@ export function usePayments(period) {
   const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // Auto-number payments per client using last 4 months of history
+  const numberPayments = async (periodPayments) => {
+    const matchedClientIds = [...new Set(periodPayments.filter(p => p.client_id).map(p => p.client_id))]
+    if (matchedClientIds.length === 0) return periodPayments
+
+    const fourMonthsAgo = new Date()
+    fourMonthsAgo.setMonth(fourMonthsAgo.getMonth() - 4)
+    const since = fourMonthsAgo.toISOString().split('T')[0]
+
+    const { data: historyPayments } = await supabase
+      .from('payments')
+      .select('id, client_id, payment_date')
+      .eq('matched', true)
+      .in('client_id', matchedClientIds)
+      .gte('payment_date', since)
+      .order('payment_date', { ascending: true })
+
+    if (historyPayments) {
+      const byClient = {}
+      for (const hp of historyPayments) {
+        if (!byClient[hp.client_id]) byClient[hp.client_id] = []
+        byClient[hp.client_id].push(hp)
+      }
+      const numMap = {}
+      for (const clientPayments of Object.values(byClient)) {
+        clientPayments.forEach((cp, i) => { numMap[cp.id] = i + 1 })
+      }
+      for (const p of periodPayments) {
+        p._paymentNumber = numMap[p.id] || null
+      }
+    }
+    return periodPayments
+  }
+
   useEffect(() => {
     setLoading(true)
     let query = supabase
@@ -78,8 +112,9 @@ export function usePayments(period) {
       query = query.gte('payment_date', start).lte('payment_date', `${end}T23:59:59`)
     }
 
-    query.then(({ data }) => {
-      setPayments(data || [])
+    query.then(async ({ data }) => {
+      const numbered = await numberPayments(data || [])
+      setPayments(numbered)
       setLoading(false)
     })
   }, [period])
@@ -142,7 +177,11 @@ export function usePayments(period) {
     if (period) {
       query = query.gte('payment_date', `${period}-01`).lte('payment_date', `${period}-31T23:59:59`)
     }
-    query.then(({ data }) => { setPayments(data || []); setLoading(false) })
+    query.then(async ({ data }) => {
+      const numbered = await numberPayments(data || [])
+      setPayments(numbered)
+      setLoading(false)
+    })
   }
 
   const silentRefresh = () => refresh(true)
