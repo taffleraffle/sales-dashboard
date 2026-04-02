@@ -422,14 +422,34 @@ function CommissionPageAdmin() {
     }
   }
 
+  const [deletingId, setDeletingId] = useState(null)
+
   const deleteClient = async (clientId) => {
     if (!confirm('Delete this client? This cannot be undone.')) return
+    setDeletingId(clientId)
     await supabase.from('commission_ledger').delete().eq('client_id', clientId)
     await supabase.from('payments').update({ client_id: null, matched: false }).eq('client_id', clientId)
     await supabase.from('clients').delete().eq('id', clientId)
+    setDeletingId(null)
     refreshClients()
     refreshLedger()
   }
+
+  const BLACKLIST = ['daniel@rankonmaps.io', 'rankonmaps']
+  const isBlacklisted = (p) => BLACKLIST.some(b => (p.customer_email || '').includes(b) || (p.customer_name || '').toLowerCase().includes(b))
+  const filteredPayments = payments.filter(p => !isBlacklisted(p))
+
+  const countryEmoji = (phone, email) => {
+    if (phone?.startsWith('+64') || email?.endsWith('.nz')) return '\u{1F1F3}\u{1F1FF}'
+    if (phone?.startsWith('+61') || email?.endsWith('.au')) return '\u{1F1E6}\u{1F1FA}'
+    if (phone?.startsWith('+44') || email?.endsWith('.uk')) return '\u{1F1EC}\u{1F1E7}'
+    if (phone?.startsWith('+1')) return '\u{1F1FA}\u{1F1F8}'
+    return '\u{1F310}'
+  }
+
+  // Count transactions per client
+  const txCountByClient = {}
+  payments.forEach(p => { if (p.client_id) txCountByClient[p.client_id] = (txCountByClient[p.client_id] || 0) + 1 })
 
   const generateCommissions = async () => {
     if (!confirm('Generate commission entries from client payment data? This will create ledger entries based on each client\'s payment count and monthly amount.')) return
@@ -536,8 +556,8 @@ function CommissionPageAdmin() {
     setTimeout(() => setSyncResult(null), 8000)
   }
 
-  const inputCls = 'w-full px-2 py-1.5 bg-bg-primary border border-border-default rounded text-xs text-text-primary'
-  const selectCls = 'w-full px-2 py-1.5 bg-bg-primary border border-border-default rounded text-xs text-text-primary'
+  const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+  const selectCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 appearance-none cursor-pointer'
 
   return (
     <div>
@@ -605,7 +625,7 @@ function CommissionPageAdmin() {
                   const totalEarnings = isRamp ? Math.max(ms.ramp_amount || 0, raw.total_commission) : baseOrRamp + raw.total_commission
                   const s = { ...raw, base_salary: baseOrRamp, total_earnings: totalEarnings, pay_type: ms.pay_type || 'base' }
                   return (
-                    <tr key={m.id} onClick={() => navigate(`/sales/commissions/${m.id}`)} className="border-t border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer">
+                    <tr key={m.id} onClick={() => navigate(`/sales/commissions/${m.id}`)} className="border-t border-border-default/30 row-glow transition-all duration-150 cursor-pointer group">
                       <td className="px-3 py-2 font-medium text-opt-yellow hover:underline">{m.name}</td>
                       <td className="px-3 py-2 text-text-400 capitalize">{m.role}</td>
                       <td className="px-3 py-2 text-right text-text-400">
@@ -630,8 +650,8 @@ function CommissionPageAdmin() {
       {activeTab === 'payments' && (
         <div>
           {/* Add Payment Modal */}
-          {showAddPayment && (
-            <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-4">
+          <div className={`expand-section ${showAddPayment ? 'max-h-[500px] opacity-100 mb-4' : 'max-h-0 opacity-0'}`}>
+            <div className="bg-bg-card border border-border-default rounded-2xl p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-medium text-text-secondary">Add Payment</h3>
                 <button onClick={() => setShowAddPayment(false)} className="text-text-400 hover:text-text-primary"><X size={14} /></button>
@@ -652,9 +672,9 @@ function CommissionPageAdmin() {
                 <div><label className="text-[10px] text-text-400 block mb-1">Payment Date</label><input type="date" value={newPayment.payment_date} onChange={e => setNewPayment(p => ({ ...p, payment_date: e.target.value }))} className={inputCls} /></div>
                 <div><label className="text-[10px] text-text-400 block mb-1">Description</label><input value={newPayment.description} onChange={e => setNewPayment(p => ({ ...p, description: e.target.value }))} placeholder="Optional" className={inputCls} /></div>
               </div>
-              <button onClick={handleAddPayment} className="px-4 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Save size={12} className="inline mr-1" />Save Payment</button>
+              <button onClick={handleAddPayment} className="px-4 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:bg-opt-yellow/90 transition-all"><Save size={12} className="inline mr-1" />Save Payment</button>
             </div>
-          )}
+          </div>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-medium text-text-secondary">Payments — {period}</h2>
@@ -685,10 +705,10 @@ function CommissionPageAdmin() {
               <tbody>
                 {loadingPayments ? (
                   <tr><td colSpan={8} className="px-4 py-8 text-center text-text-400"><Loader size={14} className="animate-spin inline mr-2" />Loading...</td></tr>
-                ) : payments.length === 0 ? (
+                ) : filteredPayments.length === 0 ? (
                   <tr><td colSpan={8} className="px-4 py-8 text-center text-text-400">No payments for this period</td></tr>
-                ) : payments.map(p => (
-                  <tr key={p.id} className={`border-t border-border-default/30 hover:bg-bg-card-hover/50 ${!p.matched ? 'bg-warning/5' : ''}`}>
+                ) : filteredPayments.map(p => (
+                  <tr key={p.id} className={`border-t border-border-default/30 row-glow transition-all duration-150 ${!p.matched ? 'bg-warning/5' : ''}`}>
                     <td className="px-3 py-2 text-text-400">{new Date(p.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
                     <td className="px-3 py-2 font-medium text-text-primary">{p.customer_name || '—'}</td>
                     <td className="px-3 py-2 text-text-400 text-[10px]">{p.customer_email || '—'}</td>
@@ -766,8 +786,8 @@ function CommissionPageAdmin() {
       {activeTab === 'clients' && (
         <div>
           {/* Add Client Form */}
-          {showAddClient && (
-            <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-4">
+          <div className={`expand-section ${showAddClient ? 'max-h-[600px] opacity-100 mb-4' : 'max-h-0 opacity-0'}`}>
+            <div className="bg-bg-card border border-border-default rounded-2xl p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-medium text-text-secondary">Add Client</h3>
                 <button onClick={() => setShowAddClient(false)} className="text-text-400 hover:text-text-primary"><X size={14} /></button>
@@ -806,9 +826,9 @@ function CommissionPageAdmin() {
                     <option value="4">4 — Month 3 paid</option>
                   </select></div>
               </div>
-              <button onClick={handleAddClient} disabled={!newClient.name} className="px-4 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-50"><Save size={12} className="inline mr-1" />Save Client</button>
+              <button onClick={handleAddClient} disabled={!newClient.name} className="px-4 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:bg-opt-yellow/90 disabled:opacity-50 transition-all"><Save size={12} className="inline mr-1" />Save Client</button>
             </div>
-          )}
+          </div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-medium text-text-secondary">Client List</h2>
             <div className="flex items-center gap-2">
@@ -890,13 +910,14 @@ function CommissionPageAdmin() {
                     <th className="px-3 py-2 text-right">Monthly</th>
                     <th className="px-3 py-2 text-left">Payment #</th>
                     <th className="px-3 py-2 text-left">Next Billing</th>
+                    <th className="px-3 py-2 text-right">Txns</th>
                     <th className="px-3 py-2 text-right">Forecast</th>
-                    <th className="px-3 py-2 w-8"></th>
+                    <th className="px-3 py-2 w-12"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {clients.length === 0 ? (
-                    <tr><td colSpan={11} className="px-4 py-8 text-center text-text-400">No clients yet — click Add Client or Import CSV to get started</td></tr>
+                    <tr><td colSpan={12} className="px-4 py-8 text-center text-text-400">No clients yet — click Add Client or Import CSV to get started</td></tr>
                   ) : clients.map(c => {
                     const isEditing = editingClientId === c.id
                     if (isEditing) {
@@ -935,8 +956,10 @@ function CommissionPageAdmin() {
                       )
                     }
                     return (
-                      <tr key={c.id} className="border-t border-border-default/30 hover:bg-bg-card-hover/50">
-                        <td className="px-3 py-2 font-medium text-text-primary">{c.name}</td>
+                      <tr key={c.id} className={`border-t border-border-default/30 row-glow transition-all duration-150 group ${deletingId === c.id ? 'opacity-40' : ''}`}>
+                        <td className="px-3 py-2 font-medium text-text-primary group-hover:text-opt-yellow transition-colors">
+                          {countryEmoji(c.phone, c.email)} {c.name}
+                        </td>
                         <td className="px-3 py-2 text-text-400">{c.company_name || '—'}</td>
                         <td className="px-3 py-2 text-text-400">{c.email || '—'}</td>
                         <td className="px-3 py-2">
@@ -958,10 +981,13 @@ function CommissionPageAdmin() {
                         <td className="px-3 py-2 text-text-400 text-[10px]">
                           {c.next_billing_date ? new Date(c.next_billing_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
                         </td>
+                        <td className="px-3 py-2 text-right text-text-primary text-[10px] font-medium tabular-nums">
+                          {txCountByClient[c.id] || 0}
+                        </td>
                         <td className="px-3 py-2 text-right">
                           {(() => {
                             const pc = c.payment_count || 0
-                            const remaining = Math.max(0, 4 - pc) // payments left in commission window (trial + 3 months)
+                            const remaining = Math.max(0, 4 - pc)
                             const forecast = remaining * Number(c.monthly_amount || 0)
                             return forecast > 0
                               ? <span className="text-opt-yellow text-[10px] font-medium">${forecast.toLocaleString()}</span>
@@ -969,9 +995,11 @@ function CommissionPageAdmin() {
                           })()}
                         </td>
                         <td className="px-3 py-2">
-                          <div className="flex gap-1.5">
-                            <button onClick={() => { setEditingClientId(c.id); setEditClient({ name: c.name, email: c.email, phone: c.phone, company_name: c.company_name, closer_id: c.closer_id || '', setter_id: c.setter_id || '', stage: c.stage, monthly_amount: c.monthly_amount, trial_amount: c.trial_amount, trial_start_date: c.trial_start_date || '', ascension_date: c.ascension_date || '', billing_day: c.billing_day || '', next_billing_date: c.next_billing_date || '', payment_count: c.payment_count || 0 }) }} className="text-text-400 hover:text-opt-yellow"><Edit3 size={12} /></button>
-                            <button onClick={() => deleteClient(c.id)} className="text-text-400 hover:text-danger"><X size={12} /></button>
+                          <div className="flex gap-1.5 items-center">
+                            <button onClick={() => { setEditingClientId(c.id); setEditClient({ name: c.name, email: c.email, phone: c.phone, company_name: c.company_name, closer_id: c.closer_id || '', setter_id: c.setter_id || '', stage: c.stage, monthly_amount: c.monthly_amount, trial_amount: c.trial_amount, trial_start_date: c.trial_start_date || '', ascension_date: c.ascension_date || '', billing_day: c.billing_day || '', next_billing_date: c.next_billing_date || '', payment_count: c.payment_count || 0 }) }} className="text-text-400 hover:text-opt-yellow transition-colors"><Edit3 size={12} /></button>
+                            <button onClick={() => deleteClient(c.id)} disabled={deletingId === c.id} className="text-text-400 hover:text-danger transition-colors disabled:opacity-30">
+                              {deletingId === c.id ? <Loader size={12} className="animate-spin" /> : <X size={12} />}
+                            </button>
                           </div>
                         </td>
                       </tr>

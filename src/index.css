@@ -115,6 +115,33 @@ body {
   }
 }
 
+/* ── Reusable UI Components ── */
+
+/* Consistent input styling */
+input[type="date"], input[type="month"] {
+  color-scheme: dark;
+}
+
+/* Smooth expand/collapse animation */
+.expand-section {
+  transition: max-height 300ms ease-out, opacity 200ms ease-in;
+  overflow: hidden;
+}
+
+/* Glow on hover for interactive cards */
+.glow-hover {
+  transition: all 200ms ease;
+}
+.glow-hover:hover {
+  border-color: rgba(212, 245, 12, 0.15);
+  box-shadow: 0 0 20px rgba(212, 245, 12, 0.04), 0 0 4px rgba(212, 245, 12, 0.02);
+}
+
+/* Table row hover with subtle yellow tint */
+.row-glow:hover {
+  background: rgba(212, 245, 12, 0.03);
+}
+
 /* Splash screen loading bar */
 @keyframes load-bar {
   0% { width: 0; }
