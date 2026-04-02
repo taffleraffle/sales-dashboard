@@ -11,8 +11,6 @@ import KPICard from '../components/KPICard'
 import ClientsTab from '../components/commission/ClientsTab'
 import PaymentsTab from '../components/commission/PaymentsTab'
 import CommissionWarnings from '../components/CommissionWarnings'
-import ForecastChart from '../components/commission/ForecastChart'
-import UpcomingPayments from '../components/commission/UpcomingPayments'
 import MonthPicker from '../components/MonthPicker'
 
 function SettingsCard({ member, saved, onSave }) {
@@ -209,7 +207,7 @@ function CommissionPageAdmin() {
   const [activeTab, setActiveTab] = useState('overview')
   const { members } = useTeamMembers()
   const { settings, settingsMap, upsert: upsertSettings } = useCommissionSettings()
-  const { clients, clientsMap, refresh: refreshClients } = useClients()
+  const { clients, clientsMap, silentRefresh: refreshClients } = useClients()
   const { payments, loading: loadingPayments, matchPayment, unmatchPayment, refresh: refreshPayments } = usePayments(period)
   const { ledger, loading: loadingLedger, updateStatus, refresh: refreshLedger } = useCommissionLedger(null, period)
   const { blacklist, addPattern: addBlacklistPattern, removePattern: removeBlacklistPattern, isBlacklisted } = usePaymentBlacklist()
@@ -371,7 +369,7 @@ function CommissionPageAdmin() {
       </div>
 
       {/* Overview Tab */}
-      {activeTab === 'overview' && (<>
+      {activeTab === 'overview' && (
         <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
           <div className="px-4 py-3 border-b border-border-default">
             <h2 className="text-sm font-medium text-text-secondary">Commission Breakdown — {period}</h2>
@@ -419,10 +417,7 @@ function CommissionPageAdmin() {
           </div>
         </div>
 
-        {/* Forecast + Upcoming */}
-        <ForecastChart clients={clients} payments={payments} />
-        <UpcomingPayments clients={clients} />
-      </>)}
+      )}
 
       {/* Payments Tab */}
       {activeTab === 'payments' && (
@@ -450,6 +445,7 @@ function CommissionPageAdmin() {
           payments={payments}
           refreshClients={refreshClients}
           refreshLedger={refreshLedger}
+          refreshPayments={refreshPayments}
         />
       )}
 

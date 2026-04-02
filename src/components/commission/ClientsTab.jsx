@@ -17,7 +17,7 @@ const STAGE_COLORS = {
 const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 const selectCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 appearance-none cursor-pointer'
 
-export default function ClientsTab({ clients, members, payments, refreshClients, refreshLedger }) {
+export default function ClientsTab({ clients, members, payments, refreshClients, refreshLedger, refreshPayments }) {
   const [editingClient, setEditingClient] = useState(null)
   const [showAddClient, setShowAddClient] = useState(false)
   const [newClient, setNewClient] = useState({ name: '', email: '', phone: '', company_name: '', closer_id: '', setter_id: '', stage: 'trial', monthly_amount: '', trial_amount: '', trial_start_date: '', ascension_date: '', billing_day: '', next_billing_date: '', payment_count: '0' })
@@ -187,8 +187,10 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
     await supabase.from('payments').update({ client_id: null, matched: false }).eq('client_id', clientId)
     await supabase.from('clients').delete().eq('id', clientId)
     setDeletingId(null)
+    // Silent refreshes to avoid table flash
     refreshClients()
     refreshLedger()
+    refreshPayments()
   }
 
   return (

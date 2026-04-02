@@ -36,8 +36,8 @@ export function useClients() {
   const [clients, setClients] = useState([])
   const [loading, setLoading] = useState(true)
 
-  const fetch = useCallback(async () => {
-    setLoading(true)
+  const fetch = useCallback(async (silent) => {
+    if (!silent) setLoading(true)
     const { data } = await supabase
       .from('clients')
       .select('*, closer:team_members!clients_closer_id_fkey(name), setter:team_members!clients_setter_id_fkey(name)')
@@ -55,7 +55,10 @@ export function useClients() {
   const clientsMap = {}
   for (const c of clients) clientsMap[c.id] = c
 
-  return { clients, clientsMap, loading, refresh: fetch }
+  // Silent refresh doesn't flash loading state
+  const silentRefresh = useCallback(() => fetch(true), [fetch])
+
+  return { clients, clientsMap, setClients, loading, refresh: fetch, silentRefresh }
 }
 
 export function usePayments(period) {

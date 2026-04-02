@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { DollarSign, ArrowLeft, TrendingUp, ChevronDown } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
-import { useCommissionLedger, useCommissionSettings } from '../hooks/useCommissions'
+import { useCommissionLedger, useCommissionSettings, useClients } from '../hooks/useCommissions'
 import { summarizeCommissions } from '../services/commissionCalc'
 import KPICard from '../components/KPICard'
 import MonthPicker from '../components/MonthPicker'
@@ -47,6 +47,7 @@ export default function CommissionDetail({ memberId: propId } = {}) {
   const { ledger, loading, updateStatus } = useCommissionLedger(id, showAllTime ? null : period)
   const { settingsMap } = useCommissionSettings()
   const settings = settingsMap[id] || {}
+  const { clients } = useClients()
 
   // Fetch member info
   useEffect(() => {
@@ -117,37 +118,73 @@ export default function CommissionDetail({ memberId: propId } = {}) {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
-        <KPICard
-          label={(settings.pay_type || 'base') === 'ramp' ? 'Monthly Ramp' : 'Base Salary'}
-          value={`$${((settings.pay_type || 'base') === 'ramp' ? (settings.ramp_amount || 0) : (settings.base_salary || 0)).toLocaleString()}`}
-          subtitle={(settings.pay_type || 'base') === 'ramp' ? 'guaranteed minimum' : 'monthly fixed'}
-        />
-        <KPICard label="Commission Rate" value={`${settings.commission_rate || 0}%`} subtitle="of net cash (months 0-3)" />
-        <KPICard label={showAllTime ? 'All-Time Commission' : `${period} Commission`} value={`$${(showAllTime ? allTimeTotals.total : summary.total_commission).toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${showAllTime ? allTimeTotals.deals : summary.entries.length} deals`} />
-        <KPICard label={showAllTime ? 'All-Time Revenue' : `${period} Revenue`} value={`$${(showAllTime ? allTimeTotals.revenue : currentEntries.reduce((s, e) => s + Number(e.payment_amount || 0), 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle="attributed" />
-        <KPICard label={showAllTime ? 'All-Time Earnings' : `${period} Earnings`} value={`$${(showAllTime ? allTimeTotals.total + (settings.base_salary || 0) : summary.total_earnings).toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle="base + commission" />
-      </div>
+      {/* KPI Cards — single condensed row */}
+      {(() => {
+        // Forecast: clients assigned to this member within commission window (0-3 months)
+        const memberClients = clients.filter(c =>
+          (c.closer_id === id || c.setter_id === id) &&
+          c.stage !== 'churned' &&
+          (c.payment_count || 0) < 4
+        )
+        const forecastedCash = memberClients.reduce((s, c) => s + Number(c.monthly_amount || 0), 0)
+        const actualCash = showAllTime
+          ? allTimeTotals.revenue
+          : currentEntries.reduce((s, e) => s + Number(e.payment_amount || 0), 0)
+        // Clients who haven't paid this period (no ledger entry for this period)
+        const paidClientIds = new Set(currentEntries.map(e => e.client_id))
+        const missingClients = memberClients.filter(c => !paidClientIds.has(c.id))
 
-      {/* Monthly Breakdown */}
-      {!showAllTime && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-          <KPICard label="Commission Earned" value={`$${summary.total_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${summary.entries.length} deals`} />
-          {summary.pay_type === 'ramp' ? (
+        return (<>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <KPICard label="Commission Rate" value={`${settings.commission_rate || 0}%`} subtitle="of net cash (months 0-3)" />
             <KPICard
-              label="Ramp Top-Up"
-              value={summary.ramp_topup > 0 ? `+$${summary.ramp_topup.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '$0.00'}
-              subtitle={summary.ramp_topup > 0 ? `topped up to $${summary.ramp_amount.toLocaleString()} min` : 'commissions exceed ramp'}
+              label={showAllTime ? 'All-Time Revenue' : 'Revenue Generated'}
+              value={`$${actualCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              subtitle={`${showAllTime ? allTimeTotals.deals : currentEntries.length} deals`}
             />
-          ) : (
-            <KPICard label="Base Salary" value={`$${summary.base_salary.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle="fixed monthly" />
+            <KPICard label="Forecasted Cash" value={`$${forecastedCash.toLocaleString()}`} subtitle={`${memberClients.length} active clients`} />
+            <KPICard
+              label="Outstanding"
+              value={`${missingClients.length}`}
+              subtitle={missingClients.length > 0 ? 'clients haven\'t paid yet' : 'all clients paid'}
+            />
+          </div>
+
+          {/* Outstanding clients — who hasn't paid this period */}
+          {!showAllTime && missingClients.length > 0 && (
+            <div className="bg-warning/5 border border-warning/20 rounded-2xl overflow-hidden mb-6">
+              <div className="px-4 py-2.5 border-b border-warning/20 flex items-center gap-2">
+                <span className="text-[10px] text-warning uppercase font-medium tracking-wider">Missing Payments — {period}</span>
+                <span className="text-[10px] text-text-400">{missingClients.length} clients expected but not yet collected</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-text-400 uppercase text-[10px] tracking-wider">
+                      <th className="px-3 py-2 text-left">Client</th>
+                      <th className="px-3 py-2 text-left">Company</th>
+                      <th className="px-3 py-2 text-right">Expected</th>
+                      <th className="px-3 py-2 text-left">Payment #</th>
+                      <th className="px-3 py-2 text-left">Next Billing</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {missingClients.map(c => (
+                      <tr key={c.id} className="border-t border-warning/10">
+                        <td className="px-3 py-2 font-medium text-text-primary">{c.name}</td>
+                        <td className="px-3 py-2 text-text-400">{c.company_name || '—'}</td>
+                        <td className="px-3 py-2 text-right text-warning font-medium">${Number(c.monthly_amount).toLocaleString()}</td>
+                        <td className="px-3 py-2 text-text-400">#{(c.payment_count || 0) + 1}</td>
+                        <td className="px-3 py-2 text-text-400">{c.next_billing_date ? new Date(c.next_billing_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
-          <KPICard label="Trial Deals" value={`$${summary.trial_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${summary.entries.filter(e => e.commission_type === 'trial_close').length} closes`} />
-          <KPICard label="Ascension Deals" value={`$${summary.ascension_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`${summary.entries.filter(e => e.commission_type === 'ascension').length} payments`} />
-          <KPICard label="Total Earnings" value={`$${summary.total_earnings.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={summary.pay_type === 'ramp' ? 'ramp or commission (higher)' : 'base + commission'} />
-        </div>
-      )}
+        </>)
+      })()}
 
       {/* 6-Month Trend */}
       <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-6">
