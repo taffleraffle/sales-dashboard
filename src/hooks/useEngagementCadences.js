@@ -11,7 +11,10 @@ export function useEngagementCadences() {
       .select('*')
       .order('created_at')
     if (error) console.error('engagement_cadences:', error)
-    setCadences(data || [])
+    // Fixed order: speed_to_lead first, then call_confirmation, then re_engage
+    const order = { speed_to_lead: 0, call_confirmation: 1, re_engage: 2 }
+    const sorted = (data || []).sort((a, b) => (order[a.name] ?? 9) - (order[b.name] ?? 9))
+    setCadences(sorted)
     setLoading(false)
   }, [])
 
