@@ -147,34 +147,28 @@ export default function CommissionDetail({ memberId: propId } = {}) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-bg-card text-text-400 uppercase text-[10px] tracking-wider">
-                  <th className="px-4 py-2.5 text-left"></th>
-                  <th className="px-4 py-2.5 text-right">Cash</th>
-                  <th className="px-4 py-2.5 text-right">Commission ({rate}%)</th>
+                  <th className="px-4 py-2.5 text-right">Forecasted Cash</th>
+                  <th className="px-4 py-2.5 text-right">Actual Cash</th>
+                  <th className="px-4 py-2.5 text-right">Forecasted Commission</th>
+                  <th className="px-4 py-2.5 text-right">Actual Commission</th>
+                  {isRamp && <th className="px-4 py-2.5 text-right">Ramp</th>}
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-t border-border-default/30 bg-danger/5">
-                  <td className="px-4 py-3 font-medium text-danger">Forecasted</td>
+                <tr className="border-t border-border-default/30">
                   <td className="px-4 py-3 text-right text-danger font-medium">${forecastedCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                  <td className="px-4 py-3 text-right text-danger font-medium">${forecastedCommission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                </tr>
-                <tr className="border-t border-border-default/30 bg-success/5">
-                  <td className="px-4 py-3 font-medium text-success">Actual</td>
                   <td className="px-4 py-3 text-right text-success font-medium">${actualCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                  <td className="px-4 py-3 text-right text-danger font-medium">${forecastedCommission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                   <td className="px-4 py-3 text-right text-success font-bold">${actualCommission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                </tr>
-                {isRamp && (
-                  <tr className="border-t border-border-default/30">
-                    <td className="px-4 py-3 font-medium text-text-400">Ramp Guarantee</td>
-                    <td className="px-4 py-3 text-right text-text-400 font-medium">${rampAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                    <td className="px-4 py-3 text-right text-text-primary font-medium">
+                  {isRamp && (
+                    <td className="px-4 py-3 text-right font-medium">
                       {rampTopUp > 0
-                        ? <span className="text-warning">+${rampTopUp.toLocaleString('en-US', { minimumFractionDigits: 2 })} top-up</span>
-                        : <span className="text-success">exceeded</span>
+                        ? <span className="text-warning">${rampAmount.toLocaleString()} <span className="text-[9px] text-text-400">(+${rampTopUp.toLocaleString()} top-up)</span></span>
+                        : <span className="text-success">${rampAmount.toLocaleString()} <span className="text-[9px]">exceeded</span></span>
                       }
                     </td>
-                  </tr>
-                )}
+                  )}
+                </tr>
               </tbody>
             </table>
           </div>
