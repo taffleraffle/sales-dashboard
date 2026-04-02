@@ -200,24 +200,23 @@ export async function syncEODToTracker() {
     const eod = byDate[date]
     const callAgg = callAggByDate[date] || { ascCash: 0, ascRevenue: 0, financeOffers: 0, financeAccepted: 0 }
 
-    // Build patch: only set fields that have EOD data
+    // Build patch: set fields from EOD data (use != null to allow zero values)
     const patch = { updated_at: new Date().toISOString() }
-    if (eod.offers) patch.offers = eod.offers
-    if (eod.closes) patch.closes = eod.closes
-    if (eod.trial_cash) patch.trial_cash = eod.trial_cash
-    if (eod.trial_revenue) patch.trial_revenue = eod.trial_revenue
-    if (eod.ascensions) patch.ascensions = eod.ascensions
-    if (callAgg.ascCash) patch.ascend_cash = callAgg.ascCash
-    if (callAgg.ascRevenue) patch.ascend_revenue = callAgg.ascRevenue
-    if (callAgg.financeOffers) patch.finance_offers = callAgg.financeOffers
-    if (callAgg.financeAccepted) patch.finance_accepted = callAgg.financeAccepted
-    if (eod.live_calls) patch.live_calls = eod.live_calls
-    if (eod.booked) patch.calls_on_calendar = eod.booked
+    if (eod.offers != null) patch.offers = eod.offers
+    if (eod.closes != null) patch.closes = eod.closes
+    if (eod.trial_cash != null) patch.trial_cash = eod.trial_cash
+    if (eod.trial_revenue != null) patch.trial_revenue = eod.trial_revenue
+    if (eod.ascensions != null) patch.ascensions = eod.ascensions
+    if (callAgg.ascCash != null) patch.ascend_cash = callAgg.ascCash
+    if (callAgg.ascRevenue != null) patch.ascend_revenue = callAgg.ascRevenue
+    if (callAgg.financeOffers != null) patch.finance_offers = callAgg.financeOffers
+    if (callAgg.financeAccepted != null) patch.finance_accepted = callAgg.financeAccepted
+    if (eod.live_calls != null) patch.live_calls = eod.live_calls
+    if (eod.booked != null) patch.calls_on_calendar = eod.booked
     // EOD booked calls ARE the qualified bookings — always overwrite GHL calendar count
-    // because the closer's report is the source of truth for their actual day
-    if (eod.booked) patch.qualified_bookings = eod.booked
-    if (eod.no_shows) patch.no_shows = eod.no_shows
-    if (eod.reschedules) patch.reschedules = eod.reschedules
+    if (eod.booked != null) patch.qualified_bookings = eod.booked
+    if (eod.no_shows != null) patch.no_shows = eod.no_shows
+    if (eod.reschedules != null) patch.reschedules = eod.reschedules
 
     if (existing) {
       // Only update fields that are non-zero from EOD — don't overwrite existing CSV data with 0
