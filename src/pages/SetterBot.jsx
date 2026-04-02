@@ -4,7 +4,7 @@ import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import { useEngagementData } from '../hooks/useEngagementData'
 import { useEngagementCadences } from '../hooks/useEngagementCadences'
-import { Bot, Loader2, ChevronDown, ChevronUp, Filter, Zap, Phone, RefreshCw, Check, Save } from 'lucide-react'
+import { Bot, Loader2, ChevronDown, ChevronUp, Filter, Zap, Phone, RefreshCw, Check, Save, Power, Clock, AlertTriangle, MessageSquare } from 'lucide-react'
 
 const SEQ_COLORS = {
   pre_call: 'bg-emerald-500/20 text-emerald-400',
@@ -56,10 +56,23 @@ function formatTime(dateStr) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })
 }
 
+function formatHour(h) {
+  if (h === 0) return '12:00 AM'
+  if (h < 12) return `${h}:00 AM`
+  if (h === 12) return '12:00 PM'
+  return `${h - 12}:00 PM`
+}
+
 const CADENCE_ICONS = {
   speed_to_lead: Zap,
   call_confirmation: Phone,
   re_engage: RefreshCw,
+}
+
+const CADENCE_DESCRIPTIONS = {
+  speed_to_lead: 'Automatically reaches out to new leads after business hours when no setter is available.',
+  call_confirmation: 'Sends confirmation messages before scheduled calls and escalates non-responsive leads.',
+  re_engage: 'Re-engages cold leads who haven\'t responded after a set period.',
 }
 
 const CADENCE_SEQ_MAP = {
@@ -69,9 +82,6 @@ const CADENCE_SEQ_MAP = {
 }
 
 function CadenceCard({ cadence, conversations, onSave }) {
-  const [target, setTarget] = useState(cadence.target || '')
-  const [goal, setGoal] = useState(cadence.goal || '')
-  const [instructions, setInstructions] = useState(cadence.instructions || '')
   const [enabled, setEnabled] = useState(cadence.enabled)
   const [rules, setRules] = useState(cadence.trigger_rules || {})
   const [saving, setSaving] = useState(false)
@@ -79,193 +89,189 @@ function CadenceCard({ cadence, conversations, onSave }) {
   const [expanded, setExpanded] = useState(false)
 
   const Icon = CADENCE_ICONS[cadence.name] || Zap
+  const description = CADENCE_DESCRIPTIONS[cadence.name] || ''
   const seqTypes = CADENCE_SEQ_MAP[cadence.name] || []
   const cadenceConvos = conversations.filter(c => seqTypes.includes(c.sequence_type))
   const lastFired = cadenceConvos.length > 0 ? cadenceConvos[0]?.created_at : null
+  const replied = cadenceConvos.filter(c => c.last_prospect_reply_at).length
+  const replyRate = cadenceConvos.length > 0 ? ((replied / cadenceConvos.length) * 100).toFixed(0) : 0
 
-  const hasChanges = target !== (cadence.target || '') ||
-    goal !== (cadence.goal || '') ||
-    instructions !== (cadence.instructions || '') ||
-    enabled !== cadence.enabled ||
+  const hasChanges = enabled !== cadence.enabled ||
     JSON.stringify(rules) !== JSON.stringify(cadence.trigger_rules || {})
 
   const handleSave = async () => {
     setSaving(true)
-    const ok = await onSave(cadence.id, { target, goal, instructions, enabled, trigger_rules: rules })
+    const ok = await onSave(cadence.id, { enabled, trigger_rules: rules })
     setSaving(false)
     if (ok) { setSaved(true); setTimeout(() => setSaved(false), 3000) }
   }
 
+  const toggleEnabled = () => {
+    const next = !enabled
+    setEnabled(next)
+  }
+
   const updateRule = (key, value) => setRules(prev => ({ ...prev, [key]: value }))
 
+  const ruleCls = 'w-full py-2 px-3 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+
   return (
-    <div className={`bg-bg-card border rounded-2xl p-5 transition-all ${enabled ? 'border-border-default' : 'border-border-default/40 opacity-60'}`}>
+    <div className={`bg-bg-card border rounded-2xl overflow-hidden transition-all hover:border-opt-yellow/20 ${enabled ? 'border-border-default' : 'border-border-default/40'}`}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${enabled ? 'bg-opt-yellow/10' : 'bg-text-400/10'}`}>
-            <Icon size={16} className={enabled ? 'text-opt-yellow' : 'text-text-400'} />
-          </div>
-          <div>
-            <p className="text-text-primary font-semibold text-sm">{cadence.display_name}</p>
-            <p className="text-text-400 text-[10px]">{cadenceConvos.length} leads processed{lastFired ? ` \u00b7 Last: ${timeAgo(lastFired)}` : ''}</p>
-          </div>
-          {expanded ? <ChevronUp size={14} className="text-text-400" /> : <ChevronDown size={14} className="text-text-400" />}
-        </div>
-        <button
-          onClick={() => { setEnabled(!enabled) }}
-          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all ${
-            enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-          }`}
-        >
-          {enabled ? 'ON' : 'OFF'}
-        </button>
-      </div>
-
-      {expanded && (
-        <div className="space-y-3 mt-3 pt-3 border-t border-border-default/50">
-          {/* Target */}
-          <div>
-            <label className="text-[10px] text-text-400 uppercase font-medium block mb-1.5">Target</label>
-            <input
-              value={target}
-              onChange={e => setTarget(e.target.value)}
-              className="w-full py-2 px-3 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-400 focus:outline-none focus:border-opt-yellow/40"
-              placeholder="Who does this cadence target..."
-            />
-          </div>
-
-          {/* Goal */}
-          <div>
-            <label className="text-[10px] text-text-400 uppercase font-medium block mb-1.5">Goal</label>
-            <input
-              value={goal}
-              onChange={e => setGoal(e.target.value)}
-              className="w-full py-2 px-3 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-400 focus:outline-none focus:border-opt-yellow/40"
-              placeholder="What is the bot trying to achieve..."
-            />
-          </div>
-
-          {/* Instructions */}
-          <div>
-            <label className="text-[10px] text-text-400 uppercase font-medium block mb-1.5">Instructions</label>
-            <textarea
-              value={instructions}
-              onChange={e => setInstructions(e.target.value)}
-              rows={3}
-              className="w-full py-2 px-3 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary placeholder:text-text-400 focus:outline-none focus:border-opt-yellow/40 resize-none"
-              placeholder="Custom instructions for the AI..."
-            />
-          </div>
-
-          {/* Trigger Rules */}
-          <div>
-            <label className="text-[10px] text-text-400 uppercase font-medium block mb-2">Trigger Rules</label>
-            <div className="grid grid-cols-2 gap-3">
-              {cadence.name === 'speed_to_lead' && (
-                <>
-                  <div>
-                    <label className="text-[10px] text-text-400 block mb-1">After hours cutoff</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number" min={0} max={23}
-                        value={rules.after_hours_cutoff ?? 17}
-                        onChange={e => updateRule('after_hours_cutoff', parseInt(e.target.value) || 17)}
-                        className="w-16 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
-                      />
-                      <span className="text-text-400 text-xs">({(rules.after_hours_cutoff ?? 17) > 12 ? `${(rules.after_hours_cutoff ?? 17) - 12}pm` : `${rules.after_hours_cutoff ?? 17}am`})</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-text-400 block mb-1">No contact timeout</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number" min={1} max={60}
-                        value={rules.no_contact_minutes ?? 5}
-                        onChange={e => updateRule('no_contact_minutes', parseInt(e.target.value) || 5)}
-                        className="w-16 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
-                      />
-                      <span className="text-text-400 text-xs">minutes</span>
-                    </div>
-                  </div>
-                </>
-              )}
-              {cadence.name === 'call_confirmation' && (
-                <>
-                  <div>
-                    <label className="text-[10px] text-text-400 block mb-1">No reply threshold</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number" min={1} max={72}
-                        value={rules.no_reply_hours ?? 24}
-                        onChange={e => updateRule('no_reply_hours', parseInt(e.target.value) || 24)}
-                        className="w-16 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
-                      />
-                      <span className="text-text-400 text-xs">hours before call</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-text-400 block mb-1">Non-responsive escalation</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number" min={1} max={12}
-                        value={rules.non_responsive_at_hours ?? 4}
-                        onChange={e => updateRule('non_responsive_at_hours', parseInt(e.target.value) || 4)}
-                        className="w-16 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
-                      />
-                      <span className="text-text-400 text-xs">hours before call</span>
-                    </div>
-                  </div>
-                </>
-              )}
-              {cadence.name === 're_engage' && (
-                <>
-                  <div>
-                    <label className="text-[10px] text-text-400 block mb-1">Stale threshold</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number" min={12} max={168}
-                        value={rules.stale_hours ?? 48}
-                        onChange={e => updateRule('stale_hours', parseInt(e.target.value) || 48)}
-                        className="w-16 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
-                      />
-                      <span className="text-text-400 text-xs">hours no reply</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-text-400 block mb-1">Step intervals</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={(rules.steps_days || [0, 2, 5]).join(', ')}
-                        onChange={e => updateRule('steps_days', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
-                        className="w-24 py-1.5 px-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40"
-                      />
-                      <span className="text-text-400 text-xs">days</span>
-                    </div>
-                  </div>
-                </>
-              )}
+      <div className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2.5">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${enabled ? 'bg-opt-yellow/10' : 'bg-text-400/10'}`}>
+              <Icon size={18} className={enabled ? 'text-opt-yellow' : 'text-text-400'} />
+            </div>
+            <div>
+              <p className="text-text-primary font-bold text-sm">{cadence.display_name}</p>
+              <p className="text-text-400 text-[10px]">{description}</p>
             </div>
           </div>
+          {/* ON/OFF Toggle */}
+          <button
+            onClick={toggleEnabled}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              enabled
+                ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30'
+                : 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20'
+            }`}
+          >
+            <Power size={12} />
+            {enabled ? 'Active' : 'Disabled'}
+          </button>
+        </div>
 
-          {/* Save */}
-          <div className="flex items-center justify-end gap-3 pt-2">
-            {saved && (
-              <span className="flex items-center gap-1 text-xs text-success font-medium">
-                <Check size={12} /> Saved
-              </span>
+        {/* Stats bar */}
+        <div className="flex items-center gap-4 text-[10px] text-text-400">
+          <span className="flex items-center gap-1"><MessageSquare size={10} /> {cadenceConvos.length} leads</span>
+          <span className="flex items-center gap-1"><Check size={10} className="text-emerald-400" /> {replyRate}% reply rate</span>
+          {lastFired && <span className="flex items-center gap-1"><Clock size={10} /> Last: {timeAgo(lastFired)}</span>}
+        </div>
+      </div>
+
+      {/* Expand toggle */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full px-5 py-2 border-t border-border-default/50 flex items-center justify-center gap-1 text-[10px] text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-colors"
+      >
+        {expanded ? <><ChevronUp size={12} /> Hide trigger rules</> : <><ChevronDown size={12} /> Configure trigger rules</>}
+      </button>
+
+      {expanded && (
+        <div className="px-5 pb-5 pt-3 border-t border-border-default/50 bg-bg-primary/30">
+          {/* Trigger Rules — clear labels */}
+          <div className="space-y-3">
+            {cadence.name === 'speed_to_lead' && (
+              <>
+                <div>
+                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">After-Hours Start Time</label>
+                  <p className="text-[9px] text-text-400 mb-1.5">Bot activates after this hour (leads arriving after business hours)</p>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={rules.after_hours_cutoff ?? 17}
+                      onChange={e => updateRule('after_hours_cutoff', parseInt(e.target.value))}
+                      className={ruleCls + ' w-auto'}
+                    >
+                      {Array.from({ length: 24 }, (_, i) => (
+                        <option key={i} value={i}>{formatHour(i)}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">Wait Before Contacting</label>
+                  <p className="text-[9px] text-text-400 mb-1.5">Minutes to wait for a setter to claim the lead before bot reaches out</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" min={1} max={60}
+                      value={rules.no_contact_minutes ?? 5}
+                      onChange={e => updateRule('no_contact_minutes', parseInt(e.target.value) || 5)}
+                      className={ruleCls + ' w-20'}
+                    />
+                    <span className="text-text-400 text-xs">minutes</span>
+                  </div>
+                </div>
+              </>
             )}
-            {hasChanges && (
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-50"
-              >
-                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                {saving ? 'Saving...' : 'Save'}
-              </button>
+            {cadence.name === 'call_confirmation' && (
+              <>
+                <div>
+                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">Confirmation Window</label>
+                  <p className="text-[9px] text-text-400 mb-1.5">How many hours before the call to send a confirmation message</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" min={1} max={72}
+                      value={rules.no_reply_hours ?? 24}
+                      onChange={e => updateRule('no_reply_hours', parseInt(e.target.value) || 24)}
+                      className={ruleCls + ' w-20'}
+                    />
+                    <span className="text-text-400 text-xs">hours before call</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">Non-Responsive Alert</label>
+                  <p className="text-[9px] text-text-400 mb-1.5">If lead hasn't replied by this many hours before the call, flag as at-risk</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" min={1} max={12}
+                      value={rules.non_responsive_at_hours ?? 4}
+                      onChange={e => updateRule('non_responsive_at_hours', parseInt(e.target.value) || 4)}
+                      className={ruleCls + ' w-20'}
+                    />
+                    <span className="text-text-400 text-xs">hours before call</span>
+                  </div>
+                </div>
+              </>
             )}
+            {cadence.name === 're_engage' && (
+              <>
+                <div>
+                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">Cold Lead Threshold</label>
+                  <p className="text-[9px] text-text-400 mb-1.5">Hours of no reply before the lead is considered cold and re-engagement starts</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" min={12} max={168}
+                      value={rules.stale_hours ?? 48}
+                      onChange={e => updateRule('stale_hours', parseInt(e.target.value) || 48)}
+                      className={ruleCls + ' w-20'}
+                    />
+                    <span className="text-text-400 text-xs">hours</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">Follow-Up Schedule</label>
+                  <p className="text-[9px] text-text-400 mb-1.5">Days after going cold to send each follow-up (comma separated)</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={(rules.steps_days || [0, 2, 5]).join(', ')}
+                      onChange={e => updateRule('steps_days', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))}
+                      className={ruleCls + ' w-32'}
+                      placeholder="0, 2, 5"
+                    />
+                    <span className="text-text-400 text-xs">days</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Save Button — always visible */}
+          <div className="flex items-center justify-between mt-4 pt-3 border-t border-border-default/30">
+            <div>
+              {saved && <span className="flex items-center gap-1 text-xs text-success font-medium"><Check size={12} /> Settings saved</span>}
+              {hasChanges && !saved && <span className="text-[10px] text-warning">Unsaved changes</span>}
+            </div>
+            <button
+              onClick={handleSave}
+              disabled={saving || !hasChanges}
+              className="flex items-center gap-1.5 px-5 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-30 transition-all"
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              {saving ? 'Saving...' : 'Save Settings'}
+            </button>
           </div>
         </div>
       )}
@@ -281,30 +287,30 @@ function ConversationRow({ convo }) {
   return (
     <>
       <tr
-        className="border-b border-border-default/50 hover:bg-bg-card-hover transition-colors cursor-pointer"
+        className="border-b border-border-default/30 hover:bg-bg-card-hover/50 transition-colors cursor-pointer group"
         onClick={() => setExpanded(!expanded)}
       >
-        <td className="py-3 px-3">
+        <td className="py-2.5 px-3">
           <div className="flex items-center gap-2">
-            {expanded ? <ChevronUp size={14} className="text-text-400" /> : <ChevronDown size={14} className="text-text-400" />}
+            <ChevronDown size={12} className={`text-text-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
             <div>
-              <p className="text-sm text-text-primary font-medium">{convo.prospect_name || 'Unknown'}</p>
+              <p className="text-sm text-text-primary font-medium group-hover:text-opt-yellow transition-colors">{convo.prospect_name || 'Unknown'}</p>
               <p className="text-[10px] text-text-400 font-mono">{convo.prospect_phone}</p>
             </div>
           </div>
         </td>
-        <td className="py-3 px-3"><Badge text={convo.sequence_type} colorMap={SEQ_COLORS} /></td>
-        <td className="py-3 px-3"><Badge text={convo.status} colorMap={STATUS_COLORS} /></td>
-        <td className="py-3 px-3 text-sm text-text-primary">{messages.length}</td>
-        <td className="py-3 px-3">
+        <td className="py-2.5 px-3"><Badge text={convo.sequence_type} colorMap={SEQ_COLORS} /></td>
+        <td className="py-2.5 px-3"><Badge text={convo.status} colorMap={STATUS_COLORS} /></td>
+        <td className="py-2.5 px-3 text-sm text-text-primary">{messages.length}</td>
+        <td className="py-2.5 px-3">
           {convo.last_prospect_reply_at
-            ? <span className="text-emerald-400 text-xs">Replied</span>
+            ? <span className="text-emerald-400 text-xs flex items-center gap-1"><Check size={10} /> Replied</span>
             : <span className="text-text-400 text-xs">No reply</span>
           }
         </td>
-        <td className="py-3 px-3 text-sm text-text-secondary">{convo.setter_name || ''}</td>
-        <td className="py-3 px-3 text-sm text-text-secondary">{timeAgo(convo.updated_at)}</td>
-        <td className="py-3 px-3 text-sm text-text-secondary max-w-[200px] truncate">
+        <td className="py-2.5 px-3 text-sm text-text-secondary">{convo.setter_name || ''}</td>
+        <td className="py-2.5 px-3 text-xs text-text-400">{timeAgo(convo.updated_at)}</td>
+        <td className="py-2.5 px-3 text-xs text-text-secondary max-w-[200px] truncate">
           {lastMsg?.direction === 'inbound' && <span className="text-emerald-400 mr-1">&larr;</span>}
           {lastMsg?.direction === 'outbound' && <span className="text-blue-400 mr-1">&rarr;</span>}
           {lastMsg?.content?.slice(0, 50) || ''}
@@ -315,7 +321,7 @@ function ConversationRow({ convo }) {
           <td colSpan={8} className="p-0">
             <div className="bg-bg-primary/50 border-t border-border-default px-6 py-4 max-h-[400px] overflow-y-auto">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-[10px] text-text-400 uppercase tracking-wider font-semibold">Conversation History</p>
+                <p className="text-[10px] text-opt-yellow uppercase tracking-wider font-semibold">Conversation History</p>
                 {convo.appointment_time && (
                   <p className="text-[10px] text-text-400">Call: {formatTime(convo.appointment_time)}</p>
                 )}
@@ -400,9 +406,14 @@ export default function SetterBot() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
         <div className="flex items-center gap-3">
-          <Bot className="w-6 h-6 text-opt-yellow" />
-          <h1 className="text-xl sm:text-2xl font-bold text-text-primary">Setter Bot</h1>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-400">
+          <div className="w-10 h-10 rounded-xl bg-opt-yellow/10 flex items-center justify-center">
+            <Bot className="w-5 h-5 text-opt-yellow" />
+          </div>
+          <div>
+            <h1 className="text-lg sm:text-xl font-bold text-text-primary">Setter Bot</h1>
+            <p className="text-[10px] text-text-400">Automated lead engagement and follow-up</p>
+          </div>
+          <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-400 border border-amber-500/20">
             Dry Run
           </span>
         </div>
@@ -411,9 +422,9 @@ export default function SetterBot() {
 
       {/* KPI Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
-        <KPICard label="Conversations" value={stats.total} highlight />
+        <KPICard label="Conversations" value={stats.total} />
         <KPICard label="Active" value={stats.active} />
-        <KPICard label="Reply Rate" value={`${stats.replyRate}%`} target={40} />
+        <KPICard label="Reply Rate" value={`${stats.replyRate}%`} />
         <KPICard label="Sent" value={stats.outbound} />
         <KPICard label="Received" value={stats.inbound} />
         <KPICard label="Booked" value={stats.booked} />
@@ -429,7 +440,10 @@ export default function SetterBot() {
       </div>
 
       {/* Cadences */}
-      <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Cadences</h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">Cadences</h2>
+        <span className="text-[10px] text-text-400">Click a cadence to configure trigger rules</span>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         {cadences.map(c => (
           <CadenceCard key={c.id} cadence={c} conversations={conversations} onSave={updateCadence} />
@@ -441,12 +455,11 @@ export default function SetterBot() {
 
       {/* Sequence Breakdown + Setter Cards Row */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
-        {/* Sequence Breakdown */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-5">
+        <div className="bg-bg-card border border-border-default rounded-2xl p-5 hover:border-opt-yellow/10 transition-colors">
           <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">By Sequence</h2>
           <div className="space-y-2">
             {Object.entries(stats.bySequence).map(([seq, count]) => (
-              <div key={seq} className="flex items-center justify-between">
+              <div key={seq} className="flex items-center justify-between py-1 hover:bg-bg-card-hover/30 rounded px-1 transition-colors">
                 <Badge text={seq} colorMap={SEQ_COLORS} />
                 <span className="text-text-primary font-bold">{count}</span>
               </div>
@@ -457,9 +470,8 @@ export default function SetterBot() {
           </div>
         </div>
 
-        {/* Per-Setter Cards */}
         {setterStats.map(s => (
-          <div key={s.id} className="bg-bg-card border border-border-default rounded-2xl p-5 hover:border-border-default/60 transition-all">
+          <div key={s.id} className="bg-bg-card border border-border-default rounded-2xl p-5 hover:border-opt-yellow/10 transition-colors">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-8 h-8 rounded-full bg-opt-yellow/10 flex items-center justify-center">
                 <span className="text-opt-yellow font-bold text-sm">{s.name?.[0]}</span>
@@ -470,19 +482,19 @@ export default function SetterBot() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
+              <div className="py-1">
                 <p className="text-text-400 text-[10px] uppercase tracking-wider">Convos</p>
                 <p className="text-text-primary font-bold text-lg">{s.convos}</p>
               </div>
-              <div>
+              <div className="py-1">
                 <p className="text-text-400 text-[10px] uppercase tracking-wider">Replies</p>
                 <p className="text-text-primary font-bold text-lg">{s.replies}</p>
               </div>
-              <div>
+              <div className="py-1">
                 <p className="text-text-400 text-[10px] uppercase tracking-wider">Reply Rate</p>
                 <p className={`font-bold text-lg ${parseFloat(s.replyRate) >= 40 ? 'text-success' : 'text-text-primary'}`}>{s.replyRate}%</p>
               </div>
-              <div>
+              <div className="py-1">
                 <p className="text-text-400 text-[10px] uppercase tracking-wider">Booked</p>
                 <p className="text-opt-yellow font-bold text-lg">{s.booked}</p>
               </div>
@@ -492,26 +504,24 @@ export default function SetterBot() {
       </div>
 
       {/* Leads Table */}
-      <div className="bg-bg-card border border-border-default rounded-2xl p-5">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
+      <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-5 border-b border-border-default">
           <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">All Leads</h2>
           <div className="flex items-center gap-2">
-            {/* Search */}
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search name or phone..."
-              className="bg-bg-primary border border-border-default rounded-lg px-3 py-1.5 text-xs text-text-primary placeholder:text-text-400 w-48 focus:outline-none focus:border-opt-yellow/40"
+              className="bg-bg-primary border border-border-default rounded-lg px-3 py-1.5 text-xs text-text-primary placeholder:text-text-400 w-48 focus:outline-none focus:border-opt-yellow/40 transition-colors"
             />
-            {/* Filter Dropdown */}
             <div className="relative">
               <select
                 value={leadFilter}
                 onChange={e => setLeadFilter(e.target.value)}
-                className="appearance-none bg-bg-primary border border-border-default rounded-lg px-3 py-1.5 pr-8 text-xs text-text-primary focus:outline-none focus:border-opt-yellow/40 cursor-pointer"
+                className="appearance-none bg-bg-primary border border-border-default rounded-lg px-3 py-1.5 pr-8 text-xs text-text-primary focus:outline-none focus:border-opt-yellow/40 cursor-pointer transition-colors"
               >
-                <option value="all">All Leads ({conversations.length})</option>
+                <option value="all">All ({conversations.length})</option>
                 <option value="contacted">Contacted ({conversations.filter(c => (c.messages || []).some(m => m.direction === 'outbound')).length})</option>
                 <option value="replied">Replied ({conversations.filter(c => c.last_prospect_reply_at).length})</option>
                 <option value="no_reply">No Reply ({conversations.filter(c => !c.last_prospect_reply_at && (c.messages || []).some(m => m.direction === 'outbound')).length})</option>
@@ -531,9 +541,9 @@ export default function SetterBot() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-border-default">
+                <tr className="border-b border-border-default bg-bg-card">
                   <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Prospect</th>
                   <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Sequence</th>
                   <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Status</th>
@@ -552,7 +562,7 @@ export default function SetterBot() {
             </table>
           </div>
         )}
-        <div className="mt-3 text-[10px] text-text-400">
+        <div className="px-5 py-2 border-t border-border-default text-[10px] text-text-400">
           Showing {filteredLeads.length} of {conversations.length} leads
         </div>
       </div>
