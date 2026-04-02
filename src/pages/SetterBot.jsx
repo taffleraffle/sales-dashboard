@@ -81,6 +81,72 @@ const CADENCE_SEQ_MAP = {
   re_engage: ['re_engage'],
 }
 
+const CADENCE_DOCS = {
+  speed_to_lead: {
+    title: 'How Speed to Lead Works',
+    steps: [
+      { label: 'Lead comes in', detail: 'A new contact is created in GHL (form submission, ad lead, etc)' },
+      { label: 'Time check', detail: 'Bot checks if it\'s after the "After-Hours Start Time" in the lead\'s timezone (EST). If it\'s during business hours, it checks if no setter has contacted them within the "Wait Before Contacting" timeout.' },
+      { label: 'First text', detail: 'Bot sends a casual intro text as the assigned setter. Asks what the biggest problem is. Does NOT mention maps, SEO, or anything technical.' },
+      { label: 'Conversation', detail: 'If they reply, the bot qualifies them: what\'s the gap, what have they tried, why now. Keeps it short and curious.' },
+      { label: 'Book an intro call', detail: 'Once qualified, the bot transitions to booking a quick phone call. NOT a strategy session. Just an intro ring.' },
+    ],
+    data_source: 'GHL webhook (contact-created) triggers the bot. Contact details, notes, and assigned setter pulled from GHL API.',
+  },
+  call_confirmation: {
+    title: 'How Call Confirmation Works',
+    steps: [
+      { label: 'Poll upcoming calls', detail: 'Every 5 minutes, the bot checks GHL calendar for strategy calls coming up in the next 26 hours.' },
+      { label: 'Check for unconfirmed', detail: 'For each upcoming call, the bot checks if the prospect has replied to ANY messages. If they haven\'t replied within the "Confirmation Window" (default 24h before call), the bot starts the confirmation sequence.' },
+      { label: 'Open with a question', detail: 'The bot texts as the assigned setter and asks a specific question the closer "needs confirmed" before the call (primary service, target area, etc). The goal is to get them to REPLY, not just confirm logistics.' },
+      { label: 'Follow-up if no reply', detail: 'If still no reply, the bot bumps the message. Tries a different angle (verify business address, confirm service area).' },
+      { label: 'Escalation', detail: 'If the prospect hasn\'t replied by the "Non-Responsive Alert" threshold (default 4h before call), the bot sends a direct confirmation with the meeting link and alerts the team via Slack about a potential no-show.' },
+      { label: 'Meeting link', detail: 'The bot pulls the calendar invite meeting link from the GHL appointment and includes it in confirmation texts so the prospect has it right in their messages.' },
+    ],
+    data_source: 'GHL Calendar API polled every 5 min. Checks engagement_conversations table for reply status (last_prospect_reply_at). Appointment details, contact info, assigned closer name, and meeting link all pulled from GHL.',
+  },
+  re_engage: {
+    title: 'How Re-engagement Works',
+    steps: [
+      { label: 'Hourly scan', detail: 'Every hour, the bot scans the engagement_conversations table for leads where the last message was sent 48+ hours ago (configurable) with no reply.' },
+      { label: 'Eligibility check', detail: 'Skips leads who previously asked to stop, leads where a setter has manually engaged since, and leads who already have an active re-engagement sequence.' },
+      { label: 'Step 1: Fresh angle', detail: 'First re-engagement text. Does NOT reference that they didn\'t reply. Comes in with a completely new angle based on their notes/trade.' },
+      { label: 'Step 2: Value drop', detail: 'After the configured gap (default 2 days), sends something useful or a quick insight. "Saw this and thought of you" energy.' },
+      { label: 'Step 3: Last chance', detail: 'Final attempt (default day 5). Direct but warm. Gives them an easy out. "No worries if the timing isn\'t right."' },
+      { label: 'Sequence complete', detail: 'After step 3, the conversation is marked as completed. The lead won\'t be re-engaged again unless a new appointment is booked.' },
+    ],
+    data_source: 'Supabase engagement_conversations table scanned hourly. Filters by last_prospect_reply_at (NULL or older than threshold) and updated_at. GHL contact data pulled for context when generating messages.',
+  },
+}
+
+function CadenceDocPanel({ cadenceName }) {
+  const doc = CADENCE_DOCS[cadenceName]
+  if (!doc) return null
+
+  return (
+    <div className="space-y-4">
+      <h4 className="text-xs font-bold text-text-primary">{doc.title}</h4>
+      <div className="space-y-2.5">
+        {doc.steps.map((step, i) => (
+          <div key={i} className="flex gap-3">
+            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-opt-yellow/10 flex items-center justify-center mt-0.5">
+              <span className="text-[9px] font-bold text-opt-yellow">{i + 1}</span>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-text-primary">{step.label}</p>
+              <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed">{step.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 pt-3 border-t border-border-default/30">
+        <p className="text-[10px] text-text-400 uppercase font-medium mb-1">Data Source</p>
+        <p className="text-[11px] text-text-secondary leading-relaxed">{doc.data_source}</p>
+      </div>
+    </div>
+  )
+}
+
 function CadenceCard({ cadence, conversations, onSave }) {
   const [enabled, setEnabled] = useState(cadence.enabled)
   const [rules, setRules] = useState(cadence.trigger_rules || {})

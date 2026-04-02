@@ -82,14 +82,63 @@ export function usePayments(period) {
   }, [period])
 
   const matchPayment = async (paymentId, clientId) => {
+    // Get the payment to find its Stripe customer ID
+    const { data: payment } = await supabase
+      .from('payments').select('metadata').eq('id', paymentId).single()
+
+    // Match this payment
     const { error } = await supabase
       .from('payments')
       .update({ client_id: clientId, matched: true })
       .eq('id', paymentId)
-    return !error
+    if (error) return false
+
+    // Auto-match all other payments from the same Stripe customer
+    const stripeCustomerId = payment?.metadata?.stripe_customer_id
+    if (stripeCustomerId) {
+      await supabase
+        .from('payments')
+        .update({ client_id: clientId, matched: true })
+        .eq('matched', false)
+        .not('metadata', 'is', null)
+      // Use a more targeted approach - fetch unmatched, filter by customer ID
+      const { data: unmatched } = await supabase
+        .from('payments').select('id, metadata').eq('matched', false)
+      if (unmatched) {
+        const sameCustomer = unmatched.filter(p => p.metadata?.stripe_customer_id === stripeCustomerId)
+        for (const p of sameCustomer) {
+          await supabase.from('payments').update({ client_id: clientId, matched: true }).eq('id', p.id)
+        }
+      }
+    }
+
+    // Also match by same customer_email
+    if (payment) {
+      const { data: thisPayment } = await supabase.from('payments').select('customer_email').eq('id', paymentId).single()
+      if (thisPayment?.customer_email) {
+        await supabase.from('payments')
+          .update({ client_id: clientId, matched: true })
+          .eq('customer_email', thisPayment.customer_email)
+          .eq('matched', false)
+      }
+    }
+
+    // Refresh
+    return true
   }
 
-  return { payments, loading, matchPayment }
+  const refresh = () => {
+    setLoading(true)
+    let query = supabase.from('payments')
+      .select('*, client:clients(name, company_name, closer_id, setter_id)')
+      .order('payment_date', { ascending: false })
+    if (period) {
+      query = query.gte('payment_date', `${period}-01`).lte('payment_date', `${period}-31T23:59:59`)
+    }
+    query.then(({ data }) => { setPayments(data || []); setLoading(false) })
+  }
+
+  return { payments, loading, matchPayment, refresh }
 }
 
 export function useCommissionLedger(memberId, period) {

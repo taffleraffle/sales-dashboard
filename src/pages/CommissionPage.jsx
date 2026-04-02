@@ -156,7 +156,7 @@ function CommissionPageAdmin() {
   const { members } = useTeamMembers()
   const { settings, settingsMap, upsert: upsertSettings } = useCommissionSettings()
   const { clients, clientsMap, refresh: refreshClients } = useClients()
-  const { payments, loading: loadingPayments, matchPayment } = usePayments(period)
+  const { payments, loading: loadingPayments, matchPayment, refresh: refreshPayments } = usePayments(period)
   const { ledger, loading: loadingLedger, updateStatus, refresh: refreshLedger } = useCommissionLedger(null, period)
   const navigate = useNavigate()
   const [importStatus, setImportStatus] = useState(null)
@@ -521,12 +521,13 @@ function CommissionPageAdmin() {
     setSyncing(true)
     setSyncResult(null)
     try {
-      const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/sync-stripe-payments?days=90&limit=100', {
+      const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/sync-stripe-payments?days=90&limit=100&resync=true', {
         headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` }
       })
       const data = await r.json()
       if (data.error) throw new Error(data.error)
-      setSyncResult(`Synced ${data.synced} payments (${data.matched} matched, ${data.skipped} skipped)`)
+      setSyncResult(`Synced ${data.synced} new, ${data.updated} updated, ${data.matched} matched`)
+      refreshPayments()
       refreshLedger()
     } catch (err) {
       setSyncResult(`Error: ${err.message}`)
@@ -673,12 +674,12 @@ function CommissionPageAdmin() {
                 <tr className="bg-bg-card text-text-400 uppercase text-[10px]">
                   <th className="px-3 py-2 text-left">Date</th>
                   <th className="px-3 py-2 text-left">Customer</th>
+                  <th className="px-3 py-2 text-left">Email</th>
+                  <th className="px-3 py-2 text-left">Invoice</th>
                   <th className="px-3 py-2 text-left">Source</th>
                   <th className="px-3 py-2 text-right">Amount</th>
-                  <th className="px-3 py-2 text-right">Fee</th>
                   <th className="px-3 py-2 text-right">Net</th>
-                  <th className="px-3 py-2 text-left">Client</th>
-                  <th className="px-3 py-2 text-left">Status</th>
+                  <th className="px-3 py-2 text-left">Matched Client</th>
                 </tr>
               </thead>
               <tbody>
@@ -689,7 +690,9 @@ function CommissionPageAdmin() {
                 ) : payments.map(p => (
                   <tr key={p.id} className={`border-t border-border-default/30 hover:bg-bg-card-hover/50 ${!p.matched ? 'bg-warning/5' : ''}`}>
                     <td className="px-3 py-2 text-text-400">{new Date(p.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
-                    <td className="px-3 py-2 text-text-primary">{p.customer_name || p.customer_email || '—'}</td>
+                    <td className="px-3 py-2 font-medium text-text-primary">{p.customer_name || '—'}</td>
+                    <td className="px-3 py-2 text-text-400 text-[10px]">{p.customer_email || '—'}</td>
+                    <td className="px-3 py-2 text-text-400 text-[10px]">{p.metadata?.invoice_number ? `#${p.metadata.invoice_number}` : (p.description || '—')}</td>
                     <td className="px-3 py-2">
                       <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${
                         p.source === 'stripe' ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' :
@@ -698,8 +701,7 @@ function CommissionPageAdmin() {
                       }`}>{p.source}</span>
                     </td>
                     <td className="px-3 py-2 text-right text-text-primary">${Number(p.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                    <td className="px-3 py-2 text-right text-danger">${Number(p.fee).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                    <td className="px-3 py-2 text-right font-medium text-text-primary">${Number(p.net_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    <td className="px-3 py-2 text-right font-medium text-success">${Number(p.net_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                     <td className="px-3 py-2">
                       {p.matched ? (
                         <span className="text-success text-[10px] flex items-center gap-1"><Check size={10} /> {p.client?.name || 'Matched'}</span>
@@ -712,7 +714,7 @@ function CommissionPageAdmin() {
                             Match <ChevronDown size={10} />
                           </button>
                           {matchingPaymentId === p.id && (
-                            <div className="absolute z-20 mt-1 left-0 bg-bg-card border border-border-default rounded-lg shadow-lg py-1 min-w-[200px] max-h-[200px] overflow-y-auto">
+                            <div className="absolute z-20 mt-1 left-0 bg-bg-card border border-border-default rounded-lg shadow-lg py-1 min-w-[250px] max-h-[200px] overflow-y-auto">
                               <div className="px-2 py-1">
                                 <input
                                   type="text"
@@ -724,7 +726,7 @@ function CommissionPageAdmin() {
                                 />
                               </div>
                               {clients
-                                .filter(c => !searchClient || c.name.toLowerCase().includes(searchClient.toLowerCase()))
+                                .filter(c => !searchClient || c.name.toLowerCase().includes(searchClient.toLowerCase()) || (c.company_name || '').toLowerCase().includes(searchClient.toLowerCase()))
                                 .slice(0, 15)
                                 .map(c => (
                                   <button
@@ -733,6 +735,7 @@ function CommissionPageAdmin() {
                                       await matchPayment(p.id, c.id)
                                       setMatchingPaymentId(null)
                                       setSearchClient('')
+                                      refreshPayments()
                                     }}
                                     className="w-full text-left px-3 py-1.5 text-[11px] text-text-primary hover:bg-bg-card-hover flex items-center justify-between"
                                   >
