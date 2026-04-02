@@ -142,6 +142,37 @@ input[type="date"], input[type="month"] {
   background: rgba(212, 245, 12, 0.03);
 }
 
+/* Slide-out panel (client edit, etc.) */
+.slide-panel {
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Fade out animation for row delete */
+@keyframes fade-out {
+  to { opacity: 0; max-height: 0; padding: 0; overflow: hidden; }
+}
+.fade-out {
+  animation: fade-out 300ms ease-out forwards;
+}
+
+/* Slide in from right (panels, modals) */
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.slide-in-right {
+  animation: slide-in-right 300ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Tab content fade */
+@keyframes tab-fade {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tab-fade {
+  animation: tab-fade 150ms ease-out forwards;
+}
+
 /* Splash screen loading bar */
 @keyframes load-bar {
   0% { width: 0; }

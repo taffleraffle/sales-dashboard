@@ -27,7 +27,7 @@ export async function matchPaymentToClient(
   name: string | null,
   ghlApiKey?: string,
   ghlLocationId?: string,
-): Promise<{ clientId: string | null; matched: boolean; autoCreated: boolean }> {
+): Promise<{ clientId: string | null; matched: boolean; autoCreated: boolean; confidence: number; matchTier: string }> {
 
   // Fetch all clients once for multi-strategy matching
   const { data: allClients } = await supabase
@@ -36,60 +36,58 @@ export async function matchPaymentToClient(
 
   const clients = allClients || []
 
-  // 1. Exact email match (case-insensitive)
+  // 1. Exact email match (case-insensitive) — confidence: 1.0
   if (email) {
     const emailLower = email.toLowerCase()
     const match = clients.find(c => c.email && c.email.toLowerCase() === emailLower)
-    if (match) return { clientId: match.id, matched: true, autoCreated: false }
+    if (match) return { clientId: match.id, matched: true, autoCreated: false, confidence: 1.0, matchTier: 'exact_email' }
   }
 
-  // 2. Email domain match (e.g. john@acpsplumbing.com matches acps75@gmail.com client who has company "ACPS")
+  // 2. Email domain match — confidence: 0.7
   if (email) {
     const emailUser = email.split('@')[0]?.toLowerCase() || ''
     const emailDomain = email.split('@')[1]?.split('.')[0]?.toLowerCase() || ''
-    // Check if email username or domain matches any client name or company name
     for (const c of clients) {
       const cName = normalizeForMatch(c.name)
       const cCompany = normalizeForMatch(c.company_name)
       const normUser = normalizeForMatch(emailUser)
       const normDomain = normalizeForMatch(emailDomain)
       if (cName && normUser.length > 2 && (normUser.includes(cName) || cName.includes(normUser))) {
-        return { clientId: c.id, matched: true, autoCreated: false }
+        return { clientId: c.id, matched: true, autoCreated: false, confidence: 0.7, matchTier: 'email_domain' }
       }
       if (cCompany && normDomain.length > 3 && (normDomain.includes(cCompany) || cCompany.includes(normDomain))) {
-        return { clientId: c.id, matched: true, autoCreated: false }
+        return { clientId: c.id, matched: true, autoCreated: false, confidence: 0.7, matchTier: 'email_domain' }
       }
     }
   }
 
-  // 3. Phone match (last 10 digits)
+  // 3. Phone match (last 10 digits) — confidence: 0.9
   if (phone) {
     const norm = normalizePhone(phone)
     if (norm) {
       const match = clients.find(c => c.phone && normalizePhone(c.phone) === norm)
-      if (match) return { clientId: match.id, matched: true, autoCreated: false }
+      if (match) return { clientId: match.id, matched: true, autoCreated: false, confidence: 0.9, matchTier: 'phone' }
     }
   }
 
-  // 4. Name / company name match
+  // 4. Name / company name match — confidence: 0.5
   if (name && name.length > 2) {
     const normName = normalizeForMatch(name)
-    // Skip generic names
     if (!['invoice', 'subscription', 'payment', 'update'].some(g => normName.includes(g))) {
       for (const c of clients) {
         const cName = normalizeForMatch(c.name)
         const cCompany = normalizeForMatch(c.company_name)
         if (cName && normName.length > 3 && (normName.includes(cName) || cName.includes(normName))) {
-          return { clientId: c.id, matched: true, autoCreated: false }
+          return { clientId: c.id, matched: true, autoCreated: false, confidence: 0.5, matchTier: 'name' }
         }
         if (cCompany && normName.length > 4 && (normName.includes(cCompany) || cCompany.includes(normName))) {
-          return { clientId: c.id, matched: true, autoCreated: false }
+          return { clientId: c.id, matched: true, autoCreated: false, confidence: 0.5, matchTier: 'name' }
         }
       }
     }
   }
 
-  // 5. GHL API lookup
+  // 5. GHL API lookup — confidence: 0.6
   if (ghlApiKey && ghlLocationId && (email || phone)) {
     try {
       const query = email || phone
@@ -110,13 +108,13 @@ export async function matchPaymentToClient(
             stage: 'trial',
             trial_start_date: new Date().toISOString().split('T')[0],
           }).select('id').single()
-          if (!error && newClient) return { clientId: newClient.id, matched: true, autoCreated: true }
+          if (!error && newClient) return { clientId: newClient.id, matched: true, autoCreated: true, confidence: 0.6, matchTier: 'ghl' }
         }
       }
     } catch { /* continue */ }
   }
 
-  return { clientId: null, matched: false, autoCreated: false }
+  return { clientId: null, matched: false, autoCreated: false, confidence: 0, matchTier: 'none' }
 }
 
 /**

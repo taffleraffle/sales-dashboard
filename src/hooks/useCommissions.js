@@ -81,27 +81,27 @@ export function usePayments(period) {
     })
   }, [period])
 
-  const matchPayment = async (paymentId, clientId) => {
+  const matchPayment = async (paymentId, clientId, userEmail) => {
     // Get the payment to find its Stripe customer ID
     const { data: payment } = await supabase
       .from('payments').select('metadata').eq('id', paymentId).single()
 
-    // Match this payment
+    // Match this payment + set audit fields
     const { error } = await supabase
       .from('payments')
-      .update({ client_id: clientId, matched: true })
+      .update({
+        client_id: clientId,
+        matched: true,
+        manually_matched: true,
+        matched_by: userEmail || null,
+        matched_at: new Date().toISOString(),
+      })
       .eq('id', paymentId)
     if (error) return false
 
     // Auto-match all other payments from the same Stripe customer
     const stripeCustomerId = payment?.metadata?.stripe_customer_id
     if (stripeCustomerId) {
-      await supabase
-        .from('payments')
-        .update({ client_id: clientId, matched: true })
-        .eq('matched', false)
-        .not('metadata', 'is', null)
-      // Use a more targeted approach - fetch unmatched, filter by customer ID
       const { data: unmatched } = await supabase
         .from('payments').select('id, metadata').eq('matched', false)
       if (unmatched) {
@@ -113,17 +113,33 @@ export function usePayments(period) {
     }
 
     // Also match by same customer_email
-    if (payment) {
-      const { data: thisPayment } = await supabase.from('payments').select('customer_email').eq('id', paymentId).single()
-      if (thisPayment?.customer_email) {
-        await supabase.from('payments')
-          .update({ client_id: clientId, matched: true })
-          .eq('customer_email', thisPayment.customer_email)
-          .eq('matched', false)
-      }
+    const { data: thisPayment } = await supabase.from('payments').select('customer_email').eq('id', paymentId).single()
+    if (thisPayment?.customer_email) {
+      await supabase.from('payments')
+        .update({ client_id: clientId, matched: true })
+        .eq('customer_email', thisPayment.customer_email)
+        .eq('matched', false)
     }
 
-    // Refresh
+    return true
+  }
+
+  const unmatchPayment = async (paymentId, userEmail) => {
+    // Unmatch the payment
+    const { error } = await supabase
+      .from('payments')
+      .update({
+        client_id: null,
+        matched: false,
+        manually_matched: true,
+        matched_by: userEmail || null,
+        matched_at: new Date().toISOString(),
+      })
+      .eq('id', paymentId)
+    if (error) return false
+
+    // Delete commission_ledger entries for this payment
+    await supabase.from('commission_ledger').delete().eq('payment_id', paymentId)
     return true
   }
 
@@ -138,7 +154,7 @@ export function usePayments(period) {
     query.then(({ data }) => { setPayments(data || []); setLoading(false) })
   }
 
-  return { payments, loading, matchPayment, refresh }
+  return { payments, loading, matchPayment, unmatchPayment, refresh }
 }
 
 export function useCommissionLedger(memberId, period) {
@@ -172,4 +188,49 @@ export function useCommissionLedger(memberId, period) {
   }
 
   return { ledger, loading, updateStatus, refresh: fetch }
+}
+
+export function usePaymentBlacklist() {
+  const [blacklist, setBlacklist] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  const fetch = useCallback(async () => {
+    setLoading(true)
+    const { data } = await supabase
+      .from('payment_blacklist')
+      .select('*')
+      .order('created_at')
+    setBlacklist(data || [])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { fetch() }, [fetch])
+
+  const addPattern = async (pattern, matchField, createdBy) => {
+    const { error } = await supabase
+      .from('payment_blacklist')
+      .insert({ pattern, match_field: matchField, created_by: createdBy })
+    if (!error) await fetch()
+    return !error
+  }
+
+  const removePattern = async (id) => {
+    const { error } = await supabase
+      .from('payment_blacklist')
+      .delete()
+      .eq('id', id)
+    if (!error) await fetch()
+    return !error
+  }
+
+  const isBlacklisted = (payment) => {
+    return blacklist.some(b => {
+      if (b.match_field === 'email') return (payment.customer_email || '').toLowerCase().includes(b.pattern.toLowerCase())
+      if (b.match_field === 'name') return (payment.customer_name || '').toLowerCase().includes(b.pattern.toLowerCase())
+      if (b.match_field === 'description') return (payment.description || '').toLowerCase().includes(b.pattern.toLowerCase())
+      return false
+    })
+  }
+
+  return { blacklist, loading, addPattern, removePattern, isBlacklisted, refresh: fetch }
 }

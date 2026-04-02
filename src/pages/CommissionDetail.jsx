@@ -1,10 +1,12 @@
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { DollarSign, ArrowLeft, TrendingUp, ChevronDown } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useCommissionLedger, useCommissionSettings } from '../hooks/useCommissions'
 import { summarizeCommissions } from '../services/commissionCalc'
 import KPICard from '../components/KPICard'
+import MonthPicker from '../components/MonthPicker'
 
 const TYPE_COLORS = {
   trial_close: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
@@ -30,6 +32,12 @@ export default function CommissionDetail({ memberId: propId } = {}) {
   const params = useParams()
   const id = propId || params.id
   const navigate = useNavigate()
+  const { isAdmin, profile } = useAuth()
+
+  // URL security: non-admins can only view their own commission detail
+  if (!propId && !isAdmin && profile?.teamMemberId && profile.teamMemberId !== id) {
+    return <Navigate to="/sales/commissions" replace />
+  }
   const now = new Date()
   const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const [period, setPeriod] = useState(currentPeriod)
@@ -105,13 +113,7 @@ export default function CommissionDetail({ memberId: propId } = {}) {
             />
             All time
           </label>
-          <input
-            type="month"
-            value={period}
-            onChange={e => setPeriod(e.target.value)}
-            disabled={showAllTime}
-            className="bg-bg-primary border border-border-default rounded-lg px-3 py-1.5 text-xs text-text-primary disabled:opacity-50"
-          />
+          <MonthPicker value={period} onChange={setPeriod} disabled={showAllTime} />
         </div>
       </div>
 
