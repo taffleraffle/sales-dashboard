@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { DollarSign, Upload, Check, X, ChevronDown, Loader, Search, ArrowRight, Plus, Edit3, Save, Download, Eye } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -172,6 +172,14 @@ function CommissionPageAdmin() {
   const [csvPreview, setCsvPreview] = useState(null) // { headers, rows, file }
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
+
+  // Auto-calculate commissions on page load and when payments/settings change
+  const settingsReady = Object.values(settingsMap).some(s => s.commission_rate > 0)
+  useEffect(() => {
+    if (settingsReady && payments.length > 0 && !loadingPayments) {
+      autoCalculateCommissions()
+    }
+  }, [settingsReady, payments.length, loadingPayments])
 
   const summaries = summarizeCommissions(ledger, settingsMap)
   const totalCommission = Object.values(summaries).reduce((s, m) => s + m.total_commission, 0)
@@ -451,30 +459,34 @@ function CommissionPageAdmin() {
   const txCountByClient = {}
   payments.forEach(p => { if (p.client_id) txCountByClient[p.client_id] = (txCountByClient[p.client_id] || 0) + 1 })
 
-  const generateCommissions = async () => {
-    if (!confirm('Generate commission entries from all matched Stripe/Fanbasis payments? This will clear existing entries and recalculate from current rates.')) return
-    setImportStatus('Calculating commissions...')
-
-    // Clear existing ledger
-    await supabase.from('commission_ledger').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-
-    // Fetch ALL matched payments (not just current period)
+  // Auto-calculate commissions whenever payments or settings change
+  const autoCalculateCommissions = async () => {
     const { data: allPayments } = await supabase.from('payments')
-      .select('id, net_amount, payment_date, payment_type, client_id, client:clients(id, name, closer_id, setter_id, trial_start_date, stage)')
+      .select('id, net_amount, payment_date, payment_type, client_id')
       .eq('matched', true)
-      .order('payment_date')
+
+    if (!allPayments?.length) return
+
+    // Get client details separately to avoid join issues
+    const clientIds = [...new Set(allPayments.map(p => p.client_id).filter(Boolean))]
+    const { data: clientData } = await supabase.from('clients')
+      .select('id, closer_id, setter_id, trial_start_date, stage')
+      .in('id', clientIds)
+    const clientMap = {}
+    clientData?.forEach(c => { clientMap[c.id] = c })
+
+    // Check which payments already have commission entries
+    const { data: existingEntries } = await supabase.from('commission_ledger').select('payment_id')
+    const processedPayments = new Set((existingEntries || []).map(e => e.payment_id))
 
     let created = 0
-    for (const p of (allPayments || [])) {
-      if (!p.client) continue
-      const client = p.client
-      if (!client.closer_id && !client.setter_id) continue
+    for (const p of allPayments) {
+      if (processedPayments.has(p.id)) continue
+      const client = clientMap[p.client_id]
+      if (!client || (!client.closer_id && !client.setter_id)) continue
 
-      // Check commission window (months 0-3)
       if (client.trial_start_date) {
-        const start = new Date(client.trial_start_date)
-        const payDate = new Date(p.payment_date)
-        const monthsSince = (payDate - start) / (30.44 * 86400000)
+        const monthsSince = (new Date(p.payment_date) - new Date(client.trial_start_date)) / (30.44 * 86400000)
         if (monthsSince > 4) continue
       }
 
@@ -483,38 +495,26 @@ function CommissionPageAdmin() {
       const netAmount = Number(p.net_amount) || 0
       if (netAmount <= 0) continue
 
-      // Closer commission
-      if (client.closer_id) {
-        const cs = settingsMap[client.closer_id]
-        const rate = cs?.commission_rate || 0
-        if (rate > 0) {
-          await supabase.from('commission_ledger').insert({
-            member_id: client.closer_id, payment_id: p.id, client_id: client.id, period: periodStr,
-            commission_type: commType, payment_amount: netAmount, commission_rate: rate,
-            commission_amount: Number((netAmount * rate / 100).toFixed(2)), status: 'pending',
-          })
-          created++
-        }
+      if (client.closer_id && settingsMap[client.closer_id]?.commission_rate > 0) {
+        const rate = settingsMap[client.closer_id].commission_rate
+        await supabase.from('commission_ledger').insert({
+          member_id: client.closer_id, payment_id: p.id, client_id: client.id, period: periodStr,
+          commission_type: commType, payment_amount: netAmount, commission_rate: rate,
+          commission_amount: Number((netAmount * rate / 100).toFixed(2)), status: 'pending',
+        })
+        created++
       }
-
-      // Setter commission
-      if (client.setter_id) {
-        const cs = settingsMap[client.setter_id]
-        const rate = cs?.commission_rate || 0
-        if (rate > 0) {
-          await supabase.from('commission_ledger').insert({
-            member_id: client.setter_id, payment_id: p.id, client_id: client.id, period: periodStr,
-            commission_type: commType, payment_amount: netAmount, commission_rate: rate,
-            commission_amount: Number((netAmount * rate / 100).toFixed(2)), status: 'pending',
-          })
-          created++
-        }
+      if (client.setter_id && settingsMap[client.setter_id]?.commission_rate > 0) {
+        const rate = settingsMap[client.setter_id].commission_rate
+        await supabase.from('commission_ledger').insert({
+          member_id: client.setter_id, payment_id: p.id, client_id: client.id, period: periodStr,
+          commission_type: commType, payment_amount: netAmount, commission_rate: rate,
+          commission_amount: Number((netAmount * rate / 100).toFixed(2)), status: 'pending',
+        })
+        created++
       }
     }
-
-    setImportStatus(`Generated ${created} commission entries from ${allPayments?.length || 0} payments`)
-    refreshLedger()
-    setTimeout(() => setImportStatus(null), 8000)
+    if (created > 0) refreshLedger()
   }
 
   const syncStripePayments = async () => {
@@ -528,7 +528,7 @@ function CommissionPageAdmin() {
       if (data.error) throw new Error(data.error)
       setSyncResult(`Synced ${data.synced} new, ${data.updated} updated, ${data.matched} matched`)
       refreshPayments()
-      refreshLedger()
+      // Commissions will auto-calculate via useEffect when payments refresh
     } catch (err) {
       setSyncResult(`Error: ${err.message}`)
     }
@@ -664,7 +664,6 @@ function CommissionPageAdmin() {
               <button onClick={syncStripePayments} disabled={syncing} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-purple-500/30 text-purple-400 rounded-xl hover:bg-purple-500/10 disabled:opacity-50 transition-all">
                 {syncing ? <><Loader size={12} className="animate-spin" /> Syncing...</> : <><Download size={12} /> Sync Stripe</>}
               </button>
-              <button onClick={generateCommissions} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-success/30 text-success rounded-xl hover:bg-success/10 transition-all"><DollarSign size={12} /> Calculate Commissions</button>
               <button onClick={() => setShowAddPayment(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:bg-opt-yellow/90 transition-all"><Plus size={12} /> Add Payment</button>
             </div>
           </div>
@@ -818,9 +817,6 @@ function CommissionPageAdmin() {
               <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-400 rounded-lg hover:bg-bg-card-hover"><Download size={12} /> Template</button>
               <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-primary rounded-lg hover:bg-bg-card-hover"><Upload size={12} /> Import CSV</button>
               <button onClick={() => setShowAddClient(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Plus size={12} /> Add Client</button>
-              {clients.length > 0 && (
-                <button onClick={generateCommissions} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-success/30 text-success rounded-lg hover:bg-success/10"><DollarSign size={12} /> Generate Commissions</button>
-              )}
             </div>
           </div>
           {/* CSV Preview Modal */}
