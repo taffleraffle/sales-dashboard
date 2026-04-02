@@ -134,18 +134,38 @@ export default function CommissionDetail({ memberId: propId } = {}) {
         const paidClientIds = new Set(currentEntries.map(e => e.client_id))
         const missingClients = memberClients.filter(c => !paidClientIds.has(c.id))
 
-        const forecastedCommission = forecastedCash * (settings.commission_rate || 0) / 100
+        const rate = settings.commission_rate || 0
+        const forecastedCommission = forecastedCash * rate / 100
+        const actualCommission = showAllTime ? allTimeTotals.total : summary.total_commission
 
         return (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <KPICard label="Commission Rate" value={`${settings.commission_rate || 0}%`} subtitle="of net cash (months 0-3)" />
-            <KPICard
-              label={showAllTime ? 'All-Time Revenue' : 'Revenue Generated'}
-              value={`$${actualCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
-              subtitle={`${showAllTime ? allTimeTotals.deals : currentEntries.length} collected`}
-            />
-            <KPICard label="Forecasted Cash" value={`$${forecastedCash.toLocaleString()}`} subtitle={`${memberClients.length} active clients`} />
-            <KPICard label="Forecasted Commission" value={`$${forecastedCommission.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} subtitle={`at ${settings.commission_rate || 0}%`} />
+          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-bg-card text-text-400 uppercase text-[10px] tracking-wider">
+                  <th className="px-4 py-2.5 text-left"></th>
+                  <th className="px-4 py-2.5 text-right">Cash</th>
+                  <th className="px-4 py-2.5 text-right">Commission ({rate}%)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-t border-border-default/30">
+                  <td className="px-4 py-3 font-medium text-text-primary">Forecasted</td>
+                  <td className="px-4 py-3 text-right text-text-primary font-medium">${forecastedCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                  <td className="px-4 py-3 text-right text-text-primary font-medium">${forecastedCommission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                </tr>
+                <tr className="border-t border-border-default/30">
+                  <td className="px-4 py-3 font-medium text-success">Actual</td>
+                  <td className="px-4 py-3 text-right text-success font-medium">${actualCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                  <td className="px-4 py-3 text-right text-success font-bold">${actualCommission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                </tr>
+                <tr className="border-t border-border-default/30">
+                  <td className="px-4 py-3 font-medium text-text-400">Lifetime Revenue</td>
+                  <td className="px-4 py-3 text-right text-text-primary font-medium">${allTimeTotals.revenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                  <td className="px-4 py-3 text-right text-text-primary font-medium">${allTimeTotals.total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         )
       })()}
