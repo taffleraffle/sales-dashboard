@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { matchPaymentToClient, autoCreateCommission } from '../_shared/matchPayment.ts'
+import { matchPaymentToClient, autoCreateCommission, toUSD } from '../_shared/matchPayment.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -56,8 +56,11 @@ serve(async (req) => {
       const invoiceMatch = (charge.description || '').match(/Invoice\s*#?(\d+)/i)
       const invoiceNumber = invoiceMatch ? invoiceMatch[1] : null
 
-      const amount = (charge.amount || 0) / 100
-      const fee = charge.application_fee_amount ? charge.application_fee_amount / 100 : Number((amount * 0.029 + 0.30).toFixed(2))
+      const rawAmount = (charge.amount || 0) / 100
+      const currency = (charge.currency || 'usd').toUpperCase()
+      const amount = toUSD(rawAmount, currency)
+      const rawFee = charge.application_fee_amount ? charge.application_fee_amount / 100 : Number((rawAmount * 0.029 + 0.30).toFixed(2))
+      const fee = toUSD(rawFee, currency)
       const netAmount = Number((amount - fee).toFixed(2))
       const paymentDate = new Date(charge.created * 1000).toISOString()
 
