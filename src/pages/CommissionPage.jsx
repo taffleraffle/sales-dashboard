@@ -452,89 +452,69 @@ function CommissionPageAdmin() {
   payments.forEach(p => { if (p.client_id) txCountByClient[p.client_id] = (txCountByClient[p.client_id] || 0) + 1 })
 
   const generateCommissions = async () => {
-    if (!confirm('Generate commission entries from client payment data? This will create ledger entries based on each client\'s payment count and monthly amount.')) return
-    setImportStatus('Generating commissions...')
+    if (!confirm('Generate commission entries from all matched Stripe/Fanbasis payments? This will clear existing entries and recalculate from current rates.')) return
+    setImportStatus('Calculating commissions...')
+
+    // Clear existing ledger
+    await supabase.from('commission_ledger').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+
+    // Fetch ALL matched payments (not just current period)
+    const { data: allPayments } = await supabase.from('payments')
+      .select('id, net_amount, payment_date, payment_type, client_id, client:clients(id, name, closer_id, setter_id, trial_start_date, stage)')
+      .eq('matched', true)
+      .order('payment_date')
+
     let created = 0
-
-    for (const client of clients) {
+    for (const p of (allPayments || [])) {
+      if (!p.client) continue
+      const client = p.client
       if (!client.closer_id && !client.setter_id) continue
-      const pc = client.payment_count || 0
-      if (pc === 0) continue
 
-      for (let pn = 0; pn < pc && pn < 4; pn++) {
-        const amount = pn === 0 ? (Number(client.trial_amount) || Number(client.monthly_amount) || 0) : (Number(client.monthly_amount) || 0)
-        if (amount === 0) continue
+      // Check commission window (months 0-3)
+      if (client.trial_start_date) {
+        const start = new Date(client.trial_start_date)
+        const payDate = new Date(p.payment_date)
+        const monthsSince = (payDate - start) / (30.44 * 86400000)
+        if (monthsSince > 4) continue
+      }
 
-        const commType = pn === 0 ? 'trial_close' : 'ascension'
-        // Estimate payment date from trial_start_date
-        const startDate = client.trial_start_date ? new Date(client.trial_start_date + 'T12:00:00') : new Date()
-        const payDate = new Date(startDate)
-        payDate.setMonth(payDate.getMonth() + pn)
-        const periodStr = `${payDate.getFullYear()}-${String(payDate.getMonth() + 1).padStart(2, '0')}`
+      const periodStr = p.payment_date.slice(0, 7)
+      const commType = p.payment_type === 'trial' ? 'trial_close' : 'ascension'
+      const netAmount = Number(p.net_amount) || 0
+      if (netAmount <= 0) continue
 
-        // Create payment record
-        const { data: payment } = await supabase.from('payments').insert({
-          source: 'manual',
-          source_event_id: `gen_${client.id}_${pn}`,
-          amount,
-          fee: 0,
-          net_amount: amount,
-          customer_name: client.name,
-          customer_email: client.email,
-          payment_date: payDate.toISOString(),
-          payment_type: pn === 0 ? 'trial' : 'monthly',
-          payment_number: pn,
-          client_id: client.id,
-          matched: true,
-        }).select('id').single()
-
-        if (!payment) continue
-
-        // Create commission for closer
-        if (client.closer_id) {
-          const cs = settingsMap[client.closer_id]
-          const rate = cs?.commission_rate || 0
-          if (rate > 0) {
-            await supabase.from('commission_ledger').insert({
-              member_id: client.closer_id,
-              payment_id: payment.id,
-              client_id: client.id,
-              period: periodStr,
-              commission_type: commType,
-              payment_amount: amount,
-              commission_rate: rate,
-              commission_amount: Number((amount * rate / 100).toFixed(2)),
-              status: 'pending',
-            })
-            created++
-          }
+      // Closer commission
+      if (client.closer_id) {
+        const cs = settingsMap[client.closer_id]
+        const rate = cs?.commission_rate || 0
+        if (rate > 0) {
+          await supabase.from('commission_ledger').insert({
+            member_id: client.closer_id, payment_id: p.id, client_id: client.id, period: periodStr,
+            commission_type: commType, payment_amount: netAmount, commission_rate: rate,
+            commission_amount: Number((netAmount * rate / 100).toFixed(2)), status: 'pending',
+          })
+          created++
         }
+      }
 
-        // Create commission for setter
-        if (client.setter_id) {
-          const cs = settingsMap[client.setter_id]
-          const rate = cs?.commission_rate || 0
-          if (rate > 0) {
-            await supabase.from('commission_ledger').insert({
-              member_id: client.setter_id,
-              payment_id: payment.id,
-              client_id: client.id,
-              period: periodStr,
-              commission_type: commType,
-              payment_amount: amount,
-              commission_rate: rate,
-              commission_amount: Number((amount * rate / 100).toFixed(2)),
-              status: 'pending',
-            })
-            created++
-          }
+      // Setter commission
+      if (client.setter_id) {
+        const cs = settingsMap[client.setter_id]
+        const rate = cs?.commission_rate || 0
+        if (rate > 0) {
+          await supabase.from('commission_ledger').insert({
+            member_id: client.setter_id, payment_id: p.id, client_id: client.id, period: periodStr,
+            commission_type: commType, payment_amount: netAmount, commission_rate: rate,
+            commission_amount: Number((netAmount * rate / 100).toFixed(2)), status: 'pending',
+          })
+          created++
         }
       }
     }
 
-    setImportStatus(`Generated ${created} commission entries`)
+    setImportStatus(`Generated ${created} commission entries from ${allPayments?.length || 0} payments`)
     refreshLedger()
-    setTimeout(() => setImportStatus(null), 5000)
+    setTimeout(() => setImportStatus(null), 8000)
   }
 
   const syncStripePayments = async () => {
@@ -681,10 +661,11 @@ function CommissionPageAdmin() {
               {syncResult && <span className="text-[10px] text-success">{syncResult}</span>}
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={syncStripePayments} disabled={syncing} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-purple-500/30 text-purple-400 rounded-lg hover:bg-purple-500/10 disabled:opacity-50">
+              <button onClick={syncStripePayments} disabled={syncing} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-purple-500/30 text-purple-400 rounded-xl hover:bg-purple-500/10 disabled:opacity-50 transition-all">
                 {syncing ? <><Loader size={12} className="animate-spin" /> Syncing...</> : <><Download size={12} /> Sync Stripe</>}
               </button>
-              <button onClick={() => setShowAddPayment(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90"><Plus size={12} /> Add Payment</button>
+              <button onClick={generateCommissions} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-success/30 text-success rounded-xl hover:bg-success/10 transition-all"><DollarSign size={12} /> Calculate Commissions</button>
+              <button onClick={() => setShowAddPayment(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:bg-opt-yellow/90 transition-all"><Plus size={12} /> Add Payment</button>
             </div>
           </div>
           <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
