@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, memo, useCallback, startTransition } from 'react'
+import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition } from 'react'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { syncMetaToTracker } from '../services/metaAdsSync'
 import DateRangeSelector from '../components/DateRangeSelector'
