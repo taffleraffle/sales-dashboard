@@ -9,10 +9,28 @@ import { fetchWavvCallsForSTL } from '../services/wavvService'
 
 const KPI_DEFAULTS = { leads_day: 70, sets_day: 3, stl_pct: 80 }
 
+function toETDateStr(d) {
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+}
+
 function isWeekday(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00')
+  const d = new Date(dateStr + 'T12:00:00')
   const day = d.getDay()
   return day !== 0 && day !== 6
+}
+
+function getAllWeekdays(fromStr, toStr) {
+  const result = []
+  const d = new Date(toStr + 'T12:00:00')
+  const end = new Date(fromStr + 'T12:00:00')
+  while (d >= end) {
+    const day = d.getDay()
+    if (day !== 0 && day !== 6) {
+      result.push(d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }))
+    }
+    d.setDate(d.getDate() - 1)
+  }
+  return result
 }
 
 export default function SetterKPIHistory() {
@@ -95,36 +113,46 @@ export default function SetterKPIHistory() {
     </div>
   )
 
-  // Filter to weekdays only (Mon-Fri)
-  const weekdayReports = reports.filter(r => isWeekday(r.report_date))
+  // Build index of EOD reports by date
+  const eodByDate = {}
+  for (const r of reports) eodByDate[r.report_date] = r
 
-  // Build daily rows
-  const rows = weekdayReports.map(r => {
-    const leads = r.total_leads || 0
-    const sets = r.sets || 0
-    const dials = r.outbound_calls || 0
-    const pickups = r.pickups || 0
-    const mcs = r.meaningful_conversations || 0
+  // Generate all weekdays in range, including days without EODs
+  const today = toETDateStr(new Date())
+  const fromDate = sinceDate(range)
+  const toDate = typeof range === 'object' && range.to ? range.to : today
+  const allWeekdays = getAllWeekdays(fromDate, toDate)
+
+  // Build daily rows for every weekday
+  const rows = allWeekdays.map(date => {
+    const r = eodByDate[date]
+    const hasEOD = !!r
+    const leads = r?.total_leads || 0
+    const sets = r?.sets || 0
+    const dials = r?.outbound_calls || 0
+    const pickups = r?.pickups || 0
+    const mcs = r?.meaningful_conversations || 0
 
     const leadsPct = kpiTargets.leads_day > 0 ? Math.min((leads / kpiTargets.leads_day) * 100, 100) : 0
     const setsPct = kpiTargets.sets_day > 0 ? Math.min((sets / kpiTargets.sets_day) * 100, 100) : 0
 
-    const leadsHit = leads >= kpiTargets.leads_day
-    const setsHit = sets >= kpiTargets.sets_day
+    const leadsHit = hasEOD && leads >= kpiTargets.leads_day
+    const setsHit = hasEOD && sets >= kpiTargets.sets_day
     const kpisHit = (leadsHit ? 1 : 0) + (setsHit ? 1 : 0)
 
-    return { date: r.report_date, leads, sets, dials, pickups, mcs, leadsPct, setsPct, leadsHit, setsHit, kpisHit, selfRating: r.self_rating }
+    return { date, leads, sets, dials, pickups, mcs, leadsPct, setsPct, leadsHit, setsHit, kpisHit, hasEOD, selfRating: r?.self_rating }
   })
 
-  const totalDays = rows.length
-  const allHitDays = rows.filter(r => r.kpisHit === 2).length
+  const reportedRows = rows.filter(r => r.hasEOD)
+  const totalDays = reportedRows.length
+  const allHitDays = reportedRows.filter(r => r.kpisHit === 2).length
   const hitPct = totalDays > 0 ? ((allHitDays / totalDays) * 100).toFixed(0) : 0
 
-  const totalLeads = rows.reduce((s, r) => s + r.leads, 0)
-  const totalSets = rows.reduce((s, r) => s + r.sets, 0)
-  const totalDials = rows.reduce((s, r) => s + r.dials, 0)
-  const totalPickups = rows.reduce((s, r) => s + r.pickups, 0)
-  const totalMCs = rows.reduce((s, r) => s + r.mcs, 0)
+  const totalLeads = reportedRows.reduce((s, r) => s + r.leads, 0)
+  const totalSets = reportedRows.reduce((s, r) => s + r.sets, 0)
+  const totalDials = reportedRows.reduce((s, r) => s + r.dials, 0)
+  const totalPickups = reportedRows.reduce((s, r) => s + r.pickups, 0)
+  const totalMCs = reportedRows.reduce((s, r) => s + r.mcs, 0)
 
   const avgLeads = totalDays > 0 ? (totalLeads / totalDays).toFixed(1) : 0
   const avgSets = totalDays > 0 ? (totalSets / totalDays).toFixed(1) : 0
@@ -145,8 +173,8 @@ export default function SetterKPIHistory() {
   const kpiTotal = stlPct != null ? 3 : 2
 
   const fmtDate = d => {
-    const dt = new Date(d + 'T00:00:00')
-    return dt.toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })
+    const dt = new Date(d + 'T12:00:00')
+    return dt.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/New_York' })
   }
 
   return (
@@ -169,7 +197,7 @@ export default function SetterKPIHistory() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
         <div className="bg-bg-card border border-border-default rounded-2xl p-4">
           <p className="text-[10px] text-text-400 uppercase mb-1">Weekdays Reported</p>
-          <p className="text-xl font-bold">{totalDays}</p>
+          <p className="text-xl font-bold">{totalDays} <span className="text-sm text-text-400">/ {allWeekdays.length}</span></p>
         </div>
         <div className="bg-bg-card border border-border-default rounded-2xl p-4">
           <p className="text-[10px] text-text-400 uppercase mb-1">All Targets Hit</p>
@@ -192,7 +220,7 @@ export default function SetterKPIHistory() {
           ) : stlPct != null ? (
             <>
               <p className={`text-xl font-bold ${stlHit ? 'text-success' : 'text-danger'}`}>{Math.round(stlPct)}%</p>
-              <p className="text-[9px] text-text-400">Target: {kpiTargets.stl_pct}% · {stl.under5m}/{stl.worked} leads</p>
+              <p className="text-[9px] text-text-400">Target: {kpiTargets.stl_pct}% · {stl.under5m}/{stl.worked} leads · Avg: {stl.avgDisplay}</p>
             </>
           ) : (
             <p className="text-xl font-bold text-text-400">—</p>
@@ -246,33 +274,40 @@ export default function SetterKPIHistory() {
               </thead>
               <tbody>
                 {rows.map((r, i) => (
-                  <tr key={r.date} className={`border-b border-border-default/50 ${i % 2 === 0 ? '' : 'bg-bg-primary/30'} hover:bg-bg-card-hover transition-colors`}>
-                    <td className="px-4 py-2.5 text-text-primary font-medium whitespace-nowrap">{fmtDate(r.date)}</td>
-                    <td className={`text-right px-3 py-2.5 font-semibold ${cellColor(r.leadsHit, r.leadsPct)}`}>
-                      {r.leads} <span className="text-text-400 font-normal text-[10px]">/ {kpiTargets.leads_day}</span>
+                  <tr key={r.date} className={`border-b border-border-default/50 ${!r.hasEOD ? 'opacity-40' : ''} ${i % 2 === 0 ? '' : 'bg-bg-primary/30'} hover:bg-bg-card-hover transition-colors`}>
+                    <td className="px-4 py-2.5 text-text-primary font-medium whitespace-nowrap">
+                      {fmtDate(r.date)}
+                      {!r.hasEOD && <span className="text-[9px] text-danger/70 ml-1.5">No EOD</span>}
                     </td>
-                    <td className="px-3 py-2.5">
-                      <div className="h-1.5 bg-bg-primary rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${barColor(r.leadsHit, r.leadsPct)} transition-all`} style={{ width: `${r.leadsPct}%` }} />
-                      </div>
-                    </td>
-                    <td className={`text-right px-3 py-2.5 font-semibold ${cellColor(r.setsHit, r.setsPct)}`}>
-                      {r.sets} <span className="text-text-400 font-normal text-[10px]">/ {kpiTargets.sets_day}</span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="h-1.5 bg-bg-primary rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${barColor(r.setsHit, r.setsPct)} transition-all`} style={{ width: `${r.setsPct}%` }} />
-                      </div>
-                    </td>
-                    <td className="text-right px-3 py-2.5 text-text-primary">{r.dials}</td>
-                    <td className="text-right px-3 py-2.5 text-text-primary">{r.pickups}</td>
-                    <td className="text-right px-3 py-2.5 text-text-primary">{r.mcs}</td>
-                    <td className="text-center px-3 py-2.5">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${hitBadge(r.kpisHit)}`}>
-                        {r.kpisHit === kpiTotal && <CheckCircle size={10} />}
-                        {r.kpisHit}/{kpiTotal}
-                      </span>
-                    </td>
+                    {r.hasEOD ? (<>
+                      <td className={`text-right px-3 py-2.5 font-semibold ${cellColor(r.leadsHit, r.leadsPct)}`}>
+                        {r.leads} <span className="text-text-400 font-normal text-[10px]">/ {kpiTargets.leads_day}</span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="h-1.5 bg-bg-primary rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${barColor(r.leadsHit, r.leadsPct)} transition-all`} style={{ width: `${r.leadsPct}%` }} />
+                        </div>
+                      </td>
+                      <td className={`text-right px-3 py-2.5 font-semibold ${cellColor(r.setsHit, r.setsPct)}`}>
+                        {r.sets} <span className="text-text-400 font-normal text-[10px]">/ {kpiTargets.sets_day}</span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="h-1.5 bg-bg-primary rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${barColor(r.setsHit, r.setsPct)} transition-all`} style={{ width: `${r.setsPct}%` }} />
+                        </div>
+                      </td>
+                      <td className="text-right px-3 py-2.5 text-text-primary">{r.dials}</td>
+                      <td className="text-right px-3 py-2.5 text-text-primary">{r.pickups}</td>
+                      <td className="text-right px-3 py-2.5 text-text-primary">{r.mcs}</td>
+                      <td className="text-center px-3 py-2.5">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${hitBadge(r.kpisHit)}`}>
+                          {r.kpisHit === kpiTotal && <CheckCircle size={10} />}
+                          {r.kpisHit}/{kpiTotal}
+                        </span>
+                      </td>
+                    </>) : (
+                      <td colSpan={7} className="px-3 py-2.5 text-center text-text-400/50 text-[10px]">—</td>
+                    )}
                   </tr>
                 ))}
               </tbody>

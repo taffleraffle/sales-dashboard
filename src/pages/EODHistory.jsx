@@ -1,15 +1,26 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader, Check, X, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react'
+import { Loader, Check, X, ChevronDown, ChevronUp, AlertCircle, Minus } from 'lucide-react'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useEODHistory } from '../hooks/useEODHistory'
 import { toLocalDateStr } from '../lib/dateUtils'
 
+function toETDateStr(d) {
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+}
+
+function isWeekend(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00')
+  const day = d.getDay()
+  return day === 0 || day === 6
+}
+
 function defaultRange() {
-  const to = new Date()
-  const from = new Date()
+  const now = new Date()
+  const to = toETDateStr(now)
+  const from = new Date(now)
   from.setDate(from.getDate() - 29)
-  return { from: toLocalDateStr(from), to: toLocalDateStr(to) }
+  return { from: toETDateStr(from), to }
 }
 
 export default function EODHistory({ embedded = false }) {
@@ -56,8 +67,8 @@ export default function EODHistory({ embedded = false }) {
   const toggleDate = d => setExpandedDates(prev => ({ ...prev, [d]: !prev[d] }))
 
   const fmtDate = d => {
-    const dt = new Date(d + 'T00:00:00')
-    return dt.toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })
+    const dt = new Date(d + 'T12:00:00')
+    return dt.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/New_York' })
   }
 
   const fmtCurrency = v => {
@@ -134,22 +145,25 @@ export default function EODHistory({ embedded = false }) {
             </thead>
             <tbody>
               {dates.map((date, i) => {
+                const weekend = isWeekend(date)
                 const submittedCount = allMembers.filter(m => {
                   const key = `${date}_${m.id}`
                   return m.role === 'closer' ? closerByDateMember[key] : setterByDateMember[key]
                 }).length
-                const rate = allMembers.length > 0 ? Math.round((submittedCount / allMembers.length) * 100) : 0
+                // Weekends don't count toward submission rate
+                const rate = weekend ? null : (allMembers.length > 0 ? Math.round((submittedCount / allMembers.length) * 100) : 0)
 
                 return (
                   <tr
                     key={date}
-                    className={`border-b border-border-default/50 hover:bg-bg-card-hover transition-colors cursor-pointer ${i % 2 === 0 ? '' : 'bg-bg-primary/30'}`}
+                    className={`border-b border-border-default/50 hover:bg-bg-card-hover transition-colors cursor-pointer ${weekend ? 'opacity-60' : ''} ${i % 2 === 0 ? '' : 'bg-bg-primary/30'}`}
                     onClick={() => toggleDate(date)}
                   >
                     <td className="px-4 py-2 text-text-primary font-medium whitespace-nowrap sticky left-0 bg-inherit z-10">
                       <span className="flex items-center gap-1.5">
                         {expandedDates[date] ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                         {fmtDate(date)}
+                        {weekend && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium">WE</span>}
                       </span>
                     </td>
                     {closers.map(m => {
@@ -158,6 +172,8 @@ export default function EODHistory({ embedded = false }) {
                         <td key={m.id} className="px-2 py-2 text-center">
                           {eod ? (
                             <Check size={14} className="text-success mx-auto" />
+                          ) : weekend ? (
+                            <span className="text-blue-400 text-sm font-bold">—</span>
                           ) : (
                             <X size={14} className="text-danger/50 mx-auto" />
                           )}
@@ -170,6 +186,8 @@ export default function EODHistory({ embedded = false }) {
                         <td key={m.id} className="px-2 py-2 text-center">
                           {eod ? (
                             <Check size={14} className="text-success mx-auto" />
+                          ) : weekend ? (
+                            <span className="text-blue-400 text-sm font-bold">—</span>
                           ) : (
                             <X size={14} className="text-danger/50 mx-auto" />
                           )}
@@ -177,13 +195,17 @@ export default function EODHistory({ embedded = false }) {
                       )
                     })}
                     <td className="px-3 py-2 text-center">
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                        rate === 100 ? 'bg-success/20 text-success' :
-                        rate >= 50 ? 'bg-opt-yellow/20 text-opt-yellow' :
-                        'bg-danger/20 text-danger'
-                      }`}>
-                        {rate}%
-                      </span>
+                      {weekend ? (
+                        <span className="text-blue-400 text-[10px] font-medium">—</span>
+                      ) : (
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                          rate === 100 ? 'bg-success/20 text-success' :
+                          rate >= 50 ? 'bg-opt-yellow/20 text-opt-yellow' :
+                          'bg-danger/20 text-danger'
+                        }`}>
+                          {rate}%
+                        </span>
+                      )}
                     </td>
                   </tr>
                 )
