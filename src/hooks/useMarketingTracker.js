@@ -183,15 +183,17 @@ export async function syncEODToTracker() {
     }
   }
 
-  // Count auto bookings from GHL intro calendars by appointment date
+  // Count auto bookings from GHL intro calendars by booked_at date (not appointment_date)
+  // booked_at = when the lead actually booked, which is the marketing-relevant date
   const { data: autoAppts } = await supabase
     .from('ghl_appointments')
-    .select('appointment_date, calendar_name')
+    .select('booked_at, calendar_name')
     .in('calendar_name', INTRO_CALENDARS)
     .neq('appointment_status', 'cancelled')
+    .not('booked_at', 'is', null)
   const autoByDate = {}
   for (const a of (autoAppts || [])) {
-    const d = a.appointment_date
+    const d = (a.booked_at || '').split(' ')[0] || (a.booked_at || '').split('T')[0]
     if (d) autoByDate[d] = (autoByDate[d] || 0) + 1
   }
 
