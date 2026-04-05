@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { sinceDate } from '../lib/dateUtils'
+import { INTRO_CALENDARS } from '../utils/constants'
+
+const isAutoLead = l => l.lead_source === 'auto' || INTRO_CALENDARS.includes(l.lead_source)
 
 export function useFunnelData(days = 30) {
   const [data, setData] = useState({ leads: 0, bookings: 0, shows: 0, closes: 0, autoBookings: 0, manualSets: 0, autoShows: 0, autoCloses: 0, manualShows: 0, manualCloses: 0 })
@@ -14,8 +17,8 @@ export function useFunnelData(days = 30) {
         .gte('date_set', sinceDate(days))
 
       const all = leads || []
-      const auto = all.filter(l => l.lead_source === 'auto')
-      const manual = all.filter(l => l.lead_source !== 'auto')
+      const auto = all.filter(isAutoLead)
+      const manual = all.filter(l => !isAutoLead(l))
 
       const showStatuses = ['showed', 'closed', 'not_closed']
 

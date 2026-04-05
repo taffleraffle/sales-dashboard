@@ -9,6 +9,7 @@ import { useSetterEODs } from '../hooks/useSetterData'
 import { supabase } from '../lib/supabase'
 import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
+import { syncGHLAppointments } from '../services/ghlCalendar'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { Loader, ChevronDown, Plus, ChevronUp } from 'lucide-react'
 import { computeShowRate } from '../utils/metricCalculations'
@@ -38,17 +39,39 @@ export default function SetterOverview() {
   const [loadingEndangered, setLoadingEndangered] = useState(false)
   const [dateStats, setDateStats] = useState({})
 
-  // Fetch appointments from GHL calendars
+  // Fetch appointments from GHL calendars — auto-sync if stale
   useEffect(() => {
     async function fetchAppointments() {
       // INTRO_CALENDARS imported from utils/constants.js
       const { data } = await supabase
         .from('ghl_appointments')
-        .select('ghl_event_id, closer_id, ghl_user_id, ghl_contact_id, contact_name, contact_phone, appointment_date, booked_at, calendar_name, appointment_status, outcome, start_time')
+        .select('ghl_event_id, closer_id, ghl_user_id, ghl_contact_id, contact_name, contact_phone, appointment_date, booked_at, calendar_name, appointment_status, outcome, start_time, created_at')
         .gte('booked_at', `${sinceDate(range)} 00:00:00`)
         .neq('appointment_status', 'cancelled')
       setAllAppointments(data || [])
       setAutoBookings((data || []).filter(a => INTRO_CALENDARS.includes(a.calendar_name)))
+
+      // Auto-sync from GHL if cache is stale (>1 hour since newest record)
+      const newest = (data || []).reduce((latest, r) => {
+        const t = new Date(r.created_at || 0).getTime()
+        return t > latest ? t : latest
+      }, 0)
+      const isStale = !data?.length || (Date.now() - newest) > 60 * 60 * 1000
+      if (isStale) {
+        const today = new Date().toISOString().split('T')[0]
+        syncGHLAppointments(sinceDate(range), today)
+          .then(async () => {
+            // Refresh after sync
+            const { data: fresh } = await supabase
+              .from('ghl_appointments')
+              .select('ghl_event_id, closer_id, ghl_user_id, ghl_contact_id, contact_name, contact_phone, appointment_date, booked_at, calendar_name, appointment_status, outcome, start_time, created_at')
+              .gte('booked_at', `${sinceDate(range)} 00:00:00`)
+              .neq('appointment_status', 'cancelled')
+            setAllAppointments(fresh || [])
+            setAutoBookings((fresh || []).filter(a => INTRO_CALENDARS.includes(a.calendar_name)))
+          })
+          .catch(err => console.warn('Auto GHL sync failed:', err.message))
+      }
     }
     fetchAppointments()
   }, [range])
@@ -196,8 +219,10 @@ export default function SetterOverview() {
   const leadsPerClose = closedLeads.length > 0 ? parseFloat((companyActivity.leads / closedLeads.length).toFixed(1)) : 0
 
   // Auto vs Manual booking breakdown
-  const autoLeads = allLeads.filter(l => l.lead_source === 'auto')
-  const manualLeads = allLeads.filter(l => l.lead_source !== 'auto')
+  // lead_source can be 'auto' (new records) or a raw calendar ID (legacy records)
+  const isAutoLead = l => l.lead_source === 'auto' || INTRO_CALENDARS.includes(l.lead_source)
+  const autoLeads = allLeads.filter(isAutoLead)
+  const manualLeads = allLeads.filter(l => !isAutoLead(l))
   const showStatuses = ['showed', 'closed', 'not_closed']
   const autoShowResult = computeShowRate(autoLeads, dateStats)
   const manualShowResult = computeShowRate(manualLeads, dateStats)
