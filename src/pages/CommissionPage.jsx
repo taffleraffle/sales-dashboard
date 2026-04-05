@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { DollarSign, Check, Loader, ArrowRight, Save, X, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -216,6 +216,22 @@ function CommissionPageAdmin() {
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState(null)
 
+  // Auto-sync Stripe on first page load (once per session)
+  const autoSyncRan = useRef(false)
+  useEffect(() => {
+    if (autoSyncRan.current || loadingPayments) return
+    autoSyncRan.current = true
+    ;(async () => {
+      try {
+        const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/sync-stripe-payments?days=7&limit=100&resync=true', {
+          headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` }
+        })
+        const data = await r.json()
+        if (data.synced > 0 || data.matched > 0) refreshPayments()
+      } catch (e) { console.warn('Auto Stripe sync failed:', e) }
+    })()
+  }, [loadingPayments])
+
   // Auto-calculate commissions on page load and when payments/settings change
   const settingsReady = Object.values(settingsMap).some(s => s.commission_rate > 0)
   useEffect(() => {
@@ -312,13 +328,31 @@ function CommissionPageAdmin() {
       })
       const data = await r.json()
       if (data.error) throw new Error(data.error)
-      setSyncResult(`Synced ${data.synced} new, ${data.updated} updated, ${data.matched} matched`)
+      setSyncResult(`Stripe: ${data.synced} new, ${data.updated} updated, ${data.matched} matched`)
       refreshPayments()
-      // Commissions will auto-calculate via useEffect when payments refresh
     } catch (err) {
-      setSyncResult(`Error: ${err.message}`)
+      setSyncResult(`Stripe error: ${err.message}`)
     }
     setSyncing(false)
+    setTimeout(() => setSyncResult(null), 8000)
+  }
+
+  const [syncingFanbasis, setSyncingFanbasis] = useState(false)
+  const syncFanbasisPayments = async () => {
+    setSyncingFanbasis(true)
+    setSyncResult(null)
+    try {
+      const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/sync-fanbasis-payments?days=90&limit=100', {
+        headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` }
+      })
+      const data = await r.json()
+      if (data.error) throw new Error(data.error)
+      setSyncResult(`Fanbasis: ${data.synced} new, ${data.matched} matched`)
+      refreshPayments()
+    } catch (err) {
+      setSyncResult(`Fanbasis error: ${err.message}`)
+    }
+    setSyncingFanbasis(false)
     setTimeout(() => setSyncResult(null), 8000)
   }
 
@@ -431,8 +465,10 @@ function CommissionPageAdmin() {
           refreshPayments={refreshPayments}
           refreshLedger={refreshLedger}
           syncing={syncing}
+          syncingFanbasis={syncingFanbasis}
           syncResult={syncResult}
           onSync={syncStripePayments}
+          onSyncFanbasis={syncFanbasisPayments}
           userEmail={profile?.email}
         />
       )}

@@ -8,7 +8,7 @@ const selectCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default r
 export default function PaymentsTab({
   payments, clients, period, loadingPayments,
   matchPayment, unmatchPayment, refreshPayments, refreshLedger,
-  syncing, syncResult, onSync, userEmail,
+  syncing, syncingFanbasis, syncResult, onSync, onSyncFanbasis, userEmail,
 }) {
   const [showAddPayment, setShowAddPayment] = useState(false)
   const [savingPayment, setSavingPayment] = useState(false)
@@ -186,6 +186,9 @@ export default function PaymentsTab({
         <div className="flex items-center gap-2">
           <button onClick={onSync} disabled={syncing} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-purple-500/30 text-purple-400 rounded-xl hover:bg-purple-500/10 disabled:opacity-50 transition-all duration-150">
             {syncing ? <><Loader size={12} className="animate-spin" /> Syncing...</> : <><Download size={12} /> Sync Stripe</>}
+          </button>
+          <button onClick={onSyncFanbasis} disabled={syncingFanbasis} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-blue-500/30 text-blue-400 rounded-xl hover:bg-blue-500/10 disabled:opacity-50 transition-all duration-150">
+            {syncingFanbasis ? <><Loader size={12} className="animate-spin" /> Syncing...</> : <><Download size={12} /> Sync Fanbasis</>}
           </button>
           <button onClick={() => setShowAddPayment(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:brightness-110 transition-all duration-150"><Plus size={12} /> Add Payment</button>
         </div>
