@@ -71,9 +71,12 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
   onProgress(`Scanning ${allContacts.length} contacts for appointments...`)
 
   // Check each contact for appointments in the date range
+  // Extend end date 30 days forward to catch future bookings made today
   const allAppointments = []
   const dateStartFilter = `${startDate} 00:00:00`
-  const dateEndFilter = `${endDate} 23:59:59`
+  const futureEnd = new Date(endDate + 'T00:00:00')
+  futureEnd.setDate(futureEnd.getDate() + 30)
+  const dateEndFilter = `${futureEnd.toISOString().split('T')[0]} 23:59:59`
 
   for (let i = 0; i < allContacts.length; i += 10) {
     const batch = allContacts.slice(i, i + 10)
