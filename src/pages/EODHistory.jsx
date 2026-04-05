@@ -10,8 +10,8 @@ function toETDateStr(d) {
 }
 
 function isWeekend(dateStr) {
-  const d = new Date(dateStr + 'T12:00:00')
-  const day = d.getDay()
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const day = new Date(y, m - 1, d).getDay()
   return day === 0 || day === 6
 }
 
@@ -35,13 +35,16 @@ export default function EODHistory({ embedded = false }) {
   const closers = useMemo(() => members.filter(m => m.role === 'closer'), [members])
   const setters = useMemo(() => members.filter(m => m.role === 'setter'), [members])
 
-  // Build date list for range
+  // Build date list for range (treat as calendar dates, no timezone shift)
   const dates = useMemo(() => {
     const result = []
-    const d = new Date(dateRange.to + 'T00:00:00')
-    const end = new Date(dateRange.from + 'T00:00:00')
+    const [ty, tm, td] = dateRange.to.split('-').map(Number)
+    const [fy, fm, fd] = dateRange.from.split('-').map(Number)
+    const d = new Date(ty, tm - 1, td)
+    const end = new Date(fy, fm - 1, fd)
     while (d >= end) {
-      result.push(toLocalDateStr(d))
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      result.push(dateStr)
       d.setDate(d.getDate() - 1)
     }
     return result
@@ -67,8 +70,9 @@ export default function EODHistory({ embedded = false }) {
   const toggleDate = d => setExpandedDates(prev => ({ ...prev, [d]: !prev[d] }))
 
   const fmtDate = d => {
-    const dt = new Date(d + 'T12:00:00')
-    return dt.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/New_York' })
+    const [y, m, day] = d.split('-').map(Number)
+    const dt = new Date(y, m - 1, day)
+    return dt.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })
   }
 
   const fmtCurrency = v => {

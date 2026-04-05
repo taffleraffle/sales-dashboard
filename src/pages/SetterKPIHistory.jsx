@@ -13,20 +13,29 @@ function toETDateStr(d) {
   return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
 }
 
-function isWeekday(dateStr) {
-  const d = new Date(dateStr + 'T12:00:00')
-  const day = d.getDay()
+// Get day of week from a YYYY-MM-DD string treated as a calendar date (no timezone shift)
+function getDayOfWeek(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d).getDay() // 0=Sun, 6=Sat
+}
+
+function isWeekdayDate(dateStr) {
+  const day = getDayOfWeek(dateStr)
   return day !== 0 && day !== 6
 }
 
 function getAllWeekdays(fromStr, toStr) {
   const result = []
-  const d = new Date(toStr + 'T12:00:00')
-  const end = new Date(fromStr + 'T12:00:00')
+  // Parse as calendar dates (no timezone shift)
+  const [fy, fm, fd] = fromStr.split('-').map(Number)
+  const [ty, tm, td] = toStr.split('-').map(Number)
+  const d = new Date(ty, tm - 1, td)
+  const end = new Date(fy, fm - 1, fd)
   while (d >= end) {
     const day = d.getDay()
     if (day !== 0 && day !== 6) {
-      result.push(d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }))
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      result.push(dateStr)
     }
     d.setDate(d.getDate() - 1)
   }
@@ -173,8 +182,9 @@ export default function SetterKPIHistory() {
   const kpiTotal = stlPct != null ? 3 : 2
 
   const fmtDate = d => {
-    const dt = new Date(d + 'T12:00:00')
-    return dt.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/New_York' })
+    const [y, m, day] = d.split('-').map(Number)
+    const dt = new Date(y, m - 1, day)
+    return dt.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })
   }
 
   return (
