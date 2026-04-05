@@ -239,6 +239,8 @@ export default function SalesOverview() {
   const [showAllRecentLeads, setShowAllRecentLeads] = useState(false)
   const [endangeredLeads, setEndangeredLeads] = useState([])
   const [loadingEndangered, setLoadingEndangered] = useState(false)
+  const [showRevenueBreakdown, setShowRevenueBreakdown] = useState(false)
+  const [revenueDeals, setRevenueDeals] = useState(null)
 
   // ── Pending EOD: check who hasn't submitted today ──
   const [pendingEOD, setPendingEOD] = useState({ closers: [], setters: [] })
@@ -291,6 +293,25 @@ export default function SalesOverview() {
     }
     checkTodayCloses()
   }, [])
+
+  const openRevenueBreakdown = async () => {
+    setShowRevenueBreakdown(true)
+    if (revenueDeals) return // already loaded
+    const reportIds = closerReports.map(r => r.id)
+    if (!reportIds.length) { setRevenueDeals([]); return }
+    const { data: calls } = await supabase
+      .from('closer_calls')
+      .select('prospect_name, call_type, outcome, revenue, cash_collected, eod_report_id')
+      .in('eod_report_id', reportIds)
+      .in('outcome', ['closed', 'ascended'])
+    // Map report_id to date
+    const reportDateMap = {}
+    for (const r of closerReports) reportDateMap[r.id] = r.report_date
+    setRevenueDeals((calls || []).map(c => ({
+      ...c,
+      date: reportDateMap[c.eod_report_id] || '',
+    })).sort((a, b) => b.date.localeCompare(a.date)))
+  }
 
   const toggleContacted = async (leadId, current) => {
     await supabase.from('setter_leads').update({ contacted: !current }).eq('id', leadId)
@@ -478,8 +499,8 @@ export default function SalesOverview() {
 
       {/* ═══ HERO KPIs ═══ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
-        <KPICard label="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} subtitle={`${ct.closes} closes`} highlight />
-        <KPICard label="Total Cash" value={`$${totalCash.toLocaleString()}`} subtitle={totalRevenue > 0 ? `${((totalCash / totalRevenue) * 100).toFixed(0)}% collected` : ''} />
+        <KPICard label="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} subtitle={`${ct.closes} closes`} highlight onClick={openRevenueBreakdown} />
+        <KPICard label="Total Cash" value={`$${totalCash.toLocaleString()}`} subtitle={totalRevenue > 0 ? `${((totalCash / totalRevenue) * 100).toFixed(0)}% collected` : ''} onClick={openRevenueBreakdown} />
         <KPICard label="Show Rate" value={`${showRate}%`} target={70} direction="above" subtitle={`${ct.liveCalls}/${ct.booked}`} />
         <KPICard label="Avg STL" value={stl ? stl.avgDisplay : stlLoading ? '...' : '—'} subtitle={stl ? `${stl.pctUnder5m}% < 5m` : ''} />
       </div>
@@ -878,6 +899,88 @@ export default function SalesOverview() {
 
       {/* Endangered Leads — upcoming appointments with no engagement */}
       <EndangeredLeadsTable leads={endangeredLeads} loading={loadingEndangered} />
+
+      {/* Revenue Breakdown Modal */}
+      {showRevenueBreakdown && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowRevenueBreakdown(false)}>
+          <div className="bg-bg-card border border-border-default rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-border-default flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-bold">Revenue Breakdown</h2>
+                <p className="text-[10px] text-text-400 mt-0.5">All closed & ascended deals in this period</p>
+              </div>
+              <button onClick={() => setShowRevenueBreakdown(false)} className="w-8 h-8 rounded-lg flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Summary */}
+            <div className="px-5 py-3 border-b border-border-default grid grid-cols-4 gap-3">
+              <div>
+                <p className="text-[9px] text-text-400 uppercase">Trial Revenue</p>
+                <p className="text-sm font-bold">${ct.revenue.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-[9px] text-text-400 uppercase">Trial Cash</p>
+                <p className="text-sm font-bold text-success">${ct.cash.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-[9px] text-text-400 uppercase">Ascend Revenue</p>
+                <p className="text-sm font-bold">${ct.ascendRevenue.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-[9px] text-text-400 uppercase">Ascend Cash</p>
+                <p className="text-sm font-bold text-success">${ct.ascendCash.toLocaleString()}</p>
+              </div>
+            </div>
+
+            {/* Deal list */}
+            <div className="overflow-y-auto max-h-[50vh]">
+              {!revenueDeals ? (
+                <div className="flex items-center justify-center py-8"><Loader className="animate-spin text-opt-yellow" size={20} /></div>
+              ) : revenueDeals.length === 0 ? (
+                <p className="text-text-400 text-sm text-center py-8">No closed deals in this period.</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[10px] text-text-400 uppercase border-b border-border-default sticky top-0 bg-bg-card">
+                      <th className="text-left px-4 py-2 font-medium">Date</th>
+                      <th className="text-left px-3 py-2 font-medium">Prospect</th>
+                      <th className="text-center px-3 py-2 font-medium">Type</th>
+                      <th className="text-right px-3 py-2 font-medium">Revenue</th>
+                      <th className="text-right px-4 py-2 font-medium">Cash</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {revenueDeals.map((d, i) => (
+                      <tr key={i} className={`border-b border-border-default/30 ${i % 2 ? 'bg-bg-primary/30' : ''}`}>
+                        <td className="px-4 py-2 text-text-400 whitespace-nowrap">{d.date}</td>
+                        <td className="px-3 py-2 text-text-primary font-medium">{d.prospect_name}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                            d.call_type === 'ascension' ? 'bg-purple-500/20 text-purple-400' : 'bg-success/20 text-success'
+                          }`}>
+                            {d.call_type === 'ascension' ? 'Ascension' : 'Trial'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right">${parseFloat(d.revenue || 0).toLocaleString()}</td>
+                        <td className="px-4 py-2 text-right text-success font-medium">${parseFloat(d.cash_collected || 0).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-border-default bg-bg-primary/50 font-semibold">
+                      <td className="px-4 py-2" colSpan={3}>Total</td>
+                      <td className="px-3 py-2 text-right">${totalRevenue.toLocaleString()}</td>
+                      <td className="px-4 py-2 text-right text-success">${totalCash.toLocaleString()}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
