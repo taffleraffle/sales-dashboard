@@ -15,6 +15,8 @@ import SettingsPage from './pages/SettingsPage'
 import CommissionPage from './pages/CommissionPage'
 import CommissionDetail from './pages/CommissionDetail'
 import SetterBot from './pages/SetterBot'
+import SetterKPIHistory from './pages/SetterKPIHistory'
+import EODHistory from './pages/EODHistory'
 import SetPasswordPage from './pages/SetPasswordPage'
 import SplashScreen from './components/SplashScreen'
 import { Loader } from 'lucide-react'
@@ -72,8 +74,10 @@ export default function App() {
               <Route path="/sales/closers/:id" element={<CloserDetail />} />
               <Route path="/sales/setters" element={<SetterOverview />} />
               <Route path="/sales/setters/:id" element={<SetterDetail />} />
+              <Route path="/sales/setters/:id/kpi-history" element={<SetterKPIHistory />} />
               <Route path="/sales/marketing" element={<MarketingPerformance />} />
               <Route path="/sales/eod" element={<EODReview />} />
+              <Route path="/sales/eod-history" element={<EODHistory />} />
               <Route path="/sales/call-data" element={<CallData />} />
               <Route path="/sales/commissions" element={<CommissionPage />} />
               <Route path="/sales/commissions/:id" element={<CommissionDetail />} />

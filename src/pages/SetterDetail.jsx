@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import React, { useState, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
@@ -430,6 +430,10 @@ export default function SetterDetail() {
               </div>
               {savingStlHours && <p className="text-[9px] text-opt-yellow mt-1">Saving...</p>}
             </div>
+
+            <Link to={`/sales/setters/${id}/kpi-history`} className="text-xs text-opt-yellow hover:underline mt-3 inline-block">
+              View KPI & Target History →
+            </Link>
           </div>
         )
       })()}

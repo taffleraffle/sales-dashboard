@@ -38,6 +38,7 @@ export function useEODSubmit() {
           offered: c.offered || false,
           offered_finance: c.offered_finance || false,
           notes: c.notes || '',
+          setter_lead_id: c.setter_lead_id || null,
         }))
         const { error: callError } = await supabase.from('closer_calls').insert(callRows)
         if (callError) throw callError

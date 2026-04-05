@@ -5,6 +5,7 @@ import { useEODSubmit } from '../hooks/useEOD'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { fetchCloserCalendar, syncGHLAppointments } from '../services/ghlCalendar'
+import { INTRO_CALENDARS } from '../utils/constants'
 
 const closingOutcomes = [
   { value: 'no_show', label: 'No Show', color: 'text-danger' },
@@ -1561,7 +1562,7 @@ export default function EODReview() {
           appointment_date: selectedDate,
           start_time: formatTime(evt.start_time),
           calendar_name: evt.calendar_name || '',
-          lead_source: matchedLead?.lead_source || evt.lead_source || (source === 'ghl' ? 'ghl' : 'manual'),
+          lead_source: INTRO_CALENDARS.includes(evt.calendar_name) ? 'auto' : (matchedLead?.lead_source || evt.lead_source || (source === 'ghl' ? 'ghl' : 'manual')),
           call_type: 'new_call',
           outcome: outcome || (matchedLead?.status && matchedLead.status !== 'booked' ? matchedLead.status : 'no_show'),
           revenue: matchedLead?.revenue_attributed || evt.revenue_attributed || 0,
@@ -1693,7 +1694,7 @@ export default function EODReview() {
             .single()
           setCloserNotes(eodData?.notes || '')
           setCalls(savedCalls.map(c => ({
-            lead_id: c.lead_id || null,
+            lead_id: c.setter_lead_id || null,
             ghl_event_id: c.ghl_event_id || null,
             lead_name: c.prospect_name || 'Unknown',
             setter_name: c.setter_name || '—',
@@ -1797,7 +1798,7 @@ export default function EODReview() {
           appointment_date: selectedDate,
           start_time: formatTime(evt.start_time),
           calendar_name: evt.calendar_name || '',
-          lead_source: matchedLead?.lead_source || evt.lead_source || (source === 'ghl' ? 'ghl' : 'manual'),
+          lead_source: INTRO_CALENDARS.includes(evt.calendar_name) ? 'auto' : (matchedLead?.lead_source || evt.lead_source || (source === 'ghl' ? 'ghl' : 'manual')),
           call_type: 'new_call',
           outcome: outcome || (matchedLead?.status && matchedLead.status !== 'booked' ? matchedLead.status : 'no_show'),
           revenue: matchedLead?.revenue_attributed || evt.revenue_attributed || 0,
@@ -1940,7 +1941,7 @@ export default function EODReview() {
         if (c.lead_id && c.outcome !== c.existing_status) {
           await supabase
             .from('setter_leads')
-            .update({ status: c.outcome, revenue_attributed: c.revenue || 0, updated_at: new Date().toISOString() })
+            .update({ status: c.outcome, revenue_attributed: c.revenue || 0, closer_id: selectedMember, updated_at: new Date().toISOString() })
             .eq('id', c.lead_id)
         }
       }

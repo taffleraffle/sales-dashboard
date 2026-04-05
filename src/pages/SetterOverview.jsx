@@ -12,6 +12,7 @@ import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } f
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { Loader, ChevronDown, Plus, ChevronUp } from 'lucide-react'
 import { computeShowRate } from '../utils/metricCalculations'
+import { INTRO_CALENDARS } from '../utils/constants'
 import { checkEndangeredLeads } from '../services/engagementCheck'
 import EndangeredLeadsTable from '../components/EndangeredLeadsTable'
 
@@ -40,10 +41,7 @@ export default function SetterOverview() {
   // Fetch appointments from GHL calendars
   useEffect(() => {
     async function fetchAppointments() {
-      const INTRO_CALENDARS = [
-        '5omixNmtgmGMWQfEL0fs', 'C5NRRAjwsy43nOyU6izQ',
-        'GpYh75LaFEJgpHYkZfN9', 'okWMyvLhnJ7sbuvSIzok', 'MvYStrHFsRTpunwTXIqT',
-      ]
+      // INTRO_CALENDARS imported from utils/constants.js
       const { data } = await supabase
         .from('ghl_appointments')
         .select('ghl_event_id, closer_id, ghl_user_id, ghl_contact_id, contact_name, contact_phone, appointment_date, booked_at, calendar_name, appointment_status, outcome, start_time')
