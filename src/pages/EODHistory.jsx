@@ -8,11 +8,11 @@ import { toLocalDateStr } from '../lib/dateUtils'
 function defaultRange() {
   const to = new Date()
   const from = new Date()
-  from.setDate(from.getDate() - 6)
+  from.setDate(from.getDate() - 29)
   return { from: toLocalDateStr(from), to: toLocalDateStr(to) }
 }
 
-export default function EODHistory() {
+export default function EODHistory({ embedded = false }) {
   const navigate = useNavigate()
   const [dateRange, setDateRange] = useState(defaultRange)
   const { members, loading: membersLoading } = useTeamMembers()
@@ -79,27 +79,32 @@ export default function EODHistory() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <div>
-          <h1 className="text-lg sm:text-xl font-bold">EOD History</h1>
-          <p className="text-xs text-text-400">Team submission overview & daily details</p>
+      {/* Header — hidden when embedded in EOD page */}
+      {!embedded && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div>
+            <h1 className="text-lg sm:text-xl font-bold">EOD History</h1>
+            <p className="text-xs text-text-400">Team submission overview & daily details</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={dateRange.from}
-            onChange={e => setDateRange(prev => ({ ...prev, from: e.target.value }))}
-            className="bg-bg-card border border-border-default rounded-xl px-3 py-1.5 text-xs text-text-primary [color-scheme:dark]"
-          />
-          <span className="text-text-400 text-xs">to</span>
-          <input
-            type="date"
-            value={dateRange.to}
-            onChange={e => setDateRange(prev => ({ ...prev, to: e.target.value }))}
-            className="bg-bg-card border border-border-default rounded-xl px-3 py-1.5 text-xs text-text-primary [color-scheme:dark]"
-          />
-        </div>
+      )}
+
+      {/* Date range selector */}
+      <div className="flex items-center gap-2 mb-4">
+        <input
+          type="date"
+          value={dateRange.from}
+          onChange={e => setDateRange(prev => ({ ...prev, from: e.target.value }))}
+          className="bg-bg-card border border-border-default rounded-xl px-3 py-1.5 text-xs text-text-primary [color-scheme:dark]"
+        />
+        <span className="text-text-400 text-xs">to</span>
+        <input
+          type="date"
+          value={dateRange.to}
+          onChange={e => setDateRange(prev => ({ ...prev, to: e.target.value }))}
+          className="bg-bg-card border border-border-default rounded-xl px-3 py-1.5 text-xs text-text-primary [color-scheme:dark]"
+        />
+        <span className="text-[10px] text-text-400">{dates.length} days</span>
       </div>
 
       {/* Submission Matrix */}

@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { fetchCloserCalendar, syncGHLAppointments } from '../services/ghlCalendar'
 import { INTRO_CALENDARS } from '../utils/constants'
+import EODHistory from './EODHistory'
 
 const closingOutcomes = [
   { value: 'no_show', label: 'No Show', color: 'text-danger' },
@@ -2148,6 +2149,29 @@ export default function EODReview() {
     const params = new URLSearchParams(window.location.search)
     return !!params.get('tab') || (!isAdmin && !!profile?.teamMemberId)
   })
+  const [eodView, setEodView] = useState('submit') // 'submit' | 'history'
+
+  if (eodView === 'history') {
+    return (
+      <div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">End of Day</h1>
+            <p className="text-xs sm:text-sm text-text-400 mt-0.5 sm:mt-1">Team submission history</p>
+          </div>
+        </div>
+        <div className="flex gap-2 mb-6">
+          <button onClick={() => setEodView('submit')} className="px-4 py-2 rounded-xl text-xs font-medium text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all">
+            Submit EOD
+          </button>
+          <button className="px-4 py-2 rounded-xl text-xs font-medium bg-opt-yellow text-bg-primary shadow-sm">
+            History
+          </button>
+        </div>
+        <EODHistory embedded />
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -2157,15 +2181,25 @@ export default function EODReview() {
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight">End of Day</h1>
           <p className="text-xs sm:text-sm text-text-400 mt-0.5 sm:mt-1">{eodStarted ? 'File your daily report' : 'Review and submit EOD reports'}</p>
         </div>
-        {!eodStarted && (
-          <button
-            onClick={() => setEodStarted(true)}
-            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-opt-yellow text-bg-primary font-semibold text-sm hover:brightness-110 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
-          >
-            <Plus size={16} />
-            New EOD
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {!eodStarted && (
+            <button
+              onClick={() => setEodView('history')}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border-default text-text-400 hover:text-text-primary hover:bg-bg-card-hover font-medium text-sm transition-all"
+            >
+              History
+            </button>
+          )}
+          {!eodStarted && (
+            <button
+              onClick={() => setEodStarted(true)}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-opt-yellow text-bg-primary font-semibold text-sm hover:brightness-110 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
+            >
+              <Plus size={16} />
+              New EOD
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── Landing view: no EOD started yet ── */}

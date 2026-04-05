@@ -10,7 +10,6 @@ const navItems = [
   { to: '/sales/setters', icon: Users, label: 'Setters' },
   { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
-  { to: '/sales/eod-history', icon: History, label: 'EOD History' },
   { to: '/sales/call-data', icon: Headphones, label: 'Call Data' },
   { to: '/sales/commissions', icon: DollarSign, label: 'Commissions' },
   { to: '/sales/setter-bot', icon: Bot, label: 'Setter Bot' },
