@@ -237,7 +237,7 @@ export default function SetterDetail() {
   }
 
   // Enrich leads with closer call outcomes matched by name + appointment_date
-  const enrichedLeads = leads.map(l => {
+  const enrichedLeadsAll = leads.map(l => {
     if (l.status !== 'set') return { ...l, resolved_outcome: l.status }
     if (!l.appointment_date) return { ...l, resolved_outcome: l.status }
     const name = (l.lead_name || '').toLowerCase().trim()
@@ -247,6 +247,24 @@ export default function SetterDetail() {
     const outcome = closerCallMap[`${name}|${l.appointment_date}`]
     return { ...l, resolved_outcome: outcome || l.status }
   })
+
+  // Dedupe by normalized lead name — if a lead is re-set multiple times,
+  // keep the most recent entry (or the one with a resolved outcome if any exists)
+  const dedupedMap = new Map()
+  for (const l of enrichedLeadsAll) {
+    const key = (l.lead_name || '').toLowerCase().trim()
+    if (!key) continue
+    const existing = dedupedMap.get(key)
+    if (!existing) { dedupedMap.set(key, l); continue }
+    // Prefer leads with resolved outcomes (closed/not_closed/showed/no_show) over 'set'
+    const existingResolved = existing.resolved_outcome && existing.resolved_outcome !== 'set'
+    const currentResolved = l.resolved_outcome && l.resolved_outcome !== 'set'
+    if (currentResolved && !existingResolved) { dedupedMap.set(key, l); continue }
+    if (!currentResolved && existingResolved) continue
+    // Both same — keep the most recent by date_set
+    if (l.date_set > existing.date_set) dedupedMap.set(key, l)
+  }
+  const enrichedLeads = Array.from(dedupedMap.values()).sort((a, b) => (b.date_set || '').localeCompare(a.date_set || ''))
 
   // Compute show/close rate from leads + closer EOD daily stats
   const { showRate } = computeShowRate(leads, dateStats)
@@ -477,7 +495,7 @@ export default function SetterDetail() {
       {/* Lead Outcomes Table */}
       {mySets > 0 && (
         <div className="mb-6">
-          <h2 className="text-sm font-medium text-text-secondary mb-3">Recent Sets ({leads.length})</h2>
+          <h2 className="text-sm font-medium text-text-secondary mb-3">Recent Sets ({enrichedLeads.length}{leads.length !== enrichedLeads.length ? ` unique, ${leads.length} total` : ''})</h2>
           <DataTable columns={leadColumns} data={enrichedLeads} emptyMessage="No sets yet" />
         </div>
       )}
@@ -517,10 +535,16 @@ export default function SetterDetail() {
               <h2 className="text-sm font-medium text-text-secondary">Recent Leads Contacted ({grouped.length} contacts, {recentCalls.length} calls)</h2>
               <div className="flex items-center gap-1.5 text-[10px] text-text-400">
                 <span>From</span>
-                <input type="date" value={callsFrom} onChange={e => setCallsFrom(e.target.value)}
+                <input type="date" value={callsFrom} onChange={e => {
+                  setCallsFrom(e.target.value)
+                  if (callsTo) setRange({ from: e.target.value, to: callsTo })
+                }}
                   className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary" />
                 <span>to</span>
-                <input type="date" value={callsTo} onChange={e => setCallsTo(e.target.value)}
+                <input type="date" value={callsTo} onChange={e => {
+                  setCallsTo(e.target.value)
+                  if (callsFrom) setRange({ from: callsFrom, to: e.target.value })
+                }}
                   className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary" />
               </div>
             </div>
