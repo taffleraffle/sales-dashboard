@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase'
 import { fetchCloserCalendar, syncGHLAppointments } from '../services/ghlCalendar'
 import { INTRO_CALENDARS } from '../utils/constants'
 import EODHistory from './EODHistory'
+import { reconcileAttribution } from '../services/attributionReconciliation'
 
 const closingOutcomes = [
   { value: 'no_show', label: 'No Show', color: 'text-danger' },
@@ -1946,6 +1947,9 @@ export default function EODReview() {
             .eq('id', c.lead_id)
         }
       }
+
+      // Auto-reconcile: match unlinked closer_calls to setter_leads by name
+      reconcileAttribution(selectedDate).catch(e => console.warn('Attribution reconciliation failed:', e))
 
       // Auto-sync aggregated closer EOD data to marketing_tracker for this date
       try {
