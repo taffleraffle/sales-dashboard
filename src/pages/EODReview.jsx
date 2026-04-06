@@ -760,7 +760,7 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
 }
 
 // Setter Dashboard with pipeline stats + EOD form
-function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, setConfirmed, savedSetterLeads = [], initialSetLeads = [], initialRescheduleLeads = [], eodExists = null, filingNew = false, setFilingNew, submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0 }) {
+function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel, setterData, updateSetter, handleConfirmSetter, confirmed, setConfirmed, savedSetterLeads = [], initialSetLeads = [], initialRescheduleLeads = [], eodExists = null, filingNew = false, setFilingNew, submitting, setLeadsForSets, setRescheduleLeadsForParent, refreshKey = 0, canEdit = true }) {
   const [pipeline, setPipeline] = useState({ set: 0, booked: 0, showed: 0, closed: 0, noShow: 0, cancelled: 0, revenue: 0, total: 0 })
   const [weeklyStats, setWeeklyStats] = useState({ sets: 0, shows: 0, closes: 0, revenue: 0, showRate: 0, closeRate: 0 })
   const [loading, setLoading] = useState(true)
@@ -1242,7 +1242,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           </div>
 
           {/* Confirm */}
-          {!confirmed && (
+          {!confirmed && canEdit && (
             <button
               onClick={handleConfirmSetter}
               disabled={submitting || !allLeadsAssigned}
@@ -1406,8 +1406,8 @@ export default function EODReview() {
     const params = new URLSearchParams(window.location.search)
     const urlMember = params.get('member')
     if (urlMember) return urlMember
-    // Auto-select the logged-in user's team member
-    if (!isAdmin && profile?.teamMemberId) return profile.teamMemberId
+    // Default to logged-in user's member, but allow switching to view others
+    if (profile?.teamMemberId) return profile.teamMemberId
     return ''
   })
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -2287,7 +2287,7 @@ export default function EODReview() {
       {/* ── Active EOD: member/date selection + form ── */}
       <div className="flex items-center gap-3 mb-2 flex-wrap">
         <button
-          onClick={() => { setEodStarted(false); setSelectedMember(isAdmin ? '' : (profile?.teamMemberId || '')) }}
+          onClick={() => { setEodStarted(false) }}
           className="text-xs text-text-400 hover:text-text-primary transition-colors mr-1"
         >
           ← Back
@@ -2302,7 +2302,7 @@ export default function EODReview() {
                   if (!allowed) return
                   setTab(t)
                   setConfirmed(false)
-                  setSelectedMember(isAdmin ? '' : (profile?.teamMemberId || ''))
+                  // keep current selection so user can view across tabs
                 }}
                 disabled={!allowed}
                 className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 transition-all ${
@@ -2320,14 +2320,13 @@ export default function EODReview() {
         <select
           value={selectedMember}
           onChange={e => { setSelectedMember(e.target.value); setConfirmed(false) }}
-          disabled={!isAdmin && !!profile?.teamMemberId}
-          className="bg-bg-card border border-border-default rounded-xl px-3 py-1.5 text-sm text-text-primary disabled:opacity-60 disabled:cursor-not-allowed"
+          className="bg-bg-card border border-border-default rounded-xl px-3 py-1.5 text-sm text-text-primary"
         >
           <option value="">Select {tab}...</option>
           {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
-        {!isAdmin && profile?.teamMemberId && (
-          <span className="text-[10px] text-text-400 flex items-center gap-1"><Lock size={10} /> Locked to your account</span>
+        {!isAdmin && profile?.teamMemberId && selectedMember !== profile.teamMemberId && (
+          <span className="text-[10px] text-text-400 flex items-center gap-1"><Lock size={10} /> View only — can&apos;t edit</span>
         )}
       </div>
 
@@ -2881,7 +2880,7 @@ export default function EODReview() {
 
                   <button
                     onClick={handleConfirmCloser}
-                    disabled={confirmed || submitting}
+                    disabled={confirmed || submitting || (!isAdmin && profile?.teamMemberId && selectedMember !== profile.teamMemberId)}
                     className={`w-full mt-4 flex items-center justify-center gap-2 px-4 py-2.5 rounded font-medium text-sm transition-colors ${
                       confirmed
                         ? 'bg-success/20 text-success border border-success/30'
@@ -3138,6 +3137,7 @@ export default function EODReview() {
           submitting={submitting}
           setLeadsForSets={setSetterSetLeads}
           setRescheduleLeadsForParent={setSetterRescheduleLeads}
+          canEdit={isAdmin || profile?.teamMemberId === selectedMember}
           refreshKey={setterRefreshKey}
         />
       )}
