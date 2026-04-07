@@ -216,25 +216,42 @@ export function normalizeSubject(subject) {
 
 /**
  * Aggregate email stats per subject for the date range.
- * Only includes outbound workflow-sourced emails.
+ * Only includes outbound emails. Also counts replies (inbound emails in
+ * the same conversation that arrived AFTER the outbound was sent).
  */
 export async function loadEmailStats(fromDate, toDate) {
-  const { data } = await supabase
+  // Pull outbound emails in the date range
+  const { data: outbound } = await supabase
     .from('email_message_cache')
-    .select('subject, status, source, direction, date_added, contact_id')
+    .select('id, subject, status, source, direction, date_added, contact_id, conversation_id')
     .gte('date_added', fromDate)
     .lte('date_added', toDate + 'T23:59:59')
     .eq('direction', 'outbound')
     .order('date_added', { ascending: false })
 
+  // Pull ALL inbound emails (we'll match by conversation_id + date)
+  const { data: inbound } = await supabase
+    .from('email_message_cache')
+    .select('conversation_id, date_added')
+    .eq('direction', 'inbound')
+
+  // Index inbound by conversation_id
+  const inboundByConvo = {}
+  for (const ib of (inbound || [])) {
+    if (!ib.conversation_id) continue
+    if (!inboundByConvo[ib.conversation_id]) inboundByConvo[ib.conversation_id] = []
+    inboundByConvo[ib.conversation_id].push(ib.date_added)
+  }
+
   const bySubject = {}
-  for (const e of (data || [])) {
+  for (const e of (outbound || [])) {
     const key = normalizeSubject(e.subject)
     if (!bySubject[key]) {
       bySubject[key] = {
         subject: key,
         source: e.source,
         rawSubjects: new Set(),
+        repliedConvos: new Set(),
         sent: 0,
         delivered: 0,
         opened: 0,
@@ -247,6 +264,12 @@ export async function loadEmailStats(fromDate, toDate) {
     const s = bySubject[key]
     s.rawSubjects.add(e.subject || '(no subject)')
     s.sent++
+
+    // Check if this conversation got a reply AFTER this outbound
+    if (e.conversation_id && inboundByConvo[e.conversation_id]) {
+      const replied = inboundByConvo[e.conversation_id].some(dt => dt > e.date_added)
+      if (replied) s.repliedConvos.add(e.conversation_id)
+    }
     if (e.status === 'delivered') s.delivered++
     if (e.status === 'opened') { s.delivered++; s.opened++ }
     if (e.status === 'clicked') { s.delivered++; s.opened++; s.clicked++ }
@@ -259,6 +282,7 @@ export async function loadEmailStats(fromDate, toDate) {
     subject: s.subject,
     source: s.source,
     variants: s.rawSubjects.size,
+    replied: s.repliedConvos.size,
     sent: s.sent,
     delivered: s.delivered,
     opened: s.opened,
@@ -267,6 +291,7 @@ export async function loadEmailStats(fromDate, toDate) {
     deliveryRate: s.sent > 0 ? parseFloat(((s.delivered / s.sent) * 100).toFixed(1)) : 0,
     openRate: s.delivered > 0 ? parseFloat(((s.opened / s.delivered) * 100).toFixed(1)) : 0,
     clickRate: s.delivered > 0 ? parseFloat(((s.clicked / s.delivered) * 100).toFixed(1)) : 0,
+    replyRate: s.delivered > 0 ? parseFloat(((s.repliedConvos.size / s.delivered) * 100).toFixed(1)) : 0,
     uniqueContacts: s.contactIds.size,
     lastSent: s.lastSent,
   })).sort((a, b) => b.sent - a.sent)
@@ -290,6 +315,23 @@ export async function loadSubjectMeta() {
   const map = {}
   for (const row of (data || [])) map[row.subject] = row
   return map
+}
+
+/**
+ * Bulk-assign multiple subjects to a single workflow.
+ */
+export async function bulkAssignWorkflow(subjects, workflowId, workflowName) {
+  if (!subjects?.length) return false
+  const now = new Date().toISOString()
+  const rows = subjects.map(subject => ({
+    subject,
+    workflow_id: workflowId || null,
+    workflow_name: workflowName || null,
+    updated_at: now,
+  }))
+  const { error } = await supabase.from('email_subject_meta').upsert(rows, { onConflict: 'subject' })
+  if (error) console.error('Bulk assign failed:', error)
+  return !error
 }
 
 /**

@@ -3,7 +3,7 @@ import { Loader, RefreshCw, Mail, AlertCircle, Star, ArrowUp, ArrowDown } from '
 import KPICard from '../components/KPICard'
 import DateRangeSelector from '../components/DateRangeSelector'
 import { sinceDate, rangeToDays } from '../lib/dateUtils'
-import { fetchWorkflows, syncEmailMessages, refreshRecentEmailStatuses, loadEmailStats, loadCachedWorkflows, loadSubjectMeta, updateSubjectMeta } from '../services/ghlEmailFlows'
+import { fetchWorkflows, syncEmailMessages, refreshRecentEmailStatuses, loadEmailStats, loadCachedWorkflows, loadSubjectMeta, updateSubjectMeta, bulkAssignWorkflow } from '../services/ghlEmailFlows'
 
 export default function EmailFlows() {
   const [range, setRange] = useState(30)
@@ -24,6 +24,8 @@ export default function EmailFlows() {
   const [sortKey, setSortKey] = useState('sent')
   const [sortDir, setSortDir] = useState('desc')
   const [editingSubject, setEditingSubject] = useState(null)
+  const [bulkSelected, setBulkSelected] = useState(new Set())
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false)
   const [error, setError] = useState(null)
 
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
@@ -69,6 +71,25 @@ export default function EmailFlows() {
     const wf = workflows.find(w => w.id === workflowId)
     setMeta(subject, { workflow_id: workflowId || null, workflow_name: wf?.name || null })
     setEditingSubject(null)
+  }
+
+  const toggleBulk = (subject) => {
+    const next = new Set(bulkSelected)
+    if (next.has(subject)) next.delete(subject)
+    else next.add(subject)
+    setBulkSelected(next)
+  }
+
+  const handleBulkAssign = async (workflowId) => {
+    const wf = workflows.find(w => w.id === workflowId)
+    const subjects = [...bulkSelected]
+    await bulkAssignWorkflow(subjects, workflowId, wf?.name || null)
+    // Update local state
+    const updates = {}
+    for (const s of subjects) updates[s] = { ...(subjectMeta[s] || {}), subject: s, workflow_id: workflowId, workflow_name: wf?.name || null }
+    setSubjectMeta({ ...subjectMeta, ...updates })
+    setBulkSelected(new Set())
+    setBulkAssignOpen(false)
   }
 
   const toggleSort = (key) => {
@@ -146,7 +167,7 @@ export default function EmailFlows() {
           id: wfId,
           name: wfName,
           emails: [],
-          sent: 0, delivered: 0, opened: 0, clicked: 0,
+          sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0,
         }
       }
       const g = groups[wfId]
@@ -155,11 +176,13 @@ export default function EmailFlows() {
       g.delivered += s.delivered
       g.opened += s.opened
       g.clicked += s.clicked
+      g.replied += s.replied || 0
     }
     return Object.values(groups).map(g => ({
       ...g,
       openRate: g.delivered > 0 ? parseFloat(((g.opened / g.delivered) * 100).toFixed(1)) : 0,
       clickRate: g.delivered > 0 ? parseFloat(((g.clicked / g.delivered) * 100).toFixed(1)) : 0,
+      replyRate: g.delivered > 0 ? parseFloat(((g.replied / g.delivered) * 100).toFixed(1)) : 0,
     })).sort((a, b) => b.sent - a.sent)
   }, [visibleStats, subjectMeta])
 
@@ -169,13 +192,15 @@ export default function EmailFlows() {
       delivered: a.delivered + s.delivered,
       opened: a.opened + s.opened,
       clicked: a.clicked + s.clicked,
+      replied: a.replied + (s.replied || 0),
       failed: a.failed + s.failed,
-    }), { sent: 0, delivered: 0, opened: 0, clicked: 0, failed: 0 })
+    }), { sent: 0, delivered: 0, opened: 0, clicked: 0, replied: 0, failed: 0 })
     return {
       ...t,
       deliveryRate: t.sent > 0 ? ((t.delivered / t.sent) * 100).toFixed(1) : 0,
       openRate: t.delivered > 0 ? ((t.opened / t.delivered) * 100).toFixed(1) : 0,
       clickRate: t.delivered > 0 ? ((t.clicked / t.delivered) * 100).toFixed(1) : 0,
+      replyRate: t.delivered > 0 ? ((t.replied / t.delivered) * 100).toFixed(1) : 0,
     }
   }, [filteredStats])
 
@@ -225,11 +250,12 @@ export default function EmailFlows() {
       )}
 
       {/* Top KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <KPICard label="Total Sent" value={totals.sent.toLocaleString()} subtitle={`${filteredStats.length} unique subjects`} />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        <KPICard label="Total Sent" value={totals.sent.toLocaleString()} subtitle={`${filteredStats.length} subjects`} />
         <KPICard label="Delivered" value={`${totals.deliveryRate}%`} subtitle={`${totals.delivered.toLocaleString()} of ${totals.sent.toLocaleString()}`} />
         <KPICard label="Open Rate" value={`${totals.openRate}%`} subtitle={`${totals.opened.toLocaleString()} opens`} highlight />
         <KPICard label="Click Rate" value={`${totals.clickRate}%`} subtitle={`${totals.clicked.toLocaleString()} clicks`} />
+        <KPICard label="Reply Rate" value={`${totals.replyRate}%`} subtitle={`${totals.replied.toLocaleString()} replies`} />
       </div>
 
       {loading ? (
@@ -322,21 +348,46 @@ export default function EmailFlows() {
                           <div className="text-[9px] text-text-400 uppercase">Click</div>
                           <div className={`font-bold ${rateColor(g.clickRate, 5, 2)}`}>{g.clickRate}%</div>
                         </div>
+                        <div className="text-right min-w-[60px]">
+                          <div className="text-[9px] text-text-400 uppercase">Reply</div>
+                          <div className={`font-bold ${rateColor(g.replyRate, 10, 3)}`}>{g.replyRate}%</div>
+                        </div>
                         <span className="text-text-400">{isExpanded ? '▼' : '▶'}</span>
                       </div>
                     </button>
                     {isExpanded && (
-                      <div className="border-t border-border-default overflow-x-auto">
+                      <div className="border-t border-border-default">
+                        {isUnassigned && bulkSelected.size > 0 && (
+                          <div className="px-4 py-2 bg-opt-yellow/10 border-b border-opt-yellow/30 flex items-center justify-between">
+                            <span className="text-xs text-opt-yellow font-medium">{bulkSelected.size} selected</span>
+                            <div className="flex items-center gap-2">
+                              <select
+                                onChange={e => { if (e.target.value) handleBulkAssign(e.target.value) }}
+                                className="bg-bg-primary border border-opt-yellow/40 rounded-lg px-2 py-1 text-xs text-text-primary"
+                                defaultValue=""
+                              >
+                                <option value="">Assign all to workflow…</option>
+                                {workflows.filter(w => w.status === 'published').map(w => (
+                                  <option key={w.id} value={w.id}>{w.name}</option>
+                                ))}
+                              </select>
+                              <button onClick={() => setBulkSelected(new Set())} className="text-[10px] text-text-400 hover:text-opt-yellow">Clear</button>
+                            </div>
+                          </div>
+                        )}
+                        <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="text-[10px] text-text-400 uppercase border-b border-border-default/50 bg-bg-primary/30">
                               <th className="px-2 py-2 w-8"></th>
+                              {isUnassigned && <th className="px-2 py-2 w-8"></th>}
                               <th className="text-left px-4 py-2 font-medium">Subject</th>
                               <th className="text-right px-3 py-2 font-medium">Sent</th>
                               <th className="text-right px-3 py-2 font-medium">Opened</th>
                               <th className="text-right px-3 py-2 font-medium">Clicked</th>
                               <th className="text-right px-3 py-2 font-medium">Open %</th>
                               <th className="text-right px-3 py-2 font-medium">Click %</th>
+                              <th className="text-right px-3 py-2 font-medium">Reply %</th>
                               <th className="text-right px-4 py-2 font-medium">Last Sent</th>
                               <th className="px-2 py-2 w-24"></th>
                             </tr>
@@ -352,6 +403,16 @@ export default function EmailFlows() {
                                       <Star size={12} fill={isMonitored ? 'currentColor' : 'none'} />
                                     </button>
                                   </td>
+                                  {isUnassigned && (
+                                    <td className="px-2 py-2 text-center">
+                                      <input
+                                        type="checkbox"
+                                        checked={bulkSelected.has(s.subject)}
+                                        onChange={() => toggleBulk(s.subject)}
+                                        className="accent-opt-yellow cursor-pointer"
+                                      />
+                                    </td>
+                                  )}
                                   <td className="px-4 py-2 text-text-primary max-w-md truncate" title={s.subject}>
                                     {s.subject}
                                     {s.variants > 1 && <span className="ml-1.5 text-[9px] text-text-400">({s.variants}v)</span>}
@@ -361,6 +422,7 @@ export default function EmailFlows() {
                                   <td className="text-right px-3 py-2 text-text-400">{s.clicked}</td>
                                   <td className={`text-right px-3 py-2 font-semibold ${rateColor(s.openRate, 40, 20)}`}>{s.openRate}%</td>
                                   <td className={`text-right px-3 py-2 font-semibold ${rateColor(s.clickRate, 5, 2)}`}>{s.clickRate}%</td>
+                                  <td className={`text-right px-3 py-2 font-semibold ${rateColor(s.replyRate || 0, 10, 3)}`}>{s.replyRate || 0}%</td>
                                   <td className="text-right px-4 py-2 text-text-400 whitespace-nowrap">{fmtDate(s.lastSent)}</td>
                                   <td className="px-2 py-2">
                                     {isUnassigned && (
@@ -389,6 +451,7 @@ export default function EmailFlows() {
                             })}
                           </tbody>
                         </table>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -435,6 +498,7 @@ export default function EmailFlows() {
                     <Th label="Clicked" k="clicked" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                     <Th label="Open %" k="openRate" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                     <Th label="Click %" k="clickRate" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <Th label="Reply %" k="replyRate" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                     <Th label="Last Sent" k="lastSent" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </tr>
                 </thead>
@@ -490,12 +554,13 @@ export default function EmailFlows() {
                       <td className="text-right px-3 py-2.5 text-text-400">{s.clicked}</td>
                       <td className={`text-right px-3 py-2.5 font-semibold ${rateColor(s.openRate, 40, 20)}`}>{s.openRate}%</td>
                       <td className={`text-right px-3 py-2.5 font-semibold ${rateColor(s.clickRate, 5, 2)}`}>{s.clickRate}%</td>
+                      <td className={`text-right px-3 py-2.5 font-semibold ${rateColor(s.replyRate || 0, 10, 3)}`}>{s.replyRate || 0}%</td>
                       <td className="text-right px-4 py-2.5 text-text-400 whitespace-nowrap">{fmtDate(s.lastSent)}</td>
                     </tr>
                     )
                   })}
                   {filteredStats.length === 0 && (
-                    <tr><td colSpan={10} className="px-4 py-8 text-center text-text-400 text-xs">No emails match this filter.</td></tr>
+                    <tr><td colSpan={11} className="px-4 py-8 text-center text-text-400 text-xs">No emails match this filter.</td></tr>
                   )}
                 </tbody>
               </table>
