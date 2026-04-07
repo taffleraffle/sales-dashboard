@@ -279,3 +279,30 @@ export async function loadCachedWorkflows() {
   const { data } = await supabase.from('ghl_workflows').select('*').order('name')
   return data || []
 }
+
+/**
+ * Load all subject metadata (workflow assignments, monitor flags).
+ * Returns a map keyed by normalized subject.
+ */
+export async function loadSubjectMeta() {
+  const { data, error } = await supabase.from('email_subject_meta').select('*')
+  if (error) return {}
+  const map = {}
+  for (const row of (data || [])) map[row.subject] = row
+  return map
+}
+
+/**
+ * Update metadata for a subject (workflow assignment, monitor flag).
+ */
+export async function updateSubjectMeta(subject, updates) {
+  const payload = {
+    subject,
+    ...updates,
+    updated_at: new Date().toISOString(),
+  }
+  if (updates.monitored === true) payload.monitored_at = new Date().toISOString()
+  const { error } = await supabase.from('email_subject_meta').upsert(payload, { onConflict: 'subject' })
+  if (error) console.error('Subject meta upsert failed:', error)
+  return !error
+}
