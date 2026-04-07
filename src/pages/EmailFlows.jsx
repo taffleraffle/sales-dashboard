@@ -237,6 +237,7 @@ export default function EmailFlows() {
                     <tr key={s.subject} className={`border-b border-border-default/50 ${i % 2 === 0 ? '' : 'bg-bg-primary/30'} hover:bg-bg-card-hover transition-colors`}>
                       <td className="px-4 py-2.5 text-text-primary max-w-md truncate" title={s.subject}>
                         {s.subject}
+                        {s.variants > 1 && <span className="ml-1.5 text-[9px] text-text-400">({s.variants} variants)</span>}
                       </td>
                       <td className="text-right px-3 py-2.5 font-semibold">{s.sent}</td>
                       <td className="text-right px-3 py-2.5 text-text-400">{s.delivered}</td>

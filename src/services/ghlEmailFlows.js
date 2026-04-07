@@ -166,6 +166,55 @@ export async function refreshRecentEmailStatuses(daysBack = 7) {
 }
 
 /**
+ * Normalize an email subject by stripping personalized variables so the same
+ * automation email shows as one row regardless of which contact it went to.
+ *
+ * Examples:
+ *   "Hey Tom, see you in 15!"               → "Hey {NAME}, see you in 15!"
+ *   "Tom + Eric Introduction"               → "{NAME} + Eric Introduction"
+ *   "FWD: can you please email Tom Hresko"  → "FWD: can you please email {NAME}"
+ *   "Tom, missed you but I held the space"  → "{NAME}, missed you but I held the space"
+ *   "Kyle here's how we get you calls"      → "{NAME} here's how we get you calls"
+ *   "Appointment Confirmation on Thursday, April 9, 2026 3:30 PM (EDT)" → "Appointment Confirmation on {DATE}"
+ *   "Re: your application Tom"              → "Re: your application {NAME}"
+ */
+export function normalizeSubject(subject) {
+  if (!subject) return '(no subject)'
+  let s = subject.trim()
+
+  // Strip date+time patterns (Appointment Confirmation etc.)
+  s = s.replace(/\bon\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+[A-Z][a-z]+\s+\d{1,2},?\s+\d{4}.*$/i, 'on {DATE}')
+  s = s.replace(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,\s+[A-Z][a-z]+\s+\d{1,2}.*$/i, '{DATE}')
+  s = s.replace(/\b\d{1,2}:\d{2}\s*(AM|PM)\s*\([A-Z]{2,4}\)/gi, '')
+
+  // Pattern: "Name + Eric Introduction" / "Name + Anything Introduction"
+  s = s.replace(/^[A-Z][a-zA-Z]+\s+\+\s+(\w+)\s+Introduction$/i, '{NAME} + $1 Introduction')
+
+  // Pattern: "FWD: can you please email FirstName LastName"
+  s = s.replace(/^(FWD:\s+can you please email)\s+[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]*)*$/i, '$1 {NAME}')
+
+  // Pattern: "Name, missed you but I held the space"
+  s = s.replace(/^[A-Z][a-zA-Z]+,\s+(missed you.*)$/i, '{NAME}, $1')
+
+  // Pattern: "Name here's ..." (no comma, name at start followed by lowercase)
+  s = s.replace(/^[A-Z][a-zA-Z]+\s+(here'?s\s+.*)$/i, '{NAME} $1')
+
+  // Pattern: "Name how fast..." / "Name how can..."
+  s = s.replace(/^[A-Z][a-zA-Z]+\s+(how\s+(can|fast|do|will|much).*)$/i, '{NAME} $1')
+
+  // Pattern: "Hey Name," / "Hi Name,"
+  s = s.replace(/^(Hey|Hi|Hello)\s+[A-Z][a-zA-Z]+([,\s])/i, '$1 {NAME}$2')
+
+  // Don't strip trailing names — too risky (matches "Reserved", "Introduction", etc.)
+  // Names usually appear at start, which we already handle above.
+
+  // Collapse repeated whitespace
+  s = s.replace(/\s+/g, ' ').trim()
+
+  return s
+}
+
+/**
  * Aggregate email stats per subject for the date range.
  * Only includes outbound workflow-sourced emails.
  */
@@ -180,11 +229,12 @@ export async function loadEmailStats(fromDate, toDate) {
 
   const bySubject = {}
   for (const e of (data || [])) {
-    const key = e.subject || '(no subject)'
+    const key = normalizeSubject(e.subject)
     if (!bySubject[key]) {
       bySubject[key] = {
         subject: key,
         source: e.source,
+        rawSubjects: new Set(),
         sent: 0,
         delivered: 0,
         opened: 0,
@@ -195,6 +245,7 @@ export async function loadEmailStats(fromDate, toDate) {
       }
     }
     const s = bySubject[key]
+    s.rawSubjects.add(e.subject || '(no subject)')
     s.sent++
     if (e.status === 'delivered') s.delivered++
     if (e.status === 'opened') { s.delivered++; s.opened++ }
@@ -207,6 +258,7 @@ export async function loadEmailStats(fromDate, toDate) {
   return Object.values(bySubject).map(s => ({
     subject: s.subject,
     source: s.source,
+    variants: s.rawSubjects.size,
     sent: s.sent,
     delivered: s.delivered,
     opened: s.opened,
