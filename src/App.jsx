@@ -15,6 +15,7 @@ import SettingsPage from './pages/SettingsPage'
 import CommissionPage from './pages/CommissionPage'
 import CommissionDetail from './pages/CommissionDetail'
 import SetterBot from './pages/SetterBot'
+import EmailFlows from './pages/EmailFlows'
 import SetterKPIHistory from './pages/SetterKPIHistory'
 // EODHistory is now embedded in EODReview page
 import SetPasswordPage from './pages/SetPasswordPage'
@@ -82,6 +83,7 @@ export default function App() {
               <Route path="/sales/commissions" element={<CommissionPage />} />
               <Route path="/sales/commissions/:id" element={<CommissionDetail />} />
               <Route path="/sales/setter-bot" element={<SetterBot />} />
+              <Route path="/sales/email-flows" element={<EmailFlows />} />
               <Route path="/sales/settings" element={<SettingsPage />} />
             </Route>
           </Routes>
