@@ -17,8 +17,11 @@ export default function EmailFlows() {
     try { return new Set(JSON.parse(localStorage.getItem('email_flows_selected') || '[]')) }
     catch { return new Set() }
   })
-  const [workflowFilter, setWorkflowFilter] = useState('all') // 'all' | workflow_id | 'unassigned' | 'monitored'
-  const [sortKey, setSortKey] = useState('sent') // 'subject', 'sent', 'opened', 'clicked', 'openRate', 'clickRate', 'lastSent'
+  const [view, setView] = useState('all') // 'all' | 'workflows'
+  const [workflowFilter, setWorkflowFilter] = useState('all')
+  const [expandedWorkflow, setExpandedWorkflow] = useState(null)
+  const [minSends, setMinSends] = useState(10)
+  const [sortKey, setSortKey] = useState('sent')
   const [sortDir, setSortDir] = useState('desc')
   const [editingSubject, setEditingSubject] = useState(null)
   const [error, setError] = useState(null)
@@ -104,8 +107,11 @@ export default function EmailFlows() {
     localStorage.setItem('email_flows_selected', JSON.stringify([...next]))
   }
 
+  // Stats above the min-send threshold
+  const visibleStats = useMemo(() => stats.filter(s => s.sent >= minSends), [stats, minSends])
+
   const filteredStats = useMemo(() => {
-    let result = selectedSubjects.size === 0 ? stats : stats.filter(s => selectedSubjects.has(s.subject))
+    let result = visibleStats
 
     // Apply workflow filter
     if (workflowFilter === 'unassigned') {
@@ -126,7 +132,36 @@ export default function EmailFlows() {
       return 0
     })
     return sorted
-  }, [stats, selectedSubjects, subjectMeta, workflowFilter, sortKey, sortDir])
+  }, [visibleStats, subjectMeta, workflowFilter, sortKey, sortDir])
+
+  // Group emails by workflow for the workflows view
+  const workflowGroups = useMemo(() => {
+    const groups = {}
+    for (const s of visibleStats) {
+      const meta = subjectMeta[s.subject]
+      const wfId = meta?.workflow_id || '__unassigned__'
+      const wfName = meta?.workflow_name || 'Unassigned'
+      if (!groups[wfId]) {
+        groups[wfId] = {
+          id: wfId,
+          name: wfName,
+          emails: [],
+          sent: 0, delivered: 0, opened: 0, clicked: 0,
+        }
+      }
+      const g = groups[wfId]
+      g.emails.push(s)
+      g.sent += s.sent
+      g.delivered += s.delivered
+      g.opened += s.opened
+      g.clicked += s.clicked
+    }
+    return Object.values(groups).map(g => ({
+      ...g,
+      openRate: g.delivered > 0 ? parseFloat(((g.opened / g.delivered) * 100).toFixed(1)) : 0,
+      clickRate: g.delivered > 0 ? parseFloat(((g.clicked / g.delivered) * 100).toFixed(1)) : 0,
+    })).sort((a, b) => b.sent - a.sent)
+  }, [visibleStats, subjectMeta])
 
   const totals = useMemo(() => {
     const t = filteredStats.reduce((a, s) => ({
@@ -212,55 +247,159 @@ export default function EmailFlows() {
         </div>
       ) : (
         <>
-          {/* Subject toggle chips */}
-          <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-[11px] text-opt-yellow uppercase font-medium">Selected Automations ({selectedSubjects.size}/{stats.length})</h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    const all = new Set(stats.map(s => s.subject))
-                    setSelectedSubjects(all)
-                    localStorage.setItem('email_flows_selected', JSON.stringify([...all]))
-                  }}
-                  className="text-[10px] text-text-400 hover:text-opt-yellow"
-                >
-                  Select all
-                </button>
-                <span className="text-text-400">·</span>
-                <button
-                  onClick={() => {
-                    setSelectedSubjects(new Set())
-                    localStorage.setItem('email_flows_selected', '[]')
-                  }}
-                  className="text-[10px] text-text-400 hover:text-opt-yellow"
-                >
-                  Clear
-                </button>
-              </div>
+          {/* View tabs + min-send filter */}
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <div className="flex gap-1 bg-bg-card border border-border-default rounded-xl p-1">
+              <button
+                onClick={() => setView('all')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  view === 'all' ? 'bg-opt-yellow text-bg-primary shadow-sm' : 'text-text-400 hover:text-text-primary'
+                }`}
+              >
+                All Emails
+              </button>
+              <button
+                onClick={() => setView('workflows')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  view === 'workflows' ? 'bg-opt-yellow text-bg-primary shadow-sm' : 'text-text-400 hover:text-text-primary'
+                }`}
+              >
+                By Workflow
+              </button>
             </div>
-            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-              {stats.map(s => {
-                const active = selectedSubjects.has(s.subject)
-                return (
-                  <button
-                    key={s.subject}
-                    onClick={() => toggleSubject(s.subject)}
-                    className={`text-[10px] px-2 py-1 rounded-full border transition-all ${
-                      active
-                        ? 'bg-opt-yellow/20 border-opt-yellow/40 text-opt-yellow'
-                        : 'bg-bg-primary border-border-default text-text-400 hover:border-text-400'
-                    }`}
-                    title={s.subject}
-                  >
-                    {s.subject.length > 40 ? s.subject.slice(0, 40) + '...' : s.subject}
-                    <span className="ml-1.5 opacity-70">({s.sent})</span>
-                  </button>
-                )
-              })}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-text-400 uppercase">Min sends:</span>
+              <select
+                value={minSends}
+                onChange={e => setMinSends(parseInt(e.target.value))}
+                className="bg-bg-card border border-border-default rounded-lg px-2 py-1 text-[11px] text-text-primary"
+              >
+                <option value={0}>All</option>
+                <option value={5}>5+</option>
+                <option value={10}>10+</option>
+                <option value={20}>20+</option>
+                <option value={50}>50+</option>
+              </select>
+              <span className="text-[10px] text-text-400">{visibleStats.length} of {stats.length} emails</span>
             </div>
           </div>
 
+          {/* === BY WORKFLOW VIEW === */}
+          {view === 'workflows' && (
+            <div className="space-y-3 mb-6">
+              {workflowGroups.length === 0 && (
+                <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400 text-sm">
+                  No emails meet the minimum send threshold.
+                </div>
+              )}
+              {workflowGroups.map(g => {
+                const isExpanded = expandedWorkflow === g.id
+                const isUnassigned = g.id === '__unassigned__'
+                return (
+                  <div key={g.id} className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+                    <button
+                      onClick={() => setExpandedWorkflow(isExpanded ? null : g.id)}
+                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-card-hover transition-colors text-left"
+                    >
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${isUnassigned ? 'bg-text-400/10 text-text-400' : 'bg-opt-yellow/20 text-opt-yellow'}`}>
+                          {g.emails.length} email{g.emails.length === 1 ? '' : 's'}
+                        </span>
+                        <h3 className={`text-sm font-semibold truncate ${isUnassigned ? 'text-text-400 italic' : 'text-text-primary'}`}>
+                          {g.name}
+                        </h3>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs">
+                        <div className="text-right">
+                          <div className="text-[9px] text-text-400 uppercase">Sent</div>
+                          <div className="font-bold text-text-primary">{g.sent.toLocaleString()}</div>
+                        </div>
+                        <div className="text-right min-w-[60px]">
+                          <div className="text-[9px] text-text-400 uppercase">Open</div>
+                          <div className={`font-bold ${rateColor(g.openRate, 40, 20)}`}>{g.openRate}%</div>
+                        </div>
+                        <div className="text-right min-w-[60px]">
+                          <div className="text-[9px] text-text-400 uppercase">Click</div>
+                          <div className={`font-bold ${rateColor(g.clickRate, 5, 2)}`}>{g.clickRate}%</div>
+                        </div>
+                        <span className="text-text-400">{isExpanded ? '▼' : '▶'}</span>
+                      </div>
+                    </button>
+                    {isExpanded && (
+                      <div className="border-t border-border-default overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-[10px] text-text-400 uppercase border-b border-border-default/50 bg-bg-primary/30">
+                              <th className="px-2 py-2 w-8"></th>
+                              <th className="text-left px-4 py-2 font-medium">Subject</th>
+                              <th className="text-right px-3 py-2 font-medium">Sent</th>
+                              <th className="text-right px-3 py-2 font-medium">Opened</th>
+                              <th className="text-right px-3 py-2 font-medium">Clicked</th>
+                              <th className="text-right px-3 py-2 font-medium">Open %</th>
+                              <th className="text-right px-3 py-2 font-medium">Click %</th>
+                              <th className="text-right px-4 py-2 font-medium">Last Sent</th>
+                              <th className="px-2 py-2 w-24"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.emails.sort((a, b) => b.sent - a.sent).map((s, i) => {
+                              const meta = subjectMeta[s.subject] || {}
+                              const isMonitored = meta.monitored
+                              return (
+                                <tr key={s.subject} className={`border-b border-border-default/30 ${isMonitored ? 'bg-blue-500/10 border-l-2 border-blue-400' : i % 2 === 0 ? '' : 'bg-bg-primary/20'}`}>
+                                  <td className="px-2 py-2 text-center">
+                                    <button onClick={() => toggleMonitored(s.subject)} className={isMonitored ? 'text-blue-400' : 'text-text-400/30 hover:text-text-400'}>
+                                      <Star size={12} fill={isMonitored ? 'currentColor' : 'none'} />
+                                    </button>
+                                  </td>
+                                  <td className="px-4 py-2 text-text-primary max-w-md truncate" title={s.subject}>
+                                    {s.subject}
+                                    {s.variants > 1 && <span className="ml-1.5 text-[9px] text-text-400">({s.variants}v)</span>}
+                                  </td>
+                                  <td className="text-right px-3 py-2 font-semibold">{s.sent}</td>
+                                  <td className="text-right px-3 py-2 text-text-400">{s.opened}</td>
+                                  <td className="text-right px-3 py-2 text-text-400">{s.clicked}</td>
+                                  <td className={`text-right px-3 py-2 font-semibold ${rateColor(s.openRate, 40, 20)}`}>{s.openRate}%</td>
+                                  <td className={`text-right px-3 py-2 font-semibold ${rateColor(s.clickRate, 5, 2)}`}>{s.clickRate}%</td>
+                                  <td className="text-right px-4 py-2 text-text-400 whitespace-nowrap">{fmtDate(s.lastSent)}</td>
+                                  <td className="px-2 py-2">
+                                    {isUnassigned && (
+                                      editingSubject === s.subject ? (
+                                        <select
+                                          autoFocus
+                                          value=""
+                                          onChange={e => assignWorkflow(s.subject, e.target.value)}
+                                          onBlur={() => setEditingSubject(null)}
+                                          className="bg-bg-primary border border-opt-yellow/40 rounded px-1 py-0.5 text-[10px] text-text-primary"
+                                        >
+                                          <option value="">— Pick —</option>
+                                          {workflows.filter(w => w.status === 'published').map(w => (
+                                            <option key={w.id} value={w.id}>{w.name}</option>
+                                          ))}
+                                        </select>
+                                      ) : (
+                                        <button onClick={() => setEditingSubject(s.subject)} className="text-[10px] text-text-400/60 hover:text-opt-yellow">
+                                          Assign
+                                        </button>
+                                      )
+                                    )}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* === ALL EMAILS VIEW === */}
+          {view === 'all' && (
+          <>
           {/* Stats table */}
           <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
             <div className="px-4 py-3 border-b border-border-default flex items-center justify-between flex-wrap gap-2">
@@ -362,9 +501,11 @@ export default function EmailFlows() {
               </table>
             </div>
           </div>
+          </>
+          )}
 
           {/* GHL Workflow reference */}
-          {workflows.length > 0 && (
+          {false && workflows.length > 0 && (
             <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
               <div className="px-4 py-3 border-b border-border-default">
                 <h3 className="text-[11px] text-opt-yellow uppercase font-medium">GHL Workflows ({workflows.length}) <span className="text-text-400 font-normal normal-case">— reference list</span></h3>
