@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, User, Search, Bell, MoreHorizontal, X, Headphones, DollarSign, Bot, History, Mail } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
+import { startAutoSync, stopAutoSync } from '../services/autoSync'
 
 const navItems = [
   { to: '/sales', icon: BarChart3, label: 'Overview', end: true },
@@ -37,6 +38,13 @@ export default function Layout() {
     document.addEventListener('pointerdown', handler)
     return () => document.removeEventListener('pointerdown', handler)
   }, [moreOpen])
+
+  // Background auto-sync: Stripe (6h), GHL appointments (2h), Email flows (4h),
+  // Marketing tracker (6h). Runs on mount and every 30 minutes thereafter.
+  useEffect(() => {
+    startAutoSync()
+    return () => stopAutoSync()
+  }, [])
 
   return (
     <div className="min-h-screen bg-bg-primary flex">

@@ -64,6 +64,10 @@ export function useCloserCallBreakdown(closerId, days = 30) {
         .in('eod_report_id', reportIds)
 
       // Aggregate per closer
+      // IMPORTANT: 'ascended' outcome means an existing client was upgraded —
+      // it should count as LIVE (they showed) but NOT as a new close (no double-counting).
+      // Pure ascension-type calls (call_type = 'ascension') are upgrades to existing
+      // clients and should NOT count toward the new-call close rate at all.
       const byCloser = {}
       for (const c of (calls || [])) {
         const cid = reportToCloser[c.eod_report_id]
@@ -72,7 +76,9 @@ export function useCloserCallBreakdown(closerId, days = 30) {
         const b = byCloser[cid]
         const isNew = c.call_type === 'new_call'
         const isFu = c.call_type === 'follow_up'
-        const isLive = ['closed', 'not_closed'].includes(c.outcome)
+        // Live = they showed up (closed, not_closed, or ascended existing client)
+        const isLive = ['closed', 'not_closed', 'ascended'].includes(c.outcome)
+        // Close = fresh close only (ascensions are upgrades, not new closes)
         const isClose = c.outcome === 'closed'
         if (isNew && isClose) b.ncCloses++
         if (isFu && isClose) b.fuCloses++
