@@ -1448,12 +1448,15 @@ export default function EODReview() {
 
   const addManualCall = (lead) => {
     setShowLeadPicker(false)
+    // Only use lead.id as setter_lead_id if the picker returned an actual setter_lead
+    // (not a ghl_appointment or ghl contact — those have different primary keys)
+    const isSetterLead = lead?._source === 'lead'
     setCalls(prev => [...prev, {
-      lead_id: lead ? lead.id : null,
-      ghl_event_id: null,
+      lead_id: isSetterLead ? lead.id : null,
+      ghl_event_id: lead?._source === 'ghl' ? lead.ghl_event_id : null,
       lead_name: lead ? lead.lead_name : 'Manual Entry',
       setter_name: lead?.setter?.name || '—',
-      appointment_date: selectedDate,
+      appointment_date: lead?.appointment_date || selectedDate,
       start_time: null,
       calendar_name: '',
       lead_source: lead?.lead_source || 'manual',
@@ -1467,8 +1470,8 @@ export default function EODReview() {
       notes: '',
       fathom_summary: null,
       fathom_duration: null,
-      contact_email: '',
-      contact_phone: '',
+      contact_email: lead?.contact_email || '',
+      contact_phone: lead?.contact_phone || '',
       is_manual: true,
     }])
   }

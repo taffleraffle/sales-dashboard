@@ -27,6 +27,69 @@ export function useCloserEODs(closerId, days = 30) {
   return { reports, loading }
 }
 
+/**
+ * Aggregate close breakdown by call type from closer_calls rows.
+ * Returns per-closer splits: new_call closes vs follow_up closes.
+ * Used for the "close rate = closes on new calls / live new calls" formula,
+ * and "net close rate = all closes / live new calls".
+ */
+export function useCloserCallBreakdown(closerId, days = 30) {
+  const [breakdown, setBreakdown] = useState({})
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetch() {
+      setLoading(true)
+      // Fetch reports in range, then their calls
+      let reportQ = supabase
+        .from('closer_eod_reports')
+        .select('id, closer_id')
+        .gte('report_date', sinceDate(days))
+      if (closerId) reportQ = reportQ.eq('closer_id', closerId)
+      const { data: reports } = await reportQ
+
+      const reportIds = (reports || []).map(r => r.id)
+      const reportToCloser = {}
+      for (const r of (reports || [])) reportToCloser[r.id] = r.closer_id
+
+      if (reportIds.length === 0) {
+        setBreakdown({})
+        setLoading(false)
+        return
+      }
+
+      const { data: calls } = await supabase
+        .from('closer_calls')
+        .select('eod_report_id, call_type, outcome')
+        .in('eod_report_id', reportIds)
+
+      // Aggregate per closer
+      const byCloser = {}
+      for (const c of (calls || [])) {
+        const cid = reportToCloser[c.eod_report_id]
+        if (!cid) continue
+        if (!byCloser[cid]) byCloser[cid] = { ncCloses: 0, fuCloses: 0, ncLive: 0, fuLive: 0, allCloses: 0 }
+        const b = byCloser[cid]
+        const isNew = c.call_type === 'new_call'
+        const isFu = c.call_type === 'follow_up'
+        const isLive = ['closed', 'not_closed'].includes(c.outcome)
+        const isClose = c.outcome === 'closed'
+        if (isNew && isClose) b.ncCloses++
+        if (isFu && isClose) b.fuCloses++
+        if (isNew && isLive) b.ncLive++
+        if (isFu && isLive) b.fuLive++
+        if (isClose) b.allCloses++
+      }
+
+      setBreakdown(byCloser)
+      setLoading(false)
+    }
+    fetch()
+  }, [closerId, days])
+
+  return { breakdown, loading }
+}
+
 export function useCloserTranscripts(closerId) {
   const [transcripts, setTranscripts] = useState([])
   const [loading, setLoading] = useState(true)

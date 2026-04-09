@@ -4,7 +4,7 @@ import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import { useTeamMembers } from '../hooks/useTeamMembers'
-import { useCloserEODs } from '../hooks/useCloserData'
+import { useCloserEODs, useCloserCallBreakdown } from '../hooks/useCloserData'
 import { Loader, Plus } from 'lucide-react'
 import { rangeToDays } from '../lib/dateUtils'
 
@@ -13,6 +13,7 @@ export default function CloserOverview() {
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const { members: closers, loading: loadingMembers } = useTeamMembers('closer')
   const { reports, loading: loadingReports } = useCloserEODs(null, days)
+  const { breakdown } = useCloserCallBreakdown(null, days)
 
   if (loadingMembers) {
     return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
@@ -38,7 +39,24 @@ export default function CloserOverview() {
   const totalBooked = companyTotals.ncBooked + companyTotals.fuBooked
   const totalNoShows = companyTotals.ncNoShows + companyTotals.fuNoShows
   const companyShowRate = totalBooked > 0 ? parseFloat(((companyTotals.liveCalls / totalBooked) * 100).toFixed(1)) : 0
-  const companyCloseRate = companyTotals.liveCalls > 0 ? parseFloat(((companyTotals.closes / companyTotals.liveCalls) * 100).toFixed(1)) : 0
+
+  // Company close-rate breakdown from call-level data
+  const companyBreak = Object.values(breakdown).reduce((a, b) => ({
+    ncCloses: a.ncCloses + b.ncCloses,
+    fuCloses: a.fuCloses + b.fuCloses,
+    ncLive: a.ncLive + b.ncLive,
+    fuLive: a.fuLive + b.fuLive,
+    allCloses: a.allCloses + b.allCloses,
+  }), { ncCloses: 0, fuCloses: 0, ncLive: 0, fuLive: 0, allCloses: 0 })
+
+  // Close rate = closes on NEW calls only / live new calls
+  const companyCloseRate = companyBreak.ncLive > 0
+    ? parseFloat(((companyBreak.ncCloses / companyBreak.ncLive) * 100).toFixed(1))
+    : 0
+  // Net close rate = ALL closes (new + follow-up) / live new calls
+  const companyNetCloseRate = companyBreak.ncLive > 0
+    ? parseFloat((((companyBreak.ncCloses + companyBreak.fuCloses) / companyBreak.ncLive) * 100).toFixed(1))
+    : 0
   const companyOfferRate = companyTotals.liveCalls > 0 ? parseFloat(((companyTotals.offers / companyTotals.liveCalls) * 100).toFixed(1)) : 0
   const companyOfferCloseRate = companyTotals.offers > 0 ? parseFloat(((companyTotals.closes / companyTotals.offers) * 100).toFixed(1)) : 0
   const companyRescheduleRate = totalBooked > 0 ? parseFloat(((companyTotals.reschedules / totalBooked) * 100).toFixed(1)) : 0
@@ -61,12 +79,16 @@ export default function CloserOverview() {
     }), { ncBooked: 0, fuBooked: 0, noShows: 0, liveCalls: 0, offers: 0, closes: 0, revenue: 0, cash: 0 })
 
     const booked = totals.ncBooked + totals.fuBooked
+    const b = breakdown[closer.id] || { ncCloses: 0, fuCloses: 0, ncLive: 0 }
     return {
       ...closer,
       ...totals,
       booked,
       showRate: booked ? parseFloat(((totals.liveCalls / booked) * 100).toFixed(1)) : 0,
-      closeRate: totals.liveCalls ? parseFloat(((totals.closes / totals.liveCalls) * 100).toFixed(1)) : 0,
+      // Close rate = new call closes / live new calls (excludes follow-ups from denominator)
+      closeRate: b.ncLive > 0 ? parseFloat(((b.ncCloses / b.ncLive) * 100).toFixed(1)) : 0,
+      // Net close rate = all closes (new + FU) / live new calls
+      netCloseRate: b.ncLive > 0 ? parseFloat((((b.ncCloses + b.fuCloses) / b.ncLive) * 100).toFixed(1)) : 0,
       offerRate: totals.liveCalls ? parseFloat(((totals.offers / totals.liveCalls) * 100).toFixed(1)) : 0,
       cashCollRate: totals.revenue > 0 ? parseFloat(((totals.cash / totals.revenue) * 100).toFixed(1)) : 0,
       reschedules: myReports.reduce((s, r) => s + (r.reschedules || 0), 0),
@@ -105,6 +127,7 @@ export default function CloserOverview() {
         <Gauge label="Resched Rate" value={companyRescheduleRate} target={10} max={100} />
         <Gauge label="Offer Rate" value={companyOfferRate} target={80} />
         <Gauge label="Close Rate" value={companyCloseRate} target={25} />
+        <Gauge label="Net Close" value={companyNetCloseRate} target={30} />
         <Gauge label="Offer → Close" value={companyOfferCloseRate} target={30} max={100} />
         <Gauge label="Calls/Close" value={callsPerClose} target={4} max={20} />
         <Gauge label="Cash Collect %" value={cashCollectionRate} target={50} />

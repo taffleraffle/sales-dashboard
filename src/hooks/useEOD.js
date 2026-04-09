@@ -24,6 +24,18 @@ export function useEODSubmit() {
 
       // Insert calls if any
       if (calls.length > 0) {
+        // Validate setter_lead_ids exist — strip any that don't to prevent FK violations.
+        // Stale IDs can come from picked GHL appointments, deleted setter_leads, etc.
+        const candidateIds = [...new Set(calls.map(c => c.setter_lead_id).filter(Boolean))]
+        const validIds = new Set()
+        if (candidateIds.length > 0) {
+          const { data: existing } = await supabase
+            .from('setter_leads')
+            .select('id')
+            .in('id', candidateIds)
+          for (const row of (existing || [])) validIds.add(row.id)
+        }
+
         // Delete existing calls for this report
         await supabase.from('closer_calls').delete().eq('eod_report_id', report.id)
 
@@ -38,7 +50,7 @@ export function useEODSubmit() {
           offered: c.offered || false,
           offered_finance: c.offered_finance || false,
           notes: c.notes || '',
-          setter_lead_id: c.setter_lead_id || null,
+          setter_lead_id: c.setter_lead_id && validIds.has(c.setter_lead_id) ? c.setter_lead_id : null,
         }))
         const { error: callError } = await supabase.from('closer_calls').insert(callRows)
         if (callError) throw callError
