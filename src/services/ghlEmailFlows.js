@@ -348,3 +348,45 @@ export async function updateSubjectMeta(subject, updates) {
   if (error) console.error('Subject meta upsert failed:', error)
   return !error
 }
+
+// ── Flow Group CRUD ──
+
+export async function loadFlowGroups() {
+  const { data } = await supabase.from('email_flow_groups').select('*').order('sort_order').order('name')
+  return data || []
+}
+
+export async function createFlowGroup(name, description = '', color = '#f0e050') {
+  const { data, error } = await supabase.from('email_flow_groups').insert({ name, description, color }).select().single()
+  if (error) { console.error('Create flow group failed:', error); return null }
+  return data
+}
+
+export async function updateFlowGroup(id, updates) {
+  const { error } = await supabase.from('email_flow_groups').update(updates).eq('id', id)
+  if (error) console.error('Update flow group failed:', error)
+  return !error
+}
+
+export async function deleteFlowGroup(id) {
+  // Clear flow_group_id on all assigned subjects first
+  await supabase.from('email_subject_meta').update({ flow_group_id: null, updated_at: new Date().toISOString() }).eq('flow_group_id', id)
+  const { error } = await supabase.from('email_flow_groups').delete().eq('id', id)
+  if (error) console.error('Delete flow group failed:', error)
+  return !error
+}
+
+export async function assignSubjectsToFlow(subjects, flowGroupId) {
+  if (!subjects?.length) return false
+  const now = new Date().toISOString()
+  const rows = subjects.map(subject => ({ subject, flow_group_id: flowGroupId, updated_at: now }))
+  const { error } = await supabase.from('email_subject_meta').upsert(rows, { onConflict: 'subject' })
+  if (error) console.error('Assign to flow failed:', error)
+  return !error
+}
+
+export async function removeSubjectFromFlow(subject) {
+  const { error } = await supabase.from('email_subject_meta').update({ flow_group_id: null, updated_at: new Date().toISOString() }).eq('subject', subject)
+  if (error) console.error('Remove from flow failed:', error)
+  return !error
+}
