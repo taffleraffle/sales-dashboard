@@ -19,7 +19,7 @@ export default function EmailFlows() {
   const [syncing, setSyncing] = useState(false)
   const [syncProgress, setSyncProgress] = useState('')
   const [view, setView] = useState('flows') // 'flows' | 'all'
-  const [minSends, setMinSends] = useState(10)
+  const [minSends, setMinSends] = useState(1)
   const [sortKey, setSortKey] = useState('sent')
   const [sortDir, setSortDir] = useState('desc')
   const [expandedFlow, setExpandedFlow] = useState(null)

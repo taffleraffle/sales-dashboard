@@ -202,8 +202,14 @@ export function normalizeSubject(subject) {
   // Pattern: "FWD: can you please email FirstName LastName"
   s = s.replace(/^(FWD:\s+can you please email)\s+[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]*)*$/i, '$1 {NAME}')
 
-  // Pattern: "Name, missed you but I held the space"
-  s = s.replace(/^[A-Z][a-zA-Z]+,\s+(missed you.*)$/i, '{NAME}, $1')
+  // Pattern: "Name, missed you but I held the space" / "Name, This remodeler..."
+  // Any "Capitalized, " at start where the name is a first name (not a real word)
+  s = s.replace(/^[A-Z][a-zA-Z]+,\s+(.+)$/i, (match, rest) => {
+    const name = match.split(',')[0].trim()
+    // Skip if it's a common word, not a name
+    if (/^(The|This|That|And|But|For|With|What|Why|How|When|Where)$/i.test(name)) return match
+    return `{NAME}, ${rest}`
+  })
 
   // Pattern: "Name here's ..." (no comma, name at start followed by lowercase)
   s = s.replace(/^[A-Z][a-zA-Z]+\s+(here'?s\s+.*)$/i, '{NAME} $1')
@@ -211,11 +217,15 @@ export function normalizeSubject(subject) {
   // Pattern: "Name how fast..." / "Name how can..."
   s = s.replace(/^[A-Z][a-zA-Z]+\s+(how\s+(can|fast|do|will|much).*)$/i, '{NAME} $1')
 
-  // Pattern: "Hey Name," / "Hi Name,"
-  s = s.replace(/^(Hey|Hi|Hello)\s+[A-Z][a-zA-Z]+([,\s])/i, '$1 {NAME}$2')
+  // Pattern: "Name this is..." / "Name that..." / "Name what..."
+  s = s.replace(/^[A-Z][a-zA-Z]+\s+(this\s+is\s+.*)$/i, '{NAME} $1')
+  s = s.replace(/^[A-Z][a-zA-Z]+\s+(that\s+.*)$/i, '{NAME} $1')
+  s = s.replace(/^[A-Z][a-zA-Z]+\s+(what\s+.*)$/i, '{NAME} $1')
+  s = s.replace(/^[A-Z][a-zA-Z]+\s+(we\s+.*)$/i, '{NAME} $1')
+  s = s.replace(/^[A-Z][a-zA-Z]+\s+(I\s+.*)$/i, '{NAME} $1')
 
-  // Don't strip trailing names — too risky (matches "Reserved", "Introduction", etc.)
-  // Names usually appear at start, which we already handle above.
+  // Pattern: "Hey Name," / "Hi Name," / "Hey Name " (no comma)
+  s = s.replace(/^(Hey|Hi|Hello)\s+[A-Z][a-zA-Z]+([,\s])/i, '$1 {NAME}$2')
 
   // Collapse repeated whitespace
   s = s.replace(/\s+/g, ' ').trim()
