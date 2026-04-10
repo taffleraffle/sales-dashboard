@@ -7,7 +7,7 @@ import {
   fetchWorkflows, syncEmailMessages, refreshRecentEmailStatuses,
   loadEmailStats, loadCachedWorkflows, loadSubjectMeta, updateSubjectMeta,
   loadFlowGroups, createFlowGroup, updateFlowGroup, deleteFlowGroup,
-  assignSubjectsToFlow, removeSubjectFromFlow,
+  assignSubjectsToFlow, removeSubjectFromFlow, loadEmailRecipients,
 } from '../services/ghlEmailFlows'
 
 export default function EmailFlows() {
@@ -27,6 +27,9 @@ export default function EmailFlows() {
   const [emailSearch, setEmailSearch] = useState('')
   const [newFlowName, setNewFlowName] = useState('')
   const [showCreateFlow, setShowCreateFlow] = useState(false)
+  const [expandedEmail, setExpandedEmail] = useState(null) // normalized subject
+  const [emailRecipients, setEmailRecipients] = useState([])
+  const [loadingRecipients, setLoadingRecipients] = useState(false)
   const [error, setError] = useState(null)
 
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
@@ -104,9 +107,11 @@ export default function EmailFlows() {
     })
   }, [flowGroups, visibleStats, subjectMeta])
 
-  // Totals across all flows
+  // Totals — from tracked flows if any exist, otherwise from all visible emails
   const flowTotals = useMemo(() => {
-    const emails = flowGroupStats.flatMap(fg => fg.emails)
+    const emails = flowGroupStats.length > 0
+      ? flowGroupStats.flatMap(fg => fg.emails)
+      : visibleStats
     const t = emails.reduce((a, s) => ({
       sent: a.sent + s.sent, delivered: a.delivered + s.delivered,
       opened: a.opened + s.opened, clicked: a.clicked + s.clicked, replied: a.replied + (s.replied || 0),
@@ -117,7 +122,7 @@ export default function EmailFlows() {
       clickRate: t.delivered > 0 ? ((t.clicked / t.delivered) * 100).toFixed(1) : 0,
       replyRate: t.delivered > 0 ? ((t.replied / t.delivered) * 100).toFixed(1) : 0,
     }
-  }, [flowGroupStats])
+  }, [flowGroupStats, visibleStats])
 
   const handleCreateFlow = async () => {
     if (!newFlowName.trim()) return
@@ -151,6 +156,15 @@ export default function EmailFlows() {
   const handleRemoveFromFlow = async (subject) => {
     await removeSubjectFromFlow(subject)
     setSubjectMeta(prev => ({ ...prev, [subject]: { ...(prev[subject] || {}), flow_group_id: null } }))
+  }
+
+  const toggleEmailDetail = async (subject) => {
+    if (expandedEmail === subject) { setExpandedEmail(null); return }
+    setExpandedEmail(subject)
+    setLoadingRecipients(true)
+    const recipients = await loadEmailRecipients(subject, fromDate, toDate)
+    setEmailRecipients(recipients)
+    setLoadingRecipients(false)
   }
 
   const rateColor = (v, good, ok) => v >= good ? 'text-success' : v >= ok ? 'text-opt-yellow' : 'text-danger'
@@ -353,10 +367,13 @@ export default function EmailFlows() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {sortedStats(fg.emails).map((s, i) => (
-                                  <tr key={s.subject} className={`border-b border-border-default/20 ${i % 2 ? 'bg-bg-primary/10' : ''}`}>
+                                {sortedStats(fg.emails).map((s, i) => [
+                                  <tr key={s.subject} className={`border-b border-border-default/20 ${i % 2 ? 'bg-bg-primary/10' : ''} cursor-pointer hover:bg-opt-yellow/5`} onClick={() => toggleEmailDetail(s.subject)}>
                                     <td className="px-4 py-2 text-text-primary truncate max-w-md" title={s.subject}>
-                                      {s.subject}
+                                      <span className="inline-flex items-center gap-1.5">
+                                        {expandedEmail === s.subject ? <ChevronUp size={10} className="text-opt-yellow shrink-0" /> : <ChevronDown size={10} className="text-text-400 shrink-0" />}
+                                        {s.subject}
+                                      </span>
                                       {s.variants > 1 && <span className="ml-1.5 text-[9px] text-text-400">({s.variants}v)</span>}
                                     </td>
                                     <td className="text-right px-3 py-2 font-semibold">{s.sent}</td>
@@ -366,11 +383,18 @@ export default function EmailFlows() {
                                     <td className={`text-right px-3 py-2 font-semibold ${rateColor(s.clickRate, 5, 2)}`}>{s.clickRate}%</td>
                                     <td className={`text-right px-3 py-2 font-semibold ${rateColor(s.replyRate || 0, 10, 3)}`}>{s.replyRate || 0}%</td>
                                     <td className="text-right px-3 py-2 text-text-400 whitespace-nowrap">{fmtDate(s.lastSent)}</td>
-                                    <td className="px-2 py-2">
+                                    <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
                                       <button onClick={() => handleRemoveFromFlow(s.subject)} className="text-text-400/30 hover:text-danger" title="Remove from flow"><X size={12} /></button>
                                     </td>
-                                  </tr>
-                                ))}
+                                  </tr>,
+                                  expandedEmail === s.subject && (
+                                    <tr key={s.subject + '-detail'}>
+                                      <td colSpan={9} className="px-4 py-3 bg-bg-primary/30">
+                                        <RecipientDetail recipients={emailRecipients} loading={loadingRecipients} />
+                                      </td>
+                                    </tr>
+                                  )
+                                ])}
                               </tbody>
                             </table>
                           </div>
@@ -409,13 +433,17 @@ export default function EmailFlows() {
                     {sortedStats(visibleStats).map((s, i) => {
                       const meta = subjectMeta[s.subject]
                       const assignedFlow = meta?.flow_group_id ? flowGroups.find(fg => fg.id === meta.flow_group_id) : null
-                      return (
-                        <tr key={s.subject} className={`border-b border-border-default/50 ${i % 2 ? 'bg-bg-primary/30' : ''} hover:bg-bg-card-hover`}>
+                      const isExp = expandedEmail === s.subject
+                      return [
+                        <tr key={s.subject} className={`border-b border-border-default/50 ${i % 2 ? 'bg-bg-primary/30' : ''} hover:bg-bg-card-hover cursor-pointer`} onClick={() => toggleEmailDetail(s.subject)}>
                           <td className="px-4 py-2.5 text-text-primary truncate max-w-md" title={s.subject}>
-                            {s.subject}
+                            <span className="inline-flex items-center gap-1.5">
+                              {isExp ? <ChevronUp size={10} className="text-opt-yellow shrink-0" /> : <ChevronDown size={10} className="text-text-400 shrink-0" />}
+                              {s.subject}
+                            </span>
                             {s.variants > 1 && <span className="ml-1.5 text-[9px] text-text-400">({s.variants}v)</span>}
                           </td>
-                          <td className="px-2 py-2.5">
+                          <td className="px-2 py-2.5" onClick={e => e.stopPropagation()}>
                             {assignedFlow ? (
                               <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: (assignedFlow.color || '#f0e050') + '30', color: assignedFlow.color || '#f0e050' }}>
                                 {assignedFlow.name}
@@ -436,8 +464,15 @@ export default function EmailFlows() {
                           <td className={`text-right px-3 py-2.5 font-semibold ${rateColor(s.clickRate, 5, 2)}`}>{s.clickRate}%</td>
                           <td className={`text-right px-3 py-2.5 font-semibold ${rateColor(s.replyRate || 0, 10, 3)}`}>{s.replyRate || 0}%</td>
                           <td className="text-right px-3 py-2.5 text-text-400 whitespace-nowrap">{fmtDate(s.lastSent)}</td>
-                        </tr>
-                      )
+                        </tr>,
+                        isExp && (
+                          <tr key={s.subject + '-detail'}>
+                            <td colSpan={7} className="px-4 py-3 bg-bg-primary/30 border-b border-border-default/50">
+                              <RecipientDetail recipients={emailRecipients} loading={loadingRecipients} />
+                            </td>
+                          </tr>
+                        )
+                      ]
                     })}
                     {visibleStats.length === 0 && (
                       <tr><td colSpan={7} className="px-4 py-8 text-center text-text-400 text-xs">No emails above {minSends} sends. Sync data or lower the threshold.</td></tr>
@@ -449,6 +484,53 @@ export default function EmailFlows() {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+function RecipientDetail({ recipients, loading }) {
+  if (loading) return <div className="flex items-center justify-center py-4"><Loader size={14} className="animate-spin text-opt-yellow" /></div>
+  if (!recipients?.length) return <p className="text-[10px] text-text-400 text-center py-3">No recipient data available.</p>
+
+  const statusIcon = (status, replied) => {
+    if (replied) return <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-semibold">Replied</span>
+    if (status === 'clicked') return <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-success/20 text-success font-semibold">Clicked</span>
+    if (status === 'opened') return <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-opt-yellow/20 text-opt-yellow font-semibold">Opened</span>
+    if (status === 'delivered') return <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-text-400/15 text-text-400 font-semibold">Delivered</span>
+    if (status === 'failed') return <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-danger/20 text-danger font-semibold">Failed</span>
+    return <span className="text-[9px] text-text-400">{status || '—'}</span>
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-2 text-[10px] text-text-400">
+        <span>{recipients.length} recipients</span>
+        <span className="text-success">{recipients.filter(r => r.status === 'opened' || r.status === 'clicked').length} opened</span>
+        <span className="text-blue-400">{recipients.filter(r => r.replied).length} replied</span>
+        <span className="text-danger">{recipients.filter(r => r.status === 'failed').length} failed</span>
+      </div>
+      <div className="max-h-48 overflow-y-auto">
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="text-[9px] text-text-400 uppercase border-b border-border-default/30">
+              <th className="text-left px-2 py-1 font-medium">Subject</th>
+              <th className="text-left px-2 py-1 font-medium">Contact</th>
+              <th className="text-left px-2 py-1 font-medium">Status</th>
+              <th className="text-right px-2 py-1 font-medium">Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recipients.map((r, i) => (
+              <tr key={r.id || i} className="border-b border-border-default/15">
+                <td className="px-2 py-1 text-text-400 truncate max-w-[250px]">{r.rawSubject}</td>
+                <td className="px-2 py-1 text-text-primary">{r.contactId?.slice(0, 12) || '—'}</td>
+                <td className="px-2 py-1">{statusIcon(r.status, r.replied)}</td>
+                <td className="text-right px-2 py-1 text-text-400 whitespace-nowrap">{r.date ? new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

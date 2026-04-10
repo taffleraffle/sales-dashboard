@@ -404,6 +404,45 @@ export async function assignSubjectsToFlow(subjects, flowGroupId) {
   return !error
 }
 
+/**
+ * Load individual email records for a given normalized subject.
+ * Returns per-contact entries with status, date, contact_id.
+ */
+export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
+  const { data } = await supabase
+    .from('email_message_cache')
+    .select('id, subject, status, contact_id, date_added, conversation_id')
+    .eq('direction', 'outbound')
+    .gte('date_added', fromDate)
+    .lte('date_added', toDate + 'T23:59:59')
+    .order('date_added', { ascending: false })
+
+  // Filter to those matching this normalized subject
+  const matching = (data || []).filter(e => normalizeSubject(e.subject) === normalizedSubject)
+
+  // Check for replies in same conversations
+  const { data: inbound } = await supabase
+    .from('email_message_cache')
+    .select('conversation_id, date_added')
+    .eq('direction', 'inbound')
+
+  const inboundByConvo = {}
+  for (const ib of (inbound || [])) {
+    if (!ib.conversation_id) continue
+    if (!inboundByConvo[ib.conversation_id]) inboundByConvo[ib.conversation_id] = []
+    inboundByConvo[ib.conversation_id].push(ib.date_added)
+  }
+
+  return matching.map(e => ({
+    id: e.id,
+    rawSubject: e.subject,
+    status: e.status,
+    contactId: e.contact_id,
+    date: e.date_added,
+    replied: e.conversation_id && inboundByConvo[e.conversation_id]?.some(dt => dt > e.date_added),
+  }))
+}
+
 export async function removeSubjectFromFlow(subject) {
   const { error } = await supabase.from('email_subject_meta').update({ flow_group_id: null, updated_at: new Date().toISOString() }).eq('subject', subject)
   if (error) console.error('Remove from flow failed:', error)
