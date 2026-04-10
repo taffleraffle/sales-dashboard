@@ -8,10 +8,10 @@ import { syncEmailMessages, refreshRecentEmailStatuses, fetchWorkflows } from '.
 import { toLocalDateStr } from '../lib/dateUtils'
 
 const SYNC_INTERVALS = {
-  stripe: 6 * 60 * 60 * 1000,      // 6 hours
-  ghlAppointments: 2 * 60 * 60 * 1000, // 2 hours
-  emailFlows: 4 * 60 * 60 * 1000,  // 4 hours
-  marketingTracker: 6 * 60 * 60 * 1000, // 6 hours
+  stripe: 4 * 60 * 60 * 1000,      // 4 hours
+  ghlAppointments: 1 * 60 * 60 * 1000, // 1 hour
+  emailFlows: 2 * 60 * 60 * 1000,  // 2 hours
+  marketingTracker: 4 * 60 * 60 * 1000, // 4 hours
 }
 
 function lastRun(key) {

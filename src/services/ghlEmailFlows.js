@@ -44,19 +44,28 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
 
   let synced = 0, skipped = 0
 
-  // Fetch email conversations (paginated)
-  let convPage = 0
+  // Fetch ALL email conversations — GHL /conversations/search returns up to
+  // ~2000 results for lastMessageType=TYPE_EMAIL. No cursor pagination available,
+  // so we fetch a single large batch. The limit of 100 per page is the API max.
   let allConvos = []
-  while (convPage < 20) {
-    const url = `${BASE_URL}/conversations/search?locationId=${GHL_LOCATION_ID}&lastMessageType=TYPE_EMAIL&limit=100${convPage > 0 ? `&startAfterDate=${allConvos[allConvos.length - 1]?.lastMessageDate || ''}` : ''}`
-    const res = await fetch(url, { headers: ghlHeaders })
+  for (let page = 0; page < 30; page++) {
+    const params = new URLSearchParams({
+      locationId: GHL_LOCATION_ID,
+      lastMessageType: 'TYPE_EMAIL',
+      limit: '100',
+    })
+    // Use startAfterDate for pagination if we have previous results
+    if (allConvos.length > 0) {
+      const lastDate = allConvos[allConvos.length - 1]?.lastMessageDate
+      if (lastDate) params.set('startAfterDate', String(lastDate))
+    }
+    const res = await fetch(`${BASE_URL}/conversations/search?${params}`, { headers: ghlHeaders })
     if (!res.ok) break
     const data = await res.json()
     const convos = data.conversations || []
     if (convos.length === 0) break
     allConvos = allConvos.concat(convos)
-    if (convos.length < 100) break
-    convPage++
+    if (convos.length < 100) break // last page
   }
 
   onProgress(0, allConvos.length)
