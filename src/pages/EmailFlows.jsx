@@ -513,8 +513,8 @@ function RecipientDetail({ recipients, loading }) {
         <table className="w-full text-[11px]">
           <thead>
             <tr className="text-[9px] text-text-400 uppercase border-b border-border-default/30">
-              <th className="text-left px-2 py-1 font-medium">Subject</th>
               <th className="text-left px-2 py-1 font-medium">Contact</th>
+              <th className="text-left px-2 py-1 font-medium">Subject Sent</th>
               <th className="text-left px-2 py-1 font-medium">Status</th>
               <th className="text-right px-2 py-1 font-medium">Date</th>
             </tr>
@@ -522,8 +522,8 @@ function RecipientDetail({ recipients, loading }) {
           <tbody>
             {recipients.map((r, i) => (
               <tr key={r.id || i} className="border-b border-border-default/15">
+                <td className="px-2 py-1 text-text-primary font-medium">{r.contactName}</td>
                 <td className="px-2 py-1 text-text-400 truncate max-w-[250px]">{r.rawSubject}</td>
-                <td className="px-2 py-1 text-text-primary">{r.contactId?.slice(0, 12) || '—'}</td>
                 <td className="px-2 py-1">{statusIcon(r.status, r.replied)}</td>
                 <td className="text-right px-2 py-1 text-text-400 whitespace-nowrap">{r.date ? new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</td>
               </tr>

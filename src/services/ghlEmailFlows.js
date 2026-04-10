@@ -433,11 +433,29 @@ export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
     inboundByConvo[ib.conversation_id].push(ib.date_added)
   }
 
+  // Resolve contact IDs to names via GHL API (batch)
+  const uniqueContactIds = [...new Set(matching.map(e => e.contact_id).filter(Boolean))]
+  const contactNames = {}
+  for (let i = 0; i < uniqueContactIds.length; i += 10) {
+    const batch = uniqueContactIds.slice(i, i + 10)
+    const results = await Promise.all(batch.map(async cid => {
+      try {
+        const r = await fetch(`${BASE_URL}/contacts/${cid}`, { headers: ghlHeaders })
+        if (!r.ok) return { id: cid, name: null }
+        const d = await r.json()
+        const c = d.contact || d
+        return { id: cid, name: `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || cid.slice(0, 12) }
+      } catch { return { id: cid, name: null } }
+    }))
+    for (const r of results) if (r.name) contactNames[r.id] = r.name
+  }
+
   return matching.map(e => ({
     id: e.id,
     rawSubject: e.subject,
     status: e.status,
     contactId: e.contact_id,
+    contactName: contactNames[e.contact_id] || e.contact_id?.slice(0, 12) || '—',
     date: e.date_added,
     replied: e.conversation_id && inboundByConvo[e.conversation_id]?.some(dt => dt > e.date_added),
   }))
