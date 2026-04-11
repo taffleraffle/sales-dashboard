@@ -79,6 +79,7 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
   const dateEndFilter = `${futureEnd.toISOString().split('T')[0]} 23:59:59`
 
   for (let i = 0; i < allContacts.length; i += 10) {
+    if (i > 0 && i % 100 === 0) await new Promise(r => setTimeout(r, 1000))
     const batch = allContacts.slice(i, i + 10)
     const results = await Promise.all(
       batch.map(async (contact) => {
@@ -87,6 +88,7 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
             `${BASE_URL}/contacts/${contact.id}/appointments`,
             { headers: ghlHeaders }
           )
+          if (res.status === 429) return []
           if (!res.ok) return []
           const json = await res.json()
           return (json.events || [])

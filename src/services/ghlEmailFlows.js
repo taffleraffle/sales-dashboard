@@ -71,14 +71,17 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
   onProgress(0, allConvos.length)
 
   // For each conversation, fetch messages and find email IDs
+  // Rate limit: pause briefly every 50 requests to avoid GHL 429s
   const emailDetailJobs = []
   let convIdx = 0
   for (const convo of allConvos) {
     convIdx++
     onProgress(convIdx, allConvos.length)
+    if (convIdx % 50 === 0) await new Promise(r => setTimeout(r, 1000))
 
     try {
       const msgRes = await fetch(`${BASE_URL}/conversations/${convo.id}/messages`, { headers: ghlHeaders })
+      if (msgRes.status === 429) { await new Promise(r => setTimeout(r, 5000)); continue }
       if (!msgRes.ok) continue
       const msgData = await msgRes.json()
       const messages = msgData.messages?.messages || []
@@ -96,10 +99,11 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
     }
   }
 
-  // Fetch full email details in batches of 10 for performance
+  // Fetch full email details in batches of 5 with rate limit pauses
   const rowsToUpsert = []
-  for (let i = 0; i < emailDetailJobs.length; i += 10) {
-    const batch = emailDetailJobs.slice(i, i + 10)
+  for (let i = 0; i < emailDetailJobs.length; i += 5) {
+    if (i > 0 && i % 50 === 0) await new Promise(r => setTimeout(r, 1000))
+    const batch = emailDetailJobs.slice(i, i + 5)
     const results = await Promise.all(batch.map(async ({ innerId, convoId }) => {
       try {
         const r = await fetch(`${BASE_URL}/conversations/messages/email/${innerId}`, { headers: ghlHeaders })
@@ -433,11 +437,12 @@ export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
     inboundByConvo[ib.conversation_id].push(ib.date_added)
   }
 
-  // Resolve contact IDs to names via GHL API (batch)
+  // Resolve contact IDs to names via GHL API (batch, rate limited)
   const uniqueContactIds = [...new Set(matching.map(e => e.contact_id).filter(Boolean))]
   const contactNames = {}
-  for (let i = 0; i < uniqueContactIds.length; i += 10) {
-    const batch = uniqueContactIds.slice(i, i + 10)
+  for (let i = 0; i < uniqueContactIds.length; i += 5) {
+    if (i > 0 && i % 25 === 0) await new Promise(r => setTimeout(r, 1000))
+    const batch = uniqueContactIds.slice(i, i + 5)
     const results = await Promise.all(batch.map(async cid => {
       try {
         const r = await fetch(`${BASE_URL}/contacts/${cid}`, { headers: ghlHeaders })
