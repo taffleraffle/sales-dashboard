@@ -8,10 +8,11 @@ import { syncEmailMessages, refreshRecentEmailStatuses, fetchWorkflows } from '.
 import { toLocalDateStr } from '../lib/dateUtils'
 
 const SYNC_INTERVALS = {
-  stripe: 4 * 60 * 60 * 1000,      // 4 hours
+  stripe: 2 * 60 * 60 * 1000,       // 2 hours
+  fanbasis: 2 * 60 * 60 * 1000,     // 2 hours
   ghlAppointments: 1 * 60 * 60 * 1000, // 1 hour
-  emailFlows: 2 * 60 * 60 * 1000,  // 2 hours
-  marketingTracker: 4 * 60 * 60 * 1000, // 4 hours
+  emailFlows: 2 * 60 * 60 * 1000,   // 2 hours
+  marketingTracker: 1 * 60 * 60 * 1000, // 1 hour
 }
 
 function lastRun(key) {
@@ -37,6 +38,20 @@ async function syncStripe() {
     console.log('[auto-sync] Stripe:', data.synced || 0, 'new,', data.matched || 0, 'matched')
   } catch (e) {
     console.warn('[auto-sync] Stripe failed:', e.message)
+  }
+}
+
+async function syncFanbasis() {
+  if (!shouldRun('fanbasis')) return
+  markRun('fanbasis')
+  try {
+    const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/sync-fanbasis-payments?days=14&limit=100', {
+      headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` }
+    })
+    const data = await r.json()
+    console.log('[auto-sync] Fanbasis:', data.synced || 0, 'new,', data.matched || 0, 'matched')
+  } catch (e) {
+    console.warn('[auto-sync] Fanbasis failed:', e.message)
   }
 }
 
@@ -86,6 +101,7 @@ async function syncMarketingTracker() {
 export async function runAutoSync() {
   // Run in parallel but don't block — fire and forget
   syncStripe()
+  syncFanbasis()
   syncGHL()
   syncEmails()
   syncMarketingTracker()
@@ -100,8 +116,10 @@ let intervalHandle = null
  */
 export function startAutoSync() {
   if (intervalHandle) return
+  // Run immediately on first page load
   runAutoSync()
-  intervalHandle = setInterval(runAutoSync, 30 * 60 * 1000)
+  // Re-check every 15 minutes (individual syncs skip if not due)
+  intervalHandle = setInterval(runAutoSync, 15 * 60 * 1000)
 }
 
 export function stopAutoSync() {
