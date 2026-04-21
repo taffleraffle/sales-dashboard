@@ -3,7 +3,7 @@ import { todayET } from '../lib/dateUtils'
 import KPICard from '../components/KPICard'
 import DateRangeSelector from '../components/DateRangeSelector'
 import { Loader, Phone, DollarSign, Target, BarChart3, Zap, Users, TrendingUp, Award, Clock, ArrowUpRight, ChevronDown, ChevronUp, Check, X, Trophy } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs } from '../hooks/useCloserData'
 import { useSetterEODs } from '../hooks/useSetterData'
@@ -221,6 +221,7 @@ function StatusPill({ label, count, active }) {
 }
 
 export default function SalesOverview() {
+  const navigate = useNavigate()
   const [range, setRange] = useState(30)
   const [wavvAgg, setWavvAgg] = useState(null)
   const [wavvLoading, setWavvLoading] = useState(true)
@@ -731,11 +732,13 @@ export default function SalesOverview() {
             </thead>
             <tbody>
               {closerBoard.map((c, i) => (
-                <tr key={c.id} className={`border-t border-border-default/40 hover:bg-bg-card-hover transition-colors ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}>
+                <tr
+                  key={c.id}
+                  onClick={() => navigate(`/sales/closers/${c.id}`)}
+                  className={`border-t border-border-default/40 hover:bg-bg-card-hover cursor-pointer transition-colors ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}
+                >
                   <td className="py-2 sm:py-3 px-2 sm:px-4"><RankBadge rank={i + 1} /></td>
-                  <td className="py-2 sm:py-3 px-2 sm:px-4">
-                    <Link to={`/sales/closers/${c.id}`} className="font-medium text-text-primary hover:text-opt-yellow transition-colors whitespace-nowrap">{c.name}</Link>
-                  </td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-text-primary whitespace-nowrap">{c.name}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{c.live}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-semibold">{c.closes}</td>
                   <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-medium ${getColor(parseFloat(c.showPct), 70, 'above')}`}>{c.showPct}%</td>
@@ -794,11 +797,13 @@ export default function SalesOverview() {
             </thead>
             <tbody>
               {setterBoard.map((s, i) => (
-                <tr key={s.id} className={`border-t border-border-default/40 hover:bg-bg-card-hover transition-colors ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}>
+                <tr
+                  key={s.id}
+                  onClick={() => navigate(`/sales/setters/${s.id}`)}
+                  className={`border-t border-border-default/40 hover:bg-bg-card-hover cursor-pointer transition-colors ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}
+                >
                   <td className="py-2 sm:py-3 px-2 sm:px-4"><RankBadge rank={i + 1} /></td>
-                  <td className="py-2 sm:py-3 px-2 sm:px-4">
-                    <Link to={`/sales/setters/${s.id}`} className="font-medium text-text-primary hover:text-opt-yellow transition-colors whitespace-nowrap">{s.name}</Link>
-                  </td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-text-primary whitespace-nowrap">{s.name}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-semibold">{s.dials.toLocaleString()}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{s.pickups.toLocaleString()}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{s.mcs}</td>
