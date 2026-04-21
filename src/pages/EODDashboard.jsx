@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronRight, Plus, Calendar, Loader } from 'lucide-react'
+import { ChevronRight, Plus, Calendar } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { todayET, toLocalDateStr } from '../lib/dateUtils'
 import { useTeamMembers } from '../hooks/useTeamMembers'
