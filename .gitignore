@@ -45,3 +45,12 @@ migrations/versions/__pycache__/
 
 # Claude
 .claude/
+
+# Supabase CLI local state (churns constantly, not sensitive but noisy)
+supabase/.temp/
+
+# Backup copies kept during refactors
+*.v1.jsx
+*.v1.js
+*.v1.ts
+*.v1.tsx
