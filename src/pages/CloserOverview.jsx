@@ -16,8 +16,24 @@ export default function CloserOverview() {
   const { reports, loading: loadingReports } = useCloserEODs(null, days)
   const { breakdown } = useCloserCallBreakdown(null, days)
 
-  if (loadingMembers) {
-    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  // Wait for BOTH members and reports before rendering so KPI cards don't flash
+  // empty values (0s) while reports are still loading in the background.
+  if (loadingMembers || loadingReports) {
+    return (
+      <div className="max-w-[1600px] mx-auto space-y-4 animate-pulse">
+        <div className="flex items-center justify-between gap-3 mb-6">
+          <div className="h-8 w-48 tile" />
+          <div className="h-9 w-36 tile" />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3">
+          {Array.from({ length: 8 }, (_, i) => <div key={i} className="tile h-24" />)}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-3">
+          {Array.from({ length: 8 }, (_, i) => <div key={i} className="tile h-20" />)}
+        </div>
+        <div className="tile h-64" />
+      </div>
+    )
   }
 
   // Company-wide totals from all closer EODs

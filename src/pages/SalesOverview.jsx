@@ -436,7 +436,11 @@ export default function SalesOverview() {
   }).sort((a, b) => b.dials - a.dials)
 
   const isLoading = loadingFunnel || wavvLoading
-  const dataReady = closerReports.length > 0 || closers.length > 0 || !loadingFunnel
+  // Wait for all above-the-fold data before revealing. Previous gate flipped as
+  // soon as funnel loaded, then other sections popped in one-by-one as their
+  // independent hooks resolved. Now we block until the critical set is ready
+  // so content appears in one coordinated paint.
+  const dataReady = !loadingFunnel && !wavvLoading && closers.length > 0 && setters.length > 0
 
   return (
     <div className="space-y-6">
@@ -460,19 +464,34 @@ export default function SalesOverview() {
         </div>
       </div>
 
-      {/* Loading skeleton */}
+      {/* Loading skeleton — mirrors the final layout shape so the jump is minimal */}
       {!dataReady && (
-        <div className="space-y-4 animate-pulse">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[1,2,3,4].map(i => <div key={i} className="tile tile-feedback h-28" />)}
+        <div className="space-y-6 animate-pulse">
+          {/* Hero KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
+            {Array.from({ length: 4 }, (_, i) => <div key={i} className="tile tile-feedback h-28" />)}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-            {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="tile tile-feedback h-24" />)}
+          {/* Secondary KPIs */}
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3">
+            {Array.from({ length: 8 }, (_, i) => <div key={i} className="tile tile-feedback h-24" />)}
           </div>
+          {/* Funnel + Key Rates */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="tile tile-feedback h-64" />
             <div className="tile tile-feedback h-64" />
           </div>
+          {/* Cash / Marketing / Dialer */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="tile tile-feedback h-56" />
+            <div className="tile tile-feedback h-56" />
+            <div className="tile tile-feedback h-56" />
+          </div>
+          {/* Closer Leaderboard */}
+          <div className="tile tile-feedback h-72" />
+          {/* Setter Leaderboard */}
+          <div className="tile tile-feedback h-72" />
+          {/* Recent Leads */}
+          <div className="tile tile-feedback h-64" />
         </div>
       )}
 
