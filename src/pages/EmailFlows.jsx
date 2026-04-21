@@ -4,6 +4,7 @@ import { Loader, Mail, AlertCircle, ArrowUp, ArrowDown, Plus, Trash2, X, Chevron
 import KPICard from '../components/KPICard'
 import ConfirmModal from '../components/ConfirmModal'
 import EditFlowModal from '../components/EditFlowModal'
+import FlowPicker from '../components/FlowPicker'
 import DateRangeSelector from '../components/DateRangeSelector'
 import { sinceDate } from '../lib/dateUtils'
 import { getLastSyncTime } from '../services/autoSync'
@@ -65,13 +66,18 @@ export default function EmailFlows() {
 
   const visibleStats = useMemo(() => stats.filter(s => s.sent >= minSends), [stats, minSends])
 
-  const sortedStats = (list) => [...list].sort((a, b) => {
-    let av = a[sortKey], bv = b[sortKey]
-    if (sortKey === 'lastSent') { av = new Date(av || 0).getTime(); bv = new Date(bv || 0).getTime() }
-    if (av < bv) return sortDir === 'asc' ? -1 : 1
-    if (av > bv) return sortDir === 'asc' ? 1 : -1
-    return 0
-  })
+  // Sorted version of visibleStats. Previously this was an inline function re-creating
+  // the sorted array on every render — with hundreds of emails, that thrashed the UI on
+  // every hover, keystroke, or state change. Memoize on the exact inputs.
+  const sortedVisibleStats = useMemo(() => {
+    return [...visibleStats].sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey]
+      if (sortKey === 'lastSent') { av = new Date(av || 0).getTime(); bv = new Date(bv || 0).getTime() }
+      if (av < bv) return sortDir === 'asc' ? -1 : 1
+      if (av > bv) return sortDir === 'asc' ? 1 : -1
+      return 0
+    })
+  }, [visibleStats, sortKey, sortDir])
 
   const flowGroupStats = useMemo(() => {
     return flowGroups.map(fg => {
@@ -324,7 +330,7 @@ export default function EmailFlows() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedStats(visibleStats).map((s, i) => {
+                    {sortedVisibleStats.map((s, i) => {
                       const meta = subjectMeta[s.subject]
                       const assignedFlow = meta?.flow_group_id ? flowGroups.find(fg => fg.id === meta.flow_group_id) : null
                       const isExp = expandedEmail === s.subject
@@ -343,14 +349,10 @@ export default function EmailFlows() {
                                 {assignedFlow.name}
                               </span>
                             ) : (
-                              <select
-                                className="bg-transparent text-[10px] text-text-400 cursor-pointer hover:text-opt-yellow outline-none"
-                                value=""
-                                onChange={e => e.target.value && handleAddEmailToFlow(s.subject, e.target.value)}
-                              >
-                                <option value="">Add to…</option>
-                                {flowGroups.map(fg => <option key={fg.id} value={fg.id}>{fg.name}</option>)}
-                              </select>
+                              <FlowPicker
+                                flowGroups={flowGroups}
+                                onPick={(flowId) => handleAddEmailToFlow(s.subject, flowId)}
+                              />
                             )}
                           </td>
                           <td className="text-right px-3 py-2.5 font-semibold">{s.sent}</td>
