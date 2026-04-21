@@ -176,9 +176,15 @@ export default function CallData() {
     userScrolledUpRef.current = el.scrollHeight - el.scrollTop - el.clientHeight > 60
   }
 
-  // Auto-scroll only when user is near the bottom
+  // Auto-scroll only when user is near the bottom AND there's something to scroll to.
+  // Guard against initial mount: scrollIntoView scrolls ANY ancestor scroll container,
+  // including the page itself, which pulled the viewport down on navigate.
   useEffect(() => {
-    if (!userScrolledUpRef.current) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (chatMessages.length === 0 && !chatStreamText) return
+    if (userScrolledUpRef.current) return
+    // Scroll only the chat container, not the page — use scrollTop instead of scrollIntoView.
+    const el = chatContainerRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [chatMessages, chatStreamText])
 
   // Reset scroll lock when user sends a new message

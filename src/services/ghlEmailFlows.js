@@ -424,17 +424,27 @@ export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
   // Filter to those matching this normalized subject
   const matching = (data || []).filter(e => normalizeSubject(e.subject) === normalizedSubject)
 
-  // Check for replies in same conversations
-  const { data: inbound } = await supabase
-    .from('email_message_cache')
-    .select('conversation_id, date_added')
-    .eq('direction', 'inbound')
-
+  // Check for replies in same conversations. Bounded by:
+  //  - only conversation_ids we actually care about (the matching outbound ones)
+  //  - the same date window as the outbound query (+1 day window past end to catch quick replies)
+  //  - a hard row limit so the query can't balloon to 100k+ rows and time out PostgREST.
+  const interestingConvos = [...new Set(matching.map(e => e.conversation_id).filter(Boolean))]
   const inboundByConvo = {}
-  for (const ib of (inbound || [])) {
-    if (!ib.conversation_id) continue
-    if (!inboundByConvo[ib.conversation_id]) inboundByConvo[ib.conversation_id] = []
-    inboundByConvo[ib.conversation_id].push(ib.date_added)
+  if (interestingConvos.length > 0) {
+    const { data: inbound } = await supabase
+      .from('email_message_cache')
+      .select('conversation_id, date_added')
+      .eq('direction', 'inbound')
+      .in('conversation_id', interestingConvos)
+      .gte('date_added', fromDate)
+      .lte('date_added', toDate + 'T23:59:59')
+      .limit(2000)
+
+    for (const ib of (inbound || [])) {
+      if (!ib.conversation_id) continue
+      if (!inboundByConvo[ib.conversation_id]) inboundByConvo[ib.conversation_id] = []
+      inboundByConvo[ib.conversation_id].push(ib.date_added)
+    }
   }
 
   // Resolve contact IDs to names — check cache first, then GHL API

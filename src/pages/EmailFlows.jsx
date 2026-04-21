@@ -1,14 +1,16 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader, Mail, AlertCircle, ArrowUp, ArrowDown, Plus, Trash2, X, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react'
+import { Loader, Mail, AlertCircle, ArrowUp, ArrowDown, Plus, Trash2, X, ChevronRight, ChevronDown, ChevronUp, Pencil } from 'lucide-react'
 import KPICard from '../components/KPICard'
 import ConfirmModal from '../components/ConfirmModal'
+import EditFlowModal from '../components/EditFlowModal'
 import DateRangeSelector from '../components/DateRangeSelector'
 import { sinceDate } from '../lib/dateUtils'
 import { getLastSyncTime } from '../services/autoSync'
+import { useToast } from '../hooks/useToast'
 import {
   loadEmailStats, loadSubjectMeta,
-  loadFlowGroups, createFlowGroup, deleteFlowGroup,
+  loadFlowGroups, createFlowGroup, deleteFlowGroup, updateFlowGroup,
   assignSubjectsToFlow, removeSubjectFromFlow, loadEmailRecipients,
 } from '../services/ghlEmailFlows'
 
@@ -29,6 +31,9 @@ export default function EmailFlows() {
   const [loadingRecipients, setLoadingRecipients] = useState(false)
   const [error, setError] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const [editingFlow, setEditingFlow] = useState(null)
+  const toast = useToast()
 
   const fromDate = sinceDate(range)
   const toDate = (typeof range === 'object' && range.to) ? range.to : new Date().toLocaleDateString('en-CA')
@@ -112,16 +117,32 @@ export default function EmailFlows() {
   }
 
   const handleDeleteFlow = async () => {
-    if (!deleteTarget) return
-    const ok = await deleteFlowGroup(deleteTarget)
-    if (!ok) { setError('Failed to delete flow. Please try again.'); setDeleteTarget(null); return }
-    setFlowGroups(prev => prev.filter(fg => fg.id !== deleteTarget))
-    const updated = { ...subjectMeta }
-    for (const [k, v] of Object.entries(updated)) {
-      if (v.flow_group_id === deleteTarget) updated[k] = { ...v, flow_group_id: null }
+    if (!deleteTarget || deleting) return
+    setDeleting(true)
+    try {
+      const ok = await deleteFlowGroup(deleteTarget)
+      if (!ok) throw new Error('Delete returned false')
+      const flowName = flowGroups.find(fg => fg.id === deleteTarget)?.name || 'Flow'
+      setFlowGroups(prev => prev.filter(fg => fg.id !== deleteTarget))
+      const updated = { ...subjectMeta }
+      for (const [k, v] of Object.entries(updated)) {
+        if (v.flow_group_id === deleteTarget) updated[k] = { ...v, flow_group_id: null }
+      }
+      setSubjectMeta(updated)
+      toast.success(`Deleted "${flowName}"`)
+      setDeleteTarget(null)
+    } catch (e) {
+      toast.error(`Failed to delete flow: ${e.message || e}`)
     }
-    setSubjectMeta(updated)
-    setDeleteTarget(null)
+    setDeleting(false)
+  }
+
+  const handleSaveFlowEdit = async (updates) => {
+    if (!editingFlow) return
+    const updated = await updateFlowGroup(editingFlow.id, updates)
+    if (!updated) throw new Error('Update failed — check console for details')
+    setFlowGroups(prev => prev.map(fg => fg.id === editingFlow.id ? { ...fg, ...updates } : fg))
+    toast.success(`Updated "${updates.name}"`)
   }
 
   const handleAddEmailToFlow = async (subject, flowGroupId) => {
@@ -133,8 +154,20 @@ export default function EmailFlows() {
     if (expandedEmail === subject) { setExpandedEmail(null); return }
     setExpandedEmail(subject)
     setLoadingRecipients(true)
-    const recipients = await loadEmailRecipients(subject, fromDate, toDate)
-    setEmailRecipients(recipients)
+    setEmailRecipients([])
+    try {
+      // Wrap in a 15s timeout so the UI never hangs forever. The fix in
+      // ghlEmailFlows.loadEmailRecipients now bounds the Supabase queries,
+      // but GHL contact-name fetches can still stall on network hiccups.
+      const recipients = await Promise.race([
+        loadEmailRecipients(subject, fromDate, toDate),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Loading recipients timed out after 15s')), 15000)),
+      ])
+      setEmailRecipients(recipients)
+    } catch (e) {
+      toast.error(`Couldn't load recipients: ${e.message || e}`)
+      setEmailRecipients([])
+    }
     setLoadingRecipients(false)
   }
 
@@ -250,6 +283,13 @@ export default function EmailFlows() {
                       <div className="text-right min-w-[50px]"><div className="text-[10px] text-text-400 uppercase">Open</div><div className={`font-bold ${rateColor(fg.openRate, 40, 20)}`}>{fg.openRate}%</div></div>
                       <div className="text-right min-w-[50px]"><div className="text-[10px] text-text-400 uppercase">Click</div><div className={`font-bold ${rateColor(fg.clickRate, 5, 2)}`}>{fg.clickRate}%</div></div>
                       <div className="text-right min-w-[50px]"><div className="text-[10px] text-text-400 uppercase">Reply</div><div className={`font-bold ${rateColor(fg.replyRate, 10, 3)}`}>{fg.replyRate}%</div></div>
+                      <button
+                        onClick={(e) => { e.preventDefault(); setEditingFlow(fg) }}
+                        className="p-1.5 text-text-400/50 hover:text-opt-yellow transition-colors"
+                        title="Edit flow"
+                      >
+                        <Pencil size={14} />
+                      </button>
                       <button onClick={(e) => { e.preventDefault(); setDeleteTarget(fg.id) }} className="p-1.5 text-text-400/30 hover:text-danger transition-colors" title="Delete flow">
                         <Trash2 size={14} />
                       </button>
@@ -344,10 +384,18 @@ export default function EmailFlows() {
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteFlow}
+        loading={deleting}
         title="Delete Flow"
         message="Are you sure you want to delete this flow? All emails will be unassigned from it. This cannot be undone."
         confirmLabel="Delete Flow"
         variant="danger"
+      />
+
+      {/* Edit flow modal */}
+      <EditFlowModal
+        flow={editingFlow}
+        onClose={() => setEditingFlow(null)}
+        onSave={handleSaveFlowEdit}
       />
     </div>
   )

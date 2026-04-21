@@ -217,7 +217,10 @@ async function fetchGHLLeadsByDate(sinceStr) {
  */
 export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
   // Step 1: pull fresh Meta Ads data
-  if (pullFresh && ACCOUNT_ID && ACCESS_TOKEN) {
+  if (pullFresh) {
+    if (!ACCOUNT_ID || !ACCESS_TOKEN) {
+      throw new Error('Meta Ads credentials missing — set VITE_META_ADS_ACCOUNT_ID and VITE_META_ADS_ACCESS_TOKEN in Render env vars')
+    }
     await syncMetaAds(days)
   }
 
@@ -300,13 +303,15 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
     const existing = existingMap[date]
 
     if (existing) {
-      // Row exists — only PATCH the auto-sync fields, never touch manually-entered data
+      // Row exists — only PATCH the auto-sync fields, never touch manually-entered data.
+      // Use `!= null` (presence check) instead of truthy check so $0 / 0-leads / 0-bookings
+      // days still overwrite stale values and don't get silently skipped.
       const patch = { updated_at: new Date().toISOString() }
-      if (byDate[date]?.adspend) patch.adspend = byDate[date].adspend
-      if (leadsByDate[date]) patch.leads = leadsByDate[date]
-      if (autoBookingsByDate[date]) patch.auto_bookings = autoBookingsByDate[date]
+      if (byDate[date]?.adspend != null) patch.adspend = byDate[date].adspend
+      if (leadsByDate[date] != null) patch.leads = leadsByDate[date]
+      if (autoBookingsByDate[date] != null) patch.auto_bookings = autoBookingsByDate[date]
       // Only update qualified_bookings if the existing row has no value
-      if (!existing.qualified_bookings && qualBookingsByDate[date]) patch.qualified_bookings = qualBookingsByDate[date]
+      if (!existing.qualified_bookings && qualBookingsByDate[date] != null) patch.qualified_bookings = qualBookingsByDate[date]
 
       const { error } = await supabase
         .from('marketing_tracker')

@@ -1,16 +1,21 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Loader, ArrowLeft, Mail, Trash2, Plus, X, Search, ChevronDown, ChevronUp, ArrowUp, ArrowDown } from 'lucide-react'
+import { Loader, ArrowLeft, Mail, Trash2, Plus, X, Search, ChevronDown, ChevronUp, ArrowUp, ArrowDown, Pencil, GripVertical } from 'lucide-react'
 import KPICard from '../components/KPICard'
 import ConfirmModal from '../components/ConfirmModal'
+import EditFlowModal from '../components/EditFlowModal'
 import DateRangeSelector from '../components/DateRangeSelector'
 import { sinceDate } from '../lib/dateUtils'
+import { useToast } from '../hooks/useToast'
 import {
   loadEmailStats, loadSubjectMeta, loadFlowGroups,
   deleteFlowGroup, assignSubjectsToFlow, removeSubjectFromFlow,
   loadEmailRecipients, updateFlowGroup,
 } from '../services/ghlEmailFlows'
 import { supabase } from '../lib/supabase'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 export default function EmailFlowDetail() {
   const { flowId } = useParams()
@@ -29,6 +34,9 @@ export default function EmailFlowDetail() {
   const [emailRecipients, setEmailRecipients] = useState([])
   const [loadingRecipients, setLoadingRecipients] = useState(false)
   const [reordering, setReordering] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
+  const toast = useToast()
 
   const fromDate = sinceDate(range)
   const toDate = (typeof range === 'object' && range.to) ? range.to : new Date().toLocaleDateString('en-CA')
@@ -92,8 +100,24 @@ export default function EmailFlowDetail() {
     : availableEmails.slice(0, 30)
 
   const handleDelete = async () => {
-    await deleteFlowGroup(flowId)
-    navigate('/sales/email-flows')
+    if (deleting) return
+    setDeleting(true)
+    try {
+      const ok = await deleteFlowGroup(flowId)
+      if (!ok) throw new Error('Delete returned false')
+      toast.success(`Deleted "${flow.name}"`)
+      navigate('/sales/email-flows')
+    } catch (e) {
+      toast.error(`Failed to delete: ${e.message || e}`)
+      setDeleting(false)
+    }
+  }
+
+  const handleSaveEdit = async (updates) => {
+    const updated = await updateFlowGroup(flowId, updates)
+    if (!updated) throw new Error('Update failed')
+    setFlow(prev => ({ ...prev, ...updates }))
+    toast.success('Flow updated')
   }
 
   const handleAddEmail = async (subject) => {
@@ -114,18 +138,9 @@ export default function EmailFlowDetail() {
     setSubjectMeta(prev => ({ ...prev, [subject]: { ...(prev[subject] || {}), flow_group_id: null } }))
   }
 
-  const handleMoveEmail = async (index, direction) => {
-    if (reordering) return
-    const newEmails = [...flowEmails]
-    const targetIndex = index + direction
-    if (targetIndex < 0 || targetIndex >= newEmails.length) return
-
-    // Swap
-    const temp = newEmails[index]
-    newEmails[index] = newEmails[targetIndex]
-    newEmails[targetIndex] = temp
-
-    // Update sort_orders optimistically
+  // Shared reorder helper — dnd handler and arrow buttons both call this.
+  // Accepts the full ordered array of emails, computes new sort_orders, persists.
+  const persistEmailOrder = async (newEmails) => {
     setReordering(true)
     const now = new Date().toISOString()
     const updates = newEmails.map((e, i) => ({ subject: e.subject, sort_order: i + 1 }))
@@ -134,23 +149,53 @@ export default function EmailFlowDetail() {
       updatedMeta[u.subject] = { ...(updatedMeta[u.subject] || {}), sort_order: u.sort_order }
     }
     setSubjectMeta(updatedMeta)
-
-    // Persist in single upsert
-    await supabase.from('email_subject_meta')
+    const { error } = await supabase.from('email_subject_meta')
       .upsert(
         updates.map(u => ({ ...subjectMeta[u.subject], subject: u.subject, sort_order: u.sort_order, updated_at: now })),
         { onConflict: 'subject' }
       )
     setReordering(false)
+    if (error) toast.error(`Reorder failed: ${error.message}`)
   }
+
+  const handleMoveEmail = async (index, direction) => {
+    if (reordering) return
+    const targetIndex = index + direction
+    if (targetIndex < 0 || targetIndex >= flowEmails.length) return
+    const newEmails = [...flowEmails]
+    ;[newEmails[index], newEmails[targetIndex]] = [newEmails[targetIndex], newEmails[index]]
+    await persistEmailOrder(newEmails)
+  }
+
+  const handleDragEnd = async (event) => {
+    const { active, over } = event
+    if (!over || active.id === over.id || reordering) return
+    const oldIndex = flowEmails.findIndex(e => e.subject === active.id)
+    const newIndex = flowEmails.findIndex(e => e.subject === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    await persistEmailOrder(arrayMove(flowEmails, oldIndex, newIndex))
+  }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
 
   const toggleEmailDetail = async (subject) => {
     if (expandedEmail === subject) { setExpandedEmail(null); return }
     setEmailRecipients([])
     setExpandedEmail(subject)
     setLoadingRecipients(true)
-    const recipients = await loadEmailRecipients(subject, fromDate, toDate)
-    setEmailRecipients(recipients)
+    try {
+      const recipients = await Promise.race([
+        loadEmailRecipients(subject, fromDate, toDate),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Loading recipients timed out after 15s')), 15000)),
+      ])
+      setEmailRecipients(recipients)
+    } catch (e) {
+      toast.error(`Couldn't load recipients: ${e.message || e}`)
+      setEmailRecipients([])
+    }
     setLoadingRecipients(false)
   }
 
@@ -189,6 +234,9 @@ export default function EmailFlowDetail() {
         </div>
         <div className="flex items-center gap-2">
           <DateRangeSelector selected={range} onChange={setRange} />
+          <button onClick={() => setShowEdit(true)} className="p-2 rounded-xl text-text-400 hover:text-opt-yellow hover:bg-opt-yellow-subtle transition-all" title="Edit flow">
+            <Pencil size={16} />
+          </button>
           <button onClick={() => setShowDelete(true)} className="p-2 rounded-xl text-text-400 hover:text-danger hover:bg-danger/10 transition-all" title="Delete flow">
             <Trash2 size={16} />
           </button>
@@ -252,75 +300,36 @@ export default function EmailFlowDetail() {
               </button>
             </div>
           ) : (
-            <div className="space-y-2">
-              {flowEmails.map((email, index) => {
-                const isExpanded = expandedEmail === email.subject
-                return (
-                  <div key={email.subject} className="tile tile-feedback overflow-hidden">
-                    {/* Email row */}
-                    <div className="flex items-center gap-3 px-4 py-3 hover:bg-bg-card-hover transition-colors cursor-pointer" onClick={() => toggleEmailDetail(email.subject)}>
-                      {/* Position + reorder */}
-                      <div className="flex flex-col items-center gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={() => handleMoveEmail(index, -1)}
-                          disabled={index === 0 || reordering}
-                          className="p-0.5 text-text-400 hover:text-opt-yellow disabled:opacity-20 disabled:hover:text-text-400 transition-colors"
-                        >
-                          <ArrowUp size={12} />
-                        </button>
-                        <span className="text-[11px] font-bold text-opt-yellow w-5 text-center">{index + 1}</span>
-                        <button
-                          onClick={() => handleMoveEmail(index, 1)}
-                          disabled={index === flowEmails.length - 1 || reordering}
-                          className="p-0.5 text-text-400 hover:text-opt-yellow disabled:opacity-20 disabled:hover:text-text-400 transition-colors"
-                        >
-                          <ArrowDown size={12} />
-                        </button>
-                      </div>
-
-                      {/* Subject + stats */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          {isExpanded ? <ChevronUp size={14} className="text-opt-yellow shrink-0" /> : <ChevronDown size={14} className="text-text-400 shrink-0" />}
-                          <span className="text-sm text-text-primary truncate">{email.subject}</span>
-                          {email.variants > 1 && <span className="text-[10px] text-text-400">({email.variants}v)</span>}
-                        </div>
-                      </div>
-
-                      {/* Quick stats */}
-                      <div className="flex items-center gap-3 text-xs shrink-0">
-                        <div className="text-right hidden sm:block">
-                          <div className="text-[9px] text-text-400 uppercase">Sent</div>
-                          <div className="font-bold">{email.sent}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[9px] text-text-400 uppercase">Open</div>
-                          <div className={`font-bold ${rateColor(email.openRate, 40, 20)}`}>{email.openRate}%</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[9px] text-text-400 uppercase">Click</div>
-                          <div className={`font-bold ${rateColor(email.clickRate, 5, 2)}`}>{email.clickRate}%</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[9px] text-text-400 uppercase">Reply</div>
-                          <div className={`font-bold ${rateColor(email.replyRate || 0, 10, 3)}`}>{email.replyRate || 0}%</div>
-                        </div>
-                        <button onClick={(e) => { e.stopPropagation(); handleRemoveEmail(email.subject) }} className="p-1.5 text-text-400/30 hover:text-danger transition-colors" title="Remove from flow">
-                          <X size={14} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Expanded: recipients */}
-                    {isExpanded && (
-                      <div className="border-t border-border-default px-4 py-3 bg-bg-primary/30">
-                        <RecipientDetail recipients={emailRecipients} loading={loadingRecipients} />
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={flowEmails.map(e => e.subject)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="space-y-2">
+                  {flowEmails.map((email, index) => (
+                    <SortableEmailRow
+                      key={email.subject}
+                      email={email}
+                      index={index}
+                      isExpanded={expandedEmail === email.subject}
+                      isLast={index === flowEmails.length - 1}
+                      reordering={reordering}
+                      onToggleDetail={() => toggleEmailDetail(email.subject)}
+                      onMoveUp={() => handleMoveEmail(index, -1)}
+                      onMoveDown={() => handleMoveEmail(index, 1)}
+                      onRemove={() => handleRemoveEmail(email.subject)}
+                      rateColor={rateColor}
+                      recipients={emailRecipients}
+                      loadingRecipients={loadingRecipients}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
           )}
         </div>
 
@@ -369,11 +378,105 @@ export default function EmailFlowDetail() {
         open={showDelete}
         onClose={() => setShowDelete(false)}
         onConfirm={handleDelete}
+        loading={deleting}
         title="Delete Flow"
         message={`Are you sure you want to delete "${flow.name}"? All emails will be unassigned. This cannot be undone.`}
         confirmLabel="Delete Flow"
         variant="danger"
       />
+
+      {/* Edit modal */}
+      <EditFlowModal
+        flow={showEdit ? flow : null}
+        onClose={() => setShowEdit(false)}
+        onSave={handleSaveEdit}
+      />
+    </div>
+  )
+}
+
+function SortableEmailRow({ email, index, isExpanded, isLast, reordering, onToggleDetail, onMoveUp, onMoveDown, onRemove, rateColor, recipients, loadingRecipients }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: email.subject })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  return (
+    <div ref={setNodeRef} style={style} className="tile tile-feedback overflow-hidden">
+      <div className="flex items-center gap-3 px-4 py-3 hover:bg-bg-card-hover transition-colors">
+        {/* Drag handle */}
+        <button
+          {...attributes}
+          {...listeners}
+          className="p-1 text-text-400/40 hover:text-opt-yellow cursor-grab active:cursor-grabbing touch-none"
+          title="Drag to reorder"
+          aria-label="Drag to reorder email"
+        >
+          <GripVertical size={14} />
+        </button>
+
+        {/* Position + up/down fallback */}
+        <div className="flex flex-col items-center gap-0.5 shrink-0">
+          <button
+            onClick={onMoveUp}
+            disabled={index === 0 || reordering}
+            className="p-0.5 text-text-400 hover:text-opt-yellow disabled:opacity-20 disabled:hover:text-text-400 transition-colors"
+            aria-label="Move up"
+          >
+            <ArrowUp size={12} />
+          </button>
+          <span className="text-[11px] font-bold text-opt-yellow w-5 text-center">{index + 1}</span>
+          <button
+            onClick={onMoveDown}
+            disabled={isLast || reordering}
+            className="p-0.5 text-text-400 hover:text-opt-yellow disabled:opacity-20 disabled:hover:text-text-400 transition-colors"
+            aria-label="Move down"
+          >
+            <ArrowDown size={12} />
+          </button>
+        </div>
+
+        {/* Subject */}
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={onToggleDetail}>
+          <div className="flex items-center gap-2">
+            {isExpanded ? <ChevronUp size={14} className="text-opt-yellow shrink-0" /> : <ChevronDown size={14} className="text-text-400 shrink-0" />}
+            <span className="text-sm text-text-primary truncate">{email.subject}</span>
+            {email.variants > 1 && <span className="text-[10px] text-text-400">({email.variants}v)</span>}
+          </div>
+        </div>
+
+        {/* Quick stats */}
+        <div className="flex items-center gap-3 text-xs shrink-0">
+          <div className="text-right hidden sm:block">
+            <div className="text-[9px] text-text-400 uppercase">Sent</div>
+            <div className="font-bold">{email.sent}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[9px] text-text-400 uppercase">Open</div>
+            <div className={`font-bold ${rateColor(email.openRate, 40, 20)}`}>{email.openRate}%</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[9px] text-text-400 uppercase">Click</div>
+            <div className={`font-bold ${rateColor(email.clickRate, 5, 2)}`}>{email.clickRate}%</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[9px] text-text-400 uppercase">Reply</div>
+            <div className={`font-bold ${rateColor(email.replyRate || 0, 10, 3)}`}>{email.replyRate || 0}%</div>
+          </div>
+          <button onClick={onRemove} className="p-1.5 text-text-400/30 hover:text-danger transition-colors" title="Remove from flow">
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded: recipients */}
+      {isExpanded && (
+        <div className="border-t border-border-default px-4 py-3 bg-bg-primary/30">
+          <RecipientDetail recipients={recipients} loading={loadingRecipients} />
+        </div>
+      )}
     </div>
   )
 }
