@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
-import { AlertTriangle, Trash2 } from 'lucide-react'
+import { AlertTriangle, Trash2, Loader } from 'lucide-react'
 
-export default function ConfirmModal({ open, onClose, onConfirm, title, message, confirmLabel = 'Confirm', variant = 'danger' }) {
+export default function ConfirmModal({ open, onClose, onConfirm, title, message, confirmLabel = 'Confirm', variant = 'danger', loading = false }) {
   const confirmRef = useRef(null)
 
   useEffect(() => {
@@ -10,10 +10,10 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
 
   useEffect(() => {
     if (!open) return
-    const handleEsc = (e) => { if (e.key === 'Escape') onClose() }
+    const handleEsc = (e) => { if (e.key === 'Escape' && !loading) onClose() }
     window.addEventListener('keydown', handleEsc)
     return () => window.removeEventListener('keydown', handleEsc)
-  }, [open, onClose])
+  }, [open, onClose, loading])
 
   if (!open) return null
 
@@ -24,7 +24,7 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
   const iconColor = variant === 'danger' ? 'text-danger' : 'text-opt-yellow'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => !loading && onClose()}>
       <div className="tile tile-feedback w-full max-w-sm mx-4 p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-start gap-3 mb-4">
           <div className={`p-2 rounded-xl bg-bg-primary ${iconColor}`}>
@@ -36,11 +36,21 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 mt-6">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-xs font-medium text-text-400 hover:text-text-primary hover:bg-bg-primary transition-all">
+          <button
+            onClick={onClose}
+            disabled={loading}
+            className="px-4 py-2 rounded-xl text-xs font-medium text-text-400 hover:text-text-primary hover:bg-bg-primary transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             Cancel
           </button>
-          <button ref={confirmRef} onClick={onConfirm} className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${btnColor}`}>
-            {confirmLabel}
+          <button
+            ref={confirmRef}
+            onClick={onConfirm}
+            disabled={loading}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all inline-flex items-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed ${btnColor}`}
+          >
+            {loading && <Loader size={12} className="animate-spin" />}
+            {loading ? 'Working…' : confirmLabel}
           </button>
         </div>
       </div>

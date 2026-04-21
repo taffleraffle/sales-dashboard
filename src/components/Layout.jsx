@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, MoreHorizontal, X, Headphones, DollarSign, Bot, Mail, ChevronDown } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, Headphones, DollarSign, Bot, Mail, ChevronDown } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -21,10 +21,6 @@ const navItems = [
   { to: '/sales/settings', icon: Settings, label: 'Settings' },
 ]
 
-// Mobile: show these 4 in bottom bar, rest go under "More"
-const mobileMainItems = navItems.slice(0, 4) // Overview, Closers, Setters, Marketing
-const mobileMoreItems = navItems.slice(4)     // EOD, Call Data, Commissions, Setter Bot, Email Flows, Settings
-
 function initialsOf(name) {
   if (!name) return '?'
   const parts = name.trim().split(/\s+/)
@@ -34,26 +30,41 @@ function initialsOf(name) {
 
 export default function Layout() {
   const { profile, signOut, isAdmin } = useAuth()
-  const [moreOpen, setMoreOpen] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
-  const moreRef = useRef(null)
   const profileRef = useRef(null)
 
   const roleLabel = isAdmin ? 'Admin' : profile?.role === 'closer' ? 'Closer' : profile?.role === 'setter' ? 'Setter' : 'Viewer'
 
-  // Close popovers on outside pointerdown
+  // Outside-click dismiss for the profile dropdown. The drawer has its own
+  // backdrop layer, so clicking outside of it already closes it via backdrop onClick.
   useEffect(() => {
-    if (!moreOpen && !profileOpen) return
+    if (!profileOpen) return
     const handler = (e) => {
-      if (moreOpen && moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false)
-      if (profileOpen && profileRef.current && !profileRef.current.contains(e.target)) setProfileOpen(false)
+      if (profileRef.current && !profileRef.current.contains(e.target)) setProfileOpen(false)
     }
     document.addEventListener('pointerdown', handler)
     return () => document.removeEventListener('pointerdown', handler)
-  }, [moreOpen, profileOpen])
+  }, [profileOpen])
 
-  // Background auto-sync: Stripe, Fanbasis, GHL appointments, email flows,
-  // marketing tracker (EOD), Meta+GHL pipeline. Runs on mount + every 15 min.
+  // Escape closes the drawer (accessibility)
+  useEffect(() => {
+    if (!drawerOpen) return
+    const handler = (e) => { if (e.key === 'Escape') setDrawerOpen(false) }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [drawerOpen])
+
+  // Lock body scroll while the drawer is open so the page underneath
+  // doesn't scroll when the user swipes inside the drawer.
+  useEffect(() => {
+    if (!drawerOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [drawerOpen])
+
+  // Background auto-sync
   useEffect(() => {
     startAutoSync()
     return () => stopAutoSync()
@@ -86,7 +97,6 @@ export default function Layout() {
                 }
               >
                 <Icon size={ICON.xl} />
-                {/* Tooltip — desktop only (sidebar itself is hidden on mobile) */}
                 <span className="absolute left-full ml-3 px-2.5 py-1 rounded-lg bg-bg-card border border-border-default text-xs text-text-primary whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity shadow-lg">
                   {label}
                 </span>
@@ -104,83 +114,95 @@ export default function Layout() {
           </button>
         </aside>
 
-        {/* ── Mobile Bottom Nav ── */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-bg-sidebar/95 backdrop-blur-xl border-t border-border-default safe-bottom">
-          <div className="flex items-center justify-around px-3 py-2">
-            {mobileMainItems.map(({ to, icon: Icon, label, end }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                className={({ isActive }) =>
-                  `flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all min-w-[56px] min-h-[48px] ${
-                    isActive
-                      ? 'text-opt-yellow'
-                      : 'text-text-400'
-                  }`
-                }
-              >
-                <Icon size={22} />
-                <span className="text-[10px] font-medium leading-none">{label}</span>
-              </NavLink>
-            ))}
-            {/* More button */}
-            <div className="relative" ref={moreRef}>
-              <button
-                onClick={() => setMoreOpen(v => !v)}
-                className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all min-w-[56px] min-h-[48px] ${moreOpen ? 'text-opt-yellow' : 'text-text-400'}`}
-              >
-                {moreOpen ? <X size={22} /> : <MoreHorizontal size={22} />}
-                <span className="text-[10px] font-medium leading-none">More</span>
-              </button>
-              {moreOpen && (
-                <div className="absolute bottom-full mb-2 right-0 dropdown-panel min-w-[200px]">
-                  {mobileMoreItems.map(({ to, icon: Icon, label, end }) => (
-                    <NavLink
-                      key={to}
-                      to={to}
-                      end={end}
-                      onClick={() => setMoreOpen(false)}
-                      className={({ isActive }) =>
-                        `flex items-center gap-3 px-4 py-3 transition-all min-h-[48px] ${
-                          isActive
-                            ? 'text-opt-yellow bg-opt-yellow-subtle'
-                            : 'text-text-secondary hover:bg-bg-card-hover'
-                        }`
-                      }
-                    >
-                      <Icon size={ICON.xl} />
-                      <span className="text-sm font-medium">{label}</span>
-                    </NavLink>
-                  ))}
-                  <button
-                    onClick={() => { setMoreOpen(false); signOut() }}
-                    className="flex items-center gap-3 px-4 py-3 w-full text-left text-danger hover:bg-danger/5 transition-all min-h-[48px] border-t border-border-default"
-                  >
-                    <LogOut size={ICON.xl} />
-                    <span className="text-sm font-medium">Sign Out</span>
-                  </button>
+        {/* ── Mobile Drawer (hamburger menu) ── */}
+        {drawerOpen && (
+          <>
+            <div
+              className="md:hidden fixed inset-0 z-[99] bg-black/50 backdrop-blur-sm"
+              onClick={() => setDrawerOpen(false)}
+              aria-hidden="true"
+            />
+            <aside
+              className="md:hidden fixed top-0 left-0 h-full z-[100] w-72 max-w-[82vw] bg-bg-sidebar border-r border-border-default shadow-2xl flex flex-col slide-in-right"
+              role="dialog"
+              aria-label="Navigation menu"
+            >
+              {/* Drawer header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-opt-yellow flex items-center justify-center">
+                    <BarChart3 size={15} className="text-bg-primary" />
+                  </div>
+                  <span className="text-sm font-semibold text-text-primary">Sales Dashboard</span>
                 </div>
-              )}
-            </div>
-          </div>
-        </nav>
+                <button
+                  onClick={() => setDrawerOpen(false)}
+                  className="w-10 h-10 rounded-xl flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all"
+                  aria-label="Close menu"
+                >
+                  <X size={ICON.lg} />
+                </button>
+              </div>
+
+              {/* Nav items — all of them */}
+              <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
+                {navItems.map(({ to, icon: Icon, label, end }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    end={end}
+                    onClick={() => setDrawerOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-3 rounded-xl transition-all min-h-[48px] ${
+                        isActive
+                          ? 'bg-opt-yellow-subtle text-opt-yellow'
+                          : 'text-text-secondary hover:bg-bg-card-hover'
+                      }`
+                    }
+                  >
+                    <Icon size={ICON.xl} className="shrink-0" />
+                    <span className="text-sm font-medium">{label}</span>
+                  </NavLink>
+                ))}
+              </nav>
+
+              {/* Drawer footer — sign out */}
+              <div className="border-t border-border-default p-2">
+                <button
+                  onClick={() => { setDrawerOpen(false); signOut() }}
+                  className="flex items-center gap-3 px-3 py-3 w-full text-left rounded-xl text-danger hover:bg-danger/5 transition-all min-h-[48px]"
+                >
+                  <LogOut size={ICON.xl} />
+                  <span className="text-sm font-medium">Sign Out</span>
+                </button>
+              </div>
+            </aside>
+          </>
+        )}
 
         {/* ── Main Content ── */}
         <div className="flex-1 md:ml-16 min-w-0">
           {/* Top bar */}
-          <header className="h-14 md:h-16 border-b border-border-default flex items-center justify-between px-4 md:px-8 sticky top-0 bg-bg-primary/80 backdrop-blur-xl z-40">
-            {/* Logo (mobile only) */}
-            <div className="md:hidden w-8 h-8 rounded-full bg-opt-yellow flex items-center justify-center shrink-0">
-              <BarChart3 size={15} className="text-bg-primary" />
+          <header className="h-14 md:h-16 border-b border-border-default flex items-center justify-between px-3 sm:px-4 md:px-8 sticky top-0 bg-bg-primary/80 backdrop-blur-xl z-40">
+            {/* Left slot */}
+            <div className="flex items-center gap-2">
+              {/* Mobile hamburger */}
+              <button
+                onClick={() => setDrawerOpen(true)}
+                aria-expanded={drawerOpen}
+                aria-label="Open navigation menu"
+                className="md:hidden w-11 h-11 rounded-xl flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-colors"
+              >
+                <Menu size={ICON.xl} />
+              </button>
+              {/* Mobile logo (next to hamburger) */}
+              <div className="md:hidden w-8 h-8 rounded-full bg-opt-yellow flex items-center justify-center shrink-0">
+                <BarChart3 size={15} className="text-bg-primary" />
+              </div>
             </div>
 
-            {/* Left slot (reserved — search removed until it's wired up) */}
-            <div className="hidden md:block" />
-
-            {/* Right side */}
+            {/* Right side — profile only */}
             <div className="flex items-center gap-3 md:gap-4">
-              {/* User profile — clickable on desktop AND mobile */}
               {profile && (
                 <div className="relative" ref={profileRef}>
                   <button
@@ -230,13 +252,13 @@ export default function Layout() {
             </div>
           </header>
 
-          {/* Page content — full-width, responsive padding */}
-          <main className="w-full px-3 sm:px-4 md:px-8 py-4 md:py-6 pb-24 md:pb-6">
+          {/* Page content — full-width, no bottom-nav reservation anymore */}
+          <main className="w-full px-3 sm:px-4 md:px-8 py-4 md:py-6 pb-6">
             <Outlet />
           </main>
         </div>
 
-        {/* Toast stack — globally mounted, consumed via useToast() */}
+        {/* Toast stack — globally mounted */}
         <ToastStack />
 
         {/* Sales Intelligence Chat */}

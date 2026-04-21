@@ -38,6 +38,17 @@ function shouldRun(key, force = false) {
   return Date.now() - lastRun(key) > SYNC_INTERVALS[key]
 }
 
+// Per-sync last-error string so the UI can show "Marketing sync failed: …"
+// instead of a green checkmark when the last attempt actually crashed.
+const lastErrors = {}
+function markError(key, err) {
+  const msg = typeof err === 'string' ? err : (err?.message || 'Unknown error')
+  lastErrors[key] = msg
+}
+function clearError(key) {
+  delete lastErrors[key]
+}
+
 // Listener for UI subscribers so a "last synced" indicator can re-render
 // whenever a sync finishes.
 const subscribers = new Set()
@@ -59,10 +70,13 @@ async function syncStripe(force = false) {
     const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/sync-stripe-payments?days=14&limit=100&resync=false', {
       headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` }
     })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
     const data = await r.json()
     console.log('[auto-sync] Stripe:', data.synced || 0, 'new,', data.matched || 0, 'matched')
+    clearError('stripe')
   } catch (e) {
     console.warn('[auto-sync] Stripe failed:', e.message)
+    markError('stripe', e)
   } finally { notify() }
 }
 
@@ -73,10 +87,13 @@ async function syncFanbasis(force = false) {
     const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/sync-fanbasis-payments?days=14&limit=100', {
       headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` }
     })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
     const data = await r.json()
     console.log('[auto-sync] Fanbasis:', data.synced || 0, 'new,', data.matched || 0, 'matched')
+    clearError('fanbasis')
   } catch (e) {
     console.warn('[auto-sync] Fanbasis failed:', e.message)
+    markError('fanbasis', e)
   } finally { notify() }
 }
 
@@ -89,8 +106,10 @@ async function syncGHL(force = false) {
     past.setDate(past.getDate() - 30)
     await syncGHLAppointments(toLocalDateStr(past), today)
     console.log('[auto-sync] GHL appointments done')
+    clearError('ghlAppointments')
   } catch (e) {
     console.warn('[auto-sync] GHL appointments failed:', e.message)
+    markError('ghlAppointments', e)
   } finally { notify() }
 }
 
@@ -102,8 +121,10 @@ async function syncEmails(force = false) {
     const result = await syncEmailMessages(30)
     await refreshRecentEmailStatuses(7)
     console.log('[auto-sync] Email flows:', result.synced || 0, 'new emails')
+    clearError('emailFlows')
   } catch (e) {
     console.warn('[auto-sync] Email flows failed:', e.message)
+    markError('emailFlows', e)
   } finally { notify() }
 }
 
@@ -114,8 +135,10 @@ async function syncMarketingTracker(force = false) {
     const { syncEODToTracker } = await import('../hooks/useMarketingTracker')
     await syncEODToTracker()
     console.log('[auto-sync] Marketing tracker (EOD) done')
+    clearError('marketingTracker')
   } catch (e) {
     console.warn('[auto-sync] Marketing tracker failed:', e.message)
+    markError('marketingTracker', e)
   } finally { notify() }
 }
 
@@ -128,8 +151,10 @@ async function syncMeta(force = false) {
     const { syncMetaToTracker } = await import('./metaAdsSync')
     const result = await syncMetaToTracker(30)
     console.log('[auto-sync] Meta+GHL pipeline done:', result || '(no summary returned)')
+    clearError('meta')
   } catch (e) {
     console.warn('[auto-sync] Meta+GHL pipeline failed:', e.message)
+    markError('meta', e)
   } finally { notify() }
 }
 
@@ -196,6 +221,7 @@ export function getAllSyncStatus() {
       interval,
       nextDue: last > 0 ? last + interval : now,
       overdue: last === 0 || (now - last > interval),
+      error: lastErrors[key] || null,
     }
   })
 }
