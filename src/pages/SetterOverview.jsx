@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
@@ -18,6 +18,7 @@ import { checkEndangeredLeads } from '../services/engagementCheck'
 import EndangeredLeadsTable from '../components/EndangeredLeadsTable'
 
 export default function SetterOverview() {
+  const navigate = useNavigate()
   const [range, setRange] = useState(30)
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const { members: setters, loading: loadingMembers } = useTeamMembers('setter')
@@ -709,10 +710,12 @@ export default function SetterOverview() {
                 const mcToSet = s.mcs > 0 ? ((s.totalSets / s.mcs) * 100).toFixed(1) : '—'
 
                 return (
-                  <tr key={s.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50">
-                    <td className="px-3 py-2 font-medium">
-                      <Link to={`/sales/setters/${s.id}`} className="text-opt-yellow hover:underline">{s.name}</Link>
-                    </td>
+                  <tr
+                    key={s.id}
+                    onClick={() => navigate(`/sales/setters/${s.id}`)}
+                    className="border-b border-border-default/30 hover:bg-bg-card-hover cursor-pointer transition-colors"
+                  >
+                    <td className="px-3 py-2 font-medium text-opt-yellow">{s.name}</td>
                     <td className="px-3 py-2 text-right text-text-400">{s.dials.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right text-text-400">{s.pickups.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right text-text-400">{s.mcs}</td>

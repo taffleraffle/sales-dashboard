@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
@@ -9,6 +9,7 @@ import { Loader, Plus } from 'lucide-react'
 import { rangeToDays } from '../lib/dateUtils'
 
 export default function CloserOverview() {
+  const navigate = useNavigate()
   const [range, setRange] = useState(30)
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const { members: closers, loading: loadingMembers } = useTeamMembers('closer')
@@ -202,10 +203,12 @@ export default function CloserOverview() {
                   {closerStats.map(c => {
                     const rateColor = (v, good, ok) => v >= good ? 'text-success' : v >= ok ? 'text-opt-yellow' : 'text-danger'
                     return (
-                      <tr key={c.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50">
-                        <td className="px-3 py-2 font-medium">
-                          <Link to={`/sales/closers/${c.id}`} className="text-opt-yellow hover:underline">{c.name}</Link>
-                        </td>
+                      <tr
+                        key={c.id}
+                        onClick={() => navigate(`/sales/closers/${c.id}`)}
+                        className="border-b border-border-default/30 hover:bg-bg-card-hover cursor-pointer transition-colors"
+                      >
+                        <td className="px-3 py-2 font-medium text-opt-yellow">{c.name}</td>
                         <td className="px-3 py-2 text-right text-text-400">{c.booked}</td>
                         <td className="px-3 py-2 text-right text-text-400">{c.liveCalls}</td>
                         <td className="px-3 py-2 text-right text-danger">{c.noShows}</td>
