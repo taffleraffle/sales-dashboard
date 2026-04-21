@@ -82,7 +82,7 @@ export default function DateRangeSelector({ selected, onChange }) {
 
       {/* Custom dropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 z-50 bg-bg-card border border-border-default rounded-2xl p-5 shadow-xl shadow-black/40 w-72">
+        <div className="absolute right-0 top-full mt-2 z-50 tile tile-feedback p-5 shadow-xl shadow-black/40 w-72">
           <p className="text-[11px] text-text-400 uppercase tracking-wider font-medium mb-3">Custom Range</p>
 
           <div className="space-y-3">

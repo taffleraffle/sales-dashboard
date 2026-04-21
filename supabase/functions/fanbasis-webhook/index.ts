@@ -4,7 +4,7 @@ import { matchPaymentToClient, autoCreateCommission } from '../_shared/matchPaym
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' } })
+    return new Response('ok', { headers: { 'Access-Control-Allow-Origin': 'https://sales-dashboard-ftct.onrender.com', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' } })
   }
 
   try {

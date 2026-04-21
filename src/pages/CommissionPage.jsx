@@ -41,7 +41,7 @@ function SettingsCard({ member, saved, onSave }) {
   const inputCls = 'w-full py-2 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:border-opt-yellow/50 focus:outline-none transition-colors'
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+    <div className="tile tile-feedback p-4">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-sm font-bold text-text-primary">{member.name}</h3>
@@ -140,7 +140,7 @@ function BlacklistSettings({ blacklist, onAdd, onRemove, userEmail }) {
       <h2 className="text-sm font-medium text-text-secondary mb-2">Payment Blacklist</h2>
       <p className="text-[10px] text-text-400 mb-3">Payments matching these patterns are hidden from the Payments tab.</p>
 
-      <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+      <div className="tile tile-feedback p-4">
         <div className="flex items-center gap-2 mb-3">
           <input
             type="text"
@@ -404,7 +404,7 @@ function CommissionPageAdmin() {
 
       {/* Overview Tab */}
       {activeTab === 'overview' && (
-        <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+        <div className="tile tile-feedback overflow-hidden">
           <div className="px-4 py-3 border-b border-border-default">
             <h2 className="text-sm font-medium text-text-secondary">Commission Breakdown — {period}</h2>
           </div>

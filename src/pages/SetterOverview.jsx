@@ -165,10 +165,10 @@ export default function SetterOverview() {
           <div className="h-8 w-40 bg-bg-card rounded-xl" />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-          {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="bg-bg-card border border-border-default rounded-2xl h-24" />)}
+          {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="tile tile-feedback h-24" />)}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[1,2,3,4].map(i => <div key={i} className="bg-bg-card border border-border-default rounded-2xl h-32" />)}
+          {[1,2,3,4].map(i => <div key={i} className="tile tile-feedback h-32" />)}
         </div>
       </div>
     )
@@ -381,7 +381,7 @@ export default function SetterOverview() {
         <Gauge label="MC → Set" value={companyRates.mcToSet} target={30} max={100} />
       </div>
       {leadsPerClose > 0 && (
-        <div className="bg-bg-card border border-border-default rounded-2xl px-4 py-3 mb-6 flex items-center gap-3">
+        <div className="tile tile-feedback px-4 py-3 mb-6 flex items-center gap-3">
           <span className="text-xs text-text-400">Leads per Close:</span>
           <span className="text-lg font-bold text-opt-yellow">{leadsPerClose}</span>
           <span className="text-xs text-text-400">({closedLeads.length} closes from {companyActivity.leads.toLocaleString()} leads)</span>
@@ -392,7 +392,7 @@ export default function SetterOverview() {
       {(booking.autoTotal > 0 || booking.manualTotal > 0) && (
         <>
           <h2 className="text-sm font-medium text-text-secondary mb-3">Auto Booking vs Manual Sets</h2>
-          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+          <div className="tile tile-feedback overflow-hidden mb-6">
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
@@ -452,7 +452,7 @@ export default function SetterOverview() {
             <KPICard label="< 5 min" value={`${stl.pctUnder5m}%`} subtitle={`${stl.under5m} of ${stl.worked} leads`} />
           </div>
           {stl.leads.length > 0 && (
-            <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+            <div className="tile tile-feedback overflow-hidden mb-6">
               <button onClick={() => setStlOpen(!stlOpen)} className="w-full px-4 py-2 border-b border-border-default flex items-center justify-between hover:bg-bg-card-hover/50 transition-colors">
                 <span className="text-xs font-medium text-text-secondary">Recent Leads — Response Times ({stl.allLeads.length}){stl.notCalled > 0 && <span className="ml-2 text-danger">{stl.notCalled} not called</span>}</span>
                 <ChevronDown size={14} className={`text-text-400 transition-transform ${stlOpen ? 'rotate-180' : ''}`} />
@@ -510,7 +510,7 @@ export default function SetterOverview() {
           )}
         </>
       ) : (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-6 text-center mb-6">
+        <div className="tile tile-feedback p-6 text-center mb-6">
           {loadingPipeline || !stlCalls ? (
             <><Loader className="animate-spin text-opt-yellow mx-auto mb-2 h-4 w-4" /><span className="text-xs text-text-400">Loading speed to lead data...</span></>
           ) : !hasWavv ? (
@@ -524,7 +524,7 @@ export default function SetterOverview() {
       {/* GHL Pipeline Performance */}
       <h2 className="text-sm font-medium text-text-secondary mb-3">GHL Pipeline Performance</h2>
       {loadingPipeline ? (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center mb-6">
+        <div className="tile tile-feedback p-8 text-center mb-6">
           <Loader className="animate-spin text-opt-yellow mx-auto mb-2" />
           <span className="text-xs text-text-400">Loading pipelines... {pipelineProgress}</span>
         </div>
@@ -537,7 +537,7 @@ export default function SetterOverview() {
             const rateColor = (v, good, ok) => v === '—' ? 'text-text-400' : parseFloat(v) >= good ? 'text-success' : parseFloat(v) >= ok ? 'text-opt-yellow' : 'text-danger'
             const fmtRate = (num, den) => den > 0 ? ((num / den) * 100).toFixed(1) : '—'
             return (
-              <div key={pipe.id} className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+              <div key={pipe.id} className="tile tile-feedback overflow-hidden">
                 <div className="px-3 sm:px-4 py-3 border-b border-border-default flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-0">
                   <h3 className="text-sm font-bold text-text-primary">{pipe.name}</h3>
                   <div className="flex flex-wrap gap-2 sm:gap-4 text-[10px] sm:text-xs text-text-400">
@@ -612,7 +612,7 @@ export default function SetterOverview() {
           })}
         </div>
       ) : (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400 mb-6">
+        <div className="tile tile-feedback p-8 text-center text-text-400 mb-6">
           No GHL pipeline data available
         </div>
       )}
@@ -620,7 +620,7 @@ export default function SetterOverview() {
       {/* Per-Setter Cards */}
       <h2 className="text-sm font-medium text-text-secondary mb-3">Individual Performance</h2>
       {setterCards.length === 0 ? (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400">
+        <div className="tile tile-feedback p-8 text-center text-text-400">
           No setters found. Add team members in Supabase.
         </div>
       ) : (
@@ -629,7 +629,7 @@ export default function SetterOverview() {
             <Link
               key={s.id}
               to={`/sales/setters/${s.id}`}
-              className="bg-bg-card border border-border-default rounded-2xl p-3 sm:p-5 hover:bg-bg-card-hover transition-colors block"
+              className="tile tile-feedback p-3 sm:p-5 hover:bg-bg-card-hover transition-colors block"
             >
               <div className="flex items-center justify-between mb-3 sm:mb-4">
                 <div className="flex items-center gap-2">
@@ -678,7 +678,7 @@ export default function SetterOverview() {
 
       {/* Setter Stats Table */}
       <h2 className="text-sm font-medium text-text-secondary mb-3">Setter Conversion Table</h2>
-      <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+      <div className="tile tile-feedback overflow-hidden mb-6">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
@@ -803,7 +803,7 @@ export default function SetterOverview() {
               Recent Leads — Live from GHL ({ghlLeads.length})
               {loadingPipeline && <span className="text-[10px] text-text-400 ml-2">loading... {pipelineProgress}</span>}
             </h2>
-            <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+            <div className="tile tile-feedback overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>

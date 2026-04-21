@@ -105,7 +105,7 @@ export default function GHLImportModal({ clients, onClose, onImported }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col slide-in-right" onClick={e => e.stopPropagation()}>
+      <div className="tile tile-feedback shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col slide-in-right" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-default">
           <div>

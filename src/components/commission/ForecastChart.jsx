@@ -40,7 +40,7 @@ export default function ForecastChart({ clients, payments }) {
   }
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl p-4 mt-4">
+    <div className="tile tile-feedback p-4 mt-4">
       <h3 className="text-xs font-medium text-text-secondary mb-3">Revenue Forecast — Expected vs Actual</h3>
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data} barGap={4}>

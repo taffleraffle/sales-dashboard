@@ -15,7 +15,7 @@ const STAGE_COLORS = {
 }
 
 const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
-const selectCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 appearance-none cursor-pointer'
+const selectCls = 'select-input w-full'
 
 export default function ClientsTab({ clients, members, payments, refreshClients, refreshLedger, refreshPayments }) {
   const [editingClient, setEditingClient] = useState(null)
@@ -197,7 +197,7 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
     <div>
       {/* Add Client Form */}
       <div className={`expand-section ${showAddClient ? 'max-h-[600px] opacity-100 mb-4' : 'max-h-0 opacity-0'}`}>
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+        <div className="tile tile-feedback p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-medium text-text-secondary">Add Client</h3>
             <button onClick={() => setShowAddClient(false)} className="text-text-400 hover:text-text-primary transition-colors"><X size={14} /></button>
@@ -309,7 +309,7 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
       )}
 
       {/* Client Table */}
-      <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+      <div className="tile tile-feedback overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>

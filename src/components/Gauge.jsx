@@ -6,7 +6,7 @@ export default function Gauge({ label, value, target, direction = 'above', max =
   const barColor = colorClass.includes('success') ? '#d4f50c' : colorClass.includes('warning') ? '#f59e0b' : colorClass.includes('danger') ? '#ef4444' : '#606060'
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl p-3 sm:p-5">
+    <div className="tile tile-feedback p-3 sm:p-5">
       <p className="text-[10px] sm:text-[11px] uppercase tracking-wider text-text-400 mb-2 sm:mb-3 font-medium">{label}</p>
       <div className="flex items-end gap-2 mb-2 sm:mb-3">
         <p className={`text-base sm:text-xl font-bold ${colorClass}`}>{value != null ? `${value}%` : '—'}</p>

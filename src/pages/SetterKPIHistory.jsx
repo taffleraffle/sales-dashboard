@@ -205,25 +205,25 @@ export default function SetterKPIHistory() {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+        <div className="tile tile-feedback p-4">
           <p className="text-[10px] text-text-400 uppercase mb-1">Weekdays Reported</p>
           <p className="text-xl font-bold">{totalDays} <span className="text-sm text-text-400">/ {allWeekdays.length}</span></p>
         </div>
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+        <div className="tile tile-feedback p-4">
           <p className="text-[10px] text-text-400 uppercase mb-1">All Targets Hit</p>
           <p className={`text-xl font-bold ${allHitDays > 0 ? 'text-success' : 'text-danger'}`}>{allHitDays} <span className="text-sm text-text-400">/ {totalDays}</span></p>
         </div>
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+        <div className="tile tile-feedback p-4">
           <p className="text-[10px] text-text-400 uppercase mb-1">Avg Leads/Day</p>
           <p className={`text-xl font-bold ${parseFloat(avgLeads) >= kpiTargets.leads_day ? 'text-success' : 'text-danger'}`}>{avgLeads}</p>
           <p className="text-[9px] text-text-400">Target: {kpiTargets.leads_day}</p>
         </div>
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+        <div className="tile tile-feedback p-4">
           <p className="text-[10px] text-text-400 uppercase mb-1">Avg Sets/Day</p>
           <p className={`text-xl font-bold ${parseFloat(avgSets) >= kpiTargets.sets_day ? 'text-success' : 'text-danger'}`}>{avgSets}</p>
           <p className="text-[9px] text-text-400">Target: {kpiTargets.sets_day}</p>
         </div>
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+        <div className="tile tile-feedback p-4">
           <p className="text-[10px] text-text-400 uppercase mb-1 flex items-center gap-1"><Clock size={10} /> STL &lt; 5min</p>
           {stlLoading ? (
             <p className="text-xl font-bold text-text-400">...</p>
@@ -236,14 +236,14 @@ export default function SetterKPIHistory() {
             <p className="text-xl font-bold text-text-400">—</p>
           )}
         </div>
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+        <div className="tile tile-feedback p-4">
           <p className="text-[10px] text-text-400 uppercase mb-1">Avg Dials / PU / MC</p>
           <p className="text-lg font-bold">{avgDials} <span className="text-text-400 text-sm font-normal">/ {avgPickups} / {avgMCs}</span></p>
         </div>
       </div>
 
       {/* Hit rate bar */}
-      <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-6">
+      <div className="tile tile-feedback p-4 mb-6">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[11px] text-opt-yellow uppercase font-medium flex items-center gap-1.5">
             <Target size={12} /> Target Hit Rate
@@ -257,7 +257,7 @@ export default function SetterKPIHistory() {
       </div>
 
       {/* Daily table */}
-      <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+      <div className="tile tile-feedback overflow-hidden">
         <div className="px-4 py-3 border-b border-border-default">
           <h3 className="text-[11px] text-opt-yellow uppercase font-medium flex items-center gap-1.5">
             <TrendingUp size={12} /> Daily Breakdown <span className="text-text-400 font-normal normal-case">(Mon–Fri)</span>

@@ -136,7 +136,7 @@ export default function CloserOverview() {
       {/* Per-Closer Cards */}
       <h2 className="text-sm font-medium text-text-secondary mb-3">Individual Performance</h2>
       {closerStats.length === 0 ? (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400">
+        <div className="tile tile-feedback p-8 text-center text-text-400">
           No closers found. Add team members in Supabase.
         </div>
       ) : (
@@ -145,7 +145,7 @@ export default function CloserOverview() {
             <Link
               key={c.id}
               to={`/sales/closers/${c.id}`}
-              className="bg-bg-card border border-border-default rounded-2xl p-3 sm:p-6 hover:bg-bg-card-hover transition-all block"
+              className="tile tile-feedback p-3 sm:p-6 hover:bg-bg-card-hover transition-all block"
             >
               <div className="flex items-center justify-between mb-3 sm:mb-4">
                 <h3 className="text-base sm:text-lg font-bold">{c.name}</h3>
@@ -176,7 +176,7 @@ export default function CloserOverview() {
       {closerStats.length > 0 && (
         <>
           <h2 className="text-sm font-medium text-text-secondary mb-3">Closer Comparison</h2>
-          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+          <div className="tile tile-feedback overflow-hidden mb-6">
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>

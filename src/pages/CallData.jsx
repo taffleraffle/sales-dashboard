@@ -9,7 +9,9 @@ import { supabase } from '../lib/supabase'
 
 // ── Markdown parser (reused from SalesChatWidget) ──
 function parseMarkdown(text) {
+  // Escape raw HTML from input to prevent XSS, then apply markdown formatting
   let html = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/```[\s\S]*?```/g, m => `<pre class="bg-bg-primary rounded px-3 py-2 text-xs overflow-x-auto my-2">${m.slice(3, -3).trim()}</pre>`)
     .replace(/^### (.+)$/gm, '<h4 class="text-xs font-semibold text-opt-yellow mt-3 mb-1">$1</h4>')
     .replace(/^## (.+)$/gm, '<h3 class="text-sm font-semibold text-opt-yellow mt-3 mb-1">$1</h3>')
@@ -355,7 +357,7 @@ export default function CallData() {
         </div>
 
         {/* Right: AI Chat — fixed height, sticky, contained scroll */}
-        <div className="w-full lg:w-[380px] xl:w-[420px] shrink-0 bg-bg-card border border-border-default rounded-2xl flex flex-col overflow-hidden lg:sticky lg:top-2" style={{ height: 'calc(100vh - 1.5rem)', maxHeight: 'calc(100vh - 1.5rem)' }}>
+        <div className="w-full lg:w-[380px] xl:w-[420px] shrink-0 tile tile-feedback flex flex-col overflow-hidden lg:sticky lg:top-2" style={{ height: 'calc(100vh - 1.5rem)', maxHeight: 'calc(100vh - 1.5rem)' }}>
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default shrink-0">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-full bg-opt-yellow/15 flex items-center justify-center">

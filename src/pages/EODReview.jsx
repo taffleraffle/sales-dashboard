@@ -130,7 +130,7 @@ function LeadPicker({ onSelect, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl w-96 max-h-[400px] overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="tile tile-feedback w-96 max-h-[400px] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-3 py-2 border-b border-border-default">
           <Search size={14} className="text-text-400" />
           <input
@@ -449,7 +449,7 @@ function DealUpdater({ closerId, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl w-[480px] max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="tile tile-feedback w-[480px] max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
           <div className="flex items-center gap-2">
@@ -691,7 +691,7 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
 
   if (selectedLead) {
     return (
-      <div className="flex items-center gap-2 bg-bg-card border border-border-default rounded-2xl px-3 py-2 flex-wrap">
+      <div className="flex items-center gap-2 tile tile-feedback px-3 py-2 flex-wrap">
         <span className="text-xs text-text-400">{label} {index + 1}:</span>
         <span className="text-sm font-medium">{selectedLead.lead_name}</span>
         <div className="flex items-center gap-1">
@@ -730,7 +730,7 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
         {loading && <Loader size={12} className="animate-spin text-text-400" />}
       </div>
       {open && search.length >= 2 && (
-        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-bg-card border border-border-default rounded-2xl shadow-lg max-h-[200px] overflow-y-auto">
+        <div className="absolute z-20 top-full left-0 right-0 mt-1 tile tile-feedback shadow-lg max-h-[200px] overflow-y-auto">
           {results.length === 0 && !loading && (
             <div className="p-3 text-center text-text-400 text-xs">No leads found</div>
           )}
@@ -980,7 +980,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           </div>
 
           {/* Activity — read-only cards matching edit layout */}
-          <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+          <div className="tile tile-feedback p-4">
             <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">
               {selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()} &middot; Activity
             </h3>
@@ -1005,7 +1005,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
 
           {/* Sets — assigned leads read-only */}
           {savedSetterLeads.filter(l => l.status !== 'rescheduled').length > 0 && (
-            <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+            <div className="tile tile-feedback p-4">
               <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">
                 Sets ({savedSetterLeads.filter(l => l.status !== 'rescheduled').length})
               </h3>
@@ -1039,7 +1039,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
 
           {/* Reschedules — read-only */}
           {savedSetterLeads.filter(l => l.status === 'rescheduled').length > 0 && (
-            <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+            <div className="tile tile-feedback p-4">
               <h3 className="text-[11px] text-blue-400 uppercase font-medium mb-3">
                 Reschedules ({savedSetterLeads.filter(l => l.status === 'rescheduled').length})
               </h3>
@@ -1059,7 +1059,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           )}
 
           {/* Self Assessment — read-only */}
-          <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+          <div className="tile tile-feedback p-4">
             <h3 className="text-[11px] text-text-400 uppercase font-medium mb-3">Self Assessment</h3>
             <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-6">
               <div>
@@ -1087,7 +1087,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
 
       {/* No EOD available for this date */}
       {!confirmed && eodExists === false && !filingNew && (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center">
+        <div className="tile tile-feedback p-8 text-center">
           <p className="text-text-400 text-sm mb-3">No end of day submitted for {selectedName} on {formatDateLabel(selectedDate).split(' — ').pop() || selectedDate}.</p>
           <button
             onClick={() => setFilingNew(true)}
@@ -1111,7 +1111,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           ['Show %', pipeline.total > 0 ? `${((pipeline.showed / pipeline.total) * 100).toFixed(0)}%` : '—', ''],
           ['Close %', pipeline.showed > 0 ? `${((pipeline.closed / pipeline.showed) * 100).toFixed(0)}%` : '—', ''],
         ].map(([label, val, color]) => (
-          <div key={label} className="bg-bg-card border border-border-default rounded-2xl p-2.5 text-center">
+          <div key={label} className="tile tile-feedback p-2.5 text-center">
             <p className={`text-lg font-bold ${color}`}>{val}</p>
             <p className="text-[10px] text-text-400 uppercase">{label}</p>
           </div>
@@ -1122,7 +1122,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
         {/* Left: EOD form */}
         <div className="space-y-4">
           {/* Activity inputs */}
-          <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+          <div className="tile tile-feedback p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-[11px] text-opt-yellow uppercase font-medium">
                 {selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()} &middot; Activity
@@ -1163,7 +1163,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
 
           {/* Lead assignment for each set */}
           {setterData.sets > 0 && (
-            <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+            <div className="tile tile-feedback p-4">
               <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">
                 Assign Leads to Sets ({setLeads.filter(Boolean).length}/{setterData.sets})
               </h3>
@@ -1186,7 +1186,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
 
           {/* Lead assignment for each reschedule */}
           {setterData.reschedules > 0 && (
-            <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+            <div className="tile tile-feedback p-4">
               <h3 className="text-[11px] text-text-400 uppercase font-medium mb-3">
                 Reschedule Prospects ({rescheduleLeads.filter(Boolean).length}/{setterData.reschedules})
               </h3>
@@ -1209,7 +1209,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           )}
 
           {/* Self assessment */}
-          <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+          <div className="tile tile-feedback p-4">
             <h3 className="text-[11px] text-text-400 uppercase font-medium mb-3">Self Assessment</h3>
             <div className="grid grid-cols-1 md:grid-cols-[80px_1fr_1fr] gap-3">
               <div>
@@ -1254,7 +1254,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           )}
 
           {/* EOD History */}
-          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+          <div className="tile tile-feedback overflow-hidden">
             <button
               onClick={() => setShowHistory(!showHistory)}
               className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-card-hover transition-colors"
@@ -1313,7 +1313,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
 
         {/* Right: weekly summary sidebar */}
         <div>
-          <div className="bg-bg-card border border-border-default rounded-2xl p-4 sticky top-20">
+          <div className="tile tile-feedback p-4 sticky top-20">
             <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">This Week</h3>
 
             <div className="grid grid-cols-3 gap-2 mb-3">
@@ -2243,7 +2243,7 @@ export default function EODReview() {
 
           {/* Recent EOD history (all team) */}
           {allEodHistory.length > 0 && (
-            <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+            <div className="tile tile-feedback overflow-hidden">
               <div className="px-5 py-3 border-b border-border-default">
                 <h2 className="text-sm font-semibold text-text-primary">Recent EODs</h2>
               </div>
@@ -2453,7 +2453,7 @@ export default function EODReview() {
 
               {/* Read-only call details — expandable */}
               {calls.length > 0 && (
-                <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+                <div className="tile tile-feedback overflow-hidden">
                   <div className="px-5 py-3 border-b border-border-default">
                     <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider">{calls.length} Calls</p>
                   </div>
@@ -2541,7 +2541,7 @@ export default function EODReview() {
 
               {/* Notes */}
               {closerNotes && (
-                <div className="bg-bg-card border border-border-default rounded-2xl p-4">
+                <div className="tile tile-feedback p-4">
                   <p className="text-[10px] text-text-400 uppercase mb-1">Notes</p>
                   <p className="text-sm text-text-secondary">{closerNotes}</p>
                 </div>
@@ -2552,7 +2552,7 @@ export default function EODReview() {
           {confirmed ? null : loadingCalls ? (
             <div className="flex items-center justify-center h-32"><Loader className="animate-spin text-opt-yellow" /></div>
           ) : calls.length === 0 ? (
-            <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400 text-sm">
+            <div className="tile tile-feedback p-8 text-center text-text-400 text-sm">
               <p>No booked calls for {selectedName} on {formatDateLabel(selectedDate).split(' — ').pop() || selectedDate}.</p>
               <div className="mt-3 flex items-center justify-center gap-2">
                 <button
@@ -2784,7 +2784,7 @@ export default function EODReview() {
 
               {/* Right: summary sidebar */}
               <div className="space-y-3">
-                <div className="bg-bg-card border border-border-default rounded-2xl p-5 sticky top-20">
+                <div className="tile tile-feedback p-5 sticky top-20">
                   <h3 className="text-xs text-opt-yellow uppercase font-medium mb-4">{selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()}</h3>
 
                   <div className="grid grid-cols-3 gap-3 mb-4">
@@ -2900,7 +2900,7 @@ export default function EODReview() {
 
           {/* Closer EOD History — below the form */}
           {closerHistory.length > 0 && (
-            <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mt-6">
+            <div className="tile tile-feedback overflow-hidden mt-6">
               <button
                 onClick={() => setShowCloserHistory(!showCloserHistory)}
                 className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-card-hover transition-colors"
@@ -2999,7 +2999,7 @@ export default function EODReview() {
           {loadingAllHistory ? (
             <div className="flex items-center justify-center h-32"><Loader className="animate-spin text-opt-yellow" /></div>
           ) : (
-            <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+            <div className="tile tile-feedback overflow-hidden">
               <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">
                 <h3 className="text-[11px] text-text-400 uppercase font-medium">
                   Closer EODs — {formatDateLabel(selectedDate).split(' — ').pop() || selectedDate}
@@ -3056,7 +3056,7 @@ export default function EODReview() {
           )}
 
           {/* Older history with date range */}
-          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mt-4">
+          <div className="tile tile-feedback overflow-hidden mt-4">
             <div className="px-4 py-3 border-b border-border-default flex items-center justify-between flex-wrap gap-2">
               <h3 className="text-[11px] text-text-400 uppercase font-medium">Previous EODs</h3>
               <div className="flex items-center gap-2">
@@ -3182,7 +3182,7 @@ export default function EODReview() {
           {loadingAllHistory ? (
             <div className="flex items-center justify-center h-32"><Loader className="animate-spin text-opt-yellow" /></div>
           ) : (
-            <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+            <div className="tile tile-feedback overflow-hidden">
               <div className="px-4 py-3 border-b border-border-default">
                 <h3 className="text-[11px] text-text-400 uppercase font-medium">
                   Setter EODs — {formatDateLabel(selectedDate).split(' — ').pop() || selectedDate}
@@ -3229,7 +3229,7 @@ export default function EODReview() {
           )}
 
           {/* Older history with date range */}
-          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mt-4">
+          <div className="tile tile-feedback overflow-hidden mt-4">
             <div className="px-4 py-3 border-b border-border-default flex items-center justify-between flex-wrap gap-2">
               <h3 className="text-[11px] text-text-400 uppercase font-medium">Previous EODs</h3>
               <div className="flex items-center gap-2">

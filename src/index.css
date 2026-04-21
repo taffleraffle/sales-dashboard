@@ -128,13 +128,102 @@ input[type="date"], input[type="month"] {
   overflow: hidden;
 }
 
-/* Glow on hover for interactive cards */
+/* Glow on hover for interactive cards (legacy — prefer .tile-hover) */
 .glow-hover {
   transition: all 200ms ease;
 }
 .glow-hover:hover {
   border-color: rgba(212, 245, 12, 0.15);
   box-shadow: 0 0 20px rgba(212, 245, 12, 0.04), 0 0 4px rgba(212, 245, 12, 0.02);
+}
+
+/* ── Unified design-system primitives ── */
+
+/* Base card/tile — replaces the inline bg-bg-card border border-border-default rounded-2xl pattern */
+.tile {
+  background-color: var(--color-bg-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: 1rem;
+  transition: border-color 200ms ease, background-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+}
+
+/* Hover variant — apply ALONGSIDE .tile on any card the user can interact with */
+.tile-hover { cursor: pointer; }
+.tile-hover:hover {
+  background-color: var(--color-bg-card-hover);
+  border-color: rgba(212, 245, 12, 0.22);
+  box-shadow: 0 0 24px rgba(212, 245, 12, 0.08), 0 0 4px rgba(212, 245, 12, 0.04);
+}
+
+/* Passive tiles that still want visible feedback when hovered (non-interactive data cards) */
+.tile-feedback {
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.tile-feedback:hover {
+  border-color: rgba(212, 245, 12, 0.14);
+  box-shadow: 0 0 16px rgba(212, 245, 12, 0.05);
+}
+
+/* Unified dropdown panel */
+.dropdown-panel {
+  background-color: var(--color-bg-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: 1rem;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.2);
+  z-index: 50;
+  overflow: hidden;
+}
+
+/* Unified select input — use in place of native <select> styling */
+.select-input {
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border-default);
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23606060' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 12px;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.select-input:hover {
+  border-color: rgba(212, 245, 12, 0.25);
+}
+.select-input:focus {
+  outline: none;
+  border-color: rgba(212, 245, 12, 0.5);
+  box-shadow: 0 0 0 3px rgba(212, 245, 12, 0.08);
+}
+.select-input option {
+  background-color: var(--color-bg-card);
+  color: var(--color-text-primary);
+}
+
+/* Toast container + animations */
+.toast-stack {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: min(420px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+.toast-stack > * { pointer-events: auto; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.toast-in {
+  animation: toast-in 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 /* Table row hover with subtle yellow tint */

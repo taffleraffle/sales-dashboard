@@ -73,7 +73,7 @@ export default function SettingsPage() {
           const connected = getStatus(api.envVar)
           const result = lastResult?.key === api.key ? lastResult : null
           return (
-            <div key={api.key} className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-5">
+            <div key={api.key} className="tile tile-feedback p-4 sm:p-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
@@ -115,7 +115,7 @@ export default function SettingsPage() {
 
       <div className="mt-8">
         <h2 className="text-sm font-medium text-text-secondary mb-3">Supabase</h2>
-        <div className="bg-bg-card border border-border-default rounded-2xl p-5">
+        <div className="tile tile-feedback p-5">
           <div className="flex items-center gap-2 mb-1">
             <Check size={14} className="text-success" />
             <span className="font-medium text-sm">Supabase</span>
@@ -127,7 +127,7 @@ export default function SettingsPage() {
 
       <div className="mt-8">
         <h2 className="text-sm font-medium text-text-secondary mb-3">AI Analysis</h2>
-        <div className="bg-bg-card border border-border-default rounded-2xl p-5">
+        <div className="tile tile-feedback p-5">
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2 mb-1">
@@ -238,7 +238,7 @@ function InviteSection() {
   return (
     <div className="mt-8">
       <h2 className="text-sm font-medium text-text-secondary mb-3">Invite Team Members</h2>
-      <div className="bg-bg-card border border-border-default rounded-2xl p-5">
+      <div className="tile tile-feedback p-5">
         <div className="flex items-center gap-2 mb-4">
           <UserPlus size={14} className="text-opt-yellow" />
           <span className="font-medium text-sm">Send Dashboard Invite</span>
@@ -384,7 +384,7 @@ function PasswordResetSection() {
   return (
     <div className="mt-8">
       <h2 className="text-sm font-medium text-text-secondary mb-3">Password Management</h2>
-      <div className="bg-bg-card border border-border-default rounded-2xl p-5">
+      <div className="tile tile-feedback p-5">
         <div className="flex items-center gap-2 mb-4">
           <KeyRound size={14} className="text-opt-yellow" />
           <span className="font-medium text-sm">Reset Team Member Password</span>
@@ -505,7 +505,7 @@ function TeamMembersSection() {
       <h2 className="text-sm font-medium text-text-secondary mb-3">Team Members</h2>
       <div className="space-y-2">
         {members.map(m => (
-          <div key={m.id} className="bg-bg-card border border-border-default rounded-2xl p-5">
+          <div key={m.id} className="tile tile-feedback p-5">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-sm">{m.name}</span>

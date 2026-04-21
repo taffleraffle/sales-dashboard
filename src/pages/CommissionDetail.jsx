@@ -143,7 +143,7 @@ export default function CommissionDetail({ memberId: propId } = {}) {
         const rampTopUp = isRamp ? Math.max(0, rampAmount - actualCommission) : 0
 
         return (
-          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+          <div className="tile tile-feedback overflow-hidden mb-6">
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-bg-card text-text-400 uppercase text-[10px] tracking-wider">
@@ -192,7 +192,7 @@ export default function CommissionDetail({ memberId: propId } = {}) {
         const totalForecastedComm = totalForecasted * rate / 100
 
         return (
-          <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+          <div className="tile tile-feedback overflow-hidden">
             <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">
               <h2 className="text-sm font-medium text-text-secondary">
                 {showAllTime ? 'All Deals' : `Deals — ${period}`}

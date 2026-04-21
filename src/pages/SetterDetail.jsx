@@ -332,7 +332,7 @@ export default function SetterDetail() {
         }
 
         return (
-          <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-6">
+          <div className="tile tile-feedback p-4 mb-6">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-[11px] text-opt-yellow uppercase font-medium">Daily KPI Targets</h3>
               <button
@@ -548,7 +548,7 @@ export default function SetterDetail() {
                   className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary" />
               </div>
             </div>
-            <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+            <div className="tile tile-feedback overflow-hidden">
               <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-bg-card z-10">
@@ -635,7 +635,7 @@ export default function SetterDetail() {
 
       {/* EOD History */}
       {myEodReports.length > 0 && (
-        <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+        <div className="tile tile-feedback overflow-hidden mb-6">
           <button
             onClick={() => setShowEodHistory(!showEodHistory)}
             className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-card-hover transition-colors"
