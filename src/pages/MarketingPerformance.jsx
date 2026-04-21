@@ -127,17 +127,16 @@ const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev,
 })
 
 // ── Section Header ─────────────────────────────────────────────────
-// lg: = 1024px+ (the 1440px era). 2xl: = 1536px+ (ultrawide).
-// On 2560px monitors the lg: col counts were stretching cards to 300px+; at 2xl we
-// drop one "step" so the density stays roughly what it was at 1440.
+// Keep one-row-per-section at lg: — the outer page wrapper now caps content
+// width so cards don't stretch to 300px+ on ultrawide.
 const colsMap = {
   3: 'lg:grid-cols-3',
   4: 'lg:grid-cols-4',
   5: 'lg:grid-cols-5',
-  6: 'lg:grid-cols-6 2xl:grid-cols-5',
-  7: 'lg:grid-cols-7 2xl:grid-cols-5',
-  8: 'lg:grid-cols-8 2xl:grid-cols-6',
-  9: 'lg:grid-cols-9 2xl:grid-cols-6',
+  6: 'lg:grid-cols-6',
+  7: 'lg:grid-cols-7',
+  8: 'lg:grid-cols-8',
+  9: 'lg:grid-cols-9',
 }
 
 function Section({ title, children, cols = 6 }) {
@@ -1122,7 +1121,7 @@ export default function MarketingPerformance() {
   if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
 
   return (
-    <div>
+    <div className="max-w-[1600px] mx-auto">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div>

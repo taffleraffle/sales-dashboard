@@ -351,8 +351,10 @@ export default function SetterOverview() {
         </div>
       </div>
 
+      <div className="max-w-[1600px] mx-auto">
+
       {/* Company-Level KPIs - two rows */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 2xl:grid-cols-6 gap-2 sm:gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3 mb-6">
         <KPICard label="Total Dials" value={companyActivity.dials.toLocaleString()} />
         <KPICard label="Leads Worked" value={companyActivity.leads.toLocaleString()} />
         <KPICard label="MCs" value={companyActivity.mcs} />
@@ -371,12 +373,9 @@ export default function SetterOverview() {
         <Gauge label="MC → Set %" value={companyRates.mcToSet} target={30} max={100} />
       </div>
 
-      {/* All detail tables below get capped to 1320px so numeric columns don't swim in whitespace on ultrawide monitors. */}
-      <div className="max-w-[1320px] mx-auto">
-
       {/* Blanket Conversion Rates */}
       <h2 className="text-sm font-medium text-text-secondary mb-3">Conversion Rates</h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 2xl:grid-cols-4 gap-2 sm:gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 mb-6">
         <Gauge label="Lead → Set" value={companyRates.leadToSet} target={5} max={50} />
         <Gauge label="Lead → Close" value={companyRates.leadToClose} target={2} max={20} />
         <Gauge label="Call → Set" value={companyRates.callToSet} target={3} max={20} />
@@ -867,7 +866,7 @@ export default function SetterOverview() {
       {/* Endangered Leads — upcoming appointments with no engagement */}
       <EndangeredLeadsTable leads={endangeredLeads} loading={loadingEndangered} />
 
-      </div> {/* end max-w-[1320px] mx-auto */}
+      </div> {/* end max-w-[1600px] mx-auto */}
     </div>
   )
 }
