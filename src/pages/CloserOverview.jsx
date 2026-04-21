@@ -110,7 +110,7 @@ export default function CloserOverview() {
       </div>
 
       {/* Company-Level KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 2xl:grid-cols-6 gap-2 sm:gap-3 mb-6">
         <KPICard label="Booked" value={totalBooked} subtitle={`${companyTotals.ncBooked} NC / ${companyTotals.fuBooked} FU`} />
         <KPICard label="Live Calls" value={companyTotals.liveCalls} subtitle={`${companyTotals.liveNC} NC / ${companyTotals.liveFU} FU`} />
         <KPICard label="No Shows" value={totalNoShows} />
@@ -122,7 +122,7 @@ export default function CloserOverview() {
       </div>
 
       {/* Company Conversion Gauges */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 2xl:grid-cols-5 gap-2 sm:gap-3 mb-6">
         <Gauge label="Show Rate" value={companyShowRate} target={70} />
         <Gauge label="Resched Rate" value={companyRescheduleRate} target={10} max={100} />
         <Gauge label="Offer Rate" value={companyOfferRate} target={80} />
@@ -174,7 +174,7 @@ export default function CloserOverview() {
 
       {/* Closer Comparison Table */}
       {closerStats.length > 0 && (
-        <>
+        <div className="max-w-[1320px] mx-auto">
           <h2 className="text-sm font-medium text-text-secondary mb-3">Closer Comparison</h2>
           <div className="tile tile-feedback overflow-hidden mb-6">
             <div className="overflow-x-auto">
@@ -238,7 +238,7 @@ export default function CloserOverview() {
               </table>
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   )

@@ -127,14 +127,17 @@ const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev,
 })
 
 // ── Section Header ─────────────────────────────────────────────────
+// lg: = 1024px+ (the 1440px era). 2xl: = 1536px+ (ultrawide).
+// On 2560px monitors the lg: col counts were stretching cards to 300px+; at 2xl we
+// drop one "step" so the density stays roughly what it was at 1440.
 const colsMap = {
   3: 'lg:grid-cols-3',
   4: 'lg:grid-cols-4',
   5: 'lg:grid-cols-5',
-  6: 'lg:grid-cols-6',
-  7: 'lg:grid-cols-7',
-  8: 'lg:grid-cols-8',
-  9: 'lg:grid-cols-9',
+  6: 'lg:grid-cols-6 2xl:grid-cols-5',
+  7: 'lg:grid-cols-7 2xl:grid-cols-5',
+  8: 'lg:grid-cols-8 2xl:grid-cols-6',
+  9: 'lg:grid-cols-9 2xl:grid-cols-6',
 }
 
 function Section({ title, children, cols = 6 }) {
@@ -226,7 +229,7 @@ function TrailingTable({ entries }) {
   }
 
   return (
-    <div className="tile tile-feedback overflow-hidden">
+    <div className="tile tile-feedback overflow-hidden max-w-[1400px] mx-auto">
       <div className="px-4 py-3 border-b border-border-default">
         <h2 className="text-sm font-medium">Trailing Period Summary</h2>
       </div>
@@ -369,7 +372,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
     'ar_collected', 'ar_defaulted', 'refund_count', 'refund_amount']
 
   return (
-    <div className="tile tile-feedback overflow-hidden">
+    <div className="tile tile-feedback overflow-hidden max-w-[1400px] mx-auto">
       <div className="px-4 py-3 border-b border-border-default flex flex-wrap items-center gap-3">
         <h2 className="text-sm font-medium">Daily Tracker Data</h2>
         <div className="flex items-center gap-2 ml-auto">

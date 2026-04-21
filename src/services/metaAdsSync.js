@@ -165,7 +165,9 @@ const STRATEGY_CALL_CALENDARS = [
  * Returns { 'YYYY-MM-DD': count } by opportunity createdAt date.
  */
 async function fetchGHLLeadsByDate(sinceStr) {
-  if (!GHL_API_KEY || !GHL_LOCATION_ID) return {}
+  if (!GHL_API_KEY || !GHL_LOCATION_ID) {
+    throw new Error('GHL credentials missing — set VITE_GHL_API_KEY and VITE_GHL_LOCATION_ID in Render env vars')
+  }
 
   let allOpps = []
   let startAfterId = null, startAfter = null
@@ -188,12 +190,14 @@ async function fetchGHLLeadsByDate(sinceStr) {
         { headers: GHL_HEADERS, signal: controller.signal }
       )
     } catch (e) {
-      console.warn(`GHL pipeline fetch aborted on page ${page}:`, e.message)
-      break
-    } finally {
       clearTimeout(timeout)
+      throw new Error(`GHL pipeline fetch failed on page ${page + 1}: ${e.message}`)
     }
-    if (!res.ok) break
+    clearTimeout(timeout)
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`GHL pipeline ${res.status} ${res.statusText} on page ${page + 1}${body ? ': ' + body.slice(0, 200) : ''}`)
+    }
     const json = await res.json()
     const opps = json.opportunities || []
     allOpps = allOpps.concat(opps)
@@ -207,6 +211,7 @@ async function fetchGHLLeadsByDate(sinceStr) {
     const d = (o.createdAt || '').split('T')[0]
     if (d && d >= sinceStr) byDate[d] = (byDate[d] || 0) + 1
   }
+  console.log(`[fetchGHLLeadsByDate] Fetched ${allOpps.length} opportunities; bucketed ${Object.keys(byDate).length} distinct dates with leads since ${sinceStr}.`)
   return byDate
 }
 
@@ -229,10 +234,11 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
     : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`
 
   // Step 2: aggregate adspend from marketing_daily
-  const { data: dailyRows } = await supabase
+  const { data: dailyRows, error: dailyErr } = await supabase
     .from('marketing_daily')
     .select('date, spend')
     .gte('date', trackerSince)
+  if (dailyErr) throw new Error(`marketing_daily read failed: ${dailyErr.message}`)
 
   const byDate = {}
   for (const r of (dailyRows || [])) {
@@ -244,12 +250,13 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
   const leadsByDate = await fetchGHLLeadsByDate(trackerSince)
 
   // Step 4: pull auto_bookings from Intro Call calendars (by booked_at)
-  const { data: introAppts } = await supabase
+  const { data: introAppts, error: introErr } = await supabase
     .from('ghl_appointments')
     .select('booked_at, calendar_name, ghl_contact_id')
     .gte('booked_at', `${trackerSince} 00:00:00`)
     .neq('appointment_status', 'cancelled')
     .in('calendar_name', INTRO_CALL_CALENDARS)
+  if (introErr) throw new Error(`ghl_appointments (intro) read failed: ${introErr.message}`)
 
   const autoBookingsByDate = {}
   for (const a of (introAppts || [])) {
@@ -257,18 +264,20 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
     const d = a.booked_at.split(' ')[0].split('T')[0]
     autoBookingsByDate[d] = (autoBookingsByDate[d] || 0) + 1
   }
+  console.log(`[syncMetaToTracker] Auto bookings: ${introAppts?.length || 0} intro appointments, ${Object.keys(autoBookingsByDate).length} dates with bookings.`)
 
   // Step 5: pull qualified_bookings from Strategy Call calendars
   // Counted by appointment_date (when the call is scheduled), deduped per contact
   // appointment_date is more accurate than booked_at because calls booked in Feb for Mar
   // should show on the day they actually happen
-  const { data: stratAppts } = await supabase
+  const { data: stratAppts, error: stratErr } = await supabase
     .from('ghl_appointments')
     .select('appointment_date, calendar_name, ghl_contact_id')
     .gte('appointment_date', trackerSince)
     .neq('appointment_status', 'cancelled')
     .in('calendar_name', STRATEGY_CALL_CALENDARS)
     .order('appointment_date', { ascending: true })
+  if (stratErr) throw new Error(`ghl_appointments (strategy) read failed: ${stratErr.message}`)
 
   const qualBookingsByDate = {}
   const seenContacts = new Set()

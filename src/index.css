@@ -164,6 +164,44 @@ input[type="date"], input[type="month"] {
   box-shadow: 0 0 16px rgba(212, 245, 12, 0.05);
 }
 
+/* Decorative "catch-light" gradient accent on tile hover.
+   Radial glow anchored in the top-right corner of every hoverable tile,
+   sized to extend ~140px into the card. pointer-events: none so clicks
+   pass through to children (e.g. KPICard's onClick). The ::before sits
+   beneath normal children by default (no z-index), so absolute elements
+   like KPICard's ArrowUpRight icon still paint over the glow.
+
+   Note: .tile / .tile-feedback / .tile-hover all get position: relative
+   and overflow: hidden to contain the gradient to the card's rounded
+   corners. */
+.tile {
+  position: relative;
+  overflow: hidden;
+}
+.tile-feedback::before,
+.tile-hover::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 140px;
+  height: 140px;
+  background: radial-gradient(
+    circle at 100% 0%,
+    rgba(212, 245, 12, 0.35) 0%,
+    rgba(212, 245, 12, 0.12) 35%,
+    transparent 65%
+  );
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 240ms ease;
+  border-radius: 1rem 0 0 0;
+}
+.tile-feedback:hover::before,
+.tile-hover:hover::before {
+  opacity: 1;
+}
+
 /* Unified dropdown panel */
 .dropdown-panel {
   background-color: var(--color-bg-card);
