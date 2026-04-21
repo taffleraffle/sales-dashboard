@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
-import DataTable from '../components/DataTable'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { supabase } from '../lib/supabase'
@@ -30,7 +29,6 @@ export default function SetterOverview() {
   const [loadingPipeline, setLoadingPipeline] = useState(true)
   const [pipelineProgress, setPipelineProgress] = useState('')
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
-  const [wavvLoaded, setWavvLoaded] = useState(false)
   const [stlOpen, setStlOpen] = useState(false)
   const [stlCalls, setStlCalls] = useState(null)
   const [autoBookings, setAutoBookings] = useState([])
@@ -95,11 +93,9 @@ export default function SetterOverview() {
 
   // Fetch WAVV aggregates (fast — only 3 columns, no pagination needed)
   useEffect(() => {
-    setWavvLoaded(false)
     setStlCalls(null) // reset STL on range change
     fetchWavvAggregates(days).then(agg => {
       setWavvAgg(agg)
-      setWavvLoaded(true)
     }).catch(() => setWavvLoaded(true))
   }, [range])
 
@@ -258,10 +254,6 @@ export default function SetterOverview() {
       pct: totalAutoBookings > 0 ? parseFloat(((myAuto.length / totalAutoBookings) * 100).toFixed(1)) : 0,
     }
   }
-  const unassignedAuto = autoBookings.filter(a => {
-    return !setters.some(s => a.ghl_user_id === s.ghl_user_id || a.closer_id === s.id)
-  }).length
-
   // Per-setter breakdown — uses pre-aggregated WAVV data (no raw call filtering)
   const setterCards = setters.map(setter => {
     // Look up pre-aggregated WAVV stats for this setter
