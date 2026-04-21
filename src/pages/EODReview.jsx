@@ -2185,6 +2185,12 @@ export default function EODReview() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
+          <button
+            onClick={() => window.location.assign('/sales/eod')}
+            className="flex items-center gap-1 text-[11px] text-text-400 hover:text-opt-yellow transition-colors mb-1"
+          >
+            ← Back to Dashboard
+          </button>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight">End of Day</h1>
           <p className="text-xs sm:text-sm text-text-400 mt-0.5 sm:mt-1">{eodStarted ? 'File your daily report' : 'Review and submit EOD reports'}</p>
         </div>

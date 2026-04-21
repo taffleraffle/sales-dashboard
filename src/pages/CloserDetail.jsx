@@ -232,7 +232,7 @@ export default function CloserDetail() {
                     const cash = parseFloat(eod.total_cash_collected || 0)
                     const rev = parseFloat(eod.total_revenue || 0)
                     return (
-                      <tr key={eod.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer" onClick={() => navigate(`/sales/eod?tab=closer&member=${id}&date=${eod.report_date}`)}>
+                      <tr key={eod.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer" onClick={() => navigate(`/sales/eod/submit?tab=closer&member=${id}&date=${eod.report_date}`)}>
                         <td className="px-3 py-2 font-medium text-opt-yellow hover:underline">{eod.report_date}</td>
                         <td className="px-3 py-2 text-right">{booked}</td>
                         <td className="px-3 py-2 text-right">{live}</td>

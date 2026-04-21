@@ -86,7 +86,7 @@ export default function EODHistory({ embedded = false }) {
   // Navigate to specific member's EOD for a specific date
   const goToMemberEOD = (date, member, e) => {
     e?.stopPropagation?.()
-    navigate(`/sales/eod?tab=${member.role}&member=${member.id}&date=${date}`)
+    navigate(`/sales/eod/submit?tab=${member.role}&member=${member.id}&date=${date}`)
   }
 
   const goToDateEOD = (date, e) => {
