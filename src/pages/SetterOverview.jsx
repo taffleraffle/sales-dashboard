@@ -698,96 +698,52 @@ export default function SetterOverview() {
         </div>
       )}
 
-      {/* Setter Stats Table */}
-      <h2 className="text-sm font-medium text-text-secondary mb-4">Setter Conversion Table</h2>
-      <div className="tile tile-feedback overflow-hidden mb-6">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
-                <th className="px-3 py-2 text-left">Setter</th>
-                <th className="px-3 py-2 text-right">Dials</th>
-                <th className="px-3 py-2 text-right">Pickups</th>
-                <th className="px-3 py-2 text-right">MCs</th>
-                <th className="px-3 py-2 text-right">Sets</th>
-                <th className="px-3 py-2 text-right">Pickup %</th>
-                <th className="px-3 py-2 text-right">Lead→Set %</th>
-                <th className="px-3 py-2 text-right">Call→Set %</th>
-                <th className="px-3 py-2 text-right">Pickup→Set %</th>
-                <th className="px-3 py-2 text-right">MC→Set %</th>
-                <th className="px-3 py-2 text-right">Auto Books</th>
-                <th className="px-3 py-2 text-right">Auto %</th>
-                <th className="px-3 py-2 text-right">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {setterCards.map(s => {
-                const pickupPct = s.dials > 0 ? ((s.pickups / s.dials) * 100).toFixed(1) : '—'
-                const leadToSet = s.leads > 0 ? ((s.totalSets / s.leads) * 100).toFixed(1) : '—'
-                const callToSet = s.dials > 0 ? ((s.totalSets / s.dials) * 100).toFixed(1) : '—'
-                const pickupToSet = s.pickups > 0 ? ((s.totalSets / s.pickups) * 100).toFixed(1) : '—'
-                const mcToSet = s.mcs > 0 ? ((s.totalSets / s.mcs) * 100).toFixed(1) : '—'
-
-                return (
-                  <tr
-                    key={s.id}
-                    onClick={() => navigate(`/sales/setters/${s.id}`)}
-                    className="border-b border-border-default/30 hover:bg-bg-card-hover cursor-pointer transition-colors"
-                  >
-                    <td className="px-3 py-2 font-medium text-opt-yellow">{s.name}</td>
-                    <td className="px-3 py-2 text-right text-text-400">{s.dials.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right text-text-400">{s.pickups.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right text-text-400">{s.mcs}</td>
-                    <td className="px-3 py-2 text-right font-medium text-text-primary">{s.totalSets}</td>
-                    <td className={`px-3 py-2 text-right font-medium ${pickupPct !== '—' && parseFloat(pickupPct) >= 20 ? 'text-success' : pickupPct !== '—' && parseFloat(pickupPct) >= 10 ? 'text-opt-yellow' : 'text-danger'}`}>{pickupPct !== '—' ? `${pickupPct}%` : '—'}</td>
-                    <td className={`px-3 py-2 text-right font-medium ${leadToSet !== '—' && parseFloat(leadToSet) >= 5 ? 'text-success' : leadToSet !== '—' && parseFloat(leadToSet) >= 2 ? 'text-opt-yellow' : 'text-danger'}`}>{leadToSet !== '—' ? `${leadToSet}%` : '—'}</td>
-                    <td className={`px-3 py-2 text-right font-medium ${callToSet !== '—' && parseFloat(callToSet) >= 3 ? 'text-success' : callToSet !== '—' && parseFloat(callToSet) >= 1 ? 'text-opt-yellow' : 'text-danger'}`}>{callToSet !== '—' ? `${callToSet}%` : '—'}</td>
-                    <td className={`px-3 py-2 text-right font-medium ${pickupToSet !== '—' && parseFloat(pickupToSet) >= 10 ? 'text-success' : pickupToSet !== '—' && parseFloat(pickupToSet) >= 5 ? 'text-opt-yellow' : 'text-danger'}`}>{pickupToSet !== '—' ? `${pickupToSet}%` : '—'}</td>
-                    <td className={`px-3 py-2 text-right font-medium ${mcToSet !== '—' && parseFloat(mcToSet) >= 30 ? 'text-success' : mcToSet !== '—' && parseFloat(mcToSet) >= 15 ? 'text-opt-yellow' : 'text-danger'}`}>{mcToSet !== '—' ? `${mcToSet}%` : '—'}</td>
-                    <td className="px-3 py-2 text-right text-cyan-400 font-medium">{s.autoBookingCount}</td>
-                    <td className="px-3 py-2 text-right text-text-400">{s.autoBookingPct > 0 ? `${s.autoBookingPct}%` : '—'}</td>
-                    <td className="px-3 py-2 text-right text-success font-medium">${s.revenue.toLocaleString()}</td>
-                  </tr>
-                )
-              })}
-              {/* Totals row */}
-              {setterCards.length > 0 && (() => {
-                const totDials = setterCards.reduce((s, c) => s + c.dials, 0)
-                const totPickups = setterCards.reduce((s, c) => s + c.pickups, 0)
-                const totMcs = setterCards.reduce((s, c) => s + c.mcs, 0)
-                const totLeads = setterCards.reduce((s, c) => s + c.leads, 0)
-                const totSets = setterCards.reduce((s, c) => s + c.totalSets, 0)
-                const totRev = setterCards.reduce((s, c) => s + c.revenue, 0)
-                const tPickup = totDials > 0 ? ((totPickups / totDials) * 100).toFixed(1) : '—'
-                const tLeadSet = totLeads > 0 ? ((totSets / totLeads) * 100).toFixed(1) : '—'
-                const tCallSet = totDials > 0 ? ((totSets / totDials) * 100).toFixed(1) : '—'
-                const tPickSet = totPickups > 0 ? ((totSets / totPickups) * 100).toFixed(1) : '—'
-                const tMcSet = totMcs > 0 ? ((totSets / totMcs) * 100).toFixed(1) : '—'
-                return (
-                  <tr className="border-t border-border-default bg-bg-card-hover/30 font-medium">
-                    <td className="px-3 py-2">Total</td>
-                    <td className="px-3 py-2 text-right">{totDials.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right">{totPickups.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right">{totMcs}</td>
-                    <td className="px-3 py-2 text-right text-text-primary">{totSets}</td>
-                    <td className="px-3 py-2 text-right">{tPickup !== '—' ? `${tPickup}%` : '—'}</td>
-                    <td className="px-3 py-2 text-right">{tLeadSet !== '—' ? `${tLeadSet}%` : '—'}</td>
-                    <td className="px-3 py-2 text-right">{tCallSet !== '—' ? `${tCallSet}%` : '—'}</td>
-                    <td className="px-3 py-2 text-right">{tPickSet !== '—' ? `${tPickSet}%` : '—'}</td>
-                    <td className="px-3 py-2 text-right">{tMcSet !== '—' ? `${tMcSet}%` : '—'}</td>
-                    <td className="px-3 py-2 text-right text-cyan-400">{totalAutoBookings}</td>
-                    <td className="px-3 py-2 text-right text-text-400">{unassignedAuto > 0 ? `${unassignedAuto} unassigned` : '100%'}</td>
-                    <td className="px-3 py-2 text-right text-success">${totRev.toLocaleString()}</td>
-                  </tr>
-                )
-              })()}
-              {setterCards.length === 0 && (
-                <tr><td colSpan={13} className="px-3 py-8 text-center text-text-400">No setter data</td></tr>
-              )}
-            </tbody>
-          </table>
+      {/* Setter Conversion — leaderboard cards (matches Closer Performance style) */}
+      <h2 className="text-sm font-medium text-text-secondary mb-4">Setter Conversion</h2>
+      {setterCards.length === 0 ? (
+        <div className="tile tile-feedback p-8 text-center text-text-400 mb-6">No setter data</div>
+      ) : (
+        <div className="space-y-2 mb-6">
+          {setterCards.map(s => (
+            <SetterLeaderboardRow
+              key={s.id}
+              setter={s}
+              onClick={() => navigate(`/sales/setters/${s.id}`)}
+            />
+          ))}
+          {/* Team total */}
+          {(() => {
+            const totDials = setterCards.reduce((a, c) => a + c.dials, 0)
+            const totPickups = setterCards.reduce((a, c) => a + c.pickups, 0)
+            const totMcs = setterCards.reduce((a, c) => a + c.mcs, 0)
+            const totSets = setterCards.reduce((a, c) => a + c.totalSets, 0)
+            const totRev = setterCards.reduce((a, c) => a + c.revenue, 0)
+            const tPickup = totDials > 0 ? ((totPickups / totDials) * 100).toFixed(1) : 0
+            const tMcSet = totMcs > 0 ? ((totSets / totMcs) * 100).toFixed(1) : 0
+            const tCallSet = totDials > 0 ? ((totSets / totDials) * 100).toFixed(1) : 0
+            return (
+              <div className="tile border-t-2 border-opt-yellow/30 px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
+                <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
+                  <div className="w-9 h-9 rounded-full bg-opt-yellow/20 border border-opt-yellow/40 flex items-center justify-center">
+                    <span className="text-[11px] font-bold text-opt-yellow">∑</span>
+                  </div>
+                  <span className="text-sm font-semibold text-text-primary">Team Total</span>
+                </div>
+                <div className="flex items-baseline gap-4 sm:gap-6">
+                  <SetterStatBlock label="Sets" value={totSets} />
+                  <SetterStatBlock label="Dials" value={totDials.toLocaleString()} accent="muted" />
+                  <SetterStatBlock label="Revenue" value={`$${totRev.toLocaleString()}`} accent="success" />
+                </div>
+                <div className="flex flex-wrap gap-2 sm:ml-auto">
+                  <SetterPill label="Pickup" value={`${tPickup}%`} good={parseFloat(tPickup) >= 20} ok={parseFloat(tPickup) >= 10} />
+                  <SetterPill label="Call→Set" value={`${tCallSet}%`} good={parseFloat(tCallSet) >= 3} ok={parseFloat(tCallSet) >= 1} />
+                  <SetterPill label="MC→Set" value={`${tMcSet}%`} good={parseFloat(tMcSet) >= 30} ok={parseFloat(tMcSet) >= 15} />
+                </div>
+              </div>
+            )
+          })()}
         </div>
-      </div>
+      )}
 
       {/* Recent Leads — live from GHL pipeline */}
       {(() => {
@@ -891,6 +847,85 @@ export default function SetterOverview() {
       </div>
 
       </div> {/* end max-w-[1600px] mx-auto */}
+    </div>
+  )
+}
+
+function setterInitials(name) {
+  if (!name) return '?'
+  const parts = name.trim().split(/\s+/)
+  if (parts.length === 1) return parts[0][0].toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+function SetterPill({ label, value, good, ok }) {
+  const color = good ? 'bg-success/15 text-success border-success/30'
+    : ok ? 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30'
+    : 'bg-danger/15 text-danger border-danger/30'
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium ${color}`}>
+      <span className="text-text-400 font-normal">{label}</span>
+      <span>{value}</span>
+    </span>
+  )
+}
+
+function SetterStatBlock({ label, value, accent }) {
+  const color = accent === 'success' ? 'text-success'
+    : accent === 'opt-yellow' ? 'text-opt-yellow'
+    : accent === 'muted' ? 'text-text-secondary'
+    : 'text-text-primary'
+  return (
+    <div className="flex flex-col">
+      <span className="text-[10px] uppercase tracking-wider text-text-400">{label}</span>
+      <span className={`text-base sm:text-lg font-bold leading-tight ${color} tabular-nums`}>{value}</span>
+    </div>
+  )
+}
+
+function SetterLeaderboardRow({ setter, onClick }) {
+  const s = setter
+  const pickupPct = s.dials > 0 ? ((s.pickups / s.dials) * 100).toFixed(1) : 0
+  const callToSet = s.dials > 0 ? ((s.totalSets / s.dials) * 100).toFixed(1) : 0
+  const mcToSet = s.mcs > 0 ? ((s.totalSets / s.mcs) * 100).toFixed(1) : 0
+
+  return (
+    <div
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
+      className="tile tile-hover px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5"
+    >
+      {/* Name + initials */}
+      <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
+        <div className="w-9 h-9 rounded-full bg-opt-yellow/15 border border-opt-yellow/30 flex items-center justify-center shrink-0 text-[11px] font-bold text-opt-yellow">
+          {setterInitials(s.name)}
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-text-primary truncate">{s.name}</div>
+          {s.dataSource === 'wavv' && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-success/15 text-success">WAVV</span>
+          )}
+        </div>
+      </div>
+
+      {/* Primary stats */}
+      <div className="flex items-baseline gap-4 sm:gap-6">
+        <SetterStatBlock label="Sets" value={s.totalSets} />
+        <SetterStatBlock label="Dials" value={s.dials.toLocaleString()} accent="muted" />
+        <SetterStatBlock label="Revenue" value={`$${s.revenue.toLocaleString()}`} accent="success" />
+      </div>
+
+      {/* Rate pills */}
+      <div className="flex flex-wrap gap-2 sm:ml-auto">
+        <SetterPill label="Pickup" value={`${pickupPct}%`} good={parseFloat(pickupPct) >= 20} ok={parseFloat(pickupPct) >= 10} />
+        <SetterPill label="Call→Set" value={`${callToSet}%`} good={parseFloat(callToSet) >= 3} ok={parseFloat(callToSet) >= 1} />
+        <SetterPill label="MC→Set" value={`${mcToSet}%`} good={parseFloat(mcToSet) >= 30} ok={parseFloat(mcToSet) >= 15} />
+        {s.autoBookingCount > 0 && (
+          <SetterPill label="Auto" value={s.autoBookingCount} good={true} ok={true} />
+        )}
+      </div>
     </div>
   )
 }

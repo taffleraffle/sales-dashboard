@@ -37,13 +37,15 @@ export default function EODDashboard() {
         const [cRes, sRes] = await Promise.all([
           supabase
             .from('closer_eod_reports')
-            .select('id, closer_id, report_date, nc_booked, fu_booked, live_nc_calls, live_fu_calls, nc_no_shows, fu_no_shows, offers, closes, total_cash_collected, total_revenue, submitted_at, is_confirmed')
+            .select('id, closer_id, report_date, nc_booked, fu_booked, live_nc_calls, live_fu_calls, nc_no_shows, fu_no_shows, offers, closes, total_cash_collected, total_revenue, updated_at, is_confirmed')
             .eq('report_date', selectedDate),
           supabase
             .from('setter_eod_reports')
-            .select('id, setter_id, report_date, outbound_calls, pickups, meaningful_conversations, sets, self_rating, submitted_at, is_confirmed')
+            .select('id, setter_id, report_date, outbound_calls, pickups, meaningful_conversations, sets, self_rating, updated_at, is_confirmed')
             .eq('report_date', selectedDate),
         ])
+        if (cRes.error) console.error('EOD closer reports fetch error:', cRes.error)
+        if (sRes.error) console.error('EOD setter reports fetch error:', sRes.error)
         setCloserReports(cRes.data || [])
         setSetterReports(sRes.data || [])
       } catch (err) {
@@ -55,16 +57,17 @@ export default function EODDashboard() {
     load()
   }, [selectedDate])
 
-  // Build lookup: member_id → report
+  // Build lookup: member_id → report. Only count confirmed reports as "submitted"
+  // (is_confirmed = true). Drafts stay as pending.
   const closerByMember = useMemo(() => {
     const m = {}
-    for (const r of closerReports) if (r.is_confirmed !== false) m[r.closer_id] = r
+    for (const r of closerReports) if (r.is_confirmed === true) m[r.closer_id] = r
     return m
   }, [closerReports])
 
   const setterByMember = useMemo(() => {
     const m = {}
-    for (const r of setterReports) if (r.is_confirmed !== false) m[r.setter_id] = r
+    for (const r of setterReports) if (r.is_confirmed === true) m[r.setter_id] = r
     return m
   }, [setterReports])
 
