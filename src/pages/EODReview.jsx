@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Check, Edit3, Loader, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, Calendar, RefreshCw, Plus, Search, X, Zap, Lock } from 'lucide-react'
+import { Check, Edit3, Loader, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, Calendar, RefreshCw, Plus, Search, X, Zap, Lock, Trash2 } from 'lucide-react'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useEODSubmit } from '../hooks/useEOD'
 import { useAuth } from '../contexts/AuthContext'
@@ -1875,6 +1875,18 @@ export default function EODReview() {
     }))
   }
 
+  // Remove a call entirely (e.g. duplicate booking, wrong prospect).
+  // Save persists via delete-all-then-reinsert in useEOD.submitCloserEOD,
+  // so removing from local state + saving actually deletes from DB.
+  const removeCall = (index) => {
+    const c = calls[index]
+    const label = c?.lead_name ? `"${c.lead_name}"` : 'this call'
+    if (!confirm(`Remove ${label} from this EOD?\n\nThe call will be deleted when you save.`)) return
+    setCalls(prev => prev.filter((_, i) => i !== index))
+    // Collapse expanded detail if we just removed the expanded row
+    setExpandedCall(null)
+  }
+
   // Auto-computed summary — ascensions excluded from show rate (they always show)
   const summary = calls.reduce((acc, c) => {
     const isAsc = c.call_type === 'ascension'
@@ -2634,18 +2646,30 @@ export default function EODReview() {
                             )}
                             {call.is_manual && <span className="text-[10px] text-opt-yellow flex-shrink-0">manual</span>}
                           </div>
-                          <select value={call.call_type}
-                            onChange={e => {
-                              const newType = e.target.value
-                              updateCall(i, 'call_type', newType)
-                              if (newType === 'ascension') updateCall(i, 'outcome', 'not_ascended')
-                              else if (['ascended', 'not_ascended'].includes(call.outcome)) updateCall(i, 'outcome', 'no_show')
-                            }}
-                            className="bg-bg-primary border border-border-default rounded px-2 py-1 text-[11px] ml-2 flex-shrink-0">
-                            <option value="new_call">Closing</option>
-                            <option value="ascension">Ascension</option>
-                            <option value="follow_up">Follow Up</option>
-                          </select>
+                          <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                            <select value={call.call_type}
+                              onChange={e => {
+                                const newType = e.target.value
+                                updateCall(i, 'call_type', newType)
+                                if (newType === 'ascension') updateCall(i, 'outcome', 'not_ascended')
+                                else if (['ascended', 'not_ascended'].includes(call.outcome)) updateCall(i, 'outcome', 'no_show')
+                              }}
+                              className="bg-bg-primary border border-border-default rounded px-2 py-1 text-[11px]">
+                              <option value="new_call">Closing</option>
+                              <option value="ascension">Ascension</option>
+                              <option value="follow_up">Follow Up</option>
+                            </select>
+                            {/* Remove call — used for duplicate bookings / wrong prospect */}
+                            <button
+                              type="button"
+                              onClick={() => removeCall(i)}
+                              title={`Remove ${call.lead_name} from this EOD`}
+                              aria-label={`Remove ${call.lead_name} from this EOD`}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-text-400/60 hover:text-danger hover:bg-danger/10 transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
 
                         {/* Outcome pills */}
