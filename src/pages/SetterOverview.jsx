@@ -527,9 +527,20 @@ export default function SetterOverview() {
       {/* GHL Pipeline Performance */}
       <h2 className="text-sm font-medium text-text-secondary mb-3">GHL Pipeline Performance</h2>
       {loadingPipeline ? (
-        <div className="tile tile-feedback p-8 text-center mb-6">
-          <Loader className="animate-spin text-opt-yellow mx-auto mb-2" />
-          <span className="text-xs text-text-400">Loading pipelines... {pipelineProgress}</span>
+        <div className="tile tile-feedback overflow-hidden mb-6 animate-pulse">
+          <div className="h-10 border-b border-border-default flex items-center justify-between px-4">
+            <div className="h-3 w-32 bg-bg-primary/60 rounded" />
+            <div className="h-3 w-20 bg-bg-primary/40 rounded" />
+          </div>
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} className="h-10 border-b border-border-default/40 flex items-center gap-3 px-4">
+              <div className="h-3 w-24 bg-bg-primary/40 rounded" />
+              <div className="h-3 w-12 bg-bg-primary/40 rounded ml-auto" />
+              <div className="h-3 w-12 bg-bg-primary/40 rounded" />
+              <div className="h-3 w-12 bg-bg-primary/40 rounded" />
+            </div>
+          ))}
+          <div className="px-4 py-2 text-[10px] text-text-400 text-center">Loading pipelines… {pipelineProgress}</div>
         </div>
       ) : pipelineData.length > 0 ? (
         <div className="space-y-4 mb-6">
