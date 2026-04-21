@@ -228,12 +228,12 @@ function TrailingTable({ entries }) {
   }
 
   return (
-    <div className="tile tile-feedback overflow-hidden max-w-[1400px] mx-auto">
+    <div className="tile tile-feedback overflow-hidden">
       <div className="px-4 py-3 border-b border-border-default">
         <h2 className="text-sm font-medium">Trailing Period Summary</h2>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[11px]" style={{ minWidth: '1400px' }}>
+        <table className="w-full text-[11px]">
           <thead>
             <tr className="border-b border-border-default text-text-400 uppercase text-[9px]">
               <th className="px-2 py-1.5 text-left sticky left-0 bg-bg-card z-10">Period</th>
@@ -371,7 +371,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
     'ar_collected', 'ar_defaulted', 'refund_count', 'refund_amount']
 
   return (
-    <div className="tile tile-feedback overflow-hidden max-w-[1400px] mx-auto">
+    <div className="tile tile-feedback overflow-hidden">
       <div className="px-4 py-3 border-b border-border-default flex flex-wrap items-center gap-3">
         <h2 className="text-sm font-medium">Daily Tracker Data</h2>
         <div className="flex items-center gap-2 ml-auto">
@@ -383,7 +383,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[11px]" style={{ minWidth: '1400px' }}>
+        <table className="w-full text-[11px]">
           <thead>
             <tr className="border-b border-border-default text-text-400 uppercase text-[9px]">
               <th className="px-2 py-1.5 text-left sticky left-0 bg-bg-card z-10 cursor-pointer" onClick={() => toggleSort('date')}>
