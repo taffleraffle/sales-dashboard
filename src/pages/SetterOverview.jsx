@@ -144,18 +144,24 @@ export default function SetterOverview() {
 
   // Fetch recent WAVV calls and check endangered leads (live from GHL)
   useEffect(() => {
-    setLoadingEndangered(true)
-    const since = new Date()
-    since.setDate(since.getDate() - 7)
-    supabase
-      .from('wavv_calls')
-      .select('phone_number, call_duration')
-      .gte('started_at', since.toISOString())
-      .then(({ data }) => {
-        checkEndangeredLeads(data || [])
-          .then(setEndangeredLeads)
-          .finally(() => setLoadingEndangered(false))
-      })
+    // Defer the endangered-leads fetch to AFTER first paint. checkEndangeredLeads
+    // chains Supabase → GHL API and is non-critical (sits at bottom of page).
+    // Running it inline blocks the main render by ~400ms on slow networks.
+    const timer = setTimeout(() => {
+      setLoadingEndangered(true)
+      const since = new Date()
+      since.setDate(since.getDate() - 7)
+      supabase
+        .from('wavv_calls')
+        .select('phone_number, call_duration')
+        .gte('started_at', since.toISOString())
+        .then(({ data }) => {
+          checkEndangeredLeads(data || [])
+            .then(setEndangeredLeads)
+            .finally(() => setLoadingEndangered(false))
+        })
+    }, 400)
+    return () => clearTimeout(timer)
   }, [])
 
   if (loadingMembers || loadingLeads || loadingReports) {
@@ -344,7 +350,7 @@ export default function SetterOverview() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Setter Performance</h1>
         <div className="flex items-center gap-3">
-          <Link to="/sales/eod?tab=setter" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-opt-yellow text-bg-primary text-xs font-semibold hover:brightness-110 transition-colors">
+          <Link to="/sales/eod/submit?tab=setter" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-opt-yellow text-bg-primary text-xs font-semibold hover:brightness-110 transition-colors">
             <Plus size={14} />
             New EOD
           </Link>
@@ -374,22 +380,16 @@ export default function SetterOverview() {
         <Gauge label="MC → Set %" value={companyRates.mcToSet} target={30} max={100} />
       </div>
 
-      {/* Blanket Conversion Rates */}
-      <h2 className="text-sm font-medium text-text-secondary mb-3">Conversion Rates</h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 mb-6">
+      {/* Blanket Conversion Rates — 6 gauges including Leads/Close (moved from isolated full-width tile) */}
+      <h2 className="text-sm font-medium text-text-secondary mb-4">Conversion Rates</h2>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3 mb-6">
         <Gauge label="Lead → Set" value={companyRates.leadToSet} target={5} max={50} />
         <Gauge label="Lead → Close" value={companyRates.leadToClose} target={2} max={20} />
         <Gauge label="Call → Set" value={companyRates.callToSet} target={3} max={20} />
         <Gauge label="Pickup → Set" value={companyRates.pickupToSet} target={10} max={50} />
         <Gauge label="MC → Set" value={companyRates.mcToSet} target={30} max={100} />
+        {leadsPerClose > 0 && <Gauge label="Leads / Close" value={leadsPerClose} target={10} max={50} />}
       </div>
-      {leadsPerClose > 0 && (
-        <div className="tile tile-feedback px-4 py-3 mb-6 flex items-center gap-3">
-          <span className="text-xs text-text-400">Leads per Close:</span>
-          <span className="text-lg font-bold text-opt-yellow">{leadsPerClose}</span>
-          <span className="text-xs text-text-400">({closedLeads.length} closes from {companyActivity.leads.toLocaleString()} leads)</span>
-        </div>
-      )}
 
       {/* Auto vs Manual Booking Breakdown */}
       {(booking.autoTotal > 0 || booking.manualTotal > 0) && (
@@ -446,8 +446,11 @@ export default function SetterOverview() {
         </>
       )}
 
-      {/* Speed to Lead */}
-      <h2 className="text-sm font-medium text-text-secondary mb-3">Speed to Lead</h2>
+      {/* Speed to Lead + GHL Pipeline — side-by-side on lg+, stacked on mobile */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+      <div className="min-h-[420px]">
+      <h2 className="text-sm font-medium text-text-secondary mb-4">Speed to Lead</h2>
       {stl ? (
         <>
           <div className="grid grid-cols-2 gap-3 mb-4">
@@ -455,7 +458,7 @@ export default function SetterOverview() {
             <KPICard label="< 5 min" value={`${stl.pctUnder5m}%`} subtitle={`${stl.under5m} of ${stl.worked} leads`} />
           </div>
           {stl.leads.length > 0 && (
-            <div className="tile tile-feedback overflow-hidden mb-6">
+            <div className="tile tile-feedback overflow-hidden">
               <button onClick={() => setStlOpen(!stlOpen)} className="w-full px-4 py-2 border-b border-border-default flex items-center justify-between hover:bg-bg-card-hover/50 transition-colors">
                 <span className="text-xs font-medium text-text-secondary">Recent Leads — Response Times ({stl.allLeads.length}){stl.notCalled > 0 && <span className="ml-2 text-danger">{stl.notCalled} not called</span>}</span>
                 <ChevronDown size={14} className={`text-text-400 transition-transform ${stlOpen ? 'rotate-180' : ''}`} />
@@ -513,9 +516,9 @@ export default function SetterOverview() {
           )}
         </>
       ) : (
-        <div className="tile tile-feedback p-6 text-center mb-6">
+        <div className="tile tile-feedback p-6 text-center min-h-[300px] flex items-center justify-center">
           {loadingPipeline || !stlCalls ? (
-            <><Loader className="animate-spin text-opt-yellow mx-auto mb-2 h-4 w-4" /><span className="text-xs text-text-400">Loading speed to lead data...</span></>
+            <div><Loader className="animate-spin text-opt-yellow mx-auto mb-2 h-4 w-4" /><span className="text-xs text-text-400">Loading speed to lead data...</span></div>
           ) : !hasWavv ? (
             <span className="text-xs text-text-400">No WAVV call data yet — publish your Zapier zap to start tracking speed to lead</span>
           ) : (
@@ -523,11 +526,13 @@ export default function SetterOverview() {
           )}
         </div>
       )}
+      </div> {/* end STL column */}
 
+      <div className="min-h-[420px]">
       {/* GHL Pipeline Performance */}
-      <h2 className="text-sm font-medium text-text-secondary mb-3">GHL Pipeline Performance</h2>
+      <h2 className="text-sm font-medium text-text-secondary mb-4">GHL Pipeline Performance</h2>
       {loadingPipeline ? (
-        <div className="tile tile-feedback overflow-hidden mb-6 animate-pulse">
+        <div className="tile tile-feedback overflow-hidden animate-pulse min-h-[360px]">
           <div className="h-10 border-b border-border-default flex items-center justify-between px-4">
             <div className="h-3 w-32 bg-bg-primary/60 rounded" />
             <div className="h-3 w-20 bg-bg-primary/40 rounded" />
@@ -626,13 +631,16 @@ export default function SetterOverview() {
           })}
         </div>
       ) : (
-        <div className="tile tile-feedback p-8 text-center text-text-400 mb-6">
+        <div className="tile tile-feedback p-8 text-center text-text-400 min-h-[360px] flex items-center justify-center">
           No GHL pipeline data available
         </div>
       )}
+      </div> {/* end GHL Pipeline column */}
+
+      </div> {/* end STL + GHL side-by-side grid */}
 
       {/* Per-Setter Cards */}
-      <h2 className="text-sm font-medium text-text-secondary mb-3">Individual Performance</h2>
+      <h2 className="text-sm font-medium text-text-secondary mb-4">Individual Performance</h2>
       {setterCards.length === 0 ? (
         <div className="tile tile-feedback p-8 text-center text-text-400">
           No setters found. Add team members in Supabase.
@@ -691,7 +699,7 @@ export default function SetterOverview() {
       )}
 
       {/* Setter Stats Table */}
-      <h2 className="text-sm font-medium text-text-secondary mb-3">Setter Conversion Table</h2>
+      <h2 className="text-sm font-medium text-text-secondary mb-4">Setter Conversion Table</h2>
       <div className="tile tile-feedback overflow-hidden mb-6">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -815,7 +823,7 @@ export default function SetterOverview() {
 
         return (
           <>
-            <h2 className="text-sm font-medium text-text-secondary mb-3">
+            <h2 className="text-sm font-medium text-text-secondary mt-6 mb-4">
               Recent Leads — Live from GHL ({ghlLeads.length})
               {loadingPipeline && <span className="text-[10px] text-text-400 ml-2">loading... {pipelineProgress}</span>}
             </h2>
@@ -878,7 +886,9 @@ export default function SetterOverview() {
       })()}
 
       {/* Endangered Leads — upcoming appointments with no engagement */}
-      <EndangeredLeadsTable leads={endangeredLeads} loading={loadingEndangered} />
+      <div className="mt-6">
+        <EndangeredLeadsTable leads={endangeredLeads} loading={loadingEndangered} />
+      </div>
 
       </div> {/* end max-w-[1600px] mx-auto */}
     </div>

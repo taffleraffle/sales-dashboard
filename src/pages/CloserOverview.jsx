@@ -118,7 +118,7 @@ export default function CloserOverview() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Closer Performance</h1>
         <div className="flex items-center gap-3">
-          <Link to="/sales/eod?tab=closer" className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl bg-opt-yellow text-bg-primary text-xs font-semibold hover:brightness-110 transition-all">
+          <Link to="/sales/eod/submit?tab=closer" className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl bg-opt-yellow text-bg-primary text-xs font-semibold hover:brightness-110 transition-all">
             <Plus size={14} />
             New EOD
           </Link>
@@ -140,8 +140,8 @@ export default function CloserOverview() {
         <KPICard label="Avg Deal" value={`$${avgDealSize.toLocaleString()}`} />
       </div>
 
-      {/* Company Conversion Gauges */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-3 mb-6">
+      {/* Company Conversion Gauges — 8 items in cleanly-divisible breakpoints */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-2 sm:gap-3 mb-6">
         <Gauge label="Show Rate" value={companyShowRate} target={70} />
         <Gauge label="Resched Rate" value={companyRescheduleRate} target={10} max={100} />
         <Gauge label="Offer Rate" value={companyOfferRate} target={80} />
@@ -191,78 +191,106 @@ export default function CloserOverview() {
         </div>
       )}
 
-      {/* Closer Comparison Table */}
+      {/* Closer Comparison — leaderboard cards (replaces blocky 13-col table) */}
       {closerStats.length > 0 && (
         <>
-          <h2 className="text-sm font-medium text-text-secondary mb-3">Closer Comparison</h2>
-          <div className="tile tile-feedback overflow-hidden mb-6">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
-                    <th className="px-3 py-2 text-left">Closer</th>
-                    <th className="px-3 py-2 text-right">Booked</th>
-                    <th className="px-3 py-2 text-right">Live Calls</th>
-                    <th className="px-3 py-2 text-right">No Shows</th>
-                    <th className="px-3 py-2 text-right">Offers</th>
-                    <th className="px-3 py-2 text-right">Closes</th>
-                    <th className="px-3 py-2 text-right">Show %</th>
-                    <th className="px-3 py-2 text-right">Close %</th>
-                    <th className="px-3 py-2 text-right">Offer %</th>
-                    <th className="px-3 py-2 text-right">Resched</th>
-                    <th className="px-3 py-2 text-right">Revenue</th>
-                    <th className="px-3 py-2 text-right">Cash</th>
-                    <th className="px-3 py-2 text-right">Collect %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {closerStats.map(c => {
-                    const rateColor = (v, good, ok) => v >= good ? 'text-success' : v >= ok ? 'text-opt-yellow' : 'text-danger'
-                    return (
-                      <tr
-                        key={c.id}
-                        onClick={() => navigate(`/sales/closers/${c.id}`)}
-                        className="border-b border-border-default/30 hover:bg-bg-card-hover cursor-pointer transition-colors"
-                      >
-                        <td className="px-3 py-2 font-medium text-opt-yellow">{c.name}</td>
-                        <td className="px-3 py-2 text-right text-text-400">{c.booked}</td>
-                        <td className="px-3 py-2 text-right text-text-400">{c.liveCalls}</td>
-                        <td className="px-3 py-2 text-right text-danger">{c.noShows}</td>
-                        <td className="px-3 py-2 text-right text-text-400">{c.offers}</td>
-                        <td className="px-3 py-2 text-right font-medium text-text-primary">{c.closes}</td>
-                        <td className={`px-3 py-2 text-right font-medium ${rateColor(c.showRate, 70, 50)}`}>{c.showRate}%</td>
-                        <td className={`px-3 py-2 text-right font-medium ${rateColor(c.closeRate, 25, 15)}`}>{c.closeRate}%</td>
-                        <td className={`px-3 py-2 text-right font-medium ${rateColor(c.offerRate, 80, 60)}`}>{c.offerRate}%</td>
-                        <td className="px-3 py-2 text-right text-text-400">{c.reschedules}</td>
-                        <td className="px-3 py-2 text-right text-success font-medium">${c.revenue.toLocaleString()}</td>
-                        <td className="px-3 py-2 text-right text-opt-yellow font-medium">${c.cash.toLocaleString()}</td>
-                        <td className={`px-3 py-2 text-right font-medium ${c.cashCollRate >= 50 ? 'text-success' : c.cashCollRate >= 30 ? 'text-opt-yellow' : 'text-danger'}`}>{c.cashCollRate}%</td>
-                      </tr>
-                    )
-                  })}
-                  <tr className="border-t border-border-default bg-bg-card-hover/30 font-medium">
-                    <td className="px-3 py-2">Total</td>
-                    <td className="px-3 py-2 text-right">{totalBooked}</td>
-                    <td className="px-3 py-2 text-right">{companyTotals.liveCalls}</td>
-                    <td className="px-3 py-2 text-right">{totalNoShows}</td>
-                    <td className="px-3 py-2 text-right">{companyTotals.offers}</td>
-                    <td className="px-3 py-2 text-right">{companyTotals.closes}</td>
-                    <td className="px-3 py-2 text-right">{companyShowRate}%</td>
-                    <td className="px-3 py-2 text-right">{companyCloseRate}%</td>
-                    <td className="px-3 py-2 text-right">{companyOfferRate}%</td>
-                    <td className="px-3 py-2 text-right">{companyTotals.reschedules}</td>
-                    <td className="px-3 py-2 text-right text-success">${companyTotals.revenue.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right text-opt-yellow">${companyTotals.cash.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right">{cashCollectionRate}%</td>
-                  </tr>
-                </tbody>
-              </table>
+          <h2 className="text-sm font-medium text-text-secondary mb-4">Closer Comparison</h2>
+          <div className="space-y-2 mb-6">
+            {closerStats.map(c => (
+              <CloserLeaderboardRow
+                key={c.id}
+                closer={c}
+                onClick={() => navigate(`/sales/closers/${c.id}`)}
+              />
+            ))}
+            {/* Team total — summary row styled distinctly */}
+            <div className="tile border-t-2 border-opt-yellow/30 px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
+              <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
+                <div className="w-9 h-9 rounded-full bg-opt-yellow/20 border border-opt-yellow/40 flex items-center justify-center">
+                  <span className="text-[11px] font-bold text-opt-yellow">∑</span>
+                </div>
+                <span className="text-sm font-semibold text-text-primary">Team Total</span>
+              </div>
+              <div className="flex items-baseline gap-4 sm:gap-6">
+                <StatBlock label="Closes" value={companyTotals.closes} />
+                <StatBlock label="Revenue" value={`$${companyTotals.revenue.toLocaleString()}`} accent="success" />
+                <StatBlock label="Cash" value={`$${companyTotals.cash.toLocaleString()}`} accent="opt-yellow" />
+              </div>
+              <div className="flex flex-wrap gap-2 sm:ml-auto">
+                <Pill label="Show" value={`${companyShowRate}%`} good={parseFloat(companyShowRate) >= 70} ok={parseFloat(companyShowRate) >= 50} />
+                <Pill label="Close" value={`${companyCloseRate}%`} good={parseFloat(companyCloseRate) >= 25} ok={parseFloat(companyCloseRate) >= 15} />
+                <Pill label="Offer" value={`${companyOfferRate}%`} good={parseFloat(companyOfferRate) >= 80} ok={parseFloat(companyOfferRate) >= 60} />
+              </div>
             </div>
           </div>
         </>
       )}
 
       </div> {/* end max-w-[1600px] mx-auto */}
+    </div>
+  )
+}
+
+function initialsOf(name) {
+  if (!name) return '?'
+  const parts = name.trim().split(/\s+/)
+  if (parts.length === 1) return parts[0][0].toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+function Pill({ label, value, good, ok }) {
+  const color = good ? 'bg-success/15 text-success border-success/30'
+    : ok ? 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30'
+    : 'bg-danger/15 text-danger border-danger/30'
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium ${color}`}>
+      <span className="text-text-400 font-normal">{label}</span>
+      <span>{value}</span>
+    </span>
+  )
+}
+
+function StatBlock({ label, value, accent }) {
+  const color = accent === 'success' ? 'text-success' : accent === 'opt-yellow' ? 'text-opt-yellow' : 'text-text-primary'
+  return (
+    <div className="flex flex-col">
+      <span className="text-[10px] uppercase tracking-wider text-text-400">{label}</span>
+      <span className={`text-base sm:text-lg font-bold leading-tight ${color} tabular-nums`}>{value}</span>
+    </div>
+  )
+}
+
+function CloserLeaderboardRow({ closer, onClick }) {
+  const c = closer
+  return (
+    <div
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
+      className="tile tile-hover px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5"
+    >
+      {/* Name block */}
+      <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
+        <div className="w-9 h-9 rounded-full bg-opt-yellow/15 border border-opt-yellow/30 flex items-center justify-center shrink-0 text-[11px] font-bold text-opt-yellow">
+          {initialsOf(c.name)}
+        </div>
+        <span className="text-sm font-semibold text-text-primary truncate">{c.name}</span>
+      </div>
+
+      {/* Primary stats */}
+      <div className="flex items-baseline gap-4 sm:gap-6">
+        <StatBlock label="Closes" value={c.closes} />
+        <StatBlock label="Revenue" value={`$${c.revenue.toLocaleString()}`} accent="success" />
+        <StatBlock label="Cash" value={`$${c.cash.toLocaleString()}`} accent="opt-yellow" />
+      </div>
+
+      {/* Rate pills */}
+      <div className="flex flex-wrap gap-2 sm:ml-auto">
+        <Pill label="Show" value={`${c.showRate}%`} good={c.showRate >= 70} ok={c.showRate >= 50} />
+        <Pill label="Close" value={`${c.closeRate}%`} good={c.closeRate >= 25} ok={c.closeRate >= 15} />
+        <Pill label="Offer" value={`${c.offerRate}%`} good={c.offerRate >= 80} ok={c.offerRate >= 60} />
+      </div>
     </div>
   )
 }

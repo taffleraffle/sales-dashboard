@@ -233,7 +233,7 @@ function TrailingTable({ entries }) {
         <h2 className="text-sm font-medium">Trailing Period Summary</h2>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[11px]">
+        <table className="w-full text-[11px]" style={{ minWidth: '1400px' }}>
           <thead>
             <tr className="border-b border-border-default text-text-400 uppercase text-[9px]">
               <th className="px-2 py-1.5 text-left sticky left-0 bg-bg-card z-10">Period</th>
@@ -383,7 +383,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[11px]">
+        <table className="w-full text-[11px]" style={{ minWidth: '1400px' }}>
           <thead>
             <tr className="border-b border-border-default text-text-400 uppercase text-[9px]">
               <th className="px-2 py-1.5 text-left sticky left-0 bg-bg-card z-10 cursor-pointer" onClick={() => toggleSort('date')}>

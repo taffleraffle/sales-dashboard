@@ -503,12 +503,12 @@ export default function SalesOverview() {
             <span className="text-xs font-medium text-opt-yellow">Pending EOD Today</span>
           </div>
           {pendingEOD.closers.map(c => (
-            <Link key={c.id} to={`/sales/eod?tab=closer&member=${c.id}`} className="text-[11px] px-2 py-1 rounded-lg bg-bg-primary border border-border-default text-text-secondary hover:border-opt-yellow/30 hover:text-text-primary transition-colors">
+            <Link key={c.id} to={`/sales/eod/submit?tab=closer&member=${c.id}`} className="text-[11px] px-2 py-1 rounded-lg bg-bg-primary border border-border-default text-text-secondary hover:border-opt-yellow/30 hover:text-text-primary transition-colors">
               {c.name} <span className="text-text-400">(closer)</span>
             </Link>
           ))}
           {pendingEOD.setters.map(s => (
-            <Link key={s.id} to={`/sales/eod?tab=setter&member=${s.id}`} className="text-[11px] px-2 py-1 rounded-lg bg-bg-primary border border-border-default text-text-secondary hover:border-opt-yellow/30 hover:text-text-primary transition-colors">
+            <Link key={s.id} to={`/sales/eod/submit?tab=setter&member=${s.id}`} className="text-[11px] px-2 py-1 rounded-lg bg-bg-primary border border-border-default text-text-secondary hover:border-opt-yellow/30 hover:text-text-primary transition-colors">
               {s.name} <span className="text-text-400">(setter)</span>
             </Link>
           ))}

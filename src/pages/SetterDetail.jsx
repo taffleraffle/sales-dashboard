@@ -659,7 +659,7 @@ export default function SetterDetail() {
                 </thead>
                 <tbody>
                   {myEodReports.map(eod => (
-                    <tr key={eod.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer" onClick={() => navigate(`/sales/eod?tab=setter&member=${id}&date=${eod.report_date}`)}>
+                    <tr key={eod.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer" onClick={() => navigate(`/sales/eod/submit?tab=setter&member=${id}&date=${eod.report_date}`)}>
                       <td className="px-3 py-2 font-medium text-opt-yellow hover:underline">{eod.report_date}</td>
                       <td className="px-3 py-2 text-right">{eod.outbound_calls || 0}</td>
                       <td className="px-3 py-2 text-right">{eod.total_leads || 0}</td>
