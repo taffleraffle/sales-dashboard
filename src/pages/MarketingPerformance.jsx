@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition } from 'react'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
-import { syncMetaToTracker } from '../services/metaAdsSync'
 import DateRangeSelector from '../components/DateRangeSelector'
-import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check, RefreshCw } from 'lucide-react'
+import SyncStatusIndicator from '../components/SyncStatusIndicator'
+import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useToast } from '../hooks/useToast'
 
 import { todayET } from '../lib/dateUtils'
 
@@ -160,7 +161,7 @@ function MTDFunnel({ stats }) {
   const maxVal = Math.max(...steps.map(s => s.value), 1)
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl p-5">
+    <div className="tile tile-feedback p-5">
       <h2 className="text-sm font-medium mb-4 flex items-center gap-2">
         <span className="text-opt-yellow">&#9660;</span> MTD Funnel
       </h2>
@@ -225,7 +226,7 @@ function TrailingTable({ entries }) {
   }
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+    <div className="tile tile-feedback overflow-hidden">
       <div className="px-4 py-3 border-b border-border-default">
         <h2 className="text-sm font-medium">Trailing Period Summary</h2>
       </div>
@@ -368,7 +369,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
     'ar_collected', 'ar_defaulted', 'refund_count', 'refund_amount']
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+    <div className="tile tile-feedback overflow-hidden">
       <div className="px-4 py-3 border-b border-border-default flex flex-wrap items-center gap-3">
         <h2 className="text-sm font-medium">Daily Tracker Data</h2>
         <div className="flex items-center gap-2 ml-auto">
@@ -424,8 +425,8 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
 
       {/* Edit panel */}
       {editDate && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setEditDate(null)}>
-          <div className="bg-bg-card border border-border-default rounded-2xl w-[calc(100vw-2rem)] max-w-[520px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditDate(null)}>
+          <div className="tile tile-feedback w-full max-w-[520px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-border-default">
               <div className="flex items-center gap-2">
                 <Edit3 size={14} className="text-opt-yellow" />
@@ -500,17 +501,24 @@ const manualFields = [
 function AddEntryModal({ onSave, onClose }) {
   const [form, setForm] = useState({ date: todayET() })
   const [saving, setSaving] = useState(false)
+  const toast = useToast()
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
-    try { await onSave(form); onClose() } catch (err) { alert('Failed: ' + err.message) }
+    try {
+      await onSave(form)
+      toast.success(`Saved entry for ${form.date}`)
+      onClose()
+    } catch (err) {
+      toast.error(`Save failed: ${err.message}`)
+    }
     setSaving(false)
   }
 
   let lastGroup = ''
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+      <div className="tile tile-feedback w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-bold">Add Daily Entry</h3>
           <button onClick={onClose} className="text-text-400 hover:text-text-primary"><X size={16} /></button>
@@ -566,15 +574,23 @@ const benchmarkDefs = [
 function BenchmarksModal({ benchmarks, onSave, onClose }) {
   const [form, setForm] = useState({ ...benchmarks })
   const [saving, setSaving] = useState(false)
+  const toast = useToast()
   const handleSave = async () => {
     setSaving(true)
-    try { for (const d of benchmarkDefs) { if (form[d.key] != null && form[d.key] !== benchmarks[d.key]) await onSave(d.key, form[d.key]) }; onClose() }
-    catch (err) { alert('Failed: ' + err.message) }
+    try {
+      for (const d of benchmarkDefs) {
+        if (form[d.key] != null && form[d.key] !== benchmarks[d.key]) await onSave(d.key, form[d.key])
+      }
+      toast.success('Benchmarks saved')
+      onClose()
+    } catch (err) {
+      toast.error(`Save failed: ${err.message}`)
+    }
     setSaving(false)
   }
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+      <div className="tile tile-feedback w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-bold flex items-center gap-2"><SlidersHorizontal size={14} /> Edit Benchmarks</h3>
           <button onClick={onClose} className="text-text-400 hover:text-text-primary"><X size={16} /></button>
@@ -774,8 +790,8 @@ function CSVImportModal({ onClose, onImport }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl w-[calc(100vw-2rem)] max-w-[640px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="tile tile-feedback w-full max-w-[640px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-default">
           <div className="flex items-center gap-2">
             <Upload size={16} className="text-opt-yellow" />
@@ -911,10 +927,8 @@ export default function MarketingPerformance() {
   const [showBenchmarks, setShowBenchmarks] = useState(false)
   const [importStatus, setImportStatus] = useState(null)
   const [showImportModal, setShowImportModal] = useState(false)
-  const [metaSyncing, setMetaSyncing] = useState(false)
-  const [metaStatus, setMetaStatus] = useState(null)
   const fileRef = useRef(null)
-  const hasMetaCreds = !!(import.meta.env.VITE_META_ADS_ACCESS_TOKEN && import.meta.env.VITE_META_ADS_ACCOUNT_ID)
+  const toast = useToast()
 
   // Auto-sync EOD data on page load (silent, no loading spinner)
   const autoSyncRan = useRef(false)
@@ -1079,36 +1093,28 @@ export default function MarketingPerformance() {
     setTimeout(() => setImportStatus(null), 4000)
   }
 
-  const handleMetaSync = async () => {
-    setMetaSyncing(true)
+  // Reload on sync-completion notifications so fresh data lands on screen without a button click
+  useEffect(() => {
+    const onVis = () => { if (document.visibilityState === 'visible') reload() }
+    document.addEventListener('visibilitychange', onVis)
+    // Listen for auto-sync completions via our subscriber API
+    let unsub = () => {}
+    ;(async () => {
+      const { subscribeSyncStatus } = await import('../services/autoSync')
+      unsub = subscribeSyncStatus(() => { reload().catch(() => {}) })
+    })()
+    return () => { document.removeEventListener('visibilitychange', onVis); unsub() }
+  }, [reload])
+
+  const handleDelete = useCallback(async (date) => {
+    if (!confirm(`Delete ${date}?`)) return
     try {
-      // Step 1: Sync closer EOD data
-      setMetaStatus('Step 1/3: Syncing closer EOD reports...')
-      const { syncEODToTracker } = await import('../hooks/useMarketingTracker')
-      const eodCount = await syncEODToTracker()
-      setMetaStatus(`Step 1/3 done: ${eodCount || 0} EOD days synced. Syncing Meta Ads...`)
-
-      // Step 2: Sync Meta Ads (with 30s timeout)
-      let metaResult = { days: 0, message: 'Skipped' }
-      try {
-        const metaPromise = syncMetaToTracker(30)
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Meta/GHL sync timed out after 60s')), 60000))
-        metaResult = await Promise.race([metaPromise, timeoutPromise])
-      } catch (metaErr) {
-        console.warn('Meta/GHL sync issue:', metaErr.message)
-        setMetaStatus(`EOD synced. Meta/GHL: ${metaErr.message}. Loading data...`)
-      }
-
-      await reload()
-      setMetaStatus(metaResult.message || `Synced ${eodCount || 0} EOD days`)
+      await deleteEntry(date)
+      toast.success(`Deleted ${date}`)
     } catch (err) {
-      setMetaStatus('Sync failed: ' + err.message)
+      toast.error(`Delete failed: ${err.message}`)
     }
-    setMetaSyncing(false)
-    setTimeout(() => setMetaStatus(null), 5000)
-  }
-
-  const handleDelete = useCallback(async (date) => { if (confirm(`Delete ${date}?`)) await deleteEntry(date) }, [deleteEntry])
+  }, [deleteEntry, toast])
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
 
@@ -1118,34 +1124,24 @@ export default function MarketingPerformance() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Marketing Performance</h1>
-          <p className="text-xs text-text-400">
-            {entries.length} entries
-            {metaSyncing && <span className="ml-2 text-opt-yellow"><Loader size={10} className="inline animate-spin mr-1" />Syncing...</span>}
-          </p>
+          <p className="text-xs text-text-400">{entries.length} entries</p>
         </div>
-        <DateRangeSelector selected={range} onChange={setRange} />
+        <div className="flex items-center gap-2">
+          <SyncStatusIndicator />
+          <DateRangeSelector selected={range} onChange={setRange} />
+        </div>
       </div>
 
       {/* Action bar */}
       <div className="flex flex-wrap items-center gap-3 mb-5">
         <button
           onClick={() => setShowImportModal(true)}
-          className="flex items-center gap-2 bg-bg-card border border-border-default rounded-2xl px-3 py-2 hover:bg-bg-card-hover transition-colors"
+          className="flex items-center gap-2 tile tile-feedback px-3 py-2 hover:bg-bg-card-hover transition-colors min-h-[40px]"
         >
           <Upload size={14} className="text-text-400" />
           <span className="text-xs text-text-secondary">Import CSV</span>
         </button>
         {importStatus && <span className="text-xs text-opt-yellow">{importStatus}</span>}
-        <button
-          onClick={handleMetaSync}
-          disabled={metaSyncing}
-          className="flex items-center gap-2 bg-bg-card border border-border-default rounded-2xl px-3 py-2 hover:bg-bg-card-hover transition-colors disabled:opacity-40"
-          title="Pull spend from Meta Ads, leads & bookings from GHL"
-        >
-          <RefreshCw size={14} className={`text-text-400 ${metaSyncing ? 'animate-spin' : ''}`} />
-          <span className="text-xs text-text-secondary">{metaSyncing ? 'Syncing...' : 'Sync Data'}</span>
-        </button>
-        {metaStatus && <span className="text-xs text-opt-yellow">{metaStatus}</span>}
         <div className="sm:ml-auto flex gap-2">
           <button
             onClick={() => { startTransition(() => { setWhatIfActive(!whatIfActive); if (whatIfActive) { setWhatIfOverrides({}); setWhatIfDraft({}) } }) }}

@@ -16,9 +16,24 @@ const SUGGESTED_QUESTIONS = [
   'What is our speed to lead average?',
 ]
 
+function sanitizeHtml(html) {
+  // Strip script tags, event handlers, and dangerous attributes
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
+    .replace(/<object[\s\S]*?<\/object>/gi, '')
+    .replace(/<embed[\s\S]*?>/gi, '')
+    .replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, '')
+    .replace(/\bon\w+\s*=\s*[^\s>]*/gi, '')
+    .replace(/javascript\s*:/gi, '')
+    .replace(/data\s*:\s*text\/html/gi, '')
+}
+
 function parseMarkdown(text) {
   // Simple markdown to HTML: bold, tables, headers, lists
+  // Escape raw HTML from AI output first to prevent XSS
   let html = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     // Code blocks
     .replace(/```[\s\S]*?```/g, m => `<pre class="bg-bg-primary rounded px-3 py-2 text-xs overflow-x-auto my-2">${m.slice(3, -3).trim()}</pre>`)
     // Headers

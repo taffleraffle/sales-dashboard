@@ -72,7 +72,7 @@ export default function EndangeredLeadsTable({ leads, loading }) {
 
   if (loading) {
     return (
-      <div className="bg-bg-card border border-border-default rounded-2xl p-6 mb-6">
+      <div className="tile tile-feedback p-6 mb-6">
         <div className="flex items-center gap-2 mb-3">
           <Calendar size={14} className="text-opt-yellow" />
           <h2 className="text-sm font-medium text-text-secondary">Upcoming Strategy Calls</h2>
@@ -87,7 +87,7 @@ export default function EndangeredLeadsTable({ leads, loading }) {
 
   if (!leads || leads.length === 0) {
     return (
-      <div className="bg-bg-card border border-border-default rounded-2xl p-6 mb-6">
+      <div className="tile tile-feedback p-6 mb-6">
         <div className="flex items-center gap-2 mb-3">
           <Calendar size={14} className="text-opt-yellow" />
           <h2 className="text-sm font-medium text-text-secondary">Upcoming Strategy Calls</h2>
@@ -102,7 +102,7 @@ export default function EndangeredLeadsTable({ leads, loading }) {
   const confirmed = leads.filter(l => l.engaged && l.tier !== 'cancel_risk')
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+    <div className="tile tile-feedback overflow-hidden mb-6">
       <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Calendar size={14} className="text-opt-yellow" />

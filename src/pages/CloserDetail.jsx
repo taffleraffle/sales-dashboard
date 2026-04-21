@@ -196,7 +196,7 @@ export default function CloserDetail() {
 
       {/* EOD History */}
       {myReports.length > 0 && (
-        <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+        <div className="tile tile-feedback overflow-hidden mb-6">
           <button
             onClick={() => setShowEodHistory(!showEodHistory)}
             className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-card-hover transition-colors"
@@ -255,7 +255,7 @@ export default function CloserDetail() {
       )}
 
       {/* Objection Analysis */}
-      <div className="bg-bg-card border border-border-default rounded-2xl p-5">
+      <div className="tile tile-feedback p-5">
         <div className="flex items-center gap-2 mb-4">
           <AlertTriangle size={16} className="text-warning" />
           <h2 className="text-sm font-medium">Most Common Objections</h2>

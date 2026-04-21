@@ -21,7 +21,7 @@ export default function UpcomingPayments({ clients }) {
   if (upcoming.length === 0) return null
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl mt-4 overflow-hidden">
+    <div className="tile tile-feedback mt-4 overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-card-hover transition-colors"

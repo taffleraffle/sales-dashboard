@@ -38,7 +38,7 @@ export default function CommissionWidget({ memberId }) {
   if (loading) return null
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+    <div className="tile tile-feedback overflow-hidden mb-6">
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-card-hover transition-colors"

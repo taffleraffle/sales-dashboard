@@ -463,14 +463,14 @@ export default function SalesOverview() {
       {!dataReady && (
         <div className="space-y-4 animate-pulse">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[1,2,3,4].map(i => <div key={i} className="bg-bg-card border border-border-default rounded-2xl h-28" />)}
+            {[1,2,3,4].map(i => <div key={i} className="tile tile-feedback h-28" />)}
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-            {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="bg-bg-card border border-border-default rounded-2xl h-24" />)}
+            {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="tile tile-feedback h-24" />)}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-bg-card border border-border-default rounded-2xl h-64" />
-            <div className="bg-bg-card border border-border-default rounded-2xl h-64" />
+            <div className="tile tile-feedback h-64" />
+            <div className="tile tile-feedback h-64" />
           </div>
         </div>
       )}
@@ -522,7 +522,7 @@ export default function SalesOverview() {
       {/* ═══ TWO-COLUMN: Funnel + Rates ═══ */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Sales Funnel */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+        <div className="tile tile-feedback p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4 sm:mb-5">
             <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
               <BarChart3 size={16} className="text-opt-yellow" /> Sales Funnel
@@ -572,7 +572,7 @@ export default function SalesOverview() {
         </div>
 
         {/* Key Rates */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+        <div className="tile tile-feedback p-4 sm:p-6">
           <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
             <Target size={16} className="text-opt-yellow" /> Key Rates
           </h2>
@@ -608,7 +608,7 @@ export default function SalesOverview() {
       {/* ═══ CASH BREAKDOWN + MARKETING ═══ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Cash Breakdown */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+        <div className="tile tile-feedback p-4 sm:p-6">
           <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
             <DollarSign size={16} className="text-opt-yellow" /> Cash Breakdown
           </h2>
@@ -648,7 +648,7 @@ export default function SalesOverview() {
 
         {/* Marketing metrics */}
         {mkt.adspend > 0 && (
-          <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+          <div className="tile tile-feedback p-4 sm:p-6">
             <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
               <TrendingUp size={16} className="text-opt-yellow" /> Marketing
             </h2>
@@ -680,7 +680,7 @@ export default function SalesOverview() {
         )}
 
         {/* WAVV Dialer */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+        <div className="tile tile-feedback p-4 sm:p-6">
           <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
             <Phone size={16} className="text-opt-yellow" /> Dialer Activity
           </h2>
@@ -704,7 +704,7 @@ export default function SalesOverview() {
       </div>
 
       {/* ═══ CLOSER LEADERBOARD ═══ */}
-      <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+      <div className="tile tile-feedback overflow-hidden">
         <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border-default flex items-center justify-between">
           <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
             <Award size={16} className="text-opt-yellow" /> Closer Leaderboard
@@ -767,7 +767,7 @@ export default function SalesOverview() {
       </div>
 
       {/* ═══ SETTER LEADERBOARD ═══ */}
-      <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+      <div className="tile tile-feedback overflow-hidden">
         <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border-default flex items-center justify-between">
           <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
             <Phone size={16} className="text-opt-yellow" /> Setter Leaderboard
@@ -829,7 +829,7 @@ export default function SalesOverview() {
         </div>
       </div>
       {/* ── Recent Leads ── */}
-      <div className="bg-bg-card border border-border-default rounded-2xl p-4 sm:p-6">
+      <div className="tile tile-feedback p-4 sm:p-6">
         <div className="flex items-center justify-between mb-4 sm:mb-5">
           <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
             <Users size={16} className="text-opt-yellow" /> Recent Leads
@@ -903,7 +903,7 @@ export default function SalesOverview() {
       {/* Revenue Breakdown Modal */}
       {showRevenueBreakdown && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowRevenueBreakdown(false)}>
-          <div className="bg-bg-card border border-border-default rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="tile tile-feedback shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-border-default flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-bold">Revenue Breakdown</h2>

@@ -16,6 +16,7 @@ import CommissionPage from './pages/CommissionPage'
 import CommissionDetail from './pages/CommissionDetail'
 import SetterBot from './pages/SetterBot'
 import EmailFlows from './pages/EmailFlows'
+import EmailFlowDetail from './pages/EmailFlowDetail'
 import SetterKPIHistory from './pages/SetterKPIHistory'
 // EODHistory is now embedded in EODReview page
 import SetPasswordPage from './pages/SetPasswordPage'
@@ -53,6 +54,12 @@ function ProtectedRoute({ children }) {
   return children
 }
 
+function AdminRoute({ children }) {
+  const { isAdmin } = useAuth()
+  if (!isAdmin) return <Navigate to="/sales" replace />
+  return children
+}
+
 export default function App() {
   const [splashDone, setSplashDone] = useState(() => sessionStorage.getItem('splash_shown') === '1')
 
@@ -84,7 +91,8 @@ export default function App() {
               <Route path="/sales/commissions/:id" element={<CommissionDetail />} />
               <Route path="/sales/setter-bot" element={<SetterBot />} />
               <Route path="/sales/email-flows" element={<EmailFlows />} />
-              <Route path="/sales/settings" element={<SettingsPage />} />
+              <Route path="/sales/email-flows/:flowId" element={<EmailFlowDetail />} />
+              <Route path="/sales/settings" element={<AdminRoute><SettingsPage /></AdminRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>

@@ -548,7 +548,7 @@ export default function SetterBot() {
 
       {/* Sequence Breakdown + Setter Cards Row */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
-        <div className="bg-bg-card border border-border-default rounded-2xl p-5 hover:border-opt-yellow/10 transition-colors">
+        <div className="tile tile-feedback p-5 hover:border-opt-yellow/10 transition-colors">
           <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">By Sequence</h2>
           <div className="space-y-2">
             {Object.entries(stats.bySequence).map(([seq, count]) => (
@@ -564,7 +564,7 @@ export default function SetterBot() {
         </div>
 
         {setterStats.map(s => (
-          <div key={s.id} className="bg-bg-card border border-border-default rounded-2xl p-5 hover:border-opt-yellow/10 transition-colors">
+          <div key={s.id} className="tile tile-feedback p-5 hover:border-opt-yellow/10 transition-colors">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-8 h-8 rounded-full bg-opt-yellow/10 flex items-center justify-center">
                 <span className="text-opt-yellow font-bold text-sm">{s.name?.[0]}</span>
@@ -597,7 +597,7 @@ export default function SetterBot() {
       </div>
 
       {/* Leads Table */}
-      <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden">
+      <div className="tile tile-feedback overflow-hidden">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-5 border-b border-border-default">
           <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">All Leads</h2>
           <div className="flex items-center gap-2">

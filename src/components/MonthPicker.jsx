@@ -93,7 +93,7 @@ export default function MonthPicker({ value, onChange, disabled }) {
 
       {/* Month grid dropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 z-50 bg-bg-card border border-border-default rounded-2xl p-4 shadow-xl shadow-black/40 w-64">
+        <div className="absolute right-0 top-full mt-2 z-50 tile tile-feedback p-4 shadow-xl shadow-black/40 w-64">
           {/* Year nav */}
           <div className="flex items-center justify-between mb-3">
             <button

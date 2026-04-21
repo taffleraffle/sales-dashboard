@@ -53,7 +53,7 @@ export default function AddTranscriptModal({ members = [], onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="tile tile-feedback w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-default">
           <h3 className="text-sm font-semibold text-text-primary">Add Call Transcript</h3>
           <button onClick={onClose} className="p-1 rounded-lg text-text-400 hover:text-text-primary hover:bg-bg-card-hover"><X size={16} /></button>

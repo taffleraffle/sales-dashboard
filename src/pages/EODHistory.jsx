@@ -132,7 +132,7 @@ export default function EODHistory({ embedded = false }) {
       </div>
 
       {/* Submission Matrix with inline expand */}
-      <div className="bg-bg-card border border-border-default rounded-2xl overflow-hidden mb-6">
+      <div className="tile tile-feedback overflow-hidden mb-6">
         <div className="px-4 py-3 border-b border-border-default">
           <h3 className="text-[11px] text-opt-yellow uppercase font-medium">Submission Matrix — click a cell to open that EOD</h3>
         </div>

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, Save, Loader } from 'lucide-react'
 
 const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
-const selectCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 appearance-none cursor-pointer'
+const selectCls = 'select-input w-full'
 const labelCls = 'text-[11px] text-text-400 uppercase tracking-wider block mb-1.5'
 
 export default function ClientEditPanel({ client, members, onSave, onClose }) {

@@ -437,22 +437,51 @@ export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
     inboundByConvo[ib.conversation_id].push(ib.date_added)
   }
 
-  // Resolve contact IDs to names via GHL API (batch, rate limited)
+  // Resolve contact IDs to names — check cache first, then GHL API
   const uniqueContactIds = [...new Set(matching.map(e => e.contact_id).filter(Boolean))]
   const contactNames = {}
-  for (let i = 0; i < uniqueContactIds.length; i += 5) {
+
+  // 1. Check Supabase cache for known contacts
+  if (uniqueContactIds.length > 0) {
+    const { data: cached } = await supabase
+      .from('ghl_contacts_cache')
+      .select('id, name')
+      .in('id', uniqueContactIds)
+    for (const c of (cached || [])) {
+      if (c.name) contactNames[c.id] = c.name
+    }
+  }
+
+  // 2. Fetch uncached contacts from GHL API
+  const uncachedIds = uniqueContactIds.filter(id => !contactNames[id])
+  const newlyCached = []
+  for (let i = 0; i < uncachedIds.length; i += 5) {
     if (i > 0 && i % 25 === 0) await new Promise(r => setTimeout(r, 1000))
-    const batch = uniqueContactIds.slice(i, i + 5)
+    const batch = uncachedIds.slice(i, i + 5)
     const results = await Promise.all(batch.map(async cid => {
       try {
         const r = await fetch(`${BASE_URL}/contacts/${cid}`, { headers: ghlHeaders })
-        if (!r.ok) return { id: cid, name: null }
+        if (!r.ok) return { id: cid, name: null, email: null }
         const d = await r.json()
         const c = d.contact || d
-        return { id: cid, name: `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || cid.slice(0, 12) }
-      } catch { return { id: cid, name: null } }
+        const name = `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || null
+        return { id: cid, name, email: c.email || null }
+      } catch { return { id: cid, name: null, email: null } }
     }))
-    for (const r of results) if (r.name) contactNames[r.id] = r.name
+    for (const r of results) {
+      if (r.name) {
+        contactNames[r.id] = r.name
+        newlyCached.push({ id: r.id, name: r.name, email: r.email })
+      }
+    }
+  }
+
+  // 3. Write newly resolved names to cache (fire and forget)
+  if (newlyCached.length > 0) {
+    supabase.from('ghl_contacts_cache')
+      .upsert(newlyCached.map(c => ({ ...c, synced_at: new Date().toISOString() })), { onConflict: 'id' })
+      .then(() => {})
+      .catch(() => {})
   }
 
   return matching.map(e => ({
@@ -460,7 +489,7 @@ export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
     rawSubject: e.subject,
     status: e.status,
     contactId: e.contact_id,
-    contactName: contactNames[e.contact_id] || e.contact_id?.slice(0, 12) || '—',
+    contactName: contactNames[e.contact_id] || 'Unknown Contact',
     date: e.date_added,
     replied: e.conversation_id && inboundByConvo[e.conversation_id]?.some(dt => dt > e.date_added),
   }))
