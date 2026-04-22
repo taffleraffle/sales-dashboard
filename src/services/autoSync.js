@@ -33,9 +33,25 @@ function markRun(key) {
   try { localStorage.setItem(`autosync_${key}`, String(Date.now())) } catch {}
 }
 
+// When a sync fails with a rate-limit (429), cool it down for 5 minutes so
+// the 15-minute auto-sync interval doesn't keep re-firing a sync that's
+// already under API throttle. Without this, we'd retry every 15 min forever
+// against the same 429 ceiling.
+const cooldownUntil = {}
 function shouldRun(key, force = false) {
   if (force) return true
+  if (cooldownUntil[key] && Date.now() < cooldownUntil[key]) return false
   return Date.now() - lastRun(key) > SYNC_INTERVALS[key]
+}
+function markCooldown(key, ms = 5 * 60 * 1000) {
+  cooldownUntil[key] = Date.now() + ms
+}
+function clearCooldown(key) {
+  delete cooldownUntil[key]
+}
+function isRateLimitErr(err) {
+  const msg = (err?.message || String(err || '')).toLowerCase()
+  return msg.includes('429') || msg.includes('too many requests') || msg.includes('rate limit')
 }
 
 // Per-sync last-error string so the UI can show "Marketing sync failed: …"
@@ -107,9 +123,11 @@ async function syncGHL(force = false) {
     await syncGHLAppointments(toLocalDateStr(past), today)
     console.log('[auto-sync] GHL appointments done')
     clearError('ghlAppointments')
+    clearCooldown('ghlAppointments')
   } catch (e) {
     console.warn('[auto-sync] GHL appointments failed:', e.message)
     markError('ghlAppointments', e)
+    if (isRateLimitErr(e)) markCooldown('ghlAppointments')
   } finally { notify() }
 }
 
@@ -122,9 +140,11 @@ async function syncEmails(force = false) {
     await refreshRecentEmailStatuses(7)
     console.log('[auto-sync] Email flows:', result.synced || 0, 'new emails')
     clearError('emailFlows')
+    clearCooldown('emailFlows')
   } catch (e) {
     console.warn('[auto-sync] Email flows failed:', e.message)
     markError('emailFlows', e)
+    if (isRateLimitErr(e)) markCooldown('emailFlows')
   } finally { notify() }
 }
 
@@ -152,25 +172,34 @@ async function syncMeta(force = false) {
     const result = await syncMetaToTracker(30)
     console.log('[auto-sync] Meta+GHL pipeline done:', result || '(no summary returned)')
     clearError('meta')
+    clearCooldown('meta')
   } catch (e) {
     console.warn('[auto-sync] Meta+GHL pipeline failed:', e.message)
     markError('meta', e)
+    if (isRateLimitErr(e)) markCooldown('meta')
   } finally { notify() }
 }
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 /**
  * Run all stale syncs. Safe to call repeatedly — each sync internally
  * checks its own interval and skips if not due. Pass { force: true } to
  * bypass the interval check (used by the "Sync now" button).
+ *
+ * Syncs run SEQUENTIALLY with a 500ms gap between each. Running them in
+ * parallel (the previous behavior) fired 6 network-heavy tasks at the same
+ * moment the user was trying to interact with the page, which was a major
+ * contributor to GHL rate-limit storms and perceived page-load slowness.
+ * Since each sync short-circuits when its interval hasn't elapsed, the
+ * steady-state cost of sequential execution is essentially zero.
  */
 export async function runAutoSync({ force = false } = {}) {
-  // Run in parallel but don't block — fire and forget
-  syncStripe(force)
-  syncFanbasis(force)
-  syncGHL(force)
-  syncEmails(force)
-  syncMarketingTracker(force)
-  syncMeta(force)
+  const tasks = [syncStripe, syncFanbasis, syncGHL, syncEmails, syncMarketingTracker, syncMeta]
+  for (const task of tasks) {
+    try { await task(force) } catch (_e) { void _e }
+    await sleep(500)
+  }
 }
 
 let intervalHandle = null
