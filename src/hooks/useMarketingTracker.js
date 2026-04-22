@@ -159,12 +159,23 @@ export async function syncEODToTracker() {
 
   if (!eods?.length) return 0
 
-  // Aggregate EOD reports by date
+  // Aggregate EOD reports by date.
+  //
+  // Follow-up calls are tracked separately from new calls so downstream
+  // show-rate math can use NC-only numerators (new_live_calls / nc_booked).
+  // Previously we lumped them together in live_calls / booked, which
+  // artificially inflated or deflated show rates because follow-ups
+  // aren't qualified strategy-calendar bookings.
   const byDate = {}
   const reportIdsByDate = {}
   for (const r of eods) {
     const d = r.report_date
-    if (!byDate[d]) byDate[d] = { offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0, ascensions: 0, live_calls: 0, booked: 0, no_shows: 0, reschedules: 0 }
+    if (!byDate[d]) byDate[d] = {
+      offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0, ascensions: 0,
+      live_calls: 0, live_nc: 0, live_fu: 0,
+      booked: 0, nc_booked: 0, fu_booked: 0,
+      no_shows: 0, nc_no_shows: 0, reschedules: 0,
+    }
     if (!reportIdsByDate[d]) reportIdsByDate[d] = []
     reportIdsByDate[d].push(r.id)
     byDate[d].offers += r.offers || 0
@@ -172,8 +183,13 @@ export async function syncEODToTracker() {
     byDate[d].trial_cash += parseFloat(r.total_cash_collected || 0)
     byDate[d].trial_revenue += parseFloat(r.total_revenue || 0)
     byDate[d].ascensions += r.deposits || 0
+    byDate[d].live_nc += r.live_nc_calls || 0
+    byDate[d].live_fu += r.live_fu_calls || 0
     byDate[d].live_calls += (r.live_nc_calls || 0) + (r.live_fu_calls || 0)
+    byDate[d].nc_booked += r.nc_booked || 0
+    byDate[d].fu_booked += r.fu_booked || 0
     byDate[d].booked += (r.nc_booked || 0) + (r.fu_booked || 0)
+    byDate[d].nc_no_shows += r.nc_no_shows || 0
     byDate[d].no_shows += (r.nc_no_shows || 0) + (r.fu_no_shows || 0)
     byDate[d].reschedules += r.reschedules || 0
   }
@@ -249,6 +265,11 @@ export async function syncEODToTracker() {
     if (callAgg.financeAccepted != null) patch.finance_accepted = callAgg.financeAccepted
     if (eod?.live_calls != null) patch.live_calls = eod.live_calls
     if (eod?.booked != null) patch.calls_on_calendar = eod.booked
+    // NC-only splits used for show-rate math (live_nc / nc_booked).
+    if (eod?.live_nc != null) patch.new_live_calls = eod.live_nc
+    if (eod?.live_fu != null) patch.net_live_calls = eod.live_nc + eod.live_fu
+    if (eod?.nc_booked != null) patch.net_new_calls = eod.nc_booked
+    if (eod?.fu_booked != null) patch.net_fu_calls = eod.fu_booked
     // NOTE: Do NOT set qualified_bookings from EOD here. GHL strategy-calendar is
     // the source of truth for that metric (see metaAdsSync.js). EOD's booked count
     // is the closer's manual tally of scheduled calls — useful as calls_on_calendar,
@@ -285,6 +306,11 @@ export function computeMarketingStats(entries) {
     qualified_bookings: a.qualified_bookings + (r.qualified_bookings || 0),
     calls_on_calendar: a.calls_on_calendar + (r.calls_on_calendar || (r.net_new_calls || 0) + (r.net_fu_calls || 0)),
     live_calls: a.live_calls + (r.live_calls || r.net_live_calls || 0),
+    // NC-only splits for show-rate math. Fall back to combined columns when
+    // the NC-specific columns are null (pre-fix rows); better to approximate
+    // with the mixed value than divide-by-zero.
+    new_live_calls: a.new_live_calls + (r.new_live_calls ?? r.live_calls ?? 0),
+    nc_booked: a.nc_booked + (r.net_new_calls ?? 0),
     no_shows: a.no_shows + (r.no_shows || 0),
     offers: a.offers + (r.offers || 0),
     closes: a.closes + (r.closes || 0),
@@ -306,7 +332,8 @@ export function computeMarketingStats(entries) {
     cancelled_by_prospect: a.cancelled_by_prospect + (r.cancelled_by_prospect || 0),
   }), {
     adspend: 0, leads: 0, auto_bookings: 0, qualified_bookings: 0,
-    calls_on_calendar: 0, live_calls: 0, no_shows: 0, reschedules: 0,
+    calls_on_calendar: 0, live_calls: 0, new_live_calls: 0, nc_booked: 0,
+    no_shows: 0, reschedules: 0,
     cancelled_dtf: 0, cancelled_by_prospect: 0,
     offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0,
     ascensions: 0, ascend_cash: 0, ascend_revenue: 0,
@@ -326,20 +353,26 @@ export function computeMarketingStats(entries) {
     cpb: t.qualified_bookings > 0 ? t.adspend / t.qualified_bookings : 0,
     cost_per_auto_booking: t.auto_bookings > 0 ? t.adspend / t.auto_bookings : 0,
 
-    // Show rates
-    // Gross = live / booked (raw — just no-shows)
-    // Net = live / (booked - cancels - reschedules) (only people expected to show)
+    // Show rates — NEW CALLS ONLY.
+    //
+    // qualified_bookings comes from GHL's strategy-call calendars (= new calls
+    // only by definition). The numerator used to be `live_calls` which mixed
+    // new-call shows + follow-up shows, inflating the rate vs. the strictly-NC
+    // denominator. `new_live_calls` is the live-NC-only count (closer EOD
+    // `live_nc_calls`), so now both sides of the ratio are apples-to-apples.
     cancels: t.cancelled_dtf + t.cancelled_by_prospect,
-    gross_show_rate: t.qualified_bookings > 0 ? (t.live_calls / t.qualified_bookings) * 100 : 0,
+    gross_show_rate: t.qualified_bookings > 0 ? (t.new_live_calls / t.qualified_bookings) * 100 : 0,
     net_show_rate: (() => {
       const net = t.qualified_bookings - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules
-      return net > 0 ? (t.live_calls / net) * 100 : 0
+      return net > 0 ? (t.new_live_calls / net) * 100 : 0
     })(),
-    show_rate: t.qualified_bookings > 0 ? (t.live_calls / t.qualified_bookings) * 100 : 0,
-    // Use actual no-shows from closer EOD when available; derive only as fallback
-    no_shows: t.no_shows > 0 ? t.no_shows : Math.max(0, t.qualified_bookings - t.live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules),
+    show_rate: t.qualified_bookings > 0 ? (t.new_live_calls / t.qualified_bookings) * 100 : 0,
+    // No-show rate uses the same NC-only numerator. Derive fallback from
+    // NC-live count so a missed-no-shows field doesn't pull follow-up call
+    // counts into the math.
+    no_shows: t.no_shows > 0 ? t.no_shows : Math.max(0, t.qualified_bookings - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules),
     no_show_rate: (() => {
-      const ns = t.no_shows > 0 ? t.no_shows : Math.max(0, t.qualified_bookings - t.live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules)
+      const ns = t.no_shows > 0 ? t.no_shows : Math.max(0, t.qualified_bookings - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules)
       return t.qualified_bookings > 0 ? (ns / t.qualified_bookings) * 100 : 0
     })(),
     reschedules: t.reschedules,

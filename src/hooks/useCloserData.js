@@ -188,6 +188,7 @@ export function useCloserStats(closerId, days = 30) {
       fuBooked: acc.fuBooked + (r.fu_booked || 0),
       noShows: acc.noShows + (r.nc_no_shows || 0) + (r.fu_no_shows || 0),
       liveCalls: acc.liveCalls + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
+      liveNC: acc.liveNC + (r.live_nc_calls || 0),
       offers: acc.offers + (r.offers || 0),
       closes: acc.closes + (r.closes || 0),
       revenue: acc.revenue + parseFloat(r.total_revenue || 0),
@@ -197,14 +198,16 @@ export function useCloserStats(closerId, days = 30) {
       ascendRevenue: acc.ascendRevenue + parseFloat(r.ascend_revenue || 0),
       reschedules: acc.reschedules + (r.reschedules || 0),
     }),
-    { ncBooked: 0, fuBooked: 0, noShows: 0, liveCalls: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascensions: 0, ascendCash: 0, ascendRevenue: 0, reschedules: 0 }
+    { ncBooked: 0, fuBooked: 0, noShows: 0, liveCalls: 0, liveNC: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascensions: 0, ascendCash: 0, ascendRevenue: 0, reschedules: 0 }
   )
 
   const totalBooked = totals.ncBooked + totals.fuBooked
   return {
     ...totals,
     totalBooked,
-    showRate: totalBooked ? ((totals.liveCalls / totalBooked) * 100).toFixed(1) : 0,
+    // Show rate: new-call only (live_nc / nc_booked). Follow-ups excluded —
+    // they aren't qualified strategy-call bookings.
+    showRate: totals.ncBooked ? ((totals.liveNC / totals.ncBooked) * 100).toFixed(1) : 0,
     offerRate: totals.liveCalls ? ((totals.offers / totals.liveCalls) * 100).toFixed(1) : 0,
     closeRate: totals.liveCalls ? ((totals.closes / totals.liveCalls) * 100).toFixed(1) : 0,
     rescheduleRate: totalBooked ? ((totals.reschedules / totalBooked) * 100).toFixed(1) : 0,
