@@ -1108,6 +1108,29 @@ export default function MarketingPerformance() {
     return () => { document.removeEventListener('visibilitychange', onVis); unsub() }
   }, [reload])
 
+  // Fresh-EOD-on-mount: when Marketing opens, immediately pull any closer EOD
+  // updates into marketing_tracker. Previously this only ran on the 1-hour
+  // auto-sync timer, so a closer filing an EOD 20 min ago would show blank
+  // live_calls/closes columns until the next cycle. Runs in the background
+  // (non-blocking) so the page renders immediately; reload fires when done.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { syncEODToTracker } = await import('../hooks/useMarketingTracker')
+        const count = await syncEODToTracker()
+        if (cancelled) return
+        if (count > 0) {
+          await reload()
+          toast.info(`Refreshed ${count} day${count === 1 ? '' : 's'} of closer EOD data`, { duration: 3000 })
+        }
+      } catch (e) {
+        if (!cancelled) console.warn('EOD→tracker refresh on mount failed:', e.message)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [reload, toast])
+
   const handleDelete = useCallback(async (date) => {
     if (!confirm(`Delete ${date}?`)) return
     try {
