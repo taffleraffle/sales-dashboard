@@ -188,7 +188,15 @@ export default function EmailFlowDetail() {
     setLoadingRecipients(true)
     try {
       const recipients = await Promise.race([
-        loadEmailRecipients(subject, fromDate, toDate),
+        loadEmailRecipients(subject, fromDate, toDate, (refreshed) => {
+          // onNamesResolved: swap the "Unknown" names for real ones
+          // once the background GHL resolver finishes, if the dropdown
+          // for this subject is still open.
+          setExpandedEmail(current => {
+            if (current === subject) setEmailRecipients(refreshed)
+            return current
+          })
+        }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Loading recipients timed out after 15s')), 15000)),
       ])
       setEmailRecipients(recipients)

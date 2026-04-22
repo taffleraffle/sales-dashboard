@@ -76,6 +76,33 @@ export default function Layout() {
     }
   }, [])
 
+  // Pre-warm email-flow data + GHL contact-name cache so the Email Flows
+  // page renders instantly when the user navigates to it, and recipient
+  // dropdowns show real names instead of "Unknown" on first open. Runs 5s
+  // after mount (after auto-sync gets its head start) and is fire-and-forget.
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const { prewarmRecipientNameCache, loadEmailStats, loadFlowGroups, loadSubjectMeta } =
+          await import('../services/ghlEmailFlows')
+        // Default page range is last 30 days — matches the EmailFlows default.
+        const since = new Date(); since.setDate(since.getDate() - 30)
+        const fromDate = since.toISOString().split('T')[0]
+        const toDate = new Date().toISOString().split('T')[0]
+        // Fire the three page queries in parallel so the module-level caches
+        // are warm by the time the user navigates.
+        Promise.all([
+          loadEmailStats(fromDate, toDate),
+          loadFlowGroups(),
+          loadSubjectMeta(),
+        ]).catch(() => {})
+        // Name resolver runs on its own timeline — can take many seconds.
+        prewarmRecipientNameCache(30).catch(() => {})
+      } catch (_e) { void _e }
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [])
+
   return (
     <ToastProvider>
       <div className="min-h-screen bg-bg-primary flex">
