@@ -1,6 +1,10 @@
 import { supabase } from '../lib/supabase'
 import { BASE_URL, GHL_LOCATION_ID, ghlFetch } from './ghlClient'
 
+// Raw key ref kept local so the "is GHL configured?" guards below can
+// short-circuit before any network call. Auth headers live in ghlClient.
+const GHL_API_KEY = import.meta.env.VITE_GHL_API_KEY
+
 /**
  * Sync all GHL appointments for a date range to Supabase.
  * Scans ALL contacts in the location and checks each for appointments.
