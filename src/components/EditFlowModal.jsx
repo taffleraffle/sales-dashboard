@@ -91,7 +91,8 @@ export default function EditFlowModal({ flow, onClose, onSave }) {
               {SWATCHES.map(c => {
                 const selected = color.toLowerCase() === c.toLowerCase()
                 // Pick a legible tick color: dark for light swatches, white for dark.
-                const tickDark = ['#f0e050', '#d4f50c', '#eab308'].includes(c.toLowerCase())
+                // Dark tick on bright/light swatches, white tick on dark ones.
+                const tickDark = ['#f0e050', '#d4f50c', '#eab308', '#22c55e', '#06b6d4', '#3b82f6'].includes(c.toLowerCase())
                 return (
                   <button
                     key={c}
