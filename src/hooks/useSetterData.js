@@ -2,12 +2,27 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { sinceDate } from '../lib/dateUtils'
 
+// Module-level cache keyed by (setterId, days). 3-min TTL mirrors the
+// closer EOD cache. Nav between Overview / Setter Overview / EOD dashboards
+// now returns cached data instantly and refreshes in the background.
+const eodCache = new Map()
+const EOD_TTL_MS = 3 * 60 * 1000
+
+function eodKey(setterId, days) {
+  return `${setterId || 'all'}:${days}`
+}
+
 export function useSetterEODs(setterId, days = 30) {
-  const [reports, setReports] = useState([])
-  const [loading, setLoading] = useState(true)
+  const key = eodKey(setterId, days)
+  const cached = eodCache.get(key)
+  const hasFresh = cached && (Date.now() - cached.ts) < EOD_TTL_MS
+
+  const [reports, setReports] = useState(cached?.reports || [])
+  const [loading, setLoading] = useState(!hasFresh)
 
   useEffect(() => {
-    async function fetch() {
+    let active = true
+    async function go() {
       let query = supabase
         .from('setter_eod_reports')
         .select('*, setter:team_members(name)')
@@ -17,14 +32,30 @@ export function useSetterEODs(setterId, days = 30) {
       if (setterId) query = query.eq('setter_id', setterId)
 
       const { data, error } = await query
+      if (!active) return
       if (error) console.error('Failed to fetch setter EODs:', error)
-      setReports(data || [])
+      const next = data || []
+      eodCache.set(key, { reports: next, ts: Date.now() })
+      setReports(next)
       setLoading(false)
     }
-    fetch()
-  }, [setterId, days])
+
+    if (hasFresh) {
+      setLoading(false)
+      go().catch(() => {})
+    } else {
+      setLoading(true)
+      go()
+    }
+    return () => { active = false }
+  }, [setterId, days, key, hasFresh])
 
   return { reports, loading }
+}
+
+/** Invalidate the setter-EOD cache — call after a successful EOD submit/edit. */
+export function clearSetterEODCache() {
+  eodCache.clear()
 }
 
 export function useSetterStats(setterId, days = 30) {

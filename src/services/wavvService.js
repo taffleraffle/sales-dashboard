@@ -16,11 +16,40 @@ function classifyCall(duration) {
   }
 }
 
+// Module-level cache for WAVV aggregates. Keyed by `days`, 5-minute TTL.
+// WAVV aggregates are called from SalesOverview + SetterOverview + PipelinePerformance,
+// each page burning a Supabase aggregation on mount. With cache + inflight dedupe,
+// a user hopping between these pages within 5 min sees the third visit in <10ms.
+const aggregateCache = new Map() // days → { data, expiresAt }
+const aggregateInflight = new Map() // days → promise
+const AGG_TTL = 5 * 60 * 1000
+
 /**
  * Fetch per-user WAVV aggregates directly from Supabase.
  * Returns: { totals: {dials,pickups,mcs}, byUser: {[userId]: {dials,pickups,mcs,uniqueContacts,avgDuration}}, uniqueContacts }
  */
 export async function fetchWavvAggregates(days = 30) {
+  const key = String(days)
+  const cached = aggregateCache.get(key)
+  if (cached && Date.now() < cached.expiresAt) return cached.data
+  if (aggregateInflight.has(key)) return aggregateInflight.get(key)
+
+  const promise = (async () => {
+    const result = await fetchWavvAggregatesUncached(days)
+    aggregateCache.set(key, { data: result, expiresAt: Date.now() + AGG_TTL })
+    aggregateInflight.delete(key)
+    return result
+  })()
+  aggregateInflight.set(key, promise)
+  return promise
+}
+
+export function clearWavvAggregatesCache() {
+  aggregateCache.clear()
+  aggregateInflight.clear()
+}
+
+async function fetchWavvAggregatesUncached(days = 30) {
   const since = sinceDate(days)
 
   const rows = []
