@@ -1991,9 +1991,12 @@ export default function EODReview() {
             trial_revenue: a.trial_revenue + parseFloat(r.total_revenue || 0),
             ascensions: a.ascensions + (r.deposits || 0),
             live_calls: a.live_calls + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
+            live_nc: a.live_nc + (r.live_nc_calls || 0),
             booked: a.booked + (r.nc_booked || 0) + (r.fu_booked || 0),
+            nc_booked: a.nc_booked + (r.nc_booked || 0),
+            fu_booked: a.fu_booked + (r.fu_booked || 0),
             reschedules: a.reschedules + (r.reschedules || 0),
-          }), { offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0, ascensions: 0, live_calls: 0, booked: 0, reschedules: 0 })
+          }), { offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0, ascensions: 0, live_calls: 0, live_nc: 0, booked: 0, nc_booked: 0, fu_booked: 0, reschedules: 0 })
           // Split ascension + finance data from calls
           const callAgg = (allCalls || []).reduce((a, c) => ({
             ascCash: a.ascCash + (c.call_type === 'ascension' ? parseFloat(c.cash_collected || 0) : 0),
@@ -2021,7 +2024,11 @@ export default function EODReview() {
             finance_offers: callAgg.financeOffers,
             finance_accepted: callAgg.financeAccepted,
             live_calls: agg.live_calls,
+            net_live_calls: agg.live_calls,
+            new_live_calls: agg.live_nc,
             calls_on_calendar: agg.booked,
+            net_new_calls: agg.nc_booked,
+            net_fu_calls: agg.fu_booked,
             reschedules: agg.reschedules,
             updated_at: new Date().toISOString(),
           }, { onConflict: 'date' })

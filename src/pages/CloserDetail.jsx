@@ -106,11 +106,13 @@ export default function CloserDetail() {
   // Company-wide averages from all closer EODs
   const companyTotals = allReports.reduce((acc, r) => ({
     booked: acc.booked + (r.nc_booked || 0) + (r.fu_booked || 0),
+    ncBooked: acc.ncBooked + (r.nc_booked || 0),
     liveCalls: acc.liveCalls + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
+    liveNC: acc.liveNC + (r.live_nc_calls || 0),
     offers: acc.offers + (r.offers || 0),
     closes: acc.closes + (r.closes || 0),
     reschedules: acc.reschedules + (r.reschedules || 0),
-  }), { booked: 0, liveCalls: 0, offers: 0, closes: 0, reschedules: 0 })
+  }), { booked: 0, ncBooked: 0, liveCalls: 0, liveNC: 0, offers: 0, closes: 0, reschedules: 0 })
 
   // Aggregate breakdowns across all closers for company averages
   const companyBreakSum = Object.values(allBreak || {}).reduce((a, b) => ({
@@ -130,7 +132,8 @@ export default function CloserDetail() {
   const myNetCloseRate = mb.ncLive > 0 ? parseFloat((((mb.ncCloses + mb.fuCloses) / mb.ncLive) * 100).toFixed(1)) : 0
 
   const companyRates = {
-    showRate: companyTotals.booked > 0 ? parseFloat(((companyTotals.liveCalls / companyTotals.booked) * 100).toFixed(1)) : 0,
+    // Show rate: new-call only (denominator = nc_booked, numerator = live_nc_calls)
+    showRate: companyTotals.ncBooked > 0 ? parseFloat(((companyTotals.liveNC / companyTotals.ncBooked) * 100).toFixed(1)) : 0,
     closeRate: companyCloseRateNew,
     netCloseRate: companyNetCloseRate,
     offerRate: companyTotals.liveCalls > 0 ? parseFloat(((companyTotals.offers / companyTotals.liveCalls) * 100).toFixed(1)) : 0,

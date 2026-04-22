@@ -55,7 +55,11 @@ export default function CloserOverview() {
 
   const totalBooked = companyTotals.ncBooked + companyTotals.fuBooked
   const totalNoShows = companyTotals.ncNoShows + companyTotals.fuNoShows
-  const companyShowRate = totalBooked > 0 ? parseFloat(((companyTotals.liveCalls / totalBooked) * 100).toFixed(1)) : 0
+  // Show rate: new-call only. Follow-ups aren't qualified bookings and shouldn't
+  // affect the headline show rate. Denominator is nc_booked; numerator is
+  // live_nc_calls. Live calls / total booked as before would skew on teams
+  // that run heavy follow-up schedules.
+  const companyShowRate = companyTotals.ncBooked > 0 ? parseFloat(((companyTotals.liveNC / companyTotals.ncBooked) * 100).toFixed(1)) : 0
 
   // Company close-rate breakdown from call-level data
   const companyBreak = Object.values(breakdown).reduce((a, b) => ({
@@ -89,11 +93,12 @@ export default function CloserOverview() {
       fuBooked: acc.fuBooked + (r.fu_booked || 0),
       noShows: acc.noShows + (r.nc_no_shows || 0) + (r.fu_no_shows || 0),
       liveCalls: acc.liveCalls + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
+      liveNC: acc.liveNC + (r.live_nc_calls || 0),
       offers: acc.offers + (r.offers || 0),
       closes: acc.closes + (r.closes || 0),
       revenue: acc.revenue + parseFloat(r.total_revenue || 0),
       cash: acc.cash + parseFloat(r.total_cash_collected || 0),
-    }), { ncBooked: 0, fuBooked: 0, noShows: 0, liveCalls: 0, offers: 0, closes: 0, revenue: 0, cash: 0 })
+    }), { ncBooked: 0, fuBooked: 0, noShows: 0, liveCalls: 0, liveNC: 0, offers: 0, closes: 0, revenue: 0, cash: 0 })
 
     const booked = totals.ncBooked + totals.fuBooked
     const b = breakdown[closer.id] || { ncCloses: 0, fuCloses: 0, ncLive: 0 }
@@ -101,7 +106,8 @@ export default function CloserOverview() {
       ...closer,
       ...totals,
       booked,
-      showRate: booked ? parseFloat(((totals.liveCalls / booked) * 100).toFixed(1)) : 0,
+      // Show rate: new-call only (see companyShowRate note).
+      showRate: totals.ncBooked ? parseFloat(((totals.liveNC / totals.ncBooked) * 100).toFixed(1)) : 0,
       // Close rate = new call closes / live new calls (excludes follow-ups from denominator)
       closeRate: b.ncLive > 0 ? parseFloat(((b.ncCloses / b.ncLive) * 100).toFixed(1)) : 0,
       // Net close rate = all closes (new + FU) / live new calls

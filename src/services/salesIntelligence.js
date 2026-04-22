@@ -110,9 +110,11 @@ export async function buildSalesContext() {
   const closerPerf = {}
   for (const eod of closerEods) {
     const name = eod.closer?.name || 'Unknown'
-    if (!closerPerf[name]) closerPerf[name] = { booked: 0, live: 0, closes: 0, revenue: 0, cash: 0, noShows: 0, offers: 0, days: 0, reschedules: 0, ascensions: 0, ascendCash: 0 }
+    if (!closerPerf[name]) closerPerf[name] = { booked: 0, ncBooked: 0, live: 0, liveNC: 0, closes: 0, revenue: 0, cash: 0, noShows: 0, offers: 0, days: 0, reschedules: 0, ascensions: 0, ascendCash: 0 }
     closerPerf[name].booked += (eod.nc_booked || 0) + (eod.fu_booked || 0)
+    closerPerf[name].ncBooked += (eod.nc_booked || 0)
     closerPerf[name].live += (eod.live_nc_calls || 0) + (eod.live_fu_calls || 0)
+    closerPerf[name].liveNC += (eod.live_nc_calls || 0)
     closerPerf[name].closes += eod.closes || 0
     closerPerf[name].revenue += parseFloat(eod.total_revenue || 0)
     closerPerf[name].cash += parseFloat(eod.total_cash_collected || 0)

@@ -87,15 +87,18 @@ export default function SetterOverview() {
   useEffect(() => {
     supabase
       .from('closer_eod_reports')
-      .select('report_date, nc_booked, nc_no_shows, live_nc_calls, fu_booked, fu_no_shows, live_fu_calls')
+      .select('report_date, nc_booked, nc_no_shows, live_nc_calls')
       .gte('report_date', sinceDate(range))
       .then(({ data }) => {
+        // New-call only: setter leads are always new/qualified calls, so the
+        // show-rate denominator should exclude follow-up calls (which no longer
+        // belong to the setter funnel anyway).
         const stats = {}
         for (const e of (data || [])) {
           if (!stats[e.report_date]) stats[e.report_date] = { booked: 0, noShows: 0, live: 0 }
-          stats[e.report_date].booked += (e.nc_booked || 0) + (e.fu_booked || 0)
-          stats[e.report_date].noShows += (e.nc_no_shows || 0) + (e.fu_no_shows || 0)
-          stats[e.report_date].live += (e.live_nc_calls || 0) + (e.live_fu_calls || 0)
+          stats[e.report_date].booked += (e.nc_booked || 0)
+          stats[e.report_date].noShows += (e.nc_no_shows || 0)
+          stats[e.report_date].live += (e.live_nc_calls || 0)
         }
         setDateStats(stats)
       })

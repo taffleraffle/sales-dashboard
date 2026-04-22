@@ -373,8 +373,11 @@ export default function SalesOverview() {
   // Closer totals
   const ct = closerReports.reduce((a, r) => ({
     booked: a.booked + (r.nc_booked || 0) + (r.fu_booked || 0),
+    ncBooked: a.ncBooked + (r.nc_booked || 0),
     liveCalls: a.liveCalls + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
+    liveNC: a.liveNC + (r.live_nc_calls || 0),
     noShows: a.noShows + (r.nc_no_shows || 0) + (r.fu_no_shows || 0),
+    ncNoShows: a.ncNoShows + (r.nc_no_shows || 0),
     offers: a.offers + (r.offers || 0),
     closes: a.closes + (r.closes || 0),
     revenue: a.revenue + parseFloat(r.total_revenue || 0),
@@ -383,15 +386,19 @@ export default function SalesOverview() {
     ascendCash: a.ascendCash + parseFloat(r.ascend_cash || 0),
     ascendRevenue: a.ascendRevenue + parseFloat(r.ascend_revenue || 0),
     reschedules: a.reschedules + (r.reschedules || 0),
-  }), { booked: 0, liveCalls: 0, noShows: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascensions: 0, ascendCash: 0, ascendRevenue: 0, reschedules: 0 })
+  }), { booked: 0, ncBooked: 0, liveCalls: 0, liveNC: 0, noShows: 0, ncNoShows: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascensions: 0, ascendCash: 0, ascendRevenue: 0, reschedules: 0 })
 
   const totalRevenue = ct.revenue + ct.ascendRevenue
   const totalCash = ct.cash + ct.ascendCash
-  const showRate = ct.booked ? ((ct.liveCalls / ct.booked) * 100).toFixed(1) : 0
+  // Show rate + no-show rate: new-call only. Follow-ups aren't qualified
+  // bookings so they shouldn't affect show%. Close/offer/reschedule rates
+  // remain against all live calls / total booked (a close on a follow-up
+  // is still a close).
+  const showRate = ct.ncBooked ? ((ct.liveNC / ct.ncBooked) * 100).toFixed(1) : 0
   const closeRate = ct.liveCalls ? ((ct.closes / ct.liveCalls) * 100).toFixed(1) : 0
   const offerRate = ct.liveCalls ? ((ct.offers / ct.liveCalls) * 100).toFixed(1) : 0
   const rescheduleRate = ct.booked ? ((ct.reschedules / ct.booked) * 100).toFixed(1) : 0
-  const noShowRate = ct.booked ? ((ct.noShows / ct.booked) * 100).toFixed(1) : 0
+  const noShowRate = ct.ncBooked ? ((ct.ncNoShows / ct.ncBooked) * 100).toFixed(1) : 0
 
   // Funnel
   const funnel = { leads: funnelData.leads, bookings: funnelData.bookings, shows: funnelData.shows, offers: ct.offers, closes: funnelData.closes }
@@ -410,15 +417,18 @@ export default function SalesOverview() {
     const my = closerReports.filter(r => r.closer_id === c.id)
     const t = my.reduce((a, r) => ({
       booked: a.booked + (r.nc_booked || 0) + (r.fu_booked || 0),
+      ncBooked: a.ncBooked + (r.nc_booked || 0),
       live: a.live + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
+      liveNC: a.liveNC + (r.live_nc_calls || 0),
       offers: a.offers + (r.offers || 0),
       closes: a.closes + (r.closes || 0),
       revenue: a.revenue + parseFloat(r.total_revenue || 0),
       cash: a.cash + parseFloat(r.total_cash_collected || 0),
       ascendCash: a.ascendCash + parseFloat(r.ascend_cash || 0),
-    }), { booked: 0, live: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascendCash: 0 })
+    }), { booked: 0, ncBooked: 0, live: 0, liveNC: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascendCash: 0 })
     return { id: c.id, name: c.name, ...t, totalCash: t.cash + t.ascendCash,
-      showPct: t.booked ? ((t.live / t.booked) * 100).toFixed(1) : '0.0',
+      // Show rate: new-call only (live_nc / nc_booked). See ct comment above.
+      showPct: t.ncBooked ? ((t.liveNC / t.ncBooked) * 100).toFixed(1) : '0.0',
       closePct: t.live ? ((t.closes / t.live) * 100).toFixed(1) : '0.0',
       offerPct: t.live ? ((t.offers / t.live) * 100).toFixed(1) : '0.0',
     }
