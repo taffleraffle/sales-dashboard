@@ -53,7 +53,11 @@ export async function fetchPipelines() {
   const res = await ghlFetch(
     `${BASE_URL}/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`
   )
-  if (!res.ok) throw new Error(`GHL pipelines ${res.status}`)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    const detail = body ? `: ${body.slice(0, 200)}` : ''
+    throw new Error(`GHL pipelines ${res.status}${detail}`)
+  }
   const data = await res.json()
   return (data.pipelines || []).map(p => ({
     id: p.id,
@@ -67,18 +71,21 @@ export async function fetchPipelines() {
 /**
  * Fetch all opportunities for a given pipeline, paginating through results.
  *
- * Page size is 500 (GHL max). A busy 800-opp pipeline fits in 2 pages instead
- * of 8, cutting total request count 4×. Each page uses `ghlFetch` which
- * transparently retries on 429 with exponential backoff.
+ * GHL's /opportunities/search caps `limit` at 100 per page — we tried bumping
+ * to 500 in PR #13 and got back 400 Bad Request from GHL. Kept at 100 now,
+ * combined with the module-level memoization in fetchAllPipelineSummaries
+ * which means we only paginate once per 5-min window anyway.
  */
 export async function fetchOpportunities(pipelineId, onProgress) {
   const all = []
-  let url = `${BASE_URL}/opportunities/search?location_id=${GHL_LOCATION_ID}&pipeline_id=${pipelineId}&limit=500`
+  let url = `${BASE_URL}/opportunities/search?location_id=${GHL_LOCATION_ID}&pipeline_id=${pipelineId}&limit=100`
 
   while (url && all.length < 5000) {
     const res = await ghlFetch(url)
     if (!res.ok) {
-      throw new Error(`GHL pipeline ${res.status} ${res.statusText}`)
+      const body = await res.text().catch(() => '')
+      const detail = body ? `: ${body.slice(0, 200)}` : ''
+      throw new Error(`GHL pipeline ${res.status}${detail}`)
     }
     const data = await res.json()
     const opps = data.opportunities || []

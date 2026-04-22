@@ -172,13 +172,13 @@ async function fetchGHLLeadsByDate(sinceStr) {
 
   let allOpps = []
   let startAfterId = null, startAfter = null
-  // limit=500 is the GHL maximum. An 800-opp pipeline fits in 2 pages instead
-  // of 8. Outer cap stays at 20 pages = 10k opps, plenty of headroom.
-  for (let page = 0; page < 20; page++) {
+  // GHL caps /opportunities/search at limit=100 per page — 500 returns 400.
+  // Outer cap of 50 pages = 5000 opps, more than enough for SCIO pipeline.
+  for (let page = 0; page < 50; page++) {
     const params = new URLSearchParams({
       location_id: GHL_LOCATION_ID,
       pipeline_id: SCIO_PIPELINE_ID,
-      limit: '500',
+      limit: '100',
     })
     if (startAfterId) {
       params.set('startAfterId', startAfterId)
