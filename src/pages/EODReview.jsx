@@ -940,7 +940,17 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
     if (setterId) loadSetterData()
   }, [setterId, selectedDate])
 
-  if (loading) return <div className="flex items-center justify-center h-32"><Loader className="animate-spin text-opt-yellow" /></div>
+  // Shape-matching skeleton so the setter form doesn't reflow when data arrives.
+  if (loading) return (
+    <div className="space-y-4 animate-pulse">
+      <div className="tile tile-feedback h-16" />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[1,2,3,4].map(i => <div key={i} className="tile tile-feedback h-24" />)}
+      </div>
+      <div className="tile tile-feedback h-64" />
+      <div className="tile tile-feedback h-48" />
+    </div>
+  )
 
   const updateSetLead = (index, lead) => {
     setSetLeads(prev => prev.map((l, i) => i === index ? lead : l))
@@ -2568,7 +2578,9 @@ export default function EODReview() {
           )}
 
           {confirmed ? null : loadingCalls ? (
-            <div className="flex items-center justify-center h-32"><Loader className="animate-spin text-opt-yellow" /></div>
+            <div className="space-y-3 animate-pulse">
+              {[1,2,3].map(i => <div key={i} className="tile tile-feedback h-48" />)}
+            </div>
           ) : calls.length === 0 ? (
             <div className="tile tile-feedback p-8 text-center text-text-400 text-sm">
               <p>No booked calls for {selectedName} on {formatDateLabel(selectedDate).split(' — ').pop() || selectedDate}.</p>
@@ -3027,7 +3039,20 @@ export default function EODReview() {
 
           {/* Today's submissions */}
           {loadingAllHistory ? (
-            <div className="flex items-center justify-center h-32"><Loader className="animate-spin text-opt-yellow" /></div>
+            <div className="tile tile-feedback overflow-hidden animate-pulse">
+              <div className="px-4 py-3 border-b border-border-default">
+                <div className="h-3 w-56 bg-bg-primary/50 rounded" />
+              </div>
+              {[1,2,3,4].map(i => (
+                <div key={i} className="h-10 border-b border-border-default/40 flex items-center px-4 gap-3">
+                  <div className="h-3 w-32 bg-bg-primary/40 rounded" />
+                  <div className="h-3 w-12 bg-bg-primary/40 rounded ml-auto" />
+                  <div className="h-3 w-12 bg-bg-primary/40 rounded" />
+                  <div className="h-3 w-12 bg-bg-primary/40 rounded" />
+                  <div className="h-3 w-12 bg-bg-primary/40 rounded" />
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="tile tile-feedback overflow-hidden">
               <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">
@@ -3210,7 +3235,20 @@ export default function EODReview() {
 
           {/* Today's submissions */}
           {loadingAllHistory ? (
-            <div className="flex items-center justify-center h-32"><Loader className="animate-spin text-opt-yellow" /></div>
+            <div className="tile tile-feedback overflow-hidden animate-pulse">
+              <div className="px-4 py-3 border-b border-border-default">
+                <div className="h-3 w-56 bg-bg-primary/50 rounded" />
+              </div>
+              {[1,2,3,4].map(i => (
+                <div key={i} className="h-10 border-b border-border-default/40 flex items-center px-4 gap-3">
+                  <div className="h-3 w-32 bg-bg-primary/40 rounded" />
+                  <div className="h-3 w-12 bg-bg-primary/40 rounded ml-auto" />
+                  <div className="h-3 w-12 bg-bg-primary/40 rounded" />
+                  <div className="h-3 w-12 bg-bg-primary/40 rounded" />
+                  <div className="h-3 w-12 bg-bg-primary/40 rounded" />
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="tile tile-feedback overflow-hidden">
               <div className="px-4 py-3 border-b border-border-default">
