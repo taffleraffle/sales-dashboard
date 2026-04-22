@@ -65,10 +65,15 @@ export default function Layout() {
     return () => { document.body.style.overflow = prev }
   }, [drawerOpen])
 
-  // Background auto-sync
+  // Background auto-sync. Deferred 3s after mount so the first paint / first
+  // page render isn't competing with 6 sync network calls (the previous
+  // contention was the biggest trigger of GHL 429 rate-limit errors).
   useEffect(() => {
-    startAutoSync()
-    return () => stopAutoSync()
+    const timer = setTimeout(() => startAutoSync(), 3000)
+    return () => {
+      clearTimeout(timer)
+      stopAutoSync()
+    }
   }, [])
 
   return (

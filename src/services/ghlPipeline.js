@@ -7,6 +7,28 @@ const ghlHeaders = {
   'Version': '2021-07-28',
 }
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
+/**
+ * Fetch a GHL URL with exponential backoff on 429. Honors Retry-After.
+ * Retries: 1s, 2s, 4s, 8s — max 4 attempts. Non-429 failures bubble up fast.
+ */
+async function ghlFetch(url, { maxAttempts = 4 } = {}) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const res = await fetch(url, { headers: ghlHeaders })
+    if (res.status !== 429) return res
+    const retryAfter = Number(res.headers.get('Retry-After'))
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? retryAfter * 1000
+      : Math.min(8000, 1000 * 2 ** attempt)
+    if (attempt === maxAttempts - 1) return res // give up, let caller surface error
+    console.warn(`[ghlFetch] 429 on ${url.split('?')[0]} — backing off ${waitMs}ms (attempt ${attempt + 1}/${maxAttempts})`)
+    await sleep(waitMs)
+  }
+  // Unreachable — the final iteration returns res.
+  throw new Error('ghlFetch: exhausted retries')
+}
+
 // Wavv dialer tag classification
 const WAVV_DIAL_TAGS = new Set([
   'wavv-no-answer', 'wavv-left-voicemail', 'wavv-bad-number',
@@ -57,10 +79,10 @@ function classifyStage(stageName) {
  * Fetch all pipelines and their stages for this location.
  */
 export async function fetchPipelines() {
-  const res = await fetch(
-    `${BASE_URL}/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`,
-    { headers: ghlHeaders }
+  const res = await ghlFetch(
+    `${BASE_URL}/opportunities/pipelines?locationId=${GHL_LOCATION_ID}`
   )
+  if (!res.ok) throw new Error(`GHL pipelines ${res.status}`)
   const data = await res.json()
   return (data.pipelines || []).map(p => ({
     id: p.id,
@@ -73,13 +95,20 @@ export async function fetchPipelines() {
 
 /**
  * Fetch all opportunities for a given pipeline, paginating through results.
+ *
+ * Page size is 500 (GHL max). A busy 800-opp pipeline fits in 2 pages instead
+ * of 8, cutting total request count 4×. Each page uses `ghlFetch` which
+ * transparently retries on 429 with exponential backoff.
  */
 export async function fetchOpportunities(pipelineId, onProgress) {
   const all = []
-  let url = `${BASE_URL}/opportunities/search?location_id=${GHL_LOCATION_ID}&pipeline_id=${pipelineId}&limit=100`
+  let url = `${BASE_URL}/opportunities/search?location_id=${GHL_LOCATION_ID}&pipeline_id=${pipelineId}&limit=500`
 
   while (url && all.length < 5000) {
-    const res = await fetch(url, { headers: ghlHeaders })
+    const res = await ghlFetch(url)
+    if (!res.ok) {
+      throw new Error(`GHL pipeline ${res.status} ${res.statusText}`)
+    }
     const data = await res.json()
     const opps = data.opportunities || []
     all.push(...opps)
@@ -200,19 +229,54 @@ export async function fetchPipelineSummary(pipelineId, stages, onProgress) {
 }
 
 /**
- * Fetch all pipelines with their summaries in parallel.
+ * Fetch all pipelines with their summaries.
+ *
+ * Pipelines fetch SEQUENTIALLY, not in parallel. Running 5 pipelines × 2 pages
+ * in parallel previously fired 10 GHL requests in the same ~500ms window,
+ * which was the primary trigger of 429 storms. Sequential keeps us well under
+ * GHL's 100 req / 10s ceiling even with pagination.
+ *
+ * Result is memoized at the module level with a 5-minute TTL — concurrent
+ * callers (e.g. SalesOverview + PipelinePerformance mounting back-to-back)
+ * share the same in-flight promise instead of each launching their own tree.
  */
+let pipelineCache = { data: null, expiresAt: 0, inflight: null }
+
 export async function fetchAllPipelineSummaries(onProgress) {
-  const pipelines = await fetchPipelines()
-  const results = await Promise.all(
-    pipelines.map(async (p) => {
+  const now = Date.now()
+  if (pipelineCache.data && now < pipelineCache.expiresAt) {
+    return pipelineCache.data
+  }
+  if (pipelineCache.inflight) {
+    return pipelineCache.inflight
+  }
+
+  pipelineCache.inflight = (async () => {
+    const pipelines = await fetchPipelines()
+    const results = []
+    for (const p of pipelines) {
       const summary = await fetchPipelineSummary(p.id, p.stages, (loaded, total) => {
         if (onProgress) onProgress(p.name, loaded, total)
       })
-      return { ...p, summary }
-    })
-  )
-  return results.filter(p => p.summary.total > 0)
+      results.push({ ...p, summary })
+    }
+    return results.filter(p => p.summary.total > 0)
+  })()
+
+  try {
+    const result = await pipelineCache.inflight
+    pipelineCache = { data: result, expiresAt: Date.now() + 5 * 60 * 1000, inflight: null }
+    return result
+  } catch (err) {
+    // Reset on error so the next call retries instead of returning a dead promise.
+    pipelineCache = { data: null, expiresAt: 0, inflight: null }
+    throw err
+  }
+}
+
+/** Invalidate the pipeline cache — call from Settings "Force refresh" or on manual sync. */
+export function clearPipelineCache() {
+  pipelineCache = { data: null, expiresAt: 0, inflight: null }
 }
 
 /**
