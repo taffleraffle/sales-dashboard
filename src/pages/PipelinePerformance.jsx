@@ -7,7 +7,8 @@ import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { syncGHLAppointments } from '../services/ghlCalendar'
-import { Loader, ChevronDown, ChevronUp } from 'lucide-react'
+import { Loader, ChevronDown, ChevronUp, AlertTriangle, RefreshCw } from 'lucide-react'
+import { clearPipelineCache } from '../services/ghlPipeline'
 
 export default function PipelinePerformance() {
   const [range, setRange] = useState(30)
@@ -18,6 +19,8 @@ export default function PipelinePerformance() {
   const [pipelineData, setPipelineData] = useState([])
   const [loadingPipeline, setLoadingPipeline] = useState(true)
   const [pipelineProgress, setPipelineProgress] = useState('')
+  const [pipelineError, setPipelineError] = useState(null)
+  const [retryKey, setRetryKey] = useState(0)
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
   const [stlCalls, setStlCalls] = useState(null)
   const [stlOpen, setStlOpen] = useState(false)
@@ -57,9 +60,13 @@ export default function PipelinePerformance() {
     run()
   }, [range])
 
-  // Pipelines
+  // Pipelines. Errors are surfaced in the UI (not silent "no data") — Ben was
+  // seeing "no data available" when the real cause was a 429 storm eating the
+  // promise. Now the banner shows the actual error and offers a retry that
+  // bypasses the 5-min memo cache.
   useEffect(() => {
     setLoadingPipeline(true)
+    setPipelineError(null)
     setPipelineData([])
     fetchAllPipelineSummaries((name, loaded, total) => {
       setPipelineProgress(`${name}: ${loaded}/${total}`)
@@ -68,10 +75,16 @@ export default function PipelinePerformance() {
       setLoadingPipeline(false)
     }).catch(err => {
       console.error('Failed to fetch GHL pipelines:', err)
+      setPipelineError(err?.message || String(err))
       setPipelineData([])
       setLoadingPipeline(false)
     })
-  }, [range])
+  }, [range, retryKey])
+
+  const handleRetry = () => {
+    clearPipelineCache()
+    setRetryKey(k => k + 1)
+  }
 
   // WAVV aggregate totals
   useEffect(() => {
@@ -110,6 +123,27 @@ export default function PipelinePerformance() {
       </div>
 
       <div className="max-w-[1600px] mx-auto space-y-6">
+
+        {/* Error banner — visible whenever pipeline fetch failed. Without
+            this, Ben saw "no data available" with no indication of WHY. */}
+        {pipelineError && (
+          <div className="tile border border-danger/40 bg-danger/5 px-4 py-3 flex items-start gap-3">
+            <AlertTriangle size={18} className="text-danger shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-danger">Couldn't load pipeline data from GHL</p>
+              <p className="text-xs text-text-400 mt-1 break-words">{pipelineError}</p>
+              <p className="text-[11px] text-text-400 mt-1">If this is a 429 rate-limit, wait ~30 seconds and retry. Other errors usually mean GHL credentials need refreshing.</p>
+            </div>
+            <button
+              onClick={handleRetry}
+              disabled={loadingPipeline}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-opt-yellow border border-opt-yellow/30 hover:bg-opt-yellow/10 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={loadingPipeline ? 'animate-spin' : ''} />
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* Top KPI row */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
