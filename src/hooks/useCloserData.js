@@ -2,12 +2,28 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { sinceDate } from '../lib/dateUtils'
 
+// Module-level cache keyed by (closerId, days). 3-min TTL — closer_eod_reports
+// updates throughout the day as closers submit, so we keep it fresher than
+// team_members (5min). Mirrors useTeamMembers: return cached instantly,
+// kick a background refresh.
+const eodCache = new Map()
+const EOD_TTL_MS = 3 * 60 * 1000
+
+function eodKey(closerId, days) {
+  return `${closerId || 'all'}:${days}`
+}
+
 export function useCloserEODs(closerId, days = 30) {
-  const [reports, setReports] = useState([])
-  const [loading, setLoading] = useState(true)
+  const key = eodKey(closerId, days)
+  const cached = eodCache.get(key)
+  const hasFresh = cached && (Date.now() - cached.ts) < EOD_TTL_MS
+
+  const [reports, setReports] = useState(cached?.reports || [])
+  const [loading, setLoading] = useState(!hasFresh)
 
   useEffect(() => {
-    async function fetch() {
+    let active = true
+    async function go() {
       let query = supabase
         .from('closer_eod_reports')
         .select('*, closer:team_members(name)')
@@ -17,14 +33,30 @@ export function useCloserEODs(closerId, days = 30) {
       if (closerId) query = query.eq('closer_id', closerId)
 
       const { data, error } = await query
+      if (!active) return
       if (error) console.error('Failed to fetch closer EODs:', error)
-      setReports(data || [])
+      const next = data || []
+      eodCache.set(key, { reports: next, ts: Date.now() })
+      setReports(next)
       setLoading(false)
     }
-    fetch()
-  }, [closerId, days])
+
+    if (hasFresh) {
+      setLoading(false)
+      go().catch(() => {})
+    } else {
+      setLoading(true)
+      go()
+    }
+    return () => { active = false }
+  }, [closerId, days, key, hasFresh])
 
   return { reports, loading }
+}
+
+/** Invalidate the closer-EOD cache — call after a successful EOD submit/edit. */
+export function clearCloserEODCache() {
+  eodCache.clear()
 }
 
 /**

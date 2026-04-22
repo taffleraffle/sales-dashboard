@@ -76,6 +76,7 @@ export default function SetterOverview() {
         .select('id, setter_id, closer_id, lead_name, lead_source, date_set, appointment_date, status, revenue_attributed, closer:team_members!setter_leads_closer_id_fkey(name)')
         .gte('date_set', sinceDate(range))
         .order('date_set', { ascending: false })
+        .limit(500)
       setAllLeads(data || [])
       setLoadingLeads(false)
     }

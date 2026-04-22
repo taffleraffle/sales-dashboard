@@ -10,8 +10,18 @@ export function useMarketingTracker({ autoSync = false } = {}) {
 
   const load = useCallback(async () => {
     try {
+      // Cap at ~90 days. The tracker has been accumulating daily rows for months
+      // and the UI only ever shows "trailing period" windows (7/14/30/90). A
+      // default `.select('*')` with no bound pulls every row ever written, which
+      // quadruples when the Marketing page is mounted during auto-sync.
+      const ninetyDaysAgo = new Date()
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
+      const sinceStr = ninetyDaysAgo.toISOString().split('T')[0]
       const [trackerRes, bmRes] = await Promise.all([
-        supabase.from('marketing_tracker').select('*').order('date', { ascending: false }),
+        supabase.from('marketing_tracker')
+          .select('*')
+          .gte('date', sinceStr)
+          .order('date', { ascending: false }),
         supabase.from('marketing_benchmarks').select('*'),
       ])
       if (trackerRes.error) console.error('Tracker load error:', trackerRes.error)
