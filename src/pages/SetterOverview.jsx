@@ -514,75 +514,74 @@ export default function SetterOverview() {
         </div>
       )}
 
-      {/* Recent Leads (from setter_leads) + Upcoming Strategy Calls — side-by-side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
-        <div>
-          <h2 className="text-sm font-medium text-text-secondary mb-4">
-            Recent Leads Set ({allLeads.length})
-          </h2>
-          <div className="tile tile-feedback overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
-                    <th className="px-3 py-2 text-left">Lead</th>
-                    <th className="px-3 py-2 text-left">Setter</th>
-                    <th className="px-3 py-2 text-left">Source</th>
-                    <th className="px-3 py-2 text-left">Status</th>
-                    <th className="px-3 py-2 text-right">Revenue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {allLeads.slice(0, showAllRecent ? 50 : 10).map(l => {
-                    const setterName = setters.find(s => s.id === l.setter_id)?.name || '—'
-                    const statusStyle = (status) => {
-                      if (status === 'closed') return 'bg-success/15 text-success'
-                      if (status === 'showed' || status === 'not_closed') return 'bg-cyan-400/15 text-cyan-400'
-                      if (status === 'no_show') return 'bg-danger/15 text-danger'
-                      if (status === 'rescheduled') return 'bg-orange-400/15 text-orange-400'
-                      return 'bg-text-400/15 text-text-400'
-                    }
-                    const isAuto = l.lead_source === 'auto' || INTRO_CALENDARS.includes(l.lead_source)
-                    const sourceLabel = isAuto ? 'auto' : (l.lead_source || 'manual')
-                    return (
-                      <tr key={l.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50">
-                        <td className="px-3 py-1.5 font-medium text-text-primary truncate max-w-[160px]">{l.lead_name || '—'}</td>
-                        <td className="px-3 py-1.5 text-opt-yellow">{setterName}</td>
-                        <td className="px-3 py-1.5 text-text-400 capitalize truncate max-w-[100px]" title={l.lead_source || ''}>{sourceLabel}</td>
-                        <td className="px-3 py-1.5">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded capitalize ${statusStyle(l.status)}`}>
-                            {(l.status || 'pending').replace('_', ' ')}
-                          </span>
-                        </td>
-                        <td className="px-3 py-1.5 text-right">
-                          {parseFloat(l.revenue_attributed || 0) > 0 ? (
-                            <span className="text-success">${parseFloat(l.revenue_attributed).toLocaleString()}</span>
-                          ) : '—'}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                  {allLeads.length === 0 && (
-                    <tr><td colSpan={5} className="px-3 py-8 text-center text-text-400">No leads in this range</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {allLeads.length > 10 && (
-              <button
-                onClick={() => setShowAllRecent(v => !v)}
-                className="w-full py-3 text-xs font-medium text-opt-yellow hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default"
-              >
-                {showAllRecent ? 'Show less' : `Show all ${Math.min(allLeads.length, 50)} leads`}
-              </button>
-            )}
+      {/* Recent Leads (from setter_leads) + Upcoming Strategy Calls — side-by-side.
+          Both cards flex to equal height; inner scroll keeps them visually balanced
+          regardless of row count. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6 items-stretch">
+        <div className="tile tile-feedback overflow-hidden flex flex-col h-full">
+          <div className="px-4 py-3 border-b border-border-default flex items-center justify-between shrink-0">
+            <h2 className="text-sm font-medium text-text-secondary">Recent Leads Set ({allLeads.length})</h2>
           </div>
+          <div className="flex-1 overflow-auto min-h-0">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-bg-card z-10">
+                <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
+                  <th className="px-3 py-2 text-left">Lead</th>
+                  <th className="px-3 py-2 text-left">Setter</th>
+                  <th className="px-3 py-2 text-left">Source</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                  <th className="px-3 py-2 text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allLeads.slice(0, showAllRecent ? 50 : 10).map(l => {
+                  const setterName = setters.find(s => s.id === l.setter_id)?.name || '—'
+                  const statusStyle = (status) => {
+                    if (status === 'closed') return 'bg-success/15 text-success'
+                    if (status === 'showed' || status === 'not_closed') return 'bg-cyan-400/15 text-cyan-400'
+                    if (status === 'no_show') return 'bg-danger/15 text-danger'
+                    if (status === 'rescheduled') return 'bg-orange-400/15 text-orange-400'
+                    return 'bg-text-400/15 text-text-400'
+                  }
+                  const isAuto = l.lead_source === 'auto' || INTRO_CALENDARS.includes(l.lead_source)
+                  const sourceLabel = isAuto ? 'auto' : (l.lead_source || 'manual')
+                  return (
+                    <tr key={l.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50">
+                      <td className="px-3 py-1.5 font-medium text-text-primary truncate max-w-[160px]">{l.lead_name || '—'}</td>
+                      <td className="px-3 py-1.5 text-opt-yellow">{setterName}</td>
+                      <td className="px-3 py-1.5 text-text-400 capitalize truncate max-w-[100px]" title={l.lead_source || ''}>{sourceLabel}</td>
+                      <td className="px-3 py-1.5">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded capitalize ${statusStyle(l.status)}`}>
+                          {(l.status || 'pending').replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        {parseFloat(l.revenue_attributed || 0) > 0 ? (
+                          <span className="text-success">${parseFloat(l.revenue_attributed).toLocaleString()}</span>
+                        ) : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {allLeads.length === 0 && (
+                  <tr><td colSpan={5} className="px-3 py-8 text-center text-text-400">No leads in this range</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {allLeads.length > 10 && (
+            <button
+              onClick={() => setShowAllRecent(v => !v)}
+              className="w-full py-3 text-xs font-medium text-opt-yellow hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default shrink-0"
+            >
+              {showAllRecent ? 'Show less' : `Show all ${Math.min(allLeads.length, 50)} leads`}
+            </button>
+          )}
         </div>
 
         {/* Endangered Leads — upcoming appointments with no engagement */}
-        <div>
-          <EndangeredLeadsTable leads={endangeredLeads} loading={loadingEndangered} />
-        </div>
+        <EndangeredLeadsTable leads={endangeredLeads} loading={loadingEndangered} fillHeight />
+
       </div>
 
       </div> {/* end max-w-[1600px] mx-auto */}
