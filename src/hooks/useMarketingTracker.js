@@ -14,13 +14,21 @@ export function useMarketingTracker({ autoSync = false } = {}) {
       // and the UI only ever shows "trailing period" windows (7/14/30/90). A
       // default `.select('*')` with no bound pulls every row ever written, which
       // quadruples when the Marketing page is mounted during auto-sync.
+      //
+      // Also cap UPPER bound at today. Strategy calls booked for future dates
+      // used to create future-dated rows in marketing_tracker (fixed at sync
+      // time, but this is the safety net for rows that leaked through before
+      // that fix shipped). Future dates pollute the trailing-period rate columns
+      // because they have 0 live-calls / 0 closes, dragging Show% and Close%.
       const ninetyDaysAgo = new Date()
       ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
       const sinceStr = ninetyDaysAgo.toISOString().split('T')[0]
+      const todayStr = new Date().toISOString().split('T')[0]
       const [trackerRes, bmRes] = await Promise.all([
         supabase.from('marketing_tracker')
           .select('*')
           .gte('date', sinceStr)
+          .lte('date', todayStr)
           .order('date', { ascending: false }),
         supabase.from('marketing_benchmarks').select('*'),
       ])

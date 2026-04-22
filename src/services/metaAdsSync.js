@@ -236,6 +236,12 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
     ? (() => { const s = new Date(); s.setDate(s.getDate() - days); return s.toISOString().split('T')[0] })()
     : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`
 
+  // Marketing tracker rows should only exist for dates that have already happened.
+  // A strategy call scheduled for next week shouldn't create a future-dated row
+  // in marketing_tracker — the dashboard then shows future dates with 0 spend
+  // but non-zero Q.BOOK, which pollutes the trailing-period rates.
+  const trackerUntil = new Date().toISOString().split('T')[0]
+
   // Step 2: aggregate adspend from marketing_daily
   const { data: dailyRows, error: dailyErr } = await supabase
     .from('marketing_daily')
@@ -271,19 +277,28 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
     const raw = a.booked_at || a.appointment_date
     if (!raw) continue
     const d = String(raw).split(' ')[0].split('T')[0]
-    if (d < trackerSince) continue
+    if (d < trackerSince || d > trackerUntil) continue
     autoBookingsByDate[d] = (autoBookingsByDate[d] || 0) + 1
   }
   console.log(`[syncMetaToTracker] Auto bookings: ${introAppts?.length || 0} intro appointments, ${Object.keys(autoBookingsByDate).length} dates with bookings.`)
 
   // Step 5: pull qualified_bookings from Strategy Call calendars.
-  // Each non-cancelled appointment = 1 qualified booking. No per-contact dedupe —
-  // a lead who re-books after a reschedule IS two bookings, and the previous
-  // global Set wiped out same-contact bookings even across months.
+  //
+  // Bucket by appointment_date so qualified_bookings aligns day-for-day with
+  // live_calls (both keyed off the day of the call) — that's what makes the
+  // gross_show_rate / close_rate formulas work (live_calls / qualified_bookings
+  // on the same date). If we bucketed by booked_at, shows and bookings would
+  // live on different rows and the rates would be misleading.
+  //
+  // BUT — skip appointments whose date is still in the future. A call scheduled
+  // for next week hasn't happened yet; its show rate is undefined. Creating a
+  // row for a future date drags down the trailing-period rate columns because
+  // the future row has qualified_bookings>0 but live_calls=0.
   const { data: stratAppts, error: stratErr } = await supabase
     .from('ghl_appointments')
     .select('appointment_date, calendar_name, ghl_contact_id')
     .gte('appointment_date', trackerSince)
+    .lte('appointment_date', trackerUntil)
     .neq('appointment_status', 'cancelled')
     .in('calendar_name', STRATEGY_CALL_CALENDARS)
     .order('appointment_date', { ascending: true })
@@ -292,7 +307,9 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
   const qualBookingsByDate = {}
   for (const a of (stratAppts || [])) {
     if (!a.appointment_date) continue
-    qualBookingsByDate[a.appointment_date] = (qualBookingsByDate[a.appointment_date] || 0) + 1
+    const d = a.appointment_date
+    if (d < trackerSince || d > trackerUntil) continue
+    qualBookingsByDate[d] = (qualBookingsByDate[d] || 0) + 1
   }
   console.log(`[syncMetaToTracker] Qualified bookings: ${stratAppts?.length || 0} strategy appointments, ${Object.keys(qualBookingsByDate).length} dates with bookings.`)
 
