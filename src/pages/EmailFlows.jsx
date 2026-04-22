@@ -13,6 +13,7 @@ import {
   loadEmailStats, loadSubjectMeta,
   loadFlowGroups, createFlowGroup, deleteFlowGroup, updateFlowGroup,
   assignSubjectsToFlow, removeSubjectFromFlow, loadEmailRecipients,
+  prewarmRecipientNameCache,
 } from '../services/ghlEmailFlows'
 
 export default function EmailFlows() {
@@ -23,6 +24,7 @@ export default function EmailFlows() {
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('flows') // 'flows' | 'all'
   const [minSends, setMinSends] = useState(1)
+  const [flowFilter, setFlowFilter] = useState('all') // 'all' | 'unassigned' | flow_group_id
   const [sortKey, setSortKey] = useState('sent')
   const [sortDir, setSortDir] = useState('desc')
   const [newFlowName, setNewFlowName] = useState('')
@@ -59,12 +61,36 @@ export default function EmailFlows() {
 
   useEffect(() => { loadData() }, [range])
 
+  // Pre-warm the GHL contact-name cache. Without this, every recipient
+  // dropdown opens showing "Unknown" for all rows until the background
+  // resolver catches up. Kicking it off on page mount means names are
+  // populated by the time the user expands their first email.
+  useEffect(() => {
+    prewarmRecipientNameCache(30)
+      .then(r => {
+        if (r?.resolved > 0) {
+          console.log(`[prewarmRecipientNameCache] Resolved ${r.resolved} of ${r.checked} contacts`)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   const toggleSort = (key) => {
     if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('desc') }
   }
 
-  const visibleStats = useMemo(() => stats.filter(s => s.sent >= minSends), [stats, minSends])
+  const visibleStats = useMemo(() => {
+    let filtered = stats.filter(s => s.sent >= minSends)
+    if (flowFilter !== 'all') {
+      filtered = filtered.filter(s => {
+        const fgId = subjectMeta[s.subject]?.flow_group_id
+        if (flowFilter === 'unassigned') return !fgId
+        return fgId === flowFilter
+      })
+    }
+    return filtered
+  }, [stats, minSends, flowFilter, subjectMeta])
 
   // Sorted version of visibleStats. Previously this was an inline function re-creating
   // the sorted array on every render — with hundreds of emails, that thrashed the UI on
@@ -162,11 +188,17 @@ export default function EmailFlows() {
     setLoadingRecipients(true)
     setEmailRecipients([])
     try {
-      // Wrap in a 15s timeout so the UI never hangs forever. The fix in
-      // ghlEmailFlows.loadEmailRecipients now bounds the Supabase queries,
-      // but GHL contact-name fetches can still stall on network hiccups.
+      // 15s timeout so the UI never hangs forever. onNamesResolved re-fires
+      // setEmailRecipients once the background GHL fetch completes so the
+      // open dropdown updates in-place from "Unknown" to the real names.
       const recipients = await Promise.race([
-        loadEmailRecipients(subject, fromDate, toDate),
+        loadEmailRecipients(subject, fromDate, toDate, (refreshed) => {
+          // Only apply the refresh if the same row is still open.
+          setExpandedEmail(current => {
+            if (current === subject) setEmailRecipients(refreshed)
+            return current
+          })
+        }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Loading recipients timed out after 15s')), 15000)),
       ])
       setEmailRecipients(recipients)
@@ -312,9 +344,22 @@ export default function EmailFlows() {
           {/* ═══ ALL EMAILS VIEW ═══ */}
           {view === 'all' && (
             <div className="tile tile-feedback overflow-hidden">
-              <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">
+              <div className="px-4 py-3 border-b border-border-default flex flex-wrap items-center gap-3">
                 <h3 className="text-[11px] text-opt-yellow uppercase font-medium">All Emails ({visibleStats.length})</h3>
-                <span className="text-[10px] text-text-400">{visibleStats.length} of {stats.length} (min {minSends} sends)</span>
+                <select
+                  value={flowFilter}
+                  onChange={e => setFlowFilter(e.target.value)}
+                  className="select-input text-[11px] py-1 px-2"
+                  aria-label="Filter by flow"
+                  title="Filter by flow"
+                >
+                  <option value="all">All flows</option>
+                  <option value="unassigned">Unassigned</option>
+                  {flowGroups.map(fg => (
+                    <option key={fg.id} value={fg.id}>{fg.name}</option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-text-400 ml-auto">{visibleStats.length} of {stats.length} (min {minSends} sends)</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">

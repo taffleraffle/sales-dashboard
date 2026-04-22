@@ -8,15 +8,17 @@ import { useAuth } from '../contexts/AuthContext'
 import { ICON } from '../utils/constants'
 
 /**
- * EOD Dashboard — the new default landing at /sales/eod.
+ * EOD Dashboard — the default landing at /sales/eod.
  *
- * Two tables (Closers | Setters) listing each team member's submission for the
- * selected date. Submitted rows show the key numbers and open the form page
- * when clicked. Pending rows (no submission yet) show a "+ File" button that
- * jumps straight into the form pre-configured for that member + date.
+ * A single unified team table with a Role pill column so the whole team
+ * (closers + setters) is visible at once. Each row shows inline role-
+ * specific highlights (booked/live/closes/cash for closers, dials/sets
+ * for setters) so you can scan both groups without juggling two tables.
  *
- * The existing EODReview form lives at /sales/eod/submit and handles the
- * actual create/edit interaction — this page just directs traffic to it.
+ * Clicking a submitted row opens the existing EODReview form in view/edit
+ * mode; pending rows show a "+ File" button that jumps into the form in
+ * create mode. Only submitted reports (is_confirmed=true) count as
+ * "submitted" — drafts stay as pending.
  */
 export default function EODDashboard() {
   const navigate = useNavigate()
@@ -27,14 +29,13 @@ export default function EODDashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [closerReports, setCloserReports] = useState([])
   const [setterReports, setSetterReports] = useState([])
+  const [roleFilter, setRoleFilter] = useState('all') // 'all' | 'closer' | 'setter' | 'pending'
 
   const { members: closers, loading: loadingClosers } = useTeamMembers('closer')
   const { members: setters, loading: loadingSetters } = useTeamMembers('setter')
 
   useEffect(() => {
     async function load() {
-      // First load shows a skeleton; subsequent date changes dim the existing
-      // table instead of collapsing the layout into placeholder tiles.
       setRefreshing(true)
       try {
         const [cRes, sRes] = await Promise.all([
@@ -61,8 +62,7 @@ export default function EODDashboard() {
     load()
   }, [selectedDate])
 
-  // Build lookup: member_id → report. Only count confirmed reports as "submitted"
-  // (is_confirmed = true). Drafts stay as pending.
+  // Only confirmed reports count as submitted; drafts stay pending.
   const closerByMember = useMemo(() => {
     const m = {}
     for (const r of closerReports) if (r.is_confirmed === true) m[r.closer_id] = r
@@ -75,11 +75,39 @@ export default function EODDashboard() {
     return m
   }, [setterReports])
 
-  const closerRows = useMemo(() => closers.map(c => ({ member: c, report: closerByMember[c.id] || null })), [closers, closerByMember])
-  const setterRows = useMemo(() => setters.map(s => ({ member: s, report: setterByMember[s.id] || null })), [setters, setterByMember])
+  // Merge both role lists into one team roster. Sorted alphabetically so the
+  // whole team shows up in one place — pending first (they're what needs
+  // chasing), then submitted, each group alpha-sorted by name.
+  const teamRows = useMemo(() => {
+    const rows = [
+      ...closers.map(c => ({ member: c, role: 'closer', report: closerByMember[c.id] || null })),
+      ...setters.map(s => ({ member: s, role: 'setter', report: setterByMember[s.id] || null })),
+    ]
+    rows.sort((a, b) => {
+      // Pending before submitted, then alpha by name.
+      const aSubmitted = !!a.report, bSubmitted = !!b.report
+      if (aSubmitted !== bSubmitted) return aSubmitted ? 1 : -1
+      return (a.member.name || '').localeCompare(b.member.name || '')
+    })
+    return rows
+  }, [closers, setters, closerByMember, setterByMember])
 
-  const submittedClosers = closerRows.filter(r => r.report).length
-  const submittedSetters = setterRows.filter(r => r.report).length
+  const filteredRows = useMemo(() => {
+    if (roleFilter === 'all') return teamRows
+    if (roleFilter === 'pending') return teamRows.filter(r => !r.report)
+    return teamRows.filter(r => r.role === roleFilter)
+  }, [teamRows, roleFilter])
+
+  const totalSubmitted = teamRows.filter(r => r.report).length
+  const totalPending = teamRows.length - totalSubmitted
+  const closerStats = {
+    submitted: teamRows.filter(r => r.role === 'closer' && r.report).length,
+    total: closers.length,
+  }
+  const setterStats = {
+    submitted: teamRows.filter(r => r.role === 'setter' && r.report).length,
+    total: setters.length,
+  }
 
   const shiftDate = (days) => {
     const d = new Date(selectedDate + 'T12:00:00')
@@ -87,8 +115,8 @@ export default function EODDashboard() {
     setSelectedDate(toLocalDateStr(d))
   }
 
-  const openReport = (tab, memberId) => {
-    navigate(`/sales/eod/submit?tab=${tab}&member=${memberId}&date=${selectedDate}`)
+  const openReport = (role, memberId) => {
+    navigate(`/sales/eod/submit?tab=${role}&member=${memberId}&date=${selectedDate}`)
   }
 
   const openNewEOD = () => {
@@ -153,86 +181,60 @@ export default function EODDashboard() {
 
       {showSkeleton ? (
         <div className="space-y-4 animate-pulse">
-          <div className="tile tile-feedback h-64" />
-          <div className="tile tile-feedback h-64" />
+          <div className="tile tile-feedback h-12" />
+          <div className="tile tile-feedback h-96" />
         </div>
       ) : (
-        <div className={`space-y-6 transition-opacity duration-150 ${refreshing ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
-          {/* Closer Reports */}
-          <div className="tile tile-feedback overflow-hidden">
-            <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Closer Reports</h2>
-              <span className="text-xs text-text-400 tabular-nums">
-                {submittedClosers} submitted · {closerRows.length - submittedClosers} pending
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
-                    <th className="px-4 py-2 text-left">Closer</th>
-                    <th className="px-4 py-2 text-right">Booked</th>
-                    <th className="px-4 py-2 text-right">Live</th>
-                    <th className="px-4 py-2 text-right">No Shows</th>
-                    <th className="px-4 py-2 text-right">Offers</th>
-                    <th className="px-4 py-2 text-right">Closes</th>
-                    <th className="px-4 py-2 text-right">Cash</th>
-                    <th className="px-4 py-2 text-right">Revenue</th>
-                    <th className="w-10"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {closerRows.length === 0 && (
-                    <tr><td colSpan={9} className="px-4 py-8 text-center text-text-400">No closers in the team yet.</td></tr>
-                  )}
-                  {closerRows.map(({ member, report }) => (
-                    <CloserReportRow
-                      key={member.id}
-                      member={member}
-                      report={report}
-                      isMe={profile?.teamMemberId === member.id}
-                      canFile={isAdmin || profile?.teamMemberId === member.id}
-                      onOpen={() => openReport('closer', member.id)}
-                    />
-                  ))}
-                </tbody>
-              </table>
+        <div className={`space-y-4 transition-opacity duration-150 ${refreshing ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
+
+          {/* Summary + role filter pills */}
+          <div className="tile tile-feedback px-4 py-3 flex flex-wrap items-center gap-3">
+            <span className="text-xs text-text-400">
+              <span className="font-semibold text-text-primary tabular-nums">{totalSubmitted}</span> of{' '}
+              <span className="tabular-nums">{teamRows.length}</span> submitted
+              {totalPending > 0 && <span className="text-danger ml-2">· {totalPending} pending</span>}
+            </span>
+            <div className="flex items-center gap-1 sm:ml-auto">
+              <FilterPill label={`All · ${teamRows.length}`} active={roleFilter === 'all'} onClick={() => setRoleFilter('all')} />
+              <FilterPill label={`Closers · ${closerStats.submitted}/${closerStats.total}`} active={roleFilter === 'closer'} onClick={() => setRoleFilter('closer')} />
+              <FilterPill label={`Setters · ${setterStats.submitted}/${setterStats.total}`} active={roleFilter === 'setter'} onClick={() => setRoleFilter('setter')} />
+              {totalPending > 0 && (
+                <FilterPill label={`Pending · ${totalPending}`} active={roleFilter === 'pending'} onClick={() => setRoleFilter('pending')} danger />
+              )}
             </div>
           </div>
 
-          {/* Setter Reports */}
+          {/* Unified team table */}
           <div className="tile tile-feedback overflow-hidden">
-            <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Setter Reports</h2>
-              <span className="text-xs text-text-400 tabular-nums">
-                {submittedSetters} submitted · {setterRows.length - submittedSetters} pending
-              </span>
-            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
-                    <th className="px-4 py-2 text-left">Setter</th>
-                    <th className="px-4 py-2 text-right">Dials</th>
-                    <th className="px-4 py-2 text-right">Pickups</th>
-                    <th className="px-4 py-2 text-right">MCs</th>
-                    <th className="px-4 py-2 text-right">Sets</th>
-                    <th className="px-4 py-2 text-right">Self-rating</th>
-                    <th className="w-10"></th>
+                    <th className="px-4 py-2.5 text-left">Team Member</th>
+                    <th className="px-3 py-2.5 text-left">Role</th>
+                    <th className="px-4 py-2.5 text-left">Highlights</th>
+                    <th className="w-28 px-4 py-2.5 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {setterRows.length === 0 && (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-text-400">No setters in the team yet.</td></tr>
+                  {filteredRows.length === 0 && (
+                    <tr><td colSpan={4} className="px-4 py-8 text-center text-text-400">
+                      {teamRows.length === 0
+                        ? 'No team members yet.'
+                        : roleFilter === 'pending'
+                          ? 'Everyone has submitted for this date.'
+                          : 'No team members match this filter.'}
+                    </td></tr>
                   )}
-                  {setterRows.map(({ member, report }) => (
-                    <SetterReportRow
-                      key={member.id}
+                  {filteredRows.map(({ member, role, report }) => (
+                    <TeamEodRow
+                      key={`${role}:${member.id}`}
                       member={member}
+                      role={role}
                       report={report}
                       isMe={profile?.teamMemberId === member.id}
                       canFile={isAdmin || profile?.teamMemberId === member.id}
-                      onOpen={() => openReport('setter', member.id)}
+                      onOpen={() => openReport(role, member.id)}
                     />
                   ))}
                 </tbody>
@@ -245,99 +247,117 @@ export default function EODDashboard() {
   )
 }
 
-function CloserReportRow({ member, report, isMe, canFile, onOpen }) {
-  const submitted = !!report
-  if (submitted) {
-    const booked = (report.nc_booked || 0) + (report.fu_booked || 0)
-    const live = (report.live_nc_calls || 0) + (report.live_fu_calls || 0)
-    const noShows = (report.nc_no_shows || 0) + (report.fu_no_shows || 0)
-    return (
-      <tr
-        onClick={onOpen}
-        className="border-b border-border-default/30 hover:bg-bg-card-hover cursor-pointer transition-colors"
-      >
-        <td className="px-4 py-2.5 font-medium text-opt-yellow">
-          {member.name}
-          {isMe && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-opt-yellow/15 text-opt-yellow">YOU</span>}
-        </td>
-        <td className="px-4 py-2.5 text-right tabular-nums">{booked}</td>
-        <td className="px-4 py-2.5 text-right tabular-nums">{live}</td>
-        <td className="px-4 py-2.5 text-right tabular-nums text-danger">{noShows}</td>
-        <td className="px-4 py-2.5 text-right tabular-nums">{report.offers || 0}</td>
-        <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-success">{report.closes || 0}</td>
-        <td className="px-4 py-2.5 text-right tabular-nums text-opt-yellow">${parseFloat(report.total_cash_collected || 0).toLocaleString()}</td>
-        <td className="px-4 py-2.5 text-right tabular-nums">${parseFloat(report.total_revenue || 0).toLocaleString()}</td>
-        <td className="px-3"><ChevronRight size={ICON.md} className="text-text-400" /></td>
-      </tr>
-    )
-  }
+function FilterPill({ label, active, onClick, danger = false }) {
+  const activeCls = danger
+    ? 'bg-danger/15 border-danger/40 text-danger'
+    : 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow'
+  const inactiveCls = 'border-border-default text-text-secondary hover:bg-bg-card-hover'
   return (
-    <tr className="border-b border-border-default/30 opacity-60 hover:opacity-100 transition-opacity">
-      <td className="px-4 py-2.5 font-medium text-text-secondary">
-        {member.name}
-        {isMe && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-opt-yellow/15 text-opt-yellow">YOU</span>}
+    <button
+      onClick={onClick}
+      className={`px-3 py-1 rounded-full border text-[11px] font-medium transition-colors ${active ? activeCls : inactiveCls}`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function RolePill({ role }) {
+  const isCloser = role === 'closer'
+  const cls = isCloser
+    ? 'bg-cyan-400/15 text-cyan-400 border-cyan-400/30'
+    : 'bg-purple-400/15 text-purple-400 border-purple-400/30'
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-medium uppercase tracking-wide ${cls}`}>
+      {isCloser ? 'Closer' : 'Setter'}
+    </span>
+  )
+}
+
+/**
+ * One row per team member. Renders role-specific inline highlights:
+ *   Closer → Booked · Live · Closes · Cash · Revenue
+ *   Setter → Dials · Pickups · Sets · Self-rating
+ *
+ * Pending (no confirmed report) rows are dimmed with an italic "Not
+ * submitted" marker and a "+ File" button at the end.
+ */
+function TeamEodRow({ member, role, report, isMe, canFile, onOpen }) {
+  const submitted = !!report
+  const cls = submitted
+    ? 'border-b border-border-default/30 hover:bg-bg-card-hover cursor-pointer transition-colors'
+    : 'border-b border-border-default/30 opacity-60 hover:opacity-100 transition-opacity'
+
+  return (
+    <tr onClick={submitted ? onOpen : undefined} className={cls}>
+      <td className="px-4 py-2.5 align-middle">
+        <div className="flex items-center gap-2">
+          <span className={`font-medium ${submitted ? 'text-opt-yellow' : 'text-text-secondary'}`}>{member.name}</span>
+          {isMe && <span className="text-[9px] px-1.5 py-0.5 rounded bg-opt-yellow/15 text-opt-yellow">YOU</span>}
+        </div>
       </td>
-      <td colSpan={7} className="px-4 py-2.5 text-center text-[11px] text-text-400 italic">Not submitted</td>
-      <td className="px-3">
-        {canFile && (
+      <td className="px-3 py-2.5 align-middle">
+        <RolePill role={role} />
+      </td>
+      <td className="px-4 py-2.5 align-middle text-text-secondary">
+        {submitted
+          ? (role === 'closer' ? <CloserHighlights report={report} /> : <SetterHighlights report={report} />)
+          : <span className="italic text-text-400 text-[11px]">Not submitted</span>}
+      </td>
+      <td className="px-4 py-2.5 align-middle text-right">
+        {submitted ? (
+          <ChevronRight size={ICON.md} className="text-text-400 inline" />
+        ) : canFile ? (
           <button
-            onClick={onOpen}
+            onClick={(e) => { e.stopPropagation(); onOpen() }}
             className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-opt-yellow/10 border border-opt-yellow/30 text-opt-yellow hover:bg-opt-yellow/20 transition-colors"
             aria-label={`File EOD for ${member.name}`}
           >
             <Plus size={ICON.xs} /> File
           </button>
-        )}
+        ) : null}
       </td>
     </tr>
   )
 }
 
-function SetterReportRow({ member, report, isMe, canFile, onOpen }) {
-  const submitted = !!report
-  if (submitted) {
-    return (
-      <tr
-        onClick={onOpen}
-        className="border-b border-border-default/30 hover:bg-bg-card-hover cursor-pointer transition-colors"
-      >
-        <td className="px-4 py-2.5 font-medium text-opt-yellow">
-          {member.name}
-          {isMe && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-opt-yellow/15 text-opt-yellow">YOU</span>}
-        </td>
-        <td className="px-4 py-2.5 text-right tabular-nums">{(report.outbound_calls || 0).toLocaleString()}</td>
-        <td className="px-4 py-2.5 text-right tabular-nums">{report.pickups || 0}</td>
-        <td className="px-4 py-2.5 text-right tabular-nums">{report.meaningful_conversations || 0}</td>
-        <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-success">{report.sets || 0}</td>
-        <td className="px-4 py-2.5 text-right tabular-nums">
-          {report.self_rating ? (
-            <span className={report.self_rating >= 7 ? 'text-success' : report.self_rating >= 5 ? 'text-opt-yellow' : 'text-danger'}>
-              {report.self_rating}/10
-            </span>
-          ) : '—'}
-        </td>
-        <td className="px-3"><ChevronRight size={ICON.md} className="text-text-400" /></td>
-      </tr>
-    )
-  }
+function CloserHighlights({ report }) {
+  const booked = (report.nc_booked || 0) + (report.fu_booked || 0)
+  const live = (report.live_nc_calls || 0) + (report.live_fu_calls || 0)
+  const cash = parseFloat(report.total_cash_collected || 0)
+  const revenue = parseFloat(report.total_revenue || 0)
   return (
-    <tr className="border-b border-border-default/30 opacity-60 hover:opacity-100 transition-opacity">
-      <td className="px-4 py-2.5 font-medium text-text-secondary">
-        {member.name}
-        {isMe && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-opt-yellow/15 text-opt-yellow">YOU</span>}
-      </td>
-      <td colSpan={5} className="px-4 py-2.5 text-center text-[11px] text-text-400 italic">Not submitted</td>
-      <td className="px-3">
-        {canFile && (
-          <button
-            onClick={onOpen}
-            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-opt-yellow/10 border border-opt-yellow/30 text-opt-yellow hover:bg-opt-yellow/20 transition-colors"
-            aria-label={`File EOD for ${member.name}`}
-          >
-            <Plus size={ICON.xs} /> File
-          </button>
-        )}
-      </td>
-    </tr>
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums">
+      <Stat label="Booked" value={booked} />
+      <Stat label="Live" value={live} />
+      <Stat label="Closes" value={report.closes || 0} accent="success" />
+      <Stat label="Cash" value={`$${cash.toLocaleString()}`} accent="yellow" />
+      <Stat label="Rev" value={`$${revenue.toLocaleString()}`} />
+    </div>
+  )
+}
+
+function SetterHighlights({ report }) {
+  const rating = report.self_rating
+  const ratingColor = rating >= 7 ? 'text-success' : rating >= 5 ? 'text-opt-yellow' : rating > 0 ? 'text-danger' : 'text-text-400'
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums">
+      <Stat label="Dials" value={(report.outbound_calls || 0).toLocaleString()} />
+      <Stat label="Pickups" value={report.pickups || 0} />
+      <Stat label="MCs" value={report.meaningful_conversations || 0} />
+      <Stat label="Sets" value={report.sets || 0} accent="success" />
+      <span className="text-text-400">Rating <span className={`font-medium ${ratingColor}`}>{rating ? `${rating}/10` : '—'}</span></span>
+    </div>
+  )
+}
+
+function Stat({ label, value, accent }) {
+  const color = accent === 'success' ? 'text-success'
+    : accent === 'yellow' ? 'text-opt-yellow'
+    : 'text-text-primary'
+  return (
+    <span className="text-text-400">
+      {label} <span className={`font-medium ${color}`}>{value}</span>
+    </span>
   )
 }

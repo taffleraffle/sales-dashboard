@@ -234,7 +234,33 @@ export function normalizeSubject(subject) {
  * Only includes outbound emails. Also counts replies (inbound emails in
  * the same conversation that arrived AFTER the outbound was sent).
  */
+// Module-level cache for email flow page data. Prewarmed on Layout mount so
+// the Email Flows page renders instantly instead of waiting on Supabase.
+const statsCache = new Map()  // `${fromDate}:${toDate}` → { data, ts }
+const flowGroupsCache = { data: null, ts: 0 }
+const subjectMetaCache = { data: null, ts: 0 }
+const STATS_TTL_MS = 5 * 60 * 1000  // stats can move — 5 min
+const GROUPS_TTL_MS = 10 * 60 * 1000  // flow groups rarely change — 10 min
+const META_TTL_MS = 10 * 60 * 1000
+
+export function clearEmailFlowCaches() {
+  statsCache.clear()
+  flowGroupsCache.data = null
+  flowGroupsCache.ts = 0
+  subjectMetaCache.data = null
+  subjectMetaCache.ts = 0
+}
+
 export async function loadEmailStats(fromDate, toDate) {
+  const key = `${fromDate}:${toDate}`
+  const cached = statsCache.get(key)
+  if (cached && (Date.now() - cached.ts) < STATS_TTL_MS) return cached.data
+  const data = await _loadEmailStats(fromDate, toDate)
+  statsCache.set(key, { data, ts: Date.now() })
+  return data
+}
+
+async function _loadEmailStats(fromDate, toDate) {
   // Pull outbound emails in the date range
   const { data: outbound } = await supabase
     .from('email_message_cache')
@@ -325,10 +351,15 @@ export async function loadCachedWorkflows() {
  * Returns a map keyed by normalized subject.
  */
 export async function loadSubjectMeta() {
+  if (subjectMetaCache.data && (Date.now() - subjectMetaCache.ts) < META_TTL_MS) {
+    return subjectMetaCache.data
+  }
   const { data, error } = await supabase.from('email_subject_meta').select('*')
-  if (error) return {}
+  if (error) return subjectMetaCache.data || {}
   const map = {}
   for (const row of (data || [])) map[row.subject] = row
+  subjectMetaCache.data = map
+  subjectMetaCache.ts = Date.now()
   return map
 }
 
@@ -367,19 +398,27 @@ export async function updateSubjectMeta(subject, updates) {
 // ── Flow Group CRUD ──
 
 export async function loadFlowGroups() {
+  if (flowGroupsCache.data && (Date.now() - flowGroupsCache.ts) < GROUPS_TTL_MS) {
+    return flowGroupsCache.data
+  }
   const { data } = await supabase.from('email_flow_groups').select('*').order('sort_order').order('name')
-  return data || []
+  const result = data || []
+  flowGroupsCache.data = result
+  flowGroupsCache.ts = Date.now()
+  return result
 }
 
 export async function createFlowGroup(name, description = '', color = '#f0e050') {
   const { data, error } = await supabase.from('email_flow_groups').insert({ name, description, color }).select().single()
   if (error) { console.error('Create flow group failed:', error); return null }
+  flowGroupsCache.data = null
   return data
 }
 
 export async function updateFlowGroup(id, updates) {
   const { error } = await supabase.from('email_flow_groups').update(updates).eq('id', id)
   if (error) console.error('Update flow group failed:', error)
+  else flowGroupsCache.data = null
   return !error
 }
 
@@ -388,6 +427,10 @@ export async function deleteFlowGroup(id) {
   await supabase.from('email_subject_meta').update({ flow_group_id: null, updated_at: new Date().toISOString() }).eq('flow_group_id', id)
   const { error } = await supabase.from('email_flow_groups').delete().eq('id', id)
   if (error) console.error('Delete flow group failed:', error)
+  else {
+    flowGroupsCache.data = null
+    subjectMetaCache.data = null
+  }
   return !error
 }
 
@@ -397,6 +440,7 @@ export async function assignSubjectsToFlow(subjects, flowGroupId) {
   const rows = subjects.map(subject => ({ subject, flow_group_id: flowGroupId, updated_at: now }))
   const { error } = await supabase.from('email_subject_meta').upsert(rows, { onConflict: 'subject' })
   if (error) console.error('Assign to flow failed:', error)
+  else subjectMetaCache.data = null
   return !error
 }
 
@@ -412,10 +456,12 @@ export async function assignSubjectsToFlow(subjects, flowGroupId) {
  * 20+ seconds on large flows because name resolution went out to GHL 5 at a
  * time with a 1s sleep every 25 requests. Now the UI renders in <1s.
  *
- * Unknown contacts are backfilled asynchronously via {@link resolveRecipientNamesInBackground}
- * so the next time the dropdown opens (or the cache warms up), names show up.
+ * @param {Function} [onNamesResolved] — optional callback. Fires after the
+ *   background GHL fetch completes with the updated recipient list (same
+ *   shape) so the UI can re-render with fresh names. Pass null/undefined
+ *   if you don't need the refresh.
  */
-export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
+export async function loadEmailRecipients(normalizedSubject, fromDate, toDate, onNamesResolved) {
   const { data } = await supabase
     .from('email_message_cache')
     .select('id, subject, status, contact_id, date_added, conversation_id')
@@ -459,33 +505,46 @@ export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
     }
   }
 
-  // Backfill missing names in the background — no await, doesn't block the UI.
-  const uncachedIds = uniqueContactIds.filter(id => !contactNames[id])
-  if (uncachedIds.length > 0) {
-    resolveRecipientNamesInBackground(uncachedIds)
-  }
-
-  return matching.map(e => ({
+  const toRecipients = (nameMap) => matching.map(e => ({
     id: e.id,
     rawSubject: e.subject,
     status: e.status,
     contactId: e.contact_id,
-    contactName: contactNames[e.contact_id] || 'Unknown Contact',
+    contactName: nameMap[e.contact_id] || (e.contact_id ? `Contact ${e.contact_id.slice(0, 8)}` : 'Unknown'),
     date: e.date_added,
     replied: e.conversation_id && inboundByConvo[e.conversation_id]?.some(dt => dt > e.date_added),
   }))
+
+  // Backfill missing names in the background. If the caller passed an
+  // onNamesResolved callback, invoke it once fresh names land so the UI
+  // can re-render without the user having to close and reopen the dropdown.
+  const uncachedIds = uniqueContactIds.filter(id => !contactNames[id])
+  if (uncachedIds.length > 0) {
+    resolveRecipientNamesInBackground(uncachedIds, async (resolved) => {
+      if (!onNamesResolved) return
+      const merged = { ...contactNames, ...resolved }
+      onNamesResolved(toRecipients(merged))
+    })
+  }
+
+  return toRecipients(contactNames)
 }
 
 /**
  * Fire-and-forget GHL contact name resolution.
  *
- * Caps at 50 contacts per call to avoid running up against GHL's rate limits
- * on very large flows. Any additional uncached contacts will be picked up on
- * the next dropdown open (at which point the first 50 will already be cached).
+ * Caps at 100 contacts per call. Used by loadEmailRecipients on dropdown open
+ * AND by prewarmRecipientNameCache on Email Flows page mount — the latter
+ * pre-populates the cache so the very first dropdown open already has names.
+ *
+ * @param {string[]} contactIds
+ * @param {Function} [onResolved] — callback receiving { [id]: name } map
+ *   of newly-resolved names so callers can refresh their UI.
  */
-function resolveRecipientNamesInBackground(contactIds) {
-  const capped = contactIds.slice(0, 50)
+function resolveRecipientNamesInBackground(contactIds, onResolved) {
+  const capped = contactIds.slice(0, 100)
   ;(async () => {
+    const resolved = {}
     const newlyCached = []
     for (let i = 0; i < capped.length; i += 10) {
       const batch = capped.slice(i, i + 10)
@@ -499,19 +558,79 @@ function resolveRecipientNamesInBackground(contactIds) {
           return name ? { id: cid, name, email: c.email || null } : null
         } catch { return null }
       }))
-      for (const r of results) if (r) newlyCached.push(r)
+      for (const r of results) {
+        if (r) {
+          newlyCached.push(r)
+          resolved[r.id] = r.name
+        }
+      }
     }
     if (newlyCached.length > 0) {
-      supabase.from('ghl_contacts_cache')
+      await supabase.from('ghl_contacts_cache')
         .upsert(newlyCached.map(c => ({ ...c, synced_at: new Date().toISOString() })), { onConflict: 'id' })
-        .then(() => {})
-        .catch(() => {})
     }
-  })().catch(() => {})
+    if (onResolved) {
+      try { await onResolved(resolved) } catch (_e) { void _e }
+    }
+  })().catch((err) => {
+    console.warn('[resolveRecipientNamesInBackground] failed:', err?.message || err)
+  })
+}
+
+/**
+ * Pre-warm the GHL contact-name cache.
+ *
+ * Scans the last N days of outbound emails, finds every contact_id that isn't
+ * already in `ghl_contacts_cache`, and resolves up to 200 of them from GHL in
+ * the background. Fires from the EmailFlows page mount (and can be reused
+ * from Layout mount) so when the user opens a flow's recipient dropdown,
+ * names are already populated — no more "Unknown Contact" on first view.
+ *
+ * Returns a promise that resolves with `{ checked, resolved }` once done.
+ * Safe to call repeatedly — only uncached IDs are fetched.
+ */
+export async function prewarmRecipientNameCache(daysBack = 30) {
+  const since = new Date()
+  since.setDate(since.getDate() - daysBack)
+  const sinceStr = since.toISOString().split('T')[0]
+
+  const { data: emails } = await supabase
+    .from('email_message_cache')
+    .select('contact_id')
+    .eq('direction', 'outbound')
+    .gte('date_added', sinceStr)
+    .not('contact_id', 'is', null)
+
+  const uniqueIds = [...new Set((emails || []).map(e => e.contact_id).filter(Boolean))]
+  if (uniqueIds.length === 0) return { checked: 0, resolved: 0 }
+
+  // Check which ones are already in cache.
+  const cachedIds = new Set()
+  const CHUNK = 200
+  for (let i = 0; i < uniqueIds.length; i += CHUNK) {
+    const chunk = uniqueIds.slice(i, i + CHUNK)
+    const { data: cached } = await supabase
+      .from('ghl_contacts_cache')
+      .select('id')
+      .in('id', chunk)
+    for (const c of (cached || [])) cachedIds.add(c.id)
+  }
+
+  const uncached = uniqueIds.filter(id => !cachedIds.has(id))
+  if (uncached.length === 0) return { checked: uniqueIds.length, resolved: 0 }
+
+  // Batch-resolve up to 200 names in the background.
+  const toResolve = uncached.slice(0, 200)
+  return new Promise(resolve => {
+    resolveRecipientNamesInBackground(toResolve, (resolved) => {
+      resolve({ checked: uniqueIds.length, resolved: Object.keys(resolved).length })
+    })
+  })
 }
 
 export async function removeSubjectFromFlow(subject) {
   const { error } = await supabase.from('email_subject_meta').update({ flow_group_id: null, updated_at: new Date().toISOString() }).eq('subject', subject)
   if (error) console.error('Remove from flow failed:', error)
+  else subjectMetaCache.data = null
   return !error
 }
