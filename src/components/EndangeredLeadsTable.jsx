@@ -67,17 +67,24 @@ function formatDuration(secs) {
   return `${Math.floor(secs / 60)}m ${secs % 60}s`
 }
 
-export default function EndangeredLeadsTable({ leads, loading }) {
+export default function EndangeredLeadsTable({ leads, loading, fillHeight = false }) {
   const [expandedId, setExpandedId] = useState(null)
+  // `fillHeight` is opt-in because this component is also used on SalesOverview
+  // as a free-standing tile where default-height + bottom-margin is correct.
+  // SetterOverview passes fillHeight so it matches sibling card height in the
+  // side-by-side grid layout.
+  const containerCls = fillHeight
+    ? 'tile tile-feedback overflow-hidden h-full flex flex-col'
+    : 'tile tile-feedback overflow-hidden mb-6'
 
   if (loading) {
     return (
-      <div className="tile tile-feedback p-6 mb-6">
+      <div className={fillHeight ? 'tile tile-feedback p-6 h-full flex flex-col' : 'tile tile-feedback p-6 mb-6'}>
         <div className="flex items-center gap-2 mb-3">
           <Calendar size={14} className="text-opt-yellow" />
           <h2 className="text-sm font-medium text-text-secondary">Upcoming Strategy Calls</h2>
         </div>
-        <div className="flex items-center justify-center gap-2 py-8 text-text-400 text-xs">
+        <div className={`flex items-center justify-center gap-2 text-text-400 text-xs ${fillHeight ? 'flex-1' : 'py-8'}`}>
           <Loader size={14} className="animate-spin" />
           Checking engagement signals...
         </div>
@@ -87,12 +94,12 @@ export default function EndangeredLeadsTable({ leads, loading }) {
 
   if (!leads || leads.length === 0) {
     return (
-      <div className="tile tile-feedback p-6 mb-6">
+      <div className={fillHeight ? 'tile tile-feedback p-6 h-full flex flex-col' : 'tile tile-feedback p-6 mb-6'}>
         <div className="flex items-center gap-2 mb-3">
           <Calendar size={14} className="text-opt-yellow" />
           <h2 className="text-sm font-medium text-text-secondary">Upcoming Strategy Calls</h2>
         </div>
-        <p className="text-xs text-text-400 text-center py-4">No upcoming strategy calls in the next 7 days.</p>
+        <p className={`text-xs text-text-400 text-center ${fillHeight ? 'flex-1 flex items-center justify-center' : 'py-4'}`}>No upcoming strategy calls in the next 7 days.</p>
       </div>
     )
   }
@@ -102,8 +109,8 @@ export default function EndangeredLeadsTable({ leads, loading }) {
   const confirmed = leads.filter(l => l.engaged && l.tier !== 'cancel_risk')
 
   return (
-    <div className="tile tile-feedback overflow-hidden mb-6">
-      <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">
+    <div className={containerCls}>
+      <div className="px-4 py-3 border-b border-border-default flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <Calendar size={14} className="text-opt-yellow" />
           <h2 className="text-sm font-medium text-text-secondary">Upcoming Strategy Calls ({leads.length})</h2>
@@ -126,9 +133,9 @@ export default function EndangeredLeadsTable({ leads, loading }) {
           )}
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className={fillHeight ? 'flex-1 overflow-auto min-h-0' : 'overflow-x-auto'}>
         <table className="w-full text-xs">
-          <thead>
+          <thead className={fillHeight ? 'sticky top-0 bg-bg-card z-10' : ''}>
             <tr className="bg-bg-card text-text-400 uppercase text-[10px]">
               <th className="px-3 py-2 text-left w-5"></th>
               <th className="px-3 py-2 text-left">Lead</th>

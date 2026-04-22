@@ -23,7 +23,6 @@ export default function PipelinePerformance() {
   const [retryKey, setRetryKey] = useState(0)
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
   const [stlCalls, setStlCalls] = useState(null)
-  const [stlOpen, setStlOpen] = useState(false)
   const [allAppointments, setAllAppointments] = useState([])
   const [totalSets, setTotalSets] = useState(0)
   const [showAllLeads, setShowAllLeads] = useState(false)
@@ -159,27 +158,25 @@ export default function PipelinePerformance() {
           {stl ? (
             stl.allLeads.length > 0 && (
               <div className="tile tile-feedback overflow-hidden">
-                <button onClick={() => setStlOpen(!stlOpen)} className="w-full px-4 py-2 border-b border-border-default flex items-center justify-between hover:bg-bg-card-hover/50 transition-colors">
+                <div className="px-4 py-2 border-b border-border-default flex items-center justify-between">
                   <span className="text-xs font-medium text-text-secondary">
                     Recent Leads — Response Times ({stl.allLeads.length})
                     {stl.notCalled > 0 && <span className="ml-2 text-danger">{stl.notCalled} not called</span>}
                   </span>
-                  <ChevronDown size={14} className={`text-text-400 transition-transform ${stlOpen ? 'rotate-180' : ''}`} />
-                </button>
-                {stlOpen && (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
-                          <th className="px-3 py-2 text-left">Lead</th>
-                          <th className="px-3 py-2 text-left">Setter</th>
-                          <th className="px-3 py-2 text-left">Entered Pipeline</th>
-                          <th className="px-3 py-2 text-left">Called At</th>
-                          <th className="px-3 py-2 text-right">Talk Time</th>
-                          <th className="px-3 py-2 text-right">Response Time</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
+                        <th className="px-3 py-2 text-left">Lead</th>
+                        <th className="px-3 py-2 text-left">Setter</th>
+                        <th className="px-3 py-2 text-left">Entered Pipeline</th>
+                        <th className="px-3 py-2 text-left">Called At</th>
+                        <th className="px-3 py-2 text-right">Talk Time</th>
+                        <th className="px-3 py-2 text-right">Response Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
                         {stl.allLeads.slice(0, 50).map((l, i) => {
                           const tzOpts = { timeZone: 'America/Indiana/Indianapolis', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
                           const setterName = l.setterId ? (setters.find(s => s.wavv_user_id === l.setterId)?.name || '—') : '—'
@@ -214,7 +211,6 @@ export default function PipelinePerformance() {
                       </tbody>
                     </table>
                   </div>
-                )}
               </div>
             )
           ) : (
