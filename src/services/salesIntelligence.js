@@ -8,7 +8,7 @@ async function fetchGHLLeads(since) {
   const leads = []
   if (!GHL_KEY || !GHL_LOC) return leads
   try {
-    let url = `${GHL_BASE}/opportunities/search?location_id=${GHL_LOC}&pipeline_id=${SCIO_PIPELINE}&limit=500`
+    let url = `${GHL_BASE}/opportunities/search?location_id=${GHL_LOC}&pipeline_id=${SCIO_PIPELINE}&limit=100`
     while (url && leads.length < 3000) {
       const res = await ghlFetch(url)
       const data = await res.json()
