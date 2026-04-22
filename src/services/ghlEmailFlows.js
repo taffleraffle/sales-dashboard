@@ -412,6 +412,17 @@ export async function assignSubjectsToFlow(subjects, flowGroupId) {
  * Load individual email records for a given normalized subject.
  * Returns per-contact entries with status, date, contact_id.
  */
+/**
+ * Load recipients for a given normalized subject.
+ *
+ * Fast path: resolves names ONLY from the Supabase `ghl_contacts_cache` table —
+ * no GHL API calls on the hot path. Opening the dropdown used to block for
+ * 20+ seconds on large flows because name resolution went out to GHL 5 at a
+ * time with a 1s sleep every 25 requests. Now the UI renders in <1s.
+ *
+ * Unknown contacts are backfilled asynchronously via {@link resolveRecipientNamesInBackground}
+ * so the next time the dropdown opens (or the cache warms up), names show up.
+ */
 export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
   const { data } = await supabase
     .from('email_message_cache')
@@ -421,13 +432,9 @@ export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
     .lte('date_added', toDate + 'T23:59:59')
     .order('date_added', { ascending: false })
 
-  // Filter to those matching this normalized subject
   const matching = (data || []).filter(e => normalizeSubject(e.subject) === normalizedSubject)
 
-  // Check for replies in same conversations. Bounded by:
-  //  - only conversation_ids we actually care about (the matching outbound ones)
-  //  - the same date window as the outbound query (+1 day window past end to catch quick replies)
-  //  - a hard row limit so the query can't balloon to 100k+ rows and time out PostgREST.
+  // Replies lookup — bounded by conversation_ids we care about, same window, row cap.
   const interestingConvos = [...new Set(matching.map(e => e.conversation_id).filter(Boolean))]
   const inboundByConvo = {}
   if (interestingConvos.length > 0) {
@@ -447,11 +454,9 @@ export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
     }
   }
 
-  // Resolve contact IDs to names — check cache first, then GHL API
+  // Resolve contact IDs to names — cache only on the hot path.
   const uniqueContactIds = [...new Set(matching.map(e => e.contact_id).filter(Boolean))]
   const contactNames = {}
-
-  // 1. Check Supabase cache for known contacts
   if (uniqueContactIds.length > 0) {
     const { data: cached } = await supabase
       .from('ghl_contacts_cache')
@@ -462,36 +467,10 @@ export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
     }
   }
 
-  // 2. Fetch uncached contacts from GHL API
+  // Backfill missing names in the background — no await, doesn't block the UI.
   const uncachedIds = uniqueContactIds.filter(id => !contactNames[id])
-  const newlyCached = []
-  for (let i = 0; i < uncachedIds.length; i += 5) {
-    if (i > 0 && i % 25 === 0) await new Promise(r => setTimeout(r, 1000))
-    const batch = uncachedIds.slice(i, i + 5)
-    const results = await Promise.all(batch.map(async cid => {
-      try {
-        const r = await fetch(`${BASE_URL}/contacts/${cid}`, { headers: ghlHeaders })
-        if (!r.ok) return { id: cid, name: null, email: null }
-        const d = await r.json()
-        const c = d.contact || d
-        const name = `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || null
-        return { id: cid, name, email: c.email || null }
-      } catch { return { id: cid, name: null, email: null } }
-    }))
-    for (const r of results) {
-      if (r.name) {
-        contactNames[r.id] = r.name
-        newlyCached.push({ id: r.id, name: r.name, email: r.email })
-      }
-    }
-  }
-
-  // 3. Write newly resolved names to cache (fire and forget)
-  if (newlyCached.length > 0) {
-    supabase.from('ghl_contacts_cache')
-      .upsert(newlyCached.map(c => ({ ...c, synced_at: new Date().toISOString() })), { onConflict: 'id' })
-      .then(() => {})
-      .catch(() => {})
+  if (uncachedIds.length > 0) {
+    resolveRecipientNamesInBackground(uncachedIds)
   }
 
   return matching.map(e => ({
@@ -503,6 +482,40 @@ export async function loadEmailRecipients(normalizedSubject, fromDate, toDate) {
     date: e.date_added,
     replied: e.conversation_id && inboundByConvo[e.conversation_id]?.some(dt => dt > e.date_added),
   }))
+}
+
+/**
+ * Fire-and-forget GHL contact name resolution.
+ *
+ * Caps at 50 contacts per call to avoid running up against GHL's rate limits
+ * on very large flows. Any additional uncached contacts will be picked up on
+ * the next dropdown open (at which point the first 50 will already be cached).
+ */
+function resolveRecipientNamesInBackground(contactIds) {
+  const capped = contactIds.slice(0, 50)
+  ;(async () => {
+    const newlyCached = []
+    for (let i = 0; i < capped.length; i += 10) {
+      const batch = capped.slice(i, i + 10)
+      const results = await Promise.all(batch.map(async cid => {
+        try {
+          const r = await fetch(`${BASE_URL}/contacts/${cid}`, { headers: ghlHeaders })
+          if (!r.ok) return null
+          const d = await r.json()
+          const c = d.contact || d
+          const name = `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.email || null
+          return name ? { id: cid, name, email: c.email || null } : null
+        } catch { return null }
+      }))
+      for (const r of results) if (r) newlyCached.push(r)
+    }
+    if (newlyCached.length > 0) {
+      supabase.from('ghl_contacts_cache')
+        .upsert(newlyCached.map(c => ({ ...c, synced_at: new Date().toISOString() })), { onConflict: 'id' })
+        .then(() => {})
+        .catch(() => {})
+    }
+  })().catch(() => {})
 }
 
 export async function removeSubjectFromFlow(subject) {

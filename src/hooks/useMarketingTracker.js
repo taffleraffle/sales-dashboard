@@ -231,8 +231,10 @@ export async function syncEODToTracker() {
     if (callAgg.financeAccepted != null) patch.finance_accepted = callAgg.financeAccepted
     if (eod?.live_calls != null) patch.live_calls = eod.live_calls
     if (eod?.booked != null) patch.calls_on_calendar = eod.booked
-    // EOD booked calls ARE the qualified bookings — always overwrite GHL calendar count
-    if (eod?.booked != null) patch.qualified_bookings = eod.booked
+    // NOTE: Do NOT set qualified_bookings from EOD here. GHL strategy-calendar is
+    // the source of truth for that metric (see metaAdsSync.js). EOD's booked count
+    // is the closer's manual tally of scheduled calls — useful as calls_on_calendar,
+    // but it underreports whenever the closer forgets a booking GHL did capture.
     if (eod?.no_shows != null) patch.no_shows = eod.no_shows
     if (eod?.reschedules != null) patch.reschedules = eod.reschedules
 

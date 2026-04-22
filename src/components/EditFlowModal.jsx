@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Loader, Save } from 'lucide-react'
+import { X, Loader, Save, Check } from 'lucide-react'
 import { ICON } from '../utils/constants'
 
 // Preset palette — matches the existing design language (yellow, accent hues).
@@ -88,26 +88,44 @@ export default function EditFlowModal({ flow, onClose, onSave }) {
           <div>
             <label className="text-[11px] uppercase tracking-wider text-text-400 block mb-1.5">Color</label>
             <div className="flex items-center gap-2 flex-wrap">
-              {SWATCHES.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setColor(c)}
-                  aria-label={`Set color to ${c}`}
-                  className={`w-7 h-7 rounded-lg border-2 transition-all ${color === c ? 'border-text-primary scale-110' : 'border-transparent hover:scale-105'}`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-              <label className="w-7 h-7 rounded-lg border border-border-default flex items-center justify-center text-[9px] text-text-400 cursor-pointer hover:border-opt-yellow/30 relative">
-                <input
-                  type="color"
-                  value={color}
-                  onChange={e => setColor(e.target.value)}
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                  aria-label="Pick a custom color"
-                />
-                +
-              </label>
+              {SWATCHES.map(c => {
+                const selected = color.toLowerCase() === c.toLowerCase()
+                // Pick a legible tick color: dark for light swatches, white for dark.
+                const tickDark = ['#f0e050', '#d4f50c', '#eab308'].includes(c.toLowerCase())
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setColor(c)}
+                    aria-label={`Set color to ${c}`}
+                    aria-pressed={selected}
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ring-offset-2 ring-offset-bg-card ${selected ? 'ring-2 ring-text-primary scale-110' : 'ring-0 hover:scale-105'}`}
+                    style={{ backgroundColor: c }}
+                  >
+                    {selected && <Check size={14} className={tickDark ? 'text-bg-primary' : 'text-white'} strokeWidth={3} />}
+                  </button>
+                )
+              })}
+              {/* Custom color picker — also shows a tick when active. */}
+              {(() => {
+                const isCustom = !SWATCHES.map(s => s.toLowerCase()).includes(color.toLowerCase())
+                return (
+                  <label className={`w-8 h-8 rounded-lg border flex items-center justify-center text-[10px] cursor-pointer relative transition-all ${isCustom ? 'border-text-primary scale-110' : 'border-border-default text-text-400 hover:border-opt-yellow/30'}`}
+                    style={isCustom ? { backgroundColor: color } : {}}
+                    aria-pressed={isCustom}
+                    title="Custom color"
+                  >
+                    <input
+                      type="color"
+                      value={color}
+                      onChange={e => setColor(e.target.value)}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      aria-label="Pick a custom color"
+                    />
+                    {isCustom ? <Check size={14} className="text-white" strokeWidth={3} /> : '+'}
+                  </label>
+                )
+              })()}
             </div>
           </div>
         </div>
