@@ -249,27 +249,34 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
   // Step 3: pull leads from GHL pipeline (more accurate than Meta)
   const leadsByDate = await fetchGHLLeadsByDate(trackerSince)
 
-  // Step 4: pull auto_bookings from Intro Call calendars (by booked_at)
+  // Step 4: pull auto_bookings from Intro Call calendars.
+  // Fall back to appointment_date when booked_at is NULL — historical rows
+  // synced before migration 022 don't have booked_at populated, so filtering
+  // strictly on booked_at returns zero. Union filter covers both sides.
   const { data: introAppts, error: introErr } = await supabase
     .from('ghl_appointments')
-    .select('booked_at, calendar_name, ghl_contact_id')
-    .gte('booked_at', `${trackerSince} 00:00:00`)
+    .select('booked_at, appointment_date, calendar_name, ghl_contact_id')
+    .or(`booked_at.gte.${trackerSince},appointment_date.gte.${trackerSince}`)
     .neq('appointment_status', 'cancelled')
     .in('calendar_name', INTRO_CALL_CALENDARS)
   if (introErr) throw new Error(`ghl_appointments (intro) read failed: ${introErr.message}`)
 
   const autoBookingsByDate = {}
   for (const a of (introAppts || [])) {
-    if (!a.booked_at) continue
-    const d = a.booked_at.split(' ')[0].split('T')[0]
+    // Prefer booked_at (actual booking timestamp — aligns with ad-spend day).
+    // Fall back to appointment_date for legacy rows missing booked_at.
+    const raw = a.booked_at || a.appointment_date
+    if (!raw) continue
+    const d = String(raw).split(' ')[0].split('T')[0]
+    if (d < trackerSince) continue
     autoBookingsByDate[d] = (autoBookingsByDate[d] || 0) + 1
   }
   console.log(`[syncMetaToTracker] Auto bookings: ${introAppts?.length || 0} intro appointments, ${Object.keys(autoBookingsByDate).length} dates with bookings.`)
 
-  // Step 5: pull qualified_bookings from Strategy Call calendars
-  // Counted by appointment_date (when the call is scheduled), deduped per contact
-  // appointment_date is more accurate than booked_at because calls booked in Feb for Mar
-  // should show on the day they actually happen
+  // Step 5: pull qualified_bookings from Strategy Call calendars.
+  // Each non-cancelled appointment = 1 qualified booking. No per-contact dedupe —
+  // a lead who re-books after a reschedule IS two bookings, and the previous
+  // global Set wiped out same-contact bookings even across months.
   const { data: stratAppts, error: stratErr } = await supabase
     .from('ghl_appointments')
     .select('appointment_date, calendar_name, ghl_contact_id')
@@ -280,14 +287,11 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
   if (stratErr) throw new Error(`ghl_appointments (strategy) read failed: ${stratErr.message}`)
 
   const qualBookingsByDate = {}
-  const seenContacts = new Set()
   for (const a of (stratAppts || [])) {
-    if (!a.appointment_date || !a.ghl_contact_id) continue
-    // Only count first strategy call per contact
-    if (seenContacts.has(a.ghl_contact_id)) continue
-    seenContacts.add(a.ghl_contact_id)
+    if (!a.appointment_date) continue
     qualBookingsByDate[a.appointment_date] = (qualBookingsByDate[a.appointment_date] || 0) + 1
   }
+  console.log(`[syncMetaToTracker] Qualified bookings: ${stratAppts?.length || 0} strategy appointments, ${Object.keys(qualBookingsByDate).length} dates with bookings.`)
 
   // Merge all dates
   const allDates = new Set([
@@ -319,8 +323,9 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
       if (byDate[date]?.adspend != null) patch.adspend = byDate[date].adspend
       if (leadsByDate[date] != null) patch.leads = leadsByDate[date]
       if (autoBookingsByDate[date] != null) patch.auto_bookings = autoBookingsByDate[date]
-      // Only update qualified_bookings if the existing row has no value
-      if (!existing.qualified_bookings && qualBookingsByDate[date] != null) patch.qualified_bookings = qualBookingsByDate[date]
+      // GHL strategy calendar is the source of truth for qualified_bookings —
+      // always overwrite so stale counts get corrected when new bookings land.
+      if (qualBookingsByDate[date] != null) patch.qualified_bookings = qualBookingsByDate[date]
 
       const { error } = await supabase
         .from('marketing_tracker')

@@ -23,7 +23,8 @@ export default function EODDashboard() {
   const { profile, isAdmin } = useAuth()
 
   const [selectedDate, setSelectedDate] = useState(todayET())
-  const [loading, setLoading] = useState(true)
+  const [initialLoad, setInitialLoad] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [closerReports, setCloserReports] = useState([])
   const [setterReports, setSetterReports] = useState([])
 
@@ -32,7 +33,9 @@ export default function EODDashboard() {
 
   useEffect(() => {
     async function load() {
-      setLoading(true)
+      // First load shows a skeleton; subsequent date changes dim the existing
+      // table instead of collapsing the layout into placeholder tiles.
+      setRefreshing(true)
       try {
         const [cRes, sRes] = await Promise.all([
           supabase
@@ -51,7 +54,8 @@ export default function EODDashboard() {
       } catch (err) {
         console.error('EOD dashboard load failed:', err)
       } finally {
-        setLoading(false)
+        setRefreshing(false)
+        setInitialLoad(false)
       }
     }
     load()
@@ -94,7 +98,7 @@ export default function EODDashboard() {
     navigate(`/sales/eod/submit?${params.toString()}`)
   }
 
-  const isLoading = loading || loadingClosers || loadingSetters
+  const showSkeleton = initialLoad && (loadingClosers || loadingSetters || refreshing)
 
   const formatDateLabel = (d) => {
     if (d === todayET()) return 'Today'
@@ -147,13 +151,13 @@ export default function EODDashboard() {
         </div>
       </div>
 
-      {isLoading ? (
+      {showSkeleton ? (
         <div className="space-y-4 animate-pulse">
           <div className="tile tile-feedback h-64" />
           <div className="tile tile-feedback h-64" />
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className={`space-y-6 transition-opacity duration-150 ${refreshing ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
           {/* Closer Reports */}
           <div className="tile tile-feedback overflow-hidden">
             <div className="px-4 py-3 border-b border-border-default flex items-center justify-between">

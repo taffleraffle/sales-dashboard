@@ -8,6 +8,7 @@ import CloserOverview from './pages/CloserOverview'
 import CloserDetail from './pages/CloserDetail'
 import SetterOverview from './pages/SetterOverview'
 import SetterDetail from './pages/SetterDetail'
+import PipelinePerformance from './pages/PipelinePerformance'
 import EODReview from './pages/EODReview'
 import EODDashboard from './pages/EODDashboard'
 import MarketingPerformance from './pages/MarketingPerformance'
@@ -84,6 +85,7 @@ export default function App() {
               <Route path="/sales/setters" element={<SetterOverview />} />
               <Route path="/sales/setters/:id" element={<SetterDetail />} />
               <Route path="/sales/setters/:id/kpi-history" element={<SetterKPIHistory />} />
+              <Route path="/sales/pipeline" element={<PipelinePerformance />} />
               <Route path="/sales/marketing" element={<MarketingPerformance />} />
               <Route path="/sales/eod" element={<EODDashboard />} />
               <Route path="/sales/eod/submit" element={<EODReview />} />
