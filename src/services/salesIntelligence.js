@@ -1,19 +1,16 @@
 import { supabase } from '../lib/supabase'
+import { BASE_URL as GHL_BASE, GHL_LOCATION_ID as GHL_LOC, ghlFetch } from './ghlClient'
 
-const GHL_BASE = 'https://services.leadconnectorhq.com'
 const GHL_KEY = import.meta.env.VITE_GHL_API_KEY
-const GHL_LOC = import.meta.env.VITE_GHL_LOCATION_ID
 const SCIO_PIPELINE = 'ZN1DW9S9qS540PNAXSxa'
-
-const ghlHeaders = { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28' }
 
 async function fetchGHLLeads(since) {
   const leads = []
   if (!GHL_KEY || !GHL_LOC) return leads
   try {
-    let url = `${GHL_BASE}/opportunities/search?location_id=${GHL_LOC}&pipeline_id=${SCIO_PIPELINE}&limit=100`
+    let url = `${GHL_BASE}/opportunities/search?location_id=${GHL_LOC}&pipeline_id=${SCIO_PIPELINE}&limit=500`
     while (url && leads.length < 3000) {
-      const res = await fetch(url, { headers: ghlHeaders })
+      const res = await ghlFetch(url)
       const data = await res.json()
       for (const o of (data.opportunities || [])) {
         if (o.createdAt && new Date(o.createdAt) >= since) {

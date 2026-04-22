@@ -1,33 +1,4 @@
-const GHL_API_KEY = import.meta.env.VITE_GHL_API_KEY
-const GHL_LOCATION_ID = import.meta.env.VITE_GHL_LOCATION_ID
-const BASE_URL = 'https://services.leadconnectorhq.com'
-
-const ghlHeaders = {
-  'Authorization': `Bearer ${GHL_API_KEY}`,
-  'Version': '2021-07-28',
-}
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms))
-
-/**
- * Fetch a GHL URL with exponential backoff on 429. Honors Retry-After.
- * Retries: 1s, 2s, 4s, 8s — max 4 attempts. Non-429 failures bubble up fast.
- */
-async function ghlFetch(url, { maxAttempts = 4 } = {}) {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const res = await fetch(url, { headers: ghlHeaders })
-    if (res.status !== 429) return res
-    const retryAfter = Number(res.headers.get('Retry-After'))
-    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
-      ? retryAfter * 1000
-      : Math.min(8000, 1000 * 2 ** attempt)
-    if (attempt === maxAttempts - 1) return res // give up, let caller surface error
-    console.warn(`[ghlFetch] 429 on ${url.split('?')[0]} — backing off ${waitMs}ms (attempt ${attempt + 1}/${maxAttempts})`)
-    await sleep(waitMs)
-  }
-  // Unreachable — the final iteration returns res.
-  throw new Error('ghlFetch: exhausted retries')
-}
+import { BASE_URL, GHL_LOCATION_ID, ghlFetch } from './ghlClient'
 
 // Wavv dialer tag classification
 const WAVV_DIAL_TAGS = new Set([

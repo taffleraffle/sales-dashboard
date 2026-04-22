@@ -1,19 +1,11 @@
 import { supabase } from '../lib/supabase'
-
-const GHL_API_KEY = import.meta.env.VITE_GHL_API_KEY
-const GHL_LOCATION_ID = import.meta.env.VITE_GHL_LOCATION_ID
-const BASE_URL = 'https://services.leadconnectorhq.com'
-
-const ghlHeaders = {
-  'Authorization': `Bearer ${GHL_API_KEY}`,
-  'Version': '2021-07-28',
-}
+import { BASE_URL, GHL_LOCATION_ID, ghlFetch } from './ghlClient'
 
 /**
  * Fetch all GHL workflows and cache them in ghl_workflows table.
  */
 export async function fetchWorkflows() {
-  const res = await fetch(`${BASE_URL}/workflows/?locationId=${GHL_LOCATION_ID}`, { headers: ghlHeaders })
+  const res = await ghlFetch(`${BASE_URL}/workflows/?locationId=${GHL_LOCATION_ID}`)
   if (!res.ok) throw new Error(`Workflows fetch failed: ${res.status}`)
   const data = await res.json()
   const workflows = (data.workflows || []).map(w => ({
@@ -59,7 +51,7 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
       const lastDate = allConvos[allConvos.length - 1]?.lastMessageDate
       if (lastDate) params.set('startAfterDate', String(lastDate))
     }
-    const res = await fetch(`${BASE_URL}/conversations/search?${params}`, { headers: ghlHeaders })
+    const res = await ghlFetch(`${BASE_URL}/conversations/search?${params}`)
     if (!res.ok) break
     const data = await res.json()
     const convos = data.conversations || []
@@ -80,7 +72,7 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
     if (convIdx % 50 === 0) await new Promise(r => setTimeout(r, 1000))
 
     try {
-      const msgRes = await fetch(`${BASE_URL}/conversations/${convo.id}/messages`, { headers: ghlHeaders })
+      const msgRes = await ghlFetch(`${BASE_URL}/conversations/${convo.id}/messages`)
       if (msgRes.status === 429) { await new Promise(r => setTimeout(r, 5000)); continue }
       if (!msgRes.ok) continue
       const msgData = await msgRes.json()
@@ -106,7 +98,7 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
     const batch = emailDetailJobs.slice(i, i + 5)
     const results = await Promise.all(batch.map(async ({ innerId, convoId }) => {
       try {
-        const r = await fetch(`${BASE_URL}/conversations/messages/email/${innerId}`, { headers: ghlHeaders })
+        const r = await ghlFetch(`${BASE_URL}/conversations/messages/email/${innerId}`)
         if (!r.ok) return null
         const d = await r.json()
         const em = d.emailMessage
@@ -161,7 +153,7 @@ export async function refreshRecentEmailStatuses(daysBack = 7) {
     const batch = ids.slice(i, i + 10)
     const results = await Promise.all(batch.map(async (id) => {
       try {
-        const r = await fetch(`${BASE_URL}/conversations/messages/email/${id}`, { headers: ghlHeaders })
+        const r = await ghlFetch(`${BASE_URL}/conversations/messages/email/${id}`)
         if (!r.ok) return null
         const d = await r.json()
         return d.emailMessage ? { id, status: d.emailMessage.status } : null
@@ -499,7 +491,7 @@ function resolveRecipientNamesInBackground(contactIds) {
       const batch = capped.slice(i, i + 10)
       const results = await Promise.all(batch.map(async cid => {
         try {
-          const r = await fetch(`${BASE_URL}/contacts/${cid}`, { headers: ghlHeaders })
+          const r = await ghlFetch(`${BASE_URL}/contacts/${cid}`)
           if (!r.ok) return null
           const d = await r.json()
           const c = d.contact || d

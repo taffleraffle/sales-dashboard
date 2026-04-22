@@ -1,13 +1,5 @@
 import { supabase } from '../lib/supabase'
-
-const GHL_API_KEY = import.meta.env.VITE_GHL_API_KEY
-const GHL_LOCATION_ID = import.meta.env.VITE_GHL_LOCATION_ID
-const BASE_URL = 'https://services.leadconnectorhq.com'
-
-const ghlHeaders = {
-  'Authorization': `Bearer ${GHL_API_KEY}`,
-  'Version': '2021-07-28',
-}
+import { BASE_URL, GHL_LOCATION_ID, ghlFetch } from './ghlClient'
 
 /**
  * Sync all GHL appointments for a date range to Supabase.
@@ -53,7 +45,7 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
       params.set('startAfter', String(startAfter))
     }
 
-    const res = await fetch(`${BASE_URL}/contacts/?${params}`, { headers: ghlHeaders })
+    const res = await ghlFetch(`${BASE_URL}/contacts/?${params}`)
     if (!res.ok) break
 
     const json = await res.json()
@@ -84,11 +76,9 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
     const results = await Promise.all(
       batch.map(async (contact) => {
         try {
-          const res = await fetch(
-            `${BASE_URL}/contacts/${contact.id}/appointments`,
-            { headers: ghlHeaders }
+          const res = await ghlFetch(
+            `${BASE_URL}/contacts/${contact.id}/appointments`
           )
-          if (res.status === 429) return []
           if (!res.ok) return []
           const json = await res.json()
           return (json.events || [])

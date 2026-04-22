@@ -133,10 +133,11 @@ export async function syncMetaAds(days = 30) {
   return { synced, skipped, total: synced + skipped }
 }
 
-// GHL config
+import { BASE_URL as GHL_BASE, GHL_LOCATION_ID, ghlFetch } from './ghlClient'
+
+// `GHL_API_KEY` is still referenced for the sanity check below; the actual
+// Authorization header lives in the shared ghlClient module.
 const GHL_API_KEY = import.meta.env.VITE_GHL_API_KEY
-const GHL_LOCATION_ID = import.meta.env.VITE_GHL_LOCATION_ID
-const GHL_HEADERS = { 'Authorization': `Bearer ${GHL_API_KEY}`, 'Version': '2021-07-28' }
 
 // SCIO PIPELINE (USA) — opportunities here are the real leads
 const SCIO_PIPELINE_ID = 'ZN1DW9S9qS540PNAXSxa'
@@ -171,23 +172,25 @@ async function fetchGHLLeadsByDate(sinceStr) {
 
   let allOpps = []
   let startAfterId = null, startAfter = null
-  for (let page = 0; page < 50; page++) {
+  // limit=500 is the GHL maximum. An 800-opp pipeline fits in 2 pages instead
+  // of 8. Outer cap stays at 20 pages = 10k opps, plenty of headroom.
+  for (let page = 0; page < 20; page++) {
     const params = new URLSearchParams({
       location_id: GHL_LOCATION_ID,
       pipeline_id: SCIO_PIPELINE_ID,
-      limit: '100',
+      limit: '500',
     })
     if (startAfterId) {
       params.set('startAfterId', startAfterId)
       params.set('startAfter', String(startAfter))
     }
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15000)
+    const timeout = setTimeout(() => controller.abort(), 30000)
     let res
     try {
-      res = await fetch(
-        `https://services.leadconnectorhq.com/opportunities/search?${params}`,
-        { headers: GHL_HEADERS, signal: controller.signal }
+      res = await ghlFetch(
+        `${GHL_BASE}/opportunities/search?${params}`,
+        { signal: controller.signal }
       )
     } catch (e) {
       clearTimeout(timeout)

@@ -1,10 +1,4 @@
-const GHL_API_KEY = import.meta.env.VITE_GHL_API_KEY
-const GHL_LOCATION_ID = import.meta.env.VITE_GHL_LOCATION_ID
-const GHL_BASE = 'https://services.leadconnectorhq.com'
-const ghlHeaders = {
-  'Authorization': `Bearer ${GHL_API_KEY}`,
-  'Version': '2021-07-28',
-}
+import { BASE_URL as GHL_BASE, GHL_LOCATION_ID, ghlFetch } from './ghlClient'
 
 const CANCEL_PATTERNS = [
   /\b(cancel|reschedule|can'?t make|won'?t make|not going to make|not able|unable|have to push|move|postpone|rain ?check)\b/i,
@@ -41,7 +35,7 @@ export async function fetchUpcomingAppointments() {
   const in7d = now + 7 * 24 * 3600000
 
   // Get all calendars
-  const calRes = await fetch(`${GHL_BASE}/calendars/?locationId=${GHL_LOCATION_ID}`, { headers: ghlHeaders })
+  const calRes = await ghlFetch(`${GHL_BASE}/calendars/?locationId=${GHL_LOCATION_ID}`)
   if (!calRes.ok) return []
   const { calendars } = await calRes.json()
 
@@ -51,9 +45,8 @@ export async function fetchUpcomingAppointments() {
   // Fetch events from strategy calendars in parallel
   const results = await Promise.allSettled(
     strategyCals.map(async (cal) => {
-      const r = await fetch(
-        `${GHL_BASE}/calendars/events?locationId=${GHL_LOCATION_ID}&calendarId=${cal.id}&startTime=${now}&endTime=${in7d}`,
-        { headers: ghlHeaders }
+      const r = await ghlFetch(
+        `${GHL_BASE}/calendars/events?locationId=${GHL_LOCATION_ID}&calendarId=${cal.id}&startTime=${now}&endTime=${in7d}`
       )
       if (!r.ok) return []
       const d = await r.json()
@@ -82,7 +75,7 @@ export async function fetchUpcomingAppointments() {
  */
 async function fetchContactPhone(contactId) {
   try {
-    const r = await fetch(`${GHL_BASE}/contacts/${contactId}`, { headers: ghlHeaders })
+    const r = await ghlFetch(`${GHL_BASE}/contacts/${contactId}`)
     if (!r.ok) return null
     const d = await r.json()
     return d.contact?.phone || null
@@ -100,9 +93,8 @@ async function checkContactEngagement(ghlContactId, apptTime) {
   if (!ghlContactId) return empty
 
   try {
-    const convRes = await fetch(
-      `${GHL_BASE}/conversations/search?locationId=${GHL_LOCATION_ID}&contactId=${ghlContactId}`,
-      { headers: ghlHeaders }
+    const convRes = await ghlFetch(
+      `${GHL_BASE}/conversations/search?locationId=${GHL_LOCATION_ID}&contactId=${ghlContactId}`
     )
     if (!convRes.ok) return empty
 
@@ -112,9 +104,8 @@ async function checkContactEngagement(ghlContactId, apptTime) {
 
     const lastOutboundDate = conv.lastMessageDate ? new Date(conv.lastMessageDate) : null
 
-    const msgRes = await fetch(
-      `${GHL_BASE}/conversations/${conv.id}/messages`,
-      { headers: ghlHeaders }
+    const msgRes = await ghlFetch(
+      `${GHL_BASE}/conversations/${conv.id}/messages`
     )
     if (!msgRes.ok) return { hasInbound: false, lastOutboundDate, channels: [], activity: [] }
 
