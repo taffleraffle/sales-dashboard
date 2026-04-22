@@ -490,12 +490,12 @@ export default function SetterOverview() {
             const tMcSet = totMcs > 0 ? ((totSets / totMcs) * 100).toFixed(1) : 0
             const tCallSet = totDials > 0 ? ((totSets / totDials) * 100).toFixed(1) : 0
             return (
-              <div className="tile border-t-2 border-opt-yellow/30 px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
+              <div className="bg-opt-yellow/[0.06] border border-opt-yellow/30 rounded-2xl px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
                 <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
-                  <div className="w-9 h-9 rounded-full bg-opt-yellow/20 border border-opt-yellow/40 flex items-center justify-center">
+                  <div className="w-9 h-9 rounded-full bg-opt-yellow/25 border border-opt-yellow/50 flex items-center justify-center">
                     <span className="text-[11px] font-bold text-opt-yellow">∑</span>
                   </div>
-                  <span className="text-sm font-semibold text-text-primary">Team Total</span>
+                  <span className="text-sm font-semibold text-opt-yellow">Team Total</span>
                 </div>
                 <div className="flex items-baseline gap-4 sm:gap-6">
                   <SetterStatBlock label="Sets" value={totSets} />
