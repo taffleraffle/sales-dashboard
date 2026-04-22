@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Calendar, ChevronDown } from 'lucide-react'
 
 const presets = [
@@ -24,14 +25,48 @@ export default function DateRangeSelector({ selected, onChange }) {
   const [open, setOpen] = useState(false)
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
-  const ref = useRef(null)
+  // Portal-based popover position. Measuring the Custom-button rect on open
+  // and rendering the popover into document.body means no ancestor flex /
+  // overflow / transform can push the page layout around when the panel
+  // opens — it floats above everything, independent of its DOM position.
+  const [popover, setPopover] = useState({ top: 0, left: 0, maxWidth: 0 })
+  const containerRef = useRef(null)
+  const triggerRef = useRef(null)
+  const popoverRef = useRef(null)
 
-  // Close on outside click
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const gutter = 12
+    const panelWidth = 288 // w-72
+    // Anchor panel to the right edge of the trigger button so it aligns with
+    // the "Custom" chip. Clamp at viewport edges so we don't spill off-screen.
+    let left = rect.right - panelWidth
+    if (left < gutter) left = gutter
+    const maxRight = window.innerWidth - gutter
+    if (left + panelWidth > maxRight) left = maxRight - panelWidth
+    setPopover({ top: rect.bottom + 8, left, maxWidth: panelWidth })
+  }, [open])
+
+  // Close on outside click OR on scroll/resize (so the panel doesn't float
+  // detached from the trigger button if the user scrolls the page).
   useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+    if (!open) return
+    const handleDown = (e) => {
+      if (triggerRef.current?.contains(e.target)) return
+      if (popoverRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
+    const handleScroll = () => setOpen(false)
+    document.addEventListener('mousedown', handleDown)
+    window.addEventListener('scroll', handleScroll, true)
+    window.addEventListener('resize', handleScroll)
+    return () => {
+      document.removeEventListener('mousedown', handleDown)
+      window.removeEventListener('scroll', handleScroll, true)
+      window.removeEventListener('resize', handleScroll)
+    }
+  }, [open])
 
   const isPreset = (days) => {
     if (isCustomRange(selected)) return false
@@ -48,7 +83,7 @@ export default function DateRangeSelector({ selected, onChange }) {
   const customLabel = formatRangeLabel(selected)
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative" ref={containerRef}>
       <div className="flex gap-1.5 bg-bg-card border border-border-default rounded-xl p-1 overflow-x-auto no-scrollbar">
         {presets.map(({ label, days }) => (
           <button
@@ -66,6 +101,7 @@ export default function DateRangeSelector({ selected, onChange }) {
 
         {/* Custom range toggle */}
         <button
+          ref={triggerRef}
           onClick={() => setOpen(!open)}
           className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium transition-all duration-200 whitespace-nowrap shrink-0 ${
             isCustomRange(selected)
@@ -80,9 +116,16 @@ export default function DateRangeSelector({ selected, onChange }) {
         </button>
       </div>
 
-      {/* Custom dropdown */}
-      {open && (
-        <div className="absolute right-0 top-full mt-2 z-50 tile tile-feedback p-5 shadow-xl shadow-black/40 w-72">
+      {/* Custom popover — rendered into document.body via portal so opening
+          it never pushes the surrounding page layout around. */}
+      {open && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={popoverRef}
+          className="fixed z-[1000] tile tile-feedback p-5 shadow-xl shadow-black/40"
+          style={{ top: popover.top, left: popover.left, width: popover.maxWidth }}
+          role="dialog"
+          aria-label="Custom date range"
+        >
           <p className="text-[11px] text-text-400 uppercase tracking-wider font-medium mb-3">Custom Range</p>
 
           <div className="space-y-3">
@@ -150,7 +193,8 @@ export default function DateRangeSelector({ selected, onChange }) {
           >
             Apply Range
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
