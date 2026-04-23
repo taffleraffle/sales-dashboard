@@ -30,10 +30,14 @@ export default function CloserDetail() {
 
   const rawObjections = freshObjections || storedObjections
   const [objections, setObjections] = useState([])
+  // Map of lowercased prospect name → outcome ('closed' | 'ascended' | 'not_closed' | 'no_show' | ...)
+  // Used both to recompute the aggregate win_rate AND to color individual
+  // call-reference chips green/red per prospect in the render.
+  const [callOutcomes, setCallOutcomes] = useState({})
 
   // Recalculate win rates from actual closer_calls outcomes
   useEffect(() => {
-    if (!rawObjections.length) { setObjections([]); return }
+    if (!rawObjections.length) { setObjections([]); setCallOutcomes({}); return }
     async function recalcWinRates() {
       // Fetch all closer_calls for this closer in the date range
       const { data: closerCalls } = await supabase
@@ -47,27 +51,43 @@ export default function CloserDetail() {
           callMap[key] = c.outcome
         }
       }
-      // Recalculate win rate for each objection based on actual outcomes
+      setCallOutcomes(callMap)
+      const resolveOutcome = (ref) => {
+        const name = (ref.prospect || '').toLowerCase().trim()
+        if (callMap[name] !== undefined) return callMap[name]
+        const firstName = name.split(' ')[0]
+        const match = Object.entries(callMap).find(([k]) => k.split(' ')[0] === firstName)
+        return match ? match[1] : undefined
+      }
+      // Recalculate win rate for each objection + dedupe refs by prospect:date.
+      // The same Adam Burrell appearing twice in one objection comes from the
+      // AI returning duplicate call_numbers or legacy data that wasn't deduped
+      // at write time — strip on read so legacy rows look clean too.
       const enriched = rawObjections.map(obj => {
-        const refs = Array.isArray(obj.call_references) ? obj.call_references : []
-        if (refs.length === 0) return obj
+        const rawRefs = Array.isArray(obj.call_references) ? obj.call_references : []
+        const seen = new Set()
+        const dedupedRefs = []
+        for (const ref of rawRefs) {
+          const key = `${(ref.prospect || '').toLowerCase().trim()}|${ref.date || ''}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          dedupedRefs.push(ref)
+        }
+
         let wins = 0, total = 0
-        for (const ref of refs) {
-          const name = (ref.prospect || '').toLowerCase().trim()
-          if (callMap[name] !== undefined) {
+        for (const ref of dedupedRefs) {
+          const outcome = resolveOutcome(ref)
+          if (outcome !== undefined) {
             total++
-            if (callMap[name] === 'closed') wins++
-          } else {
-            // Try first name match
-            const firstName = name.split(' ')[0]
-            const match = Object.entries(callMap).find(([k]) => k.split(' ')[0] === firstName)
-            if (match) {
-              total++
-              if (match[1] === 'closed') wins++
-            }
+            if (outcome === 'closed' || outcome === 'ascended') wins++
           }
         }
-        return { ...obj, win_rate: total > 0 ? Math.round((wins / total) * 100) : obj.win_rate }
+        return {
+          ...obj,
+          call_references: dedupedRefs,
+          occurrence_count: dedupedRefs.length || obj.occurrence_count,
+          win_rate: total > 0 ? Math.round((wins / total) * 100) : obj.win_rate,
+        }
       })
       setObjections(enriched)
     }
@@ -270,10 +290,24 @@ export default function CloserDetail() {
           <div className="space-y-3">
             {objections.map((obj, i) => {
               const refs = Array.isArray(obj.call_references) ? obj.call_references : []
-              const quotes = Array.isArray(obj.example_quotes) ? obj.example_quotes : []
+              const legacyQuotes = Array.isArray(obj.example_quotes) ? obj.example_quotes : []
+              // Resolve per-ref outcome — same first-name fallback the win-rate
+              // reducer uses, so the chip color agrees with the badge.
+              const outcomeFor = (ref) => {
+                const name = (ref.prospect || '').toLowerCase().trim()
+                if (callOutcomes[name] !== undefined) return callOutcomes[name]
+                const firstName = name.split(' ')[0]
+                const match = Object.entries(callOutcomes).find(([k]) => k.split(' ')[0] === firstName)
+                return match ? match[1] : undefined
+              }
+              const refClass = (outcome) => {
+                if (outcome === 'closed' || outcome === 'ascended') return 'bg-success/15 text-success border border-success/40 hover:bg-success/25'
+                if (outcome === 'no_show' || outcome === 'not_closed') return 'bg-danger/15 text-danger border border-danger/40 hover:bg-danger/25'
+                return 'bg-bg-card-hover border border-border-default hover:bg-opt-yellow/10 hover:text-opt-yellow'
+              }
               return (
                 <div key={i} className="border border-border-default rounded-2xl p-4">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
                       <span className="font-medium text-sm">{obj.objection_category}</span>
                       <span className="text-xs bg-text-400/15 text-text-400 px-2 py-0.5 rounded">
@@ -289,27 +323,37 @@ export default function CloserDetail() {
                     )}
                   </div>
 
-                  {quotes.length > 0 && (
-                    <p className="text-xs text-text-400 italic mb-2">"{quotes[0]}"</p>
-                  )}
-
-                  {refs.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {refs.map((ref, j) => (
-                        <a
-                          key={j}
-                          href={ref.url || '#'}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs bg-bg-card-hover px-2 py-1 rounded hover:bg-opt-yellow/10 hover:text-opt-yellow transition-colors"
-                        >
-                          <span>{ref.prospect}</span>
-                          <span className="text-text-400">({ref.date})</span>
-                          {ref.url && <ExternalLink size={10} />}
-                        </a>
-                      ))}
+                  {refs.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {refs.map((ref, j) => {
+                        const outcome = outcomeFor(ref)
+                        const quote = ref.quote || legacyQuotes[j] || legacyQuotes[0]
+                        return (
+                          <div key={j} className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
+                            <a
+                              href={ref.url || '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors shrink-0 ${refClass(outcome)}`}
+                              title={outcome === 'closed' || outcome === 'ascended' ? 'Closed / won'
+                                : outcome === 'no_show' ? 'No-show'
+                                : outcome === 'not_closed' ? 'Not closed'
+                                : outcome ? `Outcome: ${outcome}` : 'Outcome unknown'}
+                            >
+                              <span className="font-medium">{ref.prospect}</span>
+                              <span className="opacity-70">({ref.date})</span>
+                              {ref.url && <ExternalLink size={10} />}
+                            </a>
+                            {quote && (
+                              <p className="text-xs text-text-400 italic min-w-0 flex-1">&ldquo;{quote}&rdquo;</p>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
-                  )}
+                  ) : legacyQuotes.length > 0 ? (
+                    <p className="text-xs text-text-400 italic">&ldquo;{legacyQuotes[0]}&rdquo;</p>
+                  ) : null}
                 </div>
               )
             })}
