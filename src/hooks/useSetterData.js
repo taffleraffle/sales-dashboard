@@ -58,6 +58,26 @@ export function clearSetterEODCache() {
   eodCache.clear()
 }
 
+/**
+ * Populate the module-level setter-EOD cache from Layout's pre-warm effect.
+ * First page to mount (SalesOverview / SetterOverview / EODDashboard) gets
+ * data instantly from the hook cache. Short-circuits if already fresh.
+ */
+export async function prewarmSetterEODs(setterId = null, days = 30) {
+  const key = eodKey(setterId, days)
+  const cached = eodCache.get(key)
+  if (cached && (Date.now() - cached.ts) < EOD_TTL_MS) return
+  let query = supabase
+    .from('setter_eod_reports')
+    .select('*, setter:team_members(name)')
+    .gte('report_date', sinceDate(days))
+    .order('report_date', { ascending: false })
+  if (setterId) query = query.eq('setter_id', setterId)
+  const { data, error } = await query
+  if (error) return
+  eodCache.set(key, { reports: data || [], ts: Date.now() })
+}
+
 export function useSetterStats(setterId, days = 30) {
   const { reports } = useSetterEODs(setterId, days)
 

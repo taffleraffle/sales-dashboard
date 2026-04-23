@@ -454,6 +454,14 @@ function RecipientDetail({ recipients, loading }) {
   if (loading) return <div className="flex items-center justify-center py-4"><Loader size={16} className="animate-spin text-opt-yellow" /></div>
   if (!recipients?.length) return <p className="text-xs text-text-400 text-center py-3">No recipient data available.</p>
 
+  // Count placeholder names ("Contact abc12345" or "Unknown") so the user sees
+  // a progress indicator while the GHL resolver fills real names in the
+  // background — otherwise the table just sits with mystery IDs until the
+  // `onNamesResolved` callback fires a second setEmailRecipients.
+  const unresolvedCount = recipients.filter(r =>
+    !r.contactName || r.contactName.startsWith('Contact ') || r.contactName === 'Unknown Contact' || r.contactName === 'Unknown'
+  ).length
+
   const counts = {
     all: recipients.length,
     delivered: recipients.filter(r => r.status === 'delivered').length,
@@ -504,6 +512,12 @@ function RecipientDetail({ recipients, loading }) {
             {f.label} ({counts[f.key]})
           </button>
         ))}
+        {unresolvedCount > 0 && (
+          <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] text-text-400 italic">
+            <Loader size={10} className="animate-spin text-opt-yellow" />
+            Resolving {unresolvedCount} name{unresolvedCount === 1 ? '' : 's'}…
+          </span>
+        )}
       </div>
 
       <div className="max-h-56 overflow-y-auto">
