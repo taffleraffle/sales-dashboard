@@ -76,31 +76,72 @@ export default function Layout() {
     }
   }, [])
 
-  // Pre-warm email-flow data + GHL contact-name cache so the Email Flows
-  // page renders instantly when the user navigates to it, and recipient
-  // dropdowns show real names instead of "Unknown" on first open. Runs 5s
-  // after mount (after auto-sync gets its head start) and is fire-and-forget.
+  // Pre-warm caches for the slow pages so data is already in memory by the
+  // time the user navigates. Staggered (5s → 7s → 12s → 17s) so we don't
+  // hammer Supabase + GHL the moment the first paint settles. All fire-and-
+  // forget — failures don't affect the page; the pages will just re-fetch
+  // on their own mount if the cache is empty.
   useEffect(() => {
-    const timer = setTimeout(async () => {
+    const timers = []
+
+    // +5s: email-flow queries (loadEmailStats/loadFlowGroups/loadSubjectMeta
+    // caches + GHL contact-name resolver for recipient dropdowns).
+    timers.push(setTimeout(async () => {
       try {
         const { prewarmRecipientNameCache, loadEmailStats, loadFlowGroups, loadSubjectMeta } =
           await import('../services/ghlEmailFlows')
-        // Default page range is last 30 days — matches the EmailFlows default.
         const since = new Date(); since.setDate(since.getDate() - 30)
         const fromDate = since.toISOString().split('T')[0]
         const toDate = new Date().toISOString().split('T')[0]
-        // Fire the three page queries in parallel so the module-level caches
-        // are warm by the time the user navigates.
         Promise.all([
           loadEmailStats(fromDate, toDate),
           loadFlowGroups(),
           loadSubjectMeta(),
         ]).catch(() => {})
-        // Name resolver runs on its own timeline — can take many seconds.
         prewarmRecipientNameCache(30).catch(() => {})
       } catch (_e) { void _e }
-    }, 5000)
-    return () => clearTimeout(timer)
+    }, 5000))
+
+    // +7s: GHL pipeline summaries. Slowest fetch in the app (~5-10s cold).
+    // Feeds SalesOverview, SetterDetail, SetterKPIHistory, PipelinePerformance.
+    // Module-level 5-min memo means the first page to mount after this call
+    // gets instant data. If it fails (429 / network), pages re-fetch on mount.
+    timers.push(setTimeout(async () => {
+      try {
+        const { fetchAllPipelineSummaries } = await import('../services/ghlPipeline')
+        fetchAllPipelineSummaries().catch(() => {})
+      } catch (_e) { void _e }
+    }, 7000))
+
+    // +12s: closer + setter EOD reports (team-wide, last 30d). Populates
+    // the module-level caches in useCloserData / useSetterData so the first
+    // page to mount (SalesOverview, CloserOverview, SetterOverview,
+    // EODDashboard, EODReview, CommissionPage) gets data instantly instead
+    // of re-fetching on mount.
+    timers.push(setTimeout(async () => {
+      try {
+        const [{ prewarmCloserEODs }, { prewarmSetterEODs }] = await Promise.all([
+          import('../hooks/useCloserData'),
+          import('../hooks/useSetterData'),
+        ])
+        // Both fire in parallel — different tables, no contention.
+        Promise.all([
+          prewarmCloserEODs(null, 30),
+          prewarmSetterEODs(null, 30),
+        ]).catch(() => {})
+      } catch (_e) { void _e }
+    }, 12000))
+
+    // +17s: WAVV aggregates (30-day window). Feeds SalesOverview +
+    // SetterOverview + PipelinePerformance. Has its own 5-min module cache.
+    timers.push(setTimeout(async () => {
+      try {
+        const { fetchWavvAggregates } = await import('../services/wavvService')
+        fetchWavvAggregates(30).catch(() => {})
+      } catch (_e) { void _e }
+    }, 17000))
+
+    return () => { for (const t of timers) clearTimeout(t) }
   }, [])
 
   return (

@@ -60,6 +60,28 @@ export function clearCloserEODCache() {
 }
 
 /**
+ * Populate the module-level EOD cache from Layout's pre-warm effect so the
+ * first page to mount (SalesOverview / CloserOverview / EODDashboard / etc.)
+ * gets instant data from `useCloserEODs` instead of waiting on Supabase.
+ *
+ * Safe to call repeatedly — short-circuits if a fresh entry already exists.
+ */
+export async function prewarmCloserEODs(closerId = null, days = 30) {
+  const key = eodKey(closerId, days)
+  const cached = eodCache.get(key)
+  if (cached && (Date.now() - cached.ts) < EOD_TTL_MS) return
+  let query = supabase
+    .from('closer_eod_reports')
+    .select('*, closer:team_members(name)')
+    .gte('report_date', sinceDate(days))
+    .order('report_date', { ascending: false })
+  if (closerId) query = query.eq('closer_id', closerId)
+  const { data, error } = await query
+  if (error) return
+  eodCache.set(key, { reports: data || [], ts: Date.now() })
+}
+
+/**
  * Aggregate close breakdown by call type from closer_calls rows.
  * Returns per-closer splits: new_call closes vs follow_up closes.
  * Used for the "close rate = closes on new calls / live new calls" formula,

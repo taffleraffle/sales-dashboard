@@ -507,6 +507,12 @@ function RecipientDetail({ recipients, loading }) {
   if (loading) return <div className="flex items-center justify-center py-4"><Loader size={16} className="animate-spin text-opt-yellow" /></div>
   if (!recipients?.length) return <p className="text-xs text-text-400 text-center py-3">No recipient data available.</p>
 
+  // See EmailFlows.RecipientDetail for rationale — count placeholder names
+  // so the user sees a live progress chip while GHL resolver fills names.
+  const unresolvedCount = recipients.filter(r =>
+    !r.contactName || r.contactName.startsWith('Contact ') || r.contactName === 'Unknown Contact' || r.contactName === 'Unknown'
+  ).length
+
   const counts = {
     all: recipients.length,
     delivered: recipients.filter(r => r.status === 'delivered').length,
@@ -544,6 +550,12 @@ function RecipientDetail({ recipients, loading }) {
     <div>
       {/* Status filter pills */}
       <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+        {unresolvedCount > 0 && (
+          <span className="order-last ml-auto inline-flex items-center gap-1.5 text-[10px] text-text-400 italic">
+            <Loader size={10} className="animate-spin text-opt-yellow" />
+            Resolving {unresolvedCount} name{unresolvedCount === 1 ? '' : 's'}…
+          </span>
+        )}
         {filters.map(f => (
           <button
             key={f.key}
