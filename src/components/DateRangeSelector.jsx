@@ -134,7 +134,7 @@ export default function DateRangeSelector({ selected, onChange }) {
       {open && typeof document !== 'undefined' && createPortal(
         <div
           ref={popoverRef}
-          className="fixed z-[1000] tile tile-feedback p-5 shadow-xl shadow-black/40"
+          className="fixed z-[1000] bg-bg-card border border-border-default rounded-2xl p-5 shadow-xl shadow-black/40"
           style={{ top: popover.top, left: popover.left, width: popover.maxWidth }}
           role="dialog"
           aria-label="Custom date range"
