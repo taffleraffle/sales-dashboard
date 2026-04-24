@@ -48,8 +48,11 @@ export default function DateRangeSelector({ selected, onChange }) {
     setPopover({ top: rect.bottom + 8, left, maxWidth: panelWidth })
   }, [open])
 
-  // Close on outside click OR on scroll/resize (so the panel doesn't float
-  // detached from the trigger button if the user scrolls the page).
+  // Close on outside click. Reposition (don't close) on window scroll/resize
+  // so the panel tracks its trigger. The previous scroll-close used capture:true
+  // and fired on every nested scroll — including the focus-scroll the browser
+  // does when you click into the native date input — which immediately closed
+  // the popover the same tick it opened.
   useEffect(() => {
     if (!open) return
     const handleDown = (e) => {
@@ -57,14 +60,24 @@ export default function DateRangeSelector({ selected, onChange }) {
       if (popoverRef.current?.contains(e.target)) return
       setOpen(false)
     }
-    const handleScroll = () => setOpen(false)
+    const reposition = () => {
+      if (!triggerRef.current) return
+      const rect = triggerRef.current.getBoundingClientRect()
+      const gutter = 12
+      const panelWidth = 288
+      let left = rect.right - panelWidth
+      if (left < gutter) left = gutter
+      const maxRight = window.innerWidth - gutter
+      if (left + panelWidth > maxRight) left = maxRight - panelWidth
+      setPopover({ top: rect.bottom + 8, left, maxWidth: panelWidth })
+    }
     document.addEventListener('mousedown', handleDown)
-    window.addEventListener('scroll', handleScroll, true)
-    window.addEventListener('resize', handleScroll)
+    window.addEventListener('scroll', reposition, { passive: true })
+    window.addEventListener('resize', reposition)
     return () => {
       document.removeEventListener('mousedown', handleDown)
-      window.removeEventListener('scroll', handleScroll, true)
-      window.removeEventListener('resize', handleScroll)
+      window.removeEventListener('scroll', reposition)
+      window.removeEventListener('resize', reposition)
     }
   }, [open])
 
