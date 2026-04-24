@@ -1272,7 +1272,7 @@ export default function MarketingPerformance() {
         <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} prev={sp.offer_rate} whatIf={wf?.offer_rate} tip="Offers / Live Calls" />
         <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" prev={sp.cost_per_offer} whatIf={wf?.cost_per_offer} tip="Adspend / Offers" />
         <KPI label="Total Closes" value={stats.closes} format="n" prev={sp.closes} whatIf={wf?.closes} tip="Deals closed (trial sign-ups)" />
-        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={wf?.close_rate} tip="Closes / Live Calls" />
+        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={wf?.close_rate} tip="Closes / Live New Calls (FU calls excluded from denominator)" />
         <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} prev={sp.cpa_trial} whatIf={wf?.cpa_trial} tip="Cost Per Acquisition = Adspend / Closes" />
       </Section>
 

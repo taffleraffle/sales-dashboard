@@ -382,7 +382,14 @@ export function computeMarketingStats(entries) {
     // Offer & close
     offer_rate: t.live_calls > 0 ? (t.offers / t.live_calls) * 100 : 0,
     cost_per_offer: t.offers > 0 ? t.adspend / t.offers : 0,
-    close_rate: t.live_calls > 0 ? (t.closes / t.live_calls) * 100 : 0,
+    // Close rate uses NC-only live calls in the denominator. Including
+    // live_fu_calls would deflate the rate every time a closer logs an FU
+    // set without a close. Numerator is total closes (FU close on a marketing-
+    // sourced lead is still a marketing close); the strictly NC-only close
+    // rate lives on CloserOverview / CloserDetail / SalesOverview which have
+    // call-level data available. Marketing tracker syncs daily aggregates
+    // and doesn't store nc_closes separately.
+    close_rate: t.new_live_calls > 0 ? (t.closes / t.new_live_calls) * 100 : 0,
     cpa_trial: t.closes > 0 ? t.adspend / t.closes : 0,
 
     // Trial financials

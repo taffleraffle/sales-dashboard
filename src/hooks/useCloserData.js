@@ -231,7 +231,12 @@ export function useCloserStats(closerId, days = 30) {
     // they aren't qualified strategy-call bookings.
     showRate: totals.ncBooked ? ((totals.liveNC / totals.ncBooked) * 100).toFixed(1) : 0,
     offerRate: totals.liveCalls ? ((totals.offers / totals.liveCalls) * 100).toFixed(1) : 0,
-    closeRate: totals.liveCalls ? ((totals.closes / totals.liveCalls) * 100).toFixed(1) : 0,
+    // closeRate here is an APPROXIMATION from EOD-level aggregates (numerator =
+    // all closes, denominator = live NC only). Prefer useCloserCallBreakdown's
+    // ncCloses / ncLive when you need the strictly-NC close rate (CloserOverview
+    // and CloserDetail use that instead). Kept for back-compat with any caller
+    // reading stats.closeRate; do not use this for performance dashboards.
+    closeRate: totals.liveNC ? ((totals.closes / totals.liveNC) * 100).toFixed(1) : 0,
     rescheduleRate: totalBooked ? ((totals.reschedules / totalBooked) * 100).toFixed(1) : 0,
   }
 }

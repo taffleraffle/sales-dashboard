@@ -5,7 +5,7 @@ import DateRangeSelector from '../components/DateRangeSelector'
 import { Loader, Phone, DollarSign, Target, BarChart3, Zap, Users, TrendingUp, Award, Clock, ArrowUpRight, ChevronDown, ChevronUp, Check, X, Trophy } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
-import { useCloserEODs } from '../hooks/useCloserData'
+import { useCloserEODs, useCloserCallBreakdown } from '../hooks/useCloserData'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { useFunnelData } from '../hooks/useFunnelData'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
@@ -233,6 +233,7 @@ export default function SalesOverview() {
   const { members: closers } = useTeamMembers('closer')
   const { members: setters } = useTeamMembers('setter')
   const { reports: closerReports } = useCloserEODs(null, days)
+  const { breakdown: callBreakdown } = useCloserCallBreakdown(null, days)
   const { reports: setterReports } = useSetterEODs(null, days)
   const { entries: marketingEntries } = useMarketingTracker()
   const { leads: recentLeads, refresh: refreshLeads } = useLeadAttribution(days)
@@ -390,12 +391,16 @@ export default function SalesOverview() {
 
   const totalRevenue = ct.revenue + ct.ascendRevenue
   const totalCash = ct.cash + ct.ascendCash
-  // Show rate + no-show rate: new-call only. Follow-ups aren't qualified
-  // bookings so they shouldn't affect show%. Close/offer/reschedule rates
-  // remain against all live calls / total booked (a close on a follow-up
-  // is still a close).
+  // Close rate is strictly NC-only on BOTH sides — FU calls and FU closes are
+  // excluded so a closer's number is never moved by their FU pipeline. Sourced
+  // from the call-level breakdown (closer_calls.call_type = 'new_call'),
+  // matching the formula on CloserOverview / CloserDetail.
+  const ncBreakSum = Object.values(callBreakdown || {}).reduce((a, b) => ({
+    ncCloses: a.ncCloses + (b.ncCloses || 0),
+    ncLive:   a.ncLive   + (b.ncLive   || 0),
+  }), { ncCloses: 0, ncLive: 0 })
   const showRate = ct.ncBooked ? ((ct.liveNC / ct.ncBooked) * 100).toFixed(1) : 0
-  const closeRate = ct.liveCalls ? ((ct.closes / ct.liveCalls) * 100).toFixed(1) : 0
+  const closeRate = ncBreakSum.ncLive > 0 ? ((ncBreakSum.ncCloses / ncBreakSum.ncLive) * 100).toFixed(1) : 0
   const offerRate = ct.liveCalls ? ((ct.offers / ct.liveCalls) * 100).toFixed(1) : 0
   const rescheduleRate = ct.booked ? ((ct.reschedules / ct.booked) * 100).toFixed(1) : 0
   const noShowRate = ct.ncBooked ? ((ct.ncNoShows / ct.ncBooked) * 100).toFixed(1) : 0
@@ -426,10 +431,15 @@ export default function SalesOverview() {
       cash: a.cash + parseFloat(r.total_cash_collected || 0),
       ascendCash: a.ascendCash + parseFloat(r.ascend_cash || 0),
     }), { booked: 0, ncBooked: 0, live: 0, liveNC: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascendCash: 0 })
+    // Close rate is strictly NC-only — FU closes and FU live calls are both
+    // excluded. Pulled from the call-level breakdown so it matches Closer
+    // Overview / Closer Detail. EOD-aggregate `closes` includes FU and would
+    // otherwise inflate the numerator; `t.live` includes FU and deflates the
+    // denominator. Both wrong for a closing-skill rate.
+    const cb = (callBreakdown || {})[c.id] || { ncCloses: 0, ncLive: 0 }
     return { id: c.id, name: c.name, ...t, totalCash: t.cash + t.ascendCash,
-      // Show rate: new-call only (live_nc / nc_booked). See ct comment above.
       showPct: t.ncBooked ? ((t.liveNC / t.ncBooked) * 100).toFixed(1) : '0.0',
-      closePct: t.live ? ((t.closes / t.live) * 100).toFixed(1) : '0.0',
+      closePct: cb.ncLive > 0 ? ((cb.ncCloses / cb.ncLive) * 100).toFixed(1) : '0.0',
       offerPct: t.live ? ((t.offers / t.live) * 100).toFixed(1) : '0.0',
     }
   }).sort((a, b) => b.totalCash - a.totalCash)
