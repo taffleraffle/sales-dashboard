@@ -4,7 +4,7 @@ import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import CommissionWidget from '../components/CommissionWidget'
-import { AlertTriangle, Loader, ExternalLink, ChevronDown } from 'lucide-react'
+import { AlertTriangle, Loader, ExternalLink, ChevronDown, Calendar, Edit3 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useCloserStats, useCloserEODs, useCloserTranscripts, useObjectionAnalysis, useCloserCallBreakdown } from '../hooks/useCloserData'
 import { analyzeObjections } from '../services/objectionAnalysis'
@@ -18,7 +18,9 @@ export default function CloserDetail() {
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const [member, setMember] = useState(null)
   const [freshObjections, setFreshObjections] = useState(null)
-  const [showEodHistory, setShowEodHistory] = useState(false)
+  const [allCalls, setAllCalls] = useState([])
+  const [selectedDate, setSelectedDate] = useState(null)
+  const [expandedCallId, setExpandedCallId] = useState(null)
   const syncedRef = useRef(false)
   const stats = useCloserStats(id, days)
   const { reports: myReports } = useCloserEODs(id, days)
@@ -35,23 +37,49 @@ export default function CloserDetail() {
   // call-reference chips green/red per prospect in the render.
   const [callOutcomes, setCallOutcomes] = useState({})
 
+  // Fetch full closer_calls once — used both by the Calls Calendar (everything)
+  // and by the objection win-rate recalculation (prospect_name → outcome map).
+  useEffect(() => {
+    if (!myReports.length) { setAllCalls([]); setCallOutcomes({}); return }
+    let active = true
+    async function fetchCalls() {
+      const reportToDate = {}
+      for (const r of myReports) reportToDate[r.id] = r.report_date
+      const { data } = await supabase
+        .from('closer_calls')
+        .select('id, prospect_name, outcome, call_type, revenue, cash_collected, notes, ghl_event_id, created_at, eod_report_id')
+        .in('eod_report_id', myReports.map(r => r.id))
+        .order('created_at', { ascending: true })
+      if (!active) return
+      const enriched = (data || []).map(c => ({ ...c, report_date: reportToDate[c.eod_report_id] }))
+      setAllCalls(enriched)
+      const map = {}
+      for (const c of enriched) {
+        if (c.prospect_name) map[c.prospect_name.toLowerCase().trim()] = c.outcome
+      }
+      setCallOutcomes(map)
+    }
+    fetchCalls()
+    return () => { active = false }
+  }, [myReports])
+
+  // Default-select the most recent date that has calls so the day-detail
+  // panel is populated on first paint. Also auto-corrects when the date range
+  // changes and the previously-selected date falls outside the new window.
+  useEffect(() => {
+    if (allCalls.length === 0) return
+    const dates = [...new Set(allCalls.map(c => c.report_date).filter(Boolean))].sort()
+    if (!dates.length) return
+    if (!selectedDate || !dates.includes(selectedDate)) {
+      setSelectedDate(dates[dates.length - 1])
+    }
+  }, [allCalls, selectedDate])
+
   // Recalculate win rates from actual closer_calls outcomes
   useEffect(() => {
-    if (!rawObjections.length) { setObjections([]); setCallOutcomes({}); return }
+    if (!rawObjections.length) { setObjections([]); return }
     async function recalcWinRates() {
-      // Fetch all closer_calls for this closer in the date range
-      const { data: closerCalls } = await supabase
-        .from('closer_calls')
-        .select('prospect_name, outcome, eod_report_id')
-        .in('eod_report_id', myReports.map(r => r.id))
-      const callMap = {}
-      for (const c of (closerCalls || [])) {
-        if (c.prospect_name) {
-          const key = c.prospect_name.toLowerCase().trim()
-          callMap[key] = c.outcome
-        }
-      }
-      setCallOutcomes(callMap)
+      const callMap = callOutcomes
       const resolveOutcome = (ref) => {
         const name = (ref.prospect || '').toLowerCase().trim()
         if (callMap[name] !== undefined) return callMap[name]
@@ -92,7 +120,7 @@ export default function CloserDetail() {
       setObjections(enriched)
     }
     recalcWinRates()
-  }, [rawObjections, myReports])
+  }, [rawObjections, callOutcomes])
 
   useEffect(() => {
     supabase.from('team_members').select('*').eq('id', id).single()
@@ -217,65 +245,17 @@ export default function CloserDetail() {
         <Gauge label="Avg Call" value={avgFathomDuration > 0 ? Math.round(avgFathomDuration / 60) : 0} target={30} max={90} />
       </div>
 
-      {/* EOD History */}
-      {myReports.length > 0 && (
-        <div className="tile tile-feedback overflow-hidden mb-6">
-          <button
-            onClick={() => setShowEodHistory(!showEodHistory)}
-            className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-card-hover transition-colors"
-          >
-            <h2 className="text-sm font-medium">EOD History ({myReports.length})</h2>
-            <ChevronDown size={14} className={`text-text-400 transition-transform ${showEodHistory ? 'rotate-180' : ''}`} />
-          </button>
-          {showEodHistory && (
-            <div className="border-t border-border-default overflow-x-auto max-h-[400px] overflow-y-auto">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-bg-card z-10">
-                  <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
-                    <th className="px-3 py-2 text-left">Date</th>
-                    <th className="px-3 py-2 text-right">Booked</th>
-                    <th className="px-3 py-2 text-right">Live</th>
-                    <th className="px-3 py-2 text-right">No Shows</th>
-                    <th className="px-3 py-2 text-right">Offers</th>
-                    <th className="px-3 py-2 text-right">Closes</th>
-                    <th className="px-3 py-2 text-right">Asc</th>
-                    <th className="px-3 py-2 text-right">Show%</th>
-                    <th className="px-3 py-2 text-right">Close%</th>
-                    <th className="px-3 py-2 text-right">Cash</th>
-                    <th className="px-3 py-2 text-right">Revenue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {myReports.map(eod => {
-                    const booked = (eod.nc_booked || 0) + (eod.fu_booked || 0)
-                    const live = (eod.live_nc_calls || 0) + (eod.live_fu_calls || 0)
-                    const noShows = (eod.nc_no_shows || 0) + (eod.fu_no_shows || 0)
-                    const showPct = booked > 0 ? ((live / booked) * 100).toFixed(0) : '—'
-                    const closePct = live > 0 ? (((eod.closes || 0) / live) * 100).toFixed(0) : '—'
-                    const cash = parseFloat(eod.total_cash_collected || 0)
-                    const rev = parseFloat(eod.total_revenue || 0)
-                    return (
-                      <tr key={eod.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer" onClick={() => navigate(`/sales/eod/submit?tab=closer&member=${id}&date=${eod.report_date}`)}>
-                        <td className="px-3 py-2 font-medium text-opt-yellow hover:underline">{eod.report_date}</td>
-                        <td className="px-3 py-2 text-right">{booked}</td>
-                        <td className="px-3 py-2 text-right">{live}</td>
-                        <td className="px-3 py-2 text-right text-danger">{noShows}</td>
-                        <td className="px-3 py-2 text-right">{eod.offers || 0}</td>
-                        <td className="px-3 py-2 text-right font-medium">{eod.closes || 0}</td>
-                        <td className="px-3 py-2 text-right text-cyan-400">{eod.deposits || 0}</td>
-                        <td className={`px-3 py-2 text-right font-medium ${showPct !== '—' && parseFloat(showPct) >= 70 ? 'text-success' : showPct !== '—' && parseFloat(showPct) >= 50 ? 'text-opt-yellow' : 'text-danger'}`}>{showPct !== '—' ? `${showPct}%` : '—'}</td>
-                        <td className={`px-3 py-2 text-right font-medium ${closePct !== '—' && parseFloat(closePct) >= 25 ? 'text-success' : closePct !== '—' && parseFloat(closePct) >= 15 ? 'text-opt-yellow' : 'text-danger'}`}>{closePct !== '—' ? `${closePct}%` : '—'}</td>
-                        <td className="px-3 py-2 text-right text-opt-yellow">{cash > 0 ? `$${cash.toLocaleString()}` : '—'}</td>
-                        <td className="px-3 py-2 text-right text-success">{rev > 0 ? `$${rev.toLocaleString()}` : '—'}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Calls Calendar — replaces the old EOD-aggregate table.
+          Day strip across the top, click a day to see that day's calls below. */}
+      <CallsCalendar
+        calls={allCalls}
+        selectedDate={selectedDate}
+        onSelectDate={(d) => { setSelectedDate(d); setExpandedCallId(null) }}
+        expandedCallId={expandedCallId}
+        onToggleCall={(cid) => setExpandedCallId(expandedCallId === cid ? null : cid)}
+        onEditEod={(d) => navigate(`/sales/eod/submit?tab=closer&member=${id}&date=${d}`)}
+        days={days}
+      />
 
       {/* Objection Analysis */}
       <div className="tile tile-feedback p-5">
@@ -367,6 +347,261 @@ export default function CloserDetail() {
           <p className="text-text-400 text-sm py-4 text-center">No transcripts available yet — Fathom meetings sync automatically.</p>
         )}
       </div>
+    </div>
+  )
+}
+
+// ---------- Calls Calendar ----------
+// Outcome → { label, ring, dot } — colors mirror the EODReview chip palette so
+// a call looks the same wherever it appears in the app.
+const OUTCOME_META = {
+  closed:       { label: 'Closed',      bar: 'bg-success',     chip: 'bg-success/15 text-success border-success/30' },
+  ascended:     { label: 'Ascended',    bar: 'bg-cyan-400',    chip: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' },
+  not_closed:   { label: 'Not Closed',  bar: 'bg-text-400',    chip: 'bg-text-400/15 text-text-400 border-border-default' },
+  not_ascended: { label: "Didn't Asc",  bar: 'bg-text-400',    chip: 'bg-text-400/15 text-text-400 border-border-default' },
+  no_show:      { label: 'No Show',     bar: 'bg-danger',      chip: 'bg-danger/15 text-danger border-danger/30' },
+  rescheduled:  { label: 'Rescheduled', bar: 'bg-blue-400',    chip: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
+}
+
+const TYPE_META = {
+  new_call:  { label: 'NC',  chip: 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30' },
+  follow_up: { label: 'FU',  chip: 'bg-purple-500/15 text-purple-400 border-purple-500/30' },
+  ascension: { label: 'ASC', chip: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' },
+}
+
+function fmtDayShort(iso) {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  const wd = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()]
+  return `${wd} ${m}/${d}`
+}
+
+function fmtDayLong(iso) {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  const wd = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][date.getDay()]
+  const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m - 1]
+  return `${wd}, ${mo} ${d}, ${y}`
+}
+
+function fmtTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+function CallsCalendar({ calls, selectedDate, onSelectDate, expandedCallId, onToggleCall, onEditEod, days }) {
+  // Group calls by report_date
+  const byDate = new Map()
+  for (const c of calls) {
+    if (!c.report_date) continue
+    if (!byDate.has(c.report_date)) byDate.set(c.report_date, [])
+    byDate.get(c.report_date).push(c)
+  }
+  const sortedDates = [...byDate.keys()].sort() // ascending → today rightmost
+
+  const dayCalls = selectedDate ? (byDate.get(selectedDate) || []) : []
+  const dayTotals = dayCalls.reduce((a, c) => {
+    a.calls++
+    if (c.outcome === 'closed') a.closes++
+    if (c.outcome === 'ascended') a.ascensions++
+    if (c.outcome === 'no_show') a.noShows++
+    a.cash += parseFloat(c.cash_collected || 0)
+    a.revenue += parseFloat(c.revenue || 0)
+    return a
+  }, { calls: 0, closes: 0, ascensions: 0, noShows: 0, cash: 0, revenue: 0 })
+
+  return (
+    <div className="tile tile-feedback p-4 sm:p-5 mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        <Calendar size={16} className="text-opt-yellow" />
+        <h2 className="text-sm font-medium">Calls Calendar</h2>
+        <span className="text-xs text-text-400 ml-auto">
+          {calls.length} calls · last {days} days
+        </span>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-3 mb-4 text-[10px] text-text-400">
+        {Object.entries(OUTCOME_META).filter(([k]) => k !== 'not_ascended').map(([k, meta]) => (
+          <span key={k} className="inline-flex items-center gap-1.5">
+            <span className={`inline-block w-2 h-2 rounded-sm ${meta.bar}`} />
+            {meta.label}
+          </span>
+        ))}
+      </div>
+
+      {sortedDates.length === 0 ? (
+        <div className="py-10 text-center text-text-400 text-sm">
+          No calls in the last {days} days.
+        </div>
+      ) : (
+        <>
+          {/* Day strip */}
+          <div className="overflow-x-auto -mx-1 pb-1">
+            <div className="flex gap-2 px-1 min-w-min">
+              {sortedDates.map(date => (
+                <DayCell
+                  key={date}
+                  date={date}
+                  calls={byDate.get(date)}
+                  selected={date === selectedDate}
+                  onClick={() => onSelectDate(date)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Selected day detail */}
+          {selectedDate && (
+            <div className="mt-5 border-t border-border-default pt-4">
+              <div className="flex flex-wrap items-center gap-3 mb-3">
+                <h3 className="text-sm font-semibold">{fmtDayLong(selectedDate)}</h3>
+                <span className="text-xs text-text-400">
+                  {dayTotals.calls} call{dayTotals.calls === 1 ? '' : 's'}
+                  {dayTotals.closes > 0 && <span className="text-success"> · {dayTotals.closes} closed</span>}
+                  {dayTotals.ascensions > 0 && <span className="text-cyan-400"> · {dayTotals.ascensions} asc</span>}
+                  {dayTotals.noShows > 0 && <span className="text-danger"> · {dayTotals.noShows} no-show</span>}
+                  {dayTotals.cash > 0 && <span className="text-opt-yellow"> · ${dayTotals.cash.toLocaleString()} cash</span>}
+                </span>
+                <button
+                  onClick={() => onEditEod(selectedDate)}
+                  className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-opt-yellow border border-opt-yellow/30 hover:bg-opt-yellow/10 transition-colors"
+                >
+                  <Edit3 size={12} />
+                  Edit EOD
+                </button>
+              </div>
+
+              {dayCalls.length === 0 ? (
+                <p className="text-text-400 text-sm py-4 text-center">No calls recorded for this day.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {dayCalls.map(call => (
+                    <CallRow
+                      key={call.id}
+                      call={call}
+                      expanded={expandedCallId === call.id}
+                      onToggle={() => onToggleCall(call.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function DayCell({ date, calls, selected, onClick }) {
+  const counts = {}
+  for (const c of calls) {
+    const key = c.outcome || 'unknown'
+    counts[key] = (counts[key] || 0) + 1
+  }
+  const total = calls.length
+
+  // Render outcome bar segments in a fixed priority order so colors are stable
+  const segOrder = ['closed', 'ascended', 'not_closed', 'not_ascended', 'rescheduled', 'no_show']
+  const segs = segOrder
+    .filter(k => counts[k])
+    .map(k => ({ outcome: k, count: counts[k], pct: (counts[k] / total) * 100 }))
+
+  // Top-line stat: closes if any, else live calls, else booked count
+  const closes = (counts.closed || 0) + (counts.ascended || 0)
+  const noShows = counts.no_show || 0
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-col gap-1.5 min-w-[78px] sm:min-w-[88px] px-2.5 py-2.5 rounded-2xl border transition-all text-left ${
+        selected
+          ? 'border-opt-yellow bg-opt-yellow/10'
+          : 'border-border-default bg-bg-card hover:bg-bg-card-hover hover:border-border-default'
+      }`}
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <span className={`text-[10px] uppercase tracking-wider ${selected ? 'text-opt-yellow' : 'text-text-400'}`}>
+          {fmtDayShort(date)}
+        </span>
+        <span className="text-[10px] text-text-400 tabular-nums">{total}</span>
+      </div>
+
+      {/* Outcome bar */}
+      <div className="flex h-1.5 rounded-full overflow-hidden bg-bg-primary">
+        {segs.map((s, i) => (
+          <div
+            key={i}
+            className={OUTCOME_META[s.outcome]?.bar || 'bg-text-400'}
+            style={{ width: `${s.pct}%` }}
+            title={`${OUTCOME_META[s.outcome]?.label || s.outcome}: ${s.count}`}
+          />
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2 text-[10px] tabular-nums">
+        {closes > 0 && <span className="text-success">{closes}W</span>}
+        {noShows > 0 && <span className="text-danger">{noShows}NS</span>}
+        {closes === 0 && noShows === 0 && total > 0 && (
+          <span className="text-text-400">—</span>
+        )}
+      </div>
+    </button>
+  )
+}
+
+function CallRow({ call, expanded, onToggle }) {
+  const outcome = OUTCOME_META[call.outcome] || { label: call.outcome || '—', chip: 'bg-text-400/15 text-text-400 border-border-default' }
+  const type = TYPE_META[call.call_type] || TYPE_META.new_call
+  const time = fmtTime(call.created_at)
+  const cash = parseFloat(call.cash_collected || 0)
+  const rev = parseFloat(call.revenue || 0)
+  const hasDetail = !!call.notes
+  const isWin = call.outcome === 'closed' || call.outcome === 'ascended'
+  const isMiss = call.outcome === 'no_show'
+
+  return (
+    <div className={`bg-bg-card border rounded-xl overflow-hidden transition-colors ${
+      isWin ? 'border-success/30' : isMiss ? 'border-danger/30' : 'border-border-default'
+    }`}>
+      <button
+        onClick={onToggle}
+        className="w-full px-3 py-2.5 flex flex-wrap items-center gap-2 sm:gap-3 hover:bg-bg-card-hover/50 transition-colors text-left"
+      >
+        <ChevronDown size={12} className={`text-text-400 transition-transform flex-shrink-0 ${expanded ? '' : '-rotate-90'}`} />
+        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border ${type.chip}`}>{type.label}</span>
+        <span className="font-medium text-sm min-w-0 truncate flex-shrink">{call.prospect_name || '—'}</span>
+        {time && <span className="text-[11px] text-text-400 font-mono">{time}</span>}
+        <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${outcome.chip}`}>{outcome.label}</span>
+        <div className="ml-auto flex items-center gap-3 text-xs">
+          {cash > 0 && <span className="text-opt-yellow font-medium">${cash.toLocaleString()} cash</span>}
+          {rev > 0 && <span className="text-success">${rev.toLocaleString()} rev</span>}
+        </div>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3 pl-9 space-y-2 border-t border-border-default/40">
+          {(rev > 0 || cash > 0) && (
+            <div className="flex gap-4 text-xs pt-2">
+              <span className="text-text-400">Revenue: <strong className="text-success">${rev.toLocaleString()}</strong></span>
+              <span className="text-text-400">Cash: <strong className="text-opt-yellow">${cash.toLocaleString()}</strong></span>
+            </div>
+          )}
+          {call.notes && (
+            <div className="text-xs text-text-400 pt-1">
+              <span className="uppercase text-[10px]">Notes: </span>
+              <span className="text-text-secondary whitespace-pre-wrap">{call.notes}</span>
+            </div>
+          )}
+          {!hasDetail && rev === 0 && cash === 0 && (
+            <p className="text-[10px] text-text-400 italic pt-1">No additional details recorded.</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
