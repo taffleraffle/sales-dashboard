@@ -391,16 +391,17 @@ export default function SalesOverview() {
 
   const totalRevenue = ct.revenue + ct.ascendRevenue
   const totalCash = ct.cash + ct.ascendCash
-  // Close rate is strictly NC-only on BOTH sides — FU calls and FU closes are
-  // excluded so a closer's number is never moved by their FU pipeline. Sourced
-  // from the call-level breakdown (closer_calls.call_type = 'new_call'),
-  // matching the formula on CloserOverview / CloserDetail.
-  const ncBreakSum = Object.values(callBreakdown || {}).reduce((a, b) => ({
-    ncCloses: a.ncCloses + (b.ncCloses || 0),
-    ncLive:   a.ncLive   + (b.ncLive   || 0),
-  }), { ncCloses: 0, ncLive: 0 })
+  // Close rate is computed at the PROSPECT level: unique prospects who
+  // closed / unique prospects who had a live NC or FU call. Multiple
+  // follow-ups on the same prospect collapse to one — closing on a FU
+  // still counts as a close. See useCloserCallBreakdown for the full
+  // rationale and the audit script at scripts/close-rate-audit.mjs.
+  const prospectSum = Object.values(callBreakdown || {}).reduce((a, b) => ({
+    live:   a.live   + (b.liveProspects   || 0),
+    closed: a.closed + (b.closedProspects || 0),
+  }), { live: 0, closed: 0 })
   const showRate = ct.ncBooked ? ((ct.liveNC / ct.ncBooked) * 100).toFixed(1) : 0
-  const closeRate = ncBreakSum.ncLive > 0 ? ((ncBreakSum.ncCloses / ncBreakSum.ncLive) * 100).toFixed(1) : 0
+  const closeRate = prospectSum.live > 0 ? ((prospectSum.closed / prospectSum.live) * 100).toFixed(1) : 0
   const offerRate = ct.liveCalls ? ((ct.offers / ct.liveCalls) * 100).toFixed(1) : 0
   const rescheduleRate = ct.booked ? ((ct.reschedules / ct.booked) * 100).toFixed(1) : 0
   const noShowRate = ct.ncBooked ? ((ct.ncNoShows / ct.ncBooked) * 100).toFixed(1) : 0
@@ -431,15 +432,14 @@ export default function SalesOverview() {
       cash: a.cash + parseFloat(r.total_cash_collected || 0),
       ascendCash: a.ascendCash + parseFloat(r.ascend_cash || 0),
     }), { booked: 0, ncBooked: 0, live: 0, liveNC: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascendCash: 0 })
-    // Close rate is strictly NC-only — FU closes and FU live calls are both
-    // excluded. Pulled from the call-level breakdown so it matches Closer
-    // Overview / Closer Detail. EOD-aggregate `closes` includes FU and would
-    // otherwise inflate the numerator; `t.live` includes FU and deflates the
-    // denominator. Both wrong for a closing-skill rate.
-    const cb = (callBreakdown || {})[c.id] || { ncCloses: 0, ncLive: 0 }
+    // Close rate is prospect-level: unique closed prospects / unique live
+    // prospects. Pulls from useCloserCallBreakdown so multiple FUs on the
+    // same prospect dedup to one. See the audit script at
+    // scripts/close-rate-audit.mjs.
+    const cb = (callBreakdown || {})[c.id] || { liveProspects: 0, closedProspects: 0 }
     return { id: c.id, name: c.name, ...t, totalCash: t.cash + t.ascendCash,
       showPct: t.ncBooked ? ((t.liveNC / t.ncBooked) * 100).toFixed(1) : '0.0',
-      closePct: cb.ncLive > 0 ? ((cb.ncCloses / cb.ncLive) * 100).toFixed(1) : '0.0',
+      closePct: cb.liveProspects > 0 ? ((cb.closedProspects / cb.liveProspects) * 100).toFixed(1) : '0.0',
       offerPct: t.live ? ((t.offers / t.live) * 100).toFixed(1) : '0.0',
     }
   }).sort((a, b) => b.totalCash - a.totalCash)

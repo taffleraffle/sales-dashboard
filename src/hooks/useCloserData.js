@@ -82,10 +82,26 @@ export async function prewarmCloserEODs(closerId = null, days = 30) {
 }
 
 /**
- * Aggregate close breakdown by call type from closer_calls rows.
- * Returns per-closer splits: new_call closes vs follow_up closes.
- * Used for the "close rate = closes on new calls / live new calls" formula,
- * and "net close rate = all closes / live new calls".
+ * Per-closer call breakdown from closer_calls rows.
+ *
+ * Close rate is computed at the PROSPECT level, not the call level: count
+ * each unique prospect_name once regardless of how many follow-ups they had.
+ * "10 calls + 10 follow-ups, 5 closed" should read 50%, not 25% — multiple
+ * follow-ups on the same prospect collapse to 1 in both numerator and
+ * denominator. Closing on a follow-up still counts as a close.
+ *
+ * Returned per-closer fields:
+ *   - liveProspects:   unique prospect_name with at least one NC/FU call
+ *                      where outcome ∈ {closed, not_closed} (denominator)
+ *   - closedProspects: unique prospect_name with at least one NC/FU call
+ *                      where outcome = closed                (numerator)
+ *   - ncBooked / fuBooked-style call-row counters are kept for any caller
+ *     that still wants the old per-row splits, but consumers should prefer
+ *     liveProspects / closedProspects for close-rate math.
+ *
+ * Ascension-type calls (call_type = 'ascension') are existing-client
+ * upgrades, not new closes, and are excluded from both sides — same as
+ * before.
  */
 export function useCloserCallBreakdown(closerId, days = 30) {
   const [breakdown, setBreakdown] = useState({})
@@ -94,7 +110,6 @@ export function useCloserCallBreakdown(closerId, days = 30) {
   useEffect(() => {
     async function fetch() {
       setLoading(true)
-      // Fetch reports in range, then their calls
       let reportQ = supabase
         .from('closer_eod_reports')
         .select('id, closer_id')
@@ -114,31 +129,51 @@ export function useCloserCallBreakdown(closerId, days = 30) {
 
       const { data: calls } = await supabase
         .from('closer_calls')
-        .select('eod_report_id, call_type, outcome')
+        .select('eod_report_id, call_type, outcome, prospect_name')
         .in('eod_report_id', reportIds)
 
-      // Aggregate per closer
-      // IMPORTANT: 'ascended' outcome means an existing client was upgraded —
-      // it should count as LIVE (they showed) but NOT as a new close (no double-counting).
-      // Pure ascension-type calls (call_type = 'ascension') are upgrades to existing
-      // clients and should NOT count toward the new-call close rate at all.
-      const byCloser = {}
+      const norm = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ')
+
+      // Build Sets of prospect names per closer. Sets handle the dedup —
+      // adding the same name twice is a no-op, so multiple FUs on one
+      // prospect collapse naturally.
+      const sets = {}  // closerId -> { live: Set, closed: Set }
+      const counts = {} // closerId -> call-row counters (kept for any legacy reader)
       for (const c of (calls || [])) {
         const cid = reportToCloser[c.eod_report_id]
         if (!cid) continue
-        if (!byCloser[cid]) byCloser[cid] = { ncCloses: 0, fuCloses: 0, ncLive: 0, fuLive: 0, allCloses: 0 }
-        const b = byCloser[cid]
+        if (!sets[cid]) sets[cid] = { live: new Set(), closed: new Set() }
+        if (!counts[cid]) counts[cid] = { ncCloses: 0, fuCloses: 0, ncLive: 0, fuLive: 0, allCloses: 0 }
         const isNew = c.call_type === 'new_call'
-        const isFu = c.call_type === 'follow_up'
-        // Live = they showed up (closed, not_closed, or ascended existing client)
-        const isLive = ['closed', 'not_closed', 'ascended'].includes(c.outcome)
-        // Close = fresh close only (ascensions are upgrades, not new closes)
-        const isClose = c.outcome === 'closed'
-        if (isNew && isClose) b.ncCloses++
-        if (isFu && isClose) b.fuCloses++
-        if (isNew && isLive) b.ncLive++
-        if (isFu && isLive) b.fuLive++
-        if (isClose) b.allCloses++
+        const isFu  = c.call_type === 'follow_up'
+        const isCloseEligible = isNew || isFu
+        // For close-rate, "live" excludes ascensions. Ascended-client calls
+        // are upgrades, not closing opportunities, so they don't contribute
+        // to either numerator or denominator.
+        const isLiveForClose = isCloseEligible && ['closed', 'not_closed'].includes(c.outcome)
+        const isClose = isCloseEligible && c.outcome === 'closed'
+        const name = norm(c.prospect_name)
+        if (name && isLiveForClose) sets[cid].live.add(name)
+        if (name && isClose)        sets[cid].closed.add(name)
+
+        // Legacy call-row counters (unused by the close-rate UI, kept so
+        // any other reader doesn't break)
+        const k = counts[cid]
+        const isLiveLegacy = ['closed', 'not_closed', 'ascended'].includes(c.outcome)
+        if (isNew && c.outcome === 'closed') k.ncCloses++
+        if (isFu  && c.outcome === 'closed') k.fuCloses++
+        if (isNew && isLiveLegacy) k.ncLive++
+        if (isFu  && isLiveLegacy) k.fuLive++
+        if (c.outcome === 'closed') k.allCloses++
+      }
+
+      const byCloser = {}
+      for (const cid of Object.keys(sets)) {
+        byCloser[cid] = {
+          ...counts[cid],
+          liveProspects: sets[cid].live.size,
+          closedProspects: sets[cid].closed.size,
+        }
       }
 
       setBreakdown(byCloser)

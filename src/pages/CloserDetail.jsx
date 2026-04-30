@@ -162,35 +162,32 @@ export default function CloserDetail() {
     reschedules: acc.reschedules + (r.reschedules || 0),
   }), { booked: 0, ncBooked: 0, liveCalls: 0, liveNC: 0, offers: 0, closes: 0, reschedules: 0 })
 
-  // Aggregate breakdowns across all closers for company averages
-  const companyBreakSum = Object.values(allBreak || {}).reduce((a, b) => ({
-    ncCloses: a.ncCloses + b.ncCloses,
-    fuCloses: a.fuCloses + b.fuCloses,
-    ncLive: a.ncLive + b.ncLive,
-  }), { ncCloses: 0, fuCloses: 0, ncLive: 0 })
-  const companyCloseRateNew = companyBreakSum.ncLive > 0
-    ? parseFloat(((companyBreakSum.ncCloses / companyBreakSum.ncLive) * 100).toFixed(1))
-    : 0
-  const companyNetCloseRate = companyBreakSum.ncLive > 0
-    ? parseFloat((((companyBreakSum.ncCloses + companyBreakSum.fuCloses) / companyBreakSum.ncLive) * 100).toFixed(1))
+  // Company-wide and per-closer close rates are prospect-level: unique
+  // closed prospects / unique live prospects, dedup-by prospect_name.
+  // See useCloserCallBreakdown and scripts/close-rate-audit.mjs.
+  const companyProspects = Object.values(allBreak || {}).reduce((a, b) => ({
+    live:   a.live   + (b.liveProspects   || 0),
+    closed: a.closed + (b.closedProspects || 0),
+  }), { live: 0, closed: 0 })
+  const companyCloseRate = companyProspects.live > 0
+    ? parseFloat(((companyProspects.closed / companyProspects.live) * 100).toFixed(1))
     : 0
 
-  const mb = myBreak?.[id] || { ncCloses: 0, fuCloses: 0, ncLive: 0 }
-  const myCloseRateNew = mb.ncLive > 0 ? parseFloat(((mb.ncCloses / mb.ncLive) * 100).toFixed(1)) : 0
-  const myNetCloseRate = mb.ncLive > 0 ? parseFloat((((mb.ncCloses + mb.fuCloses) / mb.ncLive) * 100).toFixed(1)) : 0
+  const mb = myBreak?.[id] || { liveProspects: 0, closedProspects: 0 }
+  const myCloseRate = mb.liveProspects > 0
+    ? parseFloat(((mb.closedProspects / mb.liveProspects) * 100).toFixed(1))
+    : 0
 
   const companyRates = {
     // Show rate: new-call only (denominator = nc_booked, numerator = live_nc_calls)
     showRate: companyTotals.ncBooked > 0 ? parseFloat(((companyTotals.liveNC / companyTotals.ncBooked) * 100).toFixed(1)) : 0,
-    closeRate: companyCloseRateNew,
-    netCloseRate: companyNetCloseRate,
+    closeRate: companyCloseRate,
     offerRate: companyTotals.liveCalls > 0 ? parseFloat(((companyTotals.offers / companyTotals.liveCalls) * 100).toFixed(1)) : 0,
     offerCloseRate: companyTotals.offers > 0 ? parseFloat(((companyTotals.closes / companyTotals.offers) * 100).toFixed(1)) : 0,
     rescheduleRate: companyTotals.booked > 0 ? parseFloat(((companyTotals.reschedules / companyTotals.booked) * 100).toFixed(1)) : 0,
   }
 
   const myShowRate = parseFloat(stats.showRate) || 0
-  const myCloseRate = myCloseRateNew
   const myOfferRate = parseFloat(stats.offerRate) || 0
   const myOfferCloseRate = stats.offers > 0 ? parseFloat(((stats.closes / stats.offers) * 100).toFixed(1)) : 0
   const myRescheduleRate = parseFloat(stats.rescheduleRate) || 0
@@ -232,11 +229,12 @@ export default function CloserDetail() {
       {/* Commission */}
       <CommissionWidget memberId={id} />
 
-      {/* Conversion Gauges */}
+      {/* Conversion Gauges — Net Close removed; close rate is prospect-level
+          so a separate "net" version (NC denominator + FU closes counted)
+          no longer represents anything meaningful. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <Gauge label="Show Rate" value={myShowRate} target={70} delta={parseFloat((myShowRate - companyRates.showRate).toFixed(1))} avgLabel={companyRates.showRate} />
         <Gauge label="Close Rate" value={myCloseRate} target={25} delta={parseFloat((myCloseRate - companyRates.closeRate).toFixed(1))} avgLabel={companyRates.closeRate} />
-        <Gauge label="Net Close" value={myNetCloseRate} target={30} delta={parseFloat((myNetCloseRate - companyRates.netCloseRate).toFixed(1))} avgLabel={companyRates.netCloseRate} />
         <Gauge label="Offer Rate" value={myOfferRate} target={80} delta={parseFloat((myOfferRate - companyRates.offerRate).toFixed(1))} avgLabel={companyRates.offerRate} />
         <Gauge label="Offer → Close" value={myOfferCloseRate} target={30} max={100} delta={parseFloat((myOfferCloseRate - companyRates.offerCloseRate).toFixed(1))} avgLabel={companyRates.offerCloseRate} />
         <Gauge label="Reschedule %" value={myRescheduleRate} target={15} max={50} delta={parseFloat((myRescheduleRate - companyRates.rescheduleRate).toFixed(1))} avgLabel={companyRates.rescheduleRate} />
