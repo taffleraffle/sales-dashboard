@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { BASE_URL as GHL_BASE, GHL_LOCATION_ID as GHL_LOC, ghlFetch } from './ghlClient'
+import { STRATEGY_CALL_CALENDARS } from '../utils/constants'
 
 const GHL_KEY = import.meta.env.VITE_GHL_API_KEY
 const SCIO_PIPELINE = 'ZN1DW9S9qS540PNAXSxa'
@@ -292,8 +293,9 @@ ${uncalled.slice(0, 10).map(l => `${new Date(l.createdAt).toISOString().slice(0,
 
 ## APPOINTMENT TIME ANALYSIS — SHOW & CLOSE RATES BY HOUR
 ${(() => {
-  // Strategy call calendar IDs (qualified bookings — the ones that matter for show/close)
-  const STRAT_CALS = new Set(['9yoQVPBkNX4tWYmcDkf3','cEyqCFAsPLDkUV8n982h','HDsTrgpsFOXw9V4AkZGq','aQsmGwANALCwJBI7G9vT','StLqrES6WMO8f3Obdu9d','3mLE6t6rCKDdIuIfvP9j'])
+  // Strategy call calendar IDs (qualified bookings — the ones that matter for show/close).
+  // Sourced from src/utils/constants.js so this stays in sync with metaAdsSync + ghlCalendar.
+  const STRAT_CALS = new Set(STRATEGY_CALL_CALENDARS)
   const appts = (appointmentsRes.data || []).filter(a => a.start_time && a.appointment_status !== 'cancelled' && STRAT_CALS.has(a.calendar_name))
 
   // Build a lookup from closer_calls outcomes by matching prospect name + report date
