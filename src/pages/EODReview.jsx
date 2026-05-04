@@ -1428,6 +1428,9 @@ export default function EODReview() {
   const [loadingCalls, setLoadingCalls] = useState(false)
   const [expandedCall, setExpandedCall] = useState(null)
   const [closerNotes, setCloserNotes] = useState('')
+  // Calendar events for the selected date that aren't on the submitted EOD —
+  // surfaced as a banner so the closer knows new bookings landed after submit.
+  const [newCallsSinceSubmit, setNewCallsSinceSubmit] = useState([])
   const { members: closers } = useTeamMembers('closer')
   const { members: setters } = useTeamMembers('setter')
   const { submitCloserEOD, submitSetterEOD, submitting } = useEODSubmit()
@@ -1471,7 +1474,7 @@ export default function EODReview() {
       calendar_name: '',
       lead_source: lead?.lead_source || 'manual',
       call_type: 'new_call',
-      outcome: 'no_show',
+      outcome: null,
       revenue: 0,
       cash_collected: 0,
       ascended: false,
@@ -1579,7 +1582,7 @@ export default function EODReview() {
           calendar_name: evt.calendar_name || '',
           lead_source: INTRO_CALENDARS.includes(evt.calendar_name) ? 'auto' : (matchedLead?.lead_source || evt.lead_source || (source === 'ghl' ? 'ghl' : 'manual')),
           call_type: 'new_call',
-          outcome: outcome || (matchedLead?.status && matchedLead.status !== 'booked' ? matchedLead.status : 'no_show'),
+          outcome: outcome || (matchedLead?.status && matchedLead.status !== 'booked' ? matchedLead.status : null),
           revenue: matchedLead?.revenue_attributed || evt.revenue_attributed || 0,
           cash_collected: 0,
           existing_status: evt.existing_status || evt.status || null,
@@ -1609,7 +1612,7 @@ export default function EODReview() {
             calendar_name: '',
             lead_source: lead.lead_source || 'manual',
             call_type: 'new_call',
-            outcome: lead.status && lead.status !== 'booked' && lead.status !== 'set' ? lead.status : 'no_show',
+            outcome: lead.status && lead.status !== 'booked' && lead.status !== 'set' ? lead.status : null,
             revenue: parseFloat(lead.revenue_attributed || 0),
             cash_collected: 0,
             existing_status: lead.status || null,
@@ -1682,6 +1685,7 @@ export default function EODReview() {
     async function loadCalls() {
       setLoadingCalls(true)
       setExpandedCall(null)
+      setNewCallsSinceSubmit([])
 
       // Check if an EOD already exists for this member+date
       const { data: existingEOD } = await supabase
@@ -1717,7 +1721,7 @@ export default function EODReview() {
             calendar_name: c.calendar_name || '',
             lead_source: c.lead_source || '',
             call_type: c.call_type || 'new_call',
-            outcome: c.outcome || 'no_show',
+            outcome: c.outcome || null,
             revenue: parseFloat(c.revenue || 0),
             cash_collected: parseFloat(c.cash_collected || 0),
             offered: ['closed', 'not_closed'].includes(c.outcome),
@@ -1730,7 +1734,19 @@ export default function EODReview() {
             contact_phone: c.contact_phone || '',
           })))
           setLoadingCalls(false)
-          return  // Skip live calendar fetch — we have saved data
+
+          // Background: pull the live calendar and diff against saved calls.
+          // If new calendar events landed since the EOD was submitted, surface
+          // them as a banner so the closer can re-open and add them.
+          fetchCloserCalendar(selectedMember, selectedDate)
+            .then(({ events }) => {
+              const savedEventIds = new Set(savedCalls.map(c => c.ghl_event_id).filter(Boolean))
+              const fresh = (events || []).filter(e => e.ghl_event_id && !savedEventIds.has(e.ghl_event_id))
+              setNewCallsSinceSubmit(fresh)
+            })
+            .catch(err => console.warn('Post-submit calendar diff failed:', err.message))
+
+          return  // Saved data is the source of truth for the form rows
         }
       } else {
         setConfirmed(false)
@@ -1814,7 +1830,7 @@ export default function EODReview() {
           calendar_name: evt.calendar_name || '',
           lead_source: INTRO_CALENDARS.includes(evt.calendar_name) ? 'auto' : (matchedLead?.lead_source || evt.lead_source || (source === 'ghl' ? 'ghl' : 'manual')),
           call_type: 'new_call',
-          outcome: outcome || (matchedLead?.status && matchedLead.status !== 'booked' ? matchedLead.status : 'no_show'),
+          outcome: outcome || (matchedLead?.status && matchedLead.status !== 'booked' ? matchedLead.status : null),
           revenue: matchedLead?.revenue_attributed || evt.revenue_attributed || 0,
           cash_collected: 0,
           existing_status: evt.existing_status || evt.status || null,
@@ -1844,7 +1860,7 @@ export default function EODReview() {
             calendar_name: '',
             lead_source: lead.lead_source || 'manual',
             call_type: 'new_call',
-            outcome: lead.status && lead.status !== 'booked' && lead.status !== 'set' ? lead.status : 'no_show',
+            outcome: lead.status && lead.status !== 'booked' && lead.status !== 'set' ? lead.status : null,
             revenue: parseFloat(lead.revenue_attributed || 0),
             cash_collected: 0,
             existing_status: lead.status || null,
@@ -2446,6 +2462,34 @@ export default function EODReview() {
                   )}
                 </div>
 
+                {/* Needs-attention banner: any saved call still missing an outcome,
+                    or new GHL calendar events landed after this EOD was submitted. */}
+                {(() => {
+                  const pendingCount = calls.filter(c => c.outcome == null).length
+                  const newCount = newCallsSinceSubmit.length
+                  if (pendingCount === 0 && newCount === 0) return null
+                  return (
+                    <div className="mb-4 flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-amber-400/40 bg-amber-400/10 text-amber-300">
+                      <div className="text-xs">
+                        <span className="font-semibold uppercase tracking-wide text-amber-200">Needs review</span>
+                        <span className="ml-2">
+                          {pendingCount > 0 && <>{pendingCount} call{pendingCount === 1 ? '' : 's'} missing outcome</>}
+                          {pendingCount > 0 && newCount > 0 && <span className="mx-1">&middot;</span>}
+                          {newCount > 0 && <>{newCount} new call{newCount === 1 ? '' : 's'} on calendar since submit</>}
+                        </span>
+                      </div>
+                      {(isAdmin || (profile?.teamMemberId === selectedMember)) && (
+                        <button
+                          onClick={() => setConfirmed(false)}
+                          className="text-[11px] font-medium px-2.5 py-1 rounded border border-amber-400/40 hover:bg-amber-400/15 transition-colors whitespace-nowrap"
+                        >
+                          Open to fix
+                        </button>
+                      )}
+                    </div>
+                  )
+                })()}
+
                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
                   <div className="text-center p-3 bg-bg-primary rounded-2xl">
                     <p className="text-xl font-bold">{summary.booked}</p>
@@ -2622,6 +2666,7 @@ export default function EODReview() {
                   {(() => {
                     const hasCalendar = calls.some(c => c._rowSource === 'calendar')
                     const hasLeads = calls.some(c => c._rowSource === 'lead')
+                    const pendingCount = calls.filter(c => c.outcome == null).length
                     return (
                       <>
                         {hasCalendar && (
@@ -2632,6 +2677,11 @@ export default function EODReview() {
                         {hasLeads && (
                           <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/15 text-blue-400">
                             + Leads
+                          </span>
+                        )}
+                        {pendingCount > 0 && (
+                          <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-400/15 text-amber-400 border border-amber-400/30">
+                            {pendingCount} need outcome
                           </span>
                         )}
                       </>
@@ -2647,6 +2697,7 @@ export default function EODReview() {
                     const isClosedOrAscended = call.outcome === 'closed' || call.outcome === 'ascended'
                     const isNoShow = call.outcome === 'no_show'
                     const isRescheduled = call.outcome === 'rescheduled'
+                    const isPending = call.outcome == null
                     const showInputs = isClosedOrAscended
                     const typeBadge = isAscension ? { label: 'ASC', cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' }
                       : call.call_type === 'follow_up' ? { label: 'FU', cls: 'bg-purple-500/15 text-purple-400 border-purple-500/30' }
@@ -2655,7 +2706,11 @@ export default function EODReview() {
                     return (
                     <div key={call.ghl_event_id || call.lead_id || `manual-${i}`}
                       className={`bg-bg-card border rounded-2xl overflow-hidden transition-colors ${
-                        isClosedOrAscended ? 'border-success/30' : isNoShow ? 'border-danger/30' : isRescheduled ? 'border-blue-400/30' : 'border-border-default'
+                        isPending ? 'border-amber-400/50 ring-1 ring-amber-400/20'
+                        : isClosedOrAscended ? 'border-success/30'
+                        : isNoShow ? 'border-danger/30'
+                        : isRescheduled ? 'border-blue-400/30'
+                        : 'border-border-default'
                       }`}
                     >
                       {/* Card header */}
@@ -2676,7 +2731,7 @@ export default function EODReview() {
                                 const newType = e.target.value
                                 updateCall(i, 'call_type', newType)
                                 if (newType === 'ascension') updateCall(i, 'outcome', 'not_ascended')
-                                else if (['ascended', 'not_ascended'].includes(call.outcome)) updateCall(i, 'outcome', 'no_show')
+                                else if (['ascended', 'not_ascended'].includes(call.outcome)) updateCall(i, 'outcome', null)
                               }}
                               className="bg-bg-primary border border-border-default rounded px-2 py-1 text-[11px]">
                               <option value="new_call">Closing</option>

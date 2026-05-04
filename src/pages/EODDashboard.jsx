@@ -29,7 +29,10 @@ export default function EODDashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [closerReports, setCloserReports] = useState([])
   const [setterReports, setSetterReports] = useState([])
-  const [roleFilter, setRoleFilter] = useState('all') // 'all' | 'closer' | 'setter' | 'pending'
+  // Per-closer attention state for the selected date.
+  // { [closerId]: { pendingOutcomes: number, newCalls: number } }
+  const [closerAttention, setCloserAttention] = useState({})
+  const [roleFilter, setRoleFilter] = useState('all') // 'all' | 'closer' | 'setter' | 'pending' | 'attention'
 
   const { members: closers, loading: loadingClosers } = useTeamMembers('closer')
   const { members: setters, loading: loadingSetters } = useTeamMembers('setter')
@@ -38,7 +41,13 @@ export default function EODDashboard() {
     async function load() {
       setRefreshing(true)
       try {
-        const [cRes, sRes] = await Promise.all([
+        // Pull all three sources for the date in parallel:
+        //   - closer & setter EOD reports (existing)
+        //   - closer_calls for any submitted closer EODs (so we can count
+        //     rows still missing an outcome)
+        //   - ghl_appointments for the date (so we can flag new bookings
+        //     that landed on the calendar after the EOD was submitted)
+        const [cRes, sRes, apptsRes] = await Promise.all([
           supabase
             .from('closer_eod_reports')
             .select('id, closer_id, report_date, nc_booked, fu_booked, live_nc_calls, live_fu_calls, nc_no_shows, fu_no_shows, offers, closes, total_cash_collected, total_revenue, updated_at, is_confirmed')
@@ -47,11 +56,56 @@ export default function EODDashboard() {
             .from('setter_eod_reports')
             .select('id, setter_id, report_date, outbound_calls, pickups, meaningful_conversations, sets, self_rating, updated_at, is_confirmed')
             .eq('report_date', selectedDate),
+          supabase
+            .from('ghl_appointments')
+            .select('ghl_event_id, closer_id, ghl_user_id, appointment_status, calendar_name')
+            .eq('appointment_date', selectedDate)
+            .neq('appointment_status', 'cancelled'),
         ])
         if (cRes.error) console.error('EOD closer reports fetch error:', cRes.error)
         if (sRes.error) console.error('EOD setter reports fetch error:', sRes.error)
-        setCloserReports(cRes.data || [])
+        if (apptsRes.error) console.error('ghl_appointments fetch error:', apptsRes.error)
+
+        const closerRows = cRes.data || []
+        setCloserReports(closerRows)
         setSetterReports(sRes.data || [])
+
+        // Compute per-closer attention. Only meaningful for confirmed reports —
+        // a draft/pending EOD already shows as "Pending" and doesn't need an
+        // additional review badge.
+        const confirmedReports = closerRows.filter(r => r.is_confirmed === true)
+        const reportIds = confirmedReports.map(r => r.id)
+        let callsByReport = {}
+        if (reportIds.length > 0) {
+          const { data: callRows } = await supabase
+            .from('closer_calls')
+            .select('eod_report_id, outcome, ghl_event_id')
+            .in('eod_report_id', reportIds)
+          for (const c of callRows || []) {
+            const list = callsByReport[c.eod_report_id] || (callsByReport[c.eod_report_id] = [])
+            list.push(c)
+          }
+        }
+
+        const apptsByCloser = {}
+        for (const a of apptsRes.data || []) {
+          if (!a.closer_id) continue
+          const list = apptsByCloser[a.closer_id] || (apptsByCloser[a.closer_id] = [])
+          list.push(a)
+        }
+
+        const attention = {}
+        for (const report of confirmedReports) {
+          const rowCalls = callsByReport[report.id] || []
+          const pendingOutcomes = rowCalls.filter(c => c.outcome == null).length
+          const savedEventIds = new Set(rowCalls.map(c => c.ghl_event_id).filter(Boolean))
+          const calendarForCloser = apptsByCloser[report.closer_id] || []
+          const newCalls = calendarForCloser.filter(a => a.ghl_event_id && !savedEventIds.has(a.ghl_event_id)).length
+          if (pendingOutcomes > 0 || newCalls > 0) {
+            attention[report.closer_id] = { pendingOutcomes, newCalls }
+          }
+        }
+        setCloserAttention(attention)
       } catch (err) {
         console.error('EOD dashboard load failed:', err)
       } finally {
@@ -80,8 +134,8 @@ export default function EODDashboard() {
   // chasing), then submitted, each group alpha-sorted by name.
   const teamRows = useMemo(() => {
     const rows = [
-      ...closers.map(c => ({ member: c, role: 'closer', report: closerByMember[c.id] || null })),
-      ...setters.map(s => ({ member: s, role: 'setter', report: setterByMember[s.id] || null })),
+      ...closers.map(c => ({ member: c, role: 'closer', report: closerByMember[c.id] || null, attention: closerAttention[c.id] || null })),
+      ...setters.map(s => ({ member: s, role: 'setter', report: setterByMember[s.id] || null, attention: null })),
     ]
     rows.sort((a, b) => {
       // Pending before submitted, then alpha by name.
@@ -90,13 +144,16 @@ export default function EODDashboard() {
       return (a.member.name || '').localeCompare(b.member.name || '')
     })
     return rows
-  }, [closers, setters, closerByMember, setterByMember])
+  }, [closers, setters, closerByMember, setterByMember, closerAttention])
 
   const filteredRows = useMemo(() => {
     if (roleFilter === 'all') return teamRows
     if (roleFilter === 'pending') return teamRows.filter(r => !r.report)
+    if (roleFilter === 'attention') return teamRows.filter(r => r.attention)
     return teamRows.filter(r => r.role === roleFilter)
   }, [teamRows, roleFilter])
+
+  const totalAttention = teamRows.filter(r => r.attention).length
 
   const totalSubmitted = teamRows.filter(r => r.report).length
   const totalPending = teamRows.length - totalSubmitted
@@ -201,6 +258,9 @@ export default function EODDashboard() {
               {totalPending > 0 && (
                 <FilterPill label={`Pending · ${totalPending}`} active={roleFilter === 'pending'} onClick={() => setRoleFilter('pending')} danger />
               )}
+              {totalAttention > 0 && (
+                <FilterPill label={`Needs review · ${totalAttention}`} active={roleFilter === 'attention'} onClick={() => setRoleFilter('attention')} amber />
+              )}
             </div>
           </div>
 
@@ -226,12 +286,13 @@ export default function EODDashboard() {
                           : 'No team members match this filter.'}
                     </td></tr>
                   )}
-                  {filteredRows.map(({ member, role, report }) => (
+                  {filteredRows.map(({ member, role, report, attention }) => (
                     <TeamEodRow
                       key={`${role}:${member.id}`}
                       member={member}
                       role={role}
                       report={report}
+                      attention={attention}
                       isMe={profile?.teamMemberId === member.id}
                       canFile={isAdmin || profile?.teamMemberId === member.id}
                       onOpen={() => openReport(role, member.id)}
@@ -247,10 +308,12 @@ export default function EODDashboard() {
   )
 }
 
-function FilterPill({ label, active, onClick, danger = false }) {
+function FilterPill({ label, active, onClick, danger = false, amber = false }) {
   const activeCls = danger
     ? 'bg-danger/15 border-danger/40 text-danger'
-    : 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow'
+    : amber
+      ? 'bg-amber-400/15 border-amber-400/40 text-amber-300'
+      : 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow'
   const inactiveCls = 'border-border-default text-text-secondary hover:bg-bg-card-hover'
   return (
     <button
@@ -282,18 +345,35 @@ function RolePill({ role }) {
  * Pending (no confirmed report) rows are dimmed with an italic "Not
  * submitted" marker and a "+ File" button at the end.
  */
-function TeamEodRow({ member, role, report, isMe, canFile, onOpen }) {
+function TeamEodRow({ member, role, report, attention, isMe, canFile, onOpen }) {
   const submitted = !!report
   const cls = submitted
     ? 'border-b border-border-default/30 hover:bg-bg-card-hover cursor-pointer transition-colors'
     : 'border-b border-border-default/30 opacity-60 hover:opacity-100 transition-opacity'
 
+  // Concise "needs review" reason text. Both halves shown when both apply, with
+  // a middle-dot separator to match the OPT design system.
+  const attentionLabel = attention
+    ? [
+        attention.pendingOutcomes > 0 && `${attention.pendingOutcomes} missing outcome${attention.pendingOutcomes === 1 ? '' : 's'}`,
+        attention.newCalls > 0 && `${attention.newCalls} new on calendar`,
+      ].filter(Boolean).join(' · ')
+    : null
+
   return (
     <tr onClick={submitted ? onOpen : undefined} className={cls}>
       <td className="px-4 py-2.5 align-middle">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className={`font-medium ${submitted ? 'text-opt-yellow' : 'text-text-secondary'}`}>{member.name}</span>
           {isMe && <span className="text-[9px] px-1.5 py-0.5 rounded bg-opt-yellow/15 text-opt-yellow">YOU</span>}
+          {attentionLabel && (
+            <span
+              className="text-[9px] px-1.5 py-0.5 rounded border border-amber-400/40 bg-amber-400/10 text-amber-300"
+              title={attentionLabel}
+            >
+              {attentionLabel}
+            </span>
+          )}
         </div>
       </td>
       <td className="px-3 py-2.5 align-middle">
