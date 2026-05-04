@@ -155,7 +155,7 @@ function MTDFunnel({ stats }) {
   const steps = [
     { label: 'Leads', value: stats.leads },
     { label: 'Booked', value: stats.qualified_bookings },
-    { label: 'Live Calls', value: stats.live_calls },
+    { label: 'Net Live', value: stats.live_calls },
     { label: 'Offers', value: stats.offers },
     { label: 'Closes', value: stats.closes },
     { label: 'Ascensions', value: stats.ascensions },
@@ -204,7 +204,7 @@ function TrailingTable({ entries }) {
     { label: 'CPL', k: 'cpl', f: f$ },
     { label: 'Booked', k: 'qualified_bookings', f: fN },
     { label: 'L→B%', k: 'lead_to_booking_pct', f: fP },
-    { label: 'Live', k: 'live_calls', f: fN },
+    { label: 'Net Live', k: 'live_calls', f: fN },
     { label: 'Show%', k: 'show_rate', f: fP },
     { label: 'Offers', k: 'offers', f: fN },
     { label: 'Closes', k: 'closes', f: fN },
@@ -302,7 +302,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
       { k: 'auto_bookings', l: 'Auto Books' }, { k: 'qualified_bookings', l: 'Qual Books' },
     ]},
     { label: 'Calls', fields: [
-      { k: 'live_calls', l: 'Live Calls' }, { k: 'reschedules', l: 'Reschedules' },
+      { k: 'live_calls', l: 'Net Live' }, { k: 'reschedules', l: 'Reschedules' },
       { k: 'cancelled_dtf', l: 'Cancel DTF' }, { k: 'cancelled_by_prospect', l: 'Cancel Prospect' },
     ]},
     { label: 'Offers & Closes', fields: [
@@ -338,7 +338,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
     { k: 'qualified_bookings', label: 'Q.Book', fmt: fN },
     { k: null, label: 'L→Q%', calc: e => fmtP(e.qualified_bookings, e.leads),
       color: e => e.leads > 0 ? clrRate((e.qualified_bookings || 0) / e.leads * 100, 15, 8) : '' },
-    { k: 'live_calls', label: 'Live', fmt: fN },
+    { k: 'live_calls', label: 'Net Live', fmt: fN },
     { k: null, label: 'Gr.Show%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(getLive(e), cal) : '-' },
       color: e => { const cal = getCalls(e); return cal > 0 ? clrRate(getLive(e) / cal * 100, 70, 50) : '' } },
     { k: null, label: 'Net Show%', calc: e => { const net = getCalls(e) - (e.cancelled_dtf || 0) - (e.cancelled_by_prospect || 0) - (e.reschedules || 0); return net > 0 ? fmtP(getLive(e), net) : '-' },
@@ -712,7 +712,7 @@ function CSVImportModal({ onClose, onImport }) {
 
   const colLabels = {
     adspend: 'Spend', leads: 'Leads', qualified_bookings: 'Q.Book', calls_on_calendar: 'Booked',
-    live_calls: 'Live', new_live_calls: 'New Live', net_live_calls: 'Net Live', reschedules: 'Resch',
+    live_calls: 'Net Live', new_live_calls: 'New Live', net_live_calls: 'Net Live', reschedules: 'Resch',
     offers: 'Offers', closes: 'Closes', trial_cash: 'T.Cash', trial_revenue: 'T.Rev',
     ascensions: 'Asc', ascend_cash: 'A.Cash', ascend_revenue: 'A.Rev',
     finance_offers: 'Fin.Ofr', finance_accepted: 'Fin.Acc', ar_collected: 'AR',
@@ -1197,7 +1197,7 @@ export default function MarketingPerformance() {
               ['adspend', 'Adspend', '$', stats.adspend],
               ['leads', 'Leads', '#', stats.leads],
               ['qualified_bookings', 'Q.Books', '#', stats.qualified_bookings],
-              ['live_calls', 'Live Calls', '#', stats.live_calls],
+              ['live_calls', 'Net Live', '#', stats.live_calls],
               ['offers', 'Offers', '#', stats.offers],
               ['closes', 'Closes', '#', stats.closes],
               ['ascensions', 'Ascensions', '#', stats.ascensions],
@@ -1256,23 +1256,23 @@ export default function MarketingPerformance() {
       {/* Calls & Show Rates */}
       <Section title="Calls & Show Rates" cols={9}>
         <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar" />
-        <KPI label="Live" value={stats.live_calls} format="n" prev={sp.live_calls} whatIf={wf?.live_calls} tip="Calls that actually happened (showed)" />
+        <KPI label="Net Live" value={stats.live_calls} format="n" prev={sp.live_calls} whatIf={wf?.live_calls} tip="Total live calls (New + Follow-up). Calls that actually happened." />
         <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="From closer EOD reports (NC + FU no-shows)" />
         <KPI label="Cancelled" value={stats.cancels} format="n" prev={sp.cancels} tip="Cancelled DTF + Cancelled by Prospect" />
         <KPI label="Resch" value={stats.reschedules} format="n" prev={sp.reschedules} tip="Calls rescheduled to another date" />
         <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Live / Booked (includes all no-shows)" />
         <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Live / (Booked - Cancels - Reschedules)" />
         <KPI label="Resch%" value={stats.reschedule_rate} format="%" prev={sp.reschedule_rate} tip="Reschedules / Booked" />
-        <KPI label="Cost/Live" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} prev={sp.cost_per_live_call} whatIf={wf?.cost_per_live_call} tip="Adspend / Live Calls" />
+        <KPI label="Cost/Live" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} prev={sp.cost_per_live_call} whatIf={wf?.cost_per_live_call} tip="Adspend / Net Live (NC + FU)" />
       </Section>
 
       {/* Offers & Closes */}
       <Section title="Offers & Closes" cols={6}>
         <KPI label="Offers Made" value={stats.offers} format="n" prev={sp.offers} whatIf={wf?.offers} tip="Number of offers made on live calls" />
-        <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} prev={sp.offer_rate} whatIf={wf?.offer_rate} tip="Offers / Live Calls" />
+        <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} prev={sp.offer_rate} whatIf={wf?.offer_rate} tip="Offers / Net Live (NC + FU)" />
         <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" prev={sp.cost_per_offer} whatIf={wf?.cost_per_offer} tip="Adspend / Offers" />
         <KPI label="Total Closes" value={stats.closes} format="n" prev={sp.closes} whatIf={wf?.closes} tip="Deals closed (trial sign-ups)" />
-        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={wf?.close_rate} tip="Closes / Live New Calls (FU calls excluded from denominator)" />
+        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={wf?.close_rate} tip="Closes ÷ Live New Calls. Follow-ups and ascensions excluded from denominator." />
         <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} prev={sp.cpa_trial} whatIf={wf?.cpa_trial} tip="Cost Per Acquisition = Adspend / Closes" />
       </Section>
 

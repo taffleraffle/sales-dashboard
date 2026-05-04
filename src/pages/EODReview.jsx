@@ -1670,7 +1670,6 @@ export default function EODReview() {
         .eq('closer_id', selectedMember)
         .eq('is_confirmed', true)
         .order('report_date', { ascending: false })
-        .limit(14)
       setCloserHistory(data || [])
     }
     loadHistory()
@@ -1897,13 +1896,17 @@ export default function EODReview() {
     setExpandedCall(null)
   }
 
-  // Auto-computed summary — ascensions excluded from show rate (they always show)
+  // Auto-computed summary — ascensions excluded from show/close/offer rates
   const summary = calls.reduce((acc, c) => {
     const isAsc = c.call_type === 'ascension'
+    const isNew = c.call_type === 'new_call'
+    const isFu  = c.call_type === 'follow_up'
     const isLive = isAsc ? true : ['not_closed', 'closed'].includes(c.outcome)
     return {
       booked: acc.booked + (isAsc ? 0 : 1),
       showed: acc.showed + (isAsc ? 0 : (isLive ? 1 : 0)),
+      liveNc: acc.liveNc + (isNew && ['not_closed', 'closed'].includes(c.outcome) ? 1 : 0),
+      liveFu: acc.liveFu + (isFu  && ['not_closed', 'closed'].includes(c.outcome) ? 1 : 0),
       noShows: acc.noShows + (c.outcome === 'no_show' ? 1 : 0),
       rescheduled: acc.rescheduled + (c.outcome === 'rescheduled' ? 1 : 0),
       offers: acc.offers + (c.offered ? 1 : 0),
@@ -1914,16 +1917,18 @@ export default function EODReview() {
       cash: acc.cash + (isAsc ? 0 : (c.cash_collected || 0)),
       contractValue: acc.contractValue + (isAsc ? (c.revenue || 0) : 0),
       ascendCash: acc.ascendCash + (isAsc ? (c.cash_collected || 0) : 0),
-      newCall: acc.newCall + (c.call_type === 'new_call' ? 1 : 0),
-      followUp: acc.followUp + (c.call_type === 'follow_up' ? 1 : 0),
+      newCall: acc.newCall + (isNew ? 1 : 0),
+      followUp: acc.followUp + (isFu ? 1 : 0),
       financeOffered: acc.financeOffered + (isAsc && c.offered_finance ? 1 : 0),
       financeAccepted: acc.financeAccepted + (isAsc && c.offered_finance && (c.outcome === 'closed' || c.outcome === 'ascended') ? 1 : 0),
     }
-  }, { booked: 0, showed: 0, noShows: 0, rescheduled: 0, offers: 0, closes: 0, ascensions: 0, ascensionCalls: 0, revenue: 0, cash: 0, contractValue: 0, ascendCash: 0, newCall: 0, followUp: 0, financeOffered: 0, financeAccepted: 0 })
+  }, { booked: 0, showed: 0, liveNc: 0, liveFu: 0, noShows: 0, rescheduled: 0, offers: 0, closes: 0, ascensions: 0, ascensionCalls: 0, revenue: 0, cash: 0, contractValue: 0, ascendCash: 0, newCall: 0, followUp: 0, financeOffered: 0, financeAccepted: 0 })
 
-  const showRate = summary.booked ? ((summary.showed / summary.booked) * 100).toFixed(0) : 0
-  const closeRate = summary.showed ? ((summary.closes / summary.showed) * 100).toFixed(0) : 0
-  const offerRate = summary.showed ? ((summary.offers / summary.showed) * 100).toFixed(0) : 0
+  // NC-anchored rates: denominators are live NEW calls only.
+  // Show % uses NC booked / live NC. Close % and Offer % use live NC.
+  const showRate = summary.newCall ? ((summary.liveNc / summary.newCall) * 100).toFixed(0) : 0
+  const closeRate = summary.liveNc ? ((summary.closes / summary.liveNc) * 100).toFixed(0) : 0
+  const offerRate = summary.liveNc ? ((summary.offers / summary.liveNc) * 100).toFixed(0) : 0
   const rescheduleRate = summary.booked ? ((summary.rescheduled / summary.booked) * 100).toFixed(0) : 0
 
   const handleConfirmCloser = async () => {
@@ -2446,9 +2451,9 @@ export default function EODReview() {
                     <p className="text-xl font-bold">{summary.booked}</p>
                     <p className="text-[10px] text-text-400 uppercase">Booked</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
-                    <p className="text-xl font-bold">{summary.showed}</p>
-                    <p className="text-[10px] text-text-400 uppercase">Live Calls</p>
+                  <div className="text-center p-3 bg-bg-primary rounded-2xl" title={`${summary.liveNc} new + ${summary.liveFu} follow-up`}>
+                    <p className="text-xl font-bold">{summary.liveNc + summary.liveFu}</p>
+                    <p className="text-[10px] text-text-400 uppercase">Net Live</p>
                   </div>
                   <div className="text-center p-3 bg-bg-primary rounded-2xl">
                     <p className="text-xl font-bold text-danger">{summary.noShows}</p>
@@ -2841,9 +2846,9 @@ export default function EODReview() {
                       <p className="text-2xl font-bold">{summary.booked}</p>
                       <p className="text-[10px] text-text-400">Booked</p>
                     </div>
-                    <div className="text-center">
-                      <p className="text-2xl font-bold">{summary.showed}</p>
-                      <p className="text-[10px] text-text-400">Live</p>
+                    <div className="text-center" title={`${summary.liveNc} new + ${summary.liveFu} follow-up`}>
+                      <p className="text-2xl font-bold">{summary.liveNc + summary.liveFu}</p>
+                      <p className="text-[10px] text-text-400">Net Live</p>
                     </div>
                     <div className="text-center">
                       <p className="text-2xl font-bold text-danger">{summary.noShows}</p>
@@ -2963,13 +2968,15 @@ export default function EODReview() {
                     <thead className="sticky top-0 bg-bg-card z-10">
                       <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
                         <th className="px-3 py-2.5 text-left">Date</th>
-                        <th className="px-3 py-2.5 text-right">Booked</th>
-                        <th className="px-3 py-2.5 text-right">Live</th>
+                        <th className="px-3 py-2.5 text-right" title="Total bookings (NC + FU)">Booked</th>
+                        <th className="px-3 py-2.5 text-right" title="Live new calls (first-time conversations)">New</th>
+                        <th className="px-3 py-2.5 text-right" title="Live follow-up calls (returning prospects)">Follow-up</th>
+                        <th className="px-3 py-2.5 text-right" title="New + Follow-up live calls">Net Live</th>
                         <th className="px-3 py-2.5 text-right">No Shows</th>
                         <th className="px-3 py-2.5 text-right">Closes</th>
                         <th className="px-3 py-2.5 text-right">Asc</th>
-                        <th className="px-3 py-2.5 text-right">Close %</th>
-                        <th className="px-3 py-2.5 text-right">Show %</th>
+                        <th className="px-3 py-2.5 text-right" title="Closes ÷ Live New Calls. Follow-ups and ascensions excluded from denominator.">Close %</th>
+                        <th className="px-3 py-2.5 text-right" title="Live New Calls ÷ NC Booked">Show %</th>
                         <th className="px-3 py-2.5 text-right">Cash</th>
                         <th className="px-3 py-2.5 text-right">Revenue</th>
                       </tr>
@@ -2977,10 +2984,14 @@ export default function EODReview() {
                     <tbody>
                       {closerHistory.map(eod => {
                         const booked = (eod.nc_booked || 0) + (eod.fu_booked || 0)
-                        const live = (eod.live_nc_calls || 0) + (eod.live_fu_calls || 0)
+                        const liveNc = eod.live_nc_calls || 0
+                        const liveFu = eod.live_fu_calls || 0
+                        const netLive = liveNc + liveFu
                         const noShows = (eod.nc_no_shows || 0) + (eod.fu_no_shows || 0)
-                        const showPct = booked > 0 ? ((live / booked) * 100).toFixed(0) : '—'
-                        const closePct = live > 0 ? (((eod.closes || 0) / live) * 100).toFixed(0) : '—'
+                        // Show % is NC-only: live new calls / NC booked.
+                        const showPct = (eod.nc_booked || 0) > 0 ? ((liveNc / eod.nc_booked) * 100).toFixed(0) : '—'
+                        // Close % is NC-anchored: closes / live new calls.
+                        const closePct = liveNc > 0 ? (((eod.closes || 0) / liveNc) * 100).toFixed(0) : '—'
                         const rev = parseFloat(eod.total_revenue || 0)
                         const cash = parseFloat(eod.total_cash_collected || 0)
                         return (
@@ -2989,7 +3000,9 @@ export default function EODReview() {
                           >
                             <td className="px-3 py-2.5 font-medium">{formatDateLabel(eod.report_date)}</td>
                             <td className="px-3 py-2.5 text-right">{booked}</td>
-                            <td className="px-3 py-2.5 text-right">{live}</td>
+                            <td className="px-3 py-2.5 text-right">{liveNc}</td>
+                            <td className="px-3 py-2.5 text-right text-text-400">{liveFu}</td>
+                            <td className="px-3 py-2.5 text-right font-medium">{netLive}</td>
                             <td className="px-3 py-2.5 text-right text-danger">{noShows}</td>
                             <td className="px-3 py-2.5 text-right font-medium">{eod.closes || 0}</td>
                             <td className="px-3 py-2.5 text-right text-cyan-400">{eod.deposits || 0}</td>
@@ -3076,23 +3089,27 @@ export default function EODReview() {
                     <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
                       <th className="px-3 py-2 text-left">Closer</th>
                       <th className="px-3 py-2 text-right">Booked</th>
-                      <th className="px-3 py-2 text-right">Live</th>
+                      <th className="px-3 py-2 text-right" title="Live new calls (first-time conversations)">New</th>
+                      <th className="px-3 py-2 text-right" title="Live follow-up calls">FU</th>
+                      <th className="px-3 py-2 text-right" title="New + Follow-up live calls">Net Live</th>
                       <th className="px-3 py-2 text-right">No Shows</th>
                       <th className="px-3 py-2 text-right">Closes</th>
                       <th className="px-3 py-2 text-right">Asc</th>
-                      <th className="px-3 py-2 text-right">Show %</th>
+                      <th className="px-3 py-2 text-right" title="Live New Calls ÷ NC Booked">Show %</th>
                       <th className="px-3 py-2 text-right">Cash</th>
                       <th className="px-3 py-2 text-right">Revenue</th>
                     </tr>
                   </thead>
                   <tbody>
                     {allEodHistory.filter(e => e.report_date === selectedDate).length === 0 ? (
-                      <tr><td colSpan={9} className="px-3 py-6 text-center text-text-400">No EODs submitted for this date yet</td></tr>
+                      <tr><td colSpan={11} className="px-3 py-6 text-center text-text-400">No EODs submitted for this date yet</td></tr>
                     ) : allEodHistory.filter(e => e.report_date === selectedDate).map(eod => {
                       const booked = (eod.nc_booked || 0) + (eod.fu_booked || 0)
-                      const live = (eod.live_nc_calls || 0) + (eod.live_fu_calls || 0)
+                      const liveNc = eod.live_nc_calls || 0
+                      const liveFu = eod.live_fu_calls || 0
+                      const netLive = liveNc + liveFu
                       const noShows = (eod.nc_no_shows || 0) + (eod.fu_no_shows || 0)
-                      const showPct = booked > 0 ? ((live / booked) * 100).toFixed(0) : '—'
+                      const showPct = (eod.nc_booked || 0) > 0 ? ((liveNc / eod.nc_booked) * 100).toFixed(0) : '—'
                       const rev = parseFloat(eod.total_revenue || 0)
                       const cash = parseFloat(eod.total_cash_collected || 0)
                       return (
@@ -3101,7 +3118,9 @@ export default function EODReview() {
                         >
                           <td className="px-3 py-2 font-medium text-opt-yellow">{eod.closer?.name || '—'}</td>
                           <td className="px-3 py-2 text-right">{booked}</td>
-                          <td className="px-3 py-2 text-right">{live}</td>
+                          <td className="px-3 py-2 text-right">{liveNc}</td>
+                          <td className="px-3 py-2 text-right text-text-400">{liveFu}</td>
+                          <td className="px-3 py-2 text-right font-medium">{netLive}</td>
                           <td className="px-3 py-2 text-right text-danger">{noShows}</td>
                           <td className="px-3 py-2 text-right font-medium">{eod.closes || 0}</td>
                           <td className="px-3 py-2 text-right text-cyan-400">{eod.deposits || 0}</td>
@@ -3139,11 +3158,13 @@ export default function EODReview() {
                       <th className="px-3 py-2.5 text-left">Date</th>
                       <th className="px-3 py-2.5 text-left">Closer</th>
                       <th className="px-3 py-2.5 text-right">Booked</th>
-                      <th className="px-3 py-2.5 text-right">Live</th>
+                      <th className="px-3 py-2.5 text-right" title="Live new calls">New</th>
+                      <th className="px-3 py-2.5 text-right" title="Live follow-ups">FU</th>
+                      <th className="px-3 py-2.5 text-right" title="New + Follow-up live calls">Net Live</th>
                       <th className="px-3 py-2.5 text-right">No Shows</th>
                       <th className="px-3 py-2.5 text-right">Closes</th>
                       <th className="px-3 py-2.5 text-right">Asc</th>
-                      <th className="px-3 py-2.5 text-right">Show %</th>
+                      <th className="px-3 py-2.5 text-right" title="Live New Calls ÷ NC Booked">Show %</th>
                       <th className="px-3 py-2.5 text-right">Cash</th>
                       <th className="px-3 py-2.5 text-right">Revenue</th>
                     </tr>
@@ -3151,9 +3172,11 @@ export default function EODReview() {
                   <tbody>
                     {allEodHistory.filter(e => e.report_date !== selectedDate).map(eod => {
                       const booked = (eod.nc_booked || 0) + (eod.fu_booked || 0)
-                      const live = (eod.live_nc_calls || 0) + (eod.live_fu_calls || 0)
+                      const liveNc = eod.live_nc_calls || 0
+                      const liveFu = eod.live_fu_calls || 0
+                      const netLive = liveNc + liveFu
                       const noShows = (eod.nc_no_shows || 0) + (eod.fu_no_shows || 0)
-                      const showPct = booked > 0 ? ((live / booked) * 100).toFixed(0) : '—'
+                      const showPct = (eod.nc_booked || 0) > 0 ? ((liveNc / eod.nc_booked) * 100).toFixed(0) : '—'
                       const rev = parseFloat(eod.total_revenue || 0)
                       const cash = parseFloat(eod.total_cash_collected || 0)
                       return (
@@ -3163,7 +3186,9 @@ export default function EODReview() {
                           <td className="px-3 py-2.5 text-text-400">{formatDateLabel(eod.report_date)}</td>
                           <td className="px-3 py-2.5 text-opt-yellow font-medium">{eod.closer?.name || '—'}</td>
                           <td className="px-3 py-2.5 text-right">{booked}</td>
-                          <td className="px-3 py-2.5 text-right">{live}</td>
+                          <td className="px-3 py-2.5 text-right">{liveNc}</td>
+                          <td className="px-3 py-2.5 text-right text-text-400">{liveFu}</td>
+                          <td className="px-3 py-2.5 text-right font-medium">{netLive}</td>
                           <td className="px-3 py-2.5 text-right text-danger">{noShows}</td>
                           <td className="px-3 py-2.5 text-right font-medium">{eod.closes || 0}</td>
                           <td className="px-3 py-2.5 text-right text-cyan-400">{eod.deposits || 0}</td>

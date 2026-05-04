@@ -329,7 +329,7 @@ function CloserHighlights({ report }) {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums">
       <Stat label="Booked" value={booked} />
-      <Stat label="Live" value={live} />
+      <Stat label="Net Live" value={live} />
       <Stat label="Closes" value={report.closes || 0} accent="success" />
       <Stat label="Cash" value={`$${cash.toLocaleString()}`} accent="yellow" />
       <Stat label="Rev" value={`$${revenue.toLocaleString()}`} />

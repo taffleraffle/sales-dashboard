@@ -84,24 +84,26 @@ export async function prewarmCloserEODs(closerId = null, days = 30) {
 /**
  * Per-closer call breakdown from closer_calls rows.
  *
- * Close rate is computed at the PROSPECT level, not the call level: count
- * each unique prospect_name once regardless of how many follow-ups they had.
- * "10 calls + 10 follow-ups, 5 closed" should read 50%, not 25% — multiple
- * follow-ups on the same prospect collapse to 1 in both numerator and
- * denominator. Closing on a follow-up still counts as a close.
+ * Close rate is **NC-anchored** at the prospect level:
+ *   - denominator = unique prospects whose live call in the period is a
+ *     NEW call (call_type = 'new_call', outcome ∈ {closed, not_closed}).
+ *   - numerator   = unique prospects with outcome = closed in the period,
+ *     whether the close happened on the NC or a follow-up.
+ *
+ * A prospect whose only live call in the period is a follow-up (their NC
+ * happened in an earlier period) is NOT in the denominator — they're
+ * already counted against whichever period their NC occurred in. This is
+ * what the closer means when he says "of the new prospects I got to talk
+ * to this period, how many did I close?".
  *
  * Returned per-closer fields:
- *   - liveProspects:   unique prospect_name with at least one NC/FU call
- *                      where outcome ∈ {closed, not_closed} (denominator)
- *   - closedProspects: unique prospect_name with at least one NC/FU call
- *                      where outcome = closed                (numerator)
- *   - ncBooked / fuBooked-style call-row counters are kept for any caller
- *     that still wants the old per-row splits, but consumers should prefer
- *     liveProspects / closedProspects for close-rate math.
+ *   - liveProspects:   unique prospect_name with a live NEW call in window
+ *                      (denominator)
+ *   - closedProspects: unique prospect_name with outcome = closed in window
+ *                      (numerator; close can be on NC or FU)
  *
  * Ascension-type calls (call_type = 'ascension') are existing-client
- * upgrades, not new closes, and are excluded from both sides — same as
- * before.
+ * upgrades, not new closes, and are excluded entirely.
  */
 export function useCloserCallBreakdown(closerId, days = 30) {
   const [breakdown, setBreakdown] = useState({})
@@ -147,14 +149,14 @@ export function useCloserCallBreakdown(closerId, days = 30) {
         const isNew = c.call_type === 'new_call'
         const isFu  = c.call_type === 'follow_up'
         const isCloseEligible = isNew || isFu
-        // For close-rate, "live" excludes ascensions. Ascended-client calls
-        // are upgrades, not closing opportunities, so they don't contribute
-        // to either numerator or denominator.
-        const isLiveForClose = isCloseEligible && ['closed', 'not_closed'].includes(c.outcome)
+        // NC-anchored: denominator is unique prospects whose live call this
+        // period is a NEW call. Numerator is anyone who closed (NC or FU).
+        // Ascensions are upgrades, not new closes — excluded both sides.
+        const isLiveNc = isNew && ['closed', 'not_closed'].includes(c.outcome)
         const isClose = isCloseEligible && c.outcome === 'closed'
         const name = norm(c.prospect_name)
-        if (name && isLiveForClose) sets[cid].live.add(name)
-        if (name && isClose)        sets[cid].closed.add(name)
+        if (name && isLiveNc) sets[cid].live.add(name)
+        if (name && isClose)  sets[cid].closed.add(name)
 
         // Legacy call-row counters (unused by the close-rate UI, kept so
         // any other reader doesn't break)
@@ -266,11 +268,11 @@ export function useCloserStats(closerId, days = 30) {
     // they aren't qualified strategy-call bookings.
     showRate: totals.ncBooked ? ((totals.liveNC / totals.ncBooked) * 100).toFixed(1) : 0,
     offerRate: totals.liveCalls ? ((totals.offers / totals.liveCalls) * 100).toFixed(1) : 0,
-    // closeRate here is an APPROXIMATION from EOD-level aggregates (numerator =
-    // all closes, denominator = live NC only). Prefer useCloserCallBreakdown's
-    // ncCloses / ncLive when you need the strictly-NC close rate (CloserOverview
-    // and CloserDetail use that instead). Kept for back-compat with any caller
-    // reading stats.closeRate; do not use this for performance dashboards.
+    // closeRate from EOD aggregates: closes / liveNC. Matches the NC-anchored
+    // semantics in useCloserCallBreakdown (denominator = live new calls only).
+    // Slight imprecision vs. the prospect-level breakdown if a prospect has
+    // multiple NC rows in window — useCloserCallBreakdown is the source of
+    // truth for performance dashboards.
     closeRate: totals.liveNC ? ((totals.closes / totals.liveNC) * 100).toFixed(1) : 0,
     rescheduleRate: totalBooked ? ((totals.reschedules / totalBooked) * 100).toFixed(1) : 0,
   }

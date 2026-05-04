@@ -541,7 +541,7 @@ export default function SalesOverview() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
         <KPICard label="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} subtitle={`${ct.closes} closes`} highlight onClick={openRevenueBreakdown} />
         <KPICard label="Total Cash" value={`$${totalCash.toLocaleString()}`} subtitle={totalRevenue > 0 ? `${((totalCash / totalRevenue) * 100).toFixed(0)}% collected` : ''} onClick={openRevenueBreakdown} />
-        <KPICard label="Show Rate" value={`${showRate}%`} target={70} direction="above" subtitle={`${ct.liveCalls}/${ct.booked}`} />
+        <KPICard label="Show Rate" value={`${showRate}%`} target={70} direction="above" subtitle={`${ct.liveNC}/${ct.ncBooked}`} />
         <KPICard label="Avg STL" value={stl ? stl.avgDisplay : stlLoading ? '...' : '—'} subtitle={stl ? `${stl.pctUnder5m}% < 5m` : ''} />
       </div>
 
@@ -549,7 +549,7 @@ export default function SalesOverview() {
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3">
         <KPICard label="Trial Cash" value={`$${ct.cash.toLocaleString()}`} subtitle={`$${ct.revenue.toLocaleString()} rev`} />
         <KPICard label="Ascend Cash" value={`$${ct.ascendCash.toLocaleString()}`} subtitle={`${ct.ascensions} ascensions`} />
-        <KPICard label="Close Rate" value={`${closeRate}%`} target={25} direction="above" subtitle={`${ct.closes}/${ct.liveCalls}`} />
+        <KPICard label="Close Rate" value={`${closeRate}%`} target={25} direction="above" subtitle={`${prospectSum.closed}/${prospectSum.live} live new`} />
         <KPICard label="Offer Rate" value={`${offerRate}%`} target={80} direction="above" />
         {mkt.adspend > 0 && <>
           <KPICard label="Ad Spend" value={`$${mkt.adspend.toLocaleString()}`} />
@@ -759,7 +759,7 @@ export default function SalesOverview() {
               <tr className="bg-bg-primary/30 text-[10px] text-text-400 uppercase tracking-wider">
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-left w-8 sm:w-10"></th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-left">Closer</th>
-                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Live</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right" title="Net Live (NC + FU)">Net Live</th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Closes</th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Show%</th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Offer%</th>

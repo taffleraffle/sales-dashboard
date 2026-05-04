@@ -128,7 +128,7 @@ export default function CloserOverview() {
       {/* Company-Level KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3 mb-6">
         <KPICard label="Booked" value={totalBooked} subtitle={`${companyTotals.ncBooked} NC / ${companyTotals.fuBooked} FU`} />
-        <KPICard label="Live Calls" value={companyTotals.liveCalls} subtitle={`${companyTotals.liveNC} NC / ${companyTotals.liveFU} FU`} />
+        <KPICard label="Net Live" value={companyTotals.liveCalls} subtitle={`${companyTotals.liveNC} NC / ${companyTotals.liveFU} FU`} />
         <KPICard label="No Shows" value={totalNoShows} />
         <KPICard label="Offers" value={companyTotals.offers} />
         <KPICard label="Closes" value={companyTotals.closes} />
@@ -179,7 +179,7 @@ export default function CloserOverview() {
 
               <div className="flex flex-wrap gap-4 text-xs">
                 <span className="text-text-400">Booked: <strong className="text-text-primary">{c.booked}</strong></span>
-                <span className="text-text-400">Live Calls: <strong className="text-text-primary">{c.liveCalls}</strong></span>
+                <span className="text-text-400">Net Live: <strong className="text-text-primary">{c.liveCalls}</strong></span>
                 <span className="text-text-400">Offers: <strong className="text-text-primary">{c.offers}</strong></span>
                 <span className="text-text-400">Cash: <strong className="text-opt-yellow">${c.cash.toLocaleString()}</strong></span>
               </div>
