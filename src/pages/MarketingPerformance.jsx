@@ -151,71 +151,6 @@ function Section({ title, children, cols = 6 }) {
   )
 }
 
-// Lead → Bookings table — Leads | CPL | Bookings | CPB | Q.Bookings | CPQB
-//
-// Splits strategy-calendar bookings into "all" (every booking, including the
-// DQ Calendly flow) and "qualified" (DQ excluded). Cost-per columns derive
-// from adspend in the active range.
-function LeadBookingsTable({ range, stats, prevStats, sumBookings }) {
-  const totals = sumBookings(range)
-  const prevTotals = sumBookings(
-    typeof range === 'number'
-      ? Object.assign({}, { from: '0000-00-00', to: '0000-00-00' }) // we don't track prev bookings yet
-      : { from: '0000-00-00', to: '0000-00-00' }
-  )
-  void prevStats; void prevTotals // prev-period delta omitted to avoid second range query
-  const adspend = stats.adspend || 0
-  const leads = stats.leads || 0
-  const cpl = leads > 0 ? adspend / leads : 0
-  const cpb = totals.all > 0 ? adspend / totals.all : 0
-  const cpqb = totals.qualified > 0 ? adspend / totals.qualified : 0
-
-  const cells = [
-    { label: 'Leads',                 value: leads,            fmt: 'n', tip: 'New opportunities created in SCIO USA pipeline' },
-    { label: 'Cost / Lead',           value: cpl,              fmt: '$', tip: 'Adspend ÷ Leads' },
-    { label: 'Bookings',              value: totals.all,       fmt: 'n', tip: 'All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at' },
-    { label: 'Cost / Booking',        value: cpb,              fmt: '$', tip: 'Adspend ÷ Bookings' },
-    { label: 'Qualified Bookings',    value: totals.qualified, fmt: 'n', tip: 'Strategy-calendar bookings excluding the DQ Calendly calendar' },
-    { label: 'Cost / Qual. Booking',  value: cpqb,             fmt: '$', tip: 'Adspend ÷ Qualified Bookings' },
-  ]
-
-  return (
-    <div className="mb-4">
-      <h3 className="text-[10px] uppercase tracking-widest text-text-400 font-medium mb-2 pl-1">Lead → Bookings</h3>
-      <div className="tile tile-feedback overflow-hidden">
-        <table className="w-full text-[11px]">
-          <thead>
-            <tr className="border-b border-border-default text-text-400">
-              {cells.map(c => (
-                <th key={c.label} className="px-3 py-2 text-left text-[9px] uppercase tracking-wider font-medium" title={c.tip}>
-                  {c.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              {cells.map(c => (
-                <td key={c.label} className="px-3 py-3 tabular-nums">
-                  <span className="text-base font-semibold text-text-primary">
-                    {c.fmt === '$'
-                      ? `$${(c.value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                      : (c.value || 0).toLocaleString()}
-                  </span>
-                </td>
-              ))}
-            </tr>
-          </tbody>
-        </table>
-        {totals.dq > 0 && (
-          <div className="px-3 py-1.5 text-[10px] text-text-400 border-t border-border-default/40">
-            {totals.dq} of {totals.all} routed to the DQ Calendly &middot; excluded from Qualified Bookings
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
 
 // ── MTD Funnel ─────────────────────────────────────────────────────
 function MTDFunnel({ stats }) {
@@ -1366,16 +1301,6 @@ export default function MarketingPerformance() {
       )}
 
       {/* ═══ KPI Sections ═══ */}
-
-      {/* Lead → Bookings funnel — the table requested 2026-05-04. Splits
-          strategy calendars into all-bookings vs qualified-only (DQ Calendly
-          excluded). Fed by live ghl_appointments query in `bookingsByDate`. */}
-      <LeadBookingsTable
-        range={range}
-        stats={stats}
-        prevStats={statsPrev}
-        sumBookings={sumBookings}
-      />
 
       {/* Spend & Lead Acquisition.
           Auto-bookings (the legacy "intro call" calendars) are no longer
