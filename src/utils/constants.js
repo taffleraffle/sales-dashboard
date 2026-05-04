@@ -21,22 +21,12 @@ export const STRATEGY_CALL_CALENDARS = [
   'gohFzPCilzwBtVfaC6fu', // Opt Digital | Strategy Call - DQ (Calendly)
 ]
 
-// Subset of strategy calendars that route disqualified prospects (the form
-// qualifies on revenue but the prospect failed the franchise/GBP check, or
-// otherwise got routed to the deprioritized booking flow). These count
-// toward total `bookings` but are excluded from `qualified_bookings`.
-//
-// IMPORTANT — this is data-driven, not name-driven. The Typeform's
-// "IMPORTANT: Please Book A Call Below" (DQ) button routes to a Calendly
-// URL that actually lands on `T5Zif5GjDwulya6novU0` (named "Strategy Call
-// (Calendly)" — no "DQ" in the GHL name). The "Great! Please Book in a Call"
-// (qualified) button lands prospects on the cEy/gohF calendars instead.
-// The GHL calendar names are misleading — trust the form data.
-//
-// Confirmed 2026-05-04 by tracing 18 form-DQ-bucket emails to their GHL
-// appointments: 13 of the 13 with bookings landed on T5Zif5GjDwulya6novU0.
+// Subset of strategy calendars that route disqualified prospects. Pending
+// confirmation from Ben on which of T5Zif vs gohF is actually the DQ flow —
+// reverted to the GHL-named DQ calendar for now to match what the calendar
+// names suggest. Update once the per-calendar split is confirmed.
 export const DQ_BOOKING_CALENDARS = [
-  'T5Zif5GjDwulya6novU0', // Opt Digital | Strategy Call (Calendly) — actual DQ Calendly mirror
+  'gohFzPCilzwBtVfaC6fu', // Opt Digital | Strategy Call - DQ (Calendly)
 ]
 
 // Strategy calendars EXCLUDING the DQ flow. This is the denominator for
