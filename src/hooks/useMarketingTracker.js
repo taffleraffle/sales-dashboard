@@ -361,12 +361,16 @@ export function computeMarketingStats(entries) {
     // denominator. `new_live_calls` is the live-NC-only count (closer EOD
     // `live_nc_calls`), so now both sides of the ratio are apples-to-apples.
     cancels: t.cancelled_dtf + t.cancelled_by_prospect,
-    gross_show_rate: t.qualified_bookings > 0 ? (t.new_live_calls / t.qualified_bookings) * 100 : 0,
+    // Caps at 100% — show rate exceeding 100% means closers logged more lives
+    // than were booked on the calendars we track, which is a data-coverage bug,
+    // not a real metric. Capping prevents a misleading "133%" from appearing
+    // while still flagging the underlying issue (the cap kicks in at 100% flat).
+    gross_show_rate: t.qualified_bookings > 0 ? Math.min(100, (t.new_live_calls / t.qualified_bookings) * 100) : 0,
     net_show_rate: (() => {
       const net = t.qualified_bookings - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules
-      return net > 0 ? (t.new_live_calls / net) * 100 : 0
+      return net > 0 ? Math.min(100, (t.new_live_calls / net) * 100) : 0
     })(),
-    show_rate: t.qualified_bookings > 0 ? (t.new_live_calls / t.qualified_bookings) * 100 : 0,
+    show_rate: t.qualified_bookings > 0 ? Math.min(100, (t.new_live_calls / t.qualified_bookings) * 100) : 0,
     // No-show rate uses the same NC-only numerator. Derive fallback from
     // NC-live count so a missed-no-shows field doesn't pull follow-up call
     // counts into the math.

@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { INTRO_CALENDARS as INTRO_CALL_CALENDARS, STRATEGY_CALL_CALENDARS } from '../utils/constants'
 
 const ACCOUNT_ID = import.meta.env.VITE_META_ADS_ACCOUNT_ID
 const ACCESS_TOKEN = import.meta.env.VITE_META_ADS_ACCESS_TOKEN
@@ -142,24 +143,8 @@ const GHL_API_KEY = import.meta.env.VITE_GHL_API_KEY
 // SCIO PIPELINE (USA) — opportunities here are the real leads
 const SCIO_PIPELINE_ID = 'ZN1DW9S9qS540PNAXSxa'
 
-// Introductory Call calendars → auto bookings
-const INTRO_CALL_CALENDARS = [
-  '5omixNmtgmGMWQfEL0fs', // (FB) RestorationConnect AI - Introductory Call
-  'C5NRRAjwsy43nOyU6izQ', // RestorationConnect AI - Introductory Call
-  'GpYh75LaFEJgpHYkZfN9', // PlumberConnect AI - Introductory Call
-  'okWMyvLhnJ7sbuvSIzok', // Remodeling AI - Introductory Call
-  'MvYStrHFsRTpunwTXIqT', // Intro Call
-]
-
-// Strategy Call calendars → qualified bookings (deduped per contact)
-const STRATEGY_CALL_CALENDARS = [
-  '9yoQVPBkNX4tWYmcDkf3', // Remodeling AI - Strategy Call
-  'cEyqCFAsPLDkUV8n982h', // RestorationConnect AI - Strategy Call
-  'HDsTrgpsFOXw9V4AkZGq', // (FB) RestorationConnect AI - Strategy Call
-  'aQsmGwANALCwJBI7G9vT', // PlumberConnect AI - Strategy Call
-  'StLqrES6WMO8f3Obdu9d', // PoolConnect AI - Strategy Call
-  '3mLE6t6rCKDdIuIfvP9j', // (FB) PoolConnectAI - Strategy Call
-]
+// Calendar ID lists (intro + strategy) live in src/utils/constants.js so the
+// sync code in ghlCalendar.js can scan them too. Imported above.
 
 /**
  * Pull leads from GHL pipeline opportunities (SCIO USA).
