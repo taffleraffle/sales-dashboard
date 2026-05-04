@@ -26,19 +26,22 @@ const since = (() => { const s = new Date(); s.setDate(s.getDate() - 30); return
 const until = new Date().toISOString().split('T')[0]
 console.log(`Window: ${since} → ${until}`)
 
-// Strategy → qualified_bookings (bucketed by appointment_date)
+// Strategy → qualified_bookings (bucketed by booked_at, fallback appointment_date)
+// Mirrors the live syncMetaToTracker logic so the rebuild is idempotent with what
+// the browser-side sync would write.
 const { data: strat } = await supabase
   .from('ghl_appointments')
-  .select('appointment_date, calendar_name')
-  .gte('appointment_date', since)
-  .lte('appointment_date', until)
+  .select('booked_at, appointment_date, calendar_name')
+  .or(`booked_at.gte.${since},appointment_date.gte.${since}`)
   .neq('appointment_status', 'cancelled')
   .in('calendar_name', STRATEGY)
 
 const qualByDate = {}
 for (const a of strat || []) {
-  const d = a.appointment_date
-  if (!d) continue
+  const raw = a.booked_at || a.appointment_date
+  if (!raw) continue
+  const d = String(raw).split(' ')[0].split('T')[0]
+  if (d < since || d > until) continue
   qualByDate[d] = (qualByDate[d] || 0) + 1
 }
 console.log(`\nStrategy events: ${strat?.length || 0} → ${Object.keys(qualByDate).length} dates`)

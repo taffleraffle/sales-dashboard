@@ -269,30 +269,38 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
 
   // Step 5: pull qualified_bookings from Strategy Call calendars.
   //
-  // Bucket by appointment_date so qualified_bookings aligns day-for-day with
-  // live_calls (both keyed off the day of the call) — that's what makes the
-  // gross_show_rate / close_rate formulas work (live_calls / qualified_bookings
-  // on the same date). If we bucketed by booked_at, shows and bookings would
-  // live on different rows and the rates would be misleading.
+  // Bucket by booked_at (when the lead actually booked the strategy call) so
+  // qualified_bookings aligns with `leads` (which is bucketed by opportunity
+  // createdAt). Without this, leads vs bookings can flip in trailing windows
+  // — a 7d window contains all the new leads from the last 7d but ALSO the
+  // bookings of leads that came in WEEKS ago, so bookings can outrun leads.
+  // Bucketing both by their funnel-entry date makes lead_to_booking_pct sane.
   //
-  // BUT — skip appointments whose date is still in the future. A call scheduled
-  // for next week hasn't happened yet; its show rate is undefined. Creating a
-  // row for a future date drags down the trailing-period rate columns because
-  // the future row has qualified_bookings>0 but live_calls=0.
+  // Show-rate math (live_calls / qualified_bookings) becomes approximate at
+  // the daily level — a booking made Apr 28 for a call held May 4 lives on
+  // different rows. Over any trailing window of >5 days the per-row drift
+  // averages out. Show rates are also capped at 100% in useMarketingTracker.js
+  // as a safety net for the leftover daily mismatch.
+  //
+  // We also still pull the appointment_date column (used to clip out future-
+  // dated rows: a call scheduled for next week shouldn't drag the row totals
+  // until the call actually happens).
   const { data: stratAppts, error: stratErr } = await supabase
     .from('ghl_appointments')
-    .select('appointment_date, calendar_name, ghl_contact_id')
-    .gte('appointment_date', trackerSince)
-    .lte('appointment_date', trackerUntil)
+    .select('booked_at, appointment_date, calendar_name, ghl_contact_id')
+    .or(`booked_at.gte.${trackerSince},appointment_date.gte.${trackerSince}`)
     .neq('appointment_status', 'cancelled')
     .in('calendar_name', STRATEGY_CALL_CALENDARS)
-    .order('appointment_date', { ascending: true })
   if (stratErr) throw new Error(`ghl_appointments (strategy) read failed: ${stratErr.message}`)
 
   const qualBookingsByDate = {}
   for (const a of (stratAppts || [])) {
-    if (!a.appointment_date) continue
-    const d = a.appointment_date
+    // Prefer booked_at; fall back to appointment_date for legacy rows that
+    // were synced before booked_at was populated. (As of migration 022 +
+    // backfill, ~all strategy rows have booked_at.)
+    const raw = a.booked_at || a.appointment_date
+    if (!raw) continue
+    const d = String(raw).split(' ')[0].split('T')[0]
     if (d < trackerSince || d > trackerUntil) continue
     qualBookingsByDate[d] = (qualBookingsByDate[d] || 0) + 1
   }
