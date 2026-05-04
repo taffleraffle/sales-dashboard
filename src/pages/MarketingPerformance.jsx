@@ -1377,17 +1377,35 @@ export default function MarketingPerformance() {
         sumBookings={sumBookings}
       />
 
-      {/* Spend & Lead Acquisition */}
-      <Section title="Spend & Lead Acquisition" cols={8}>
-        <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={wf?.adspend} tip="Total Meta Ads spend (converted to USD)" />
-        <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={wf?.leads} tip="New leads from GHL pipeline" />
-        <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={wf?.cpl} tip="Cost Per Lead = Adspend / Leads" />
-        <KPI label="A.Books" value={stats.auto_bookings} format="n" trailing={stats30.auto_bookings} prev={sp.auto_bookings} whatIf={wf?.auto_bookings} tip="Auto bookings from Intro Call calendars" />
-        <KPI label="Cost/A.Book" value={stats.cost_per_auto_booking} format="$" trailing={stats30.cost_per_auto_booking} prev={sp.cost_per_auto_booking} whatIf={wf?.cost_per_auto_booking} tip="Cost Per Auto Booking = Adspend / Auto Bookings" />
-        <KPI label="Q.Books" value={stats.qualified_bookings} format="n" trailing={stats30.qualified_bookings} prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Strategy Call bookings (deduped per contact)" />
-        <KPI label="L→Q%" value={stats.lead_to_booking_pct} format="%" benchmark={bm.lead_to_booking} trailing={stats30.lead_to_booking_pct} prev={sp.lead_to_booking_pct} whatIf={wf?.lead_to_booking_pct} tip="Lead to Qual Booking % = Q.Books / Leads" />
-        <KPI label="Cost/Q.Book" value={stats.cpb} format="$" benchmark={bm.cpb} trailing={stats30.cpb} prev={sp.cpb} whatIf={wf?.cpb} tip="Cost Per Qual Booking = Adspend / Q.Books" />
-      </Section>
+      {/* Spend & Lead Acquisition.
+          Auto-bookings (the legacy "intro call" calendars) are no longer
+          tracked here per request — replaced with Bookings (all strategy)
+          and Cost/Booking. Q.Books now means strategy bookings EXCLUDING the
+          DQ Calendly calendar; values come from the live `bookingTotals30/r`
+          computed from ghl_appointments so they stay aligned with the new
+          Lead → Bookings table at the top. */}
+      {(() => {
+        const bk = sumBookings(range)
+        const bk30 = sumBookings(30)
+        const cpb = bk.all > 0 ? stats.adspend / bk.all : 0
+        const cpb30 = bk30.all > 0 ? stats30.adspend / bk30.all : 0
+        const cpqb = bk.qualified > 0 ? stats.adspend / bk.qualified : 0
+        const cpqb30 = bk30.qualified > 0 ? stats30.adspend / bk30.qualified : 0
+        const leadToQ = stats.leads > 0 ? (bk.qualified / stats.leads) * 100 : 0
+        const leadToQ30 = stats30.leads > 0 ? (bk30.qualified / stats30.leads) * 100 : 0
+        return (
+          <Section title="Spend & Lead Acquisition" cols={8}>
+            <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={wf?.adspend} tip="Total Meta Ads spend (converted to USD)" />
+            <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={wf?.leads} tip="New opportunities created in SCIO USA pipeline" />
+            <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={wf?.cpl} tip="Cost Per Lead = Adspend / Leads" />
+            <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at" />
+            <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} tip="Adspend ÷ Bookings (all)" />
+            <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} tip={`Strategy bookings EXCLUDING the DQ Calendly calendar${bk.dq ? ` (${bk.dq} routed to DQ in this window)` : ''}`} />
+            <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} tip="Qualified Bookings ÷ Leads" />
+            <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} tip="Adspend ÷ Qualified Bookings (excludes DQ)" />
+          </Section>
+        )
+      })()}
 
       {/* Calls & Show Rates */}
       <Section title="Calls & Show Rates" cols={9}>
