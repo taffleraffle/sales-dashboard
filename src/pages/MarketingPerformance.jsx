@@ -6,6 +6,7 @@ import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check } from
 import { supabase } from '../lib/supabase'
 import { useToast } from '../hooks/useToast'
 import { STRATEGY_CALL_CALENDARS, DQ_BOOKING_CALENDARS } from '../utils/constants'
+import { isDQRevenueTier } from '../services/ghlCalendar'
 
 import { todayET } from '../lib/dateUtils'
 
@@ -948,10 +949,16 @@ export default function MarketingPerformance() {
     })()
   }, [loading])
 
-  // Bookings split (all vs qualified vs DQ) for the new "Lead → Bookings"
-  // table. We pull this directly from ghl_appointments rather than caching
-  // a `bookings` column on marketing_tracker — the live query is cheap (one
-  // query for last 90 days) and removes a schema dependency.
+  // Bookings split (all vs qualified vs DQ) for the Spend & Lead Acquisition
+  // KPIs. Pulled live from ghl_appointments. Each appointment row carries the
+  // prospect's monthly-revenue tier (synced from the GHL contact's custom
+  // field by syncGHLAppointments) — the DQ split is "$0-$30,000" tier ⇒ DQ.
+  // This is more accurate than splitting by calendar ID because the same
+  // calendar can hold both qualified and DQ bookings (e.g. RestorationConnect
+  // Strategy Call gets both direct and form-DQ-routed prospects).
+  //
+  // Falls back to calendar-ID classification if revenue_tier is null (older
+  // rows synced before the column landed).
   const [bookingsByDate, setBookingsByDate] = useState({}) // { 'YYYY-MM-DD': { all, qualified, dq } }
   useEffect(() => {
     let cancelled = false
@@ -962,7 +969,7 @@ export default function MarketingPerformance() {
       const todayStr = new Date().toISOString().split('T')[0]
       const { data, error } = await supabase
         .from('ghl_appointments')
-        .select('booked_at, appointment_date, calendar_name')
+        .select('booked_at, appointment_date, calendar_name, revenue_tier')
         .or(`booked_at.gte.${sinceStr},appointment_date.gte.${sinceStr}`)
         .neq('appointment_status', 'cancelled')
         .in('calendar_name', STRATEGY_CALL_CALENDARS)
@@ -970,15 +977,18 @@ export default function MarketingPerformance() {
       if (error) { console.warn('Bookings load failed:', error.message); return }
       const map = {}
       for (const a of data || []) {
-        // Match the live syncMetaToTracker bucketing — booked_at preferred,
-        // fall back to appointment_date for legacy rows missing booked_at.
         const raw = a.booked_at || a.appointment_date
         if (!raw) continue
         const d = String(raw).split(' ')[0].split('T')[0]
         if (d < sinceStr || d > todayStr) continue
         if (!map[d]) map[d] = { all: 0, qualified: 0, dq: 0 }
         map[d].all++
-        if (DQ_BOOKING_CALENDARS.includes(a.calendar_name)) map[d].dq++
+        // Primary classification: revenue tier from contact's custom field.
+        // Fallback: calendar-ID-based when the tier hasn't been backfilled.
+        const dqByTier = a.revenue_tier ? isDQRevenueTier(a.revenue_tier) : null
+        const dqByCalendar = DQ_BOOKING_CALENDARS.includes(a.calendar_name)
+        const isDq = dqByTier !== null ? dqByTier : dqByCalendar
+        if (isDq) map[d].dq++
         else map[d].qualified++
       }
       setBookingsByDate(map)

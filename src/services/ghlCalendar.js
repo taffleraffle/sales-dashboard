@@ -184,6 +184,16 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
     })
   }
 
+  // 5. Tag each appointment with the prospect's monthly-revenue tier (read
+  // from GHL contact custom field `Tb6fklGYdWcgl9vUS2q9`). The Marketing page
+  // uses this to split bookings into qualified (>$30k) vs DQ ($0-$30k) — a
+  // calendar-ID split is unreliable because the same calendar can hold both.
+  //
+  // Per-contact fetch is sequential to respect GHL's 100req/10s ceiling.
+  // Only fetches contacts we don't already have a tier for in this batch
+  // (de-duped by contactId). One miss per contact, then memoized.
+  await enrichRowsWithRevenueTier(rows, onProgress)
+
   if (rows.length > 0) {
     const { error } = await supabase
       .from('ghl_appointments')
@@ -198,6 +208,56 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
   }
 
   return { synced: rows.length, scanned: (teamMembers?.length || 0) + calendarsToScan.length }
+}
+
+// GHL contact custom field that holds the monthly revenue tier captured by
+// the Typeform during qualification. The form mirrors it to a sibling field
+// (`eiTsafUsji5ZQHJpcGDk`) — same value, either works. We read the first.
+const REVENUE_TIER_FIELD_ID = 'Tb6fklGYdWcgl9vUS2q9'
+
+/**
+ * For each row in `rows`, look up the contact's monthly revenue tier from
+ * the GHL contact record and write it onto `row.revenue_tier`. Mutates
+ * `rows` in place. De-duped by ghl_contact_id so we don't double-fetch.
+ *
+ * Failures are silent — a row without a revenue tier just classifies as
+ * "unknown" downstream (treated as qualified by default to avoid false DQs).
+ */
+async function enrichRowsWithRevenueTier(rows, onProgress = () => {}) {
+  if (!rows || rows.length === 0) return
+  const uniqueContactIds = [...new Set(rows.map(r => r.ghl_contact_id).filter(Boolean))]
+  if (uniqueContactIds.length === 0) return
+
+  onProgress(`Fetching revenue tiers for ${uniqueContactIds.length} contacts...`)
+  const tierByContactId = {}
+  for (const id of uniqueContactIds) {
+    try {
+      const r = await ghlFetch(`${BASE_URL}/contacts/${id}`)
+      if (!r.ok) continue
+      const j = await r.json()
+      const c = j.contact || j
+      const field = (c.customFields || []).find(f => f.id === REVENUE_TIER_FIELD_ID)
+      if (field?.value) tierByContactId[id] = field.value
+    } catch (err) {
+      console.warn(`Revenue tier fetch failed for contact ${id}: ${err.message}`)
+    }
+  }
+
+  for (const row of rows) {
+    if (row.ghl_contact_id && tierByContactId[row.ghl_contact_id]) {
+      row.revenue_tier = tierByContactId[row.ghl_contact_id]
+    }
+  }
+}
+
+/**
+ * Classify a revenue tier value as DQ (≤$30k) or not. The form's tier values
+ * include "$0-$30,000", "$30-$50,000", "$50k-$75k/m", "$75k-$100k/m",
+ * "$100-250k/m", "$250,000/m+". Only the first one is DQ.
+ */
+export function isDQRevenueTier(tier) {
+  if (!tier) return false
+  return /^\$\s*0\s*[-–]/.test(String(tier).trim())
 }
 
 // Track sync state to avoid duplicate syncs
