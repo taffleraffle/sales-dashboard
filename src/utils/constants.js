@@ -5,11 +5,11 @@ export const INTRO_CALENDARS = [
   'GpYh75LaFEJgpHYkZfN9', 'okWMyvLhnJ7sbuvSIzok', 'MvYStrHFsRTpunwTXIqT',
 ]
 
-// GHL calendar IDs treated as qualified strategy bookings (denominator for show rates,
-// CPB, qualified_bookings on the Marketing page). The two Calendly-mirrored calendars
-// (round-robin) are not returned by `/calendars/?locationId=` but events are reachable
-// via `/calendars/events?userId=…` — they must be tracked here so the strategy-calendar
-// filter on `ghl_appointments` actually counts them.
+// All strategy-call calendars (qualified + DQ together). Used as the
+// authoritative "any booking" list — total bookings, all show-rate inputs,
+// the GHL appointment sync, etc. The Calendly mirrors are not returned by
+// `/calendars/?locationId=` but events are reachable via
+// `/calendars/events?userId=…`, so they must be listed here explicitly.
 export const STRATEGY_CALL_CALENDARS = [
   '9yoQVPBkNX4tWYmcDkf3', // Remodeling AI - Strategy Call
   'cEyqCFAsPLDkUV8n982h', // RestorationConnect AI - Strategy Call
@@ -20,6 +20,20 @@ export const STRATEGY_CALL_CALENDARS = [
   'T5Zif5GjDwulya6novU0', // Opt Digital | Strategy Call (Calendly)
   'gohFzPCilzwBtVfaC6fu', // Opt Digital | Strategy Call - DQ (Calendly)
 ]
+
+// Subset of strategy calendars that route disqualified prospects (the form
+// qualifies on revenue but the prospect failed the franchise/GBP check, or
+// otherwise got routed to the deprioritized booking flow). These count
+// toward total `bookings` but are excluded from `qualified_bookings`.
+export const DQ_BOOKING_CALENDARS = [
+  'gohFzPCilzwBtVfaC6fu', // Opt Digital | Strategy Call - DQ (Calendly)
+]
+
+// Strategy calendars EXCLUDING the DQ flow. This is the denominator for
+// `qualified_bookings` and CPQB on the Marketing page.
+export const QUALIFIED_BOOKING_CALENDARS = STRATEGY_CALL_CALENDARS.filter(
+  c => !DQ_BOOKING_CALENDARS.includes(c)
+)
 
 export const ICON = {
   xs: 10,
