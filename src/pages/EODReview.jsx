@@ -2509,9 +2509,9 @@ export default function EODReview() {
                     <p className="text-xl font-bold">{summary.booked}</p>
                     <p className="text-[10px] text-text-400 uppercase">Booked</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-2xl" title={`${summary.liveNc} new + ${summary.liveFu} follow-up`}>
-                    <p className="text-xl font-bold">{summary.liveNc + summary.liveFu}</p>
-                    <p className="text-[10px] text-text-400 uppercase">Net Live</p>
+                  <div className="text-center p-3 bg-bg-primary rounded-2xl" title={`${summary.liveNc} new (counted) · ${summary.liveFu} follow-up (separate)`}>
+                    <p className="text-xl font-bold">{summary.liveNc}</p>
+                    <p className="text-[10px] text-text-400 uppercase">Net New</p>
                   </div>
                   <div className="text-center p-3 bg-bg-primary rounded-2xl">
                     <p className="text-xl font-bold text-danger">{summary.noShows}</p>
@@ -2919,9 +2919,9 @@ export default function EODReview() {
                       <p className="text-2xl font-bold">{summary.booked}</p>
                       <p className="text-[10px] text-text-400">Booked</p>
                     </div>
-                    <div className="text-center" title={`${summary.liveNc} new + ${summary.liveFu} follow-up`}>
-                      <p className="text-2xl font-bold">{summary.liveNc + summary.liveFu}</p>
-                      <p className="text-[10px] text-text-400">Net Live</p>
+                    <div className="text-center" title={`${summary.liveNc} new (counted) · ${summary.liveFu} follow-up (separate)`}>
+                      <p className="text-2xl font-bold">{summary.liveNc}</p>
+                      <p className="text-[10px] text-text-400">Net New</p>
                     </div>
                     <div className="text-center">
                       <p className="text-2xl font-bold text-danger">{summary.noShows}</p>
@@ -3044,7 +3044,7 @@ export default function EODReview() {
                         <th className="px-3 py-2.5 text-right" title="Total bookings (NC + FU)">Booked</th>
                         <th className="px-3 py-2.5 text-right" title="Live new calls (first-time conversations)">New</th>
                         <th className="px-3 py-2.5 text-right" title="Live follow-up calls (returning prospects)">Follow-up</th>
-                        <th className="px-3 py-2.5 text-right" title="New + Follow-up live calls">Net Live</th>
+                        <th className="px-3 py-2.5 text-right" title="New + Follow-up live calls (Net New is the NC-only column to the left)">Total</th>
                         <th className="px-3 py-2.5 text-right">No Shows</th>
                         <th className="px-3 py-2.5 text-right">Closes</th>
                         <th className="px-3 py-2.5 text-right">Asc</th>
@@ -3164,7 +3164,7 @@ export default function EODReview() {
                       <th className="px-3 py-2 text-right">Booked</th>
                       <th className="px-3 py-2 text-right" title="Live new calls (first-time conversations)">New</th>
                       <th className="px-3 py-2 text-right" title="Live follow-up calls">FU</th>
-                      <th className="px-3 py-2 text-right" title="New + Follow-up live calls">Net Live</th>
+                      <th className="px-3 py-2 text-right" title="New + Follow-up live calls (Net New is the NC-only column to the left)">Total</th>
                       <th className="px-3 py-2 text-right">No Shows</th>
                       <th className="px-3 py-2 text-right">Closes</th>
                       <th className="px-3 py-2 text-right">Asc</th>
@@ -3233,7 +3233,7 @@ export default function EODReview() {
                       <th className="px-3 py-2.5 text-right">Booked</th>
                       <th className="px-3 py-2.5 text-right" title="Live new calls">New</th>
                       <th className="px-3 py-2.5 text-right" title="Live follow-ups">FU</th>
-                      <th className="px-3 py-2.5 text-right" title="New + Follow-up live calls">Net Live</th>
+                      <th className="px-3 py-2.5 text-right" title="New + Follow-up live calls (Net New is the NC-only column to the left)">Total</th>
                       <th className="px-3 py-2.5 text-right">No Shows</th>
                       <th className="px-3 py-2.5 text-right">Closes</th>
                       <th className="px-3 py-2.5 text-right">Asc</th>

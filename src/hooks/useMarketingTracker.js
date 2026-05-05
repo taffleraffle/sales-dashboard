@@ -387,6 +387,9 @@ export function computeMarketingStats(entries) {
     reschedules: t.reschedules,
     reschedule_rate: t.qualified_bookings > 0 ? (t.reschedules / t.qualified_bookings) * 100 : 0,
     cost_per_live_call: t.live_calls > 0 ? t.adspend / t.live_calls : 0,
+    // "Cost per Net New" — NC-only denominator. Matches the renamed
+    // "Net New" KPI on the Marketing page (Net Live → Net New, NC only).
+    cost_per_new_live_call: t.new_live_calls > 0 ? t.adspend / t.new_live_calls : 0,
 
     // Offer & close
     offer_rate: t.live_calls > 0 ? (t.offers / t.live_calls) * 100 : 0,

@@ -963,7 +963,7 @@ async function fetchLiveCalls({ from, to }) {
     .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected')
     .in('eod_report_id', reportIds)
     .in('outcome', ['not_closed', 'closed'])
-    .in('call_type', ['new_call', 'follow_up']) // Ascensions are NOT live calls
+    .eq('call_type', 'new_call') // "Net New" = NEW CALLS only (no follow-ups, no ascensions)
   return (callRows || []).map(c => ({
     date: reportMap[c.eod_report_id]?.report_date,
     closer: reportMap[c.eod_report_id]?.closer?.name || '—',
@@ -1054,8 +1054,8 @@ async function fetchLeads({ from, to }) {
 
 const DRILLDOWN_CONFIG = {
   live: {
-    title: 'Net Live Calls',
-    subtitle: 'Closer EOD reports · outcome = not_closed or closed · ascensions excluded',
+    title: 'Net New Calls',
+    subtitle: 'Closer EOD reports · NEW calls only (no follow-ups, no ascensions) · outcome = not_closed or closed',
     fetcher: fetchLiveCalls,
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
@@ -1615,13 +1615,13 @@ export default function MarketingPerformance() {
         return (
           <Section title="Calls & Show Rates" cols={8}>
             <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar. Click to view." onClick={() => setDrilldown('bookings')} />
-            <KPI label="Net Live" value={stats.live_calls} format="n" prev={sp.live_calls} whatIf={wf?.live_calls} tip="Total live calls (New + Follow-up). Ascensions excluded. Click to view." onClick={() => setDrilldown('live')} />
+            <KPI label="Net New" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={wf?.live_calls} tip="Net new live calls — NEW calls only (no follow-ups, no ascensions). Click to view." onClick={() => setDrilldown('live')} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
             <KPI label="Resch+Cancel" value={reschPlusCancel} format="n" trailing={reschPlusCancel30} prev={reschPlusCancelPrev} tip="Reschedules + cancellations (combined). Both are excluded from the show-rate denominator. Click to view." onClick={() => setDrilldown('rc')} />
-            <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Live ÷ Booked (no exclusions)" />
-            <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Live ÷ (Booked − Cancels − Reschedules). Cancels and reschedules don't count against show rate." />
+            <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Net New ÷ Booked (no exclusions)" />
+            <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Net New ÷ (Booked − Cancels − Reschedules). Cancels and reschedules don't count against show rate." />
             <KPI label="R+C%" value={combinedRate} format="%" tip="(Reschedules + Cancellations) ÷ Booked" />
-            <KPI label="Cost/Live" value={stats.cost_per_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_live_call} prev={sp.cost_per_live_call} whatIf={wf?.cost_per_live_call} tip="Adspend ÷ Net Live (NC + FU)" />
+            <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={wf?.cost_per_live_call} tip="Adspend ÷ Net New" />
           </Section>
         )
       })()}

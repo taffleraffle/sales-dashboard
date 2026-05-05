@@ -759,7 +759,7 @@ export default function SalesOverview() {
               <tr className="bg-bg-primary/30 text-[10px] text-text-400 uppercase tracking-wider">
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-left w-8 sm:w-10"></th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-left">Closer</th>
-                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right" title="Net Live (NC + FU)">Net Live</th>
+                <th className="py-2 sm:py-3 px-2 sm:px-4 text-right" title="Net New (NC live calls only — follow-ups + ascensions excluded)">Net New</th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Closes</th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Show%</th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Offer%</th>
@@ -793,7 +793,7 @@ export default function SalesOverview() {
               <tfoot>
                 <tr className="border-t-2 border-border-default bg-bg-primary/20 font-medium">
                   <td className="py-2 sm:py-3 px-2 sm:px-4" colSpan={2}>Team</td>
-                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{ct.liveCalls}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{ct.liveNC}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{ct.closes}</td>
                   <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums ${getColor(parseFloat(showRate), 70, 'above')}`}>{showRate}%</td>
                   <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums ${getColor(parseFloat(offerRate), 80, 'above')}`}>{offerRate}%</td>

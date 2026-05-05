@@ -403,13 +403,13 @@ function TeamEodRow({ member, role, report, attention, isMe, canFile, onOpen }) 
 
 function CloserHighlights({ report }) {
   const booked = (report.nc_booked || 0) + (report.fu_booked || 0)
-  const live = (report.live_nc_calls || 0) + (report.live_fu_calls || 0)
+  const liveNC = report.live_nc_calls || 0
   const cash = parseFloat(report.total_cash_collected || 0)
   const revenue = parseFloat(report.total_revenue || 0)
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums">
       <Stat label="Booked" value={booked} />
-      <Stat label="Net Live" value={live} />
+      <Stat label="Net New" value={liveNC} />
       <Stat label="Closes" value={report.closes || 0} accent="success" />
       <Stat label="Cash" value={`$${cash.toLocaleString()}`} accent="yellow" />
       <Stat label="Rev" value={`$${revenue.toLocaleString()}`} />

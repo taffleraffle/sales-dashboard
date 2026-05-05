@@ -215,7 +215,7 @@ export default function CloserDetail() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
         <KPICard label="Booked" value={stats.totalBooked} subtitle={`${stats.ncBooked} NC / ${stats.fuBooked} FU`} />
-        <KPICard label="Net Live" value={stats.liveCalls} subtitle={`${stats.liveNC} NC / ${stats.liveCalls - stats.liveNC} FU`} />
+        <KPICard label="Net New" value={stats.liveNC} subtitle={`${stats.liveCalls - stats.liveNC} FU separately`} />
         <KPICard label="No Shows" value={stats.noShows} />
         <KPICard label="Offers" value={stats.offers} />
         <KPICard label="Closes" value={stats.closes} />
