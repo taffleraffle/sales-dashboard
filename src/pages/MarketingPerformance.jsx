@@ -934,106 +934,245 @@ function CSVImportModal({ onClose, onImport }) {
   )
 }
 
-// ── Live Calls drill-down modal ────────────────────────────────────
-// Opens when the user clicks the Net Live KPI. Lists every closer_calls
-// row in the active range whose outcome is "live" (not_closed, closed,
-// ascended) so QA can verify exactly who's being counted.
-function LiveCallsModal({ range, onClose }) {
-  const [calls, setCalls] = useState(null) // null = loading
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      // Resolve the active range to a date span (ET-anchored)
-      let from, to
-      const today = todayET()
-      if (range === 'mtd') {
-        from = today.slice(0, 7) + '-01'; to = today
-      } else if (range && typeof range === 'object' && range.from) {
-        from = range.from; to = range.to
-      } else {
-        from = etDateOffset(-(typeof range === 'number' ? range : 30))
-        to = today
-      }
-      // Pull confirmed EOD report ids in window, then their live calls.
-      const { data: reports } = await supabase
-        .from('closer_eod_reports')
-        .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
-        .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
-      const reportIds = (reports || []).map(r => r.id)
-      const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
-      let rows = []
-      if (reportIds.length > 0) {
-        const { data: callRows } = await supabase
-          .from('closer_calls')
-          .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected')
-          .in('eod_report_id', reportIds)
-          .in('outcome', ['not_closed', 'closed', 'ascended'])
-        rows = (callRows || []).map(c => ({
-          ...c,
-          report_date: reportMap[c.eod_report_id]?.report_date,
-          closer_name: reportMap[c.eod_report_id]?.closer?.name || '—',
-        })).sort((a, b) => (b.report_date || '').localeCompare(a.report_date || ''))
-      }
-      if (!cancelled) setCalls(rows)
-    }
-    load()
-    return () => { cancelled = true }
-  }, [range])
+// ── Generic drill-down modal ───────────────────────────────────────
+// Opens when the user clicks a KPI on the Marketing page (Net Live,
+// Booked, Resch+Cancel, Leads). Each KPI passes its own `kind` and the
+// modal runs the matching fetcher + column layout.
+//
+// Fetchers all accept a `range` (numeric days, 'mtd', or {from,to}) and
+// return an array of plain objects. Range is resolved to ET-anchored
+// from/to so all users see the same window.
+function resolveRange(range) {
+  const today = todayET()
+  if (range === 'mtd') return { from: today.slice(0, 7) + '-01', to: today }
+  if (range && typeof range === 'object' && range.from) return { from: range.from, to: range.to }
+  const days = typeof range === 'number' ? range : 30
+  return { from: etDateOffset(-days), to: today }
+}
 
-  const rangeLabel = (() => {
-    if (range === 'mtd') return 'MTD'
-    if (range && typeof range === 'object' && range.from) return `${range.from} → ${range.to}`
-    return `Last ${range}d`
-  })()
+async function fetchLiveCalls({ from, to }) {
+  const { data: reports } = await supabase
+    .from('closer_eod_reports')
+    .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
+    .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
+  const reportIds = (reports || []).map(r => r.id)
+  const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
+  if (reportIds.length === 0) return []
+  const { data: callRows } = await supabase
+    .from('closer_calls')
+    .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected')
+    .in('eod_report_id', reportIds)
+    .in('outcome', ['not_closed', 'closed'])
+    .in('call_type', ['new_call', 'follow_up']) // Ascensions are NOT live calls
+  return (callRows || []).map(c => ({
+    date: reportMap[c.eod_report_id]?.report_date,
+    closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+    type: c.call_type,
+    prospect: c.prospect_name || '—',
+    outcome: c.outcome,
+    revenue: c.revenue,
+    cash: c.cash_collected,
+  })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+}
+
+async function fetchBookings({ from, to }) {
+  // Every strategy-calendar booking made in window (by booked_at).
+  const { data } = await supabase
+    .from('ghl_appointments')
+    .select('contact_name, calendar_name, booked_at, appointment_date, revenue_tier, appointment_status')
+    .in('calendar_name', STRATEGY_CALL_CALENDARS)
+    .neq('appointment_status', 'cancelled')
+    .gte('booked_at', from).lte('booked_at', to + ' 23:59:59')
+  return (data || []).map(r => ({
+    booked: String(r.booked_at).split(' ')[0].split('T')[0],
+    prospect: r.contact_name,
+    revenue_tier: r.revenue_tier,
+    appt_date: r.appointment_date,
+    is_dq: DQ_BOOKING_CALENDARS.includes(r.calendar_name) || (r.revenue_tier ? isDQRevenueTier(r.revenue_tier) : false),
+  })).sort((a, b) => (b.booked || '').localeCompare(a.booked || ''))
+}
+
+async function fetchReschCancel({ from, to }) {
+  const { data: reports } = await supabase
+    .from('closer_eod_reports')
+    .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
+    .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
+  const reportIds = (reports || []).map(r => r.id)
+  const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
+  if (reportIds.length === 0) return []
+  const { data: callRows } = await supabase
+    .from('closer_calls')
+    .select('eod_report_id, prospect_name, call_type, outcome')
+    .in('eod_report_id', reportIds)
+    .in('outcome', ['rescheduled', 'canceled'])
+  return (callRows || []).map(c => ({
+    date: reportMap[c.eod_report_id]?.report_date,
+    closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+    type: c.call_type,
+    prospect: c.prospect_name || '—',
+    outcome: c.outcome,
+  })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+}
+
+async function fetchLeads({ from, to }) {
+  // Pull live from GHL — we don't cache opportunities locally. SCIO USA only.
+  // Slow first call (~3-8s for 30d) but accurate.
+  const SCIO_USA = 'ZN1DW9S9qS540PNAXSxa'
+  const headers = {
+    Authorization: `Bearer ${import.meta.env.VITE_GHL_API_KEY}`,
+    Version: '2021-07-28',
+  }
+  const BASE = 'https://services.leadconnectorhq.com'
+  const LOC = import.meta.env.VITE_GHL_LOCATION_ID
+  let all = []
+  let startAfterId = null, startAfter = null
+  for (let p = 0; p < 50; p++) {
+    const params = new URLSearchParams({ location_id: LOC, pipeline_id: SCIO_USA, limit: '100' })
+    if (startAfterId) { params.set('startAfterId', startAfterId); params.set('startAfter', String(startAfter)) }
+    const r = await fetch(`${BASE}/opportunities/search?${params}`, { headers })
+    if (!r.ok) break
+    const j = await r.json()
+    all = all.concat(j.opportunities || [])
+    if (!j.meta?.startAfterId || (j.opportunities || []).length === 0) break
+    startAfterId = j.meta.startAfterId; startAfter = j.meta.startAfter
+  }
+  return all
+    .filter(o => {
+      const d = (o.createdAt || '').split('T')[0]
+      return d >= from && d <= to
+    })
+    .map(o => ({
+      created: (o.createdAt || '').split('T')[0],
+      name: o.contact?.name || o.name || '—',
+      email: o.contact?.email || '—',
+      phone: o.contact?.phone || '—',
+      source: o.source || '—',
+      stage: o.pipelineStageId || '—',
+    }))
+    .sort((a, b) => (b.created || '').localeCompare(a.created || ''))
+}
+
+const DRILLDOWN_CONFIG = {
+  live: {
+    title: 'Net Live Calls',
+    subtitle: 'Closer EOD reports · outcome = not_closed or closed · ascensions excluded',
+    fetcher: fetchLiveCalls,
+    columns: [
+      { key: 'date', label: 'Date', cls: 'tabular-nums' },
+      { key: 'closer', label: 'Closer', cls: 'text-opt-yellow' },
+      { key: 'type', label: 'Type', cls: 'text-[10px] uppercase text-text-400' },
+      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'outcome', label: 'Outcome', render: r => <span className={r.outcome === 'closed' ? 'text-success' : 'text-text-secondary'}>{r.outcome}</span> },
+      { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
+      { key: 'cash', label: 'Cash', align: 'right', render: r => r.cash ? `$${parseFloat(r.cash).toLocaleString()}` : '—' },
+    ],
+    emptyMsg: 'No live calls logged in this window. Closers may have filed aggregate-only EODs without per-row data.',
+  },
+  bookings: {
+    title: 'Bookings',
+    subtitle: 'Every strategy-calendar booking made in this window (by booked_at)',
+    fetcher: fetchBookings,
+    columns: [
+      { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
+      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'revenue_tier', label: 'Revenue', render: r => r.revenue_tier || '—' },
+      { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
+      { key: 'is_dq', label: 'Type', render: r => r.is_dq
+        ? <span className="text-orange-400 text-[10px] uppercase">DQ</span>
+        : <span className="text-success text-[10px] uppercase">Qual</span> },
+    ],
+    emptyMsg: 'No strategy bookings in this window.',
+  },
+  rc: {
+    title: 'Reschedules + Cancellations',
+    subtitle: 'Closer EOD reports · outcome = rescheduled or canceled',
+    fetcher: fetchReschCancel,
+    columns: [
+      { key: 'date', label: 'Date', cls: 'tabular-nums' },
+      { key: 'closer', label: 'Closer', cls: 'text-opt-yellow' },
+      { key: 'type', label: 'Type', cls: 'text-[10px] uppercase text-text-400' },
+      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'outcome', label: 'Outcome', render: r => r.outcome === 'canceled'
+        ? <span className="text-orange-400">Canceled</span>
+        : <span className="text-blue-400">Rescheduled</span> },
+    ],
+    emptyMsg: 'No reschedules or cancellations in this window.',
+  },
+  leads: {
+    title: 'Leads',
+    subtitle: 'New opportunities in SCIO USA pipeline (created in this window)',
+    fetcher: fetchLeads,
+    columns: [
+      { key: 'created', label: 'Date', cls: 'tabular-nums' },
+      { key: 'name', label: 'Name', cls: 'text-text-primary' },
+      { key: 'email', label: 'Email', cls: 'text-text-400 text-[10px]' },
+      { key: 'phone', label: 'Phone', cls: 'text-text-400 text-[10px]' },
+      { key: 'source', label: 'Source', cls: 'text-text-400 text-[10px]' },
+    ],
+    emptyMsg: 'No leads in this window.',
+    slowFirstLoad: true,
+  },
+}
+
+function DrilldownModal({ kind, range, onClose }) {
+  const config = DRILLDOWN_CONFIG[kind]
+  const [rows, setRows] = useState(null)
+  useEffect(() => {
+    if (!config) return
+    let cancelled = false
+    setRows(null)
+    config.fetcher(resolveRange(range))
+      .then(r => { if (!cancelled) setRows(r) })
+      .catch(e => { if (!cancelled) { console.warn(`${kind} drilldown failed:`, e); setRows([]) } })
+    return () => { cancelled = true }
+  }, [kind, range, config])
+
+  if (!config) return null
+
+  const rangeLabel = range === 'mtd'
+    ? 'MTD'
+    : (range && typeof range === 'object' && range.from)
+      ? `${range.from} → ${range.to}`
+      : `Last ${range}d`
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl max-w-3xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-bg-card border border-border-default rounded-2xl max-w-4xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border-default">
           <div>
-            <h2 className="text-sm font-semibold">Net Live Calls</h2>
-            <p className="text-[10px] text-text-400">{rangeLabel} · sourced from confirmed closer EOD reports</p>
+            <h2 className="text-sm font-semibold">{config.title}</h2>
+            <p className="text-[10px] text-text-400">{rangeLabel} &middot; {config.subtitle}</p>
           </div>
           <button onClick={onClose} className="text-text-400 hover:text-text-primary"><X size={18} /></button>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {calls == null && <div className="p-6 text-center text-text-400 text-xs">Loading…</div>}
-          {calls != null && calls.length === 0 && <div className="p-6 text-center text-text-400 text-xs">No live calls logged in this window. Closers may have submitted aggregate-only EODs without per-row data.</div>}
-          {calls != null && calls.length > 0 && (
+          {rows == null && <div className="p-6 text-center text-text-400 text-xs">{config.slowFirstLoad ? 'Fetching from GHL — may take a few seconds…' : 'Loading…'}</div>}
+          {rows != null && rows.length === 0 && <div className="p-6 text-center text-text-400 text-xs">{config.emptyMsg}</div>}
+          {rows != null && rows.length > 0 && (
             <table className="w-full text-[11px]">
               <thead className="sticky top-0 bg-bg-card border-b border-border-default text-[9px] uppercase tracking-wider text-text-400">
                 <tr>
-                  <th className="px-4 py-2 text-left">Date</th>
-                  <th className="px-3 py-2 text-left">Closer</th>
-                  <th className="px-3 py-2 text-left">Type</th>
-                  <th className="px-3 py-2 text-left">Prospect</th>
-                  <th className="px-3 py-2 text-left">Outcome</th>
-                  <th className="px-3 py-2 text-right">Revenue</th>
-                  <th className="px-3 py-2 text-right">Cash</th>
+                  {config.columns.map(c => (
+                    <th key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {calls.map((c, i) => {
-                  const outcomeCls = c.outcome === 'closed' || c.outcome === 'ascended' ? 'text-success'
-                    : c.outcome === 'not_closed' ? 'text-text-secondary' : 'text-text-400'
-                  return (
-                    <tr key={i} className="border-b border-border-default/30">
-                      <td className="px-4 py-2 tabular-nums">{c.report_date}</td>
-                      <td className="px-3 py-2 text-opt-yellow">{c.closer_name}</td>
-                      <td className="px-3 py-2 text-[10px] uppercase text-text-400">{c.call_type}</td>
-                      <td className="px-3 py-2 text-text-primary">{c.prospect_name || '—'}</td>
-                      <td className={`px-3 py-2 ${outcomeCls}`}>{c.outcome}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{c.revenue ? `$${parseFloat(c.revenue).toLocaleString()}` : '—'}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{c.cash_collected ? `$${parseFloat(c.cash_collected).toLocaleString()}` : '—'}</td>
-                    </tr>
-                  )
-                })}
+                {rows.map((row, i) => (
+                  <tr key={i} className="border-b border-border-default/30">
+                    {config.columns.map(c => (
+                      <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.cls || ''}`}>
+                        {c.render ? c.render(row) : (row[c.key] ?? '—')}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
         </div>
         <div className="px-5 py-2 text-[10px] text-text-400/80 border-t border-border-default">
-          {calls != null && `${calls.length} row${calls.length === 1 ? '' : 's'} shown`}
+          {rows != null && `${rows.length} row${rows.length === 1 ? '' : 's'} shown`}
         </div>
       </div>
     </div>
@@ -1046,7 +1185,7 @@ export default function MarketingPerformance() {
   const [range, setRange] = useState(30)
   const [showAddEntry, setShowAddEntry] = useState(false)
   const [showBenchmarks, setShowBenchmarks] = useState(false)
-  const [showLiveCalls, setShowLiveCalls] = useState(false)
+  const [drilldown, setDrilldown] = useState(null) // 'live' | 'bookings' | 'rc' | 'leads' | null
   const [importStatus, setImportStatus] = useState(null)
   const [showImportModal, setShowImportModal] = useState(false)
   const fileRef = useRef(null)
@@ -1450,11 +1589,11 @@ export default function MarketingPerformance() {
         return (
           <Section title="Spend & Lead Acquisition" cols={8}>
             <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={wf?.adspend} tip="Total Meta Ads spend (converted to USD)" />
-            <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={wf?.leads} tip="New opportunities created in SCIO USA pipeline" />
+            <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={wf?.leads} tip="New opportunities created in SCIO USA pipeline. Click to view." onClick={() => setDrilldown('leads')} />
             <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={wf?.cpl} tip="Cost Per Lead = Adspend / Leads" />
-            <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at" />
+            <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
             <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} tip="Adspend ÷ Bookings (all)" />
-            <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} tip={`Strategy bookings EXCLUDING the DQ Calendly calendar${bk.dq ? ` (${bk.dq} routed to DQ in this window)` : ''}`} />
+            <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} tip={`Strategy bookings EXCLUDING the DQ Calendly calendar${bk.dq ? ` (${bk.dq} routed to DQ in this window)` : ''}. Click to view.`} onClick={() => setDrilldown('bookings')} />
             <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} tip="Qualified Bookings ÷ Leads" />
             <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} tip="Adspend ÷ Qualified Bookings (excludes DQ)" />
           </Section>
@@ -1475,10 +1614,10 @@ export default function MarketingPerformance() {
           : 0
         return (
           <Section title="Calls & Show Rates" cols={8}>
-            <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar" />
-            <KPI label="Net Live" value={stats.live_calls} format="n" prev={sp.live_calls} whatIf={wf?.live_calls} tip="Total live calls (New + Follow-up). Click to see every call counted." onClick={() => setShowLiveCalls(true)} />
+            <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar. Click to view." onClick={() => setDrilldown('bookings')} />
+            <KPI label="Net Live" value={stats.live_calls} format="n" prev={sp.live_calls} whatIf={wf?.live_calls} tip="Total live calls (New + Follow-up). Ascensions excluded. Click to view." onClick={() => setDrilldown('live')} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
-            <KPI label="Resch+Cancel" value={reschPlusCancel} format="n" trailing={reschPlusCancel30} prev={reschPlusCancelPrev} tip="Reschedules + cancellations (combined). Both are excluded from the show-rate denominator." />
+            <KPI label="Resch+Cancel" value={reschPlusCancel} format="n" trailing={reschPlusCancel30} prev={reschPlusCancelPrev} tip="Reschedules + cancellations (combined). Both are excluded from the show-rate denominator. Click to view." onClick={() => setDrilldown('rc')} />
             <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Live ÷ Booked (no exclusions)" />
             <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Live ÷ (Booked − Cancels − Reschedules). Cancels and reschedules don't count against show rate." />
             <KPI label="R+C%" value={combinedRate} format="%" tip="(Reschedules + Cancellations) ÷ Booked" />
@@ -1554,7 +1693,7 @@ export default function MarketingPerformance() {
       {showAddEntry && <AddEntryModal onSave={upsertEntry} onClose={() => setShowAddEntry(false)} />}
       {showBenchmarks && <BenchmarksModal benchmarks={benchmarks} onSave={updateBenchmark} onClose={() => setShowBenchmarks(false)} />}
       {showImportModal && <CSVImportModal onImport={handleModalImport} onClose={() => setShowImportModal(false)} />}
-      {showLiveCalls && <LiveCallsModal range={range} onClose={() => setShowLiveCalls(false)} />}
+      {drilldown && <DrilldownModal kind={drilldown} range={range} onClose={() => setDrilldown(null)} />}
     </div>
   )
 }
