@@ -8,7 +8,7 @@ import { useToast } from '../hooks/useToast'
 import { STRATEGY_CALL_CALENDARS, DQ_BOOKING_CALENDARS } from '../utils/constants'
 import { isDQRevenueTier } from '../services/ghlCalendar'
 
-import { todayET } from '../lib/dateUtils'
+import { todayET, etDateOffset } from '../lib/dateUtils'
 
 const toLocalDateStr = (d) => {
   const y = d.getFullYear()
@@ -17,19 +17,22 @@ const toLocalDateStr = (d) => {
   return `${y}-${m}-${day}`
 }
 
+// All trailing-window math anchors on ET ("today" in the business timezone)
+// so a user in NZ and a user in US ET see the same numbers for the same
+// trailing-Nd selection. Without this, browser-local TZ produced different
+// windows depending on where the user is sitting.
 function filterByDays(entries, days) {
-  const now = new Date()
   if (days === 'mtd') {
-    const start = toLocalDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
+    const todayStr = todayET()
+    const start = todayStr.slice(0, 7) + '-01'
     return entries.filter(e => e.date >= start)
   }
   // Custom range: { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }
   if (days && typeof days === 'object' && days.from) {
     return entries.filter(e => e.date >= days.from && e.date <= days.to)
   }
-  const since = new Date()
-  since.setDate(since.getDate() - days)
-  return entries.filter(e => e.date >= toLocalDateStr(since))
+  const sinceStr = etDateOffset(-days)
+  return entries.filter(e => e.date >= sinceStr)
 }
 
 // Get the previous equivalent period for comparison
@@ -69,7 +72,8 @@ const fN = v => (v == null || isNaN(v)) ? '—' : v.toLocaleString()
 const fmt = (v, format) => format === '$' ? f$(v) : format === '%' ? fP(v) : format === 'x' ? fX(v) : fN(v)
 
 // ── KPI Card with benchmark + info tooltip + period arrow ─────────
-const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev, tip, whatIf }) {
+// Pass `onClick` to make a KPI clickable (used for drill-down modals).
+const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev, tip, whatIf, onClick }) {
   // Cost metrics where lower = better (CPL, CPB, CPA, Cost/Live, Cost Per Offer)
   const costLabels = ['CPL', 'Cost/', 'CPA', 'Resch%']
   const lowerIsBetter = costLabels.some(c => label.includes(c))
@@ -97,8 +101,13 @@ const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev,
   const displayValue = whatIf != null ? whatIf : value
   const hasWhatIfDelta = whatIf != null && Math.abs(whatIf - value) > 0.01
 
+  const Wrapper = onClick ? 'button' : 'div'
+  const interactiveCls = onClick ? 'text-left cursor-pointer hover:border-opt-yellow/40 hover:bg-bg-card-hover transition-colors w-full' : ''
   return (
-    <div className={`bg-bg-card border rounded-2xl p-3 relative group ${hasWhatIfDelta ? 'border-opt-yellow/40' : 'border-border-default'}`}>
+    <Wrapper
+      onClick={onClick}
+      className={`bg-bg-card border rounded-2xl p-3 relative group ${hasWhatIfDelta ? 'border-opt-yellow/40' : 'border-border-default'} ${interactiveCls}`}
+    >
       <div className="flex items-center gap-1">
         <p className="text-[9px] uppercase tracking-wider text-text-400 mb-0.5 leading-tight truncate">{label}</p>
         {arrow}
@@ -123,8 +132,9 @@ const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev,
       <div className="flex items-center gap-2 mt-0.5">
         {trailing != null && <span className="text-[9px] text-text-400">30d: {fmt(trailing, format)}</span>}
         {benchmark != null && <span className="text-[9px] text-text-400">BM: {fmt(benchmark, format)}</span>}
+        {onClick && <span className="text-[9px] text-text-400/60 ml-auto">click to view</span>}
       </div>
-    </div>
+    </Wrapper>
   )
 })
 
@@ -924,12 +934,119 @@ function CSVImportModal({ onClose, onImport }) {
   )
 }
 
+// ── Live Calls drill-down modal ────────────────────────────────────
+// Opens when the user clicks the Net Live KPI. Lists every closer_calls
+// row in the active range whose outcome is "live" (not_closed, closed,
+// ascended) so QA can verify exactly who's being counted.
+function LiveCallsModal({ range, onClose }) {
+  const [calls, setCalls] = useState(null) // null = loading
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      // Resolve the active range to a date span (ET-anchored)
+      let from, to
+      const today = todayET()
+      if (range === 'mtd') {
+        from = today.slice(0, 7) + '-01'; to = today
+      } else if (range && typeof range === 'object' && range.from) {
+        from = range.from; to = range.to
+      } else {
+        from = etDateOffset(-(typeof range === 'number' ? range : 30))
+        to = today
+      }
+      // Pull confirmed EOD report ids in window, then their live calls.
+      const { data: reports } = await supabase
+        .from('closer_eod_reports')
+        .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
+        .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
+      const reportIds = (reports || []).map(r => r.id)
+      const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
+      let rows = []
+      if (reportIds.length > 0) {
+        const { data: callRows } = await supabase
+          .from('closer_calls')
+          .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected')
+          .in('eod_report_id', reportIds)
+          .in('outcome', ['not_closed', 'closed', 'ascended'])
+        rows = (callRows || []).map(c => ({
+          ...c,
+          report_date: reportMap[c.eod_report_id]?.report_date,
+          closer_name: reportMap[c.eod_report_id]?.closer?.name || '—',
+        })).sort((a, b) => (b.report_date || '').localeCompare(a.report_date || ''))
+      }
+      if (!cancelled) setCalls(rows)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [range])
+
+  const rangeLabel = (() => {
+    if (range === 'mtd') return 'MTD'
+    if (range && typeof range === 'object' && range.from) return `${range.from} → ${range.to}`
+    return `Last ${range}d`
+  })()
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-bg-card border border-border-default rounded-2xl max-w-3xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border-default">
+          <div>
+            <h2 className="text-sm font-semibold">Net Live Calls</h2>
+            <p className="text-[10px] text-text-400">{rangeLabel} · sourced from confirmed closer EOD reports</p>
+          </div>
+          <button onClick={onClose} className="text-text-400 hover:text-text-primary"><X size={18} /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {calls == null && <div className="p-6 text-center text-text-400 text-xs">Loading…</div>}
+          {calls != null && calls.length === 0 && <div className="p-6 text-center text-text-400 text-xs">No live calls logged in this window. Closers may have submitted aggregate-only EODs without per-row data.</div>}
+          {calls != null && calls.length > 0 && (
+            <table className="w-full text-[11px]">
+              <thead className="sticky top-0 bg-bg-card border-b border-border-default text-[9px] uppercase tracking-wider text-text-400">
+                <tr>
+                  <th className="px-4 py-2 text-left">Date</th>
+                  <th className="px-3 py-2 text-left">Closer</th>
+                  <th className="px-3 py-2 text-left">Type</th>
+                  <th className="px-3 py-2 text-left">Prospect</th>
+                  <th className="px-3 py-2 text-left">Outcome</th>
+                  <th className="px-3 py-2 text-right">Revenue</th>
+                  <th className="px-3 py-2 text-right">Cash</th>
+                </tr>
+              </thead>
+              <tbody>
+                {calls.map((c, i) => {
+                  const outcomeCls = c.outcome === 'closed' || c.outcome === 'ascended' ? 'text-success'
+                    : c.outcome === 'not_closed' ? 'text-text-secondary' : 'text-text-400'
+                  return (
+                    <tr key={i} className="border-b border-border-default/30">
+                      <td className="px-4 py-2 tabular-nums">{c.report_date}</td>
+                      <td className="px-3 py-2 text-opt-yellow">{c.closer_name}</td>
+                      <td className="px-3 py-2 text-[10px] uppercase text-text-400">{c.call_type}</td>
+                      <td className="px-3 py-2 text-text-primary">{c.prospect_name || '—'}</td>
+                      <td className={`px-3 py-2 ${outcomeCls}`}>{c.outcome}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{c.revenue ? `$${parseFloat(c.revenue).toLocaleString()}` : '—'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{c.cash_collected ? `$${parseFloat(c.cash_collected).toLocaleString()}` : '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="px-5 py-2 text-[10px] text-text-400/80 border-t border-border-default">
+          {calls != null && `${calls.length} row${calls.length === 1 ? '' : 's'} shown`}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────
 export default function MarketingPerformance() {
   const { entries, benchmarks, loading, upsertEntry, upsertMany, updateBenchmark, deleteEntry, reload } = useMarketingTracker()
   const [range, setRange] = useState(30)
   const [showAddEntry, setShowAddEntry] = useState(false)
   const [showBenchmarks, setShowBenchmarks] = useState(false)
+  const [showLiveCalls, setShowLiveCalls] = useState(false)
   const [importStatus, setImportStatus] = useState(null)
   const [showImportModal, setShowImportModal] = useState(false)
   const fileRef = useRef(null)
@@ -998,15 +1115,17 @@ export default function MarketingPerformance() {
   }, [])
 
   // Sum a per-date bookings map over the same window the rest of the page uses.
+  // Anchored to ET (matches filterByDays above) so all users see the same
+  // window regardless of their browser timezone.
   const sumBookings = useCallback((days) => {
     const filterDate = (() => {
       if (days === 'mtd') {
-        const now = new Date()
-        return d => d >= toLocalDateStr(new Date(now.getFullYear(), now.getMonth(), 1))
+        const todayStr = todayET()
+        const start = todayStr.slice(0, 7) + '-01'
+        return d => d >= start
       }
       if (days && typeof days === 'object' && days.from) return d => d >= days.from && d <= days.to
-      const since = new Date(); since.setDate(since.getDate() - days)
-      const sinceStr = toLocalDateStr(since)
+      const sinceStr = etDateOffset(-days)
       return d => d >= sinceStr
     })()
     let all = 0, qualified = 0, dq = 0
@@ -1357,7 +1476,7 @@ export default function MarketingPerformance() {
         return (
           <Section title="Calls & Show Rates" cols={8}>
             <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar" />
-            <KPI label="Net Live" value={stats.live_calls} format="n" prev={sp.live_calls} whatIf={wf?.live_calls} tip="Total live calls (New + Follow-up). Calls that actually happened." />
+            <KPI label="Net Live" value={stats.live_calls} format="n" prev={sp.live_calls} whatIf={wf?.live_calls} tip="Total live calls (New + Follow-up). Click to see every call counted." onClick={() => setShowLiveCalls(true)} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
             <KPI label="Resch+Cancel" value={reschPlusCancel} format="n" trailing={reschPlusCancel30} prev={reschPlusCancelPrev} tip="Reschedules + cancellations (combined). Both are excluded from the show-rate denominator." />
             <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Live ÷ Booked (no exclusions)" />
@@ -1435,6 +1554,7 @@ export default function MarketingPerformance() {
       {showAddEntry && <AddEntryModal onSave={upsertEntry} onClose={() => setShowAddEntry(false)} />}
       {showBenchmarks && <BenchmarksModal benchmarks={benchmarks} onSave={updateBenchmark} onClose={() => setShowBenchmarks(false)} />}
       {showImportModal && <CSVImportModal onImport={handleModalImport} onClose={() => setShowImportModal(false)} />}
+      {showLiveCalls && <LiveCallsModal range={range} onClose={() => setShowLiveCalls(false)} />}
     </div>
   )
 }

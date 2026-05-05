@@ -49,3 +49,20 @@ export function toLocalDateStr(d) {
 export function todayET() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
 }
+
+/**
+ * Get an ET-anchored date offset N days from today (YYYY-MM-DD).
+ * Negative for past, positive for future.
+ *
+ * Why this exists: filterByDays on the Marketing page used to compute
+ * `today - 7d` from the BROWSER'S local timezone, so a user in NZ and a
+ * user in ET would see different trailing-7d windows for the same business
+ * data. Using ET as the anchor keeps both views aligned with where the data
+ * actually lives (closer EODs, GHL appointments, ad spend all bucket by ET).
+ */
+export function etDateOffset(days = 0) {
+  const todayStr = todayET()
+  const d = new Date(todayStr + 'T12:00:00') // noon avoids DST shift edge cases
+  d.setDate(d.getDate() + days)
+  return toLocalDateStr(d)
+}
