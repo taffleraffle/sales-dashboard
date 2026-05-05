@@ -975,6 +975,60 @@ async function fetchLiveCalls({ from, to }) {
   })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
+async function fetchCloses({ from, to }) {
+  // Every closed deal in window — closes only (not ascensions). Includes both
+  // new_call and follow_up call types since a follow-up that closes is still
+  // a marketing-attributed close.
+  const { data: reports } = await supabase
+    .from('closer_eod_reports')
+    .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
+    .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
+  const reportIds = (reports || []).map(r => r.id)
+  const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
+  if (reportIds.length === 0) return []
+  const { data: callRows } = await supabase
+    .from('closer_calls')
+    .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected, offered_finance')
+    .in('eod_report_id', reportIds)
+    .eq('outcome', 'closed')
+    .neq('call_type', 'ascension')
+  return (callRows || []).map(c => ({
+    date: reportMap[c.eod_report_id]?.report_date,
+    closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+    type: c.call_type,
+    prospect: c.prospect_name || '—',
+    revenue: c.revenue,
+    cash: c.cash_collected,
+    finance: c.offered_finance ? 'yes' : 'no',
+  })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+}
+
+async function fetchAscensions({ from, to }) {
+  // Every ascension in window — call_type = 'ascension'. Includes both ascended
+  // and not-ascended outcomes so the user can see the full ascension funnel.
+  const { data: reports } = await supabase
+    .from('closer_eod_reports')
+    .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
+    .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
+  const reportIds = (reports || []).map(r => r.id)
+  const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
+  if (reportIds.length === 0) return []
+  const { data: callRows } = await supabase
+    .from('closer_calls')
+    .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected, offered_finance')
+    .in('eod_report_id', reportIds)
+    .eq('call_type', 'ascension')
+  return (callRows || []).map(c => ({
+    date: reportMap[c.eod_report_id]?.report_date,
+    closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+    prospect: c.prospect_name || '—',
+    outcome: c.outcome,
+    revenue: c.revenue,
+    cash: c.cash_collected,
+    finance: c.offered_finance ? 'yes' : 'no',
+  })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+}
+
 async function fetchBookings({ from, to }) {
   // Every strategy-calendar booking made in window (by booked_at), DEDUPED
   // by prospect (ghl_contact_id). If Khaled books 3 times in the window, he
@@ -1125,6 +1179,36 @@ const DRILLDOWN_CONFIG = {
     emptyMsg: 'No leads in this window.',
     slowFirstLoad: true,
   },
+  closes: {
+    title: 'Closes',
+    subtitle: 'Closer EOD reports · outcome = closed · ascensions excluded',
+    fetcher: fetchCloses,
+    columns: [
+      { key: 'date', label: 'Date', cls: 'tabular-nums' },
+      { key: 'closer', label: 'Closer', cls: 'text-opt-yellow' },
+      { key: 'type', label: 'Type', cls: 'text-[10px] uppercase text-text-400' },
+      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
+      { key: 'cash', label: 'Cash', align: 'right', render: r => r.cash ? `$${parseFloat(r.cash).toLocaleString()}` : '—' },
+      { key: 'finance', label: 'Finance', cls: 'text-[10px] uppercase text-text-400' },
+    ],
+    emptyMsg: 'No closes in this window.',
+  },
+  ascensions: {
+    title: 'Ascensions',
+    subtitle: 'Closer EOD reports · call_type = ascension (all outcomes)',
+    fetcher: fetchAscensions,
+    columns: [
+      { key: 'date', label: 'Date', cls: 'tabular-nums' },
+      { key: 'closer', label: 'Closer', cls: 'text-opt-yellow' },
+      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'outcome', label: 'Outcome', render: r => <span className={r.outcome === 'ascended' ? 'text-success' : 'text-text-secondary'}>{r.outcome}</span> },
+      { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
+      { key: 'cash', label: 'Cash', align: 'right', render: r => r.cash ? `$${parseFloat(r.cash).toLocaleString()}` : '—' },
+      { key: 'finance', label: 'Finance', cls: 'text-[10px] uppercase text-text-400' },
+    ],
+    emptyMsg: 'No ascensions in this window.',
+  },
 }
 
 function DrilldownModal({ kind, range, onClose }) {
@@ -1198,7 +1282,7 @@ export default function MarketingPerformance() {
   const [range, setRange] = useState(30)
   const [showAddEntry, setShowAddEntry] = useState(false)
   const [showBenchmarks, setShowBenchmarks] = useState(false)
-  const [drilldown, setDrilldown] = useState(null) // 'live' | 'bookings' | 'rc' | 'leads' | null
+  const [drilldown, setDrilldown] = useState(null) // 'live' | 'bookings' | 'rc' | 'leads' | 'closes' | 'ascensions' | null
   const [importStatus, setImportStatus] = useState(null)
   const [showImportModal, setShowImportModal] = useState(false)
   const fileRef = useRef(null)
@@ -1727,7 +1811,7 @@ export default function MarketingPerformance() {
         <KPI label="Offers Made" value={stats.offers} format="n" prev={sp.offers} whatIf={wf?.offers} tip="Number of offers made on live calls" />
         <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} prev={sp.offer_rate} whatIf={wf?.offer_rate} tip="Offers / Net Live (NC + FU)" />
         <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" prev={sp.cost_per_offer} whatIf={wf?.cost_per_offer} tip="Adspend / Offers" />
-        <KPI label="Total Closes" value={stats.closes} format="n" prev={sp.closes} whatIf={wf?.closes} tip="Deals closed (trial sign-ups)" />
+        <KPI label="Total Closes" value={stats.closes} format="n" prev={sp.closes} whatIf={wf?.closes} tip="Deals closed (trial sign-ups). Click to view." onClick={() => setDrilldown('closes')} />
         <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={wf?.close_rate} tip="Closes ÷ Live New Calls. Follow-ups and ascensions excluded from denominator." />
         <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} prev={sp.cpa_trial} whatIf={wf?.cpa_trial} tip="Cost Per Acquisition = Adspend / Closes" />
       </Section>
@@ -1742,7 +1826,7 @@ export default function MarketingPerformance() {
 
       {/* Ascension */}
       <Section title="Ascension" cols={8}>
-        <KPI label="Total Ascensions" value={stats.ascensions} format="n" prev={sp.ascensions} whatIf={wf?.ascensions} tip="Trial clients who ascended to full package" />
+        <KPI label="Total Ascensions" value={stats.ascensions} format="n" prev={sp.ascensions} whatIf={wf?.ascensions} tip="Trial clients who ascended to full package. Click to view." onClick={() => setDrilldown('ascensions')} />
         <KPI label="Ascension Rate" value={stats.ascend_rate} format="%" benchmark={bm.ascend_rate} trailing={stats30.ascend_rate} prev={sp.ascend_rate} whatIf={wf?.ascend_rate} tip="Ascensions / Trial Closes" />
         <KPI label="CPA (Ascend)" value={stats.cpa_ascend} format="$" benchmark={bm.cpa_ascend} prev={sp.cpa_ascend} whatIf={wf?.cpa_ascend} tip="Adspend / Ascensions" />
         <KPI label="Ascend Cash" value={stats.ascend_cash} format="$" prev={sp.ascend_cash} whatIf={wf?.ascend_cash} tip="Cash collected from ascension deals" />
