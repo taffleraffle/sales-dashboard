@@ -117,10 +117,16 @@ async function syncGHL(force = false) {
   if (!shouldRun('ghlAppointments', force)) return
   markRun('ghlAppointments')
   try {
-    const today = toLocalDateStr(new Date())
+    // Pull a window that covers BOTH past calls (for outcome reconciliation)
+    // and future-scheduled calls (for cost-per-booking + cohort show-rate
+    // math). Without the forward window, calls booked today for next week
+    // never enter ghl_appointments — they're filtered out by GHL's
+    // /calendars/events endpoint, which queries by event time, not booked_at.
     const past = new Date()
     past.setDate(past.getDate() - 30)
-    await syncGHLAppointments(toLocalDateStr(past), today)
+    const future = new Date()
+    future.setDate(future.getDate() + 60)
+    await syncGHLAppointments(toLocalDateStr(past), toLocalDateStr(future))
     console.log('[auto-sync] GHL appointments done')
     clearError('ghlAppointments')
     clearCooldown('ghlAppointments')

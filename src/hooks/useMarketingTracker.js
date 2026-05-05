@@ -358,31 +358,29 @@ export function computeMarketingStats(entries) {
     cpb: t.qualified_bookings > 0 ? t.adspend / t.qualified_bookings : 0,
     cost_per_auto_booking: t.auto_bookings > 0 ? t.adspend / t.auto_bookings : 0,
 
-    // Show rates — NEW CALLS ONLY.
+    // Show rates — NEW CALLS ONLY, denominator from CLOSER EOD.
     //
-    // qualified_bookings comes from GHL's strategy-call calendars (= new calls
-    // only by definition). The numerator used to be `live_calls` which mixed
-    // new-call shows + follow-up shows, inflating the rate vs. the strictly-NC
-    // denominator. `new_live_calls` is the live-NC-only count (closer EOD
-    // `live_nc_calls`), so now both sides of the ratio are apples-to-apples.
+    // Denominator is `net_new_calls` (closer EOD `nc_booked`) instead of
+    // `qualified_bookings` (GHL booked_at-bucketed). Closers only file EOD
+    // for days that have happened, so future-scheduled bookings naturally
+    // fall out — a call booked today for next Friday isn't in the closer's
+    // nc_booked count yet. This matches Ben's mental model: show rate is
+    // "of the calls we actually had today, how many showed?" not "of the
+    // bookings that came in today, how many already showed?".
     cancels: t.cancelled_dtf + t.cancelled_by_prospect,
     // Caps at 100% — show rate exceeding 100% means closers logged more lives
-    // than were booked on the calendars we track, which is a data-coverage bug,
-    // not a real metric. Capping prevents a misleading "133%" from appearing
-    // while still flagging the underlying issue (the cap kicks in at 100% flat).
-    gross_show_rate: t.qualified_bookings > 0 ? Math.min(100, (t.new_live_calls / t.qualified_bookings) * 100) : 0,
+    // than they reported as booked, which is a data-entry inconsistency.
+    gross_show_rate: t.net_new_calls > 0 ? Math.min(100, (t.new_live_calls / t.net_new_calls) * 100) : 0,
     net_show_rate: (() => {
-      const net = t.qualified_bookings - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules
+      const net = t.net_new_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules
       return net > 0 ? Math.min(100, (t.new_live_calls / net) * 100) : 0
     })(),
-    show_rate: t.qualified_bookings > 0 ? Math.min(100, (t.new_live_calls / t.qualified_bookings) * 100) : 0,
-    // No-show rate uses the same NC-only numerator. Derive fallback from
-    // NC-live count so a missed-no-shows field doesn't pull follow-up call
-    // counts into the math.
-    no_shows: t.no_shows > 0 ? t.no_shows : Math.max(0, t.qualified_bookings - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules),
+    show_rate: t.net_new_calls > 0 ? Math.min(100, (t.new_live_calls / t.net_new_calls) * 100) : 0,
+    // No-show rate uses the same NC-only numerator and EOD denominator.
+    no_shows: t.no_shows > 0 ? t.no_shows : Math.max(0, t.net_new_calls - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules),
     no_show_rate: (() => {
-      const ns = t.no_shows > 0 ? t.no_shows : Math.max(0, t.qualified_bookings - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules)
-      return t.qualified_bookings > 0 ? (ns / t.qualified_bookings) * 100 : 0
+      const ns = t.no_shows > 0 ? t.no_shows : Math.max(0, t.net_new_calls - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules)
+      return t.net_new_calls > 0 ? (ns / t.net_new_calls) * 100 : 0
     })(),
     reschedules: t.reschedules,
     reschedule_rate: t.qualified_bookings > 0 ? (t.reschedules / t.qualified_bookings) * 100 : 0,

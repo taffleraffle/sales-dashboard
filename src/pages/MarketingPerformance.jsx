@@ -976,14 +976,27 @@ async function fetchLiveCalls({ from, to }) {
 }
 
 async function fetchBookings({ from, to }) {
-  // Every strategy-calendar booking made in window (by booked_at).
+  // Every strategy-calendar booking made in window (by booked_at), DEDUPED
+  // by prospect (ghl_contact_id). If Khaled books 3 times in the window, he
+  // counts as 1. Earliest booking in the window wins so the displayed call
+  // date matches the prospect's first commitment, not their latest reshuffle.
   const { data } = await supabase
     .from('ghl_appointments')
-    .select('contact_name, calendar_name, booked_at, appointment_date, revenue_tier, appointment_status')
+    .select('contact_name, calendar_name, booked_at, appointment_date, revenue_tier, appointment_status, ghl_contact_id')
     .in('calendar_name', STRATEGY_CALL_CALENDARS)
     .neq('appointment_status', 'cancelled')
     .gte('booked_at', from).lte('booked_at', to + ' 23:59:59')
-  return (data || []).map(r => ({
+  const byContact = new Map()
+  for (const r of data || []) {
+    // Use ghl_contact_id as the dedupe key; fall back to contact_name for
+    // legacy rows missing the contact link.
+    const key = r.ghl_contact_id || `name:${r.contact_name}`
+    const existing = byContact.get(key)
+    if (!existing || (r.booked_at || '') < (existing.booked_at || '')) {
+      byContact.set(key, r)
+    }
+  }
+  return [...byContact.values()].map(r => ({
     booked: String(r.booked_at).split(' ')[0].split('T')[0],
     prospect: r.contact_name,
     revenue_tier: r.revenue_tier,
@@ -1215,7 +1228,13 @@ export default function MarketingPerformance() {
   //
   // Falls back to calendar-ID classification if revenue_tier is null (older
   // rows synced before the column landed).
-  const [bookingsByDate, setBookingsByDate] = useState({}) // { 'YYYY-MM-DD': { all, qualified, dq } }
+  // Per-date booking records (NOT pre-counted). Each entry is the list of
+  // appointments on that date with the contact_id attached, so window-level
+  // sums can dedupe by prospect (Khaled booking 3 times = 1 prospect).
+  const [bookingsByDate, setBookingsByDate] = useState({}) // { 'YYYY-MM-DD': [{contactKey, isDq}] }
+  // Same dataset, bucketed by appointment_date (call held date). Used for
+  // cohort show rate so numerator and denominator clock the same event.
+  const [cohortBookingsByDate, setCohortBookingsByDate] = useState({})
   useEffect(() => {
     let cancelled = false
     async function loadBookings() {
@@ -1225,29 +1244,42 @@ export default function MarketingPerformance() {
       const todayStr = new Date().toISOString().split('T')[0]
       const { data, error } = await supabase
         .from('ghl_appointments')
-        .select('booked_at, appointment_date, calendar_name, revenue_tier')
+        .select('booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name')
         .or(`booked_at.gte.${sinceStr},appointment_date.gte.${sinceStr}`)
         .neq('appointment_status', 'cancelled')
         .in('calendar_name', STRATEGY_CALL_CALENDARS)
       if (cancelled) return
       if (error) { console.warn('Bookings load failed:', error.message); return }
       const map = {}
+      const cohortMap = {}
       for (const a of data || []) {
-        const raw = a.booked_at || a.appointment_date
-        if (!raw) continue
-        const d = String(raw).split(' ')[0].split('T')[0]
-        if (d < sinceStr || d > todayStr) continue
-        if (!map[d]) map[d] = { all: 0, qualified: 0, dq: 0 }
-        map[d].all++
-        // Primary classification: revenue tier from contact's custom field.
-        // Fallback: calendar-ID-based when the tier hasn't been backfilled.
         const dqByTier = a.revenue_tier ? isDQRevenueTier(a.revenue_tier) : null
         const dqByCalendar = DQ_BOOKING_CALENDARS.includes(a.calendar_name)
         const isDq = dqByTier !== null ? dqByTier : dqByCalendar
-        if (isDq) map[d].dq++
-        else map[d].qualified++
+        const contactKey = a.ghl_contact_id || `name:${a.contact_name || 'unknown'}`
+
+        // booked_at-bucketed
+        const rawBooked = a.booked_at || a.appointment_date
+        if (rawBooked) {
+          const d = String(rawBooked).split(' ')[0].split('T')[0]
+          if (d >= sinceStr && d <= todayStr) {
+            if (!map[d]) map[d] = []
+            map[d].push({ contactKey, isDq })
+          }
+        }
+
+        // appointment_date-bucketed (cap at today — exclude future calls)
+        const rawApt = a.appointment_date
+        if (rawApt) {
+          const d = String(rawApt).split(' ')[0].split('T')[0]
+          if (d >= sinceStr && d <= todayStr) {
+            if (!cohortMap[d]) cohortMap[d] = []
+            cohortMap[d].push({ contactKey, isDq })
+          }
+        }
       }
       setBookingsByDate(map)
+      setCohortBookingsByDate(cohortMap)
     }
     loadBookings()
     return () => { cancelled = true }
@@ -1256,6 +1288,10 @@ export default function MarketingPerformance() {
   // Sum a per-date bookings map over the same window the rest of the page uses.
   // Anchored to ET (matches filterByDays above) so all users see the same
   // window regardless of their browser timezone.
+  // Count UNIQUE prospects (by ghl_contact_id) whose booked_at falls in the
+  // window. A prospect who books 3 times in the window counts once. Splits
+  // into qualified vs DQ based on the most-recent classification — if any of
+  // the prospect's bookings landed on a qualified calendar, they're qualified.
   const sumBookings = useCallback((days) => {
     const filterDate = (() => {
       if (days === 'mtd') {
@@ -1267,13 +1303,55 @@ export default function MarketingPerformance() {
       const sinceStr = etDateOffset(-days)
       return d => d >= sinceStr
     })()
-    let all = 0, qualified = 0, dq = 0
-    for (const [d, v] of Object.entries(bookingsByDate)) {
+    const seen = new Map() // contactKey -> { isDq } (qualified wins over DQ)
+    for (const [d, list] of Object.entries(bookingsByDate)) {
       if (!filterDate(d)) continue
-      all += v.all; qualified += v.qualified; dq += v.dq
+      for (const b of list) {
+        const existing = seen.get(b.contactKey)
+        if (!existing) seen.set(b.contactKey, { isDq: b.isDq })
+        else if (existing.isDq && !b.isDq) seen.set(b.contactKey, { isDq: false })
+      }
+    }
+    let all = 0, qualified = 0, dq = 0
+    for (const v of seen.values()) {
+      all++
+      if (v.isDq) dq++
+      else qualified++
     }
     return { all, qualified, dq }
   }, [bookingsByDate])
+
+  // Same dedupe rule but on appointment_date (call-held) buckets. Used for
+  // cohort show rate so numerator (lives) and denominator (scheduled calls)
+  // both clock the same event AND both count unique prospects.
+  const sumCohortBookings = useCallback((days) => {
+    const filterDate = (() => {
+      if (days === 'mtd') {
+        const todayStr = todayET()
+        const start = todayStr.slice(0, 7) + '-01'
+        return d => d >= start
+      }
+      if (days && typeof days === 'object' && days.from) return d => d >= days.from && d <= days.to
+      const sinceStr = etDateOffset(-days)
+      return d => d >= sinceStr
+    })()
+    const seen = new Map()
+    for (const [d, list] of Object.entries(cohortBookingsByDate)) {
+      if (!filterDate(d)) continue
+      for (const b of list) {
+        const existing = seen.get(b.contactKey)
+        if (!existing) seen.set(b.contactKey, { isDq: b.isDq })
+        else if (existing.isDq && !b.isDq) seen.set(b.contactKey, { isDq: false })
+      }
+    }
+    let all = 0, qualified = 0, dq = 0
+    for (const v of seen.values()) {
+      all++
+      if (v.isDq) dq++
+      else qualified++
+    }
+    return { all, qualified, dq }
+  }, [cohortBookingsByDate])
 
   const rangeEntries = useMemo(() => filterByDays(entries, range), [entries, range])
   const mtdEntries = useMemo(() => filterByDays(entries, 'mtd'), [entries])
@@ -1612,14 +1690,32 @@ export default function MarketingPerformance() {
         const combinedRate = stats.qualified_bookings > 0
           ? Math.min(100, (reschPlusCancel / stats.qualified_bookings) * 100)
           : 0
+        // Cohort show rate: of qualified NEW calls scheduled (appointment_date)
+        // in this window, what fraction went live? Numerator and denominator
+        // both clock the day the call was due — no booked_at-vs-held drift,
+        // and future-dated rows are excluded by sumCohortBookings. Mirrors
+        // Net Show% formulation (excludes reschedules + cancels from the
+        // denominator) — a prospect who rescheduled/cancelled before their
+        // call shouldn't count against show rate.
+        const cohort = sumCohortBookings(range)
+        const cohort30 = sumCohortBookings(30)
+        const cohortNetDenom = Math.max(0, cohort.qualified - (stats.reschedules || 0) - (stats.cancels || 0))
+        const cohortNetDenom30 = Math.max(0, cohort30.qualified - (stats30.reschedules || 0) - (stats30.cancels || 0))
+        const cohortShowRate = cohortNetDenom > 0
+          ? Math.min(100, (stats.new_live_calls / cohortNetDenom) * 100)
+          : 0
+        const cohortShowRate30 = cohortNetDenom30 > 0
+          ? Math.min(100, (stats30.new_live_calls / cohortNetDenom30) * 100)
+          : 0
         return (
-          <Section title="Calls & Show Rates" cols={8}>
+          <Section title="Calls & Show Rates" cols={9}>
             <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar. Click to view." onClick={() => setDrilldown('bookings')} />
             <KPI label="Net New" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={wf?.live_calls} tip="Net new live calls — NEW calls only (no follow-ups, no ascensions). Click to view." onClick={() => setDrilldown('live')} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
             <KPI label="Resch+Cancel" value={reschPlusCancel} format="n" trailing={reschPlusCancel30} prev={reschPlusCancelPrev} tip="Reschedules + cancellations (combined). Both are excluded from the show-rate denominator. Click to view." onClick={() => setDrilldown('rc')} />
-            <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Net New ÷ Booked (no exclusions)" />
-            <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Net New ÷ (Booked − Cancels − Reschedules). Cancels and reschedules don't count against show rate." />
+            <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Net New ÷ Booked (no exclusions). Booked is bucketed by booked_at, so daily/weekly values drift relative to when calls actually held — use Cohort Show% for short windows." />
+            <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Net New ÷ (Booked − Cancels − Reschedules). Cancels and reschedules don't count against show rate. Same booked_at drift as Gross." />
+            <KPI label="Cohort Show%" value={cohortShowRate} format="%" trailing={cohortShowRate30} tip={`Net New ÷ (qualified calls SCHEDULED in this window − reschedules − cancels). Same exclusions as Net Show%, but the denominator is bucketed by the day the call was DUE (appointment_date), not booked_at — so numerator and denominator clock the same event. Window: ${cohort.qualified} on calendar − ${stats.reschedules || 0} resch − ${stats.cancels || 0} cancel = ${cohortNetDenom}.`} />
             <KPI label="R+C%" value={combinedRate} format="%" tip="(Reschedules + Cancellations) ÷ Booked" />
             <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={wf?.cost_per_live_call} tip="Adspend ÷ Net New" />
           </Section>
