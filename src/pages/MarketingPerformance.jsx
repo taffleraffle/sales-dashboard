@@ -31,7 +31,10 @@ function filterByDays(entries, days) {
   if (days && typeof days === 'object' && days.from) {
     return entries.filter(e => e.date >= days.from && e.date <= days.to)
   }
-  const sinceStr = etDateOffset(-days)
+  // sinceStr = first day of an N-day window ending today (so "Today" = today
+  // only, "7d" = today and the prior 6 days). Off-by-one on this caused the
+  // "Today" preset to include yesterday's data too.
+  const sinceStr = etDateOffset(-Math.max(0, days - 1))
   return entries.filter(e => e.date >= sinceStr)
 }
 
@@ -947,7 +950,7 @@ function resolveRange(range) {
   if (range === 'mtd') return { from: today.slice(0, 7) + '-01', to: today }
   if (range && typeof range === 'object' && range.from) return { from: range.from, to: range.to }
   const days = typeof range === 'number' ? range : 30
-  return { from: etDateOffset(-days), to: today }
+  return { from: etDateOffset(-Math.max(0, days - 1)), to: today }
 }
 
 async function fetchLiveCalls({ from, to }) {
@@ -1384,7 +1387,7 @@ export default function MarketingPerformance() {
         return d => d >= start
       }
       if (days && typeof days === 'object' && days.from) return d => d >= days.from && d <= days.to
-      const sinceStr = etDateOffset(-days)
+      const sinceStr = etDateOffset(-Math.max(0, days - 1))
       return d => d >= sinceStr
     })()
     const seen = new Map() // contactKey -> { isDq } (qualified wins over DQ)
@@ -1416,7 +1419,7 @@ export default function MarketingPerformance() {
         return d => d >= start
       }
       if (days && typeof days === 'object' && days.from) return d => d >= days.from && d <= days.to
-      const sinceStr = etDateOffset(-days)
+      const sinceStr = etDateOffset(-Math.max(0, days - 1))
       return d => d >= sinceStr
     })()
     const seen = new Map()

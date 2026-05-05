@@ -1,19 +1,27 @@
 /**
  * Compute a "since" date string (YYYY-MM-DD) from a range value.
  * Handles numeric days (7, 30), 'mtd' (month to date), and custom { from, to } objects.
+ *
+ * Convention: `sinceDate(N)` returns the start of an N-day window ENDING today.
+ * "Today" (N=1) returns today's date — not yesterday's. "Last 7d" returns the
+ * date 6 days ago, so the inclusive window is 7 days. Previously this was off
+ * by one — sinceDate(1) returned yesterday, which made the "Today" preset
+ * include 2 days of data.
+ *
+ * Anchored to ET (the business timezone) so users in non-ET zones see the same
+ * window as the data buckets (closer EODs, GHL appointments, ad spend all
+ * clock by ET).
  */
 export function sinceDate(range) {
-  const now = new Date()
   if (range && typeof range === 'object' && range.from) {
     return range.from
   }
   if (range === 'mtd') {
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    const today = todayET()
+    return today.slice(0, 7) + '-01'
   }
   const days = typeof range === 'number' ? range : 30
-  const since = new Date()
-  since.setDate(since.getDate() - days)
-  return since.toISOString().split('T')[0]
+  return etDateOffset(-Math.max(0, days - 1))
 }
 
 /**
