@@ -154,7 +154,7 @@ export async function fetchCloserEODTotals(sinceDate) {
 export async function syncEODToTracker() {
   const { data: eods } = await supabase
     .from('closer_eod_reports')
-    .select('id, report_date, offers, closes, total_cash_collected, total_revenue, deposits, live_nc_calls, live_fu_calls, nc_booked, fu_booked, nc_no_shows, fu_no_shows, reschedules')
+    .select('id, report_date, offers, closes, total_cash_collected, total_revenue, deposits, live_nc_calls, live_fu_calls, nc_booked, fu_booked, nc_no_shows, fu_no_shows, nc_cancels, fu_cancels, reschedules')
     .eq('is_confirmed', true)
 
   if (!eods?.length) return 0
@@ -174,7 +174,7 @@ export async function syncEODToTracker() {
       offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0, ascensions: 0,
       live_calls: 0, live_nc: 0, live_fu: 0,
       booked: 0, nc_booked: 0, fu_booked: 0,
-      no_shows: 0, nc_no_shows: 0, reschedules: 0,
+      no_shows: 0, nc_no_shows: 0, reschedules: 0, cancels: 0,
     }
     if (!reportIdsByDate[d]) reportIdsByDate[d] = []
     reportIdsByDate[d].push(r.id)
@@ -192,6 +192,7 @@ export async function syncEODToTracker() {
     byDate[d].nc_no_shows += r.nc_no_shows || 0
     byDate[d].no_shows += (r.nc_no_shows || 0) + (r.fu_no_shows || 0)
     byDate[d].reschedules += r.reschedules || 0
+    byDate[d].cancels += (r.nc_cancels || 0) + (r.fu_cancels || 0)
   }
 
   // Fetch all calls for ascension + finance splits
@@ -276,6 +277,10 @@ export async function syncEODToTracker() {
     // but it underreports whenever the closer forgets a booking GHL did capture.
     if (eod?.no_shows != null) patch.no_shows = eod.no_shows
     if (eod?.reschedules != null) patch.reschedules = eod.reschedules
+    // Closer-flagged cancels feed cancelled_by_prospect on marketing_tracker.
+    // The show-rate formula already subtracts this from the denominator, so
+    // a prospect who explicitly cancelled doesn't count against show%.
+    if (eod?.cancels != null) patch.cancelled_by_prospect = eod.cancels
 
     if (existing) {
       // Only update fields that are non-zero from EOD — don't overwrite existing CSV data with 0

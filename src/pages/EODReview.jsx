@@ -11,6 +11,7 @@ import { reconcileAttribution } from '../services/attributionReconciliation'
 
 const closingOutcomes = [
   { value: 'no_show', label: 'No Show', color: 'text-danger' },
+  { value: 'canceled', label: 'Canceled', color: 'text-orange-400' },
   { value: 'rescheduled', label: 'Rescheduled', color: 'text-blue-400' },
   { value: 'not_closed', label: 'Not Closed', color: 'text-text-400' },
   { value: 'closed', label: 'Closed', color: 'text-success' },
@@ -445,7 +446,7 @@ function DealUpdater({ closerId, onClose, onSaved }) {
     setSaving(false)
   }
 
-  const outcomeColor = (o) => o === 'closed' ? 'text-success' : o === 'not_closed' ? 'text-text-400' : o === 'no_show' ? 'text-danger' : o === 'rescheduled' ? 'text-blue-400' : 'text-text-400'
+  const outcomeColor = (o) => o === 'closed' ? 'text-success' : o === 'not_closed' ? 'text-text-400' : o === 'no_show' ? 'text-danger' : o === 'rescheduled' ? 'text-blue-400' : o === 'canceled' ? 'text-orange-400' : 'text-text-400'
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
@@ -1912,7 +1913,10 @@ export default function EODReview() {
     setExpandedCall(null)
   }
 
-  // Auto-computed summary — ascensions excluded from show/close/offer rates
+  // Auto-computed summary — ascensions excluded from show/close/offer rates.
+  // `canceled` is its own bucket — it's NOT counted as a no-show and NOT
+  // counted as live. Show rate denominators subtract canceled calls so a
+  // prospect bailing before the call doesn't drag down show%.
   const summary = calls.reduce((acc, c) => {
     const isAsc = c.call_type === 'ascension'
     const isNew = c.call_type === 'new_call'
@@ -1925,6 +1929,9 @@ export default function EODReview() {
       liveFu: acc.liveFu + (isFu  && ['not_closed', 'closed'].includes(c.outcome) ? 1 : 0),
       noShows: acc.noShows + (c.outcome === 'no_show' ? 1 : 0),
       rescheduled: acc.rescheduled + (c.outcome === 'rescheduled' ? 1 : 0),
+      canceled: acc.canceled + (c.outcome === 'canceled' ? 1 : 0),
+      ncCanceled: acc.ncCanceled + (isNew && c.outcome === 'canceled' ? 1 : 0),
+      fuCanceled: acc.fuCanceled + (isFu && c.outcome === 'canceled' ? 1 : 0),
       offers: acc.offers + (c.offered ? 1 : 0),
       closes: acc.closes + (c.outcome === 'closed' ? 1 : 0),
       ascensions: acc.ascensions + (c.outcome === 'ascended' ? 1 : 0),
@@ -1938,7 +1945,7 @@ export default function EODReview() {
       financeOffered: acc.financeOffered + (isAsc && c.offered_finance ? 1 : 0),
       financeAccepted: acc.financeAccepted + (isAsc && c.offered_finance && (c.outcome === 'closed' || c.outcome === 'ascended') ? 1 : 0),
     }
-  }, { booked: 0, showed: 0, liveNc: 0, liveFu: 0, noShows: 0, rescheduled: 0, offers: 0, closes: 0, ascensions: 0, ascensionCalls: 0, revenue: 0, cash: 0, contractValue: 0, ascendCash: 0, newCall: 0, followUp: 0, financeOffered: 0, financeAccepted: 0 })
+  }, { booked: 0, showed: 0, liveNc: 0, liveFu: 0, noShows: 0, rescheduled: 0, canceled: 0, ncCanceled: 0, fuCanceled: 0, offers: 0, closes: 0, ascensions: 0, ascensionCalls: 0, revenue: 0, cash: 0, contractValue: 0, ascendCash: 0, newCall: 0, followUp: 0, financeOffered: 0, financeAccepted: 0 })
 
   // NC-anchored rates: denominators are live NEW calls only.
   // Show % uses NC booked / live NC. Close % and Offer % use live NC.
@@ -1955,6 +1962,8 @@ export default function EODReview() {
       fu_booked: summary.followUp,
       nc_no_shows: calls.filter(c => c.call_type === 'new_call' && c.outcome === 'no_show').length,
       fu_no_shows: calls.filter(c => ['follow_up'].includes(c.call_type) && c.outcome === 'no_show').length,
+      nc_cancels: summary.ncCanceled,
+      fu_cancels: summary.fuCanceled,
       live_nc_calls: calls.filter(c => c.call_type === 'new_call' && ['not_closed', 'closed'].includes(c.outcome)).length,
       live_fu_calls: calls.filter(c => c.call_type === 'follow_up' && ['not_closed', 'closed'].includes(c.outcome)).length,
       reschedules: summary.rescheduled,
@@ -2017,7 +2026,8 @@ export default function EODReview() {
             nc_booked: a.nc_booked + (r.nc_booked || 0),
             fu_booked: a.fu_booked + (r.fu_booked || 0),
             reschedules: a.reschedules + (r.reschedules || 0),
-          }), { offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0, ascensions: 0, live_calls: 0, live_nc: 0, booked: 0, nc_booked: 0, fu_booked: 0, reschedules: 0 })
+            cancels: a.cancels + (r.nc_cancels || 0) + (r.fu_cancels || 0),
+          }), { offers: 0, closes: 0, trial_cash: 0, trial_revenue: 0, ascensions: 0, live_calls: 0, live_nc: 0, booked: 0, nc_booked: 0, fu_booked: 0, reschedules: 0, cancels: 0 })
           // Split ascension + finance data from calls
           const callAgg = (allCalls || []).reduce((a, c) => ({
             ascCash: a.ascCash + (c.call_type === 'ascension' ? parseFloat(c.cash_collected || 0) : 0),
@@ -2051,6 +2061,10 @@ export default function EODReview() {
             net_new_calls: agg.nc_booked,
             net_fu_calls: agg.fu_booked,
             reschedules: agg.reschedules,
+            // Closer-flagged cancels feed cancelled_by_prospect — the show-rate
+            // formula already subtracts this from the denominator, so cancels
+            // no longer drag show% down.
+            cancelled_by_prospect: agg.cancels,
             updated_at: new Date().toISOString(),
           }, { onConflict: 'date' })
         }
@@ -2548,6 +2562,7 @@ export default function EODReview() {
                       const outcomeBadge = call.outcome === 'closed' ? { label: 'Closed', cls: 'bg-success/15 text-success' }
                         : call.outcome === 'ascended' ? { label: 'Ascended', cls: 'bg-cyan-500/15 text-cyan-400' }
                         : call.outcome === 'no_show' ? { label: 'No Show', cls: 'bg-danger/15 text-danger' }
+                        : call.outcome === 'canceled' ? { label: 'Canceled', cls: 'bg-orange-400/15 text-orange-400' }
                         : call.outcome === 'rescheduled' ? { label: 'Rescheduled', cls: 'bg-blue-500/15 text-blue-400' }
                         : call.outcome === 'not_closed' ? { label: 'Not Closed', cls: 'bg-text-400/15 text-text-400' }
                         : call.outcome === 'not_ascended' ? { label: "Didn't Ascend", cls: 'bg-text-400/15 text-text-400' }
@@ -2697,6 +2712,7 @@ export default function EODReview() {
                     const isClosedOrAscended = call.outcome === 'closed' || call.outcome === 'ascended'
                     const isNoShow = call.outcome === 'no_show'
                     const isRescheduled = call.outcome === 'rescheduled'
+                    const isCanceled = call.outcome === 'canceled'
                     const isPending = call.outcome == null
                     const showInputs = isClosedOrAscended
                     const typeBadge = isAscension ? { label: 'ASC', cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' }
@@ -2709,6 +2725,7 @@ export default function EODReview() {
                         isPending ? 'border-amber-400/50 ring-1 ring-amber-400/20'
                         : isClosedOrAscended ? 'border-success/30'
                         : isNoShow ? 'border-danger/30'
+                        : isCanceled ? 'border-orange-400/30'
                         : isRescheduled ? 'border-blue-400/30'
                         : 'border-border-default'
                       }`}
@@ -2763,6 +2780,7 @@ export default function EODReview() {
                                 call.outcome === o.value
                                   ? o.value === 'closed' || o.value === 'ascended' ? 'bg-success text-white'
                                     : o.value === 'no_show' ? 'bg-danger text-white'
+                                    : o.value === 'canceled' ? 'bg-orange-400 text-white'
                                     : o.value === 'rescheduled' ? 'bg-blue-500 text-white'
                                     : o.value === 'not_ascended' ? 'bg-text-400/80 text-white'
                                     : 'bg-text-400/60 text-white'
