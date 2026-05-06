@@ -1756,11 +1756,11 @@ export default function MarketingPerformance() {
             <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={wf?.adspend} tip="Total Meta Ads spend (converted to USD)" />
             <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={wf?.leads} tip="New opportunities created in SCIO USA pipeline. Click to view." onClick={() => setDrilldown('leads')} />
             <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={wf?.cpl} tip="Cost Per Lead = Adspend / Leads" />
-            <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
-            <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} tip="Adspend ÷ Bookings (all)" />
-            <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} tip={`Strategy bookings EXCLUDING the DQ Calendly calendar${bk.dq ? ` (${bk.dq} routed to DQ in this window)` : ''}. Click to view.`} onClick={() => setDrilldown('bookings')} />
-            <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} tip="Qualified Bookings ÷ Leads" />
-            <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} tip="Adspend ÷ Qualified Bookings (excludes DQ)" />
+            <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} whatIf={wf?.qualified_bookings} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
+            <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={wf?.cpb} tip="Adspend ÷ Bookings (all)" />
+            <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} whatIf={wf?.qualified_bookings} tip={`Strategy bookings EXCLUDING the DQ Calendly calendar${bk.dq ? ` (${bk.dq} routed to DQ in this window)` : ''}. Click to view.`} onClick={() => setDrilldown('bookings')} />
+            <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} whatIf={wf?.lead_to_booking_pct} tip="Qualified Bookings ÷ Leads" />
+            <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} whatIf={wf?.cpb} tip="Adspend ÷ Qualified Bookings (excludes DQ)" />
           </Section>
         )
       })()}
