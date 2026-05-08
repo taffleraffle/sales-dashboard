@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition, Fragment } from 'react'
+import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition } from 'react'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import DateRangeSelector from '../components/DateRangeSelector'
 import SyncStatusIndicator from '../components/SyncStatusIndicator'
-import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check, ChevronRight, ChevronDown, Mail } from 'lucide-react'
+import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../hooks/useToast'
 import { STRATEGY_CALL_CALENDARS, DQ_BOOKING_CALENDARS } from '../utils/constants'
@@ -967,15 +967,19 @@ async function fetchLiveCalls({ from, to }) {
     .in('eod_report_id', reportIds)
     .in('outcome', ['not_closed', 'closed'])
     .eq('call_type', 'new_call') // "Net New" = NEW CALLS only (no follow-ups, no ascensions)
-  return (callRows || []).map(c => ({
+  const rows = (callRows || []).map(c => ({
     date: reportMap[c.eod_report_id]?.report_date,
     closer: reportMap[c.eod_report_id]?.closer?.name || '—',
     type: c.call_type,
     prospect: c.prospect_name || '—',
+    email: null,
     outcome: c.outcome,
     revenue: c.revenue,
     cash: c.cash_collected,
   })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+
+  await enrichRowsWithProspectEmails(rows)
+  return rows
 }
 
 async function fetchCloses({ from, to }) {
@@ -1127,13 +1131,14 @@ const DRILLDOWN_CONFIG = {
     title: 'Net New Calls',
     subtitle: 'Closer EOD reports · NEW calls only (no follow-ups, no ascensions) · outcome = not_closed or closed',
     fetcher: fetchLiveCalls,
-    expandable: true,
-    expandKey: 'prospect',
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
       { key: 'closer', label: 'Closer', cls: 'text-opt-yellow' },
       { key: 'type', label: 'Type', cls: 'text-[10px] uppercase text-text-400' },
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'email', label: 'Email', render: r => r.email
+        ? <a href={`mailto:${r.email}`} className="text-opt-yellow hover:underline" onClick={e => e.stopPropagation()}>{r.email}</a>
+        : <span className="text-text-400/60">—</span> },
       { key: 'outcome', label: 'Outcome', render: r => <span className={r.outcome === 'closed' ? 'text-success' : 'text-text-secondary'}>{r.outcome}</span> },
       { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
       { key: 'cash', label: 'Cash', align: 'right', render: r => r.cash ? `$${parseFloat(r.cash).toLocaleString()}` : '—' },
@@ -1232,226 +1237,82 @@ function normalizeProspectName(name) {
     .trim()
 }
 
-// Try to extract the GHL calendar_name from a prospect_name like
-// "Joseph Guaracino - RestorationConnect Strategy Call". Returns null if no
-// recognizable calendar suffix is present (e.g. raw name "george sidhom").
-function extractCalendarName(prospectName) {
-  if (!prospectName) return null
-  const m = prospectName.match(/[-–—]\s*((?:remodeler|restoration|plumber|service|pool)connect[^]*?strategy\s*call)\s*$/i)
-  return m ? m[1].trim() : null
-}
-
-// Resolve a prospect_name → list of GHL contact IDs.
+// Bulk-enrich an array of call rows with the matched contact's email address.
 //
-// Strategy (most → least reliable):
-//   1. ghl_appointments within ±14 days of the call date, calendar_name filter
-//      if the prospect_name carries a calendar suffix, fuzzy contact_name match.
-//   2. Wider ghl_appointments name match (no date/calendar filter).
-//   3. ghl_contacts_cache name match.
+// Mutates rows in place — sets `row.email` when a match is found. Two queries
+// total regardless of row count: one wide ghl_appointments pull covering the
+// date range, one ghl_contacts_cache lookup for the matched contact IDs.
 //
-// Returns { ids, debug } so the UI can show which strategy produced the match.
-async function resolveProspectContactIds(prospectName, callDate) {
-  const norm = normalizeProspectName(prospectName)
-  if (!norm || norm.length < 2) return { ids: [], debug: 'name too short' }
-  const firstWord = norm.split(/\s+/)[0]
-  if (firstWord.length < 2) return { ids: [], debug: 'first word too short' }
+// Match logic per row: appointment_date within ±14 days of the call date AND
+// fuzzy contact_name match (full overlap or first+last name match). When
+// multiple appointments match, the closest by date wins.
+async function enrichRowsWithProspectEmails(rows) {
+  if (!rows?.length) return
 
-  const calendarName = extractCalendarName(prospectName)
-  const matches = (rowName) => {
-    const n = normalizeProspectName(rowName)
-    if (!n) return false
-    if (n === norm || n.includes(norm) || norm.includes(n)) return true
-    // Last-name overlap: e.g. "kimberly chatman" vs "kimberly l chatman"
-    const normParts = norm.split(/\s+/)
-    const rowParts = n.split(/\s+/)
-    return normParts.length > 1 && rowParts.length > 1
-      && normParts[0] === rowParts[0]
-      && normParts[normParts.length - 1] === rowParts[rowParts.length - 1]
+  const dates = rows.map(r => r.date).filter(Boolean).sort()
+  if (dates.length === 0) return
+  const fmt = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`
+  const minDate = new Date(dates[0] + 'T00:00:00'); minDate.setDate(minDate.getDate() - 14)
+  const maxDate = new Date(dates[dates.length - 1] + 'T00:00:00'); maxDate.setDate(maxDate.getDate() + 14)
+
+  const { data: appts } = await supabase
+    .from('ghl_appointments')
+    .select('ghl_contact_id, contact_name, appointment_date')
+    .not('ghl_contact_id', 'is', null)
+    .gte('appointment_date', fmt(minDate))
+    .lte('appointment_date', fmt(maxDate))
+    .limit(5000)
+
+  const matchScore = (norm, candidate) => {
+    if (!norm || !candidate) return false
+    if (candidate === norm || candidate.includes(norm) || norm.includes(candidate)) return true
+    const np = norm.split(/\s+/), cp = candidate.split(/\s+/)
+    return np.length > 1 && cp.length > 1
+      && np[0] === cp[0]
+      && np[np.length - 1] === cp[cp.length - 1]
   }
 
-  // Pass 1: date-narrow + calendar-narrow appointment match. This is the
-  // strongest signal — same-day booking on the matching strategy calendar
-  // with overlapping name → almost certainly the right person.
-  if (callDate) {
-    const d = new Date(callDate + 'T00:00:00')
-    const fmt = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`
-    const before = new Date(d); before.setDate(before.getDate() - 14)
-    const after = new Date(d); after.setDate(after.getDate() + 14)
-    let q = supabase
-      .from('ghl_appointments')
-      .select('ghl_contact_id, contact_name, calendar_name, appointment_date')
-      .ilike('contact_name', `%${firstWord}%`)
-      .not('ghl_contact_id', 'is', null)
-      .gte('appointment_date', fmt(before))
-      .lte('appointment_date', fmt(after))
-      .limit(50)
-    if (calendarName) q = q.ilike('calendar_name', calendarName)
-    const { data: narrow } = await q
-    const ids = new Set()
-    for (const a of (narrow || [])) {
-      if (a.ghl_contact_id && matches(a.contact_name)) ids.add(a.ghl_contact_id)
+  const rowToContactId = new Map()
+  const allContactIds = new Set()
+  for (const row of rows) {
+    const norm = normalizeProspectName(row.prospect)
+    if (!norm || norm.length < 2) continue
+    const candidates = []
+    for (const a of (appts || [])) {
+      const an = normalizeProspectName(a.contact_name)
+      if (!matchScore(norm, an)) continue
+      const dDiff = Math.abs((new Date(a.appointment_date) - new Date(row.date)) / 86400000)
+      candidates.push({ id: a.ghl_contact_id, dDiff })
     }
-    if (ids.size > 0) {
-      return { ids: [...ids].slice(0, 5), debug: `appointment ±14d${calendarName ? ` · ${calendarName}` : ''} (${ids.size})` }
-    }
+    if (candidates.length === 0) continue
+    candidates.sort((a, b) => a.dDiff - b.dDiff)
+    const cid = candidates[0].id
+    rowToContactId.set(row, cid)
+    allContactIds.add(cid)
   }
 
-  // Pass 2: any-time appointment match (still the strongest source since it
-  // has ghl_contact_id explicitly).
-  const [{ data: appts }, { data: contacts }] = await Promise.all([
-    supabase
-      .from('ghl_appointments')
-      .select('ghl_contact_id, contact_name')
-      .ilike('contact_name', `%${firstWord}%`)
-      .not('ghl_contact_id', 'is', null)
-      .limit(50),
-    supabase
-      .from('ghl_contacts_cache')
-      .select('id, name')
-      .ilike('name', `%${firstWord}%`)
-      .limit(50),
-  ])
+  if (allContactIds.size === 0) return
 
-  const apptIds = new Set()
-  for (const a of (appts || [])) {
-    if (a.ghl_contact_id && matches(a.contact_name)) apptIds.add(a.ghl_contact_id)
-  }
-  if (apptIds.size > 0) {
-    return { ids: [...apptIds].slice(0, 5), debug: `appointment any-date (${apptIds.size})` }
-  }
-
-  const cacheIds = new Set()
-  for (const c of (contacts || [])) {
-    if (c.id && matches(c.name)) cacheIds.add(c.id)
-  }
-  if (cacheIds.size > 0) {
-    return { ids: [...cacheIds].slice(0, 5), debug: `contacts cache (${cacheIds.size})` }
-  }
-
-  return { ids: [], debug: `no match for "${norm}"` }
-}
-
-async function fetchProspectDetails(prospectName, callDate) {
-  const { ids, debug } = await resolveProspectContactIds(prospectName, callDate)
-  if (ids.length === 0) return { contacts: [], emails: [], debug }
-
-  // Pull contact details (name + email address) for the matched IDs.
-  // Contacts that aren't in ghl_contacts_cache yet still get a row so the
-  // user sees the matched ID and can investigate.
-  const { data: contactRows } = await supabase
+  const { data: contacts } = await supabase
     .from('ghl_contacts_cache')
-    .select('id, name, email')
-    .in('id', ids)
-  const contactMap = Object.fromEntries((contactRows || []).map(c => [c.id, c]))
-  const contacts = ids.map(id => ({
-    id,
-    name: contactMap[id]?.name || null,
-    email: contactMap[id]?.email || null,
-  }))
+    .select('id, email')
+    .in('id', [...allContactIds])
+    .not('email', 'is', null)
 
-  const { data: emails } = await supabase
-    .from('email_message_cache')
-    .select('id, subject, status, direction, date_added')
-    .in('contact_id', ids)
-    .order('date_added', { ascending: false })
-    .limit(200)
-
-  return { contacts, emails: emails || [], debug }
-}
-
-function ProspectEmails({ prospectName, callDate }) {
-  const [state, setState] = useState({ loading: true, contacts: [], emails: [], debug: '' })
-  useEffect(() => {
-    let cancelled = false
-    setState({ loading: true, contacts: [], emails: [], debug: '' })
-    fetchProspectDetails(prospectName, callDate)
-      .then(r => { if (!cancelled) setState({ loading: false, ...r }) })
-      .catch(e => {
-        console.warn('Prospect lookup failed:', e)
-        if (!cancelled) setState({ loading: false, contacts: [], emails: [], debug: e?.message || 'error' })
-      })
-    return () => { cancelled = true }
-  }, [prospectName, callDate])
-
-  if (state.loading) {
-    return <div className="px-4 py-3 text-[10px] text-text-400">Loading contact for {prospectName}…</div>
+  const emailMap = Object.fromEntries((contacts || []).map(c => [c.id, c.email]))
+  for (const row of rows) {
+    const cid = rowToContactId.get(row)
+    if (cid && emailMap[cid]) row.email = emailMap[cid]
   }
-  if (state.contacts.length === 0) {
-    return <div className="px-4 py-3 text-[10px] text-text-400">No matching GHL contact for &ldquo;{prospectName}&rdquo; — {state.debug}.</div>
-  }
-
-  return (
-    <div className="px-4 py-3 space-y-3">
-      {/* Contact emails — primary info */}
-      <div>
-        <div className="text-[9px] uppercase tracking-wider text-text-400 mb-1.5">
-          Contact{state.contacts.length === 1 ? '' : 's'} matched <span className="text-text-400/60 normal-case">· {state.debug}</span>
-        </div>
-        <div className="space-y-1">
-          {state.contacts.map(c => (
-            <div key={c.id} className="flex items-center gap-3 text-[11px]">
-              <span className="text-text-primary font-medium">{c.name || `Contact ${c.id.slice(0, 8)}`}</span>
-              {c.email
-                ? <a href={`mailto:${c.email}`} className="text-opt-yellow hover:underline" onClick={e => e.stopPropagation()}>{c.email}</a>
-                : <span className="text-text-400">no email cached — not yet synced from GHL</span>}
-              <span className="text-text-400/50 text-[9px] tabular-nums">{c.id}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Email message history — secondary info */}
-      {state.emails.length > 0 && (
-        <div>
-          <div className="text-[9px] uppercase tracking-wider text-text-400 mb-1 flex items-center gap-1">
-            <Mail size={10} /> {state.emails.length} email message{state.emails.length === 1 ? '' : 's'}
-          </div>
-          <table className="w-full text-[10px]">
-            <thead className="text-[9px] uppercase tracking-wider text-text-400">
-              <tr>
-                <th className="px-2 py-1 text-left">Date</th>
-                <th className="px-2 py-1 text-left">Dir</th>
-                <th className="px-2 py-1 text-left">Subject</th>
-                <th className="px-2 py-1 text-left">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.emails.map(e => (
-                <tr key={e.id} className="border-t border-border-default/20">
-                  <td className="px-2 py-1 tabular-nums text-text-400">{(e.date_added || '').slice(0, 16).replace('T', ' ')}</td>
-                  <td className="px-2 py-1">
-                    <span className={e.direction === 'inbound' ? 'text-blue-400' : 'text-text-secondary'}>
-                      {e.direction === 'inbound' ? 'IN' : 'OUT'}
-                    </span>
-                  </td>
-                  <td className="px-2 py-1 text-text-primary truncate max-w-[400px]" title={e.subject}>{e.subject || '(no subject)'}</td>
-                  <td className="px-2 py-1">
-                    <span className={
-                      e.status === 'opened' || e.status === 'clicked' ? 'text-success'
-                      : e.status === 'failed' ? 'text-orange-400'
-                      : 'text-text-400'
-                    }>{e.status || '—'}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
 }
 
 function DrilldownModal({ kind, range, onClose }) {
   const config = DRILLDOWN_CONFIG[kind]
   const [rows, setRows] = useState(null)
-  const [expandedIdx, setExpandedIdx] = useState(null)
-  const expandable = !!config?.expandable
   useEffect(() => {
     if (!config) return
     let cancelled = false
     setRows(null)
-    setExpandedIdx(null)
     config.fetcher(resolveRange(range))
       .then(r => { if (!cancelled) setRows(r) })
       .catch(e => { if (!cancelled) { console.warn(`${kind} drilldown failed:`, e); setRows([]) } })
@@ -1465,8 +1326,6 @@ function DrilldownModal({ kind, range, onClose }) {
     : (range && typeof range === 'object' && range.from)
       ? `${range.from} → ${range.to}`
       : `Last ${range}d`
-
-  const colCount = config.columns.length + (expandable ? 1 : 0)
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -1485,49 +1344,27 @@ function DrilldownModal({ kind, range, onClose }) {
             <table className="w-full text-[11px]">
               <thead className="sticky top-0 bg-bg-card border-b border-border-default text-[9px] uppercase tracking-wider text-text-400">
                 <tr>
-                  {expandable && <th className="px-2 py-2 w-6"></th>}
                   {config.columns.map(c => (
                     <th key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, i) => {
-                  const isExpanded = expandable && expandedIdx === i
-                  return (
-                    <Fragment key={i}>
-                      <tr
-                        className={`border-b border-border-default/30 ${expandable ? 'cursor-pointer hover:bg-bg-hover' : ''}`}
-                        onClick={expandable ? () => setExpandedIdx(isExpanded ? null : i) : undefined}
-                      >
-                        {expandable && (
-                          <td className="px-2 py-2 text-text-400">
-                            {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          </td>
-                        )}
-                        {config.columns.map(c => (
-                          <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.cls || ''}`}>
-                            {c.render ? c.render(row) : (row[c.key] ?? '—')}
-                          </td>
-                        ))}
-                      </tr>
-                      {isExpanded && (
-                        <tr className="bg-black/20 border-b border-border-default/30">
-                          <td colSpan={colCount} className="p-0">
-                            <ProspectEmails prospectName={row[config.expandKey] || ''} callDate={row.date} />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  )
-                })}
+                {rows.map((row, i) => (
+                  <tr key={i} className="border-b border-border-default/30">
+                    {config.columns.map(c => (
+                      <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.cls || ''}`}>
+                        {c.render ? c.render(row) : (row[c.key] ?? '—')}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
         </div>
-        <div className="px-5 py-2 text-[10px] text-text-400/80 border-t border-border-default flex items-center justify-between">
+        <div className="px-5 py-2 text-[10px] text-text-400/80 border-t border-border-default">
           <span>{rows != null && `${rows.length} row${rows.length === 1 ? '' : 's'} shown`}</span>
-          {expandable && rows && rows.length > 0 && <span className="text-text-400/60">Click a row to see emails</span>}
         </div>
       </div>
     </div>
