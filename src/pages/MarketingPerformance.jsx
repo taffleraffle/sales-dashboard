@@ -1654,43 +1654,70 @@ export default function MarketingPerformance() {
     const o = whatIfOverrides
     const get = (key) => (o[key] !== '' && o[key] != null) ? parseFloat(o[key]) : null
 
-    // Current rates from actual data (used as defaults for cascading)
-    const curShowRate = stats.qualified_bookings > 0 ? stats.live_calls / stats.qualified_bookings : 0.5
+    // Funnel driver is `new_live_calls` (NEW only) to match
+    // computeMarketingStats: close_rate / show_rate / cost_per_new use the
+    // NEW-only denominator; only offer_rate uses Net Live (NEW + FU). Net Live
+    // is derived from new_live_calls via the FU ratio so offer_rate stays
+    // consistent with stats.
+    const showDenomCur = stats.nc_booked > 0 ? stats.nc_booked : stats.qualified_bookings
+    const curShowRate = showDenomCur > 0 ? stats.new_live_calls / showDenomCur : 0.5
     const curOfferRate = stats.live_calls > 0 ? stats.offers / stats.live_calls : 0.8
-    const curCloseRate = stats.live_calls > 0 ? stats.closes / stats.live_calls : 0.25
+    const curCloseRate = stats.new_live_calls > 0 ? stats.closes / stats.new_live_calls : 0.25
     const curAscendRate = stats.closes > 0 ? stats.ascensions / stats.closes : 0.5
     const curAvgTrialCash = stats.closes > 0 ? stats.trial_cash / stats.closes : 1000
     const curAvgTrialRev = stats.closes > 0 ? stats.trial_revenue / stats.closes : 1000
     const curAvgAscCash = stats.ascensions > 0 ? stats.ascend_cash / stats.ascensions : 3000
     const curAvgAscRev = stats.ascensions > 0 ? stats.ascend_revenue / stats.ascensions : 9000
+    const curFuRatio = stats.new_live_calls > 0 ? stats.live_calls / stats.new_live_calls : 1
+    const curNcToQbRatio = stats.qualified_bookings > 0 ? (stats.nc_booked || stats.qualified_bookings) / stats.qualified_bookings : 1
 
-    // Cascade: each level uses override if provided, else derives from upstream
+    // Cascade
     const adspend = get('adspend') ?? stats.adspend
     const leads = get('leads') ?? stats.leads
     const qualified_bookings = get('qualified_bookings') ?? stats.qualified_bookings
 
-    // Show rate: override percentage or keep current
+    // Closer-EOD bookings (denominator for show rates). When user overrides
+    // qualified_bookings, scale nc_booked proportionally so show-rate math
+    // tracks. Direct override also supported.
+    const nc_booked = get('nc_booked')
+      ?? (get('qualified_bookings') != null
+        ? Math.round(qualified_bookings * curNcToQbRatio)
+        : (stats.nc_booked || 0))
+    const showDenom = nc_booked > 0 ? nc_booked : qualified_bookings
+
+    // Show rate: override % or keep current
     const showRateOverride = get('show_rate')
     const showRate = showRateOverride != null ? showRateOverride / 100 : curShowRate
 
-    // Live calls: override directly, OR cascade from bookings * show rate
-    const live_calls = get('live_calls') ?? (get('qualified_bookings') != null || showRateOverride != null
-      ? Math.round(qualified_bookings * showRate)
-      : stats.live_calls)
+    // New live calls (NEW only): override directly, OR cascade from
+    // showDenom * showRate
+    const new_live_calls = get('new_live_calls')
+      ?? (get('nc_booked') != null || get('qualified_bookings') != null || showRateOverride != null
+        ? Math.round(showDenom * showRate)
+        : stats.new_live_calls)
 
-    // Offer rate
+    // Net Live (NEW + FU) — derived from new_live_calls using current FU ratio
+    // unless user supplies an explicit override
+    const live_calls = get('live_calls')
+      ?? (new_live_calls !== stats.new_live_calls
+        ? Math.round(new_live_calls * curFuRatio)
+        : stats.live_calls)
+
+    // Offer rate (denominator = Net Live, matches stats)
     const offerRateOverride = get('offer_rate')
     const offerRate = offerRateOverride != null ? offerRateOverride / 100 : curOfferRate
-    const offers = get('offers') ?? (get('live_calls') != null || get('qualified_bookings') != null || offerRateOverride != null
-      ? Math.round(live_calls * offerRate)
-      : stats.offers)
+    const offers = get('offers')
+      ?? (live_calls !== stats.live_calls || offerRateOverride != null
+        ? Math.round(live_calls * offerRate)
+        : stats.offers)
 
-    // Close rate
+    // Close rate (denominator = New Live, matches stats)
     const closeRateOverride = get('close_rate')
     const closeRate = closeRateOverride != null ? closeRateOverride / 100 : curCloseRate
-    const closes = get('closes') ?? (get('live_calls') != null || get('qualified_bookings') != null || closeRateOverride != null
-      ? Math.round(live_calls * closeRate)
-      : stats.closes)
+    const closes = get('closes')
+      ?? (new_live_calls !== stats.new_live_calls || closeRateOverride != null
+        ? Math.round(new_live_calls * closeRate)
+        : stats.closes)
 
     // Trial financials
     const trial_cash = get('trial_cash') ?? (closes !== stats.closes ? Math.round(closes * curAvgTrialCash) : stats.trial_cash)
@@ -1705,7 +1732,7 @@ export default function MarketingPerformance() {
     const ascend_cash = get('ascend_cash') ?? (ascensions !== stats.ascensions ? Math.round(ascensions * curAvgAscCash) : stats.ascend_cash)
     const ascend_revenue = get('ascend_revenue') ?? (ascensions !== stats.ascensions ? Math.round(ascensions * curAvgAscRev) : stats.ascend_revenue)
 
-    // Non-cascading fields
+    // Non-cascading
     const reschedules = stats.reschedules
     const cancels = stats.cancels || 0
     const ar_collected = stats.ar_collected
@@ -1714,24 +1741,30 @@ export default function MarketingPerformance() {
 
     const all_cash = trial_cash + ascend_cash + ar_collected
     return {
-      adspend, leads, auto_bookings, qualified_bookings, live_calls, offers, closes,
+      adspend, leads, auto_bookings, qualified_bookings, nc_booked, new_live_calls, live_calls, offers, closes,
       trial_cash, trial_revenue, ascensions, ascend_cash, ascend_revenue,
       reschedules, cancels, ar_collected, ar_defaulted,
       cancelled_dtf: stats.cancelled_dtf || 0, cancelled_by_prospect: stats.cancelled_by_prospect || 0,
       finance_offers: stats.finance_offers, finance_accepted: stats.finance_accepted,
-      // Derived
+      // Derived — formulas mirror computeMarketingStats so equal inputs ⇒ equal outputs
       cpl: leads > 0 ? adspend / leads : 0,
       lead_to_booking_pct: leads > 0 ? (qualified_bookings / leads) * 100 : 0,
       cpb: qualified_bookings > 0 ? adspend / qualified_bookings : 0,
       cost_per_auto_booking: auto_bookings > 0 ? adspend / auto_bookings : 0,
-      gross_show_rate: qualified_bookings > 0 ? (live_calls / qualified_bookings) * 100 : 0,
-      net_show_rate: (() => { const net = qualified_bookings - cancels - reschedules; return net > 0 ? (live_calls / net) * 100 : 0 })(),
-      no_shows: (stats.no_shows > 0 && qualified_bookings === stats.qualified_bookings) ? stats.no_shows : Math.max(0, qualified_bookings - live_calls - cancels - reschedules),
+      gross_show_rate: showDenom > 0 ? Math.min(100, (new_live_calls / showDenom) * 100) : 0,
+      net_show_rate: (() => {
+        const net = showDenom - cancels - reschedules
+        return net > 0 ? Math.min(100, (new_live_calls / net) * 100) : 0
+      })(),
+      no_shows: (stats.no_shows > 0 && new_live_calls === stats.new_live_calls && showDenom === showDenomCur)
+        ? stats.no_shows
+        : Math.max(0, showDenom - new_live_calls - cancels - reschedules),
       reschedule_rate: qualified_bookings > 0 ? (reschedules / qualified_bookings) * 100 : 0,
       cost_per_live_call: live_calls > 0 ? adspend / live_calls : 0,
+      cost_per_new_live_call: new_live_calls > 0 ? adspend / new_live_calls : 0,
       offer_rate: live_calls > 0 ? (offers / live_calls) * 100 : 0,
       cost_per_offer: offers > 0 ? adspend / offers : 0,
-      close_rate: live_calls > 0 ? (closes / live_calls) * 100 : 0,
+      close_rate: new_live_calls > 0 ? (closes / new_live_calls) * 100 : 0,
       cpa_trial: closes > 0 ? adspend / closes : 0,
       trial_cash_pct: trial_revenue > 0 ? (trial_cash / trial_revenue) * 100 : 0,
       trial_fe_roas: adspend > 0 ? trial_cash / adspend : 0,
@@ -1877,7 +1910,7 @@ export default function MarketingPerformance() {
               ['adspend', 'Adspend', '$', stats.adspend],
               ['leads', 'Leads', '#', stats.leads],
               ['qualified_bookings', 'Q.Books', '#', stats.qualified_bookings],
-              ['live_calls', 'Net Live', '#', stats.live_calls],
+              ['new_live_calls', 'New Live', '#', stats.new_live_calls],
               ['offers', 'Offers', '#', stats.offers],
               ['closes', 'Closes', '#', stats.closes],
               ['ascensions', 'Ascensions', '#', stats.ascensions],
@@ -1983,14 +2016,14 @@ export default function MarketingPerformance() {
         return (
           <Section title="Calls & Show Rates" cols={9}>
             <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar. Click to view." onClick={() => setDrilldown('bookings')} />
-            <KPI label="Net New" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={wf?.live_calls} tip="Net new live calls — NEW calls only (no follow-ups, no ascensions). Click to view." onClick={() => setDrilldown('live')} />
+            <KPI label="Net New" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={wf?.new_live_calls} tip="Net new live calls — NEW calls only (no follow-ups, no ascensions). Click to view." onClick={() => setDrilldown('live')} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
             <KPI label="Resch+Cancel" value={reschPlusCancel} format="n" trailing={reschPlusCancel30} prev={reschPlusCancelPrev} tip="Reschedules + cancellations (combined). Both are excluded from the show-rate denominator. Click to view." onClick={() => setDrilldown('rc')} />
             <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Net New ÷ Booked (no exclusions). Booked is bucketed by booked_at, so daily/weekly values drift relative to when calls actually held — use Cohort Show% for short windows." />
             <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Net New ÷ (Booked − Cancels − Reschedules). Cancels and reschedules don't count against show rate. Same booked_at drift as Gross." />
             <KPI label="Cohort Show%" value={cohortShowRate} format="%" trailing={cohortShowRate30} tip={`Net New ÷ (qualified calls SCHEDULED in this window − reschedules − cancels). Same exclusions as Net Show%, but the denominator is bucketed by the day the call was DUE (appointment_date), not booked_at — so numerator and denominator clock the same event. Window: ${cohort.qualified} on calendar − ${stats.reschedules || 0} resch − ${stats.cancels || 0} cancel = ${cohortNetDenom}.`} />
             <KPI label="R+C%" value={combinedRate} format="%" tip="(Reschedules + Cancellations) ÷ Booked" />
-            <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={wf?.cost_per_live_call} tip="Adspend ÷ Net New" />
+            <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={wf?.cost_per_new_live_call} tip="Adspend ÷ Net New" />
           </Section>
         )
       })()}

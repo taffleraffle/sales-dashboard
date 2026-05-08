@@ -370,17 +370,17 @@ export function computeMarketingStats(entries) {
     cancels: t.cancelled_dtf + t.cancelled_by_prospect,
     // Caps at 100% — show rate exceeding 100% means closers logged more lives
     // than they reported as booked, which is a data-entry inconsistency.
-    gross_show_rate: t.net_new_calls > 0 ? Math.min(100, (t.new_live_calls / t.net_new_calls) * 100) : 0,
+    gross_show_rate: t.nc_booked > 0 ? Math.min(100, (t.new_live_calls / t.nc_booked) * 100) : 0,
     net_show_rate: (() => {
-      const net = t.net_new_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules
+      const net = t.nc_booked - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules
       return net > 0 ? Math.min(100, (t.new_live_calls / net) * 100) : 0
     })(),
-    show_rate: t.net_new_calls > 0 ? Math.min(100, (t.new_live_calls / t.net_new_calls) * 100) : 0,
+    show_rate: t.nc_booked > 0 ? Math.min(100, (t.new_live_calls / t.nc_booked) * 100) : 0,
     // No-show rate uses the same NC-only numerator and EOD denominator.
-    no_shows: t.no_shows > 0 ? t.no_shows : Math.max(0, t.net_new_calls - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules),
+    no_shows: t.no_shows > 0 ? t.no_shows : Math.max(0, t.nc_booked - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules),
     no_show_rate: (() => {
-      const ns = t.no_shows > 0 ? t.no_shows : Math.max(0, t.net_new_calls - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules)
-      return t.net_new_calls > 0 ? (ns / t.net_new_calls) * 100 : 0
+      const ns = t.no_shows > 0 ? t.no_shows : Math.max(0, t.nc_booked - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules)
+      return t.nc_booked > 0 ? (ns / t.nc_booked) * 100 : 0
     })(),
     reschedules: t.reschedules,
     reschedule_rate: t.qualified_bookings > 0 ? (t.reschedules / t.qualified_bookings) * 100 : 0,
