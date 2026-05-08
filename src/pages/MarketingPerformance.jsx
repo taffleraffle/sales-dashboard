@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase'
 import { useToast } from '../hooks/useToast'
 import { STRATEGY_CALL_CALENDARS, DQ_BOOKING_CALENDARS } from '../utils/constants'
 import { isDQRevenueTier } from '../services/ghlCalendar'
+import { BASE_URL, ghlFetch } from '../services/ghlClient'
 
 import { todayET, etDateOffset } from '../lib/dateUtils'
 
@@ -1337,6 +1338,63 @@ async function enrichRowsWithProspectEmails(rows) {
         if (!norm || norm.length < 2) continue
         const hit = clients.find(c => matchScore(norm, normalizeProspectName(c.name)))
         if (hit?.email) row.email = hit.email
+      }
+    }
+  }
+
+  // Fallback path 3 — direct GHL contact lookup for any row we have a
+  // contact_id for but still no email. The ghl_appointments sync drops
+  // contact_email on roughly 89% of rows; pulling the contact directly
+  // from GHL covers the gap. We backfill the result into both
+  // ghl_appointments and ghl_contacts_cache so subsequent loads are fast.
+  const ghlLookups = []
+  for (const row of rows) {
+    if (row.email) continue
+    const cid = rowToContactId.get(row)
+    if (cid) ghlLookups.push({ row, cid })
+  }
+  if (ghlLookups.length > 0) {
+    const cacheUpserts = []
+    // Parallel batches of 5 to respect GHL rate limits.
+    for (let i = 0; i < ghlLookups.length; i += 5) {
+      const batch = ghlLookups.slice(i, i + 5)
+      await Promise.all(batch.map(async ({ row, cid }) => {
+        try {
+          const r = await ghlFetch(`${BASE_URL}/contacts/${cid}`)
+          if (!r.ok) return
+          const d = await r.json()
+          const c = d.contact || d
+          const email = c.email || (c.emails && c.emails[0])
+          if (email && email.includes('@')) {
+            row.email = email
+            cacheUpserts.push({
+              id: cid,
+              name: `${c.firstName || ''} ${c.lastName || ''}`.trim() || null,
+              email,
+              synced_at: new Date().toISOString(),
+            })
+          }
+        } catch (e) { void e }
+      }))
+    }
+    if (cacheUpserts.length > 0) {
+      // Backfill ghl_contacts_cache + ghl_appointments.contact_email so the
+      // next render skips the GHL hop entirely. Fire-and-forget — failures
+      // here don't affect the user-visible result.
+      supabase.from('ghl_contacts_cache')
+        .upsert(cacheUpserts, { onConflict: 'id' })
+        .then(({ error }) => { if (error) console.warn('contacts cache backfill failed:', error) })
+      for (const c of cacheUpserts) {
+        supabase.from('ghl_appointments')
+          .update({ contact_email: c.email })
+          .eq('ghl_contact_id', c.id)
+          .is('contact_email', null)
+          .then(() => {}, () => {})
+        supabase.from('ghl_appointments')
+          .update({ contact_email: c.email })
+          .eq('ghl_contact_id', c.id)
+          .eq('contact_email', '')
+          .then(() => {}, () => {})
       }
     }
   }
