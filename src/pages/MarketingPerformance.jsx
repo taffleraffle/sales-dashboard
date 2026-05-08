@@ -1239,13 +1239,20 @@ function normalizeProspectName(name) {
 
 // Bulk-enrich an array of call rows with the matched contact's email address.
 //
-// Mutates rows in place — sets `row.email` when a match is found. Two queries
-// total regardless of row count: one wide ghl_appointments pull covering the
-// date range, one ghl_contacts_cache lookup for the matched contact IDs.
+// Mutates rows in place — sets `row.email` when a match is found.
 //
-// Match logic per row: appointment_date within ±14 days of the call date AND
-// fuzzy contact_name match (full overlap or first+last name match). When
-// multiple appointments match, the closest by date wins.
+// Email source preference (in order):
+//   1. ghl_appointments.contact_email  — direct from GHL sync, most reliable
+//      since every strategy call has a booking with the email attached.
+//   2. clients.email                   — for prospects who closed and became
+//      clients (prospect_name often becomes the client name).
+//   3. ghl_contacts_cache.email        — last-resort fallback for any matched
+//      contact_id whose appointment row was synced before the email column
+//      was populated.
+//
+// Match logic for #1 and #3: appointment_date within ±14 days of the call
+// date AND fuzzy contact_name match (full overlap or first+last name match).
+// When multiple appointments match, closest by date wins.
 async function enrichRowsWithProspectEmails(rows) {
   if (!rows?.length) return
 
@@ -1255,10 +1262,11 @@ async function enrichRowsWithProspectEmails(rows) {
   const minDate = new Date(dates[0] + 'T00:00:00'); minDate.setDate(minDate.getDate() - 14)
   const maxDate = new Date(dates[dates.length - 1] + 'T00:00:00'); maxDate.setDate(maxDate.getDate() + 14)
 
+  // Single wide pull — appointments carry contact_email directly, so no
+  // second hop required for the common case.
   const { data: appts } = await supabase
     .from('ghl_appointments')
-    .select('ghl_contact_id, contact_name, appointment_date')
-    .not('ghl_contact_id', 'is', null)
+    .select('ghl_contact_id, contact_name, contact_email, appointment_date')
     .gte('appointment_date', fmt(minDate))
     .lte('appointment_date', fmt(maxDate))
     .limit(5000)
@@ -1272,8 +1280,9 @@ async function enrichRowsWithProspectEmails(rows) {
       && np[np.length - 1] === cp[cp.length - 1]
   }
 
+  const unresolvedContactIds = new Set()
   const rowToContactId = new Map()
-  const allContactIds = new Set()
+
   for (const row of rows) {
     const norm = normalizeProspectName(row.prospect)
     if (!norm || norm.length < 2) continue
@@ -1282,27 +1291,54 @@ async function enrichRowsWithProspectEmails(rows) {
       const an = normalizeProspectName(a.contact_name)
       if (!matchScore(norm, an)) continue
       const dDiff = Math.abs((new Date(a.appointment_date) - new Date(row.date)) / 86400000)
-      candidates.push({ id: a.ghl_contact_id, dDiff })
+      candidates.push({ appt: a, dDiff })
     }
     if (candidates.length === 0) continue
     candidates.sort((a, b) => a.dDiff - b.dDiff)
-    const cid = candidates[0].id
-    rowToContactId.set(row, cid)
-    allContactIds.add(cid)
+    const best = candidates[0].appt
+    if (best.contact_email && best.contact_email.includes('@')) {
+      row.email = best.contact_email
+    } else if (best.ghl_contact_id) {
+      // Appointment row has no email but we know the contact_id — queue for
+      // ghl_contacts_cache fallback below.
+      rowToContactId.set(row, best.ghl_contact_id)
+      unresolvedContactIds.add(best.ghl_contact_id)
+    }
   }
 
-  if (allContactIds.size === 0) return
+  // Fallback path 1 — ghl_contacts_cache for any contact_id we couldn't
+  // resolve via appointment.contact_email.
+  if (unresolvedContactIds.size > 0) {
+    const { data: contacts } = await supabase
+      .from('ghl_contacts_cache')
+      .select('id, email')
+      .in('id', [...unresolvedContactIds])
+      .not('email', 'is', null)
+    const emailMap = Object.fromEntries((contacts || []).map(c => [c.id, c.email]))
+    for (const row of rows) {
+      if (row.email) continue
+      const cid = rowToContactId.get(row)
+      if (cid && emailMap[cid]) row.email = emailMap[cid]
+    }
+  }
 
-  const { data: contacts } = await supabase
-    .from('ghl_contacts_cache')
-    .select('id, email')
-    .in('id', [...allContactIds])
-    .not('email', 'is', null)
-
-  const emailMap = Object.fromEntries((contacts || []).map(c => [c.id, c.email]))
-  for (const row of rows) {
-    const cid = rowToContactId.get(row)
-    if (cid && emailMap[cid]) row.email = emailMap[cid]
+  // Fallback path 2 — clients table for prospects who closed and became
+  // active clients. Matches by client.name (fuzzy).
+  const stillUnresolved = rows.filter(r => !r.email)
+  if (stillUnresolved.length > 0) {
+    const { data: clients } = await supabase
+      .from('clients')
+      .select('name, email')
+      .not('email', 'is', null)
+      .limit(2000)
+    if (clients?.length) {
+      for (const row of stillUnresolved) {
+        const norm = normalizeProspectName(row.prospect)
+        if (!norm || norm.length < 2) continue
+        const hit = clients.find(c => matchScore(norm, normalizeProspectName(c.name)))
+        if (hit?.email) row.email = hit.email
+      }
+    }
   }
 }
 
