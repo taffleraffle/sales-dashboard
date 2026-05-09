@@ -1659,7 +1659,10 @@ export default function MarketingPerformance() {
     // NEW-only denominator; only offer_rate uses Net Live (NEW + FU). Net Live
     // is derived from new_live_calls via the FU ratio so offer_rate stays
     // consistent with stats.
-    const showDenomCur = stats.nc_booked > 0 ? stats.nc_booked : stats.qualified_bookings
+    // Strict denominator: matches computeMarketingStats (uses t.nc_booked
+    // only). When nc_booked is 0 the canonical shows 0% — falling back to
+    // qualified_bookings here would diverge from the displayed baseline.
+    const showDenomCur = stats.nc_booked || 0
     const curShowRate = showDenomCur > 0 ? stats.new_live_calls / showDenomCur : 0.5
     const curOfferRate = stats.live_calls > 0 ? stats.offers / stats.live_calls : 0.8
     const curCloseRate = stats.new_live_calls > 0 ? stats.closes / stats.new_live_calls : 0.25
@@ -1683,7 +1686,7 @@ export default function MarketingPerformance() {
       ?? (get('qualified_bookings') != null
         ? Math.round(qualified_bookings * curNcToQbRatio)
         : (stats.nc_booked || 0))
-    const showDenom = nc_booked > 0 ? nc_booked : qualified_bookings
+    const showDenom = nc_booked
 
     // Show rate: override % or keep current
     const showRateOverride = get('show_rate')
@@ -1738,6 +1741,8 @@ export default function MarketingPerformance() {
     const ar_collected = stats.ar_collected
     const ar_defaulted = stats.ar_defaulted
     const auto_bookings = get('auto_bookings') ?? stats.auto_bookings
+    const finance_offers = stats.finance_offers
+    const finance_accepted = stats.finance_accepted
 
     const all_cash = trial_cash + ascend_cash + ar_collected
     return {
@@ -1745,7 +1750,7 @@ export default function MarketingPerformance() {
       trial_cash, trial_revenue, ascensions, ascend_cash, ascend_revenue,
       reschedules, cancels, ar_collected, ar_defaulted,
       cancelled_dtf: stats.cancelled_dtf || 0, cancelled_by_prospect: stats.cancelled_by_prospect || 0,
-      finance_offers: stats.finance_offers, finance_accepted: stats.finance_accepted,
+      finance_offers, finance_accepted,
       // Derived — formulas mirror computeMarketingStats so equal inputs ⇒ equal outputs
       cpl: leads > 0 ? adspend / leads : 0,
       lead_to_booking_pct: leads > 0 ? (qualified_bookings / leads) * 100 : 0,
@@ -1771,7 +1776,7 @@ export default function MarketingPerformance() {
       ascend_rate: closes > 0 ? (ascensions / closes) * 100 : 0,
       cpa_ascend: ascensions > 0 ? adspend / ascensions : 0,
       ascend_cash_pct: ascend_revenue > 0 ? (ascend_cash / ascend_revenue) * 100 : 0,
-      finance_pct: ascensions > 0 ? (stats.finance_accepted / ascensions) * 100 : 0,
+      finance_pct: ascensions > 0 ? (finance_accepted / ascensions) * 100 : 0,
       net_fe_roas: adspend > 0 ? (trial_cash + ascend_cash) / adspend : 0,
       revenue_roas: adspend > 0 ? (trial_revenue + ascend_revenue) / adspend : 0,
       ar_success_rate: (ar_collected + ar_defaulted) > 0 ? (ar_collected / (ar_collected + ar_defaulted)) * 100 : 0,

@@ -360,7 +360,8 @@ export function computeMarketingStats(entries) {
 
     // Show rates — NEW CALLS ONLY, denominator from CLOSER EOD.
     //
-    // Denominator is `net_new_calls` (closer EOD `nc_booked`) instead of
+    // Denominator is `t.nc_booked` (sourced from closer-EOD `nc_booked` and
+    // stored in marketing_tracker.net_new_calls) instead of
     // `qualified_bookings` (GHL booked_at-bucketed). Closers only file EOD
     // for days that have happened, so future-scheduled bookings naturally
     // fall out — a call booked today for next Friday isn't in the closer's
