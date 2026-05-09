@@ -396,12 +396,15 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
 //   2. /{ad_id}?fields=creative{...} — creative metadata (image / video / copy)
 // Output goes to Supabase tables `ads` and `ad_daily_stats` (see migration 011).
 
+// `video_3_sec_watched_actions` was removed by Meta — derive 3-sec views from
+// the `actions` array (action_type='video_view') instead. Thruplay + avg-time
+// fields remain valid as standalone fields.
 const META_FIELDS_INSIGHTS = [
   'ad_id', 'ad_name', 'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
   'spend', 'impressions', 'reach', 'frequency',
   'clicks', 'unique_clicks', 'ctr', 'cpc', 'cpm',
   'actions', 'cost_per_action_type',
-  'video_3_sec_watched_actions', 'video_thruplay_watched_actions',
+  'video_thruplay_watched_actions',
   'video_avg_time_watched_actions',
 ].join(',')
 
@@ -482,7 +485,9 @@ async function fetchAdLevelInsights(days = 90) {
       if (!row.ad_id) continue
       adIds.add(row.ad_id)
 
-      const v3sAction = (row.video_3_sec_watched_actions || []).find(a => a.action_type === 'video_view')
+      // 3-sec views come from the `actions` array as action_type='video_view'
+      // (Meta deprecated the standalone video_3_sec_watched_actions field).
+      const v3sAction = (row.actions || []).find(a => a.action_type === 'video_view')
       const thruAction = (row.video_thruplay_watched_actions || []).find(a => a.action_type === 'video_view')
       const avgTimeAction = (row.video_avg_time_watched_actions || []).find(a => a.action_type === 'video_view')
       const resultAction = (row.actions || []).find(a => ['lead', 'offsite_conversion.fb_pixel_lead', 'onsite_conversion.lead_grouped'].includes(a.action_type))

@@ -6,6 +6,7 @@ import VariantPill from '../../components/ads/VariantPill'
 import { supabase } from '../../lib/supabase'
 import { rangeToDays } from '../../lib/dateUtils'
 import { syncMetaAdsAtAdLevel } from '../../services/metaAdsSync'
+import { runAutoSync, getLastSyncTime, subscribeSyncStatus } from '../../services/autoSync'
 
 const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
 
@@ -15,6 +16,16 @@ function fmt$(n) {
   return `$${n.toFixed(0)}`
 }
 function fmtPct(n) { return n == null || isNaN(n) ? '—' : `${n.toFixed(2)}%` }
+function formatAge(ms) {
+  if (ms == null || ms < 0) return '—'
+  const sec = Math.floor(ms / 1000)
+  if (sec < 60) return `${sec}s`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h`
+  return `${Math.floor(hr / 24)}d`
+}
 
 function StatusPill({ status, effective }) {
   const s = (effective || status || 'UNKNOWN').toUpperCase()
@@ -114,20 +125,36 @@ export default function AdsList() {
 
   useEffect(() => { reload() }, [reload])
 
+  // Auto-sync ad-level data via the global autoSync infrastructure.
+  // Triggers on mount + whenever any global sync completes (via subscriber).
+  // The sync itself is interval-gated inside autoSync (1h between runs)
+  // so visiting the page repeatedly never duplicates work.
+  const [lastAdSync, setLastAdSync] = useState(() => getLastSyncTime('metaAds'))
+  useEffect(() => {
+    runAutoSync().catch(() => {})
+    const unsub = subscribeSyncStatus(() => {
+      setLastAdSync(getLastSyncTime('metaAds'))
+      reload().catch(() => {})
+    })
+    return unsub
+  }, [reload])
+
+  // "Refresh now" — bypass the interval gate. Force a fresh ad-level pull.
   const handleSync = useCallback(async () => {
     setSyncing(true)
-    setSyncMessage('Pulling ad insights from Meta…')
+    setSyncMessage('Refreshing from Meta…')
     try {
-      const result = await syncMetaAdsAtAdLevel(typeof days === 'number' ? days : 30)
+      const result = await syncMetaAdsAtAdLevel(typeof days === 'number' ? days : 90)
       let msg = `Synced ${result.ads_seen} ads · ${result.daily_rows_upserted} daily rows · ${result.creatives_fetched} creatives refreshed`
       const vr = result.view_refresh
       if (vr && !vr.ok) {
         msg += ` · library views NOT refreshed (${vr.error || 'unknown error'})`
         setError(`Library materialized views did not refresh: ${vr.error}. Run public.refresh_ad_library_views() manually in Supabase to update component-library rollups.`)
       } else if (vr?.skipped) {
-        msg += ` · library views unchanged (refreshed ${Math.round(vr.ageSec || 0)}s ago — throttled to skip refreshes < 60s apart)`
+        msg += ` · library views unchanged (last refresh ${Math.round(vr.ageSec || 0)}s ago)`
       }
       setSyncMessage(msg)
+      setLastAdSync(Date.now())
       await reload()
     } catch (err) {
       setSyncMessage(null)
@@ -197,7 +224,14 @@ export default function AdsList() {
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-        <p className="text-xs text-text-400">{filtered.length} of {ads.length} ads · {fmt$(totals.spend)} spend in window</p>
+        <p className="text-xs text-text-400">
+          {filtered.length} of {ads.length} ads · {fmt$(totals.spend)} spend in window
+          {lastAdSync && (
+            <span className="ml-1.5 text-text-400/70">
+              · auto-synced {formatAge(Date.now() - lastAdSync)} ago
+            </span>
+          )}
+        </p>
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleSync}
@@ -205,7 +239,7 @@ export default function AdsList() {
             className="flex items-center gap-1.5 px-3 py-2 text-xs border border-border-default rounded-2xl text-text-secondary hover:bg-bg-card-hover disabled:opacity-50"
           >
             <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
-            {syncing ? 'Syncing…' : 'Sync from Meta'}
+            {syncing ? 'Syncing…' : 'Refresh now'}
           </button>
           <DateRangeSelector selected={range} onChange={setRange} />
         </div>
@@ -280,7 +314,7 @@ export default function AdsList() {
           {ads.length === 0 ? (
             <div>
               <p className="text-sm mb-2">No ads synced yet.</p>
-              <p className="text-xs">Click <span className="text-opt-yellow">Sync from Meta</span> to pull every ad and its insights. Read-only — nothing on Meta will be modified.</p>
+              <p className="text-xs">Auto-sync runs hourly in the background. First sync usually completes within ~30 seconds of opening the dashboard. Click <span className="text-opt-yellow">Refresh now</span> to force a fresh pull.</p>
             </div>
           ) : (
             <p className="text-sm">No ads match the current filter.</p>

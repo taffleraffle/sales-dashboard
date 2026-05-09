@@ -14,6 +14,7 @@ const SYNC_INTERVALS = {
   emailFlows: 30 * 60 * 1000,        // 30 minutes
   marketingTracker: 1 * 60 * 60 * 1000, // 1 hour
   meta: 1 * 60 * 60 * 1000,          // 1 hour — Meta Ads spend + GHL pipeline leads/bookings
+  metaAds: 1 * 60 * 60 * 1000,       // 1 hour — per-ad insights + creative metadata
 }
 
 const SYNC_LABELS = {
@@ -23,6 +24,7 @@ const SYNC_LABELS = {
   emailFlows: 'Email flows',
   marketingTracker: 'Marketing (EOD)',
   meta: 'Marketing (Meta + GHL)',
+  metaAds: 'Meta Ads (per-ad)',
 }
 
 function lastRun(key) {
@@ -168,6 +170,25 @@ async function syncMarketingTracker(force = false) {
   } finally { notify() }
 }
 
+// Per-ad Meta sync — feeds public.ads + public.ad_daily_stats which the
+// Creative Library page (/sales/ads) reads from. Triggers on each tick after
+// the steady interval has elapsed. Caller doesn't need a manual button.
+async function syncMetaAdLevel(force = false) {
+  if (!shouldRun('metaAds', force)) return
+  markRun('metaAds')
+  try {
+    const { syncMetaAdsAtAdLevel } = await import('./metaAdsSync')
+    const result = await syncMetaAdsAtAdLevel(90)
+    console.log('[auto-sync] Meta ad-level done:', result)
+    clearError('metaAds')
+    clearCooldown('metaAds')
+  } catch (e) {
+    console.warn('[auto-sync] Meta ad-level failed:', e.message)
+    markError('metaAds', e)
+    if (isRateLimitErr(e)) markCooldown('metaAds')
+  } finally { notify() }
+}
+
 // Meta Ads spend + GHL pipeline leads + GHL calendar bookings — all in one call.
 // This was previously ONLY triggered by a manual "Sync Data" button on the marketing page.
 async function syncMeta(force = false) {
@@ -201,7 +222,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
  * steady-state cost of sequential execution is essentially zero.
  */
 export async function runAutoSync({ force = false } = {}) {
-  const tasks = [syncStripe, syncFanbasis, syncGHL, syncEmails, syncMarketingTracker, syncMeta]
+  const tasks = [syncStripe, syncFanbasis, syncGHL, syncEmails, syncMarketingTracker, syncMeta, syncMetaAdLevel]
   for (const task of tasks) {
     try { await task(force) } catch (_e) { void _e }
     await sleep(500)
