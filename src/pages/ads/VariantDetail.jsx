@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { Loader, ChevronLeft, AlertTriangle, Sparkles, MessageSquare, Camera, Users } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
@@ -39,6 +39,7 @@ function ComponentSlot({ slot, component }) {
 
 export default function VariantDetail() {
   const { variantId } = useParams()
+  const navigate = useNavigate()
   const [variant, setVariant] = useState(null)
   const [components, setComponents] = useState({})
   const [perf, setPerf] = useState([])
@@ -64,12 +65,18 @@ export default function VariantDetail() {
         setVariant(v)
 
         const ids = [v.hook_id, v.body_angle_id, v.scene_id, v.creator_id].filter(Boolean)
-        const [{ data: comps }, { data: p }, { data: ads }] = await Promise.all([
-          ids.length ? lib.from('components').select('*').in('id', ids) : Promise.resolve({ data: [] }),
+        const [compsRes, perfRes, adsRes] = await Promise.all([
+          ids.length ? lib.from('components').select('*').in('id', ids) : Promise.resolve({ data: [], error: null }),
           lib.from('performance_daily').select('*').eq('variant_id', v.id).order('date', { ascending: true }),
           supabase.from('ads').select('*').eq('variant_id', variantId),
         ])
+        if (compsRes.error) throw new Error(`Load components failed: ${compsRes.error.message}`)
+        if (perfRes.error) throw new Error(`Load performance failed: ${perfRes.error.message}`)
+        if (adsRes.error) throw new Error(`Load linked ads failed: ${adsRes.error.message}`)
         if (cancelled) return
+        const comps = compsRes.data
+        const p = perfRes.data
+        const ads = adsRes.data
 
         const compMap = { hook: null, body_angle: null, scene: null, creator: null }
         for (const c of comps || []) {
@@ -128,9 +135,12 @@ export default function VariantDetail() {
 
   return (
     <div>
-      <Link to="/sales/ads/list" className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3">
-        <ChevronLeft size={14} /> Back to Ads
-      </Link>
+      <button
+        onClick={() => navigate(-1)}
+        className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3"
+      >
+        <ChevronLeft size={14} /> Back
+      </button>
 
       <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-4">
         <div className="flex items-start gap-3 flex-wrap">

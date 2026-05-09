@@ -83,12 +83,14 @@ BEGIN
         parser_attempted = EXCLUDED.parser_attempted;
     END IF;
   ELSE
-    -- Try exact match first, then prefix match (in case the parsed id is the
-    -- non-versioned form and the library entry is versioned).
+    -- Try exact match first, then versioned-suffix match (when the parsed id
+    -- is the non-versioned form and the library entry includes _v#). Use a
+    -- regex anchored on both ends so literal underscores in parsed_id don't
+    -- act as LIKE single-character wildcards.
     SELECT v.variant_id INTO matched_variant_id
     FROM library.variants v
     WHERE v.variant_id = parsed_id
-       OR v.variant_id LIKE parsed_id || '_v%'
+       OR v.variant_id ~ ('^' || regexp_replace(parsed_id, '([\.\-])', '\\\1', 'g') || '_v[0-9]+$')
     ORDER BY v.variant_id DESC
     LIMIT 1;
 

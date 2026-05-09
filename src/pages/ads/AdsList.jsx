@@ -115,7 +115,14 @@ export default function AdsList() {
     setSyncMessage('Pulling ad insights from Meta…')
     try {
       const result = await syncMetaAdsAtAdLevel(typeof days === 'number' ? days : 30)
-      setSyncMessage(`Synced ${result.ads_seen} ads · ${result.daily_rows_upserted} daily rows · ${result.creatives_fetched} creatives refreshed`)
+      let msg = `Synced ${result.ads_seen} ads · ${result.daily_rows_upserted} daily rows · ${result.creatives_fetched} creatives refreshed`
+      if (result.view_refresh && !result.view_refresh.ok) {
+        msg += ` · library views NOT refreshed (${result.view_refresh.error || 'unknown error'} — component-library tabs may show stale numbers)`
+      }
+      setSyncMessage(msg)
+      if (result.view_refresh && !result.view_refresh.ok) {
+        setError(`Library materialized views did not refresh: ${result.view_refresh.error}. Run public.refresh_ad_library_views() manually in Supabase to update component-library rollups.`)
+      }
       await reload()
     } catch (err) {
       setSyncMessage(null)

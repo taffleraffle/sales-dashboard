@@ -39,7 +39,7 @@ export default function AdsLayout() {
       </div>
 
       {/* Tab bar */}
-      <div className="border-b border-border-default mb-4 sticky top-0 z-10 bg-bg-primary/95 backdrop-blur-sm">
+      <div className="border-b border-border-default mb-4 sticky top-14 md:top-16 z-10 bg-bg-primary/95 backdrop-blur-sm">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div className="flex overflow-x-auto -mx-1 px-1">
             {PRIMARY.map(({ to, label, icon: Icon }) => (
