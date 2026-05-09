@@ -93,9 +93,23 @@ export async function syncMetaAds(days = 30) {
 
   // Handle pagination if there are more results
   let nextUrl = json.paging?.next
+  let pageNum = 2
   while (nextUrl) {
-    const nextRes = await fetch(nextUrl)
-    if (!nextRes.ok) break
+    const nextCtrl = new AbortController()
+    const nextTimeout = setTimeout(() => nextCtrl.abort(), 20000)
+    let nextRes
+    try {
+      nextRes = await fetch(nextUrl, { signal: nextCtrl.signal })
+    } catch (e) {
+      clearTimeout(nextTimeout)
+      throw new Error(`Meta Ads API page ${pageNum} request failed: ${e.message}`)
+    }
+    clearTimeout(nextTimeout)
+    if (!nextRes.ok) {
+      const errBody = await nextRes.json().catch(() => ({}))
+      throw new Error(`Meta Ads API page ${pageNum} returned ${nextRes.status}: ${errBody.error?.message || nextRes.statusText}`)
+    }
+    pageNum++
     const nextJson = await nextRes.json()
     const nextRows = nextJson.data || []
 
@@ -684,17 +698,21 @@ export async function syncMetaAdsAtAdLevel(days = 90, { creativeRefresh = false 
   const ctx = await backfillAdContext(insights.adIds)
 
   // Refresh the library materialized views so newly-mirrored performance_daily
-  // rows show up in component_performance / cohort_hook_body. RPC is defined
-  // in migration 012 and runs library.refresh_materialized_views() under
-  // SECURITY DEFINER so the authenticated role can call it.
-  let viewRefresh = { ok: false, error: null }
+  // rows show up in component_performance / cohort_hook_body. RPC is throttled
+  // in migration 013: skips if last refresh was < 60s ago, returns JSONB with
+  // { refreshed, skipped, reason?, last_refresh_age_sec }.
+  let viewRefresh = { ok: false, skipped: false, error: null, ageSec: null }
   try {
-    const { error: rpcErr } = await supabase.rpc('refresh_ad_library_views')
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('refresh_ad_library_views')
     if (rpcErr) {
       console.warn('[ad sync] materialized view refresh failed:', rpcErr.message)
       viewRefresh.error = rpcErr.message
     } else {
+      // rpcData is the JSONB the function returns. Falls back gracefully if
+      // the older VOID-returning version is still installed (rpcData is null).
       viewRefresh.ok = true
+      viewRefresh.skipped = rpcData?.skipped === true
+      viewRefresh.ageSec = rpcData?.last_refresh_age_sec ?? null
     }
   } catch (e) {
     console.warn('[ad sync] materialized view refresh exception:', e.message)

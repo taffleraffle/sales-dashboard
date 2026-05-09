@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader, RefreshCw, AlertTriangle, Image as ImageIcon, Film, PlayCircle, Filter } from 'lucide-react'
 import DateRangeSelector from '../../components/DateRangeSelector'
@@ -84,6 +84,10 @@ export default function AdsList() {
   const [variantFilter, setVariantFilter] = useState('all')
   const [sortBy, setSortBy] = useState('spend')
   const [search, setSearch] = useState('')
+  const syncMessageTimerRef = useRef(null)
+  useEffect(() => () => {
+    if (syncMessageTimerRef.current) clearTimeout(syncMessageTimerRef.current)
+  }, [])
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -116,20 +120,22 @@ export default function AdsList() {
     try {
       const result = await syncMetaAdsAtAdLevel(typeof days === 'number' ? days : 30)
       let msg = `Synced ${result.ads_seen} ads · ${result.daily_rows_upserted} daily rows · ${result.creatives_fetched} creatives refreshed`
-      if (result.view_refresh && !result.view_refresh.ok) {
-        msg += ` · library views NOT refreshed (${result.view_refresh.error || 'unknown error'} — component-library tabs may show stale numbers)`
+      const vr = result.view_refresh
+      if (vr && !vr.ok) {
+        msg += ` · library views NOT refreshed (${vr.error || 'unknown error'})`
+        setError(`Library materialized views did not refresh: ${vr.error}. Run public.refresh_ad_library_views() manually in Supabase to update component-library rollups.`)
+      } else if (vr?.skipped) {
+        msg += ` · library views unchanged (refreshed ${Math.round(vr.ageSec || 0)}s ago — throttled to skip refreshes < 60s apart)`
       }
       setSyncMessage(msg)
-      if (result.view_refresh && !result.view_refresh.ok) {
-        setError(`Library materialized views did not refresh: ${result.view_refresh.error}. Run public.refresh_ad_library_views() manually in Supabase to update component-library rollups.`)
-      }
       await reload()
     } catch (err) {
       setSyncMessage(null)
       setError(`Sync failed: ${err.message}`)
     } finally {
       setSyncing(false)
-      setTimeout(() => setSyncMessage(null), 6000)
+      if (syncMessageTimerRef.current) clearTimeout(syncMessageTimerRef.current)
+      syncMessageTimerRef.current = setTimeout(() => setSyncMessage(null), 6000)
     }
   }, [days, reload])
 

@@ -159,15 +159,25 @@ export default function ComponentDetail() {
       </div>
 
       <h3 className="text-xs uppercase tracking-wider text-text-400 mb-2">Weighted performance · across {fmtN(perf?.variant_count || 0)} variant{(perf?.variant_count || 0) === 1 ? '' : 's'}</h3>
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2 mb-1">
         <StatTile label="Spend" value={fmt$((perf?.total_spend || 0) * NZD_TO_USD)} sub="USD" />
         <StatTile label="Impressions" value={fmtN(perf?.total_impressions)} />
         <StatTile label="Hook%" value={fmtPctRatio(perf?.weighted_hook_rate)} />
         <StatTile label="Hold%" value={fmtPctRatio(perf?.weighted_hold_rate)} />
         <StatTile label="CTR" value={fmtPctRatio(perf?.weighted_ctr)} />
-        <StatTile label="CPL" value={fmt$(perf?.cpl ? perf.cpl * NZD_TO_USD : null)} />
-        <StatTile label="CPA" value={fmt$(perf?.cpa ? perf.cpa * NZD_TO_USD : null)} sub={perf?.total_booked_calls ? `${fmtN(perf.total_booked_calls)} bookings` : '—'} />
       </div>
+      {((perf?.total_leads || 0) > 0 || (perf?.total_booked_calls || 0) > 0 || (perf?.total_closes || 0) > 0) ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+          <StatTile label="Leads" value={fmtN(perf?.total_leads)} sub={perf?.cpl ? fmt$(perf.cpl * NZD_TO_USD) + ' CPL' : null} />
+          <StatTile label="Booked" value={fmtN(perf?.total_booked_calls)} />
+          <StatTile label="Closes" value={fmtN(perf?.total_closes)} sub={perf?.cost_per_close ? fmt$(perf.cost_per_close * NZD_TO_USD) + ' / close' : null} />
+          <StatTile label="CPA" value={fmt$(perf?.cpa ? perf.cpa * NZD_TO_USD : null)} />
+        </div>
+      ) : (
+        <p className="text-[10px] text-text-400 px-1 mb-4">
+          Funnel attribution (leads · bookings · closes · CPA) ships in Phase 4 once HYROS UTMs are wired up.
+        </p>
+      )}
 
       <h3 className="text-xs uppercase tracking-wider text-text-400 mb-2">Variants using this component · {variants.length}</h3>
       {variants.length === 0 ? (

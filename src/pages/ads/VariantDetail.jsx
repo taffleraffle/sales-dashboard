@@ -40,12 +40,12 @@ function ComponentSlot({ slot, component }) {
 export default function VariantDetail() {
   const { variantId } = useParams()
   const navigate = useNavigate()
-  const [variant, setVariant] = useState(null)
-  const [components, setComponents] = useState({})
-  const [perf, setPerf] = useState([])
-  const [linkedAds, setLinkedAds] = useState([])
+  // One bundle for all variant-derived state — avoids three separate re-renders
+  // and keeps related fields atomic.
+  const [data, setData] = useState({ variant: null, components: {}, perf: [], linkedAds: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const { variant, components, perf, linkedAds } = data
 
   useEffect(() => {
     let cancelled = false
@@ -60,9 +60,7 @@ export default function VariantDetail() {
           .eq('variant_id', variantId)
           .maybeSingle()
         if (vErr) throw new Error(`Load variant failed: ${vErr.message}`)
-        if (!v) { setError(`Variant ${variantId} not found`); setLoading(false); return }
-        if (cancelled) return
-        setVariant(v)
+        if (!v) { if (!cancelled) { setError(`Variant ${variantId} not found`); setLoading(false) }; return }
 
         const ids = [v.hook_id, v.body_angle_id, v.scene_id, v.creator_id].filter(Boolean)
         const [compsRes, perfRes, adsRes] = await Promise.all([
@@ -74,20 +72,21 @@ export default function VariantDetail() {
         if (perfRes.error) throw new Error(`Load performance failed: ${perfRes.error.message}`)
         if (adsRes.error) throw new Error(`Load linked ads failed: ${adsRes.error.message}`)
         if (cancelled) return
-        const comps = compsRes.data
-        const p = perfRes.data
-        const ads = adsRes.data
 
         const compMap = { hook: null, body_angle: null, scene: null, creator: null }
-        for (const c of comps || []) {
+        for (const c of compsRes.data || []) {
           if (c.id === v.hook_id) compMap.hook = c
           if (c.id === v.body_angle_id) compMap.body_angle = c
           if (c.id === v.scene_id) compMap.scene = c
           if (c.id === v.creator_id) compMap.creator = c
         }
-        setComponents(compMap)
-        setPerf(p || [])
-        setLinkedAds(ads || [])
+
+        setData({
+          variant: v,
+          components: compMap,
+          perf: perfRes.data || [],
+          linkedAds: adsRes.data || [],
+        })
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -135,12 +134,21 @@ export default function VariantDetail() {
 
   return (
     <div>
-      <button
-        onClick={() => navigate(-1)}
-        className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3"
-      >
-        <ChevronLeft size={14} /> Back
-      </button>
+      <div className="flex items-center gap-3 mb-3">
+        <button
+          onClick={() => {
+            // Use history if there's something to go back to, else fall through to the link.
+            if (window.history.length > 1) navigate(-1)
+            else navigate('/sales/ads/variants')
+          }}
+          className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1"
+        >
+          <ChevronLeft size={14} /> Back
+        </button>
+        <Link to="/sales/ads/variants" className="text-[10px] text-text-400 hover:text-opt-yellow uppercase tracking-wider">
+          All variants
+        </Link>
+      </div>
 
       <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-4">
         <div className="flex items-start gap-3 flex-wrap">
@@ -178,16 +186,26 @@ export default function VariantDetail() {
       )}
 
       <h3 className="text-xs uppercase tracking-wider text-text-400 mb-2">Performance · {perf.length} day{perf.length === 1 ? '' : 's'} on record</h3>
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 mb-1">
         <Tile label="Spend" value={fmt$(totals.spend_usd)} />
         <Tile label="Impressions" value={fmtN(totals.impressions)} />
         <Tile label="Hook%" value={totals.hook_rate} />
         <Tile label="Hold%" value={totals.hold_rate} />
         <Tile label="CTR" value={totals.ctr} />
-        <Tile label="Booked" value={fmtN(totals.booked)} />
-        <Tile label="Closes" value={fmtN(totals.closes)} />
-        <Tile label="CPA" value={fmt$(totals.cpa)} highlight />
+        <Tile label="Clicks" value={fmtN(totals.clicks)} />
       </div>
+      {(totals.booked > 0 || totals.closes > 0 || totals.revenue > 0) ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+          <Tile label="Booked" value={fmtN(totals.booked)} />
+          <Tile label="Closes" value={fmtN(totals.closes)} />
+          <Tile label="Revenue" value={fmt$(totals.revenue * NZD_TO_USD)} />
+          <Tile label="CPA" value={fmt$(totals.cpa)} highlight />
+        </div>
+      ) : (
+        <p className="text-[10px] text-text-400 px-1 mb-4">
+          Funnel attribution (bookings · closes · revenue · CPA) ships in Phase 4 once HYROS UTMs are wired up.
+        </p>
+      )}
 
       <h3 className="text-xs uppercase tracking-wider text-text-400 mb-2">Linked Meta ads · {linkedAds.length}</h3>
       {linkedAds.length === 0 ? (
