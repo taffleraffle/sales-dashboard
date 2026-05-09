@@ -20,6 +20,8 @@ const SetterDetail = lazy(() => import('./pages/SetterDetail'))
 const SetterKPIHistory = lazy(() => import('./pages/SetterKPIHistory'))
 const PipelinePerformance = lazy(() => import('./pages/PipelinePerformance'))
 const MarketingPerformance = lazy(() => import('./pages/MarketingPerformance'))
+const AdPerformance = lazy(() => import('./pages/AdPerformance'))
+const AdDetail = lazy(() => import('./pages/AdDetail'))
 const EODReview = lazy(() => import('./pages/EODReview'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const CommissionPage = lazy(() => import('./pages/CommissionPage'))
@@ -111,6 +113,8 @@ export default function App() {
               <Route path="/sales/setters/:id/kpi-history" element={<Suspense fallback={<PageSkeleton />}><SetterKPIHistory /></Suspense>} />
               <Route path="/sales/pipeline" element={<Suspense fallback={<PageSkeleton />}><PipelinePerformance /></Suspense>} />
               <Route path="/sales/marketing" element={<Suspense fallback={<PageSkeleton />}><MarketingPerformance /></Suspense>} />
+              <Route path="/sales/ads" element={<Suspense fallback={<PageSkeleton />}><AdPerformance /></Suspense>} />
+              <Route path="/sales/ads/:id" element={<Suspense fallback={<PageSkeleton />}><AdDetail /></Suspense>} />
               <Route path="/sales/eod" element={<EODDashboard />} />
               <Route path="/sales/eod/submit" element={<Suspense fallback={<PageSkeleton />}><EODReview /></Suspense>} />
               <Route path="/sales/eod-history" element={<Navigate to="/sales/eod" replace />} />

@@ -373,3 +373,325 @@ export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
 
   return { days: upserted, message: `Synced ${upserted} days (spend, leads, bookings)` }
 }
+
+// ─── Ad-level (per-creative) sync ──────────────────────────────────────────
+//
+// READ-ONLY consumer of the Meta Graph API. Every request below uses GET; this
+// codebase never mutates Meta state. The two endpoints we hit are:
+//   1. /act_{ACCOUNT_ID}/insights at level=ad — daily per-ad stats
+//   2. /{ad_id}?fields=creative{...} — creative metadata (image / video / copy)
+// Output goes to Supabase tables `ads` and `ad_daily_stats` (see migration 011).
+
+const META_FIELDS_INSIGHTS = [
+  'ad_id', 'ad_name', 'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
+  'spend', 'impressions', 'reach', 'frequency',
+  'clicks', 'unique_clicks', 'ctr', 'cpc', 'cpm',
+  'actions', 'cost_per_action_type',
+  'video_3_sec_watched_actions', 'video_thruplay_watched_actions',
+  'video_avg_time_watched_actions',
+].join(',')
+
+const META_FIELDS_CREATIVE = [
+  'name', 'status', 'effective_status', 'creative_id',
+  'creative{id,image_url,video_id,thumbnail_url,body,title,object_type,call_to_action_type,object_story_spec}',
+].join(',')
+
+function detectAssetType(creative) {
+  if (!creative) return 'unknown'
+  if (creative.video_id || creative.object_type === 'VIDEO') return 'video'
+  if (creative.image_url) return 'image'
+  if (creative.object_type === 'SHARE' && creative.object_story_spec?.link_data?.child_attachments) return 'carousel'
+  return 'unknown'
+}
+
+function extractCreativeMeta(creative, raw) {
+  if (!creative) return {}
+  const linkData = creative.object_story_spec?.link_data
+  const videoData = creative.object_story_spec?.video_data
+  const headline = creative.title || linkData?.name || videoData?.title || null
+  const primary_text = creative.body || linkData?.message || videoData?.message || null
+  const description = linkData?.description || creative.object_story_spec?.link_data?.description || null
+  const cta_type = creative.call_to_action_type || linkData?.call_to_action?.type || videoData?.call_to_action?.type || null
+  const destination_url = linkData?.link || videoData?.call_to_action?.value?.link || null
+  return { headline, primary_text, description, cta_type, destination_url }
+}
+
+/**
+ * Fetch per-ad daily insights from Meta and upsert into `ad_daily_stats`.
+ * Also collects the unique ad IDs seen so the caller can fetch creatives.
+ *
+ * @param {number} days - lookback window
+ * @returns {Promise<{ rowsUpserted: number, adIds: Set<string>, errors: number }>}
+ */
+async function fetchAdLevelInsights(days = 90) {
+  if (!ACCOUNT_ID || !ACCESS_TOKEN) {
+    throw new Error('Meta Ads credentials missing — set VITE_META_ADS_ACCOUNT_ID and VITE_META_ADS_ACCESS_TOKEN')
+  }
+  const since = new Date()
+  since.setDate(since.getDate() - days)
+  const sinceStr = since.toISOString().split('T')[0]
+  const untilStr = new Date().toISOString().split('T')[0]
+
+  const params = new URLSearchParams({
+    access_token: ACCESS_TOKEN,
+    level: 'ad',
+    fields: META_FIELDS_INSIGHTS,
+    time_range: JSON.stringify({ since: sinceStr, until: untilStr }),
+    time_increment: '1',
+    limit: '500',
+  })
+
+  const adIds = new Set()
+  let rowsUpserted = 0
+  let errors = 0
+  let url = `${BASE_URL}/act_${ACCOUNT_ID}/insights?${params}`
+
+  while (url) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 30000)
+    let res
+    try {
+      res = await fetch(url, { signal: controller.signal })
+    } catch (e) {
+      clearTimeout(timeout)
+      throw new Error(`Meta ad-level insights fetch failed: ${e.message}`)
+    }
+    clearTimeout(timeout)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(`Meta ad-level insights ${res.status}: ${err.error?.message || res.statusText}`)
+    }
+    const json = await res.json()
+    const rows = json.data || []
+
+    for (const row of rows) {
+      if (!row.ad_id) continue
+      adIds.add(row.ad_id)
+
+      const v3sAction = (row.video_3_sec_watched_actions || []).find(a => a.action_type === 'video_view')
+      const thruAction = (row.video_thruplay_watched_actions || []).find(a => a.action_type === 'video_view')
+      const avgTimeAction = (row.video_avg_time_watched_actions || []).find(a => a.action_type === 'video_view')
+      const resultAction = (row.actions || []).find(a => ['lead', 'offsite_conversion.fb_pixel_lead', 'onsite_conversion.lead_grouped'].includes(a.action_type))
+      const costPerResult = (row.cost_per_action_type || []).find(a => ['lead', 'offsite_conversion.fb_pixel_lead', 'onsite_conversion.lead_grouped'].includes(a.action_type))
+
+      const stat = {
+        ad_id: row.ad_id,
+        date: row.date_start,
+        spend: parseFloat(row.spend || 0),
+        impressions: parseInt(row.impressions || 0),
+        reach: parseInt(row.reach || 0),
+        frequency: parseFloat(row.frequency || 0),
+        clicks: parseInt(row.clicks || 0),
+        unique_clicks: parseInt(row.unique_clicks || 0),
+        ctr: row.ctr != null ? parseFloat(row.ctr) : null,
+        cpc: row.cpc != null ? parseFloat(row.cpc) : null,
+        cpm: row.cpm != null ? parseFloat(row.cpm) : null,
+        video_3s_views: v3sAction ? parseInt(v3sAction.value) : 0,
+        video_thruplays: thruAction ? parseInt(thruAction.value) : 0,
+        video_avg_time_watched: avgTimeAction ? parseFloat(avgTimeAction.value) : null,
+        results: resultAction ? parseInt(resultAction.value) : 0,
+        cost_per_result: costPerResult ? parseFloat(costPerResult.value) : null,
+        raw_payload: row,
+        synced_at: new Date().toISOString(),
+      }
+
+      const { error } = await supabase
+        .from('ad_daily_stats')
+        .upsert(stat, { onConflict: 'ad_id,date' })
+      if (error) {
+        console.error('[ad_daily_stats] upsert failed for', row.ad_id, row.date_start, error)
+        errors++
+      } else {
+        rowsUpserted++
+      }
+    }
+
+    url = json.paging?.next || null
+  }
+
+  return { rowsUpserted, adIds, errors }
+}
+
+/**
+ * Fetch creative metadata for a list of ad IDs and upsert into `ads`.
+ * Calls /{ad_id}?fields=... with read-only GETs.
+ *
+ * @param {Iterable<string>} adIds
+ * @returns {Promise<{ adsUpserted: number, errors: number }>}
+ */
+async function fetchAdCreatives(adIds) {
+  let adsUpserted = 0
+  let errors = 0
+  const ids = [...adIds]
+
+  for (const ad_id of ids) {
+    const params = new URLSearchParams({
+      access_token: ACCESS_TOKEN,
+      fields: META_FIELDS_CREATIVE,
+    })
+    const url = `${BASE_URL}/${ad_id}?${params}`
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 20000)
+    let res
+    try {
+      res = await fetch(url, { signal: controller.signal })
+    } catch (e) {
+      clearTimeout(timeout)
+      console.error('[ad creative] fetch failed for', ad_id, e.message)
+      errors++
+      continue
+    }
+    clearTimeout(timeout)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      console.error('[ad creative]', ad_id, res.status, err.error?.message || res.statusText)
+      errors++
+      continue
+    }
+
+    const json = await res.json()
+    const creative = json.creative || null
+    const meta = extractCreativeMeta(creative, json)
+    const asset_type = detectAssetType(creative)
+
+    // Resolve video source URL if asset is video
+    let asset_url = creative?.image_url || null
+    const thumbnail_url = creative?.thumbnail_url || creative?.image_url || null
+    if (asset_type === 'video' && creative?.video_id) {
+      const vCtrl = new AbortController()
+      const vTimeout = setTimeout(() => vCtrl.abort(), 15000)
+      try {
+        const vRes = await fetch(
+          `${BASE_URL}/${creative.video_id}?access_token=${ACCESS_TOKEN}&fields=source,permalink_url,picture`,
+          { signal: vCtrl.signal }
+        )
+        if (vRes.ok) {
+          const vJson = await vRes.json()
+          asset_url = vJson.source || vJson.permalink_url || asset_url
+        }
+      } catch (e) {
+        console.warn('[ad creative] video source resolve failed for', ad_id, e.message)
+      } finally {
+        clearTimeout(vTimeout)
+      }
+    }
+
+    const archived = ['DELETED', 'ARCHIVED'].includes(json.effective_status || json.status)
+    const record = {
+      ad_id,
+      platform: 'meta',
+      ad_name: json.name || null,
+      status: json.status || null,
+      effective_status: json.effective_status || null,
+      creative_id: creative?.id || json.creative_id || null,
+      asset_type,
+      asset_url,
+      thumbnail_url,
+      ...meta,
+      raw_payload: json,
+      last_synced_at: new Date().toISOString(),
+      archived_at: archived ? new Date().toISOString() : null,
+    }
+
+    const { error } = await supabase
+      .from('ads')
+      .upsert(record, { onConflict: 'ad_id' })
+    if (error) {
+      console.error('[ads] upsert failed for', ad_id, error)
+      errors++
+    } else {
+      adsUpserted++
+    }
+  }
+
+  return { adsUpserted, errors }
+}
+
+/**
+ * Backfill campaign / adset names on `ads` from the latest insights row.
+ * Insights endpoint returns campaign_id, campaign_name, adset_id, adset_name
+ * that the creative endpoint does not — fold them in after both syncs run.
+ */
+async function backfillAdContext(adIds) {
+  const ids = [...adIds]
+  if (!ids.length) return { backfilled: 0 }
+  const { data, error } = await supabase
+    .from('ad_daily_stats')
+    .select('ad_id, raw_payload')
+    .in('ad_id', ids)
+    .order('date', { ascending: false })
+  if (error) {
+    console.error('[ad context] backfill read failed:', error)
+    return { backfilled: 0, error: error.message }
+  }
+  const seen = new Set()
+  let backfilled = 0
+  for (const row of data || []) {
+    if (seen.has(row.ad_id)) continue
+    seen.add(row.ad_id)
+    const r = row.raw_payload || {}
+    const patch = {
+      campaign_id: r.campaign_id || null,
+      campaign_name: r.campaign_name || null,
+      adset_id: r.adset_id || null,
+      adset_name: r.adset_name || null,
+    }
+    if (!patch.campaign_id && !patch.adset_id) continue
+    const { error: upErr } = await supabase
+      .from('ads')
+      .update(patch)
+      .eq('ad_id', row.ad_id)
+    if (!upErr) backfilled++
+  }
+  return { backfilled }
+}
+
+/**
+ * Top-level: pull ad-level insights + creative metadata from Meta and persist.
+ * READ-ONLY against Meta. No POST/PUT/PATCH/DELETE is ever sent.
+ *
+ * @param {number} days - lookback window for insights (default 90)
+ * @param {{ creativeRefresh?: boolean }} opts - if creativeRefresh is true,
+ *   fetch creative metadata for every ad seen in insights (slower). Default
+ *   false fetches only ads not already in `ads` or last-synced > 7 days ago.
+ */
+export async function syncMetaAdsAtAdLevel(days = 90, { creativeRefresh = false } = {}) {
+  const startedAt = Date.now()
+  const insights = await fetchAdLevelInsights(days)
+
+  // Decide which ad IDs need creative fetched
+  const allIds = [...insights.adIds]
+  let toFetch = allIds
+  if (!creativeRefresh && allIds.length) {
+    const { data: existing, error } = await supabase
+      .from('ads')
+      .select('ad_id, last_synced_at')
+      .in('ad_id', allIds)
+    if (error) {
+      console.warn('[sync] ad lookup failed, refreshing all creatives:', error.message)
+    } else {
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+      const fresh = new Set(
+        (existing || [])
+          .filter(r => r.last_synced_at && new Date(r.last_synced_at).getTime() > sevenDaysAgo)
+          .map(r => r.ad_id)
+      )
+      toFetch = allIds.filter(id => !fresh.has(id))
+    }
+  }
+
+  const creatives = await fetchAdCreatives(toFetch)
+  const ctx = await backfillAdContext(insights.adIds)
+
+  return {
+    durationMs: Date.now() - startedAt,
+    days,
+    ads_seen: allIds.length,
+    creatives_fetched: toFetch.length,
+    daily_rows_upserted: insights.rowsUpserted,
+    ads_upserted: creatives.adsUpserted,
+    context_backfilled: ctx.backfilled,
+    insights_errors: insights.errors,
+    creative_errors: creatives.errors,
+  }
+}
