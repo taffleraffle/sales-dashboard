@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader, RefreshCw, AlertTriangle, Image as ImageIcon, Film, PlayCircle, Filter } from 'lucide-react'
-import DateRangeSelector from '../components/DateRangeSelector'
-import { supabase } from '../lib/supabase'
-import { rangeToDays } from '../lib/dateUtils'
-import { syncMetaAdsAtAdLevel } from '../services/metaAdsSync'
+import DateRangeSelector from '../../components/DateRangeSelector'
+import VariantPill from '../../components/ads/VariantPill'
+import { supabase } from '../../lib/supabase'
+import { rangeToDays } from '../../lib/dateUtils'
+import { syncMetaAdsAtAdLevel } from '../../services/metaAdsSync'
 
 const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
 
@@ -14,7 +15,6 @@ function fmt$(n) {
   return `$${n.toFixed(0)}`
 }
 function fmtPct(n) { return n == null || isNaN(n) ? '—' : `${n.toFixed(2)}%` }
-function fmtN(n) { return n == null || isNaN(n) ? '—' : Math.round(n).toLocaleString() }
 
 function StatusPill({ status, effective }) {
   const s = (effective || status || 'UNKNOWN').toUpperCase()
@@ -60,7 +60,16 @@ function AssetPreview({ ad }) {
   )
 }
 
-export default function AdPerformance() {
+function Stat({ label, value, highlight }) {
+  return (
+    <div>
+      <p className="uppercase tracking-wider text-text-400 text-[8px] mb-0.5">{label}</p>
+      <p className={`font-medium ${highlight ? 'text-opt-yellow' : 'text-text-primary'}`}>{value}</p>
+    </div>
+  )
+}
+
+export default function AdsList() {
   const [range, setRange] = useState(30)
   const days = typeof range === 'number' ? range : rangeToDays(range)
 
@@ -72,6 +81,7 @@ export default function AdPerformance() {
   const [syncMessage, setSyncMessage] = useState(null)
 
   const [statusFilter, setStatusFilter] = useState('active')
+  const [variantFilter, setVariantFilter] = useState('all')
   const [sortBy, setSortBy] = useState('spend')
   const [search, setSearch] = useState('')
 
@@ -116,22 +126,20 @@ export default function AdPerformance() {
     }
   }, [days, reload])
 
-  // Aggregate stats per ad over the visible window
   const adWithStats = useMemo(() => {
     const byAd = {}
     for (const s of stats) {
-      const cur = byAd[s.ad_id] || { spend: 0, impressions: 0, clicks: 0, results: 0, video_3s_views: 0, video_thruplays: 0, days: 0 }
+      const cur = byAd[s.ad_id] || { spend: 0, impressions: 0, clicks: 0, results: 0, video_3s_views: 0, video_thruplays: 0 }
       cur.spend += parseFloat(s.spend || 0)
       cur.impressions += parseInt(s.impressions || 0)
       cur.clicks += parseInt(s.clicks || 0)
       cur.results += parseInt(s.results || 0)
       cur.video_3s_views += parseInt(s.video_3s_views || 0)
       cur.video_thruplays += parseInt(s.video_thruplays || 0)
-      cur.days++
       byAd[s.ad_id] = cur
     }
     return ads.map(ad => {
-      const agg = byAd[ad.ad_id] || { spend: 0, impressions: 0, clicks: 0, results: 0, video_3s_views: 0, video_thruplays: 0, days: 0 }
+      const agg = byAd[ad.ad_id] || { spend: 0, impressions: 0, clicks: 0, results: 0, video_3s_views: 0, video_thruplays: 0 }
       const spend_usd = agg.spend * NZD_TO_USD
       const ctr = agg.impressions > 0 ? (agg.clicks / agg.impressions) * 100 : null
       const cpm = agg.impressions > 0 ? (spend_usd / agg.impressions) * 1000 : null
@@ -147,14 +155,13 @@ export default function AdPerformance() {
     return adWithStats
       .filter(ad => {
         if (statusFilter === 'active') {
-          const eff = (ad.effective_status || ad.status || '').toUpperCase()
-          if (eff !== 'ACTIVE') return false
+          if ((ad.effective_status || ad.status || '').toUpperCase() !== 'ACTIVE') return false
         } else if (statusFilter === 'paused') {
-          const eff = (ad.effective_status || ad.status || '').toUpperCase()
-          if (eff !== 'PAUSED') return false
+          if ((ad.effective_status || ad.status || '').toUpperCase() !== 'PAUSED') return false
         } else if (statusFilter === 'spent') {
           if ((ad.agg.spend_usd || 0) <= 0) return false
         }
+        if (variantFilter !== 'all' && ad.variant_match_status !== variantFilter) return false
         if (q && !(ad.ad_name || '').toLowerCase().includes(q) && !(ad.campaign_name || '').toLowerCase().includes(q)) return false
         return true
       })
@@ -165,34 +172,19 @@ export default function AdPerformance() {
         if (sortBy === 'newest') return new Date(b.first_seen_at || 0) - new Date(a.first_seen_at || 0)
         return 0
       })
-  }, [adWithStats, statusFilter, sortBy, search])
+  }, [adWithStats, statusFilter, variantFilter, sortBy, search])
 
-  // Aggregate header stats
-  const totals = useMemo(() => {
-    const t = filtered.reduce((a, ad) => ({
-      spend: a.spend + (ad.agg.spend_usd || 0),
-      impressions: a.impressions + ad.agg.impressions,
-      clicks: a.clicks + ad.agg.clicks,
-      results: a.results + ad.agg.results,
-      ads: a.ads + 1,
-    }), { spend: 0, impressions: 0, clicks: 0, results: 0, ads: 0 })
-    return {
-      ...t,
-      ctr: t.impressions > 0 ? (t.clicks / t.impressions) * 100 : 0,
-      cpm: t.impressions > 0 ? (t.spend / t.impressions) * 1000 : 0,
-      cpa: t.results > 0 ? t.spend / t.results : 0,
-    }
-  }, [filtered])
+  const totals = useMemo(() => filtered.reduce((a, ad) => ({
+    spend: a.spend + (ad.agg.spend_usd || 0),
+    ads: a.ads + 1,
+  }), { spend: 0, ads: 0 }), [filtered])
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
 
   return (
-    <div className="max-w-[1600px] mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Ad Performance</h1>
-          <p className="text-xs text-text-400">{filtered.length} of {ads.length} ads · {fmt$(totals.spend)} spend in window</p>
-        </div>
+    <div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+        <p className="text-xs text-text-400">{filtered.length} of {ads.length} ads · {fmt$(totals.spend)} spend in window</p>
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleSync}
@@ -218,16 +210,10 @@ export default function AdPerformance() {
         </div>
       )}
 
-      {/* Filter bar */}
       <div className="bg-bg-card border border-border-default rounded-2xl p-3 mb-4 flex flex-col sm:flex-row sm:items-center gap-2">
         <div className="flex items-center gap-1 text-text-400 text-xs"><Filter size={12} /> Filter</div>
         <div className="flex gap-1">
-          {[
-            ['active', 'Active'],
-            ['paused', 'Paused'],
-            ['spent', 'Spent'],
-            ['all', 'All'],
-          ].map(([k, label]) => (
+          {[['active', 'Active'], ['paused', 'Paused'], ['spent', 'Spent'], ['all', 'All']].map(([k, label]) => (
             <button
               key={k}
               onClick={() => setStatusFilter(k)}
@@ -241,6 +227,19 @@ export default function AdPerformance() {
             </button>
           ))}
         </div>
+        <div className="flex items-center gap-1 ml-2 text-text-400 text-[10px] uppercase tracking-wider">Variant</div>
+        <select
+          value={variantFilter}
+          onChange={e => setVariantFilter(e.target.value)}
+          className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary"
+        >
+          <option value="all">All</option>
+          <option value="matched">Matched</option>
+          <option value="orphan">Orphan</option>
+          <option value="legacy">Legacy</option>
+          <option value="unparsed">Unparsed</option>
+          <option value="pending">Pending</option>
+        </select>
         <input
           type="search"
           placeholder="Search ad or campaign…"
@@ -263,13 +262,12 @@ export default function AdPerformance() {
         </div>
       </div>
 
-      {/* Empty state */}
-      {!filtered.length && !loading && (
+      {!filtered.length && (
         <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400">
           {ads.length === 0 ? (
             <div>
               <p className="text-sm mb-2">No ads synced yet.</p>
-              <p className="text-xs">Click <span className="text-opt-yellow">Sync from Meta</span> above to pull every ad and its insights from your Meta Ads account. Read-only — nothing on Meta will be modified.</p>
+              <p className="text-xs">Click <span className="text-opt-yellow">Sync from Meta</span> to pull every ad and its insights. Read-only — nothing on Meta will be modified.</p>
             </div>
           ) : (
             <p className="text-sm">No ads match the current filter.</p>
@@ -277,13 +275,12 @@ export default function AdPerformance() {
         </div>
       )}
 
-      {/* Ad grid */}
       {filtered.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {filtered.map(ad => (
             <Link
               key={ad.ad_id}
-              to={`/sales/ads/${ad.ad_id}`}
+              to={`/sales/ads/ad/${ad.ad_id}`}
               className="bg-bg-card border border-border-default rounded-2xl p-3 hover:border-opt-yellow/40 transition-colors group"
             >
               <AssetPreview ad={ad} />
@@ -296,6 +293,9 @@ export default function AdPerformance() {
                 </div>
                 <StatusPill status={ad.status} effective={ad.effective_status} />
               </div>
+              <div className="mt-1.5">
+                <VariantPill variantId={ad.variant_id} matchStatus={ad.variant_match_status} compact={true} />
+              </div>
               <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
                 <Stat label="Spend" value={fmt$(ad.agg.spend_usd)} />
                 <Stat label="CTR" value={fmtPct(ad.agg.ctr)} />
@@ -304,23 +304,10 @@ export default function AdPerformance() {
                 <Stat label="Hold" value={fmtPct(ad.agg.hold_rate)} />
                 <Stat label="CPA" value={fmt$(ad.agg.cpa)} highlight />
               </div>
-              <div className="mt-2 pt-2 border-t border-border-default/50 flex items-center justify-between text-[9px] uppercase tracking-wider text-text-400">
-                <span>Hook · Body · Callout</span>
-                <span className="text-text-400/50">tag in detail</span>
-              </div>
             </Link>
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-function Stat({ label, value, highlight }) {
-  return (
-    <div>
-      <p className="uppercase tracking-wider text-text-400 text-[8px] mb-0.5">{label}</p>
-      <p className={`font-medium ${highlight ? 'text-opt-yellow' : 'text-text-primary'}`}>{value}</p>
     </div>
   )
 }

@@ -20,8 +20,18 @@ const SetterDetail = lazy(() => import('./pages/SetterDetail'))
 const SetterKPIHistory = lazy(() => import('./pages/SetterKPIHistory'))
 const PipelinePerformance = lazy(() => import('./pages/PipelinePerformance'))
 const MarketingPerformance = lazy(() => import('./pages/MarketingPerformance'))
-const AdPerformance = lazy(() => import('./pages/AdPerformance'))
-const AdDetail = lazy(() => import('./pages/AdDetail'))
+const AdsLayout = lazy(() => import('./pages/ads/AdsLayout'))
+const AdsList = lazy(() => import('./pages/ads/AdsList'))
+const AdsHooks = lazy(() => import('./pages/ads/AdsHooks'))
+const AdsBodies = lazy(() => import('./pages/ads/AdsBodies'))
+const AdsScenes = lazy(() => import('./pages/ads/AdsScenes'))
+const AdsCreators = lazy(() => import('./pages/ads/AdsCreators'))
+const AdsVariants = lazy(() => import('./pages/ads/AdsVariants'))
+const AdsOrphans = lazy(() => import('./pages/ads/AdsOrphans'))
+const AdsLegacy = lazy(() => import('./pages/ads/AdsLegacy'))
+const ComponentDetail = lazy(() => import('./pages/ads/ComponentDetail'))
+const VariantDetail = lazy(() => import('./pages/ads/VariantDetail'))
+const AdDetail = lazy(() => import('./pages/ads/AdDetail'))
 const EODReview = lazy(() => import('./pages/EODReview'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const CommissionPage = lazy(() => import('./pages/CommissionPage'))
@@ -113,8 +123,20 @@ export default function App() {
               <Route path="/sales/setters/:id/kpi-history" element={<Suspense fallback={<PageSkeleton />}><SetterKPIHistory /></Suspense>} />
               <Route path="/sales/pipeline" element={<Suspense fallback={<PageSkeleton />}><PipelinePerformance /></Suspense>} />
               <Route path="/sales/marketing" element={<Suspense fallback={<PageSkeleton />}><MarketingPerformance /></Suspense>} />
-              <Route path="/sales/ads" element={<Suspense fallback={<PageSkeleton />}><AdPerformance /></Suspense>} />
-              <Route path="/sales/ads/:id" element={<Suspense fallback={<PageSkeleton />}><AdDetail /></Suspense>} />
+              <Route path="/sales/ads" element={<Suspense fallback={<PageSkeleton />}><AdsLayout /></Suspense>}>
+                <Route index element={<Navigate to="/sales/ads/list" replace />} />
+                <Route path="list" element={<Suspense fallback={<PageSkeleton />}><AdsList /></Suspense>} />
+                <Route path="hooks" element={<Suspense fallback={<PageSkeleton />}><AdsHooks /></Suspense>} />
+                <Route path="bodies" element={<Suspense fallback={<PageSkeleton />}><AdsBodies /></Suspense>} />
+                <Route path="scenes" element={<Suspense fallback={<PageSkeleton />}><AdsScenes /></Suspense>} />
+                <Route path="creators" element={<Suspense fallback={<PageSkeleton />}><AdsCreators /></Suspense>} />
+                <Route path="variants" element={<Suspense fallback={<PageSkeleton />}><AdsVariants /></Suspense>} />
+                <Route path="variants/:variantId" element={<Suspense fallback={<PageSkeleton />}><VariantDetail /></Suspense>} />
+                <Route path="components/:id" element={<Suspense fallback={<PageSkeleton />}><ComponentDetail /></Suspense>} />
+                <Route path="orphans" element={<Suspense fallback={<PageSkeleton />}><AdsOrphans /></Suspense>} />
+                <Route path="legacy" element={<Suspense fallback={<PageSkeleton />}><AdsLegacy /></Suspense>} />
+                <Route path="ad/:id" element={<Suspense fallback={<PageSkeleton />}><AdDetail /></Suspense>} />
+              </Route>
               <Route path="/sales/eod" element={<EODDashboard />} />
               <Route path="/sales/eod/submit" element={<Suspense fallback={<PageSkeleton />}><EODReview /></Suspense>} />
               <Route path="/sales/eod-history" element={<Navigate to="/sales/eod" replace />} />

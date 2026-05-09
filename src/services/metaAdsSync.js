@@ -683,6 +683,24 @@ export async function syncMetaAdsAtAdLevel(days = 90, { creativeRefresh = false 
   const creatives = await fetchAdCreatives(toFetch)
   const ctx = await backfillAdContext(insights.adIds)
 
+  // Refresh the library materialized views so newly-mirrored performance_daily
+  // rows show up in component_performance / cohort_hook_body. RPC is defined
+  // in migration 012 and runs library.refresh_materialized_views() under
+  // SECURITY DEFINER so the authenticated role can call it.
+  let viewRefresh = { ok: false, error: null }
+  try {
+    const { error: rpcErr } = await supabase.rpc('refresh_ad_library_views')
+    if (rpcErr) {
+      console.warn('[ad sync] materialized view refresh failed:', rpcErr.message)
+      viewRefresh.error = rpcErr.message
+    } else {
+      viewRefresh.ok = true
+    }
+  } catch (e) {
+    console.warn('[ad sync] materialized view refresh exception:', e.message)
+    viewRefresh.error = e.message
+  }
+
   return {
     durationMs: Date.now() - startedAt,
     days,
@@ -693,5 +711,6 @@ export async function syncMetaAdsAtAdLevel(days = 90, { creativeRefresh = false 
     context_backfilled: ctx.backfilled,
     insights_errors: insights.errors,
     creative_errors: creatives.errors,
+    view_refresh: viewRefresh,
   }
 }

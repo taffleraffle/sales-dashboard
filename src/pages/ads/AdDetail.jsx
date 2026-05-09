@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Loader, ChevronLeft, AlertTriangle, ExternalLink } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { supabase } from '../../lib/supabase'
+import VariantPill from '../../components/ads/VariantPill'
 
 const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
 
@@ -98,7 +99,7 @@ export default function AdDetail() {
   if (error || !ad) {
     return (
       <div className="max-w-3xl mx-auto">
-        <Link to="/sales/ads" className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3"><ChevronLeft size={14} /> Back to Ad Performance</Link>
+        <Link to="/sales/ads/list" className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3"><ChevronLeft size={14} /> Back to Ad Performance</Link>
         <div className="bg-danger/10 border border-danger/30 text-danger rounded-2xl p-4 flex items-center gap-2">
           <AlertTriangle size={16} /> <span>{error || `Ad ${id} not found`}</span>
         </div>
@@ -108,7 +109,7 @@ export default function AdDetail() {
 
   return (
     <div className="max-w-[1400px] mx-auto">
-      <Link to="/sales/ads" className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3">
+      <Link to="/sales/ads/list" className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3">
         <ChevronLeft size={14} /> Back to Ad Performance
       </Link>
 
@@ -129,6 +130,9 @@ export default function AdDetail() {
           <div>
             <p className="text-[10px] uppercase tracking-wider text-text-400">Ad</p>
             <p className="text-lg font-semibold text-text-primary">{ad.ad_name || ad.ad_id}</p>
+            <div className="mt-1.5">
+              <VariantPill variantId={ad.variant_id} matchStatus={ad.variant_match_status} />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3 text-xs">
             <Field label="Status" value={ad.effective_status || ad.status || '—'} />

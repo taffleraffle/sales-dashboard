@@ -1,356 +1,434 @@
-# Ad Performance + Creative Library — Plan
+# Ad Performance + Creative Library — Comprehensive Plan (v2)
 
-> A standalone module inside the sales dashboard. Tracks every Meta ad currently running (and historically run), breaks each one down into its component parts (Hook · Body · Callout), and rolls performance up to both the ad and the component library so we can see which hooks / bodies / callouts are actually winning.
+> Standalone module under `/sales/ads`. Five tabs (Ads · Hooks · Bodies · Scenes · Creators) backed by the existing `library` schema and the OPT-MetaAd-Naming-SOP. Replaces the v1 plan — v1 missed that you already have 027_library_schema.sql with a 4-dimension test taxonomy.
 
-**Owner:** Ben · **Status:** Plan only — not built · **Drafted:** 2026-05-09
+**Owner:** Ben · **Status:** Plan only · **Drafted:** 2026-05-09 · **Supersedes:** v1
 
 ---
 
 ## 1 · Goal
 
-Build one place inside the sales dashboard where the team can:
+Restructure the `/sales/ads` route into a five-tab Creative Library that mirrors the OPT-MetaAd-Naming-SOP and the `library` schema. The dashboard becomes the operational surface for:
 
-1. **See every ad running on Meta right now** with live spend, impressions, CTR, CPM, hook rate, hold rate, results, CPA — pulled from the Meta Ads API.
-2. **Decompose each ad into its component parts** — Hook, Body, Callout — and store those components in a tagged library.
-3. **Roll component-level performance up across every ad they appeared in** so we can answer "which hooks have the lowest CPA across the last 90 days?" without a spreadsheet.
-4. **Attribute downstream funnel events** (lead → qualified booking → live call → close) back to the originating ad and component, using the existing `setter_leads` / `ghl_appointments` / `marketing_tracker` data.
-5. **Upload new creatives** (file + metadata) into the component library so they're catalogued before they go live, and so newly-launched ads pick up component tags automatically when they sync from Meta.
+- **Ads tab** — every Meta ad currently or historically running, with creative previewable, live performance, and which variant it belongs to.
+- **Hook library** — every hook component, ranked by weighted performance across every variant it appeared in.
+- **Body library** — every body angle (the 7 canonical: PROOF / DATA / STORY / AUTHORITY / TEACHING / OFFER / COMPETITOR), same rollup logic.
+- **Scene library** — every visual setup (the 7 canonical: OFFICE / CAR / STUDIO / OUTDOOR / ONSITE / PHONE / WHITEBOARD).
+- **Creator library** — every UGC creator + AI / direct-client (OSO / SOFIA / NATALIE / RESTO-AI / CLIENT).
+
+Plus secondary nav for the operational edges: **Variants** · **Orphans** · **Legacy**.
 
 ---
 
-## 2 · Mental model
+## 2 · What's already built (don't rebuild)
+
+**Already shipped:**
+- `supabase/migrations/027_library_schema.sql` — `library` schema with `components`, `variants`, `performance_daily`, `legacy_ad_mapping`, `orphan_ads`. Two materialized views: `component_performance`, `cohort_hook_body`. Refresh function. Seeded 19 components (body angles + scenes + creators).
+- `migrations/011_ad_performance_phase1.sql` (committed, not applied) — `public.ads`, `public.ad_daily_stats`. Raw Meta layer.
+- `src/services/metaAdsSync.js` — `syncMetaAdsAtAdLevel()`. Read-only Meta GET only.
+- `src/pages/AdPerformance.jsx` + `AdDetail.jsx` — single-tab v1 UI.
+- `OPT-MetaAd-Naming-SOP-v2-2026-05-09.docx` — naming grammar, UTM template, pre-launch checklist.
+
+**Not yet built:**
+- The bridge between raw `public.ads` and `library.variants` (parser + linkage + orphan capture).
+- The 4 component-library tabs (Hooks / Bodies / Scenes / Creators).
+- Component detail pages with weighted rollup from `library.component_performance`.
+- Variant detail page.
+- Orphan + Legacy operational tabs.
+- The tab shell wrapping all of it.
+
+**Action item that's blocking ship:** migration 011 must be pasted into Supabase Studio SQL editor by you. I don't have DB password / `psql` / `supabase` CLI / DDL-capable RPC. Once 011 lands, Phase 1 of v1 is live; everything in this v2 plan stacks on top.
+
+---
+
+## 3 · Architecture
+
+### 3.1 · Route map
 
 ```
-Component Library (the building blocks)
-  ├── Hooks           ── short opening attention grabbers (image / video / text)
-  ├── Bodies          ── middle of the ad — value prop, demo, social proof
-  └── Callouts        ── closing CTA (image / overlay / closing line)
-                  ↓
-              Each Meta ad references 1 hook + 1 body + 1 callout
-                  ↓
-Meta Ad (the assembled creative running on Meta)
-  ├── meta_ad_id, name, campaign, adset, status
-  ├── creative asset (image_url / video_url / thumbnail)
-  ├── headline, primary_text, description, cta
-  └── component_tags: [hook_id, body_id, callout_id]
-                  ↓
-              Daily insights pulled from Meta API
-                  ↓
-Performance (rolled up two ways)
-  ├── Per-ad     ── spend, impressions, CTR, CPM, hook rate, hold rate, results, CPA
-  └── Per-component ── same metrics aggregated across every ad that used that hook
+/sales/ads                           → redirects to /sales/ads/list
+/sales/ads/list                      → Ads tab (default)
+/sales/ads/hooks                     → Hook library
+/sales/ads/bodies                    → Body library
+/sales/ads/scenes                    → Scene library
+/sales/ads/creators                  → Creator library
+/sales/ads/variants                  → Variant index
+/sales/ads/variants/:variant_id      → Variant detail (which ads ran it, perf)
+/sales/ads/components/:component_id  → Component detail (which variants used it)
+/sales/ads/orphans                   → Ads that don't match the naming SOP
+/sales/ads/legacy                    → Legacy ad mapping (pre-2026-05-09)
+/sales/ads/:meta_ad_id               → Single ad detail (creative + perf timeline)
 ```
 
+### 3.2 · Data flow
+
+```
+Meta Graph API  ── GET only ──>  public.ads + public.ad_daily_stats
+                                       ↓ (parser trigger)
+                            library.variants.meta_ad_id  (linked) — OR — library.orphan_ads (unlinked)
+                                       ↓
+                            library.performance_daily (per-variant per-day)
+                                       ↓
+                       library.component_performance (materialized, weighted)
+                                       ↓
+                                    UI tabs
+```
+
+### 3.3 · UI shell
+
+New `<AdsLayout>` component renders a sticky tab bar at the top of every `/sales/ads/*` route:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  ADS  ·  HOOKS  ·  BODIES  ·  SCENES  ·  CREATORS    │ Variants  Orphans  Legacy
+│ ───                                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Primary tabs (5) are larger; secondary nav (3) is smaller text on the right. Each tab keeps its own filter / sort state (URL search params for shareable links).
+
 ---
 
-## 3 · What exists today vs what's missing
+## 4 · Per-tab spec
 
-| Capability | Today | New work |
-|---|---|---|
-| Meta API auth + credentials | ✓ in `.env` (`VITE_META_ADS_ACCESS_TOKEN`) | — |
-| Adset-level daily spend sync | ✓ [src/services/metaAdsSync.js](src/services/metaAdsSync.js) → `marketing_daily` | — |
-| Aggregated adspend on Marketing page | ✓ [src/hooks/useMarketingTracker.js](src/hooks/useMarketingTracker.js) | — |
-| **Ad-level (per-creative) sync** | ✗ | NEW — different Meta endpoint, new table |
-| **Creative asset metadata** (URL, copy, CTA) | ✗ | NEW — pulled from `/{ad_id}?fields=creative{...}` |
-| **Component library** (Hooks / Bodies / Callouts) | ✗ | NEW — Supabase tables + UI |
-| **Component tagging on ads** | ✗ | NEW — join table |
-| **Component-level performance rollup** | ✗ | NEW — view + UI |
-| **Funnel attribution per ad** | partial — `setter_leads.lead_source` exists but not joined to ad_id | NEW — UTM/`adset_id` capture into `setter_leads`, query layer |
-| **Creative upload UI** | ✗ | NEW |
-| **Standalone Ad Performance page** | ✗ — currently squeezed into Marketing page | NEW |
+### 4.1 · Ads tab — `/sales/ads/list`
+
+Card grid of every ad in `public.ads`, joined to its latest stats from `public.ad_daily_stats`, with optional variant link from `library.variants` (when parser matched).
+
+Each card shows:
+- Creative thumbnail (hover-to-play for video).
+- Ad name (truncated) + status pill.
+- Variant pill (e.g. `H4.2_BA-PROOF_S-OFFICE_OSO_v1`) → click goes to variant detail.
+- Five primary stats: Spend · CTR · Hook · CPA · Status.
+- Tag row showing the four component IDs as small chips: `H4.2 · BA-PROOF · S-OFFICE · OSO`.
+
+Filters: Active / Paused / Spent / All · search · sort by spend / CTR / CPA / newest.
+
+Empty state when no ads synced: "No ads synced yet" + Sync button.
+
+### 4.2 · Hook library — `/sales/ads/hooks`
+
+Table of every hook from `library.components` WHERE `type='hook'`, joined to the materialized `library.component_performance` view for weighted rollup metrics.
+
+Columns:
+
+| Hook ID | Label | Status | Variants | Live | Spend | Hook% | Hold% | CTR | CPA | Best variant |
+|---------|-------|--------|----------|------|-------|-------|-------|-----|-----|--------------|
+
+Sort by any column. Click row → component detail. Status filter (concept / in_production / ready / retired).
+
+"Add hook" button (top right) — opens modal that inserts a new row into `library.components` with `type='hook'`, prefilled with required fields (component_id, label, script_text, duration_sec, status='concept'). Phase 3 of this plan adds upload of the hook video asset to Supabase Storage.
+
+### 4.3 · Body library — `/sales/ads/bodies`
+
+Identical structure to Hook library, filtered to `type='body_angle'`. Already seeded with 7 canonical angles, so empty state is rare.
+
+### 4.4 · Scene library — `/sales/ads/scenes`
+
+Identical structure, filtered to `type='scene'`. 7 canonical scenes seeded.
+
+### 4.5 · Creator library — `/sales/ads/creators`
+
+Identical structure, filtered to `type='creator'`. Adds a "creator" specific column: number of variants per status (planned / live / killed / winner). 5 canonical creators seeded.
+
+### 4.6 · Component detail — `/sales/ads/components/:component_id`
+
+Drill-in for any single component (hook / body angle / scene / creator).
+
+Sections:
+1. **Header** — component_id · label · type pill · status pill · description.
+2. **Asset preview** — if hook (script_text + reference video), if body_angle (description), if scene (description + sample reference shot), if creator (avatar + bio).
+3. **Weighted rollup tile row** — Spend · Hook% · Hold% · CTR · CPL · CPA · Cost-per-close. Pulled from `library.component_performance`.
+4. **Variants table** — every `library.variants` row that references this component, with status, spend, key rates. Click → variant detail.
+5. **Cohort matrix (hooks + bodies only)** — when component is a hook or body_angle, show the `library.cohort_hook_body` slice for this component crossed against the other dimension.
+6. **Notes** — free text edit field for post-mortem learnings.
+
+### 4.7 · Variant detail — `/sales/ads/variants/:variant_id`
+
+Shows one variant (one specific 4-tuple at one iteration). Sections:
+
+1. **Header** — variant_id, status pill, launched_at, retired_at if applicable.
+2. **Component breakdown** — 4 cards, one per dimension, each showing the component_id + label.
+3. **Asset preview** — the spliced final asset (video).
+4. **Linked Meta ads** — every `public.ads` row where `variant_id = this`. Usually one, but can be multiple if relaunched.
+5. **Performance timeline** — daily spend / CTR / CPA chart from `library.performance_daily`.
+6. **Notes**.
+
+### 4.8 · Orphan tab — `/sales/ads/orphans`
+
+Lists every row in `library.orphan_ads`. Operator workflow:
+- For each orphan row, three buttons: **Map to existing variant** (search/dropdown into `library.variants`), **Create new variant** (open variant-create modal pre-filled with parsed components if any), **Mark ignored** (set `resolved=true` with notes='ignored').
+- Filter by first_seen / last_seen.
+- Bulk-resolve action for low-spend orphans.
+
+### 4.9 · Legacy tab — `/sales/ads/legacy`
+
+Lists `library.legacy_ad_mapping`. Same map/edit workflow as orphans. Marker: "60-day cutoff" — after 2026-07-08, all unmapped legacy ads get auto-archived from the dashboard's active set per the SOP.
 
 ---
 
-## 4 · Data model
+## 5 · Data model changes
 
-Five new Supabase tables. All in `public`. RLS policies mirror existing patterns (authenticated read, service-role write for sync jobs).
+### 5.1 · Migration 011 — already written, needs apply
 
-### 4.1 · `creative_components`
-The library. One row per Hook / Body / Callout.
+`public.ads` + `public.ad_daily_stats`. Pasted in Supabase Studio SQL editor.
+
+### 5.2 · Migration 012 — bridge to library
 
 ```sql
-create table creative_components (
-  id              uuid primary key default gen_random_uuid(),
-  type            text not null check (type in ('hook', 'body', 'callout')),
-  name            text not null,                          -- short label, e.g. "Pattern interrupt — yelling owner"
-  description     text,                                   -- longer notes
-  asset_url       text,                                   -- image / video URL (Supabase storage)
-  thumbnail_url   text,
-  copy_text       text,                                   -- the spoken/written line
-  duration_seconds numeric,                               -- video components only
-  tags            text[] default '{}',                    -- e.g. ['urgency', 'pain', 'humor']
-  created_by      uuid references auth.users(id),
-  created_at      timestamptz default now(),
-  archived_at     timestamptz,                            -- soft-delete
-  notes           text                                    -- post-mortem after ad ran
-);
-create index on creative_components (type) where archived_at is null;
-create index on creative_components using gin (tags);
+-- 012_ad_variant_link.sql
+-- Bridges public.ads (raw Meta sync) to library.variants (the SOP-driven library).
+
+-- 1. Add variant_id FK on public.ads
+ALTER TABLE public.ads
+  ADD COLUMN IF NOT EXISTS variant_id TEXT REFERENCES library.variants(variant_id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS variant_match_status TEXT
+    CHECK (variant_match_status IN ('matched', 'orphan', 'legacy', 'unparsed', 'pending'))
+    DEFAULT 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_ads_variant_id ON public.ads(variant_id);
+CREATE INDEX IF NOT EXISTS idx_ads_variant_match_status ON public.ads(variant_match_status);
+
+-- 2. Parse function — regex-extract variant_id from Meta ad name
+CREATE OR REPLACE FUNCTION library.parse_variant_id(ad_name TEXT)
+RETURNS TEXT AS $$
+DECLARE
+  result TEXT;
+BEGIN
+  -- Format: [...] | [...] | [variant_id] | [iteration]
+  -- variant_id pattern: H{n}.{m}?_BA-{TYPE}_S-{TYPE}_{CREATOR}_v{n}
+  SELECT (regexp_match(ad_name,
+    'H\d+(?:\.\d+)?_BA-[A-Z]+_S-[A-Z\-]+_[A-Z\-]+(?:_v\d+)?'
+  ))[1] INTO result;
+  RETURN result;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+-- 3. Trigger — on insert/update of public.ads, attempt to link to a variant
+CREATE OR REPLACE FUNCTION public.link_ad_to_variant()
+RETURNS TRIGGER AS $$
+DECLARE
+  parsed TEXT;
+  matched_variant TEXT;
+  legacy_match TEXT;
+BEGIN
+  parsed := library.parse_variant_id(NEW.ad_name);
+
+  IF parsed IS NULL THEN
+    -- Check legacy mapping first
+    SELECT lm.variant_id::text INTO legacy_match
+    FROM library.legacy_ad_mapping lm
+    WHERE lm.meta_ad_id = NEW.ad_id;
+
+    IF legacy_match IS NOT NULL THEN
+      NEW.variant_id := (SELECT variant_id FROM library.variants WHERE id::text = legacy_match);
+      NEW.variant_match_status := 'legacy';
+    ELSE
+      NEW.variant_match_status := 'unparsed';
+      INSERT INTO library.orphan_ads (meta_ad_id, meta_ad_name, parser_attempted)
+      VALUES (NEW.ad_id, NEW.ad_name, 'no SOP match in name')
+      ON CONFLICT (meta_ad_id) DO UPDATE SET
+        last_seen = NOW(),
+        meta_ad_name = EXCLUDED.meta_ad_name;
+    END IF;
+  ELSE
+    -- Parsed successfully — does the variant exist in library?
+    SELECT v.variant_id INTO matched_variant
+    FROM library.variants v
+    WHERE v.variant_id = parsed;
+
+    IF matched_variant IS NOT NULL THEN
+      NEW.variant_id := matched_variant;
+      NEW.variant_match_status := 'matched';
+      -- Backfill library.variants.meta_ad_id if blank
+      UPDATE library.variants
+      SET meta_ad_id = NEW.ad_id, meta_ad_name = NEW.ad_name
+      WHERE variant_id = matched_variant AND meta_ad_id IS NULL;
+    ELSE
+      NEW.variant_match_status := 'orphan';
+      INSERT INTO library.orphan_ads (meta_ad_id, meta_ad_name, parser_attempted)
+      VALUES (NEW.ad_id, NEW.ad_name, parsed)
+      ON CONFLICT (meta_ad_id) DO UPDATE SET
+        last_seen = NOW(),
+        parser_attempted = parsed;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER ads_link_to_variant
+  BEFORE INSERT OR UPDATE OF ad_name ON public.ads
+  FOR EACH ROW EXECUTE FUNCTION public.link_ad_to_variant();
+
+-- 4. Trigger — when ad_daily_stats inserts, mirror to library.performance_daily
+CREATE OR REPLACE FUNCTION public.mirror_stats_to_library()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_uuid UUID;
+BEGIN
+  SELECT v.id INTO v_uuid
+  FROM library.variants v
+  JOIN public.ads a ON a.variant_id = v.variant_id
+  WHERE a.ad_id = NEW.ad_id;
+
+  IF v_uuid IS NULL THEN
+    RETURN NEW; -- ad not linked to a variant yet, skip mirror
+  END IF;
+
+  INSERT INTO library.performance_daily (
+    variant_id, date, spend, impressions, reach, clicks, link_clicks,
+    three_sec_views, thruplays, source, pulled_at
+  ) VALUES (
+    v_uuid, NEW.date, NEW.spend, NEW.impressions, NEW.reach,
+    NEW.clicks, NEW.unique_clicks, NEW.video_3s_views, NEW.video_thruplays,
+    'meta', NOW()
+  )
+  ON CONFLICT (variant_id, date) DO UPDATE SET
+    spend = EXCLUDED.spend,
+    impressions = EXCLUDED.impressions,
+    reach = EXCLUDED.reach,
+    clicks = EXCLUDED.clicks,
+    link_clicks = EXCLUDED.link_clicks,
+    three_sec_views = EXCLUDED.three_sec_views,
+    thruplays = EXCLUDED.thruplays,
+    pulled_at = NOW();
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER ad_daily_stats_mirror
+  AFTER INSERT OR UPDATE ON public.ad_daily_stats
+  FOR EACH ROW EXECUTE FUNCTION public.mirror_stats_to_library();
+
+NOTIFY pgrst, 'reload schema';
 ```
 
-### 4.2 · `meta_ads`
-One row per ad ID from Meta. Catalog only — performance lives in `meta_ad_daily_stats`.
+### 5.3 · No new tables needed beyond 011 + 012
 
-```sql
-create table meta_ads (
-  ad_id           text primary key,                       -- Meta ad ID
-  ad_name         text,
-  campaign_id     text,
-  campaign_name   text,
-  adset_id        text,
-  adset_name      text,
-  status          text,                                   -- ACTIVE / PAUSED / DELETED
-  effective_status text,                                  -- finer-grained status from Meta
-  creative_id     text,                                   -- Meta creative ID
-  asset_type      text check (asset_type in ('image', 'video', 'carousel')),
-  asset_url       text,                                   -- video_id resolved to source URL or image
-  thumbnail_url   text,
-  headline        text,
-  primary_text    text,
-  description     text,
-  cta_type        text,                                   -- LEARN_MORE, SHOP_NOW, etc.
-  destination_url text,                                   -- where the ad sends users
-  first_seen_at   timestamptz default now(),
-  last_synced_at  timestamptz default now(),
-  archived_at     timestamptz                             -- when status became DELETED
-);
-create index on meta_ads (status) where archived_at is null;
-create index on meta_ads (campaign_id, adset_id);
-```
-
-### 4.3 · `meta_ad_components`
-Join table. An ad can carry exactly one of each role; one component can appear in many ads.
-
-```sql
-create table meta_ad_components (
-  ad_id          text references meta_ads(ad_id) on delete cascade,
-  component_id   uuid references creative_components(id) on delete cascade,
-  role           text not null check (role in ('hook', 'body', 'callout')),
-  assigned_at    timestamptz default now(),
-  assigned_by    uuid references auth.users(id),
-  primary key (ad_id, role)                               -- one hook per ad, etc.
-);
-create index on meta_ad_components (component_id);
-```
-
-### 4.4 · `meta_ad_daily_stats`
-Per-ad daily insights. Replaces what `marketing_daily` does at adset level, but at ad granularity.
-
-```sql
-create table meta_ad_daily_stats (
-  ad_id            text references meta_ads(ad_id) on delete cascade,
-  date             date not null,
-  spend            numeric(12, 2) default 0,              -- in account currency (NZD); convert at read time
-  impressions      integer default 0,
-  reach            integer default 0,
-  frequency        numeric(6, 2) default 0,
-  clicks           integer default 0,
-  unique_clicks    integer default 0,
-  ctr              numeric(6, 4),                         -- pct
-  cpc              numeric(10, 4),
-  cpm              numeric(10, 4),
-  video_3s_views   integer default 0,                     -- "thumbstop"
-  video_thruplays  integer default 0,                     -- 15s or 95% complete
-  video_avg_time_watched numeric(8, 2),
-  results          integer default 0,                     -- conversion events from Meta
-  cost_per_result  numeric(10, 4),
-  raw_payload      jsonb,                                 -- full Meta response, for forensic reads
-  synced_at        timestamptz default now(),
-  primary key (ad_id, date)
-);
-create index on meta_ad_daily_stats (date);
-```
-
-### 4.5 · `meta_ad_attribution` (view, not table)
-A SQL view that joins `setter_leads` ↔ `meta_ads` via `adset_id` (today) and `ad_id` (once we capture it via UTM). Returns leads → bookings → closes attributable to each ad.
-
-```sql
-create view meta_ad_attribution as
-select
-  m.ad_id,
-  m.ad_name,
-  count(distinct sl.id) filter (where sl.id is not null) as leads,
-  count(distinct sl.id) filter (where sl.appointment_date is not null) as qualified_bookings,
-  count(distinct sl.id) filter (where sl.status in ('show', 'showed', 'live', 'closed', 'not_closed', 'ascended')) as live_calls,
-  count(distinct sl.id) filter (where sl.status = 'closed') as closes,
-  coalesce(sum(sl.revenue_attributed), 0) as revenue_attributed
-from meta_ads m
-left join setter_leads sl on sl.utm_content = m.ad_id  -- after UTM capture is added
-group by m.ad_id, m.ad_name;
-```
+The `library` schema already has everything else. We're connecting, not adding.
 
 ---
 
-## 5 · Meta Ads API integration
+## 6 · Sync changes
 
-### 5.1 · New sync function — `syncMetaAdsAtAdLevel(days)`
-Lives next to existing `syncMetaAds()` in [src/services/metaAdsSync.js](src/services/metaAdsSync.js). Two endpoints per run:
+After every `syncMetaAdsAtAdLevel()` run, call `library.refresh_materialized_views()` so `component_performance` and `cohort_hook_body` reflect the new daily numbers.
 
-**A. Insights at ad level**
+```js
+// In src/services/metaAdsSync.js, end of syncMetaAdsAtAdLevel
+await supabase.rpc('refresh_materialized_views', {}, { head: false }).catch(e =>
+  console.warn('[ad sync] materialized view refresh failed:', e.message)
+)
 ```
-GET /act_{ACCOUNT_ID}/insights
-  ?level=ad
-  &fields=ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,
-          spend,impressions,reach,frequency,clicks,unique_clicks,ctr,cpc,cpm,
-          actions,cost_per_action_type,
-          video_3_sec_watched_actions,video_thruplay_watched_actions,
-          video_avg_time_watched_actions
-  &time_range={since,until}
-  &time_increment=1
-  &limit=500
-```
-→ Upserts into `meta_ad_daily_stats` keyed on `(ad_id, date)`.
 
-**B. Ad metadata + creative**
-```
-GET /{ad_id}
-  ?fields=name,status,effective_status,creative{
-    id, image_url, video_id, thumbnail_url,
-    body, title, description,
-    object_story_spec{video_data{call_to_action,video_id,image_url,message,title}},
-    object_story_spec{link_data{call_to_action,image_hash,link,message,name,description}}
-  }
-```
-→ Upserts into `meta_ads`. Resolves video_id → source URL via `/{video_id}?fields=source` if needed.
-
-### 5.2 · Sync cadence
-- Hourly background sync (extend the existing `autoSync` service).
-- Manual "Refresh Ads" button on the new page for on-demand pulls.
-- Per-ad metadata only re-fetched when `effective_status` changes or weekly, whichever is sooner — creative metadata rarely changes after ad goes live.
-
-### 5.3 · UTM capture (for attribution)
-Add `utm_source`, `utm_medium`, `utm_campaign`, `utm_content` columns to `setter_leads`. Backfill from GHL contact custom fields where available. New leads pick up UTMs from the original landing page URL — Meta passes `utm_content={{ad.id}}` automatically when the URL parameters are configured at the account level.
-
-**Action item:** verify the Meta account's URL parameters template includes `utm_content={{ad.id}}` before relying on this for attribution.
+The trigger in 012 handles the linking automatically — sync only needs to upsert into `public.ads` and `public.ad_daily_stats` as it already does.
 
 ---
 
-## 6 · Attribution model
+## 7 · Files to create / modify
 
-Three layers, in order of preference. Use the most specific data available; fall back when missing:
+### Create (new pages)
+- `src/pages/ads/AdsLayout.jsx` — tab shell wrapper
+- `src/pages/ads/AdsList.jsx` — Ads tab (rename of AdPerformance.jsx, plus variant pill)
+- `src/pages/ads/AdsHooks.jsx`
+- `src/pages/ads/AdsBodies.jsx`
+- `src/pages/ads/AdsScenes.jsx`
+- `src/pages/ads/AdsCreators.jsx`
+- `src/pages/ads/ComponentDetail.jsx`
+- `src/pages/ads/VariantDetail.jsx`
+- `src/pages/ads/AdsOrphans.jsx`
+- `src/pages/ads/AdsLegacy.jsx`
 
-1. **Per-ad (best)** — `setter_leads.utm_content = meta_ads.ad_id`. Direct match.
-2. **Per-adset (today)** — `setter_leads.utm_term = meta_ads.adset_id` (already in some leads). Aggregate across all ads in that adset.
-3. **Time-window (fallback)** — leads with no UTM but `created_at` falling on a date when only one ad ran for that audience get attributed proportionally.
+### Create (shared components)
+- `src/components/ads/ComponentTable.jsx` — used by all 4 library tabs
+- `src/components/ads/ComponentCard.jsx` — used in detail pages
+- `src/components/ads/VariantPill.jsx` — used everywhere
+- `src/components/ads/AddComponentModal.jsx` — used by library tabs
 
-The component-level rollup uses the same join, then groups by `meta_ad_components.component_id` rather than `ad_id`. A hook used in 5 ads gets its leads / closes summed across all 5.
+### Modify
+- `src/pages/AdPerformance.jsx` → moved to `src/pages/ads/AdsList.jsx` (and trimmed)
+- `src/pages/AdDetail.jsx` → kept, but move under `src/pages/ads/AdDetail.jsx`
+- `src/App.jsx` — add new routes (replace single `/sales/ads` with the route tree above)
+- `src/components/Layout.jsx` — already has Ads nav entry, no change
+- `src/services/metaAdsSync.js` — add materialized view refresh
 
----
-
-## 7 · UI · pages
-
-New top-level nav entry: **Ads** (sits between "Marketing" and "Sales" in [src/components/Layout.jsx](src/components/Layout.jsx)).
-
-### 7.1 · `/ads` — Active ads dashboard
-Default landing. Editorial layout per OPT design system.
-
-- Filter row: status (Active / Paused / All), date range, campaign, adset, asset type (image / video).
-- Grid of ad cards. Each card:
-  - 16:9 thumbnail (poster frame for video, full image for static)
-  - Ad name · status pill · "Last 7d" sparkline of spend
-  - Three component pills: HOOK · BODY · CALLOUT (filled if tagged, "+ Tag" if not)
-  - Stat row: Spend · CTR · Hook rate · Results · CPA
-  - Click → ad detail page
-- Sort options: highest spend, best CTR, lowest CPA, newest, oldest.
-
-### 7.2 · `/ads/[id]` — Single ad detail
-- Full creative preview (video player or full image).
-- Component assignment block — three slots, each clickable to assign from library or create new.
-- Performance over time: line chart of spend / CTR / CPA over the ad's lifetime.
-- Funnel attribution (from `meta_ad_attribution` view): leads → qualified bookings → live calls → closes → revenue.
-- Notes field for post-run learnings.
-
-### 7.3 · `/ads/library` — Component library
-Three tabs: HOOKS · BODIES · CALLOUTS. Each tab is a sortable table:
-
-| Component | Type | Times Used | Total Spend | Avg CTR | Avg CPA | Best Ad | Created | Status |
-|---|---|---|---|---|---|---|---|---|
-| (preview) | hook | 12 ads | $3,420 | 2.4% | $42 | "Ad name" | 2026-04-12 | Active |
-
-Click row → component detail with every ad it appeared in, charted side-by-side. Upload button at top opens upload modal (see 7.5).
-
-### 7.4 · `/ads/library/[component_id]` — Component detail
-- Asset preview (video or image).
-- All ads using this component, grid view.
-- Performance rollup: weighted average CTR, total spend, total results, blended CPA.
-- Notes (e.g. "burns out after $2k spend" — manual annotations).
-
-### 7.5 · Upload modal
-Triggered from library page or ad detail's "+ Tag" pills.
-
-- Drop zone for file (image up to 30 MB, video up to 100 MB).
-- Type selector: Hook / Body / Callout.
-- Name + description fields.
-- Tags (free-text chips).
-- Copy text field (the spoken/written line).
-- "Save to library" → uploads to Supabase Storage bucket `creative_components/`, inserts row.
-- Optionally: "Save and assign to ad X" if launched from an ad detail page.
-
-### 7.6 · Editorial style notes
-Per [OPT-DESIGN-SYSTEM.md](C:/Users/Ben/.claude/OPT-DESIGN-SYSTEM.md):
-- Newsreader serif for page titles, Inter body, JetBrains Mono for stat labels.
-- Single yellow accent `#f4e14a` for active filters and CTA buttons.
-- Eyebrow labels (`HOOK · BODY · CALLOUT`) in JetBrains Mono uppercase.
-- Bootstrap Icons for iconography (no emojis).
-- "What this means" callouts under headline metrics where the math isn't obvious.
+### Create (DB)
+- `migrations/012_ad_variant_link.sql`
 
 ---
 
-## 8 · Phased rollout
+## 8 · Phased rollout (revised)
 
-### Phase 1 — Read-only ad performance (1-2 days)
-1. Migration: `meta_ads`, `meta_ad_daily_stats` tables + RLS.
-2. Extend `metaAdsSync.js` with `syncMetaAdsAtAdLevel`.
-3. New page `/ads` showing all ads with stats — no component library yet.
-4. Single ad detail page with creative preview + performance chart.
+Each phase is independently shippable. Numbers continue from v1.
 
-**Ships:** ability to see every ad and its performance, without component tagging.
+### Phase 1.5 — 5-tab shell + read-only library tabs (1-2 days)
+*Pre-req: migration 011 applied to Supabase.*
+1. Apply migration 012 (bridge tables — applied in same paste).
+2. Build `AdsLayout` + 5 tab pages reading from existing `library.components` + `library.component_performance`.
+3. Move existing `AdPerformance.jsx` → `AdsList.jsx`, add variant pill.
+4. Build `ComponentDetail`, `VariantDetail`, `AdsOrphans`, `AdsLegacy` as read-only.
 
-### Phase 2 — Component library + tagging (1-2 days)
-5. Migration: `creative_components`, `meta_ad_components` tables.
-6. Library page `/ads/library` — read-only at first.
-7. Component assignment UI on ad detail page.
-8. Component detail page with rollup stats.
+**Ships:** the comprehensive 5-tab UI you asked for, hydrated by whatever's already in the library schema today (the 7 body angles + 7 scenes + 5 creators that were seeded). Hook tab is empty until you start adding hooks. Component detail pages show real weighted performance once any ads are linked.
 
-**Ships:** team can categorize existing ads' components and start seeing rollup data.
+### Phase 2 — Variant linking + parser (0.5 day)
+1. Migration 012's parser runs automatically on every existing + new `public.ads` row.
+2. Backfill: trigger fires on every existing row by running `UPDATE public.ads SET ad_name = ad_name`.
+3. Anything not matched lands in orphan_ads — the operator works through them in the Orphans tab.
 
-### Phase 3 — Upload + creative management (1 day)
-9. Supabase Storage bucket setup.
-10. Upload modal.
-11. Soft-delete / archive flows for components and ads.
+**Ships:** automatic linking of conformant ads to variants. Materialized views populate.
 
-**Ships:** new creatives get into the library before they go live.
+### Phase 3 — Component + variant authoring (1-2 days)
+1. `AddComponentModal` — opens from any library tab, inserts into `library.components`.
+2. `AddVariantModal` — opens from variant tab, inserts into `library.variants` (with 4 component dropdowns).
+3. Asset upload to Supabase Storage `creative_components/` bucket.
+4. Edit / archive flows.
 
-### Phase 4 — Funnel attribution (1-2 days, depends on UTM verification)
-12. Verify Meta URL parameters template.
-13. Add `utm_*` columns to `setter_leads`, backfill from GHL.
-14. Build `meta_ad_attribution` view.
-15. Wire attribution numbers into ad detail and component detail pages.
+**Ships:** full create/edit on both libraries from the UI. The launcher's pre-launch checklist becomes "is the variant in the Library? if not, add it now and then launch in Meta."
 
-**Ships:** "this hook drove $X in closed revenue across 12 ads" — the actual point of the whole thing.
+### Phase 4 — Funnel attribution (1-2 days, depends on UTM)
+1. Verify Meta URL parameters template carries `utm_content={{ad.id}}`.
+2. Add `utm_*` columns to `setter_leads`, backfill from GHL.
+3. Build `library.attribution` view: variant → leads → bookings → closes → revenue.
+4. Wire revenue tiles into Variant Detail and Component Detail.
+
+**Ships:** the actual point — "this hook drove $X in closed revenue across 12 ads."
+
+### Phase 5 — Cohort + funnel analytics (1 day)
+1. Cohort matrix UI (hook × body) — already have `library.cohort_hook_body` materialized view.
+2. Top-of-tab funnel sparkline: which components are trending up over the last 14 days.
+
+**Ships:** the at-a-glance "what's working right now" view that sits above each library tab.
 
 ---
 
-## 9 · Open questions for Ben
+## 9 · Open questions
 
-1. **Asset hosting.** Supabase Storage (cheap, integrated, but slow for large videos) or S3 / Cloudflare R2 (faster, more setup)?
-2. **Component upload — push to Meta?** Phase 3 lets you upload to the library. Should it also push the asset to Meta as a draft creative ready to launch, or stays local-only and you manually upload to Ads Manager?
-3. **FORGE integration.** FORGE generates ad creatives. Should completed FORGE generations auto-populate the component library, or only manual uploads? (Suggest manual for v1, auto in a v2.)
-4. **Multi-platform.** Plan above is Meta-only. TikTok / Google / YouTube use the same component model — worth designing the schema to be platform-agnostic now (`platform` column on `meta_ads` → rename to `ads`)?
-5. **Component types.** Hook / Body / Callout fits video ads cleanly. For static image ads — does "Hook = main image, Body = headline copy, Callout = button text" hold, or do statics get their own taxonomy?
-6. **Permissions.** Anyone with dashboard access can tag components and edit ads, or restrict tagging to a subset (you, marketing lead)?
-7. **Historical backfill.** Phase 1 sync starts from "now". Pull last 90 days of ad insights on first run, or just go forward?
+1. **Hook video assets — where do they live?** Are existing hooks already filmed but not in Supabase Storage, or does each hook component need a re-upload? Affects Phase 3 scope.
+2. **Variant auto-create on orphan resolution?** When operator marks an orphan as "create new variant", the modal pre-fills components from the parsed variant_id. Should non-conformant orphans also be allowed to become variants (bypassing the SOP), or strictly orphan?
+3. **Meta sync cadence** — current plan is hourly via existing `autoSync`. Confirm that's OK, or do you want a different cadence for ad-level sync (which is heavier than current adset-level)?
+4. **Mobile UX for the 5-tab shell** — desktop has space for all 5 + secondary nav. On mobile, do tabs become a horizontal scroll, a dropdown, or a separate menu?
+5. **Performance refresh** — `refresh_materialized_views()` is concurrent so it won't block reads, but on a large dataset it can take 30+ seconds. Worth running async in a background job rather than after every sync?
 
 ---
 
 ## 10 · ELI5
 
-You're building one page where every Facebook ad lives, with the actual creative shown next to its numbers. Each ad is broken into three Lego pieces — the hook (the first 3 seconds), the body (the middle pitch), and the callout (the close). Those pieces live in a separate library, each one knowing how many ads it's been in and how it's doing on average.
+Right now, you have one page (`/sales/ads`) that shows every Meta ad in a single grid. Useful, but flat — no structure, no library, no rollup of "which hooks are winning."
 
-Two questions this answers that nothing else in the dashboard does:
-- **Which specific ad is making us money right now?** — Ad page tells you, including the actual visual you can re-watch.
-- **Which hook style works best across all our ads?** — Library tells you, by averaging the hook's performance everywhere it's been used.
+The new build adds five tabs across the top of that page. Same URL prefix, just five views:
 
-Phase 1 ships the visual ad list. Phase 2 adds the Lego library. Phase 3 lets you upload new pieces. Phase 4 connects ads to actual closed deals so you stop optimizing for clicks and start optimizing for revenue.
+- **Ads** — what you have today, polished, with variant tags so you can see at a glance "this ad uses hook H4.2 and body PROOF."
+- **Hooks** — every hook in your library, ranked by how it actually performs across every ad it's in. Click in to see the hook script, every variant that used it, weighted CTR + hook rate + CPA.
+- **Bodies** — same thing for body angles. The 7 you defined (PROOF / DATA / STORY / etc.) each get a row.
+- **Scenes** — same for visual setups.
+- **Creators** — same for OSO / SOFIA / NATALIE / RESTO-AI / CLIENT.
 
-Total build estimate: **5-7 working days** end-to-end, assuming no surprises with Meta's video URL resolution or UTM template gaps. Each phase is independently shippable.
+Underneath, two automatic things happen:
+1. Every Meta ad name gets parsed for its `H4.2_BA-PROOF_S-OFFICE_OSO_v1` variant ID. If it matches a variant in your library, the ad joins the variant's record. If it doesn't, it goes into the Orphans tab so you can map it manually or ignore it.
+2. Every daily stat from a linked ad flows into `library.performance_daily`, which feeds the rollup tables you see on each library tab. So the numbers update as ads run, and the materialized views get refreshed after each sync.
+
+Phase 3 lets the team add new hooks and variants from the dashboard (no SQL needed). Phase 4 connects ads to closed revenue via UTMs. Phase 5 adds the hook×body cohort matrix you already have a materialized view for.
+
+**Total v2 estimate: 4-7 working days** end-to-end, in independently shippable chunks. Phase 1.5 (the 5-tab UI you asked for, read-only) is 1-2 days and can ship by tomorrow once migration 011 is applied.
