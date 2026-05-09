@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { Loader, ChevronLeft, AlertTriangle, ExternalLink } from 'lucide-react'
+import { Loader, ChevronLeft, AlertTriangle, ExternalLink, Tag } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import VariantPill from '../../components/ads/VariantPill'
+import TagVariantModal from '../../components/ads/TagVariantModal'
 
 const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
 
@@ -30,6 +31,8 @@ export default function AdDetail() {
   const [stats, setStats] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [tagOpen, setTagOpen] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -54,7 +57,7 @@ export default function AdDetail() {
     }
     load()
     return () => { cancelled = true }
-  }, [id])
+  }, [id, reloadKey])
 
   const totals = useMemo(() => {
     const t = stats.reduce((a, s) => ({
@@ -130,8 +133,14 @@ export default function AdDetail() {
           <div>
             <p className="text-[10px] uppercase tracking-wider text-text-400">Ad</p>
             <p className="text-lg font-semibold text-text-primary">{ad.ad_name || ad.ad_id}</p>
-            <div className="mt-1.5">
+            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
               <VariantPill variantId={ad.variant_id} matchStatus={ad.variant_match_status} />
+              <button
+                onClick={() => setTagOpen(true)}
+                className="flex items-center gap-1 text-[10px] text-opt-yellow hover:underline uppercase tracking-wider"
+              >
+                <Tag size={10} /> {ad.variant_id ? 'Re-tag' : 'Tag with variant'}
+              </button>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3 text-xs">
@@ -219,10 +228,14 @@ export default function AdDetail() {
         {!stats.length && <p className="text-xs text-text-400 text-center py-4">No daily insights synced for this ad yet.</p>}
       </div>
 
-      {/* Component tagging placeholder for Phase 2 */}
-      <div className="mt-4 bg-bg-card border border-dashed border-border-default rounded-2xl p-4 text-center text-text-400 text-xs">
-        Component tagging (Hook · Body · Callout) ships in Phase 2 of this feature.
-      </div>
+      <TagVariantModal
+        open={tagOpen}
+        adId={ad.ad_id}
+        adName={ad.ad_name}
+        currentVariantId={ad.variant_id}
+        onClose={() => setTagOpen(false)}
+        onTagged={() => setReloadKey(k => k + 1)}
+      />
     </div>
   )
 }

@@ -53,9 +53,8 @@ export default function VariantDetail() {
       setLoading(true)
       setError(null)
       try {
-        const lib = supabase.schema('library')
-        const { data: v, error: vErr } = await lib
-          .from('variants')
+        const { data: v, error: vErr } = await supabase
+          .from('lib_variants')
           .select('*')
           .eq('variant_id', variantId)
           .maybeSingle()
@@ -64,8 +63,8 @@ export default function VariantDetail() {
 
         const ids = [v.hook_id, v.body_angle_id, v.scene_id, v.creator_id].filter(Boolean)
         const [compsRes, perfRes, adsRes] = await Promise.all([
-          ids.length ? lib.from('components').select('*').in('id', ids) : Promise.resolve({ data: [], error: null }),
-          lib.from('performance_daily').select('*').eq('variant_id', v.id).order('date', { ascending: true }),
+          ids.length ? supabase.from('lib_components').select('*').in('id', ids) : Promise.resolve({ data: [], error: null }),
+          supabase.from('lib_performance_daily').select('*').eq('variant_id', v.id).order('date', { ascending: true }),
           supabase.from('ads').select('*').eq('variant_id', variantId),
         ])
         if (compsRes.error) throw new Error(`Load components failed: ${compsRes.error.message}`)

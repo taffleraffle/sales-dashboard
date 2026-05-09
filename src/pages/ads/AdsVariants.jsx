@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader, AlertTriangle, GitBranch, Search } from 'lucide-react'
+import { Loader, AlertTriangle, GitBranch, Search, Plus } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import AddVariantModal from '../../components/ads/AddVariantModal'
 
 const STATUS_TONE = {
   planned: 'bg-bg-card-hover text-text-400 border-border-default',
@@ -19,29 +20,27 @@ export default function AdsVariants() {
   const [error, setError] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
 
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoading(true)
-      setError(null)
-      try {
-        const { data, error: e } = await supabase
-          .schema('library')
-          .from('variants')
-          .select('*')
-          .order('created_at', { ascending: false })
-        if (e) throw new Error(e.message)
-        if (!cancelled) setRows(data || [])
-      } catch (err) {
-        if (!cancelled) setError(err.message)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const { data, error: e } = await supabase
+        .from('lib_variants')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (e) throw new Error(e.message)
+      setRows(data || [])
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
-    load()
-    return () => { cancelled = true }
   }, [])
+
+  useEffect(() => { load() }, [load])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -54,11 +53,19 @@ export default function AdsVariants() {
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        <GitBranch size={16} className="text-text-400" />
-        <p className="text-xs text-text-secondary">
-          Every assembled variant in the library. A variant is one specific (hook, body angle, scene, creator) combination at a given iteration.
-        </p>
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <div className="flex items-center gap-2 flex-1">
+          <GitBranch size={16} className="text-text-400" />
+          <p className="text-xs text-text-secondary">
+            Every assembled variant. A variant is one specific (hook, body angle, scene, creator) combination at a given iteration.
+          </p>
+        </div>
+        <button
+          onClick={() => { setEditing(null); setModalOpen(true) }}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-opt-yellow rounded-lg hover:bg-opt-yellow/20 whitespace-nowrap"
+        >
+          <Plus size={13} /> Add variant
+        </button>
       </div>
 
       {error && (
@@ -108,6 +115,7 @@ export default function AdsVariants() {
                 <th className="text-left px-3 py-2 font-normal">Meta ad</th>
                 <th className="text-left px-3 py-2 font-normal">Launched</th>
                 <th className="text-left px-3 py-2 font-normal">Created</th>
+                <th className="text-right px-3 py-2 font-normal w-12"></th>
               </tr>
             </thead>
             <tbody>
@@ -132,6 +140,12 @@ export default function AdsVariants() {
                   </td>
                   <td className="px-3 py-2 text-text-400">{v.launched_at ? new Date(v.launched_at).toLocaleDateString() : '—'}</td>
                   <td className="px-3 py-2 text-text-400">{v.created_at ? new Date(v.created_at).toLocaleDateString() : '—'}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => { setEditing(v); setModalOpen(true) }}
+                      className="text-[10px] text-text-400 hover:text-opt-yellow uppercase tracking-wider"
+                    >edit</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -140,8 +154,15 @@ export default function AdsVariants() {
       )}
 
       <p className="text-[10px] text-text-400 mt-2 px-1">
-        {filtered.length} of {rows.length} · variant authoring UI ships in Phase 3
+        {filtered.length} of {rows.length} variants
       </p>
+
+      <AddVariantModal
+        open={modalOpen}
+        existing={editing}
+        onClose={() => { setModalOpen(false); setEditing(null) }}
+        onSaved={() => load()}
+      />
     </div>
   )
 }

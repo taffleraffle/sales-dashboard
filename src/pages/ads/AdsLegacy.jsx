@@ -14,11 +14,24 @@ export default function AdsLegacy() {
       setLoading(true)
       setError(null)
       try {
-        const { data, error: e } = await supabase
-          .schema('library')
-          .from('legacy_ad_mapping')
-          .select('*, variant:variants(variant_id, status)')
+        // No FK join via the view — fetch separately and stitch
+        const { data: mappings, error: mapErr } = await supabase
+          .from('lib_legacy_ad_mapping')
+          .select('*')
           .order('created_at', { ascending: false })
+        if (mapErr) throw new Error(mapErr.message)
+        const variantIds = (mappings || []).map(m => m.variant_id).filter(Boolean)
+        let variantMap = {}
+        if (variantIds.length) {
+          const { data: variants, error: vErr } = await supabase
+            .from('lib_variants')
+            .select('id, variant_id, status')
+            .in('id', variantIds)
+          if (vErr) throw new Error(vErr.message)
+          for (const v of variants || []) variantMap[v.id] = v
+        }
+        const data = (mappings || []).map(m => ({ ...m, variant: variantMap[m.variant_id] || null }))
+        const e = null
         if (e) throw new Error(e.message)
         if (!cancelled) setRows(data || [])
       } catch (err) {

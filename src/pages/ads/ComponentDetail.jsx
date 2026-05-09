@@ -55,10 +55,9 @@ export default function ComponentDetail() {
       setLoading(true)
       setError(null)
       try {
-        const lib = supabase.schema('library')
         const [{ data: c, error: cErr }, { data: p, error: pErr }] = await Promise.all([
-          lib.from('components').select('*').eq('component_id', componentId).maybeSingle(),
-          lib.from('component_performance').select('*').eq('component_id', componentId).maybeSingle(),
+          supabase.from('lib_components').select('*').eq('component_id', componentId).maybeSingle(),
+          supabase.from('lib_component_performance').select('*').eq('component_id', componentId).maybeSingle(),
         ])
         if (cErr) throw new Error(`Load component failed: ${cErr.message}`)
         if (pErr) throw new Error(`Load perf failed: ${pErr.message}`)
@@ -72,8 +71,8 @@ export default function ComponentDetail() {
           : c.type === 'body_angle' ? 'body_angle_id'
           : c.type === 'scene' ? 'scene_id'
           : 'creator_id'
-        const { data: vs, error: vErr } = await lib
-          .from('variants')
+        const { data: vs, error: vErr } = await supabase
+          .from('lib_variants')
           .select('*')
           .eq(slotCol, c.id)
         if (vErr) throw new Error(`Load variants failed: ${vErr.message}`)

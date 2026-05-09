@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader, AlertTriangle, Search } from 'lucide-react'
+import { Loader, AlertTriangle, Search, Plus } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import AddComponentModal from './AddComponentModal'
 
 const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
 
@@ -31,29 +32,48 @@ export default function ComponentTable({ type, title, emptyHint }) {
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState('total_spend_desc')
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      // Read both views in parallel — component_performance gives weighted
+      // rates but only includes components that have linked variants. We also
+      // pull lib_components directly so newly-added rows appear immediately
+      // (with zero stats) before any variants reference them.
+      const [perfRes, compRes] = await Promise.all([
+        supabase.from('lib_component_performance').select('*').eq('type', type),
+        supabase.from('lib_components').select('*').eq('type', type),
+      ])
+      if (perfRes.error) throw new Error(perfRes.error.message)
+      if (compRes.error) throw new Error(compRes.error.message)
+      const perfMap = {}
+      for (const p of perfRes.data || []) perfMap[p.component_id] = p
+      const merged = (compRes.data || []).map(c => ({
+        component_id: c.component_id,
+        component_id_uuid: c.id,
+        type: c.type,
+        label: c.label,
+        status: c.status,
+        ...(perfMap[c.component_id] || {}),
+        // Always overwrite these from lib_components in case a stale perf row exists
+        component_id_uuid_canonical: c.id,
+      }))
+      setRows(merged)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [type])
 
   useEffect(() => {
     let cancelled = false
-    async function load() {
-      setLoading(true)
-      setError(null)
-      try {
-        const { data, error: e } = await supabase
-          .schema('library')
-          .from('component_performance')
-          .select('*')
-          .eq('type', type)
-        if (e) throw new Error(e.message)
-        if (!cancelled) setRows(data || [])
-      } catch (err) {
-        if (!cancelled) setError(err.message)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
+    load().catch(() => {})
     return () => { cancelled = true }
-  }, [type])
+  }, [load])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -84,6 +104,16 @@ export default function ComponentTable({ type, title, emptyHint }) {
           <button onClick={() => setError(null)} className="opacity-70 hover:opacity-100">dismiss</button>
         </div>
       )}
+
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-text-secondary">{filtered.length} of {rows.length} {title.toLowerCase()}</p>
+        <button
+          onClick={() => { setEditing(null); setModalOpen(true) }}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-opt-yellow rounded-lg hover:bg-opt-yellow/20"
+        >
+          <Plus size={13} /> Add {title.replace(/s$/, '').toLowerCase()}
+        </button>
+      </div>
 
       <div className="bg-bg-card border border-border-default rounded-2xl p-3 mb-3 flex flex-col sm:flex-row sm:items-center gap-2">
         <div className="flex gap-1">
@@ -148,6 +178,7 @@ export default function ComponentTable({ type, title, emptyHint }) {
                 <th className="text-right px-3 py-2 font-normal">Hold%</th>
                 <th className="text-right px-3 py-2 font-normal">CTR</th>
                 <th className="text-right px-3 py-2 font-normal">CPA</th>
+                <th className="text-right px-3 py-2 font-normal w-12"></th>
               </tr>
             </thead>
             <tbody>
@@ -173,6 +204,14 @@ export default function ComponentTable({ type, title, emptyHint }) {
                     <td className="px-3 py-2 text-right">{fmtPctRatio(r.weighted_hold_rate)}</td>
                     <td className="px-3 py-2 text-right">{fmtPctRatio(r.weighted_ctr)}</td>
                     <td className="px-3 py-2 text-right text-opt-yellow">{fmt$(r.cpa ? r.cpa * NZD_TO_USD : null)}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        onClick={() => { setEditing(r); setModalOpen(true) }}
+                        className="text-[10px] text-text-400 hover:text-opt-yellow uppercase tracking-wider"
+                      >
+                        edit
+                      </button>
+                    </td>
                   </tr>
                 )
               })}
@@ -182,8 +221,16 @@ export default function ComponentTable({ type, title, emptyHint }) {
       )}
 
       <p className="text-[10px] text-text-400 mt-2 px-1">
-        {filtered.length} of {rows.length} · rates are weighted across every variant that uses the component (not avg-of-avgs)
+        Rates are weighted across every variant that uses the component (not avg-of-avgs)
       </p>
+
+      <AddComponentModal
+        open={modalOpen}
+        type={type}
+        existing={editing}
+        onClose={() => { setModalOpen(false); setEditing(null) }}
+        onSaved={() => load()}
+      />
     </div>
   )
 }

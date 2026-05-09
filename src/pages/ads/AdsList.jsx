@@ -123,20 +123,47 @@ export default function AdsList() {
     }
   }, [days])
 
-  useEffect(() => { reload() }, [reload])
-
   // Auto-sync ad-level data via the global autoSync infrastructure.
   // Triggers on mount + whenever any global sync completes (via subscriber).
   // The sync itself is interval-gated inside autoSync (1h between runs)
   // so visiting the page repeatedly never duplicates work.
   const [lastAdSync, setLastAdSync] = useState(() => getLastSyncTime('metaAds'))
   useEffect(() => {
-    runAutoSync().catch(() => {})
+    let cancelled = false
+    async function bootstrap() {
+      await reload()
+      if (cancelled) return
+      // First load on a fresh project: nothing to read yet. Trigger an
+      // immediate ad-level sync so the user sees data without clicking
+      // anything. Falls through to runAutoSync for the steady-state path.
+      const lastSync = getLastSyncTime('metaAds')
+      if (!lastSync) {
+        setSyncing(true)
+        setSyncMessage('Auto-syncing from Meta…')
+        try {
+          await syncMetaAdsAtAdLevel(90)
+          if (cancelled) return
+          setLastAdSync(Date.now())
+          await reload()
+        } catch (e) {
+          if (!cancelled) setError(`First sync failed: ${e.message}`)
+        } finally {
+          if (!cancelled) {
+            setSyncing(false)
+            if (syncMessageTimerRef.current) clearTimeout(syncMessageTimerRef.current)
+            syncMessageTimerRef.current = setTimeout(() => setSyncMessage(null), 4000)
+          }
+        }
+      } else {
+        runAutoSync().catch(() => {})
+      }
+    }
+    bootstrap()
     const unsub = subscribeSyncStatus(() => {
       setLastAdSync(getLastSyncTime('metaAds'))
       reload().catch(() => {})
     })
-    return unsub
+    return () => { cancelled = true; unsub() }
   }, [reload])
 
   // "Refresh now" — bypass the interval gate. Force a fresh ad-level pull.
@@ -313,8 +340,20 @@ export default function AdsList() {
         <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400">
           {ads.length === 0 ? (
             <div>
-              <p className="text-sm mb-2">No ads synced yet.</p>
-              <p className="text-xs">Auto-sync runs hourly in the background. First sync usually completes within ~30 seconds of opening the dashboard. Click <span className="text-opt-yellow">Refresh now</span> to force a fresh pull.</p>
+              {syncing ? (
+                <>
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <Loader size={14} className="animate-spin text-opt-yellow" />
+                    <p className="text-sm text-opt-yellow">Auto-syncing from Meta…</p>
+                  </div>
+                  <p className="text-xs">First sync usually completes within ~30 seconds. The page will populate automatically when it finishes.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm mb-2">No ads synced yet.</p>
+                  <p className="text-xs">Auto-sync runs hourly in the background and on every dashboard load. First sync usually completes within ~30 seconds. Click <span className="text-opt-yellow">Refresh now</span> if it stalls.</p>
+                </>
+              )}
             </div>
           ) : (
             <p className="text-sm">No ads match the current filter.</p>

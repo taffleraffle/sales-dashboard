@@ -1,35 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader, AlertTriangle, AlertCircle } from 'lucide-react'
+import { Loader, AlertTriangle, AlertCircle, Tag } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import TagVariantModal from '../../components/ads/TagVariantModal'
 
 export default function AdsOrphans() {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [tagging, setTagging] = useState(null) // { ad_id, ad_name } or null
 
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoading(true)
-      setError(null)
-      try {
-        const { data, error: e } = await supabase
-          .schema('library')
-          .from('orphan_ads')
-          .select('*')
-          .order('last_seen', { ascending: false })
-        if (e) throw new Error(e.message)
-        if (!cancelled) setRows(data || [])
-      } catch (err) {
-        if (!cancelled) setError(err.message)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const { data, error: e } = await supabase
+        .from('lib_orphan_ads')
+        .select('*')
+        .order('last_seen', { ascending: false })
+      if (e) throw new Error(e.message)
+      setRows(data || [])
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
-    load()
-    return () => { cancelled = true }
   }, [])
+
+  useEffect(() => { load() }, [load])
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
 
@@ -63,6 +61,7 @@ export default function AdsOrphans() {
                 <th className="text-left px-3 py-2 font-normal">First seen</th>
                 <th className="text-left px-3 py-2 font-normal">Last seen</th>
                 <th className="text-left px-3 py-2 font-normal">Resolved</th>
+                <th className="text-right px-3 py-2 font-normal w-20"></th>
               </tr>
             </thead>
             <tbody>
@@ -80,6 +79,16 @@ export default function AdsOrphans() {
                       ? <span className="text-success text-[10px]">resolved</span>
                       : <span className="text-text-400 text-[10px]">open</span>}
                   </td>
+                  <td className="px-3 py-2 text-right">
+                    {!r.resolved && (
+                      <button
+                        onClick={() => setTagging({ ad_id: r.meta_ad_id, ad_name: r.meta_ad_name })}
+                        className="inline-flex items-center gap-1 text-[10px] text-opt-yellow hover:underline uppercase tracking-wider"
+                      >
+                        <Tag size={10} /> Tag
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -88,8 +97,16 @@ export default function AdsOrphans() {
       )}
 
       <p className="text-[10px] text-text-400 mt-2 px-1">
-        {rows.length} orphan{rows.length === 1 ? '' : 's'} · resolution UI (map to variant / ignore) ships in Phase 3
+        {rows.length} orphan{rows.length === 1 ? '' : 's'} · click Tag to map to a variant or mark ignored
       </p>
+
+      <TagVariantModal
+        open={!!tagging}
+        adId={tagging?.ad_id}
+        adName={tagging?.ad_name}
+        onClose={() => setTagging(null)}
+        onTagged={() => load()}
+      />
     </div>
   )
 }
