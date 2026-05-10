@@ -75,12 +75,42 @@ export async function* chatStream(messages) {
   }
 }
 
-/** Fire the transcribe-ads Edge Function (Whisper backfill). */
+/** Fire the transcribe-ads Edge Function (Whisper backfill of /advideos catalog). */
 export async function triggerTranscribeAds(maxRun = 25) {
   const { data, error } = await supabase.functions.invoke('transcribe-ads', {
     body: { maxRun },
   })
   if (error) throw new Error(error.message || 'transcribe-ads failed')
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
+/**
+ * Upload a source MP4 for a specific ad → Storage → invoke
+ * transcribe-uploaded-ad Edge Function which Whispers it and stores the
+ * transcript keyed by ad_id (so phrase scoring can use it).
+ *
+ * Returns the function response with transcript_preview, duration, etc.
+ */
+export async function uploadAndTranscribeAdVideo(adId, file) {
+  if (!adId) throw new Error('ad_id required')
+  if (!file) throw new Error('file required')
+
+  // Use ad_id as the storage path so re-uploads overwrite cleanly.
+  const ext = (file.name.split('.').pop() || 'mp4').toLowerCase()
+  const path = `${adId}.${ext}`
+
+  // 1. Upload to Storage (upsert = true so re-tries replace the file)
+  const upRes = await supabase.storage
+    .from('ad-source-videos')
+    .upload(path, file, { upsert: true, contentType: file.type || 'video/mp4' })
+  if (upRes.error) throw new Error(`upload failed: ${upRes.error.message}`)
+
+  // 2. Invoke the Edge Function
+  const { data, error } = await supabase.functions.invoke('transcribe-uploaded-ad', {
+    body: { ad_id: adId, storage_path: path },
+  })
+  if (error) throw new Error(error.message || 'transcribe-uploaded-ad failed')
   if (data?.error) throw new Error(data.error)
   return data
 }

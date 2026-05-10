@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Play } from 'lucide-react'
 import StatePill from './StatePill'
 import KPIBadge, { classifyKPI } from './KPIBadge'
+import AdCardUploadButton from './AdCardUploadButton'
 
 /*
   Editorial ad card — one row of `public.ads` rendered as a clickable tile.
@@ -106,6 +107,13 @@ export default function AdCard({ ad }) {
           >
             No thumbnail
           </div>
+        )}
+        {/* Upload-source-MP4 button (top-right) — video ads only */}
+        {ad.asset_type === 'video' && (
+          <AdCardUploadButton
+            adId={ad.ad_id}
+            alreadyTranscribed={ad.has_whisper_transcript}
+          />
         )}
         {/* Play overlay (just visual, click goes to detail) */}
         {ad.video_id && (

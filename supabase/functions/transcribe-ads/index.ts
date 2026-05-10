@@ -1,17 +1,24 @@
 // transcribe-ads — Supabase Edge Function
 //
-// Downloads Meta ad videos and transcribes them via OpenAI Whisper, then
-// upserts the result into library.creative_transcripts as source='whisper_api'.
+// Pivot 2026-05-11: Meta restricts the `source` URL for ad-creative videos
+// (creative.video_id range), so we cannot download the exact videos used in
+// running ads. We CAN download videos from the account's `/advideos` library
+// (the upload catalog). These two catalogs share no IDs but contain the
+// same underlying creative content uploaded by OPT.
 //
-// Called by the dashboard's "Transcribe videos" button on /sales/ads/gallery.
-// Runs incrementally — only transcribes ads that don't already have a
-// whisper_api transcript. Caps each invocation at `maxRun` (default 25) so a
-// single invocation stays under Edge Function 60s wall-clock limit.
+// This function transcribes the /advideos catalog as a brand-voice corpus
+// (stored with ad_id=NULL, meta_video_id=advideo.id, source='whisper_api').
+// The corpus feeds the analyst's "next wave" prompt and is searchable for
+// "what has OPT actually said on camera." Per-ad attribution would require
+// manual MP4 uploads (deferred — option C3 in the plan).
+//
+// Incremental: only transcribes advideos not already in
+// library.creative_transcripts (dedupe via meta_video_id). Caps each invocation
+// at maxRun videos to stay under the 60s wall-clock limit.
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-// CORS inlined (Management-API deploys can't easily resolve `../_shared/cors.ts`).
 const ALLOWED_ORIGINS = [
   'https://sales-dashboard-ftct.onrender.com',
   'http://localhost:5173',
@@ -31,11 +38,11 @@ function handleCors(req: Request): Response | null {
   return null
 }
 
-const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY')
-const META_ACCOUNT = Deno.env.get('META_ADS_ACCOUNT_ID')
-const META_TOKEN = Deno.env.get('META_ADS_ACCESS_TOKEN')
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
-const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const OPENAI_KEY    = Deno.env.get('OPENAI_API_KEY')
+const META_ACCOUNT  = Deno.env.get('META_ADS_ACCOUNT_ID')
+const META_TOKEN    = Deno.env.get('META_ADS_ACCESS_TOKEN')
+const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!
+const SERVICE_KEY   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 serve(async (req) => {
   const cors = handleCors(req)
@@ -55,8 +62,9 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
 
-  // 1. Pull video catalog from Meta
-  const videoMap = new Map<string, { source: string; length: number; title: string }>()
+  // 1. Pull advideos catalog (paginate)
+  type Advideo = { id: string; source: string; length: number; title: string }
+  const catalog: Advideo[] = []
   let url = `https://graph.facebook.com/v21.0/act_${META_ACCOUNT}/advideos?` + new URLSearchParams({
     access_token: META_TOKEN,
     fields: 'id,title,source,length',
@@ -71,50 +79,35 @@ serve(async (req) => {
     }
     const j = await res.json()
     for (const v of j.data || []) {
-      if (v.id && v.source) videoMap.set(v.id, { source: v.source, length: v.length || 0, title: v.title || '' })
+      if (v.id && v.source) catalog.push({ id: v.id, source: v.source, length: v.length || 0, title: v.title || '' })
     }
     url = j.paging?.next || ''
   }
 
-  // 2. Join to public.ads
-  const adsRes = await supabase.from('ads')
-    .select('ad_id, ad_name, raw_payload, asset_type')
-    .eq('asset_type', 'video')
-  if (adsRes.error) return json({ error: `ads read: ${adsRes.error.message}` }, 500)
-
-  const pairs: Array<{ ad_id: string; video_id: string; source: string; length: number }> = []
-  for (const a of adsRes.data || []) {
-    const c: any = a.raw_payload?.creative
-    const vid = c?.video_id || c?.object_story_spec?.video_data?.video_id
-    if (!vid) continue
-    const v = videoMap.get(vid)
-    if (!v) continue
-    pairs.push({ ad_id: a.ad_id, video_id: vid, source: v.source, length: v.length })
-  }
-
-  // 3. Filter to ads without an existing whisper_api transcript
+  // 2. Dedupe: filter to advideos we haven't transcribed yet
   const doneRes = await supabase.from('lib_creative_transcripts')
-    .select('ad_id').eq('source', 'whisper_api')
+    .select('meta_video_id').eq('source', 'whisper_api').not('meta_video_id', 'is', null)
   if (doneRes.error) return json({ error: `transcript read: ${doneRes.error.message}` }, 500)
-  const done = new Set((doneRes.data || []).map((r: any) => r.ad_id))
-  const todo = pairs.filter((p) => !done.has(p.ad_id)).slice(0, maxRun)
+  const done = new Set((doneRes.data || []).map((r: any) => r.meta_video_id))
+  const todo = catalog.filter(v => !done.has(v.id)).slice(0, maxRun)
 
   if (todo.length === 0) {
-    return json({ ok: true, processed: 0, errors: 0, totalPending: 0, message: 'All video ads already transcribed.' })
+    return json({ ok: true, processed: 0, errors: 0, totalPending: 0, catalogSize: catalog.length, message: 'All advideos already transcribed.' })
   }
 
-  // 4. Download + Whisper + upsert
+  // 3. Download + Whisper + upsert
   let processed = 0
   let errors = 0
   const startedAt = Date.now()
-  for (const p of todo) {
+  const errorDetails: string[] = []
+  for (const v of todo) {
     try {
-      const dl = await fetch(p.source)
+      const dl = await fetch(v.source)
       if (!dl.ok) throw new Error(`video download HTTP ${dl.status}`)
       const buf = new Uint8Array(await dl.arrayBuffer())
 
       const form = new FormData()
-      form.append('file', new Blob([buf], { type: 'video/mp4' }), `${p.ad_id}.mp4`)
+      form.append('file', new Blob([buf], { type: 'video/mp4' }), `${v.id}.mp4`)
       form.append('model', 'whisper-1')
       form.append('response_format', 'verbose_json')
       form.append('language', 'en')
@@ -130,43 +123,46 @@ serve(async (req) => {
       }
       const wJson = await wRes.json()
       const fullText = (wJson.text || '').trim()
-      if (!fullText) { errors++; continue }
+      if (!fullText) { errors++; errorDetails.push(`${v.id}: empty transcript`); continue }
       const segments = (wJson.segments || []).map((s: any) => ({
         t0: s.start, t1: s.end, text: s.text.trim(),
       }))
 
-      const up = await supabase.from('lib_creative_transcripts').upsert({
-        ad_id: p.ad_id,
-        meta_video_id: p.video_id,
+      const up = await supabase.from('lib_creative_transcripts').insert({
+        ad_id: null,
+        variant_id: null,
+        meta_video_id: v.id,
         source: 'whisper_api',
         language: 'en',
         full_text: fullText,
         segments,
-        duration_sec: Math.round(p.length || wJson.duration || 0),
-      }, { onConflict: 'ad_id,source' })
+        duration_sec: Math.round(v.length || wJson.duration || 0),
+      })
       if (up.error) {
-        console.error('upsert error', p.ad_id, up.error.message)
         errors++
-      } else {
-        processed++
+        errorDetails.push(`${v.id}: ${up.error.message}`)
+        continue
       }
+      processed++
     } catch (e) {
-      console.error('transcribe error', p.ad_id, (e as Error).message)
       errors++
+      errorDetails.push(`${v.id}: ${(e as Error).message}`)
     }
     if (Date.now() - startedAt > 50_000) break
   }
 
   const remainingRes = await supabase.from('lib_creative_transcripts')
-    .select('ad_id').eq('source', 'whisper_api')
-  const newDone = new Set((remainingRes.data || []).map((r: any) => r.ad_id))
-  const totalPending = pairs.filter((p) => !newDone.has(p.ad_id)).length
+    .select('meta_video_id').eq('source', 'whisper_api').not('meta_video_id', 'is', null)
+  const newDone = new Set((remainingRes.data || []).map((r: any) => r.meta_video_id))
+  const totalPending = catalog.filter(v => !newDone.has(v.id)).length
 
   return json({
     ok: true,
     processed,
     errors,
     totalPending,
+    catalogSize: catalog.length,
     elapsedSec: ((Date.now() - startedAt) / 1000).toFixed(1),
+    errorDetails: errorDetails.slice(0, 5),  // first 5 errors only
   })
 })

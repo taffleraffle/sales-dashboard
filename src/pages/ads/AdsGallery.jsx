@@ -64,7 +64,7 @@ export default function AdsGallery() {
     try {
       const adsRes = await supabase
         .from('ads')
-        .select('ad_id, ad_name, status, variant_id, variant_match_status, thumbnail_url, last_synced_at, first_seen_at')
+        .select('ad_id, ad_name, status, variant_id, variant_match_status, thumbnail_url, asset_type, last_synced_at, first_seen_at')
         .order('first_seen_at', { ascending: false })
         .limit(500)
       if (adsRes.error) throw new Error(adsRes.error.message)
@@ -94,13 +94,25 @@ export default function AdsGallery() {
         }
       }
 
+      // Fetch which ads already have a Whisper transcript so the upload
+      // button can show "already transcribed" state.
+      const transcriptsRes = await supabase
+        .from('lib_creative_transcripts')
+        .select('ad_id')
+        .eq('source', 'whisper_api')
+        .not('ad_id', 'is', null)
+      const transcribedAds = new Set((transcriptsRes.data || []).map(r => r.ad_id))
+
       // TODO Phase E: join lib_variant_state_history to populate variant_state.
-      // For v1 we read library variants directly when match_status='matched'.
       const enriched = ads.map(a => {
         const st = perAd[a.ad_id] || {}
         const ctr = st.impressions > 0 ? (st.clicks / st.impressions) * 100 : null
+        // asset_type comes from public.ads (image / video / carousel / unknown).
+        // Pull it through so AdCard knows whether to show the upload button.
         return {
           ...a,
+          asset_type: a.asset_type || null,
+          has_whisper_transcript: transcribedAds.has(a.ad_id),
           stats: {
             spend: st.spend || 0,
             impressions: st.impressions || 0,
@@ -113,9 +125,6 @@ export default function AdsGallery() {
             leadQualityPct: null,
           },
           variant_state: a.variant_id ? 'bench' : 'concept',
-          // a.thumbnail_url is selected from public.ads above. video_id +
-          // duration_sec aren't stored yet — we'd need a follow-up migration
-          // to add them. For now their absence just hides the play overlay.
           duration_sec: null,
         }
       })

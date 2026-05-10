@@ -41,8 +41,9 @@ if (RENDER_KEY) {
 
 // ── Multipart deploy ────────────────────────────────────────────
 const functions = [
-  { slug: 'transcribe-ads', path: '../supabase/functions/transcribe-ads/index.ts' },
-  { slug: 'ad-analyst',     path: '../supabase/functions/ad-analyst/index.ts' },
+  { slug: 'transcribe-ads',          path: '../supabase/functions/transcribe-ads/index.ts' },
+  { slug: 'transcribe-uploaded-ad',  path: '../supabase/functions/transcribe-uploaded-ad/index.ts' },
+  { slug: 'ad-analyst',              path: '../supabase/functions/ad-analyst/index.ts' },
 ]
 
 for (const fn of functions) {
