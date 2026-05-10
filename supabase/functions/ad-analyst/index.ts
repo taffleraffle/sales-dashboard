@@ -58,48 +58,39 @@ WHO OPT SELLS TO (this is fixed — do not invent other audiences):
   job quality and lead volume. They are NOT agency owners, NOT general SMBs,
   NOT coaches or info-product buyers.
 
-JEREMY HAYNES' THREE PERSPECTIVES for any messaging angle:
-  1. PROBLEMS      — what's actively painful, broken, embarrassing right now
-  2. CIRCUMSTANCES — the specific business situation they're sitting in
-  3. OUTCOMES     — the state they actually want to be in (vivid, specific)
+JEREMY HAYNES' THREE MESSAGING LENSES — every ad can be framed through one of
+these three perspectives:
+  1. PROBLEMS      — speak directly to what's actively painful, broken, or
+                     embarrassing for the prospect right now
+  2. CIRCUMSTANCES — speak to the specific business situation they're sitting
+                     in (revenue stage, what they've tried, what's shifting)
+  3. OUTCOMES      — speak to the vivid, specific end state they want to be in
 
 YOUR JOB
-Read the transcripts and phrase data you receive. Identify the **three** most
-distinct messaging angles that emerge from the language prospects ACTUALLY use.
-Don't invent angles — pull them from the data. Each topic must be supported by
-multiple verbatim quotes; if you can only find one quote for an angle, drop the
-angle and pick a stronger one.
+Read the transcripts and phrase data below. Produce a long, generative list of
+messaging suggestions under each of the three lenses — 6-10 ideas per lens.
+Every idea must be supported by a verbatim quote pulled from the transcripts.
+If you can't ground an idea in a real quote, drop it.
 
-OUTPUT FORMAT (exactly three topics, structured as below):
+OUTPUT FORMAT (exactly three sections, in this order):
 
-## Topic 1: [Specific angle name in 3-6 words]
-**Why this angle works**
-One short paragraph (2-3 sentences) explaining what makes this angle land,
-anchored in what's recurring in the transcripts.
+## Problems
+Brief opener: 1-2 sentences on what kinds of pain are recurring in the calls.
 
-**The problem in their words**
-- "Verbatim quote from a real transcript"
-- "Another verbatim quote"
-- "Third verbatim quote"
-(3-5 quotes, real, attributed only to the words themselves — no names)
+Then 6-10 messaging ideas. Each one in this exact shape (a single bullet):
+- **[Angle name in 3-6 words]** — One sentence explaining the angle. Anchored in: "exact verbatim quote from a transcript". Hook: "an ad hook line you could test under this angle"
 
-**Their circumstances**
-- 3-4 short bullets describing the business context
-- Revenue stage, what they've tried, what's recently shifted
+## Circumstances
+Brief opener: 1-2 sentences on what kinds of business situations keep coming up.
 
-**The outcome they want**
-- 3-4 short bullets describing the state they're chasing
-- Specific numbers when prospects mention them
+Then 6-10 messaging ideas, same bullet shape as above. Anchor each in a real
+quote that proves the circumstance is real.
 
-**Hook lines we could test**
-- 4-6 one-line ad hook ideas grounded in the above
-- Lift prospect phrasings where powerful — don't paraphrase to "make it pretty"
+## Outcomes
+Brief opener: 1-2 sentences on what kinds of end-states prospects describe.
 
-## Topic 2: [...]
-(same structure)
-
-## Topic 3: [...]
-(same structure)
+Then 6-10 messaging ideas, same bullet shape as above. Where prospects gave
+specific numbers ("$100k/month per truck", "100 calls per week"), use them.
 
 VOICE RULES (hard):
 - Pull quotes verbatim. Don't summarize them into prettier prose.
@@ -108,7 +99,7 @@ VOICE RULES (hard):
 - No "X isn't Y, it's Z" reframes. No "Here's the trap…" / "Most owners
   never…" aphorisms. No textbook openers.
 - Editorial em-dashes — like this — not double-dashes.
-- Don't pad. If a section is short, it's short.`
+- Don't pad. If you only have 6 solid ideas for a lens, output 6, not 10.`
 
 const QUICK_PROMPTS: Record<string, string> = {
   in_kpi:            'Tell me which variants are currently in KPI for booked calls. Rank by total booked calls, give a one-line reason for each.',
@@ -204,7 +195,7 @@ serve(async (req) => {
       return json({ error: 'No prospect transcripts found in window — check closer_transcripts table' }, 422)
     }
 
-    const userMsg = `Generate three messaging topics for OPT Digital based on the actual prospect language in the data below. No audience description is provided — the audience is fixed (restoration / plumbing / pool / remodeling contractors). Identify the three strongest angles in the transcripts and structure each one per the system prompt.
+    const userMsg = `Generate a messaging idea list for OPT Digital, organized under Jeremy Haynes' three lenses (Problems · Circumstances · Outcomes). No audience description is provided — the audience is fixed (restoration / plumbing / pool / remodeling contractors). Mine the data below for real prospect language and produce 6-10 ideas under each lens.
 
 === Daniel's prospect-call transcripts (last ${days} days, ${context.transcripts.length} calls) ===
 ${JSON.stringify(context.transcripts, null, 2)}
@@ -215,7 +206,7 @@ ${JSON.stringify(context.topPhrases, null, 2)}
 === Spoken transcripts from OUR filmed creatives (brand voice corpus) ===
 ${JSON.stringify(context.spokenTranscripts, null, 2)}
 
-Produce exactly three topics, in the exact format the system prompt specifies.`
+Output exactly three sections — ## Problems, ## Circumstances, ## Outcomes — each with 6-10 anchored messaging ideas as the system prompt specifies.`
 
     const upstream = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -245,7 +236,36 @@ Produce exactly three topics, in the exact format the system prompt specifies.`
     })
   }
 
-  return json({ error: 'mode must be quick / chat / messaging_topics' }, 400)
+  // ─── messaging_topics_followup: refine the current list via chat ───
+  // Caller passes the full message history including the original assistant
+  // reply. We re-include the same system prompt so Claude stays on-format
+  // and continues to anchor in real transcript quotes.
+  if (mode === 'messaging_topics_followup') {
+    const messages = body.messages
+    if (!Array.isArray(messages) || !messages.length) return json({ error: 'messages array required' }, 400)
+    const upstream = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL, max_tokens: 3000,
+        system: MESSAGING_SYSTEM_PROMPT,
+        messages,
+      }),
+    })
+    if (!upstream.ok) {
+      const err = await upstream.text()
+      return json({ error: `Anthropic: ${upstream.status} ${err.slice(0, 200)}` }, 502)
+    }
+    const j = await upstream.json()
+    const reply = j.content?.[0]?.text || ''
+    return json({ ok: true, reply, usage: j.usage })
+  }
+
+  return json({ error: 'mode must be quick / chat / messaging_topics / messaging_topics_followup' }, 400)
 })
 
 // ── Builder: pull transcripts + phrase data for the messaging-topics mode ──

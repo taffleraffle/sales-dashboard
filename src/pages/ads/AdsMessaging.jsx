@@ -28,18 +28,6 @@ export default function AdsMessaging() {
         <div>
           <span className="eyebrow eyebrow-accent">Library · Messaging</span>
           <h2 className="h3 mt-2" style={{ fontSize: 22 }}>The <em>messaging</em> workshop.</h2>
-          <p
-            className="mt-2"
-            style={{
-              fontFamily: 'var(--mono)',
-              fontSize: 10,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--ink-3)',
-            }}
-          >
-            Empirical phrase ranking · audience-archetype ideation
-          </p>
         </div>
       </div>
 
