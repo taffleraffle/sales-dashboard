@@ -23,6 +23,18 @@ function fmt$(n) {
 function fmtN(n) { return n == null || isNaN(n) ? '—' : Math.round(n).toLocaleString() }
 function fmtX(n) { return n == null || isNaN(n) ? '—' : `${n.toFixed(2)}x` }
 
+// Meta returns thumbnails with `stp=...p64x64...` which is tiny (64px).
+// Stripping the stp param keeps the URL signature intact AND drops the size cap
+// so we get the full-resolution underlying image. Empirically confirmed working.
+function upscaleMetaThumbnail(url) {
+  if (!url) return url
+  try {
+    const u = new URL(url)
+    u.searchParams.delete('stp')
+    return u.toString()
+  } catch { return url }
+}
+
 export default function AdCard({ ad }) {
   const stats = ad.stats || {}
   const spend = stats.spend ?? 0
@@ -80,7 +92,7 @@ export default function AdCard({ ad }) {
       >
         {ad.thumbnail_url ? (
           <img
-            src={ad.thumbnail_url}
+            src={upscaleMetaThumbnail(ad.thumbnail_url)}
             alt={ad.ad_name || 'ad creative'}
             loading="lazy"
             style={{
@@ -158,38 +170,79 @@ export default function AdCard({ ad }) {
 
       {/* Body */}
       <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-        {/* Variant pill / ad name */}
+        {/* Ad name + variant pill */}
         <div>
           <div
             style={{
-              fontFamily: 'var(--mono)',
-              fontSize: 9.5,
-              letterSpacing: '0.1em',
-              color: 'var(--ink-3)',
+              fontFamily: 'var(--serif)',
+              fontSize: 13.5,
+              lineHeight: 1.25,
+              letterSpacing: '-0.005em',
+              color: 'var(--ink)',
               fontWeight: 500,
-              whiteSpace: 'nowrap',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
               overflow: 'hidden',
-              textOverflow: 'ellipsis',
             }}
-            title={ad.variant_id || ad.ad_name}
+            title={ad.ad_name || ''}
           >
-            {ad.variant_id || ad.ad_name?.slice(0, 60) || 'unparsed'}
+            {ad.ad_name || ad.variant_id || 'Unnamed ad'}
           </div>
-          {ad.brand && (
+          {ad.variant_id && (
             <div
               style={{
                 fontFamily: 'var(--mono)',
                 fontSize: 9,
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
+                letterSpacing: '0.1em',
                 color: 'var(--ink-4)',
                 marginTop: 2,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
               }}
+              title={ad.variant_id}
             >
-              {ad.brand}
+              {ad.variant_id}
             </div>
           )}
         </div>
+
+        {/* Campaign + ad set chips */}
+        {(ad.campaign_name || ad.adset_name) && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+            {ad.campaign_name && (
+              <CampaignChip label="Campaign" value={ad.campaign_name} />
+            )}
+            {ad.adset_name && (
+              <CampaignChip label="Ad set" value={ad.adset_name} />
+            )}
+          </div>
+        )}
+
+        {/* Transcript preview (italic serif) when present */}
+        {ad.transcript_preview && (
+          <div
+            style={{
+              fontFamily: 'var(--serif)',
+              fontStyle: 'italic',
+              fontSize: 12,
+              lineHeight: 1.4,
+              color: 'var(--ink-2)',
+              padding: '6px 8px',
+              background: 'var(--accent-soft)',
+              borderLeft: '2px solid var(--accent)',
+              borderRadius: '0 2px 2px 0',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+            title={ad.transcript_preview}
+          >
+            "{ad.transcript_preview}"
+          </div>
+        )}
 
         {/* Headline stats — 2-row of 3 numbers */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
@@ -222,6 +275,48 @@ export default function AdCard({ ad }) {
         </div>
       </div>
     </Link>
+  )
+}
+
+/* Campaign / adset chip — minimal two-line mono label + truncated value. */
+function CampaignChip({ label, value }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: 6,
+        minWidth: 0,
+        fontFamily: 'var(--mono)',
+        fontSize: 9.5,
+        letterSpacing: '0.08em',
+      }}
+      title={`${label}: ${value}`}
+    >
+      <span
+        style={{
+          color: 'var(--ink-4)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.14em',
+          fontSize: 9,
+          flexShrink: 0,
+          minWidth: 50,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          color: 'var(--ink-2)',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {value}
+      </span>
+    </div>
   )
 }
 

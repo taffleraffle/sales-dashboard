@@ -53,6 +53,7 @@ export default function AdsGallery() {
   const [syncing, setSyncing] = useState(false)
   const [stateFilter, setStateFilter] = useState('all')
   const [spendTier, setSpendTier] = useState('all')
+  const [campaignFilter, setCampaignFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [sort, setSort] = useState('spend_desc')
   const [search, setSearch] = useState('')
@@ -64,7 +65,7 @@ export default function AdsGallery() {
     try {
       const adsRes = await supabase
         .from('ads')
-        .select('ad_id, ad_name, status, variant_id, variant_match_status, thumbnail_url, asset_type, last_synced_at, first_seen_at')
+        .select('ad_id, ad_name, status, variant_id, variant_match_status, thumbnail_url, asset_type, campaign_id, campaign_name, adset_id, adset_name, last_synced_at, first_seen_at')
         .order('first_seen_at', { ascending: false })
         .limit(500)
       if (adsRes.error) throw new Error(adsRes.error.message)
@@ -94,25 +95,31 @@ export default function AdsGallery() {
         }
       }
 
-      // Fetch which ads already have a Whisper transcript so the upload
-      // button can show "already transcribed" state.
+      // Pull whisper transcripts that ARE linked to specific ads (C3 uploads).
+      // The C2 corpus has ad_id=NULL so it doesn't surface here.
       const transcriptsRes = await supabase
         .from('lib_creative_transcripts')
-        .select('ad_id')
+        .select('ad_id, full_text')
         .eq('source', 'whisper_api')
         .not('ad_id', 'is', null)
-      const transcribedAds = new Set((transcriptsRes.data || []).map(r => r.ad_id))
+      const transcriptByAd = new Map()
+      for (const r of transcriptsRes.data || []) {
+        transcriptByAd.set(r.ad_id, r.full_text)
+      }
 
       // TODO Phase E: join lib_variant_state_history to populate variant_state.
       const enriched = ads.map(a => {
         const st = perAd[a.ad_id] || {}
         const ctr = st.impressions > 0 ? (st.clicks / st.impressions) * 100 : null
-        // asset_type comes from public.ads (image / video / carousel / unknown).
-        // Pull it through so AdCard knows whether to show the upload button.
+        const transcript = transcriptByAd.get(a.ad_id)
+        // Preview: first 140 chars of the spoken transcript (italic-serif
+        // quote on the card).
+        const transcript_preview = transcript ? transcript.slice(0, 140) : null
         return {
           ...a,
           asset_type: a.asset_type || null,
-          has_whisper_transcript: transcribedAds.has(a.ad_id),
+          has_whisper_transcript: !!transcript,
+          transcript_preview,
           stats: {
             spend: st.spend || 0,
             impressions: st.impressions || 0,
@@ -178,10 +185,18 @@ export default function AdsGallery() {
     }
   }
 
+  // Derive the campaign list from rows for the filter dropdown.
+  const campaigns = useMemo(() => {
+    const set = new Set()
+    for (const r of rows) if (r.campaign_name) set.add(r.campaign_name)
+    return Array.from(set).sort()
+  }, [rows])
+
   const filtered = useMemo(() => {
     let out = rows
     if (statusFilter !== 'all') out = out.filter(r => r.status === statusFilter)
     if (stateFilter !== 'all') out = out.filter(r => r.variant_state === stateFilter)
+    if (campaignFilter !== 'all') out = out.filter(r => r.campaign_name === campaignFilter)
     if (spendTier !== 'all') {
       out = out.filter(r => {
         const s = r.stats.spend
@@ -210,7 +225,7 @@ export default function AdsGallery() {
       return new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime()
     })
     return out
-  }, [rows, statusFilter, stateFilter, spendTier, sort, search])
+  }, [rows, statusFilter, stateFilter, campaignFilter, spendTier, sort, search])
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: analystOpen ? 'minmax(0, 1fr) 380px' : 'minmax(0, 1fr)', gap: 16 }} className="ads-gallery-grid">
@@ -295,6 +310,8 @@ export default function AdsGallery() {
           spendTier={spendTier} setSpendTier={setSpendTier}
           sort={sort} setSort={setSort}
           search={search} setSearch={setSearch}
+          campaignFilter={campaignFilter} setCampaignFilter={setCampaignFilter}
+          campaigns={campaigns}
         />
 
         {/* Error banner */}
@@ -427,6 +444,8 @@ function FilterBar({
   spendTier, setSpendTier,
   sort, setSort,
   search, setSearch,
+  campaignFilter, setCampaignFilter,
+  campaigns,
 }) {
   return (
     <div
@@ -445,6 +464,45 @@ function FilterBar({
       <ChipGroup label="State"   value={stateFilter}  setValue={setStateFilter}  options={STATE_FILTERS} />
       <ChipGroup label="Spend"   value={spendTier}    setValue={setSpendTier}    options={SPEND_TIERS} />
       <ChipGroup label="Sort"    value={sort}         setValue={setSort}         options={SORTS} />
+      {/* Campaign filter — dropdown since there can be many */}
+      {campaigns.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 9,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+              fontWeight: 500,
+              marginRight: 4,
+            }}
+          >
+            Campaign
+          </span>
+          <select
+            value={campaignFilter}
+            onChange={e => setCampaignFilter(e.target.value)}
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.06em',
+              background: 'var(--paper-2)',
+              color: 'var(--ink)',
+              border: '1px solid var(--rule)',
+              borderRadius: 2,
+              padding: '4px 8px',
+              cursor: 'pointer',
+              maxWidth: 240,
+            }}
+          >
+            <option value="all">All campaigns ({campaigns.length})</option>
+            {campaigns.map(c => (
+              <option key={c} value={c}>{c.length > 48 ? c.slice(0, 45) + '…' : c}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div style={{ flex: '1 1 200px', minWidth: 180, display: 'flex', alignItems: 'center', gap: 6 }}>
         <Search size={12} style={{ color: 'var(--ink-3)', flexShrink: 0, marginLeft: 4 }} />
         <input
