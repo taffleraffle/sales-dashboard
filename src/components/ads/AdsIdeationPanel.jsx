@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Sparkles, Loader, RefreshCw, Send } from 'lucide-react'
+import { Sparkles, Loader, RefreshCw, Send, History } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
 /*
@@ -20,28 +20,174 @@ export default function AdsIdeationPanel() {
   const [conversation, setConversation] = useState([]) // [{ role, content }]
   const [followUp, setFollowUp] = useState('')
   const [meta, setMeta] = useState(null)
+  // currentId: the lib_messaging_ideations.id of the row we're currently
+  // viewing/extending. null = nothing loaded yet OR a brand-new generation
+  // not yet saved. When we save the first time we set this; subsequent
+  // follow-ups update the same row.
+  const [currentId, setCurrentId] = useState(null)
+  const [history, setHistory] = useState([])     // [{id, created_at, title, transcript_count, ...}]
+  const [showHistory, setShowHistory] = useState(false)
   const scrollRef = useRef(null)
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [conversation, generating])
 
+  // Load the persisted history on mount and auto-display the most recent one
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase
+        .from('lib_messaging_ideations')
+        .select('id, created_at, title, transcript_count, phrase_count, conversation, initial_reply')
+        .is('archived_at', null)
+        .order('created_at', { ascending: false })
+        .limit(25)
+      if (cancelled || !data || !data.length) return
+      setHistory(data.map(r => ({
+        id: r.id,
+        created_at: r.created_at,
+        title: r.title,
+        transcript_count: r.transcript_count,
+        phrase_count: r.phrase_count,
+      })))
+      // Auto-load most recent so the page never looks empty when Ben returns
+      const top = data[0]
+      const convo = Array.isArray(top.conversation) && top.conversation.length
+        ? top.conversation
+        : [{ role: 'assistant', content: top.initial_reply }]
+      setConversation(convo)
+      setMeta({ transcripts: top.transcript_count, phrases: top.phrase_count })
+      setCurrentId(top.id)
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // Persist the current ideation. Insert on first save, update afterwards so
+  // follow-up exchanges are appended to the same row.
+  async function persistIdeation(convo, m, isNewGen) {
+    try {
+      const initial = convo.find(x => x.role === 'assistant')?.content || ''
+      const title = deriveTitle(initial)
+      if (isNewGen || !currentId) {
+        const { data, error: err } = await supabase
+          .from('lib_messaging_ideations')
+          .insert({
+            initial_reply: initial,
+            conversation: convo,
+            transcript_count: m?.transcripts || null,
+            phrase_count: m?.phrases || null,
+            title,
+          })
+          .select('id, created_at')
+          .single()
+        if (err) throw new Error(err.message)
+        setCurrentId(data.id)
+        setHistory(prev => [{ id: data.id, created_at: data.created_at, title, transcript_count: m?.transcripts, phrase_count: m?.phrases }, ...prev])
+      } else {
+        await supabase
+          .from('lib_messaging_ideations')
+          .update({ conversation: convo, title })
+          .eq('id', currentId)
+      }
+    } catch (e) {
+      console.warn('[ideation] persist failed (non-fatal):', e.message)
+    }
+  }
+
+  const loadHistory = async (id) => {
+    const { data, error: err } = await supabase
+      .from('lib_messaging_ideations')
+      .select('id, conversation, initial_reply, transcript_count, phrase_count')
+      .eq('id', id).single()
+    if (err) { setError(err.message); return }
+    const convo = Array.isArray(data.conversation) && data.conversation.length
+      ? data.conversation
+      : [{ role: 'assistant', content: data.initial_reply }]
+    setConversation(convo)
+    setMeta({ transcripts: data.transcript_count, phrases: data.phrase_count })
+    setCurrentId(id)
+    setShowHistory(false)
+  }
+
+  // Stream the SSE response from the ad-analyst function and update the
+  // assistant message as tokens arrive. Replaces supabase.functions.invoke
+  // which buffers the full body — that was timing out at 60s on the broader
+  // prompt. Now first bytes arrive in 1-2s and content streams in live.
+  async function streamMessagingTopics({ mode, messages }) {
+    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ad-analyst`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify(mode === 'messaging_topics_followup'
+        ? { mode, messages }
+        : { mode }),
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => res.statusText)
+      throw new Error(`ad-analyst ${mode} ${res.status}: ${err.slice(0, 200)}`)
+    }
+    const transcriptCount = parseInt(res.headers.get('X-Transcript-Count') || '0', 10) || null
+    const phraseCount = parseInt(res.headers.get('X-Phrase-Count') || '0', 10) || null
+    const metaFromHeaders = transcriptCount ? { transcripts: transcriptCount, phrases: phraseCount } : null
+    if (metaFromHeaders) setMeta(metaFromHeaders)
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let acc = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6).trim()
+        if (!data || data === '[DONE]') continue
+        try {
+          const json = JSON.parse(data)
+          if (json.type === 'content_block_delta' && json.delta?.text) {
+            acc += json.delta.text
+            // Update conversation state with the in-progress reply
+            setConversation(prev => {
+              const next = [...prev]
+              // Replace the last assistant placeholder, or append a fresh one
+              const lastIdx = next.findIndex((m, i) => m.role === 'assistant' && i === next.length - 1)
+              if (lastIdx >= 0) next[lastIdx] = { role: 'assistant', content: acc }
+              else next.push({ role: 'assistant', content: acc })
+              return next
+            })
+          } else if (json.type === 'error') {
+            throw new Error(`stream error: ${json.error?.message || JSON.stringify(json)}`)
+          }
+        } catch (e) {
+          if (e.message?.startsWith('stream error')) throw e
+          // ignore non-JSON heartbeats etc
+        }
+      }
+    }
+    return { text: acc, meta: metaFromHeaders }
+  }
+
   const generate = async () => {
     setError(null)
     setGenerating(true)
-    setConversation([])
     setMeta(null)
+    setCurrentId(null) // start a fresh row on every Generate
+    setConversation([{ role: 'assistant', content: '' }])
     try {
-      const { data, error: err } = await supabase.functions.invoke('ad-analyst', {
-        body: { mode: 'messaging_topics' },
-      })
-      if (err) throw new Error(err.message || 'messaging_topics failed')
-      if (data?.error) throw new Error(data.error)
-      setConversation([{ role: 'assistant', content: data.reply || '' }])
-      setMeta({ transcripts: data.transcript_count, phrases: data.phrase_count })
+      const { text: finalText, meta: finalMeta } = await streamMessagingTopics({ mode: 'messaging_topics' })
+      const finalConvo = [{ role: 'assistant', content: finalText }]
+      await persistIdeation(finalConvo, finalMeta, true)
     } catch (e) {
       console.error('[ideation] generate failed:', e)
       setError(e.message)
+      setConversation([])
     } finally {
       setGenerating(false)
     }
@@ -51,16 +197,21 @@ export default function AdsIdeationPanel() {
     if (!followUp.trim() || generating) return
     setError(null)
     setGenerating(true)
-    const nextHistory = [...conversation, { role: 'user', content: followUp.trim() }]
-    setConversation(nextHistory)
+    const userTurn = followUp.trim()
     setFollowUp('')
+    const baseHistory = [
+      ...conversation,
+      { role: 'user', content: userTurn },
+      { role: 'assistant', content: '' },
+    ]
+    setConversation(baseHistory)
     try {
-      const { data, error: err } = await supabase.functions.invoke('ad-analyst', {
-        body: { mode: 'messaging_topics_followup', messages: nextHistory.map(({ role, content }) => ({ role, content })) },
+      const { text: finalText } = await streamMessagingTopics({
+        mode: 'messaging_topics_followup',
+        messages: baseHistory.slice(0, -1).map(({ role, content }) => ({ role, content })),
       })
-      if (err) throw new Error(err.message || 'follow-up failed')
-      if (data?.error) throw new Error(data.error)
-      setConversation(prev => [...prev, { role: 'assistant', content: data.reply || '' }])
+      const finalConvo = [...baseHistory.slice(0, -1), { role: 'assistant', content: finalText }]
+      await persistIdeation(finalConvo, meta, false)
     } catch (e) {
       console.error('[ideation] follow-up failed:', e)
       setError(e.message)
@@ -79,7 +230,7 @@ export default function AdsIdeationPanel() {
 
   return (
     <div>
-      {/* Top control row — single Generate button + status line.
+      {/* Top control row — status line + history picker + generate button.
           No redundant eyebrow/headline — user is already on the "Ideation"
           sub-tab so we don't repeat the label inside the panel. */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
@@ -95,32 +246,122 @@ export default function AdsIdeationPanel() {
           Jeremy Haynes framework · Problems · Circumstances · Outcomes
           {meta ? ` · ${meta.transcripts} calls + ${meta.phrases} phrases` : ''}
         </div>
-        <button
-          onClick={generate}
-          disabled={generating}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '10px 18px',
-            background: generating ? 'var(--paper-2)' : 'var(--accent)',
-            color: 'var(--ink)',
-            border: '1px solid',
-            borderColor: generating ? 'var(--rule)' : 'var(--accent)',
-            borderRadius: 3,
-            fontFamily: 'var(--mono)',
-            fontSize: 11,
-            letterSpacing: '0.1em',
-            textTransform: 'uppercase',
-            fontWeight: 600,
-            cursor: generating ? 'wait' : 'pointer',
-          }}
-        >
-          {generating
-            ? <Loader size={13} className="animate-spin" />
-            : conversation.length ? <RefreshCw size={13} /> : <Sparkles size={13} />}
-          {generating ? 'Reading transcripts…' : conversation.length ? 'Regenerate' : 'Generate'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+          {history.length > 0 && (
+            <>
+              <button
+                onClick={() => setShowHistory(v => !v)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '10px 14px',
+                  background: 'var(--paper-2)',
+                  color: 'var(--ink-2)',
+                  border: '1px solid var(--rule)',
+                  borderRadius: 3,
+                  fontFamily: 'var(--mono)',
+                  fontSize: 11,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                <History size={12} />
+                History · {history.length}
+              </button>
+              {showHistory && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: 4,
+                    width: 360,
+                    maxHeight: 400,
+                    overflowY: 'auto',
+                    background: 'var(--paper)',
+                    border: '1px solid var(--rule)',
+                    borderRadius: 3,
+                    boxShadow: '0 6px 20px rgba(10,10,10,0.08)',
+                    zIndex: 10,
+                  }}
+                >
+                  {history.map(h => (
+                    <button
+                      key={h.id}
+                      onClick={() => loadHistory(h.id)}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '10px 14px',
+                        background: h.id === currentId ? 'var(--accent-soft)' : 'transparent',
+                        border: 'none',
+                        borderBottom: '1px solid var(--rule)',
+                        cursor: 'pointer',
+                        color: 'var(--ink)',
+                      }}
+                      onMouseEnter={e => { if (h.id !== currentId) e.currentTarget.style.background = 'var(--paper-2)' }}
+                      onMouseLeave={e => { if (h.id !== currentId) e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: 'var(--serif)',
+                          fontSize: 13,
+                          lineHeight: 1.3,
+                          color: 'var(--ink)',
+                          fontWeight: 500,
+                          marginBottom: 3,
+                        }}
+                      >
+                        {h.title || 'Untitled ideation'}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: 'var(--mono)',
+                          fontSize: 9,
+                          letterSpacing: '0.1em',
+                          color: 'var(--ink-4)',
+                        }}
+                      >
+                        {formatDate(h.created_at)}
+                        {h.transcript_count ? ` · ${h.transcript_count} calls` : ''}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          <button
+            onClick={generate}
+            disabled={generating}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 18px',
+              background: generating ? 'var(--paper-2)' : 'var(--accent)',
+              color: 'var(--ink)',
+              border: '1px solid',
+              borderColor: generating ? 'var(--rule)' : 'var(--accent)',
+              borderRadius: 3,
+              fontFamily: 'var(--mono)',
+              fontSize: 11,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              fontWeight: 600,
+              cursor: generating ? 'wait' : 'pointer',
+            }}
+          >
+            {generating
+              ? <Loader size={13} className="animate-spin" />
+              : conversation.length ? <RefreshCw size={13} /> : <Sparkles size={13} />}
+            {generating ? 'Reading transcripts…' : conversation.length ? 'New generation' : 'Generate'}
+          </button>
+        </div>
       </div>
 
       {/* Error banner */}
@@ -172,10 +413,11 @@ export default function AdsIdeationPanel() {
         </div>
       )}
 
-      {/* Lens sections from the latest assistant message */}
+      {/* Lens sections from the latest assistant message.
+          "Other patterns" is optional — only rendered if the model produced it. */}
       {lenses && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-          {['Problems', 'Circumstances', 'Outcomes'].map(name => (
+          {['Problems', 'Circumstances', 'Outcomes', 'Other patterns'].map(name => (
             <LensSection key={name} name={name} block={lenses[name.toLowerCase()]} />
           ))}
         </div>
@@ -307,19 +549,20 @@ export default function AdsIdeationPanel() {
 */
 function parseLenses(text) {
   if (!text) return null
-  const want = ['Problems', 'Circumstances', 'Outcomes']
-  const headerRe = /(?:^|\n)##\s*(Problems|Circumstances|Outcomes)\s*\n/gi
+  const required = ['Problems', 'Circumstances', 'Outcomes']
+  // Matches "## Problems", "## Circumstances", "## Outcomes", and optionally
+  // "## Other patterns" (case-insensitive). Captures the section name.
+  const headerRe = /(?:^|\n)##\s*(Problems|Circumstances|Outcomes|Other\s+patterns)\s*(?:\(optional\))?\s*\n/gi
   const matches = [...text.matchAll(headerRe)]
   if (matches.length < 3) return null
 
   const result = {}
   for (let i = 0; i < matches.length; i++) {
-    const name = matches[i][1].toLowerCase()
+    const name = matches[i][1].toLowerCase().replace(/\s+/g, ' ').trim()
     const start = matches[i].index + matches[i][0].length
     const end = i + 1 < matches.length ? matches[i + 1].index : text.length
     const block = text.slice(start, end).trim()
 
-    // Split into pre-bullet opener vs bullet list. First bullet starts at "- ".
     const firstBulletIdx = block.search(/(?:^|\n)\s*-\s+/)
     const opener = (firstBulletIdx > 0 ? block.slice(0, firstBulletIdx) : '').trim()
     const bulletText = firstBulletIdx >= 0 ? block.slice(firstBulletIdx) : ''
@@ -329,31 +572,85 @@ function parseLenses(text) {
     result[name] = { opener, ideas }
   }
 
-  // Require all three lenses to render
-  if (!want.every(w => result[w.toLowerCase()])) return null
+  if (!required.every(w => result[w.toLowerCase()])) return null
   return result
 }
 
+/*
+  Parse a single bullet line shaped as:
+    **Angle name** — Sentence explanation. Anchored in: "q1" · "q2" · "q3". Hook: "hook line"
+  Returns { name, text, quotes: [...], hook }.
+  Tolerates: single quote without separator, smart-quote characters, missing
+  hook, missing anchor.
+*/
 function parseIdeaLine(line) {
-  // Strip leading "- "
   const body = line.replace(/^\s*-\s*/, '').trim()
   if (!body) return null
 
-  // **Angle name** — sentence. Anchored in: "quote". Hook: "hook"
-  // We extract these four pieces; tolerate variations in punctuation.
+  // 1. Pull the bold angle name from the front
   const nameMatch = body.match(/^\*\*([^*]+?)\*\*\s*(?:—|-|–|:)?\s*/)
   const name = nameMatch ? nameMatch[1].trim() : null
   let rest = nameMatch ? body.slice(nameMatch[0].length) : body
 
-  const anchorMatch = rest.match(/Anchored\s+in:?\s*["“]?([^"”\n]+?)["”]?(?=\s*(?:Hook|$))/i)
-  const anchor = anchorMatch ? anchorMatch[1].trim() : null
-  if (anchorMatch) rest = rest.slice(0, anchorMatch.index).trim()
+  // 2. Split off the Hook section if present (always at the end)
+  let hook = null
+  const hookMatch = rest.match(/(?:^|\s)Hook:?\s*(.+?)\s*$/i)
+  if (hookMatch) {
+    hook = hookMatch[1].trim().replace(/^["“]|["”]\s*$/g, '')
+    rest = rest.slice(0, hookMatch.index).trim()
+  }
 
-  const hookMatch = body.match(/Hook:?\s*["“]?([^"”\n]+?)["”]?\s*$/i)
-  const hook = hookMatch ? hookMatch[1].trim() : null
+  // 3. Split off the Anchored-in section
+  let quotes = []
+  const anchorMatch = rest.match(/(?:^|\s)Anchored\s+in:?\s*(.+?)\s*$/i)
+  if (anchorMatch) {
+    const anchorBody = anchorMatch[1].trim().replace(/\.$/, '')
+    // Quotes may be separated by " · " (middle dot, our preferred), " | ",
+    // " ; ", or " and ". We also accept multi-quote strings where each is
+    // wrapped in straight or smart double-quotes.
+    quotes = extractQuotes(anchorBody)
+    rest = rest.slice(0, anchorMatch.index).trim()
+  }
 
-  const text = rest.replace(/\s+(?:Hook|Anchored).*$/i, '').trim()
-  return { name, text, anchor, hook }
+  const text = rest.replace(/[.\s]+$/, '').trim()
+  return { name, text, quotes, hook }
+}
+
+function deriveTitle(text) {
+  if (!text) return null
+  // Pick the first **bold** angle name from the Problems section as a title
+  const m = text.match(/##\s*Problems[\s\S]*?-\s*\*\*([^*]+?)\*\*/i)
+  if (m) return m[1].trim().slice(0, 80)
+  return null
+}
+
+function formatDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  if (sameDay) return `Today, ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' })
+}
+
+function extractQuotes(s) {
+  // First try: extract every "..." or "..." substring.
+  const QUOTE_RE = /["“]([^"”]+?)["”]/g
+  const out = []
+  let m
+  while ((m = QUOTE_RE.exec(s)) !== null) {
+    const q = m[1].trim()
+    if (q) out.push(q)
+  }
+  if (out.length) return out
+  // Fallback: split on " · " / " | " / " ; " and treat each part as a quote,
+  // stripping any stray quote chars.
+  return s
+    .split(/\s+[·|;]\s+/)
+    .map(t => t.replace(/^["“]|["”]\s*$/g, '').trim())
+    .filter(Boolean)
 }
 
 function LensSection({ name, block }) {
@@ -417,7 +714,7 @@ function IdeaRow({ idea }) {
         borderRadius: 3,
       }}
     >
-      {/* Left: the idea + anchor */}
+      {/* Left: the idea + supporting quotes */}
       <div>
         {idea.name && (
           <div
@@ -440,26 +737,30 @@ function IdeaRow({ idea }) {
               fontSize: 13.5,
               lineHeight: 1.5,
               color: 'var(--ink-2)',
-              marginBottom: idea.anchor ? 6 : 0,
+              marginBottom: idea.quotes?.length ? 8 : 0,
             }}
           >
             {idea.text}
           </div>
         )}
-        {idea.anchor && (
-          <div
-            style={{
-              fontFamily: 'var(--serif)',
-              fontSize: 12.5,
-              lineHeight: 1.45,
-              fontStyle: 'italic',
-              color: 'var(--ink-3)',
-              borderLeft: '2px solid var(--accent)',
-              paddingLeft: 8,
-              marginTop: 4,
-            }}
-          >
-            "{idea.anchor}"
+        {idea.quotes && idea.quotes.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+            {idea.quotes.map((q, i) => (
+              <div
+                key={i}
+                style={{
+                  fontFamily: 'var(--serif)',
+                  fontSize: 12.5,
+                  lineHeight: 1.45,
+                  fontStyle: 'italic',
+                  color: 'var(--ink-3)',
+                  borderLeft: '2px solid var(--accent)',
+                  paddingLeft: 8,
+                }}
+              >
+                "{q}"
+              </div>
+            ))}
           </div>
         )}
       </div>

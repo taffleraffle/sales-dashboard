@@ -68,38 +68,69 @@ these three perspectives:
 
 YOUR JOB
 Read the transcripts and phrase data below. Produce a long, generative list of
-messaging suggestions under each of the three lenses — 6-10 ideas per lens.
-Every idea must be supported by a verbatim quote pulled from the transcripts.
-If you can't ground an idea in a real quote, drop it.
+messaging suggestions under each lens — aim for 10-15 ideas per lens. Go wide.
+The data has 50 prospect calls — there's much more variety in there than the
+top 3-5 themes. Cover what's frequent AND what's less-frequent-but-vivid.
 
-OUTPUT FORMAT (exactly three sections, in this order):
+DIMENSIONS TO COVER (don't restrict to the top recurring pain — go broad):
+- Service-line specifics: water damage, mold remediation, fire restoration,
+  sewer line, drain cleaning, plumbing emergencies, pool service / resurfacing,
+  kitchen / bath remodels — any specific service prospects mention wanting more
+  of, or competitors crushing them on
+- Triggering moments: lost a major contract, franchise breakup, new business
+  launch, fired the last agency, slow season, season-of-year specific demand
+- Competitor / vendor mentions: agencies that burned them, Thumbtack /
+  Angie's / Networx as lead sources, TPA dependency, ServiceTitan / CRM gaps
+- Geographic / market dynamics: oversaturated market, undeserved suburb,
+  Greensboro-specific, regional language
+- Owner-stage dynamics: doing it themselves vs hired a marketing person,
+  truck count, crew size, scaling vs stuck
+- Money specifics: amounts they're spending, amounts they want to hit, ROI
+  failures with specific dollar figures
+- Anything else recurring that doesn't fit cleanly above
+
+EVERY IDEA MUST HAVE:
+- A short, distinctive name (3-6 words, no clichés)
+- One sentence explaining the angle
+- 2-4 verbatim supporting quotes from the transcripts (NOT one)
+- A hook line you could test as an ad opener
+
+If you can't ground an idea in at least 2 real quotes, drop it.
+
+OUTPUT FORMAT (exactly three sections required, optional fourth):
 
 ## Problems
-Brief opener: 1-2 sentences on what kinds of pain are recurring in the calls.
+Brief opener: 1-2 sentences on the pain landscape.
 
-Then 6-10 messaging ideas. Each one in this exact shape (a single bullet):
-- **[Angle name in 3-6 words]** — One sentence explaining the angle. Anchored in: "exact verbatim quote from a transcript". Hook: "an ad hook line you could test under this angle"
+Then 10-15 messaging ideas, each as a single bullet in this exact shape:
+- **[Angle name]** — One sentence explaining the angle. Anchored in: "first verbatim quote" · "second verbatim quote" · "third quote if applicable". Hook: "an ad hook line to test"
 
 ## Circumstances
-Brief opener: 1-2 sentences on what kinds of business situations keep coming up.
+Brief opener: 1-2 sentences on the situations prospects sit in.
 
-Then 6-10 messaging ideas, same bullet shape as above. Anchor each in a real
-quote that proves the circumstance is real.
+Then 10-15 messaging ideas, same bullet shape. Cover service-line specifics,
+triggering moments, business-stage variations.
 
 ## Outcomes
-Brief opener: 1-2 sentences on what kinds of end-states prospects describe.
+Brief opener: 1-2 sentences on the end-states prospects describe.
 
-Then 6-10 messaging ideas, same bullet shape as above. Where prospects gave
-specific numbers ("$100k/month per truck", "100 calls per week"), use them.
+Then 10-15 messaging ideas, same bullet shape. Where prospects gave specific
+numbers ("$100k/month per truck", "100 calls per week"), USE them in the hook.
+
+## Other patterns (optional)
+If there are recurring patterns that don't cleanly fit the three lenses —
+e.g. specific service-line opportunities, competitor reframes, geographic
+plays, persona variants — surface them here, same bullet shape. 5-10 ideas.
 
 VOICE RULES (hard):
 - Pull quotes verbatim. Don't summarize them into prettier prose.
+- Multi-quote separator is " · " (middle dot with spaces) — see the format.
 - No marketing-speak ("level up", "crush it", "unleash", "unlock") unless
   prospects themselves use the word.
 - No "X isn't Y, it's Z" reframes. No "Here's the trap…" / "Most owners
   never…" aphorisms. No textbook openers.
 - Editorial em-dashes — like this — not double-dashes.
-- Don't pad. If you only have 6 solid ideas for a lens, output 6, not 10.`
+- Don't pad. If you only have 8 solid ideas for a lens, output 8.`
 
 const QUICK_PROMPTS: Record<string, string> = {
   in_kpi:            'Tell me which variants are currently in KPI for booked calls. Rank by total booked calls, give a one-line reason for each.',
@@ -195,7 +226,7 @@ serve(async (req) => {
       return json({ error: 'No prospect transcripts found in window — check closer_transcripts table' }, 422)
     }
 
-    const userMsg = `Generate a messaging idea list for OPT Digital, organized under Jeremy Haynes' three lenses (Problems · Circumstances · Outcomes). No audience description is provided — the audience is fixed (restoration / plumbing / pool / remodeling contractors). Mine the data below for real prospect language and produce 6-10 ideas under each lens.
+    const userMsg = `Generate a broad messaging idea list for OPT Digital, organized under Jeremy Haynes' three lenses. No audience description is provided — the audience is fixed (restoration / plumbing / pool / remodeling contractors). Mine the data below for real prospect language and produce 10-15 ideas under each lens, plus an optional "Other patterns" section for cross-cutting themes (service lines, competitor reframes, geographic plays, etc).
 
 === Daniel's prospect-call transcripts (last ${days} days, ${context.transcripts.length} calls) ===
 ${JSON.stringify(context.transcripts, null, 2)}
@@ -206,8 +237,12 @@ ${JSON.stringify(context.topPhrases, null, 2)}
 === Spoken transcripts from OUR filmed creatives (brand voice corpus) ===
 ${JSON.stringify(context.spokenTranscripts, null, 2)}
 
-Output exactly three sections — ## Problems, ## Circumstances, ## Outcomes — each with 6-10 anchored messaging ideas as the system prompt specifies.`
+Output: ## Problems, ## Circumstances, ## Outcomes (required, 10-15 ideas each, each idea anchored in 2-4 verbatim quotes). Optional ## Other patterns (5-10 ideas, cross-cutting). Every idea ends with a Hook: line.`
 
+    // Stream the response. The broader prompt + corpus pushes us close to the
+    // 60s Edge Function wall clock when we wait for the full JSON body, so we
+    // pass Anthropic's SSE through and let the browser render incrementally.
+    // The first bytes ship in 1-2s — no more timeout drops.
     const upstream = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -216,30 +251,30 @@ Output exactly three sections — ## Problems, ## Circumstances, ## Outcomes —
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: ANTHROPIC_MODEL, max_tokens: 4000,
+        model: ANTHROPIC_MODEL, max_tokens: 6000,
         system: MESSAGING_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMsg }],
+        stream: true,
       }),
     })
     if (!upstream.ok) {
       const err = await upstream.text()
       return json({ error: `Anthropic: ${upstream.status} ${err.slice(0, 200)}` }, 502)
     }
-    const j = await upstream.json()
-    const reply = j.content?.[0]?.text || ''
-    return json({
-      ok: true,
-      reply,
-      usage: j.usage,
-      transcript_count: context.transcripts.length,
-      phrase_count: context.topPhrases.length,
+    return new Response(upstream.body, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Transcript-Count': String(context.transcripts.length),
+        'X-Phrase-Count': String(context.topPhrases.length),
+      },
     })
   }
 
   // ─── messaging_topics_followup: refine the current list via chat ───
-  // Caller passes the full message history including the original assistant
-  // reply. We re-include the same system prompt so Claude stays on-format
-  // and continues to anchor in real transcript quotes.
+  // Streams for consistency with messaging_topics.
   if (mode === 'messaging_topics_followup') {
     const messages = body.messages
     if (!Array.isArray(messages) || !messages.length) return json({ error: 'messages array required' }, 400)
@@ -251,18 +286,24 @@ Output exactly three sections — ## Problems, ## Circumstances, ## Outcomes —
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: ANTHROPIC_MODEL, max_tokens: 3000,
+        model: ANTHROPIC_MODEL, max_tokens: 4000,
         system: MESSAGING_SYSTEM_PROMPT,
         messages,
+        stream: true,
       }),
     })
     if (!upstream.ok) {
       const err = await upstream.text()
       return json({ error: `Anthropic: ${upstream.status} ${err.slice(0, 200)}` }, 502)
     }
-    const j = await upstream.json()
-    const reply = j.content?.[0]?.text || ''
-    return json({ ok: true, reply, usage: j.usage })
+    return new Response(upstream.body, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    })
   }
 
   return json({ error: 'mode must be quick / chat / messaging_topics / messaging_topics_followup' }, 400)
@@ -277,6 +318,9 @@ async function buildIdeationContext(supabase: any, days: number) {
     const d = new Date(); d.setDate(d.getDate() - days)
     return d.toISOString().split('T')[0]
   })()
+  // Wide pull — 50 prospect calls so the model has enough surface area to
+  // pull multiple quotes per idea AND to cover service-line + geographic
+  // breadth beyond just the top recurring themes.
   const trRes = await supabase.from('closer_transcripts')
     .select('prospect_name, prospect_email, meeting_date, duration_seconds, summary, outcome, objections')
     .eq('closer_id', '76f61d92-83d8-45ec-87a7-82b0dc6d607e')
@@ -284,20 +328,20 @@ async function buildIdeationContext(supabase: any, days: number) {
     .not('prospect_email', 'is', null)
     .not('summary', 'is', null)
     .gte('meeting_date', since)
-    .order('meeting_date', { ascending: false }).limit(25)
+    .order('meeting_date', { ascending: false }).limit(40)
 
-  // Top phrases from existing ad copy (carries weight signal — high
-  // delta_vs_library = phrases that over-index for booking conversion)
+  // Top phrases — 50 deep so service-line and competitor mentions surface
+  // (delta_vs_library ranks; high = over-indexes for booking conversion)
   const phRes = await supabase.from('lib_phrase_performance')
     .select('phrase, ngram_size, mean_perf_score, delta_vs_library, variants_count, total_spend')
-    .order('delta_vs_library', { ascending: false }).limit(30)
+    .order('delta_vs_library', { ascending: false }).limit(50)
 
   // Spoken transcripts (brand voice corpus from C2)
   const spRes = await supabase.from('lib_creative_transcripts')
     .select('meta_video_id, duration_sec, full_text')
     .eq('source', 'whisper_api')
     .not('full_text', 'is', null)
-    .limit(30)
+    .limit(40)
 
   return {
     transcripts: trRes.data || [],
