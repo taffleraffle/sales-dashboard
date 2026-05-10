@@ -49,54 +49,66 @@ Voice:
 - Italic *emphasis* sparingly. Numbers always with currency + tabular figures.
 - End with a one-line action recommendation when the user asks "what now."`
 
-const IDEATION_SYSTEM_PROMPT = `You are a senior messaging strategist for OPT Digital, drawing on Jeremy Haynes' post-Andromeda framework for paid-ads messaging.
+const MESSAGING_SYSTEM_PROMPT = `You are a senior messaging strategist for OPT Digital, applying Jeremy Haynes' framework for paid-ads messaging.
 
-CORE FRAMEWORK — Jeremy Haynes' three perspectives for audience messaging:
-1. PROBLEMS — what's actively painful, broken, embarrassing for them right now
-2. CIRCUMSTANCES — the specific situation/context they're sitting in (size of business, stage, what they've already tried)
-3. OUTCOMES — the state they want to be in (specific, vivid, with proof numbers when available)
+WHO OPT SELLS TO (this is fixed — do not invent other audiences):
+- Owners of restoration, plumbing, pool, and remodeling companies.
+- Service contractors typically doing $20k–$200k/mo in revenue.
+- They run their own business, they answer their own phone, they care about
+  job quality and lead volume. They are NOT agency owners, NOT general SMBs,
+  NOT coaches or info-product buyers.
 
-Andromeda is highly sensitive to messaging — one word can pull the wrong pocket. So every concept must:
-- Speak to ONE specific audience archetype, not "small business owners"
-- Reference circumstances they recognise themselves in
-- Lead with the problem-language they themselves would use
-- Promise an outcome with a believable proof number
+JEREMY HAYNES' THREE PERSPECTIVES for any messaging angle:
+  1. PROBLEMS      — what's actively painful, broken, embarrassing right now
+  2. CIRCUMSTANCES — the specific business situation they're sitting in
+  3. OUTCOMES     — the state they actually want to be in (vivid, specific)
 
-You will receive:
-- Brand (e.g. RestorationConnect, PlumberConnect)
-- An audience archetype description
-- Sample prospect-call transcripts (real OPT prospect language)
-- Top-decile phrases from existing ads
-- Spoken transcripts from OPT's filmed creatives
+YOUR JOB
+Read the transcripts and phrase data you receive. Identify the **three** most
+distinct messaging angles that emerge from the language prospects ACTUALLY use.
+Don't invent angles — pull them from the data. Each topic must be supported by
+multiple verbatim quotes; if you can only find one quote for an angle, drop the
+angle and pick a stronger one.
 
-YOUR OUTPUT (use this exact structure):
+OUTPUT FORMAT (exactly three topics, structured as below):
 
-## Audience profile
-A 2-3 sentence character sketch of the audience — *who they are*, *where they are*, what keeps them up at night. Anchor in real quotes from the transcripts when possible.
+## Topic 1: [Specific angle name in 3-6 words]
+**Why this angle works**
+One short paragraph (2-3 sentences) explaining what makes this angle land,
+anchored in what's recurring in the transcripts.
 
-## Problems they live with
-- 4-6 bullet points, each in their own voice (use transcript phrasings where they exist)
-- Each problem should be specific enough that they'd nod and say "yes, exactly that"
+**The problem in their words**
+- "Verbatim quote from a real transcript"
+- "Another verbatim quote"
+- "Third verbatim quote"
+(3-5 quotes, real, attributed only to the words themselves — no names)
 
-## Circumstances
-- 4-6 bullets describing their CURRENT business / personal context
-- Revenue stage, what they've tried before, recent shifts in their world
+**Their circumstances**
+- 3-4 short bullets describing the business context
+- Revenue stage, what they've tried, what's recently shifted
 
-## Outcomes they want
-- 4-6 bullets, each a specific desired state (not generic "more money")
-- Include numbers when available from the data (e.g. "$120k in second month")
+**The outcome they want**
+- 3-4 short bullets describing the state they're chasing
+- Specific numbers when prospects mention them
 
-## 5 messaging concepts
-For each: a hook (one line, would-be ad opener), a body angle (one short paragraph framing the offer for this audience), and an explicit pull from a transcript quote that grounds it.
+**Hook lines we could test**
+- 4-6 one-line ad hook ideas grounded in the above
+- Lift prospect phrasings where powerful — don't paraphrase to "make it pretty"
 
-## What to watch for
-One short paragraph: which phrases / words might pull the wrong pocket audience and should be AVOIDED for this archetype.
+## Topic 2: [...]
+(same structure)
 
-Voice:
-- Concrete, declarative, grounded in transcript evidence
-- Use real prospect phrasings verbatim where powerful — quote them
-- No marketing-speak ("level up", "crush it", "unleash") unless the prospects themselves use it
-- Editorial em-dashes — like this — not double-dashes`
+## Topic 3: [...]
+(same structure)
+
+VOICE RULES (hard):
+- Pull quotes verbatim. Don't summarize them into prettier prose.
+- No marketing-speak ("level up", "crush it", "unleash", "unlock") unless
+  prospects themselves use the word.
+- No "X isn't Y, it's Z" reframes. No "Here's the trap…" / "Most owners
+  never…" aphorisms. No textbook openers.
+- Editorial em-dashes — like this — not double-dashes.
+- Don't pad. If a section is short, it's short.`
 
 const QUICK_PROMPTS: Record<string, string> = {
   in_kpi:            'Tell me which variants are currently in KPI for booked calls. Rank by total booked calls, give a one-line reason for each.',
@@ -181,26 +193,29 @@ serve(async (req) => {
     return json({ ok: true, reply, usage: j.usage })
   }
 
-  // ─── audience_ideation mode: Jeremy Haynes Problems × Circumstances × Outcomes ───
-  if (mode === 'audience_ideation') {
-    const brand = body.brand
-    const audience = body.audience
-    if (!brand || !audience) return json({ error: 'brand and audience required' }, 400)
+  // ─── messaging_topics mode: 3 Jeremy-Haynes topics auto-derived from transcripts ───
+  // No user inputs. The audience is fixed (OPT's contractor service prospects)
+  // and surfaced from the transcripts themselves. Caller can optionally pass
+  // { days: 90 } to widen the transcript window; default 90.
+  if (mode === 'messaging_topics') {
+    const days = typeof body.days === 'number' ? body.days : 90
+    const context = await buildIdeationContext(supabase, days)
+    if (!context.transcripts.length) {
+      return json({ error: 'No prospect transcripts found in window — check closer_transcripts table' }, 422)
+    }
 
-    const context = await buildIdeationContext(supabase, brand)
-    const userMsg = `BRAND: ${brand}
-AUDIENCE ARCHETYPE: ${audience}
+    const userMsg = `Generate three messaging topics for OPT Digital based on the actual prospect language in the data below. No audience description is provided — the audience is fixed (restoration / plumbing / pool / remodeling contractors). Identify the three strongest angles in the transcripts and structure each one per the system prompt.
 
-=== Real prospect-call transcripts (sample, filtered to relevant brand) ===
+=== Daniel's prospect-call transcripts (last ${days} days, ${context.transcripts.length} calls) ===
 ${JSON.stringify(context.transcripts, null, 2)}
 
-=== Top-decile phrases from OUR existing ad copy ===
+=== Top-decile phrases from OUR live ad copy ===
 ${JSON.stringify(context.topPhrases, null, 2)}
 
 === Spoken transcripts from OUR filmed creatives (brand voice corpus) ===
 ${JSON.stringify(context.spokenTranscripts, null, 2)}
 
-Now produce the messaging brief using the structure in the system prompt.`
+Produce exactly three topics, in the exact format the system prompt specifies.`
 
     const upstream = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -210,8 +225,8 @@ Now produce the messaging brief using the structure in the system prompt.`
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: ANTHROPIC_MODEL, max_tokens: 3000,
-        system: IDEATION_SYSTEM_PROMPT,
+        model: ANTHROPIC_MODEL, max_tokens: 4000,
+        system: MESSAGING_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMsg }],
       }),
     })
@@ -221,61 +236,43 @@ Now produce the messaging brief using the structure in the system prompt.`
     }
     const j = await upstream.json()
     const reply = j.content?.[0]?.text || ''
-    return json({ ok: true, reply, usage: j.usage, transcript_count: context.transcripts.length })
-  }
-
-  // ─── audience_ideation_followup mode: continue the conversation ───
-  if (mode === 'audience_ideation_followup') {
-    const messages = body.messages
-    if (!Array.isArray(messages) || !messages.length) return json({ error: 'messages array required' }, 400)
-    const upstream = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: ANTHROPIC_MODEL, max_tokens: 2000,
-        system: IDEATION_SYSTEM_PROMPT,
-        messages,
-      }),
+    return json({
+      ok: true,
+      reply,
+      usage: j.usage,
+      transcript_count: context.transcripts.length,
+      phrase_count: context.topPhrases.length,
     })
-    if (!upstream.ok) {
-      const err = await upstream.text()
-      return json({ error: `Anthropic: ${upstream.status} ${err.slice(0, 200)}` }, 502)
-    }
-    const j = await upstream.json()
-    const reply = j.content?.[0]?.text || ''
-    return json({ ok: true, reply, usage: j.usage })
   }
 
-  return json({ error: 'mode must be quick / chat / audience_ideation / audience_ideation_followup' }, 400)
+  return json({ error: 'mode must be quick / chat / messaging_topics' }, 400)
 })
 
-// ── Builder: pull transcripts + phrase data for ideation ──
-async function buildIdeationContext(supabase: any, brand: string) {
-  // 1. Daniel's prospect transcripts (159), excluding team meeting + Constantine.
-  // We don't filter by brand at the transcript level (Daniel runs calls
-  // across all of OPT's brands). Sample up to 20 most recent.
+// ── Builder: pull transcripts + phrase data for the messaging-topics mode ──
+// Pulls the Fathom summary field rather than just a name/date stub — the
+// summaries contain bracketed verbatim quotes from the prospect which the
+// system prompt explicitly requires for grounded output.
+async function buildIdeationContext(supabase: any, days: number) {
   const since = (() => {
-    const d = new Date(); d.setDate(d.getDate() - 90)
+    const d = new Date(); d.setDate(d.getDate() - days)
     return d.toISOString().split('T')[0]
   })()
   const trRes = await supabase.from('closer_transcripts')
-    .select('prospect_name, prospect_email, meeting_date, duration_seconds, summary')
+    .select('prospect_name, prospect_email, meeting_date, duration_seconds, summary, outcome, objections')
     .eq('closer_id', '76f61d92-83d8-45ec-87a7-82b0dc6d607e')
     .not('prospect_email', 'ilike', '%scaleclients.io%')
     .not('prospect_email', 'is', null)
+    .not('summary', 'is', null)
     .gte('meeting_date', since)
-    .order('meeting_date', { ascending: false }).limit(20)
+    .order('meeting_date', { ascending: false }).limit(25)
 
-  // 2. Top phrases from ad copy
+  // Top phrases from existing ad copy (carries weight signal — high
+  // delta_vs_library = phrases that over-index for booking conversion)
   const phRes = await supabase.from('lib_phrase_performance')
     .select('phrase, ngram_size, mean_perf_score, delta_vs_library, variants_count, total_spend')
     .order('delta_vs_library', { ascending: false }).limit(30)
 
-  // 3. Spoken transcripts (brand voice corpus from C2)
+  // Spoken transcripts (brand voice corpus from C2)
   const spRes = await supabase.from('lib_creative_transcripts')
     .select('meta_video_id, duration_sec, full_text')
     .eq('source', 'whisper_api')

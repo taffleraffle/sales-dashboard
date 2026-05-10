@@ -12,14 +12,14 @@ import AdsIdeationPanel from '../../components/ads/AdsIdeationPanel'
 */
 
 const TABS = [
+  { id: 'ideation', label: 'Ideation', icon: Sparkles,
+    sub: 'Three messaging topics, from real calls' },
   { id: 'phrases',  label: 'Phrases',  icon: Type,
     sub: 'What words actually win' },
-  { id: 'ideation', label: 'Ideation', icon: Sparkles,
-    sub: 'Messaging by audience archetype' },
 ]
 
 export default function AdsMessaging() {
-  const [tab, setTab] = useState('phrases')
+  const [tab, setTab] = useState('ideation')
 
   return (
     <div>

@@ -36,6 +36,11 @@ export default function AdDetail() {
   const [reloadKey, setReloadKey] = useState(0)
 
   const [hyrosEvents, setHyrosEvents] = useState([])
+  // Signed URL for the uploaded source MP4 (if one was uploaded via the
+  // C3 upload button). Null when no MP4 has been dropped yet — in that
+  // case AdDetail shows the poster image with a "View on Meta" link
+  // rather than a broken <video> element pointing at the poster.
+  const [videoUrl, setVideoUrl] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -56,6 +61,23 @@ export default function AdDetail() {
         setStats(s || [])
         setTranscript((t && t[0]) || null)
         setHyrosEvents(he || [])
+
+        // If a source MP4 was uploaded for this ad, mint a signed URL so the
+        // <video> tag can stream it. Bucket is private; signed URL is the
+        // only way to play. List by prefix because the extension may be
+        // .mp4 / .mov / .webm depending on what was uploaded.
+        if (a?.asset_type === 'video') {
+          const { data: files } = await supabase.storage
+            .from('ad-source-videos')
+            .list('', { search: id, limit: 5 })
+          const match = (files || []).find(f => f.name.startsWith(`${id}.`))
+          if (match) {
+            const { data: signed } = await supabase.storage
+              .from('ad-source-videos')
+              .createSignedUrl(match.name, 3600)
+            if (signed?.signedUrl && !cancelled) setVideoUrl(signed.signedUrl)
+          }
+        }
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -126,10 +148,32 @@ export default function AdDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {/* Creative preview */}
         <div className="bg-bg-card border border-border-default rounded-sm p-3">
-          {ad.asset_type === 'video' && ad.asset_url ? (
-            <video src={ad.asset_url} poster={ad.thumbnail_url || undefined} controls preload="metadata" className="w-full rounded-lg bg-bg-primary" />
+          {ad.asset_type === 'video' && videoUrl ? (
+            // Uploaded MP4 — actually playable
+            <video src={videoUrl} poster={ad.thumbnail_url || ad.asset_url || undefined} controls preload="metadata" className="w-full rounded-lg bg-bg-primary" />
+          ) : ad.asset_type === 'video' ? (
+            // Video ad without an uploaded source MP4: show the poster as an
+            // image (NOT inside a <video> tag — Meta's poster URL is a still,
+            // not a stream) and offer a public Meta Ads Library link as a
+            // "view on Meta" path so the operator can still watch the ad.
+            <div className="relative">
+              <img src={ad.asset_url || ad.thumbnail_url} alt={ad.ad_name || ''} className="w-full rounded-lg" />
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 rounded-lg gap-2 text-paper">
+                <span className="text-[10px] uppercase tracking-wider opacity-80">Poster only · no source MP4 uploaded</span>
+                <a
+                  href={`https://www.facebook.com/ads/library/?id=${ad.ad_id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 bg-accent text-ink rounded-sm text-xs font-mono uppercase tracking-wider"
+                  style={{ background: 'var(--accent)', color: 'var(--ink)' }}
+                >
+                  View on Meta Ads Library
+                </a>
+                <span className="text-[10px] opacity-70">Or upload source MP4 from gallery card to enable playback</span>
+              </div>
+            </div>
           ) : ad.thumbnail_url || ad.asset_url ? (
-            <img src={ad.thumbnail_url || ad.asset_url} alt={ad.ad_name || ''} className="w-full rounded-lg" />
+            <img src={ad.asset_url || ad.thumbnail_url} alt={ad.ad_name || ''} className="w-full rounded-lg" />
           ) : (
             <div className="aspect-video bg-bg-primary rounded-lg flex items-center justify-center text-text-400 text-sm">No creative asset on file</div>
           )}
