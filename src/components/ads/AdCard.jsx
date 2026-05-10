@@ -23,16 +23,16 @@ function fmt$(n) {
 function fmtN(n) { return n == null || isNaN(n) ? '—' : Math.round(n).toLocaleString() }
 function fmtX(n) { return n == null || isNaN(n) ? '—' : `${n.toFixed(2)}x` }
 
-// Meta returns thumbnails with `stp=...p64x64...` which is tiny (64px).
-// Stripping the stp param keeps the URL signature intact AND drops the size cap
-// so we get the full-resolution underlying image. Empirically confirmed working.
-function upscaleMetaThumbnail(url) {
-  if (!url) return url
-  try {
-    const u = new URL(url)
-    u.searchParams.delete('stp')
-    return u.toString()
-  } catch { return url }
+// Thumbnail source resolution (replaces earlier stp-stripping hack which broke
+// Meta's URL signatures). Now: prefer the explicit full-res asset URL on the
+// row — for videos that's the facebook.com/ads/image/?d=… poster from
+// object_story_spec.video_data.image_url; for images it's the 1080-wide
+// scontent.fbcdn.net URL. Both are set at sync time. Fallback to thumbnail_url
+// only when nothing better is available.
+function pickThumbnail(ad) {
+  if (ad.asset_type === 'image' && ad.asset_url) return ad.asset_url
+  if (ad.asset_type === 'video' && ad.asset_url) return ad.asset_url
+  return ad.thumbnail_url || null
 }
 
 export default function AdCard({ ad }) {
@@ -90,9 +90,9 @@ export default function AdCard({ ad }) {
           overflow: 'hidden',
         }}
       >
-        {ad.thumbnail_url ? (
+        {pickThumbnail(ad) ? (
           <img
-            src={upscaleMetaThumbnail(ad.thumbnail_url)}
+            src={pickThumbnail(ad)}
             alt={ad.ad_name || 'ad creative'}
             loading="lazy"
             style={{

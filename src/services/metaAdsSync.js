@@ -580,8 +580,13 @@ async function fetchAdCreatives(adIds) {
       const creative = json.creative || null
       const meta = extractCreativeMeta(creative, json)
       const asset_type = detectAssetType(creative)
-      const thumbnail_url = creative?.thumbnail_url || creative?.image_url || null
-      const asset_url = creative?.image_url || null
+      // Prefer the full-res `facebook.com/ads/image/?d=...` poster from
+      // object_story_spec.video_data.image_url for videos. The legacy
+      // creative.thumbnail_url is hard-capped at 64×64 via the `stp=...p64x64`
+      // signed param, which can't be safely stripped without breaking the URL.
+      const ossVideoImage = creative?.object_story_spec?.video_data?.image_url || null
+      const thumbnail_url = ossVideoImage || creative?.image_url || creative?.thumbnail_url || null
+      const asset_url = ossVideoImage || creative?.image_url || null
       const archived = ['DELETED', 'ARCHIVED'].includes(json.effective_status || json.status)
 
       return {

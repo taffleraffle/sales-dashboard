@@ -65,38 +65,49 @@ export default function AdsGallery() {
     try {
       const adsRes = await supabase
         .from('ads')
-        .select('ad_id, ad_name, status, variant_id, variant_match_status, thumbnail_url, asset_type, campaign_id, campaign_name, adset_id, adset_name, last_synced_at, first_seen_at')
+        .select('ad_id, ad_name, status, effective_status, variant_id, variant_match_status, thumbnail_url, asset_url, asset_type, campaign_id, campaign_name, adset_id, adset_name, last_synced_at, first_seen_at')
         .order('first_seen_at', { ascending: false })
         .limit(500)
       if (adsRes.error) throw new Error(adsRes.error.message)
       const ads = adsRes.data || []
       const adIds = ads.map(a => a.ad_id)
 
-      // Stats over last 30 days, aggregated per ad
+      // Stats over last 30 days, aggregated per ad.
+      // PostgREST caps result sets at 1000 rows by default. With 381 ads × ~30d
+      // we get ~1100+ rows, so we MUST page through with .range() — otherwise
+      // the most-recent rows get silently dropped and high-spend ads show $0.
       const perAd = {}
       if (adIds.length) {
         const since = new Date(); since.setDate(since.getDate() - 30)
         const sinceStr = since.toISOString().split('T')[0]
-        const statsRes = await supabase
-          .from('ad_daily_stats')
-          .select('ad_id, spend, impressions, clicks, results')
-          .in('ad_id', adIds)
-          .gte('date', sinceStr)
-        if (statsRes.error) throw new Error(statsRes.error.message)
-        for (const s of statsRes.data || []) {
-          const r = perAd[s.ad_id] || { spend: 0, impressions: 0, clicks: 0, leads: 0 }
-          r.spend += parseFloat(s.spend || 0)
-          r.impressions += parseInt(s.impressions || 0)
-          r.clicks += parseInt(s.clicks || 0)
-          // ad_daily_stats.results = platform conversion-event count (Meta lead actions).
-          // Mapping it onto our local "leads" alias keeps the gallery card display consistent.
-          r.leads += parseInt(s.results || 0)
-          perAd[s.ad_id] = r
+        const PAGE = 1000
+        let offset = 0
+        while (true) {
+          const { data, error: sErr } = await supabase
+            .from('ad_daily_stats')
+            .select('ad_id, spend, impressions, clicks, results')
+            .in('ad_id', adIds)
+            .gte('date', sinceStr)
+            .range(offset, offset + PAGE - 1)
+          if (sErr) throw new Error(sErr.message)
+          if (!data || !data.length) break
+          for (const s of data) {
+            const r = perAd[s.ad_id] || { spend: 0, impressions: 0, clicks: 0, leads: 0 }
+            r.spend += parseFloat(s.spend || 0)
+            r.impressions += parseInt(s.impressions || 0)
+            r.clicks += parseInt(s.clicks || 0)
+            r.leads += parseInt(s.results || 0)
+            perAd[s.ad_id] = r
+          }
+          if (data.length < PAGE) break
+          offset += PAGE
         }
       }
 
-      // Pull whisper transcripts that ARE linked to specific ads (C3 uploads).
-      // The C2 corpus has ad_id=NULL so it doesn't surface here.
+      // Whisper transcripts. The /advideos corpus (C2) has ad_id=NULL — those
+      // are brand-voice corpus only and can't be card-linked without a
+      // video_id ↔ advideo_id resolution which Meta doesn't expose. Per-ad
+      // transcripts come from the C3 upload path (operator drops MP4).
       const transcriptsRes = await supabase
         .from('lib_creative_transcripts')
         .select('ad_id, full_text')
@@ -194,7 +205,17 @@ export default function AdsGallery() {
 
   const filtered = useMemo(() => {
     let out = rows
-    if (statusFilter !== 'all') out = out.filter(r => r.status === statusFilter)
+    // effective_status is the rolled-up campaign × adset × ad delivery state
+    // (e.g. CAMPAIGN_PAUSED, ADSET_PAUSED). `status` is just the ad-level
+    // toggle which doesn't reflect actual delivery. Always filter by effective.
+    if (statusFilter !== 'all') {
+      out = out.filter(r => {
+        const es = r.effective_status || r.status
+        if (statusFilter === 'ACTIVE') return es === 'ACTIVE'
+        if (statusFilter === 'PAUSED') return es && es !== 'ACTIVE'
+        return true
+      })
+    }
     if (stateFilter !== 'all') out = out.filter(r => r.variant_state === stateFilter)
     if (campaignFilter !== 'all') out = out.filter(r => r.campaign_name === campaignFilter)
     if (spendTier !== 'all') {
