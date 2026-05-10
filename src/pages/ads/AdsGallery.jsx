@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Sparkles, RefreshCw, AlertCircle, Search } from 'lucide-react'
+import { Sparkles, RefreshCw, AlertCircle, Search, Mic } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import AdCard from '../../components/ads/AdCard'
 import AdAnalystPanel from '../../components/ads/AdAnalystPanel'
+import { triggerTranscribeAds } from '../../services/adAnalyst'
+import { useToast } from '../../hooks/useToast'
 
 /*
   Live Ad Gallery — the Meta-Ads-Library-style internal surface.
@@ -132,9 +134,6 @@ export default function AdsGallery() {
     setError(null)
     try {
       const { syncMetaAdsAtAdLevel } = await import('../../services/metaAdsSync')
-      // 30-day window keeps the sync to ~6-8 mins on a fresh account vs ~30+
-      // mins for 90 days. Subsequent syncs are differential (creativeRefresh
-      // off by default) so they're much faster.
       console.time('[gallery] manual sync')
       const result = await syncMetaAdsAtAdLevel(30)
       console.timeEnd('[gallery] manual sync')
@@ -145,6 +144,28 @@ export default function AdsGallery() {
       setError(`Sync failed: ${e.message}`)
     } finally {
       setSyncing(false)
+    }
+  }
+
+  // Fire the transcribe-ads Edge Function. Runs server-side so OPENAI_API_KEY
+  // stays out of the browser bundle. Processes up to 25 videos per click;
+  // re-click to keep going through the backlog.
+  const [transcribing, setTranscribing] = useState(false)
+  const toast = useToast()
+  const triggerTranscribe = async () => {
+    setTranscribing(true)
+    try {
+      const result = await triggerTranscribeAds(25)
+      toast.success(
+        `Transcribed ${result.processed} videos · ${result.errors} errors · ${result.totalPending} pending. ` +
+        (result.totalPending > 0 ? 'Click again to continue the backlog.' : 'All caught up.'),
+        { duration: 6000 }
+      )
+    } catch (e) {
+      console.error('[gallery] transcribe failed:', e)
+      toast.error(`Transcribe failed: ${e.message}`)
+    } finally {
+      setTranscribing(false)
     }
   }
 
@@ -205,6 +226,32 @@ export default function AdsGallery() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={triggerTranscribe}
+              disabled={transcribing}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '8px 12px',
+                background: 'var(--paper)',
+                color: 'var(--ink)',
+                border: '1px solid var(--rule)',
+                borderRadius: 3,
+                fontFamily: 'var(--mono)',
+                fontSize: 10.5,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                fontWeight: 500,
+                cursor: transcribing ? 'wait' : 'pointer',
+                opacity: transcribing ? 0.6 : 1,
+                whiteSpace: 'nowrap',
+              }}
+              title="Whisper-transcribe up to 25 unprocessed video ads. Click again to continue the backlog."
+            >
+              <Mic size={12} className={transcribing ? 'animate-pulse' : ''} />
+              {transcribing ? 'Transcribing…' : 'Transcribe videos'}
+            </button>
             <button
               onClick={() => setAnalystOpen(v => !v)}
               style={{
