@@ -44,7 +44,7 @@ export default function CommissionWidget({ memberId }) {
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-card-hover transition-colors"
       >
         <div className="flex items-center gap-2">
-          <DollarSign size={14} className="text-opt-yellow" />
+          <DollarSign size={14} className="text-text-primary" />
           <h3 className="text-sm font-medium">Commission — {currentPeriod}</h3>
         </div>
         <div className="flex items-center gap-3">
@@ -111,7 +111,7 @@ export default function CommissionWidget({ memberId }) {
 
           <Link
             to="/sales/commissions"
-            className="block mt-3 text-center text-[10px] text-opt-yellow hover:text-opt-yellow/80 transition-colors"
+            className="block mt-3 text-center text-[10px] text-text-primary hover:text-text-primary/80 transition-colors"
           >
             View full commission details →
           </Link>

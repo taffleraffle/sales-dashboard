@@ -116,7 +116,7 @@ export default function AddComponentModal({ open, type, existing, onClose, onSav
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-bg-card border border-border-default rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-bg-card border border-border-default rounded-sm w-full max-w-2xl max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
@@ -128,7 +128,7 @@ export default function AddComponentModal({ open, type, existing, onClose, onSav
 
         <div className="p-4 space-y-3">
           {error && (
-            <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-xl px-3 py-2">
+            <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-sm px-3 py-2">
               <AlertTriangle size={14} /> <span className="flex-1">{error}</span>
             </div>
           )}
@@ -147,7 +147,7 @@ export default function AddComponentModal({ open, type, existing, onClose, onSav
                   type === 'scene' ? 'S-CUSTOM' :
                   'NEWCREATOR'
                 }
-                className="bg-bg-primary border border-border-default rounded-lg px-2 py-1.5 text-xs font-mono text-opt-yellow w-full mt-0.5 disabled:opacity-50"
+                className="bg-bg-primary border border-border-default rounded-lg px-2 py-1.5 text-xs font-mono text-text-primary w-full mt-0.5 disabled:opacity-50"
               />
               {type === 'hook' && <p className="text-[9px] text-text-400 mt-0.5">Per SOP: H{'{n}'}.{'{m}'} (e.g. H4.2)</p>}
             </div>
@@ -217,13 +217,13 @@ export default function AddComponentModal({ open, type, existing, onClose, onSav
                 type="file"
                 accept="video/*,image/*"
                 onChange={e => setFile(e.target.files?.[0] || null)}
-                className="text-xs text-text-secondary file:mr-2 file:px-2 file:py-1 file:bg-opt-yellow/15 file:text-opt-yellow file:border-0 file:rounded-lg file:text-xs file:cursor-pointer"
+                className="text-xs text-text-secondary file:mr-2 file:px-2 file:py-1 file:bg-opt-yellow/15 file:text-text-primary file:border-0 file:rounded-lg file:text-xs file:cursor-pointer"
               />
-              {uploading && <Loader size={12} className="animate-spin text-opt-yellow" />}
+              {uploading && <Loader size={12} className="animate-spin text-text-primary" />}
             </div>
             {assetUrl && !file && (
               <p className="text-[10px] text-text-400 mt-1">
-                Current: <a href={assetUrl} target="_blank" rel="noreferrer" className="text-opt-yellow hover:underline break-all">{assetUrl}</a>
+                Current: <a href={assetUrl} target="_blank" rel="noreferrer" className="text-text-primary hover:underline break-all">{assetUrl}</a>
               </p>
             )}
             <p className="text-[9px] text-text-400/70 mt-1">Upload to Supabase Storage. Public URL will be saved on the component.</p>
@@ -235,7 +235,7 @@ export default function AddComponentModal({ open, type, existing, onClose, onSav
           <button
             onClick={handleSave}
             disabled={saving || uploading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-opt-yellow rounded-lg hover:bg-opt-yellow/20 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-text-primary rounded-lg hover:bg-opt-yellow/20 disabled:opacity-50"
           >
             {(saving || uploading) ? <Loader size={12} className="animate-spin" /> : <Upload size={12} />}
             {existing ? 'Save changes' : 'Add to library'}

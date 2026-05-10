@@ -14,7 +14,7 @@ const STAGE_COLORS = {
   pif: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
 }
 
-const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-sm text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 const selectCls = 'select-input w-full'
 
 export default function ClientsTab({ clients, members, payments, refreshClients, refreshLedger, refreshPayments }) {
@@ -236,7 +236,7 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
                 <option value="4">4 — Month 3 paid</option>
               </select></div>
           </div>
-          <button onClick={handleAddClient} disabled={!newClient.name || addingClient} className="px-4 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:brightness-110 disabled:opacity-50 transition-all duration-150 flex items-center gap-1.5">
+          <button onClick={handleAddClient} disabled={!newClient.name || addingClient} className="px-4 py-2 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 disabled:opacity-50 transition-all duration-150 flex items-center gap-1.5">
             {addingClient ? <><Loader size={12} className="animate-spin" /> Saving...</> : <><Save size={12} /> Save Client</>}
           </button>
         </div>
@@ -247,19 +247,19 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
         <div className="flex items-center gap-2">
           {importStatus && <span className="text-[10px] text-success">{importStatus}</span>}
           <input ref={fileRef} type="file" accept=".csv,.xls,.xlsx,.tsv,.txt" onChange={handleCSVSelect} className="hidden" />
-          <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-400 rounded-xl hover:bg-bg-card-hover transition-all duration-150"><Download size={12} /> Template</button>
-          <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-primary rounded-xl hover:bg-bg-card-hover transition-all duration-150"><Upload size={12} /> Import CSV</button>
-          <button onClick={() => setShowGHLImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-purple-500/30 text-purple-400 rounded-xl hover:bg-purple-500/10 transition-all duration-150"><Download size={12} /> Import GHL</button>
-          <button onClick={() => setShowAddClient(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:brightness-110 transition-all duration-150"><Plus size={12} /> Add Client</button>
+          <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-400 rounded-sm hover:bg-bg-card-hover transition-all duration-150"><Download size={12} /> Template</button>
+          <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-primary rounded-sm hover:bg-bg-card-hover transition-all duration-150"><Upload size={12} /> Import CSV</button>
+          <button onClick={() => setShowGHLImport(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-purple-500/30 text-purple-400 rounded-sm hover:bg-purple-500/10 transition-all duration-150"><Download size={12} /> Import GHL</button>
+          <button onClick={() => setShowAddClient(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 transition-all duration-150"><Plus size={12} /> Add Client</button>
         </div>
       </div>
 
       {/* CSV Preview */}
       {csvPreview && (
-        <div className="bg-bg-card border-2 border-opt-yellow/30 rounded-2xl overflow-hidden mb-4">
+        <div className="bg-bg-card border-2 border-opt-yellow/30 rounded-sm overflow-hidden mb-4">
           <div className="px-4 py-3 border-b border-border-default flex items-center justify-between bg-opt-yellow/5">
             <div className="flex items-center gap-2">
-              <Eye size={14} className="text-opt-yellow" />
+              <Eye size={14} className="text-text-primary" />
               <h3 className="text-sm font-medium text-text-secondary">CSV Preview — {csvPreview.rows.length} rows</h3>
               {csvPreview.rows.some(r => !r._hasName) && (
                 <span className="text-[10px] text-danger">({csvPreview.rows.filter(r => !r._hasName).length} missing name)</span>
@@ -269,8 +269,8 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
               )}
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setCsvPreview(null)} className="px-3 py-1 text-xs text-text-400 hover:text-text-primary border border-border-default rounded-xl transition-all duration-150">Cancel</button>
-              <button onClick={handleConfirmImport} className="px-4 py-1 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:brightness-110 transition-all duration-150">Import All ({csvPreview.rows.filter(r => r._hasName).length})</button>
+              <button onClick={() => setCsvPreview(null)} className="px-3 py-1 text-xs text-text-400 hover:text-text-primary border border-border-default rounded-sm transition-all duration-150">Cancel</button>
+              <button onClick={handleConfirmImport} className="px-4 py-1 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 transition-all duration-150">Import All ({csvPreview.rows.filter(r => r._hasName).length})</button>
             </div>
           </div>
           <div className="overflow-x-auto max-h-[350px] overflow-y-auto">
@@ -336,7 +336,7 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
                 const country = getCountry(c.phone, c.email)
                 return (
                   <tr key={c.id} className={`border-t border-border-default/30 row-glow transition-all duration-150 group ${deletingId === c.id ? 'opacity-40' : ''}`}>
-                    <td className="px-3 py-2 font-medium text-text-primary group-hover:text-opt-yellow transition-colors">
+                    <td className="px-3 py-2 font-medium text-text-primary group-hover:text-text-primary transition-colors">
                       {c.name}
                     </td>
                     <td className="px-3 py-2 text-center text-[10px]">
@@ -356,7 +356,7 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
                       {(() => {
                         const pc = c.payment_count || 0
                         const labels = ['No payments', 'Trial', 'Month 1', 'Month 2', 'Month 3', 'Month 4+']
-                        const colors = ['text-danger', 'text-blue-400', 'text-opt-yellow', 'text-opt-yellow', 'text-success', 'text-success']
+                        const colors = ['text-danger', 'text-blue-400', 'text-text-primary', 'text-text-primary', 'text-success', 'text-success']
                         return <span className={`text-[10px] font-medium ${colors[Math.min(pc, 5)]}`}>{labels[Math.min(pc, 5)]}</span>
                       })()}
                     </td>
@@ -366,7 +366,7 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
                     <td className="px-3 py-2 text-right">
                       <button
                         onClick={() => txCountByClient[c.id] > 0 && setTimelineClient(c)}
-                        className={`text-[10px] font-medium tabular-nums ${txCountByClient[c.id] > 0 ? 'text-opt-yellow hover:underline cursor-pointer' : 'text-text-primary cursor-default'}`}
+                        className={`text-[10px] font-medium tabular-nums ${txCountByClient[c.id] > 0 ? 'text-text-primary hover:underline cursor-pointer' : 'text-text-primary cursor-default'}`}
                       >
                         {txCountByClient[c.id] || 0}
                       </button>
@@ -377,13 +377,13 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
                         const remaining = Math.max(0, 4 - pc)
                         const forecast = remaining * Number(c.monthly_amount || 0)
                         return forecast > 0
-                          ? <span className="text-opt-yellow text-[10px] font-medium">${forecast.toLocaleString()}</span>
+                          ? <span className="text-text-primary text-[10px] font-medium">${forecast.toLocaleString()}</span>
                           : <span className="text-text-400 text-[10px]">—</span>
                       })()}
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex gap-1.5 items-center">
-                        <button onClick={() => setEditingClient(c)} className="text-text-400 hover:text-opt-yellow transition-colors"><Edit3 size={12} /></button>
+                        <button onClick={() => setEditingClient(c)} className="text-text-400 hover:text-text-primary transition-colors"><Edit3 size={12} /></button>
                         <button onClick={() => deleteClient(c.id)} disabled={deletingId === c.id} className="text-text-400 hover:text-danger transition-colors disabled:opacity-30">
                           {deletingId === c.id ? <Loader size={12} className="animate-spin" /> : <X size={12} />}
                         </button>

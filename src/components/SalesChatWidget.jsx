@@ -37,8 +37,8 @@ function parseMarkdown(text) {
     // Code blocks
     .replace(/```[\s\S]*?```/g, m => `<pre class="bg-bg-primary rounded px-3 py-2 text-xs overflow-x-auto my-2">${m.slice(3, -3).trim()}</pre>`)
     // Headers
-    .replace(/^### (.+)$/gm, '<h4 class="text-xs font-semibold text-opt-yellow mt-3 mb-1">$1</h4>')
-    .replace(/^## (.+)$/gm, '<h3 class="text-sm font-semibold text-opt-yellow mt-3 mb-1">$1</h3>')
+    .replace(/^### (.+)$/gm, '<h4 class="text-xs font-semibold text-text-primary mt-3 mb-1">$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3 class="text-sm font-semibold text-text-primary mt-3 mb-1">$1</h3>')
     // Bold
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-text-primary font-semibold">$1</strong>')
     // Tables
@@ -225,7 +225,7 @@ export default function SalesChatWidget() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed right-0 top-1/2 -translate-y-1/2 z-[60] bg-opt-yellow text-bg-primary rounded-l-xl px-1.5 py-3 shadow-[0_0_20px_rgba(212,245,12,0.2)] hover:shadow-[0_0_30px_rgba(212,245,12,0.4)] hover:px-2.5 transition-all"
+          className="fixed right-0 top-1/2 -translate-y-1/2 z-[60] bg-opt-yellow text-text-primary rounded-l-xl px-1.5 py-3 shadow-[0_0_20px_rgba(212,245,12,0.2)] hover:shadow-[0_0_30px_rgba(212,245,12,0.4)] hover:px-2.5 transition-all"
           title="Sales Intelligence"
         >
           <MessageSquare size={18} />
@@ -234,12 +234,12 @@ export default function SalesChatWidget() {
 
       {/* Chat panel — slides from right */}
       {open && (
-        <div className={`fixed top-0 right-0 h-full z-[100] flex flex-col bg-bg-card border-l border-border-default shadow-2xl transition-all ${expanded ? 'w-full' : 'w-[calc(100vw-3rem)] sm:w-[420px] md:w-[480px]'}`}>
+        <div className={`fixed top-0 right-0 h-full z-[100] flex flex-col bg-bg-card border-l border-border-default shadow-md transition-all ${expanded ? 'w-full' : 'w-[calc(100vw-3rem)] sm:w-[420px] md:w-[480px]'}`}>
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default bg-bg-sidebar shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-full bg-opt-yellow flex items-center justify-center">
-                <MessageSquare size={16} className="text-bg-primary" />
+                <MessageSquare size={16} className="text-text-primary" />
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-text-primary leading-tight">Sales Intelligence</h3>
@@ -267,7 +267,7 @@ export default function SalesChatWidget() {
               <div className="space-y-4 pt-2">
                 <div className="text-center">
                   <div className="w-12 h-12 rounded-full bg-opt-yellow/10 border border-opt-yellow/20 flex items-center justify-center mx-auto mb-3">
-                    <MessageSquare size={20} className="text-opt-yellow" />
+                    <MessageSquare size={20} className="text-text-primary" />
                   </div>
                   <h4 className="text-sm font-semibold mb-1">Sales Intelligence</h4>
                   <p className="text-xs text-text-400">Ask me anything about leads, performance, revenue, marketing — all your sales data in one place.</p>
@@ -278,7 +278,7 @@ export default function SalesChatWidget() {
                     <button
                       key={i}
                       onClick={() => sendMessage(q)}
-                      className="w-full text-left px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-bg-primary border border-border-default hover:border-opt-yellow/30 hover:bg-bg-card-hover text-[11px] sm:text-xs text-text-secondary transition-colors line-clamp-2"
+                      className="w-full text-left px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-sm bg-bg-primary border border-border-default hover:border-opt-yellow/30 hover:bg-bg-card-hover text-[11px] sm:text-xs text-text-secondary transition-colors line-clamp-2"
                     >
                       {q}
                     </button>
@@ -289,9 +289,9 @@ export default function SalesChatWidget() {
 
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${
+                <div className={`max-w-[85%] rounded-sm px-3.5 py-2.5 ${
                   msg.role === 'user'
-                    ? 'bg-opt-yellow text-bg-primary rounded-br-md'
+                    ? 'bg-opt-yellow text-text-primary rounded-br-md'
                     : 'bg-bg-primary border border-border-default rounded-bl-md'
                 }`}>
                   {msg.role === 'user' ? (
@@ -308,7 +308,7 @@ export default function SalesChatWidget() {
 
             {streaming && streamingText && (
               <div className="flex justify-start">
-                <div className="max-w-[85%] rounded-2xl rounded-bl-md px-3.5 py-2.5 bg-bg-primary border border-border-default">
+                <div className="max-w-[85%] rounded-sm rounded-bl-md px-3.5 py-2.5 bg-bg-primary border border-border-default">
                   <div
                     className="text-xs text-text-secondary leading-relaxed prose-chat"
                     dangerouslySetInnerHTML={{ __html: parseMarkdown(streamingText) }}
@@ -319,7 +319,7 @@ export default function SalesChatWidget() {
 
             {streaming && !streamingText && (
               <div className="flex justify-start">
-                <div className="rounded-2xl rounded-bl-md px-3.5 py-2.5 bg-bg-primary border border-border-default">
+                <div className="rounded-sm rounded-bl-md px-3.5 py-2.5 bg-bg-primary border border-border-default">
                   <div className="flex items-center gap-2 text-xs text-text-400">
                     <Loader size={12} className="animate-spin" />
                     <span>Analyzing your sales data...</span>
@@ -341,14 +341,14 @@ export default function SalesChatWidget() {
                 onKeyDown={handleKeyDown}
                 placeholder="Ask about leads, performance, revenue..."
                 rows={1}
-                className="flex-1 bg-bg-primary border border-border-default rounded-xl px-3 py-2 text-sm text-text-primary placeholder-text-400 outline-none focus:border-opt-yellow/40 resize-none max-h-24"
+                className="flex-1 bg-bg-primary border border-border-default rounded-sm px-3 py-2 text-sm text-text-primary placeholder-text-400 outline-none focus:border-opt-yellow/40 resize-none max-h-24"
                 style={{ minHeight: '36px' }}
                 disabled={streaming}
               />
               <button
                 onClick={() => sendMessage(input)}
                 disabled={!input.trim() || streaming}
-                className="w-9 h-9 rounded-xl bg-opt-yellow text-bg-primary flex items-center justify-center shrink-0 disabled:opacity-30 hover:brightness-110 transition-all"
+                className="w-9 h-9 rounded-sm bg-opt-yellow text-text-primary flex items-center justify-center shrink-0 disabled:opacity-30 hover:brightness-110 transition-all"
               >
                 <Send size={16} />
               </button>

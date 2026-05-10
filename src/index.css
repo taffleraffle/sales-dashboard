@@ -1,249 +1,624 @@
 @import "tailwindcss";
 
+/*
+  ─────────────────────────────────────────────────────────────────
+  OPT Editorial Design System — Sales Dashboard
+  ─────────────────────────────────────────────────────────────────
+  Reference: C:\Users\Ben\.claude\OPT-DESIGN-SYSTEM.md
+
+  Tokens use the existing legacy names (--color-bg-primary, --color-text-primary,
+  --color-opt-yellow, etc.) so every existing Tailwind utility class in the app
+  (`bg-bg-primary`, `text-text-primary`, `text-opt-yellow`, `border-border-default`)
+  automatically inherits the editorial palette without per-file edits.
+
+  Canonical editorial tokens (--paper, --ink, --accent, --rule, --serif) are
+  also exposed for new editorial primitives below.
+*/
+
 @theme {
-  /* ── Pure black theme (inspired by delivery dashboard) ── */
-  --color-bg-primary: #0a0a0a;
-  --color-bg-card: #141414;
-  --color-bg-card-hover: #1a1a1a;
-  --color-bg-sidebar: #0f0f0f;
-  --color-border-default: #222222;
-  --color-border-subtle: #1a1a1a;
+  /* ── Editorial canonical tokens ── */
+  --color-paper:        #fbfaf6;
+  --color-paper-2:      #f4f1e8;
+  --color-paper-3:      #ece8da;
+  --color-ink:          #0a0a0a;
+  --color-ink-2:        #2a2a2a;
+  --color-ink-3:        #5d5d5a;
+  --color-ink-4:        #8a8882;
+  --color-rule:         #d9d4c4;
+  --color-rule-2:       #ece8da;
+  --color-accent:       #f4e14a;
+  --color-accent-dk:    #e4cc00;
+  --color-accent-soft:  #fef9cc;
+  --color-accent-ink:   #0a0a0a;
+  --color-up:           #1f7a3a;
+  --color-up-soft:      #e3f2e6;
+  --color-down:         #b42318;
+  --color-down-soft:    #fbe7e3;
+  --color-flat:         #6b7280;
 
-  /* Neon yellow accent */
-  --color-opt-yellow: #d4f50c;
-  --color-opt-yellow-muted: rgba(212, 245, 12, 0.15);
-  --color-opt-yellow-subtle: rgba(212, 245, 12, 0.06);
-  --color-opt-yellow-glow: rgba(212, 245, 12, 0.25);
+  /* ── Legacy token names (remapped to editorial values) ── */
+  --color-bg-primary:        #fbfaf6;   /* paper — page bg */
+  --color-bg-card:           #fbfaf6;   /* cards = paper with hairline */
+  --color-bg-card-hover:     #f4f1e8;   /* paper-2 */
+  --color-bg-sidebar:        #fbfaf6;   /* paper */
+  --color-border-default:    #d9d4c4;   /* rule hairline */
+  --color-border-subtle:     #ece8da;   /* rule-2 */
 
-  /* Text hierarchy */
-  --color-text-primary: #f0f0f0;
-  --color-text-secondary: #a0a0a0;
-  --color-text-400: #606060;
+  /* Yellow accent — editorial yellow (#f4e14a), not neon */
+  --color-opt-yellow:        #f4e14a;
+  --color-opt-yellow-muted:  #fef9cc;     /* soft callout bg */
+  --color-opt-yellow-subtle: rgba(244, 225, 74, 0.12);
+  --color-opt-yellow-glow:   rgba(244, 225, 74, 0.35);
 
-  /* Status */
-  --color-success: #d4f50c;
-  --color-warning: #f59e0b;
-  --color-danger: #ef4444;
+  /* Text hierarchy — ink scale */
+  --color-text-primary:      #0a0a0a;
+  --color-text-secondary:    #5d5d5a;
+  --color-text-400:          #8a8882;
 
-  /* Font */
-  --font-sans: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* Status — directional pills/deltas only */
+  --color-success: #1f7a3a;
+  --color-warning: #b88200;
+  --color-danger:  #b42318;
+
+  /* Fonts */
+  --font-sans:  'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono:  'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-serif: 'Newsreader', ui-serif, 'Iowan Old Style', Georgia, serif;
 }
 
+/*
+  ─────────────────────────────────────────────────────────────────
+  Editorial root tokens — used by new .panel / .eyebrow / etc. primitives.
+  Mirror the @theme values above (Tailwind doesn't expose @theme vars to plain CSS).
+*/
+:root {
+  --paper:        #fbfaf6;
+  --paper-2:      #f4f1e8;
+  --paper-3:      #ece8da;
+  --ink:          #0a0a0a;
+  --ink-2:        #2a2a2a;
+  --ink-3:        #5d5d5a;
+  --ink-4:        #8a8882;
+  --rule:         #d9d4c4;
+  --rule-2:       #ece8da;
+  --accent:       #f4e14a;
+  --accent-dk:    #e4cc00;
+  --accent-soft:  #fef9cc;
+  --accent-ink:   #0a0a0a;
+  --up:           #1f7a3a;
+  --up-soft:      #e3f2e6;
+  --down:         #b42318;
+  --down-soft:    #fbe7e3;
+  --flat:         #6b7280;
+
+  --serif: 'Newsreader', ui-serif, 'Iowan Old Style', Georgia, serif;
+  --sans:  'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --mono:  'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --shadow-card: 0 1px 2px rgba(10,10,10,.03), 0 6px 18px rgba(10,10,10,.04);
+}
+
+/* ── Base ── */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
 body {
-  margin: 0;
-  background-color: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  font-family: var(--font-sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+* { border-color: var(--rule); }
+a { color: inherit; text-decoration: none; }
+
+/* Date/month inputs use the light scheme now */
+input[type="date"], input[type="month"] {
+  color-scheme: light;
 }
 
-* {
-  border-color: var(--color-border-default);
-}
+/* ── Scrollbars — paper-friendly ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
+::-webkit-scrollbar-corner { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
 
-/* Custom scrollbars — pure black theme */
-::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #2a2a2a;
-  border-radius: 99px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-opt-yellow-glow);
-}
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-/* Firefox */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #2a2a2a transparent;
-}
-
-/* Tabular nums for data */
+/* ── Utilities ── */
 .tabular-nums { font-variant-numeric: tabular-nums; }
-
-/* Safe area padding for mobile bottom nav */
-.safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-}
-
-/* Hide scrollbar but keep scrolling */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* ── Mobile Responsive Fixes ── */
-@media (max-width: 768px) {
-  /* Prevent horizontal overflow at the page level */
-  body {
-    overflow-x: hidden;
-  }
+/* Editorial display number — serif + tabular-nums. Use anywhere a number lives.
+   Pairs with the eyebrow/mono label convention. */
+.num,
+.numeric,
+.editorial-num {
+  font-family: var(--serif);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
 
+/* ── Mobile responsive guards ── */
+@media (max-width: 768px) {
+  body { overflow-x: hidden; }
   main, [class*="max-w-"] {
     max-width: 100vw;
     overflow-x: hidden;
   }
-
-  /* Force horizontal scroll on all tables instead of breaking layout */
-  table {
-    min-width: max-content;
-  }
-
-  /* Smooth horizontal scrolling for table wrappers */
-  .overflow-x-auto {
-    -webkit-overflow-scrolling: touch;
-  }
-
-  /* Ensure tap targets are at least 44px */
+  table { min-width: max-content; }
+  .overflow-x-auto { -webkit-overflow-scrolling: touch; }
   button, a[role="button"], .tap-target {
     min-height: 44px;
     min-width: 44px;
   }
-
-  /* Prevent content from touching screen edges */
-  .mobile-padded {
-    padding-left: 12px;
-    padding-right: 12px;
-  }
+  .mobile-padded { padding-left: 12px; padding-right: 12px; }
 }
 
-/* ── Reusable UI Components ── */
+/* ─────────────────────────────────────────────────────────────────
+   EDITORIAL PRIMITIVES — composable utility classes for restyle.
+   ─────────────────────────────────────────────────────────────────  */
 
-/* Consistent input styling */
-input[type="date"], input[type="month"] {
-  color-scheme: dark;
+/* ── .eyebrow — small-caps mono label with dash prefix ── */
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 1px;
+  background: var(--ink);
+  flex-shrink: 0;
+}
+.eyebrow-accent { color: var(--ink); }
+.eyebrow-accent::before { background: var(--accent); height: 2px; }
+.eyebrow-bare::before { display: none; }
+
+/* ── .kicker — section subtitle (mono small caps, no dash) ── */
+.kicker {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  display: block;
+  margin-bottom: 6px;
 }
 
-/* Smooth expand/collapse animation */
-.expand-section {
-  transition: max-height 300ms ease-out, opacity 200ms ease-in;
+/* ── Section head — every § block ── */
+.section-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 24px;
+  align-items: end;
+  padding: 8px 0 12px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 24px;
+}
+.section-head .sh-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-top: 1.5px solid var(--ink);
+  padding-top: 8px;
+  align-self: start;
+  min-width: 72px;
+}
+.section-head .sh-title { min-width: 0; }
+.section-head .sh-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-top: 1.5px solid var(--ink);
+  padding-top: 8px;
+  text-align: right;
+  align-self: start;
+}
+@media (max-width: 900px) {
+  .section-head { grid-template-columns: auto 1fr; }
+  .section-head .sh-meta { display: none; }
+}
+
+/* ── Display headings ── */
+.h1 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(34px, 5vw, 56px);
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  margin: 0;
+}
+.h2 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(28px, 3.4vw, 40px);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+}
+.h3 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0;
+}
+.lede {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 60ch;
+}
+.h1 em, .h2 em, .h3 em, .lede em {
+  font-style: italic;
+  font-weight: inherit;
+}
+.yh {
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 0 0.18em;
+  border-radius: 1px;
+}
+
+/* ── .panel — base bordered container ── */
+.panel {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 22px;
+  position: relative;
+}
+.panel-flat { border: 0; padding: 0; background: transparent; }
+.panel-alt  { background: var(--paper-2); }
+.panel-ink  { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.panel-ink * { color: inherit; }
+.panel-accent { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.panel-tight { padding: 14px 16px; }
+
+/* ── .scorecard — 4-column metric grid ── */
+.scorecard {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  background: var(--paper);
   overflow: hidden;
 }
-
-/* Glow on hover for interactive cards (legacy — prefer .tile-hover) */
-.glow-hover {
-  transition: all 200ms ease;
+.scorecard > .sc-cell {
+  padding: 18px 20px;
+  border-right: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  min-height: 130px;
 }
-.glow-hover:hover {
-  border-color: rgba(212, 245, 12, 0.15);
-  box-shadow: 0 0 20px rgba(212, 245, 12, 0.04), 0 0 4px rgba(212, 245, 12, 0.02);
+.scorecard > .sc-cell:last-child { border-right: 0; }
+.sc-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+.sc-value {
+  font-family: var(--serif);
+  font-size: 38px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+.sc-foot {
+  margin-top: auto;
+  padding-top: 12px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+@media (max-width: 1100px) {
+  .scorecard { grid-template-columns: repeat(2, 1fr); }
+  .scorecard > .sc-cell:nth-child(2) { border-right: 0; }
+  .scorecard > .sc-cell:nth-child(1),
+  .scorecard > .sc-cell:nth-child(2) { border-bottom: 1px solid var(--rule); }
+}
+@media (max-width: 640px) {
+  .scorecard { grid-template-columns: 1fr; }
+  .scorecard > .sc-cell { border-right: 0; border-bottom: 1px solid var(--rule); }
+  .scorecard > .sc-cell:last-child { border-bottom: 0; }
 }
 
-/* ── Unified design-system primitives ── */
+/* ── .simple-scorecard — hero 3-cell ── */
+.simple-scorecard {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.simple-scorecard > .ss-cell {
+  padding: 24px;
+  border-right: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+}
+.simple-scorecard > .ss-cell:last-child { border-right: 0; }
+.ss-value {
+  font-family: var(--serif);
+  font-size: 52px;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ss-means {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--rule);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+@media (max-width: 900px) {
+  .simple-scorecard { grid-template-columns: 1fr; }
+  .simple-scorecard > .ss-cell { border-right: 0; border-bottom: 1px solid var(--rule); }
+  .simple-scorecard > .ss-cell:last-child { border-bottom: 0; }
+}
 
-/* Base card/tile — replaces the inline bg-bg-card border border-border-default rounded-2xl pattern */
+/* ── .pill — directional / status chip ── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.pill .arrow { font-size: 10px; }
+.pill-up    { background: var(--up-soft); color: var(--up); }
+.pill-down  { background: var(--down-soft); color: var(--down); }
+.pill-flat  { background: var(--rule-2); color: var(--ink-3); }
+.pill-accent{ background: var(--accent); color: var(--accent-ink); }
+.pill-ink   { background: var(--ink); color: var(--paper); }
+.pill-soft  { background: var(--paper-2); color: var(--ink-2); border: 1px solid var(--rule); }
+
+/* ── .tag — outlined micro-label ── */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  background: var(--paper);
+}
+.tag-solid { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.tag-accent { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+/* ── .what-it-means — interpretive callout (signature motif) ── */
+.what-it-means {
+  display: flex;
+  gap: 16px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 14px 18px;
+  align-items: flex-start;
+  border-radius: 0 2px 2px 0;
+  margin-top: 16px;
+}
+.what-it-means .wim-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+  min-width: 96px;
+  padding-top: 2px;
+  font-weight: 500;
+}
+.what-it-means .wim-body {
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.what-it-means .wim-body em { font-style: italic; }
+@media (max-width: 640px) {
+  .what-it-means { flex-direction: column; gap: 6px; }
+  .what-it-means .wim-tag { min-width: 0; }
+}
+
+/* ── .placeholder-card — "awaiting integration" ── */
+.placeholder-card {
+  border: 1px dashed var(--rule);
+  background: var(--paper-2);
+  padding: 28px;
+  border-radius: 4px;
+  text-align: center;
+  color: var(--ink-2);
+  font-family: var(--serif);
+  font-size: 14px;
+}
+
+/* ── .heatbar — inline progress strip ── */
+.heatbar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--rule-2);
+  overflow: hidden;
+  width: 100%;
+}
+.heatbar > span {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  border-radius: 999px;
+}
+.heatbar.accent > span { background: var(--accent); }
+
+/* ── .rank-move ── */
+.rank-move {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.rank-move .from {
+  color: var(--ink-3);
+  text-decoration: line-through;
+  margin-right: 4px;
+}
+.rank-move .to {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ── table.data — editorial data tables ── */
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--sans);
+}
+table.data thead th {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1.5px solid var(--ink);
+  white-space: nowrap;
+}
+table.data tbody td {
+  padding: 12px;
+  font-size: 13px;
+  color: var(--ink);
+  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+}
+table.data tbody tr:last-child td { border-bottom: 0; }
+table.data tbody tr:hover { background: var(--paper-2); }
+table.data .pri  { color: var(--ink); font-weight: 500; }
+table.data .dim  { color: var(--ink-3); }
+table.data .num  { font-variant-numeric: tabular-nums; text-align: right; font-family: var(--serif); }
+table.data .kw   { font-family: var(--serif); font-style: italic; font-size: 14px; }
+table.data.data-compare thead th { background: var(--ink); color: var(--paper); }
+table.data.data-dense tbody td { padding: 7px 10px; font-size: 12px; }
+table.data.data-dense thead th { padding: 7px 10px; }
+
+/* ─────────────────────────────────────────────────────────────────
+   LEGACY PRIMITIVES — retuned for editorial. Existing pages use these
+   class names heavily (.tile, .tile-hover, .tile-feedback, .dropdown-panel,
+   .select-input, etc.) so we restyle them in place rather than replace.
+   ─────────────────────────────────────────────────────────────────  */
+
+/* .tile — was a dark glowy card; now an editorial paper panel */
 .tile {
-  background-color: var(--color-bg-card);
-  border: 1px solid var(--color-border-default);
-  border-radius: 1rem;
-  transition: border-color 200ms ease, background-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  position: relative;
+  transition: border-color 200ms ease, background-color 200ms ease;
 }
-
-/* Hover variant — apply ALONGSIDE .tile on any card the user can interact with */
 .tile-hover { cursor: pointer; }
 .tile-hover:hover {
-  background-color: var(--color-bg-card-hover);
-  border-color: rgba(212, 245, 12, 0.22);
-  box-shadow: 0 0 24px rgba(212, 245, 12, 0.08), 0 0 4px rgba(212, 245, 12, 0.04);
+  background: var(--paper-2);
+  border-color: var(--ink-3);
+}
+.tile-feedback { transition: border-color 200ms ease; }
+.tile-feedback:hover { border-color: var(--ink-3); }
+
+/* The old radial yellow glow ::before is removed — editorial uses subtle bg shift only */
+
+/* .glow-hover (legacy) — also retuned */
+.glow-hover { transition: all 200ms ease; }
+.glow-hover:hover {
+  border-color: var(--ink-3);
 }
 
-/* Passive tiles that still want visible feedback when hovered (non-interactive data cards) */
-.tile-feedback {
-  transition: border-color 200ms ease, box-shadow 200ms ease;
-}
-.tile-feedback:hover {
-  border-color: rgba(212, 245, 12, 0.14);
-  box-shadow: 0 0 16px rgba(212, 245, 12, 0.05);
-}
-
-/* Decorative "catch-light" gradient accent on tile hover.
-   Radial glow anchored in the top-right corner of every hoverable tile,
-   sized to extend ~140px into the card. pointer-events: none so clicks
-   pass through to children (e.g. KPICard's onClick). The ::before sits
-   beneath normal children by default (no z-index), so absolute elements
-   like KPICard's ArrowUpRight icon still paint over the glow.
-
-   Note: .tile / .tile-feedback / .tile-hover all get position: relative
-   and overflow: hidden to contain the gradient to the card's rounded
-   corners. */
-.tile {
-  position: relative;
-  overflow: hidden;
-}
-.tile-feedback::before,
-.tile-hover::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 140px;
-  height: 140px;
-  background: radial-gradient(
-    circle at 100% 0%,
-    rgba(212, 245, 12, 0.35) 0%,
-    rgba(212, 245, 12, 0.12) 35%,
-    transparent 65%
-  );
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 240ms ease;
-  border-radius: 1rem 0 0 0;
-}
-.tile-feedback:hover::before,
-.tile-hover:hover::before {
-  opacity: 1;
-}
-
-/* Unified dropdown panel */
+/* .dropdown-panel — paper popup */
 .dropdown-panel {
-  background-color: var(--color-bg-card);
-  border: 1px solid var(--color-border-default);
-  border-radius: 1rem;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.2);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: var(--shadow-card);
   z-index: 50;
   overflow: hidden;
 }
 
-/* Unified select input — use in place of native <select> styling */
+/* .select-input — paper select */
 .select-input {
   padding: 0.5rem 2rem 0.5rem 0.75rem;
-  background-color: var(--color-bg-primary);
-  border: 1px solid var(--color-border-default);
-  border-radius: 0.75rem;
-  font-size: 0.875rem;
-  color: var(--color-text-primary);
+  background-color: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-size: 13px;
+  font-family: var(--sans);
+  color: var(--ink);
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
-  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23606060' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'/%3e%3c/svg%3e");
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235d5d5a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'/%3e%3c/svg%3e");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   background-size: 12px;
   transition: border-color 200ms ease, box-shadow 200ms ease;
 }
-.select-input:hover {
-  border-color: rgba(212, 245, 12, 0.25);
-}
+.select-input:hover { border-color: var(--ink-3); }
 .select-input:focus {
   outline: none;
-  border-color: rgba(212, 245, 12, 0.5);
-  box-shadow: 0 0 0 3px rgba(212, 245, 12, 0.08);
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .select-input option {
-  background-color: var(--color-bg-card);
-  color: var(--color-text-primary);
+  background-color: var(--paper);
+  color: var(--ink);
 }
 
-/* Toast container + animations */
+/* .toast-stack — keep positioning, retune visuals via Toast.jsx */
 .toast-stack {
   position: fixed;
   top: 1rem;
@@ -256,56 +631,197 @@ input[type="date"], input[type="month"] {
   pointer-events: none;
 }
 .toast-stack > * { pointer-events: auto; }
+
+/* Animations — retained from legacy CSS */
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(16px); }
   to { opacity: 1; transform: translateX(0); }
 }
-.toast-in {
-  animation: toast-in 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
+.toast-in { animation: toast-in 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
-/* Table row hover with subtle yellow tint */
-.row-glow:hover {
-  background: rgba(212, 245, 12, 0.03);
-}
-
-/* Slide-out panel (client edit, etc.) */
-.slide-panel {
-  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* Fade out animation for row delete */
 @keyframes fade-out {
   to { opacity: 0; max-height: 0; padding: 0; overflow: hidden; }
 }
-.fade-out {
-  animation: fade-out 300ms ease-out forwards;
-}
+.fade-out { animation: fade-out 300ms ease-out forwards; }
 
-/* Slide in from right (panels, modals) */
 @keyframes slide-in-right {
   from { opacity: 0; transform: translateX(40px); }
   to { opacity: 1; transform: translateX(0); }
 }
-.slide-in-right {
-  animation: slide-in-right 300ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
+.slide-in-right { animation: slide-in-right 300ms cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
-/* Tab content fade */
 @keyframes tab-fade {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.tab-fade {
-  animation: tab-fade 150ms ease-out forwards;
-}
+.tab-fade { animation: tab-fade 150ms ease-out forwards; }
 
-/* Splash screen loading bar */
 @keyframes load-bar {
   0% { width: 0; }
   60% { width: 80%; }
   100% { width: 100%; }
 }
-.animate-load-bar {
-  animation: load-bar 1.4s ease-out forwards;
+.animate-load-bar { animation: load-bar 1.4s ease-out forwards; }
+
+/* Slide-out panel (client edit, etc.) */
+.slide-panel { transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* Smooth expand/collapse */
+.expand-section {
+  transition: max-height 300ms ease-out, opacity 200ms ease-in;
+  overflow: hidden;
+}
+
+/* Table row hover (legacy) — gentle paper-2 wash */
+.row-glow:hover { background: var(--paper-2); }
+
+/* ─────────────────────────────────────────────────────────────────
+   Layout shell — sidebar / drawer / profile menu primitives.
+   ───────────────────────────────────────────────────────────────── */
+
+/* Desktop sidebar nav icons */
+.editorial-nav-item {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  transition: color 200ms ease, background 200ms ease;
+  cursor: pointer;
+  margin: 2px 0;
+}
+.editorial-nav-item:hover {
+  color: var(--ink);
+  background: var(--paper-2);
+}
+.editorial-nav-item.is-active {
+  color: var(--ink);
+  background: var(--accent-soft);
+}
+.editorial-nav-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* Tooltip on hover (desktop sidebar) */
+.editorial-nav-tip {
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 10px;
+  border-radius: 3px;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+  z-index: 60;
+}
+.editorial-nav-item:hover .editorial-nav-tip {
+  opacity: 1;
+}
+
+/* Mobile drawer rows */
+.editorial-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  min-height: 48px;
+  border-radius: 3px;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 180ms ease, color 180ms ease;
+  width: 100%;
+  text-align: left;
+}
+.editorial-nav-row:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.editorial-nav-row.is-active {
+  background: var(--accent-soft);
+  color: var(--ink);
+  position: relative;
+}
+.editorial-nav-row.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  background: var(--accent);
+}
+
+/* Profile dropdown menu rows */
+.editorial-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  min-height: 48px;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 180ms ease;
+  width: 100%;
+}
+.editorial-menu-row:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+/* ── Editorial KPI card — paper panel with responsive padding ── */
+.editorial-kpi-card {
+  padding: 12px 14px;
+  min-height: 100px;
+}
+@media (min-width: 640px) {
+  .editorial-kpi-card { padding: 14px 16px; min-height: 110px; }
+}
+@media (min-width: 1024px) {
+  .editorial-kpi-card { padding: 16px 18px; min-height: 120px; }
+}
+
+/* ── Editorial panel title — serif h3 with icon prefix ── */
+.editorial-panel-title {
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  line-height: 1.2;
+  margin: 0 0 4px 0;
+}
+.editorial-panel-title svg {
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

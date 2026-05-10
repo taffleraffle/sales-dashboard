@@ -1,12 +1,18 @@
-const statusColors = {
-  set: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-  showed: 'bg-opt-yellow-muted text-opt-yellow border-opt-yellow/30',
-  closed: 'bg-success/15 text-success border-success/30',
-  no_show: 'bg-danger/15 text-danger border-danger/30',
-  not_closed: 'bg-text-400/15 text-text-400 border-text-400/30',
-  rescheduled: 'bg-warning/15 text-warning border-warning/30',
-  cancelled: 'bg-danger/15 text-danger border-danger/30',
-  ascended: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+/*
+  Editorial lead status badge.
+  All statuses use the same .tag base; semantic colour comes from a thin
+  border + tinted background derived from the editorial palette.
+*/
+
+const statusStyles = {
+  set:         { bg: 'var(--paper-2)', fg: 'var(--ink-2)', bd: 'var(--rule)' },
+  showed:      { bg: 'var(--accent-soft)', fg: 'var(--ink)', bd: 'var(--accent)' },
+  closed:      { bg: 'var(--up-soft)', fg: 'var(--up)', bd: 'var(--up)' },
+  no_show:     { bg: 'var(--down-soft)', fg: 'var(--down)', bd: 'var(--down)' },
+  not_closed:  { bg: 'var(--paper-2)', fg: 'var(--ink-3)', bd: 'var(--rule)' },
+  rescheduled: { bg: '#fff4d6', fg: '#8a5a00', bd: '#d6b876' },
+  cancelled:   { bg: 'var(--down-soft)', fg: 'var(--down)', bd: 'var(--down)' },
+  ascended:    { bg: '#efe6ff', fg: '#5b3aa3', bd: '#bea7e0' },
 }
 
 const statusLabels = {
@@ -21,8 +27,25 @@ const statusLabels = {
 }
 
 export default function LeadStatusBadge({ status }) {
+  const s = statusStyles[status] || statusStyles.set
   return (
-    <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-medium border ${statusColors[status] || statusColors.set}`}>
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '2px 8px',
+        border: `1px solid ${s.bd}`,
+        borderRadius: 2,
+        background: s.bg,
+        color: s.fg,
+        fontFamily: 'var(--mono)',
+        fontSize: 9,
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+      }}
+    >
       {statusLabels[status] || status}
     </span>
   )

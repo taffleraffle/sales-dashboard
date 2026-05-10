@@ -25,7 +25,7 @@ export default function CloserOverview() {
           <div className="h-8 w-48 tile" />
           <div className="h-9 w-36 tile" />
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3">
           {Array.from({ length: 8 }, (_, i) => <div key={i} className="tile h-24" />)}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-3">
@@ -112,10 +112,13 @@ export default function CloserOverview() {
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Closer Performance</h1>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Closers</span>
+          <h1 className="h2 mt-2">The <em>closer</em> floor.</h1>
+        </div>
         <div className="flex items-center gap-3">
-          <Link to="/sales/eod/submit?tab=closer" className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl bg-opt-yellow text-bg-primary text-xs font-semibold hover:brightness-110 transition-all">
+          <Link to="/sales/eod/submit?tab=closer" className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-sm bg-opt-yellow text-text-primary text-xs font-semibold hover:brightness-110 transition-all">
             <Plus size={14} />
             New EOD
           </Link>
@@ -126,7 +129,7 @@ export default function CloserOverview() {
       <div className="max-w-[1600px] mx-auto">
 
       {/* Company-Level KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3 mb-6">
         <KPICard label="Booked" value={totalBooked} subtitle={`${companyTotals.ncBooked} NC / ${companyTotals.fuBooked} FU`} />
         <KPICard label="Net New" value={companyTotals.liveNC} subtitle={`${companyTotals.liveFU} FU separately`} />
         <KPICard label="No Shows" value={totalNoShows} />
@@ -181,7 +184,7 @@ export default function CloserOverview() {
                 <span className="text-text-400">Booked: <strong className="text-text-primary">{c.booked}</strong></span>
                 <span className="text-text-400">Net New: <strong className="text-text-primary">{c.liveNC}</strong></span>
                 <span className="text-text-400">Offers: <strong className="text-text-primary">{c.offers}</strong></span>
-                <span className="text-text-400">Cash: <strong className="text-opt-yellow">${c.cash.toLocaleString()}</strong></span>
+                <span className="text-text-400">Cash: <strong className="text-text-primary">${c.cash.toLocaleString()}</strong></span>
               </div>
             </Link>
           ))}
@@ -202,12 +205,12 @@ export default function CloserOverview() {
             ))}
             {/* Team total — summary row styled as a yellow-tinted card so it
                 reads as an aggregate, not a clickable team-member row. */}
-            <div className="bg-opt-yellow/[0.06] border border-opt-yellow/30 rounded-2xl px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
+            <div className="bg-opt-yellow/[0.06] border border-opt-yellow/30 rounded-sm px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
               <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
                 <div className="w-9 h-9 rounded-full bg-opt-yellow/25 border border-opt-yellow/50 flex items-center justify-center">
-                  <span className="text-[11px] font-bold text-opt-yellow">∑</span>
+                  <span className="text-[11px] font-bold text-text-primary">∑</span>
                 </div>
-                <span className="text-sm font-semibold text-opt-yellow">Team Total</span>
+                <span className="text-sm font-semibold text-text-primary">Team Total</span>
               </div>
               <div className="flex items-baseline gap-4 sm:gap-6">
                 <StatBlock label="Closes" value={companyTotals.closes} />
@@ -238,7 +241,7 @@ function initialsOf(name) {
 
 function Pill({ label, value, good, ok }) {
   const color = good ? 'bg-success/15 text-success border-success/30'
-    : ok ? 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30'
+    : ok ? 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30'
     : 'bg-danger/15 text-danger border-danger/30'
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium ${color}`}>
@@ -249,7 +252,7 @@ function Pill({ label, value, good, ok }) {
 }
 
 function StatBlock({ label, value, accent }) {
-  const color = accent === 'success' ? 'text-success' : accent === 'opt-yellow' ? 'text-opt-yellow' : 'text-text-primary'
+  const color = accent === 'success' ? 'text-success' : accent === 'opt-yellow' ? 'text-text-primary' : 'text-text-primary'
   return (
     <div className="flex flex-col">
       <span className="text-[10px] uppercase tracking-wider text-text-400">{label}</span>
@@ -270,7 +273,7 @@ function CloserLeaderboardRow({ closer, onClick }) {
     >
       {/* Name block */}
       <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
-        <div className="w-9 h-9 rounded-full bg-opt-yellow/15 border border-opt-yellow/30 flex items-center justify-center shrink-0 text-[11px] font-bold text-opt-yellow">
+        <div className="w-9 h-9 rounded-full bg-opt-yellow/15 border border-opt-yellow/30 flex items-center justify-center shrink-0 text-[11px] font-bold text-text-primary">
           {initialsOf(c.name)}
         </div>
         <span className="text-sm font-semibold text-text-primary truncate">{c.name}</span>

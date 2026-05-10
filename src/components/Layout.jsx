@@ -38,8 +38,6 @@ export default function Layout() {
 
   const roleLabel = isAdmin ? 'Admin' : profile?.role === 'closer' ? 'Closer' : profile?.role === 'setter' ? 'Setter' : 'Viewer'
 
-  // Outside-click dismiss for the profile dropdown. The drawer has its own
-  // backdrop layer, so clicking outside of it already closes it via backdrop onClick.
   useEffect(() => {
     if (!profileOpen) return
     const handler = (e) => {
@@ -49,7 +47,6 @@ export default function Layout() {
     return () => document.removeEventListener('pointerdown', handler)
   }, [profileOpen])
 
-  // Escape closes the drawer (accessibility)
   useEffect(() => {
     if (!drawerOpen) return
     const handler = (e) => { if (e.key === 'Escape') setDrawerOpen(false) }
@@ -57,8 +54,6 @@ export default function Layout() {
     return () => document.removeEventListener('keydown', handler)
   }, [drawerOpen])
 
-  // Lock body scroll while the drawer is open so the page underneath
-  // doesn't scroll when the user swipes inside the drawer.
   useEffect(() => {
     if (!drawerOpen) return
     const prev = document.body.style.overflow
@@ -66,9 +61,6 @@ export default function Layout() {
     return () => { document.body.style.overflow = prev }
   }, [drawerOpen])
 
-  // Background auto-sync. Deferred 3s after mount so the first paint / first
-  // page render isn't competing with 6 sync network calls (the previous
-  // contention was the biggest trigger of GHL 429 rate-limit errors).
   useEffect(() => {
     const timer = setTimeout(() => startAutoSync(), 3000)
     return () => {
@@ -77,16 +69,9 @@ export default function Layout() {
     }
   }, [])
 
-  // Pre-warm caches for the slow pages so data is already in memory by the
-  // time the user navigates. Staggered (5s → 7s → 12s → 17s) so we don't
-  // hammer Supabase + GHL the moment the first paint settles. All fire-and-
-  // forget — failures don't affect the page; the pages will just re-fetch
-  // on their own mount if the cache is empty.
+  // Pre-warm caches for slow pages (preserved verbatim)
   useEffect(() => {
     const timers = []
-
-    // +5s: email-flow queries (loadEmailStats/loadFlowGroups/loadSubjectMeta
-    // caches + GHL contact-name resolver for recipient dropdowns).
     timers.push(setTimeout(async () => {
       try {
         const { prewarmRecipientNameCache, loadEmailStats, loadFlowGroups, loadSubjectMeta } =
@@ -102,61 +87,57 @@ export default function Layout() {
         prewarmRecipientNameCache(30).catch(() => {})
       } catch (_e) { void _e }
     }, 5000))
-
-    // +7s: GHL pipeline summaries. Slowest fetch in the app (~5-10s cold).
-    // Feeds SalesOverview, SetterDetail, SetterKPIHistory, PipelinePerformance.
-    // Module-level 5-min memo means the first page to mount after this call
-    // gets instant data. If it fails (429 / network), pages re-fetch on mount.
     timers.push(setTimeout(async () => {
       try {
         const { fetchAllPipelineSummaries } = await import('../services/ghlPipeline')
         fetchAllPipelineSummaries().catch(() => {})
       } catch (_e) { void _e }
     }, 7000))
-
-    // +12s: closer + setter EOD reports (team-wide, last 30d). Populates
-    // the module-level caches in useCloserData / useSetterData so the first
-    // page to mount (SalesOverview, CloserOverview, SetterOverview,
-    // EODDashboard, EODReview, CommissionPage) gets data instantly instead
-    // of re-fetching on mount.
     timers.push(setTimeout(async () => {
       try {
         const [{ prewarmCloserEODs }, { prewarmSetterEODs }] = await Promise.all([
           import('../hooks/useCloserData'),
           import('../hooks/useSetterData'),
         ])
-        // Both fire in parallel — different tables, no contention.
         Promise.all([
           prewarmCloserEODs(null, 30),
           prewarmSetterEODs(null, 30),
         ]).catch(() => {})
       } catch (_e) { void _e }
     }, 12000))
-
-    // +17s: WAVV aggregates (30-day window). Feeds SalesOverview +
-    // SetterOverview + PipelinePerformance. Has its own 5-min module cache.
     timers.push(setTimeout(async () => {
       try {
         const { fetchWavvAggregates } = await import('../services/wavvService')
         fetchWavvAggregates(30).catch(() => {})
       } catch (_e) { void _e }
     }, 17000))
-
     return () => { for (const t of timers) clearTimeout(t) }
   }, [])
 
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-bg-primary flex">
-        {/* ── Left Sidebar (desktop only) ── */}
-        <aside className="hidden md:flex w-16 bg-bg-sidebar border-r border-border-default flex-col items-center py-5 fixed top-0 left-0 h-screen z-50">
-          {/* Logo */}
-          <div className="w-9 h-9 rounded-full bg-opt-yellow flex items-center justify-center mb-8">
-            <BarChart3 size={ICON.xl} className="text-bg-primary" />
+      <div className="min-h-screen flex" style={{ background: 'var(--paper)' }}>
+        {/* ── Left Sidebar (desktop) ── editorial paper, hairline border, ink icons */}
+        <aside
+          className="hidden md:flex w-16 flex-col items-center py-5 fixed top-0 left-0 h-screen z-50"
+          style={{
+            background: 'var(--paper)',
+            borderRight: '1px solid var(--rule)',
+          }}
+        >
+          {/* Logo — accent yellow disc, ink mark */}
+          <div
+            className="w-9 h-9 flex items-center justify-center mb-8"
+            style={{
+              background: 'var(--accent)',
+              borderRadius: '999px',
+            }}
+          >
+            <BarChart3 size={ICON.xl} style={{ color: 'var(--ink)' }} />
           </div>
 
-          {/* Nav Icons */}
-          <nav className="flex flex-col items-center gap-2 flex-1">
+          {/* Nav icons */}
+          <nav className="flex flex-col items-center gap-1 flex-1">
             {navItems.map(({ to, icon: Icon, label, end }) => (
               <NavLink
                 key={to}
@@ -164,63 +145,77 @@ export default function Layout() {
                 end={end}
                 title={label}
                 className={({ isActive }) =>
-                  `group relative w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-200 ${
-                    isActive
-                      ? 'bg-opt-yellow text-bg-primary shadow-[0_0_20px_rgba(212,245,12,0.15)]'
-                      : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
-                  }`
+                  `editorial-nav-item ${isActive ? 'is-active' : ''}`
                 }
               >
                 <Icon size={ICON.xl} />
-                <span className="absolute left-full ml-3 px-2.5 py-1 rounded-lg bg-bg-card border border-border-default text-xs text-text-primary whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity shadow-lg">
-                  {label}
-                </span>
+                <span className="editorial-nav-tip">{label}</span>
               </NavLink>
             ))}
           </nav>
 
-          {/* Bottom: Sign out */}
+          {/* Sign out */}
           <button
             onClick={signOut}
-            className="w-11 h-11 rounded-xl flex items-center justify-center text-text-400 hover:text-danger hover:bg-danger/10 transition-all"
+            className="editorial-nav-item"
             title="Sign out"
+            style={{ marginTop: 8 }}
           >
             <LogOut size={ICON.lg} />
+            <span className="editorial-nav-tip">Sign out</span>
           </button>
         </aside>
 
-        {/* ── Mobile Drawer (hamburger menu) ── */}
+        {/* ── Mobile Drawer ── */}
         {drawerOpen && (
           <>
             <div
-              className="md:hidden fixed inset-0 z-[99] bg-black/50 backdrop-blur-sm"
+              className="md:hidden fixed inset-0 z-[99]"
+              style={{ background: 'rgba(10,10,10,0.45)', backdropFilter: 'blur(4px)' }}
               onClick={() => setDrawerOpen(false)}
               aria-hidden="true"
             />
             <aside
-              className="md:hidden fixed top-0 left-0 h-full z-[100] w-72 max-w-[82vw] bg-bg-sidebar border-r border-border-default shadow-2xl flex flex-col slide-in-right"
+              className="md:hidden fixed top-0 left-0 h-full z-[100] w-72 max-w-[82vw] flex flex-col slide-in-right"
               role="dialog"
               aria-label="Navigation menu"
+              style={{
+                background: 'var(--paper)',
+                borderRight: '1px solid var(--rule)',
+                boxShadow: '0 0 60px rgba(10,10,10,0.18)',
+              }}
             >
               {/* Drawer header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
+              <div
+                className="flex items-center justify-between px-4 py-3"
+                style={{ borderBottom: '1px solid var(--rule)' }}
+              >
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-opt-yellow flex items-center justify-center">
-                    <BarChart3 size={15} className="text-bg-primary" />
+                  <div
+                    className="w-8 h-8 flex items-center justify-center"
+                    style={{ background: 'var(--accent)', borderRadius: '999px' }}
+                  >
+                    <BarChart3 size={15} style={{ color: 'var(--ink)' }} />
                   </div>
-                  <span className="text-sm font-semibold text-text-primary">Sales Dashboard</span>
+                  <div className="leading-tight">
+                    <span className="eyebrow eyebrow-bare" style={{ fontSize: 9 }}>OPT Digital</span>
+                    <div style={{ fontFamily: 'var(--serif)', fontSize: 15, color: 'var(--ink)', marginTop: 2 }}>
+                      Sales <em style={{ fontStyle: 'italic' }}>Dashboard</em>
+                    </div>
+                  </div>
                 </div>
                 <button
                   onClick={() => setDrawerOpen(false)}
-                  className="w-10 h-10 rounded-xl flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all"
+                  className="w-10 h-10 flex items-center justify-center"
                   aria-label="Close menu"
+                  style={{ color: 'var(--ink-3)', borderRadius: 3 }}
                 >
                   <X size={ICON.lg} />
                 </button>
               </div>
 
-              {/* Nav items — all of them */}
-              <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
+              {/* Nav items */}
+              <nav className="flex-1 overflow-y-auto px-2 py-3">
                 {navItems.map(({ to, icon: Icon, label, end }) => (
                   <NavLink
                     key={to}
@@ -228,55 +223,66 @@ export default function Layout() {
                     end={end}
                     onClick={() => setDrawerOpen(false)}
                     className={({ isActive }) =>
-                      `flex items-center gap-3 px-3 py-3 rounded-xl transition-all min-h-[48px] ${
-                        isActive
-                          ? 'bg-opt-yellow-subtle text-opt-yellow'
-                          : 'text-text-secondary hover:bg-bg-card-hover'
-                      }`
+                      `editorial-nav-row ${isActive ? 'is-active' : ''}`
                     }
                   >
-                    <Icon size={ICON.xl} className="shrink-0" />
-                    <span className="text-sm font-medium">{label}</span>
+                    <Icon size={ICON.lg} className="shrink-0" />
+                    <span>{label}</span>
                   </NavLink>
                 ))}
               </nav>
 
-              {/* Drawer footer — sign out */}
-              <div className="border-t border-border-default p-2">
+              {/* Sign out */}
+              <div style={{ borderTop: '1px solid var(--rule)', padding: 8 }}>
                 <button
                   onClick={() => { setDrawerOpen(false); signOut() }}
-                  className="flex items-center gap-3 px-3 py-3 w-full text-left rounded-xl text-danger hover:bg-danger/5 transition-all min-h-[48px]"
+                  className="editorial-nav-row"
+                  style={{ color: 'var(--down)' }}
                 >
-                  <LogOut size={ICON.xl} />
-                  <span className="text-sm font-medium">Sign Out</span>
+                  <LogOut size={ICON.lg} />
+                  <span>Sign out</span>
                 </button>
               </div>
             </aside>
           </>
         )}
 
-        {/* ── Main Content ── */}
+        {/* ── Main column ── */}
         <div className="flex-1 md:ml-16 min-w-0">
-          {/* Top bar */}
-          <header className="h-14 md:h-16 border-b border-border-default flex items-center justify-between px-3 sm:px-4 md:px-8 sticky top-0 bg-bg-primary/80 backdrop-blur-xl z-40">
-            {/* Left slot */}
-            <div className="flex items-center gap-2">
+          {/* Top bar — paper, hairline bottom, sticky */}
+          <header
+            className="h-14 md:h-16 flex items-center justify-between px-3 sm:px-4 md:px-8 sticky top-0 z-40"
+            style={{
+              background: 'rgba(251,250,246,0.92)',
+              backdropFilter: 'blur(10px)',
+              borderBottom: '1px solid var(--rule)',
+            }}
+          >
+            <div className="flex items-center gap-3">
               {/* Mobile hamburger */}
               <button
                 onClick={() => setDrawerOpen(true)}
                 aria-expanded={drawerOpen}
                 aria-label="Open navigation menu"
-                className="md:hidden w-11 h-11 rounded-xl flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-colors"
+                className="md:hidden w-11 h-11 flex items-center justify-center"
+                style={{ color: 'var(--ink)', borderRadius: 3 }}
               >
                 <Menu size={ICON.xl} />
               </button>
-              {/* Mobile logo (next to hamburger) */}
-              <div className="md:hidden w-8 h-8 rounded-full bg-opt-yellow flex items-center justify-center shrink-0">
-                <BarChart3 size={15} className="text-bg-primary" />
+              <div
+                className="md:hidden w-8 h-8 flex items-center justify-center shrink-0"
+                style={{ background: 'var(--accent)', borderRadius: 999 }}
+              >
+                <BarChart3 size={15} style={{ color: 'var(--ink)' }} />
+              </div>
+
+              {/* Wordmark — desktop */}
+              <div className="hidden md:flex items-center gap-3">
+                <span className="eyebrow eyebrow-accent">OPT Digital · Sales</span>
               </div>
             </div>
 
-            {/* Right side — profile only */}
+            {/* Profile */}
             <div className="flex items-center gap-3 md:gap-4">
               {profile && (
                 <div className="relative" ref={profileRef}>
@@ -285,29 +291,55 @@ export default function Layout() {
                     aria-expanded={profileOpen}
                     aria-haspopup="menu"
                     aria-label="Open profile menu"
-                    className="flex items-center gap-2 md:gap-3 min-h-[44px] px-1.5 md:pl-1.5 md:pr-3 rounded-xl hover:bg-bg-card-hover transition-colors"
+                    className="flex items-center gap-2 md:gap-3 min-h-[44px] px-1.5 md:pl-1.5 md:pr-3"
+                    style={{ borderRadius: 3 }}
                   >
-                    <div className="w-11 h-11 rounded-full bg-opt-yellow/15 border border-opt-yellow/30 flex items-center justify-center text-[13px] font-semibold text-opt-yellow">
+                    <div
+                      className="w-10 h-10 flex items-center justify-center text-[12px] font-semibold"
+                      style={{
+                        background: 'var(--paper-2)',
+                        border: '1px solid var(--rule)',
+                        color: 'var(--ink)',
+                        borderRadius: 999,
+                        fontFamily: 'var(--mono)',
+                        letterSpacing: '0.04em',
+                      }}
+                    >
                       {initialsOf(profile.name)}
                     </div>
-                    <div className="hidden md:block text-left">
-                      <p className="text-sm font-medium text-text-primary leading-tight">{profile.name}</p>
-                      <p className="text-[11px] text-text-400">{roleLabel}</p>
+                    <div className="hidden md:block text-left leading-tight">
+                      <p style={{ fontSize: 13, color: 'var(--ink)', fontWeight: 500, margin: 0 }}>{profile.name}</p>
+                      <p
+                        style={{
+                          fontFamily: 'var(--mono)',
+                          fontSize: 9,
+                          letterSpacing: '0.14em',
+                          textTransform: 'uppercase',
+                          color: 'var(--ink-3)',
+                          margin: 0,
+                        }}
+                      >
+                        {roleLabel}
+                      </p>
                     </div>
-                    <ChevronDown size={ICON.sm} className={`hidden md:block text-text-400 transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
+                    <ChevronDown
+                      size={ICON.sm}
+                      className={`hidden md:block transition-transform ${profileOpen ? 'rotate-180' : ''}`}
+                      style={{ color: 'var(--ink-3)' }}
+                    />
                   </button>
                   {profileOpen && (
-                    <div className="absolute top-full right-0 mt-2 dropdown-panel min-w-[240px]">
-                      <div className="px-4 py-3 border-b border-border-default">
-                        <p className="text-sm font-semibold text-text-primary">{profile.name}</p>
-                        <p className="text-[11px] text-text-400">{profile.email}</p>
-                        <p className="text-[11px] text-opt-yellow mt-0.5">{roleLabel}</p>
+                    <div className="absolute top-full right-0 mt-2 dropdown-panel min-w-[260px]">
+                      <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--rule)' }}>
+                        <p style={{ fontSize: 14, color: 'var(--ink)', fontWeight: 500, margin: 0 }}>{profile.name}</p>
+                        <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '2px 0 0' }}>{profile.email}</p>
+                        <span className="eyebrow eyebrow-accent" style={{ marginTop: 8, fontSize: 9 }}>{roleLabel}</span>
                       </div>
                       {isAdmin && (
                         <NavLink
                           to="/sales/settings"
                           onClick={() => setProfileOpen(false)}
-                          className="flex items-center gap-3 px-4 py-3 text-sm text-text-secondary hover:bg-bg-card-hover transition-all min-h-[48px]"
+                          className="editorial-menu-row"
                         >
                           <Settings size={ICON.md} />
                           <span>Settings</span>
@@ -315,10 +347,11 @@ export default function Layout() {
                       )}
                       <button
                         onClick={() => { setProfileOpen(false); signOut() }}
-                        className="flex items-center gap-3 px-4 py-3 w-full text-left text-sm text-danger hover:bg-danger/5 transition-all min-h-[48px] border-t border-border-default"
+                        className="editorial-menu-row"
+                        style={{ color: 'var(--down)', borderTop: '1px solid var(--rule)', width: '100%', textAlign: 'left' }}
                       >
                         <LogOut size={ICON.md} />
-                        <span>Sign Out</span>
+                        <span>Sign out</span>
                       </button>
                     </div>
                   )}
@@ -327,16 +360,16 @@ export default function Layout() {
             </div>
           </header>
 
-          {/* Page content — full-width, no bottom-nav reservation anymore */}
-          <main className="w-full px-3 sm:px-4 md:px-8 py-4 md:py-6 pb-6">
+          {/* Page content */}
+          <main className="w-full px-3 sm:px-4 md:px-8 py-4 md:py-6 pb-10">
             <Outlet />
           </main>
         </div>
 
-        {/* Toast stack — globally mounted */}
+        {/* Toast stack */}
         <ToastStack />
 
-        {/* Sales Intelligence Chat */}
+        {/* Sales chat */}
         <SalesChatWidget />
       </div>
     </ToastProvider>

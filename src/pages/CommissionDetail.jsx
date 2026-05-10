@@ -12,7 +12,7 @@ const TYPE_COLORS = {
   trial_close: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
   ascension: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
   recurring: 'bg-success/15 text-success border-success/30',
-  bonus: 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30',
+  bonus: 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30',
 }
 
 const TYPE_LABELS = {
@@ -89,19 +89,29 @@ export default function CommissionDetail({ memberId: propId } = {}) {
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <div className="flex items-center gap-3">
+      {/* Header — editorial */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div className="flex items-end gap-3">
           {!propId && (
-            <button onClick={() => navigate('/sales/commissions')} className="text-text-400 hover:text-text-primary">
+            <button onClick={() => navigate('/sales/commissions')} style={{ color: 'var(--ink-3)', marginBottom: 4 }}>
               <ArrowLeft size={18} />
             </button>
           )}
           <div>
-            <h1 className="text-lg sm:text-xl font-bold flex items-center gap-2">
-              <DollarSign size={20} className="text-opt-yellow" /> {propId ? 'My Commission' : member.name}
-            </h1>
-            <p className="text-xs sm:text-sm text-text-400 capitalize">{member.role} — Commission Detail</p>
+            <span className="eyebrow eyebrow-accent">Commission · {member.role}</span>
+            <h1 className="h2 mt-2">{propId ? 'My commission' : member.name}</h1>
+            <p
+              className="mt-2"
+              style={{
+                fontFamily: 'var(--mono)',
+                fontSize: 10,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: 'var(--ink-3)',
+              }}
+            >
+              Commission · detail
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">

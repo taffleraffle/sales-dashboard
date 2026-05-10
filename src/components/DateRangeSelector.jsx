@@ -21,14 +21,13 @@ function formatRangeLabel(selected) {
   return null
 }
 
+const segActive = { background: 'var(--ink)', color: 'var(--paper)', borderRadius: 3 }
+const segIdle   = { background: 'transparent', color: 'var(--ink-3)', borderRadius: 3 }
+
 export default function DateRangeSelector({ selected, onChange }) {
   const [open, setOpen] = useState(false)
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
-  // Portal-based popover position. Measuring the Custom-button rect on open
-  // and rendering the popover into document.body means no ancestor flex /
-  // overflow / transform can push the page layout around when the panel
-  // opens — it floats above everything, independent of its DOM position.
   const [popover, setPopover] = useState({ top: 0, left: 0, maxWidth: 0 })
   const containerRef = useRef(null)
   const triggerRef = useRef(null)
@@ -38,9 +37,7 @@ export default function DateRangeSelector({ selected, onChange }) {
     if (!open || !triggerRef.current) return
     const rect = triggerRef.current.getBoundingClientRect()
     const gutter = 12
-    const panelWidth = 288 // w-72
-    // Anchor panel to the right edge of the trigger button so it aligns with
-    // the "Custom" chip. Clamp at viewport edges so we don't spill off-screen.
+    const panelWidth = 288
     let left = rect.right - panelWidth
     if (left < gutter) left = gutter
     const maxRight = window.innerWidth - gutter
@@ -48,11 +45,6 @@ export default function DateRangeSelector({ selected, onChange }) {
     setPopover({ top: rect.bottom + 8, left, maxWidth: panelWidth })
   }, [open])
 
-  // Close on outside click. Reposition (don't close) on window scroll/resize
-  // so the panel tracks its trigger. The previous scroll-close used capture:true
-  // and fired on every nested scroll — including the focus-scroll the browser
-  // does when you click into the native date input — which immediately closed
-  // the popover the same tick it opened.
   useEffect(() => {
     if (!open) return
     const handleDown = (e) => {
@@ -97,73 +89,144 @@ export default function DateRangeSelector({ selected, onChange }) {
 
   return (
     <div className="relative" ref={containerRef}>
-      <div className="flex gap-1.5 bg-bg-card border border-border-default rounded-xl p-1 overflow-x-auto no-scrollbar">
+      <div
+        className="flex gap-1 overflow-x-auto no-scrollbar"
+        style={{
+          background: 'var(--paper)',
+          border: '1px solid var(--rule)',
+          borderRadius: 3,
+          padding: 3,
+        }}
+      >
         {presets.map(({ label, days }) => (
           <button
             key={label}
             onClick={() => { onChange(days); setOpen(false) }}
-            className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium transition-all duration-200 whitespace-nowrap shrink-0 ${
-              isPreset(days)
-                ? 'bg-opt-yellow text-bg-primary shadow-sm'
-                : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
-            }`}
+            style={{
+              padding: '5px 10px',
+              fontFamily: 'var(--mono)',
+              fontSize: 10.5,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              fontWeight: 500,
+              whiteSpace: 'nowrap',
+              transition: 'background 160ms ease, color 160ms ease',
+              ...(isPreset(days) ? segActive : segIdle),
+            }}
           >
             {label}
           </button>
         ))}
 
-        {/* Custom range toggle */}
         <button
           ref={triggerRef}
           onClick={() => setOpen(!open)}
-          className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium transition-all duration-200 whitespace-nowrap shrink-0 ${
-            isCustomRange(selected)
-              ? 'bg-opt-yellow text-bg-primary shadow-sm'
-              : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
-          }`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '5px 10px',
+            fontFamily: 'var(--mono)',
+            fontSize: 10.5,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            fontWeight: 500,
+            whiteSpace: 'nowrap',
+            ...(isCustomRange(selected) ? segActive : segIdle),
+          }}
         >
-          <Calendar size={12} />
+          <Calendar size={11} />
           <span className="hidden sm:inline">{customLabel || 'Custom'}</span>
           <span className="sm:hidden">{customLabel ? customLabel.substring(0, 10) : 'Custom'}</span>
-          <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
       </div>
 
-      {/* Custom popover — rendered into document.body via portal so opening
-          it never pushes the surrounding page layout around. */}
       {open && typeof document !== 'undefined' && createPortal(
         <div
           ref={popoverRef}
-          className="fixed z-[1000] bg-bg-card border border-border-default rounded-2xl p-5 shadow-xl shadow-black/40"
-          style={{ top: popover.top, left: popover.left, width: popover.maxWidth }}
+          className="fixed z-[1000]"
+          style={{
+            top: popover.top,
+            left: popover.left,
+            width: popover.maxWidth,
+            background: 'var(--paper)',
+            border: '1px solid var(--rule)',
+            borderRadius: 4,
+            padding: 18,
+            boxShadow: '0 16px 40px rgba(10,10,10,0.12)',
+          }}
           role="dialog"
           aria-label="Custom date range"
         >
-          <p className="text-[11px] text-text-400 uppercase tracking-wider font-medium mb-3">Custom Range</p>
+          <span className="eyebrow eyebrow-accent" style={{ fontSize: 9, marginBottom: 14, display: 'inline-flex' }}>Custom range</span>
 
-          <div className="space-y-3">
+          <div className="space-y-3 mt-3">
             <div>
-              <label className="text-[11px] text-text-400 block mb-1">From</label>
+              <label
+                style={{
+                  fontFamily: 'var(--mono)',
+                  fontSize: 9,
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: 'var(--ink-3)',
+                  display: 'block',
+                  marginBottom: 4,
+                }}
+              >
+                From
+              </label>
               <input
                 type="date"
                 value={customFrom}
                 onChange={e => setCustomFrom(e.target.value)}
-                className="w-full bg-bg-primary border border-border-default rounded-xl px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/50 transition-colors [color-scheme:dark]"
+                className="w-full"
+                style={{
+                  background: 'var(--paper)',
+                  border: '1px solid var(--rule)',
+                  borderRadius: 3,
+                  padding: '7px 10px',
+                  fontSize: 13,
+                  color: 'var(--ink)',
+                  colorScheme: 'light',
+                  outline: 'none',
+                }}
               />
             </div>
             <div>
-              <label className="text-[11px] text-text-400 block mb-1">To</label>
+              <label
+                style={{
+                  fontFamily: 'var(--mono)',
+                  fontSize: 9,
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: 'var(--ink-3)',
+                  display: 'block',
+                  marginBottom: 4,
+                }}
+              >
+                To
+              </label>
               <input
                 type="date"
                 value={customTo}
                 onChange={e => setCustomTo(e.target.value)}
-                className="w-full bg-bg-primary border border-border-default rounded-xl px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/50 transition-colors [color-scheme:dark]"
+                className="w-full"
+                style={{
+                  background: 'var(--paper)',
+                  border: '1px solid var(--rule)',
+                  borderRadius: 3,
+                  padding: '7px 10px',
+                  fontSize: 13,
+                  color: 'var(--ink)',
+                  colorScheme: 'light',
+                  outline: 'none',
+                }}
               />
             </div>
           </div>
 
-          {/* Quick presets within dropdown */}
-          <div className="flex flex-wrap gap-1.5 mt-4 pt-3 border-t border-border-default">
+          <div className="flex flex-wrap gap-1.5 mt-4 pt-3" style={{ borderTop: '1px solid var(--rule)' }}>
             {[
               { label: 'Last 14d', from: 14 },
               { label: 'Last 60d', from: 60 },
@@ -191,7 +254,21 @@ export default function DateRangeSelector({ selected, onChange }) {
                 <button
                   key={preset.label}
                   onClick={handleClick}
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-bg-primary text-text-400 border border-border-default hover:text-text-primary hover:border-opt-yellow/30 transition-all"
+                  style={{
+                    padding: '4px 9px',
+                    border: '1px solid var(--rule)',
+                    background: 'var(--paper)',
+                    color: 'var(--ink-3)',
+                    fontFamily: 'var(--mono)',
+                    fontSize: 9.5,
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                    fontWeight: 500,
+                    borderRadius: 2,
+                    transition: 'color 160ms ease, border-color 160ms ease',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.borderColor = 'var(--ink-3)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.borderColor = 'var(--rule)' }}
                 >
                   {preset.label}
                 </button>
@@ -202,7 +279,22 @@ export default function DateRangeSelector({ selected, onChange }) {
           <button
             onClick={applyCustom}
             disabled={!customFrom || !customTo}
-            className="mt-4 w-full py-2 rounded-xl text-xs font-semibold bg-opt-yellow text-bg-primary hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            style={{
+              marginTop: 16,
+              width: '100%',
+              padding: '8px 12px',
+              borderRadius: 3,
+              fontFamily: 'var(--mono)',
+              fontSize: 11,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              fontWeight: 600,
+              background: 'var(--accent)',
+              color: 'var(--ink)',
+              border: '1px solid var(--accent)',
+              cursor: (!customFrom || !customTo) ? 'not-allowed' : 'pointer',
+              opacity: (!customFrom || !customTo) ? 0.4 : 1,
+            }}
           >
             Apply Range
           </button>

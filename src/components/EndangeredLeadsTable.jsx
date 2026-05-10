@@ -34,7 +34,7 @@ const channelIcons = {
 
 const channelColors = {
   Call: 'text-blue-400',
-  SMS: 'text-opt-yellow',
+  SMS: 'text-text-primary',
   Email: 'text-purple-400',
   Social: 'text-pink-400',
 }
@@ -81,7 +81,7 @@ export default function EndangeredLeadsTable({ leads, loading, fillHeight = fals
     return (
       <div className={fillHeight ? 'tile tile-feedback p-6 h-full flex flex-col' : 'tile tile-feedback p-6 mb-6'}>
         <div className="flex items-center gap-2 mb-3">
-          <Calendar size={14} className="text-opt-yellow" />
+          <Calendar size={14} className="text-text-primary" />
           <h2 className="text-sm font-medium text-text-secondary">Upcoming Strategy Calls</h2>
         </div>
         <div className={`flex items-center justify-center gap-2 text-text-400 text-xs ${fillHeight ? 'flex-1' : 'py-8'}`}>
@@ -96,7 +96,7 @@ export default function EndangeredLeadsTable({ leads, loading, fillHeight = fals
     return (
       <div className={fillHeight ? 'tile tile-feedback p-6 h-full flex flex-col' : 'tile tile-feedback p-6 mb-6'}>
         <div className="flex items-center gap-2 mb-3">
-          <Calendar size={14} className="text-opt-yellow" />
+          <Calendar size={14} className="text-text-primary" />
           <h2 className="text-sm font-medium text-text-secondary">Upcoming Strategy Calls</h2>
         </div>
         <p className={`text-xs text-text-400 text-center ${fillHeight ? 'flex-1 flex items-center justify-center' : 'py-4'}`}>No upcoming strategy calls in the next 7 days.</p>
@@ -112,7 +112,7 @@ export default function EndangeredLeadsTable({ leads, loading, fillHeight = fals
     <div className={containerCls}>
       <div className="px-4 py-3 border-b border-border-default flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
-          <Calendar size={14} className="text-opt-yellow" />
+          <Calendar size={14} className="text-text-primary" />
           <h2 className="text-sm font-medium text-text-secondary">Upcoming Strategy Calls ({leads.length})</h2>
         </div>
         <div className="flex items-center gap-2 text-[10px]">
@@ -165,7 +165,7 @@ export default function EndangeredLeadsTable({ leads, loading, fillHeight = fals
                     <td className="px-3 py-2 font-medium text-text-primary">{lead.contact_name}</td>
                     <td className="px-3 py-2 text-text-400">
                       {lead.contact_phone ? (
-                        <a href={`tel:${lead.contact_phone}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1 hover:text-opt-yellow transition-colors">
+                        <a href={`tel:${lead.contact_phone}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1 hover:text-text-primary transition-colors">
                           <Phone size={10} />
                           {formatPhone(lead.contact_phone)}
                         </a>
@@ -180,7 +180,7 @@ export default function EndangeredLeadsTable({ leads, loading, fillHeight = fals
                       </span>
                     </td>
                     <td className="px-3 py-2">
-                      <span className={lead.longestCall >= 60 ? 'text-success' : lead.longestCall > 30 ? 'text-opt-yellow' : 'text-text-400'}>
+                      <span className={lead.longestCall >= 60 ? 'text-success' : lead.longestCall > 30 ? 'text-text-primary' : 'text-text-400'}>
                         {formatDuration(lead.longestCall)}
                       </span>
                     </td>
@@ -219,7 +219,7 @@ export default function EndangeredLeadsTable({ leads, loading, fillHeight = fals
                             </div>
                           </div>
                         )}
-                        <div className="text-[10px] text-opt-yellow uppercase font-medium mb-2">Inbound Responses (last 24h)</div>
+                        <div className="text-[10px] text-text-primary uppercase font-medium mb-2">Inbound Responses (last 24h)</div>
                         {activity.length === 0 ? (
                           <p className="text-[11px] text-text-400 italic">No activity found in the last 24 hours.</p>
                         ) : (

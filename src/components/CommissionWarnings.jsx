@@ -38,7 +38,7 @@ export default function CommissionWarnings({ settingsMap, members, clients, paym
   if (warnings.length === 0) return null
 
   return (
-    <div className="bg-warning/10 border border-warning/30 rounded-xl p-3 mb-4 flex flex-col gap-2">
+    <div className="bg-warning/10 border border-warning/30 rounded-sm p-3 mb-4 flex flex-col gap-2">
       {warnings.map((w, i) => (
         <div key={i} className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-warning text-xs">

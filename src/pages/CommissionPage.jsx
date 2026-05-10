@@ -59,7 +59,7 @@ function SettingsCard({ member, saved, onSave }) {
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1.5">
+          <label className="text-[10px] text-text-primary uppercase font-medium block mb-1.5">
             {isRamp ? 'Monthly Ramp (Guaranteed Min)' : 'Monthly Base Salary'}
           </label>
           <p className="text-[9px] text-text-400 mb-1.5">
@@ -79,7 +79,7 @@ function SettingsCard({ member, saved, onSave }) {
         </div>
 
         <div>
-          <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1.5">
+          <label className="text-[10px] text-text-primary uppercase font-medium block mb-1.5">
             Commission Rate
           </label>
           <p className="text-[9px] text-text-400 mb-1.5">
@@ -112,7 +112,7 @@ function SettingsCard({ member, saved, onSave }) {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="px-5 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-50 flex items-center gap-1.5"
+          className="px-5 py-2 text-xs font-medium bg-opt-yellow text-text-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-50 flex items-center gap-1.5"
         >
           {saving ? <><Loader size={12} className="animate-spin" /> Saving...</> : <><Save size={12} /> Save Settings</>}
         </button>
@@ -147,12 +147,12 @@ function BlacklistSettings({ blacklist, onAdd, onRemove, userEmail }) {
             value={newPattern}
             onChange={e => setNewPattern(e.target.value)}
             placeholder="Pattern to filter..."
-            className="flex-1 px-3 py-1.5 bg-bg-primary border border-border-default rounded-xl text-xs text-text-primary focus:border-opt-yellow/50 focus:outline-none transition-all"
+            className="flex-1 px-3 py-1.5 bg-bg-primary border border-border-default rounded-sm text-xs text-text-primary focus:border-opt-yellow/50 focus:outline-none transition-all"
           />
           <select
             value={newField}
             onChange={e => setNewField(e.target.value)}
-            className="px-3 py-1.5 bg-bg-primary border border-border-default rounded-xl text-xs text-text-primary appearance-none cursor-pointer"
+            className="px-3 py-1.5 bg-bg-primary border border-border-default rounded-sm text-xs text-text-primary appearance-none cursor-pointer"
           >
             <option value="email">Email</option>
             <option value="name">Name</option>
@@ -161,7 +161,7 @@ function BlacklistSettings({ blacklist, onAdd, onRemove, userEmail }) {
           <button
             onClick={handleAdd}
             disabled={!newPattern.trim() || adding}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:brightness-110 disabled:opacity-50 transition-all duration-150"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 disabled:opacity-50 transition-all duration-150"
           >
             {adding ? <Loader size={10} className="animate-spin" /> : <Plus size={10} />} Add
           </button>
@@ -358,12 +358,22 @@ function CommissionPageAdmin() {
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
-          <h1 className="text-lg sm:text-xl font-bold flex items-center gap-2">
-            <DollarSign size={20} className="text-opt-yellow" /> Commission Tracker
-          </h1>
-          <p className="text-xs sm:text-sm text-text-400">Track payments, calculate commissions, manage payouts</p>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Commissions</span>
+          <h1 className="h2 mt-2">What we <em>owe</em>, what we've <em>paid</em>.</h1>
+          <p
+            className="mt-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            Payments · commissions · payouts
+          </p>
         </div>
         <MonthPicker value={period} onChange={setPeriod} />
       </div>
@@ -393,7 +403,7 @@ function CommissionPageAdmin() {
             onClick={() => setActiveTab(t.key)}
             className={`px-4 py-2 text-xs font-medium transition-colors ${
               activeTab === t.key
-                ? 'text-opt-yellow border-b-2 border-opt-yellow'
+                ? 'text-text-primary border-b-2 border-opt-yellow'
                 : 'text-text-400 hover:text-text-primary'
             }`}
           >
@@ -432,7 +442,7 @@ function CommissionPageAdmin() {
                   const s = { ...raw, base_salary: baseOrRamp, total_earnings: totalEarnings, pay_type: ms.pay_type || 'base' }
                   return (
                     <tr key={m.id} onClick={() => navigate(`/sales/commissions/${m.id}`)} className="border-t border-border-default/30 row-glow transition-all duration-150 cursor-pointer group">
-                      <td className="px-3 py-2 font-medium text-opt-yellow hover:underline">{m.name}</td>
+                      <td className="px-3 py-2 font-medium text-text-primary hover:underline">{m.name}</td>
                       <td className="px-3 py-2 text-text-400 capitalize">{m.role}</td>
                       <td className="px-3 py-2 text-right text-text-400">
                         ${s.base_salary.toLocaleString()}
@@ -441,7 +451,7 @@ function CommissionPageAdmin() {
                       <td className="px-3 py-2 text-right text-text-primary">${s.trial_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right text-text-primary">${s.ascension_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right text-text-primary">${s.recurring_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      <td className="px-3 py-2 text-right font-medium text-opt-yellow">${s.total_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className="px-3 py-2 text-right font-medium text-text-primary">${s.total_commission.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right font-medium text-success flex items-center justify-end gap-1">${s.total_earnings.toLocaleString('en-US', { minimumFractionDigits: 2 })} <ArrowRight size={10} className="text-text-400" /></td>
                     </tr>
                   )

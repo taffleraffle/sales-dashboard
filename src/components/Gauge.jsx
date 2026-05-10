@@ -1,32 +1,70 @@
 import { getColor } from '../utils/metricCalculations'
 
+/*
+  Editorial gauge: eyebrow label + serif percentage + heatbar strip.
+  Bar fill colour follows the metric's directional health (up/warning/down).
+*/
+
 export default function Gauge({ label, value, target, direction = 'above', max = 100, delta, avgLabel }) {
   const pct = Math.min((value / max) * 100, 100)
   const colorClass = getColor(value, target, direction)
-  const barColor = colorClass.includes('success') ? '#d4f50c' : colorClass.includes('warning') ? '#f59e0b' : colorClass.includes('danger') ? '#ef4444' : '#606060'
+  const barColor =
+    colorClass === 'text-success' ? 'var(--up)' :
+    colorClass === 'text-warning' ? '#b88200' :
+    colorClass === 'text-danger'  ? 'var(--down)' :
+    'var(--ink)'
+  const valueColor = barColor
 
   return (
-    <div className="tile tile-feedback p-3 sm:p-5">
-      <p className="text-[10px] sm:text-[11px] uppercase tracking-wider text-text-400 mb-2 sm:mb-3 font-medium">{label}</p>
-      <div className="flex items-end gap-2 mb-2 sm:mb-3">
-        <p className={`text-base sm:text-xl font-bold ${colorClass}`}>{value != null ? `${value}%` : '—'}</p>
+    <div
+      style={{
+        background: 'var(--paper)',
+        border: '1px solid var(--rule)',
+        borderRadius: 4,
+        padding: '16px 18px',
+      }}
+    >
+      <span className="eyebrow" style={{ fontSize: 9, marginBottom: 12, display: 'inline-flex' }}>{label}</span>
+
+      <div className="flex items-baseline gap-3 mt-3">
+        <span
+          style={{
+            fontFamily: 'var(--serif)',
+            fontSize: 28,
+            lineHeight: 1,
+            color: valueColor,
+            fontVariantNumeric: 'tabular-nums',
+            letterSpacing: '-0.02em',
+          }}
+        >
+          {value != null ? `${value}%` : '—'}
+        </span>
         {delta != null && delta !== 0 && (
-          <span className={`text-xs font-medium ${delta > 0 ? 'text-success' : 'text-danger'}`}>
-            {delta > 0 ? '▲' : '▼'} {Math.abs(delta)}%
+          <span className={`pill ${delta > 0 ? 'pill-up' : 'pill-down'}`}>
+            <span className="arrow">{delta > 0 ? '↑' : '↓'}</span>
+            {Math.abs(delta)}%
           </span>
         )}
       </div>
-      <div className="w-full h-1.5 bg-bg-primary rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${pct}%`, backgroundColor: barColor }}
-        />
+
+      <div className="heatbar mt-3">
+        <span style={{ width: `${pct}%`, background: barColor }} />
       </div>
-      {avgLabel != null ? (
-        <p className="text-[10px] text-text-400 mt-2">Avg: {avgLabel}%</p>
-      ) : target != null ? (
-        <p className="text-[10px] text-text-400 mt-2">Target: {target}%</p>
-      ) : null}
+
+      {(avgLabel != null || target != null) && (
+        <p
+          style={{
+            fontFamily: 'var(--mono)',
+            fontSize: 9,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: 'var(--ink-3)',
+            margin: '10px 0 0',
+          }}
+        >
+          {avgLabel != null ? `Avg · ${avgLabel}%` : `Target · ${target}%`}
+        </p>
+      )}
     </div>
   )
 }

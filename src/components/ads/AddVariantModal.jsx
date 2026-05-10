@@ -160,7 +160,7 @@ export default function AddVariantModal({ open, existing, onClose, onSaved }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-bg-card border border-border-default rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-bg-card border border-border-default rounded-sm w-full max-w-2xl max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
@@ -170,13 +170,13 @@ export default function AddVariantModal({ open, existing, onClose, onSaved }) {
 
         <div className="p-4 space-y-3">
           {error && (
-            <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-xl px-3 py-2">
+            <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-sm px-3 py-2">
               <AlertTriangle size={14} /> <span className="flex-1">{error}</span>
             </div>
           )}
 
           {loadingComps ? (
-            <div className="flex items-center justify-center py-8"><Loader size={16} className="animate-spin text-opt-yellow" /></div>
+            <div className="flex items-center justify-center py-8"><Loader size={16} className="animate-spin text-text-primary" /></div>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-3">
@@ -211,7 +211,7 @@ export default function AddVariantModal({ open, existing, onClose, onSaved }) {
 
               <div className="bg-bg-primary border border-opt-yellow/30 rounded-lg px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wider text-text-400">Computed variant ID</p>
-                <p className="text-sm font-mono text-opt-yellow mt-0.5">{computedVariantId || 'pick all 4 components above'}</p>
+                <p className="text-sm font-mono text-text-primary mt-0.5">{computedVariantId || 'pick all 4 components above'}</p>
                 <p className="text-[9px] text-text-400/70 mt-0.5">Use this in the Meta ad name: <span className="font-mono">[Campaign] | [Audience] | {computedVariantId || 'variant_id'} | v{iteration}</span></p>
               </div>
 
@@ -222,12 +222,12 @@ export default function AddVariantModal({ open, existing, onClose, onSaved }) {
                     type="file"
                     accept="video/*,image/*"
                     onChange={e => setFile(e.target.files?.[0] || null)}
-                    className="text-xs text-text-secondary file:mr-2 file:px-2 file:py-1 file:bg-opt-yellow/15 file:text-opt-yellow file:border-0 file:rounded-lg file:text-xs file:cursor-pointer"
+                    className="text-xs text-text-secondary file:mr-2 file:px-2 file:py-1 file:bg-opt-yellow/15 file:text-text-primary file:border-0 file:rounded-lg file:text-xs file:cursor-pointer"
                   />
-                  {uploading && <Loader size={12} className="animate-spin text-opt-yellow" />}
+                  {uploading && <Loader size={12} className="animate-spin text-text-primary" />}
                 </div>
                 {assetUrl && !file && (
-                  <p className="text-[10px] text-text-400 mt-1">Current: <a href={assetUrl} target="_blank" rel="noreferrer" className="text-opt-yellow hover:underline break-all">{assetUrl}</a></p>
+                  <p className="text-[10px] text-text-400 mt-1">Current: <a href={assetUrl} target="_blank" rel="noreferrer" className="text-text-primary hover:underline break-all">{assetUrl}</a></p>
                 )}
               </div>
 
@@ -250,7 +250,7 @@ export default function AddVariantModal({ open, existing, onClose, onSaved }) {
           <button
             onClick={handleSave}
             disabled={saving || uploading || !computedVariantId}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-opt-yellow rounded-lg hover:bg-opt-yellow/20 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-text-primary rounded-lg hover:bg-opt-yellow/20 disabled:opacity-50"
           >
             {(saving || uploading) ? <Loader size={12} className="animate-spin" /> : <Upload size={12} />}
             {existing ? 'Save changes' : 'Add variant'}

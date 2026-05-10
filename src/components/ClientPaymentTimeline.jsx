@@ -2,8 +2,8 @@ import { X } from 'lucide-react'
 
 const TYPE_COLORS = {
   trial: { bg: 'bg-blue-500', ring: 'ring-blue-500/30', text: 'text-blue-400' },
-  monthly: { bg: 'bg-opt-yellow', ring: 'ring-opt-yellow/30', text: 'text-opt-yellow' },
-  ascension: { bg: 'bg-opt-yellow', ring: 'ring-opt-yellow/30', text: 'text-opt-yellow' },
+  monthly: { bg: 'bg-opt-yellow', ring: 'ring-opt-yellow/30', text: 'text-text-primary' },
+  ascension: { bg: 'bg-opt-yellow', ring: 'ring-opt-yellow/30', text: 'text-text-primary' },
   recurring: { bg: 'bg-success', ring: 'ring-success/30', text: 'text-success' },
   pif: { bg: 'bg-purple-500', ring: 'ring-purple-500/30', text: 'text-purple-400' },
   one_time: { bg: 'bg-text-400', ring: 'ring-text-400/30', text: 'text-text-400' },
@@ -23,14 +23,14 @@ export default function ClientPaymentTimeline({ client, payments, onClose }) {
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-        <div className="tile tile-feedback shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col slide-in-right" onClick={e => e.stopPropagation()}>
+        <div className="tile tile-feedback shadow-md w-full max-w-lg mx-4 max-h-[80vh] flex flex-col slide-in-right" onClick={e => e.stopPropagation()}>
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-border-default">
             <div>
               <h2 className="text-sm font-bold text-text-primary">{client.name}</h2>
               <p className="text-[10px] text-text-400">{client.company_name || ''} — Payment Timeline</p>
             </div>
-            <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all">
+            <button onClick={onClose} className="w-8 h-8 rounded-sm flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all">
               <X size={16} />
             </button>
           </div>
@@ -50,11 +50,11 @@ export default function ClientPaymentTimeline({ client, payments, onClose }) {
                     <div key={p.id} className="relative mb-6 last:mb-0">
                       {/* Node */}
                       <div className={`absolute -left-6 top-0.5 w-[18px] h-[18px] rounded-full ${colors.bg} ring-4 ${colors.ring} flex items-center justify-center`}>
-                        <span className="text-[8px] font-bold text-bg-primary">{i + 1}</span>
+                        <span className="text-[8px] font-bold text-text-primary">{i + 1}</span>
                       </div>
 
                       {/* Content */}
-                      <div className="bg-bg-primary border border-border-default rounded-xl p-3">
+                      <div className="bg-bg-primary border border-border-default rounded-sm p-3">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-[10px] text-text-400">
                             {new Date(p.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -89,7 +89,7 @@ export default function ClientPaymentTimeline({ client, payments, onClose }) {
             {expectedRemaining > 0 && (
               <div className="text-right">
                 <span className="text-[10px] text-text-400 uppercase tracking-wider">Expected Remaining</span>
-                <p className="text-sm font-bold text-opt-yellow">${expectedRemaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                <p className="text-sm font-bold text-text-primary">${expectedRemaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
               </div>
             )}
           </div>

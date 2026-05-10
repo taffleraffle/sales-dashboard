@@ -193,17 +193,29 @@ export default function EODDashboard() {
 
   return (
     <div className="max-w-[1600px] mx-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+      {/* Header — editorial */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">End of Day Reports</h1>
-          <p className="text-xs text-text-400 mt-0.5">{formatDateLabel(selectedDate)}</p>
+          <span className="eyebrow eyebrow-accent">OPT Sales · End of day</span>
+          <h1 className="h2 mt-2">A <em>review</em> of today.</h1>
+          <p
+            className="mt-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            {formatDateLabel(selectedDate)}
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 bg-bg-card border border-border-default rounded-xl px-2 py-1 min-h-[40px]">
+          <div className="flex items-center gap-1 bg-bg-card border border-border-default rounded-sm px-2 py-1 min-h-[40px]">
             <button
               onClick={() => shiftDate(-1)}
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-text-400 hover:text-opt-yellow hover:bg-bg-card-hover transition-colors"
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-colors"
               aria-label="Previous day"
             >
               <ChevronRight size={ICON.sm} className="rotate-180" />
@@ -221,7 +233,7 @@ export default function EODDashboard() {
             <button
               onClick={() => shiftDate(1)}
               disabled={selectedDate >= todayET()}
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-text-400 hover:text-opt-yellow hover:bg-bg-card-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
               aria-label="Next day"
             >
               <ChevronRight size={ICON.sm} />
@@ -229,7 +241,7 @@ export default function EODDashboard() {
           </div>
           <button
             onClick={openNewEOD}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-opt-yellow text-bg-primary hover:brightness-110 min-h-[40px]"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-opt-yellow text-text-primary hover:brightness-110 min-h-[40px]"
           >
             <Plus size={ICON.md} /> New EOD
           </button>
@@ -313,7 +325,7 @@ function FilterPill({ label, active, onClick, danger = false, amber = false }) {
     ? 'bg-danger/15 border-danger/40 text-danger'
     : amber
       ? 'bg-amber-400/15 border-amber-400/40 text-amber-300'
-      : 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow'
+      : 'bg-opt-yellow/15 border-opt-yellow/40 text-text-primary'
   const inactiveCls = 'border-border-default text-text-secondary hover:bg-bg-card-hover'
   return (
     <button
@@ -364,8 +376,8 @@ function TeamEodRow({ member, role, report, attention, isMe, canFile, onOpen }) 
     <tr onClick={submitted ? onOpen : undefined} className={cls}>
       <td className="px-4 py-2.5 align-middle">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={`font-medium ${submitted ? 'text-opt-yellow' : 'text-text-secondary'}`}>{member.name}</span>
-          {isMe && <span className="text-[9px] px-1.5 py-0.5 rounded bg-opt-yellow/15 text-opt-yellow">YOU</span>}
+          <span className={`font-medium ${submitted ? 'text-text-primary' : 'text-text-secondary'}`}>{member.name}</span>
+          {isMe && <span className="text-[9px] px-1.5 py-0.5 rounded bg-opt-yellow/15 text-text-primary">YOU</span>}
           {attentionLabel && (
             <span
               className="text-[9px] px-1.5 py-0.5 rounded border border-amber-400/40 bg-amber-400/10 text-amber-300"
@@ -390,7 +402,7 @@ function TeamEodRow({ member, role, report, attention, isMe, canFile, onOpen }) 
         ) : canFile ? (
           <button
             onClick={(e) => { e.stopPropagation(); onOpen() }}
-            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-opt-yellow/10 border border-opt-yellow/30 text-opt-yellow hover:bg-opt-yellow/20 transition-colors"
+            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-opt-yellow/10 border border-opt-yellow/30 text-text-primary hover:bg-opt-yellow/20 transition-colors"
             aria-label={`File EOD for ${member.name}`}
           >
             <Plus size={ICON.xs} /> File
@@ -419,7 +431,7 @@ function CloserHighlights({ report }) {
 
 function SetterHighlights({ report }) {
   const rating = report.self_rating
-  const ratingColor = rating >= 7 ? 'text-success' : rating >= 5 ? 'text-opt-yellow' : rating > 0 ? 'text-danger' : 'text-text-400'
+  const ratingColor = rating >= 7 ? 'text-success' : rating >= 5 ? 'text-text-primary' : rating > 0 ? 'text-danger' : 'text-text-400'
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums">
       <Stat label="Dials" value={(report.outbound_calls || 0).toLocaleString()} />
@@ -433,7 +445,7 @@ function SetterHighlights({ report }) {
 
 function Stat({ label, value, accent }) {
   const color = accent === 'success' ? 'text-success'
-    : accent === 'yellow' ? 'text-opt-yellow'
+    : accent === 'yellow' ? 'text-text-primary'
     : 'text-text-primary'
   return (
     <span className="text-text-400">

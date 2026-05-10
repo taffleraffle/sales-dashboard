@@ -40,7 +40,7 @@ export default function FlowPicker({ flowGroups, onPick, compact = true }) {
     <div className="relative inline-block" ref={ref}>
       <button
         onClick={(e) => { e.stopPropagation(); setOpen(v => !v) }}
-        className={`inline-flex items-center gap-1 ${compact ? 'text-[10px]' : 'text-xs'} text-text-400 hover:text-opt-yellow transition-colors`}
+        className={`inline-flex items-center gap-1 ${compact ? 'text-[10px]' : 'text-xs'} text-text-400 hover:text-text-primary transition-colors`}
         aria-expanded={open}
         aria-haspopup="menu"
       >

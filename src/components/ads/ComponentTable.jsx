@@ -16,7 +16,7 @@ function fmtN(n) { return n == null || isNaN(n) ? '—' : Math.round(n).toLocale
 
 const STATUS_TONE = {
   concept:        'bg-bg-card-hover text-text-400 border-border-default',
-  in_production:  'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30',
+  in_production:  'bg-opt-yellow/15 text-text-primary border-opt-yellow/30',
   ready:          'bg-success/15 text-success border-success/30',
   retired:        'bg-bg-card-hover text-text-400 border-border-default opacity-60',
 }
@@ -94,12 +94,12 @@ export default function ComponentTable({ type, title, emptyHint }) {
       })
   }, [rows, statusFilter, search, sortBy])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
 
   return (
     <div>
       {error && (
-        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-xl px-3 py-2">
+        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-sm px-3 py-2">
           <AlertTriangle size={14} /> <span className="flex-1">{error}</span>
           <button onClick={() => setError(null)} className="opacity-70 hover:opacity-100">dismiss</button>
         </div>
@@ -109,13 +109,13 @@ export default function ComponentTable({ type, title, emptyHint }) {
         <p className="text-xs text-text-secondary">{filtered.length} of {rows.length} {title.toLowerCase()}</p>
         <button
           onClick={() => { setEditing(null); setModalOpen(true) }}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-opt-yellow rounded-lg hover:bg-opt-yellow/20"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-text-primary rounded-lg hover:bg-opt-yellow/20"
         >
           <Plus size={13} /> Add {title.replace(/s$/, '').toLowerCase()}
         </button>
       </div>
 
-      <div className="bg-bg-card border border-border-default rounded-2xl p-3 mb-3 flex flex-col sm:flex-row sm:items-center gap-2">
+      <div className="bg-bg-card border border-border-default rounded-sm p-3 mb-3 flex flex-col sm:flex-row sm:items-center gap-2">
         <div className="flex gap-1">
           {['all', 'ready', 'in_production', 'concept', 'retired'].map(s => (
             <button
@@ -123,7 +123,7 @@ export default function ComponentTable({ type, title, emptyHint }) {
               onClick={() => setStatusFilter(s)}
               className={`px-2.5 py-1 text-[11px] rounded-lg border transition-colors ${
                 statusFilter === s
-                  ? 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow'
+                  ? 'bg-opt-yellow/15 border-opt-yellow/40 text-text-primary'
                   : 'border-border-default text-text-secondary hover:bg-bg-card-hover'
               }`}
             >
@@ -160,11 +160,11 @@ export default function ComponentTable({ type, title, emptyHint }) {
       </div>
 
       {!filtered.length ? (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400 text-sm">
+        <div className="bg-bg-card border border-border-default rounded-sm p-8 text-center text-text-400 text-sm">
           {rows.length === 0 ? (emptyHint || `No ${title.toLowerCase()} in the library yet.`) : `No ${title.toLowerCase()} match the current filter.`}
         </div>
       ) : (
-        <div className="bg-bg-card border border-border-default rounded-2xl overflow-x-auto">
+        <div className="bg-bg-card border border-border-default rounded-sm overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="text-text-400 text-[10px] uppercase tracking-wider">
               <tr className="border-b border-border-default">
@@ -187,7 +187,7 @@ export default function ComponentTable({ type, title, emptyHint }) {
                 return (
                   <tr key={r.component_id} className="border-b border-border-default/40 hover:bg-bg-card-hover transition-colors">
                     <td className="px-3 py-2">
-                      <Link to={`/sales/ads/components/${encodeURIComponent(r.component_id)}`} className="text-opt-yellow font-mono text-[11px] hover:underline">
+                      <Link to={`/sales/ads/components/${encodeURIComponent(r.component_id)}`} className="text-text-primary font-mono text-[11px] hover:underline">
                         {r.component_id}
                       </Link>
                     </td>
@@ -203,11 +203,11 @@ export default function ComponentTable({ type, title, emptyHint }) {
                     <td className="px-3 py-2 text-right">{fmtPctRatio(r.weighted_hook_rate)}</td>
                     <td className="px-3 py-2 text-right">{fmtPctRatio(r.weighted_hold_rate)}</td>
                     <td className="px-3 py-2 text-right">{fmtPctRatio(r.weighted_ctr)}</td>
-                    <td className="px-3 py-2 text-right text-opt-yellow">{fmt$(r.cpa ? r.cpa * NZD_TO_USD : null)}</td>
+                    <td className="px-3 py-2 text-right text-text-primary">{fmt$(r.cpa ? r.cpa * NZD_TO_USD : null)}</td>
                     <td className="px-3 py-2 text-right">
                       <button
                         onClick={() => { setEditing(r); setModalOpen(true) }}
-                        className="text-[10px] text-text-400 hover:text-opt-yellow uppercase tracking-wider"
+                        className="text-[10px] text-text-400 hover:text-text-primary uppercase tracking-wider"
                       >
                         edit
                       </button>

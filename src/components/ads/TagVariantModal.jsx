@@ -83,7 +83,7 @@ export default function TagVariantModal({ open, adId, adName, currentVariantId, 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-bg-card border border-border-default rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto"
+        className="bg-bg-card border border-border-default rounded-sm w-full max-w-xl max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
@@ -96,7 +96,7 @@ export default function TagVariantModal({ open, adId, adName, currentVariantId, 
 
         <div className="p-4 space-y-3">
           {error && (
-            <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-xl px-3 py-2">
+            <div className="flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-sm px-3 py-2">
               <AlertTriangle size={14} /> <span className="flex-1">{error}</span>
             </div>
           )}
@@ -113,7 +113,7 @@ export default function TagVariantModal({ open, adId, adName, currentVariantId, 
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-8"><Loader size={16} className="animate-spin text-opt-yellow" /></div>
+            <div className="flex items-center justify-center py-8"><Loader size={16} className="animate-spin text-text-primary" /></div>
           ) : !filtered.length ? (
             <p className="text-xs text-text-400 text-center py-6">
               {variants.length === 0
@@ -135,7 +135,7 @@ export default function TagVariantModal({ open, adId, adName, currentVariantId, 
                     onChange={() => setPicked(v.variant_id)}
                     className="accent-opt-yellow"
                   />
-                  <span className="text-xs font-mono text-opt-yellow flex-1 truncate" title={v.variant_id}>{v.variant_id}</span>
+                  <span className="text-xs font-mono text-text-primary flex-1 truncate" title={v.variant_id}>{v.variant_id}</span>
                   <span className="text-[9px] uppercase tracking-wider text-text-400">{v.status}</span>
                   {v.meta_ad_id && v.meta_ad_id !== adId && (
                     <span className="text-[9px] text-danger" title="Already linked to a different ad">⚠ in use</span>
@@ -163,7 +163,7 @@ export default function TagVariantModal({ open, adId, adName, currentVariantId, 
             <button
               onClick={handleTag}
               disabled={saving || !picked}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-opt-yellow rounded-lg hover:bg-opt-yellow/20 disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-text-primary rounded-lg hover:bg-opt-yellow/20 disabled:opacity-50"
             >
               {saving ? <Loader size={12} className="animate-spin" /> : <Tag size={12} />}
               Tag with variant

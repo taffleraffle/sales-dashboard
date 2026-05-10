@@ -104,7 +104,7 @@ function CloseCelebration({ closes, onDismiss }) {
     <>
       <Confetti active={showConfetti} />
       <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[190] transition-all duration-700 ease-out ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-8'}`}>
-        <div className="bg-bg-card border-2 border-success/40 rounded-2xl shadow-[0_0_40px_rgba(34,197,94,0.2)] px-6 py-4 max-w-lg">
+        <div className="bg-bg-card border-2 border-success/40 rounded-sm shadow-[0_0_40px_rgba(34,197,94,0.2)] px-6 py-4 max-w-lg">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 rounded-full bg-success/20 flex items-center justify-center shrink-0">
               <Trophy size={20} className="text-success" />
@@ -127,7 +127,7 @@ function CloseCelebration({ closes, onDismiss }) {
             {closes.map((c, i) => (
               <div
                 key={i}
-                className="flex items-center justify-between bg-bg-primary rounded-xl px-3 py-2 transition-all duration-500"
+                className="flex items-center justify-between bg-bg-primary rounded-sm px-3 py-2 transition-all duration-500"
                 style={{ animationDelay: `${i * 200 + 500}ms`, animation: 'slideInRight 0.5s ease-out forwards', opacity: 0, transform: 'translateX(20px)' }}
               >
                 <div className="flex items-center gap-2">
@@ -137,7 +137,7 @@ function CloseCelebration({ closes, onDismiss }) {
                   <span className="text-sm font-medium">{c.prospect_name}</span>
                 </div>
                 <div className="text-right">
-                  {c.cash_collected > 0 && <span className="text-xs font-semibold text-opt-yellow">${c.cash_collected.toLocaleString()}</span>}
+                  {c.cash_collected > 0 && <span className="text-xs font-semibold text-text-primary">${c.cash_collected.toLocaleString()}</span>}
                   {c.revenue > 0 && <span className="text-[10px] text-text-400 ml-1.5">(${c.revenue.toLocaleString()})</span>}
                 </div>
               </div>
@@ -154,66 +154,297 @@ function CloseCelebration({ closes, onDismiss }) {
   )
 }
 
-/* ── Rate Gauge (semi-circle) ── */
+/* ── Rate Gauge (semi-circle, editorial) ──
+   Track is the editorial hairline rule. Fill is ink for primary signal,
+   accent yellow when at-or-above target. Single-accent rule, no stoplight. */
 function RateGauge({ label, value, target, max = 100, suffix = '%' }) {
   const pct = Math.min(value / max, 1)
   const radius = 38
   const circumference = Math.PI * radius
   const strokeDash = pct * circumference
-  const color = value >= target ? '#d4f50c' : value >= target * 0.8 ? '#facc15' : '#ef4444'
+  const atTarget = value >= target
+  const fillColor = atTarget ? 'var(--accent)' : 'var(--ink)'
 
   return (
     <div className="flex flex-col items-center">
-      <svg className="w-[80px] h-[44px] sm:w-[120px] sm:h-[66px]" viewBox="0 0 100 55">
-        <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#222" strokeWidth="7" strokeLinecap="round" />
-        <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke={color} strokeWidth="7" strokeLinecap="round" strokeDasharray={`${strokeDash} ${circumference}`} />
-        <text x="50" y="44" textAnchor="middle" fill="#f0f0f0" fontSize="15" fontWeight="bold" fontFamily="Inter, sans-serif">{value}{suffix}</text>
+      <svg className="w-[88px] h-[48px] sm:w-[120px] sm:h-[66px]" viewBox="0 0 100 55">
+        <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="var(--rule-2)" strokeWidth="6" strokeLinecap="round" />
+        <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke={fillColor} strokeWidth="6" strokeLinecap="round" strokeDasharray={`${strokeDash} ${circumference}`} />
+        <text
+          x="50" y="44" textAnchor="middle"
+          fill="var(--ink)"
+          fontSize="17"
+          fontFamily="Newsreader, ui-serif, Georgia, serif"
+          fontWeight="500"
+          style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}
+        >
+          {value}{suffix}
+        </text>
       </svg>
-      <p className="text-[9px] sm:text-[10px] text-text-400 uppercase tracking-wider mt-1 font-medium">{label}</p>
-      <p className="text-[8px] sm:text-[9px] text-text-400">target {target}{suffix}</p>
+      <p
+        className="mt-2"
+        style={{
+          fontFamily: 'var(--mono)',
+          fontSize: 9.5,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-3)',
+          fontWeight: 500,
+        }}
+      >
+        {label}
+      </p>
+      <p
+        style={{
+          fontFamily: 'var(--mono)',
+          fontSize: 8.5,
+          letterSpacing: '0.1em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-4)',
+          marginTop: 2,
+        }}
+      >
+        target {target}{suffix}
+      </p>
     </div>
   )
 }
 
-/* ── Funnel Bar ── */
+/* ── Funnel Bar (editorial) ── */
 function FunnelStep({ label, count, prevCount, isFirst, maxCount, stepIndex, totalSteps }) {
-  // Graduated sizing: first bar is 100%, last bar is at least 35%, with smooth interpolation
-  const ratio = maxCount > 0 ? count / maxCount : 0
-  // Blend between actual ratio and a minimum floor that increases per step
-  const minPct = 100 - (stepIndex / (totalSteps - 1)) * 65 // 100% → 35%
-  const widthPct = Math.max(ratio * 100, minPct * 0.5, 30)
   const convPct = prevCount && prevCount > 0 ? ((count / prevCount) * 100).toFixed(1) : null
-  // Height tapers down the funnel
-  const height = 52 - stepIndex * 2
+  const isFinal = stepIndex === totalSteps - 1
+  // Final step (closes) gets the accent fill; everything else is ink-stroked paper.
+  // This pulls the eye to the conversion outcome, in line with editorial single-accent.
+  const fillBg = isFinal ? 'var(--accent)' : 'var(--paper)'
+  const fillBorder = isFinal ? 'var(--accent)' : 'var(--ink)'
+  const fillTxt = isFinal ? 'var(--ink)' : 'var(--ink)'
+  const height = 56 - stepIndex * 2
 
   return (
-    <div className="flex-1 flex flex-col items-center gap-1 sm:gap-1.5 min-w-0">
-      {!isFirst && <span className="text-[9px] sm:text-[10px] text-success font-semibold">{convPct}%</span>}
-      {isFirst && <div className="h-3 sm:h-4" />}
+    <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+      {!isFirst ? (
+        <span
+          style={{
+            fontFamily: 'var(--mono)',
+            fontSize: 9.5,
+            letterSpacing: '0.08em',
+            color: 'var(--ink-3)',
+            fontWeight: 500,
+          }}
+        >
+          {convPct}%
+        </span>
+      ) : (
+        <div className="h-3 sm:h-4" />
+      )}
       <div
-        className="w-full bg-opt-yellow/10 border border-opt-yellow/20 rounded-lg sm:rounded-xl flex items-center justify-center transition-all duration-500"
-        style={{ height: `${Math.max(height - 8, 36)}px` }}
+        className="w-full flex items-center justify-center transition-all duration-500"
+        style={{
+          height: `${Math.max(height - 8, 36)}px`,
+          background: fillBg,
+          border: `1px solid ${fillBorder}`,
+          borderRadius: 3,
+        }}
       >
-        <span className="text-sm sm:text-base font-bold text-text-primary">{count}</span>
+        <span
+          style={{
+            fontFamily: 'var(--serif)',
+            fontSize: 17,
+            fontVariantNumeric: 'tabular-nums',
+            letterSpacing: '-0.02em',
+            color: fillTxt,
+            fontWeight: 500,
+          }}
+        >
+          {count}
+        </span>
       </div>
-      <p className="text-[8px] sm:text-[10px] text-text-400 uppercase tracking-wider font-medium truncate max-w-full">{label}</p>
+      <p
+        className="truncate max-w-full"
+        style={{
+          fontFamily: 'var(--mono)',
+          fontSize: 9,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-3)',
+          fontWeight: 500,
+        }}
+      >
+        {label}
+      </p>
     </div>
   )
 }
 
-/* ── Rank Badge ── */
+/* ── Rank Badge (editorial) ── */
 function RankBadge({ rank }) {
-  if (rank === 1) return <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-opt-yellow/20 text-opt-yellow text-[11px] font-bold">{rank}</span>
-  if (rank === 2) return <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-500/15 text-gray-300 text-[11px] font-bold">{rank}</span>
-  if (rank === 3) return <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-700/15 text-amber-500 text-[11px] font-bold">{rank}</span>
-  return <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-bg-primary text-text-400 text-[11px] font-bold">{rank}</span>
+  const baseStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 26,
+    height: 26,
+    borderRadius: 999,
+    fontFamily: 'var(--serif)',
+    fontSize: 13,
+    fontWeight: 500,
+    fontVariantNumeric: 'tabular-nums',
+    letterSpacing: '-0.01em',
+  }
+  if (rank === 1) return <span style={{ ...baseStyle, background: 'var(--accent)', color: 'var(--ink)' }}>{rank}</span>
+  if (rank === 2) return <span style={{ ...baseStyle, background: 'var(--paper-2)', color: 'var(--ink)', border: '1px solid var(--rule)' }}>{rank}</span>
+  if (rank === 3) return <span style={{ ...baseStyle, background: 'var(--paper-2)', color: 'var(--ink-3)', border: '1px solid var(--rule)' }}>{rank}</span>
+  return <span style={{ ...baseStyle, background: 'transparent', color: 'var(--ink-3)' }}>{rank}</span>
+}
+
+/* ── Editorial KPI Table — 3-section unified scorecard ──
+   One paper panel, sections separated by hairline rules.
+   Each section has a mono-uppercase eyebrow + a row of metric cells.
+   Cells: mono label · serif tabular value · mono sub-detail.
+   Accent row gets a subtle accent-soft background.
+   Cells with onClick render as buttons with hover. */
+function KpiTable({ sections }) {
+  return (
+    <div
+      style={{
+        background: 'var(--paper)',
+        border: '1px solid var(--rule)',
+        borderRadius: 4,
+        overflow: 'hidden',
+      }}
+    >
+      {sections.map((section, idx) => (
+        <KpiSection key={section.eyebrow} section={section} isLast={idx === sections.length - 1} />
+      ))}
+    </div>
+  )
+}
+
+function KpiSection({ section, isLast }) {
+  const cols = section.cols || section.cells.length
+  // Responsive: 2 cols on mobile, then col grade per breakpoint.
+  // 6-cell  → 2/3/6   (rare; held for future reuse)
+  // 5-cell  → 2/3/5
+  // 4-cell  → 2/4
+  // 3-cell  → 1/3
+  const gridClass =
+    cols === 6 ? 'grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6' :
+    cols === 5 ? 'grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5' :
+    cols === 3 ? 'grid grid-cols-1 sm:grid-cols-3' :
+    'grid grid-cols-2 md:grid-cols-4'
+  return (
+    <div style={{ borderBottom: isLast ? 'none' : '1px solid var(--rule)' }}>
+      {/* Section eyebrow header */}
+      <div
+        style={{
+          padding: '10px 18px',
+          background: 'var(--paper-2)',
+          borderBottom: '1px solid var(--rule)',
+        }}
+      >
+        <span className="eyebrow eyebrow-accent" style={{ fontSize: 9 }}>{section.eyebrow}</span>
+      </div>
+      {/* Cells */}
+      <div className={gridClass}>
+        {section.cells.map((cell, i) => (
+          <KpiCell key={cell.label} cell={cell} isLastCol={(i + 1) % cols === 0} totalCols={cols} index={i} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function KpiCell({ cell, isLastCol }) {
+  const interactive = !!cell.onClick
+  // Right border between cells; bottom dividers come from section borderBottom
+  // at the parent level so we don't double up rules at the last cell row.
+  const baseStyle = {
+    padding: '14px 18px',
+    background: cell.accent ? 'var(--accent-soft)' : 'transparent',
+    borderRight: isLastCol ? 'none' : '1px solid var(--rule)',
+    cursor: interactive ? 'pointer' : 'default',
+    transition: 'background 160ms ease',
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: 96,
+    minWidth: 0,
+    textAlign: 'left',
+    width: '100%',
+  }
+
+  const Wrapper = interactive ? 'button' : 'div'
+
+  return (
+    <Wrapper
+      onClick={cell.onClick}
+      style={baseStyle}
+      onMouseEnter={interactive ? (e) => { e.currentTarget.style.background = cell.accent ? 'var(--accent-soft)' : 'var(--paper-2)' } : undefined}
+      onMouseLeave={interactive ? (e) => { e.currentTarget.style.background = cell.accent ? 'var(--accent-soft)' : 'transparent' } : undefined}
+    >
+      <span
+        style={{
+          fontFamily: 'var(--mono)',
+          fontSize: 9,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-3)',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          display: 'block',
+        }}
+        title={cell.label}
+      >
+        {cell.label}
+      </span>
+      <span
+        style={{
+          fontFamily: 'var(--serif)',
+          fontVariantNumeric: 'tabular-nums',
+          fontSize: 'clamp(20px, 2.4vw, 28px)',
+          lineHeight: 1.05,
+          letterSpacing: '-0.02em',
+          color: 'var(--ink)',
+          fontWeight: 400,
+          marginTop: 6,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          display: 'block',
+        }}
+        title={String(cell.value ?? '')}
+      >
+        {cell.value ?? '—'}
+      </span>
+      {cell.sub && (
+        <span
+          style={{
+            fontFamily: 'var(--mono)',
+            fontSize: 9,
+            letterSpacing: '0.08em',
+            color: 'var(--ink-3)',
+            marginTop: 'auto',
+            paddingTop: 8,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            display: 'block',
+          }}
+        >
+          {cell.sub}
+        </span>
+      )}
+    </Wrapper>
+  )
 }
 
 /* ── Status Pill ── */
 function StatusPill({ label, count, active }) {
   return (
     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${
-      active ? 'bg-opt-yellow text-bg-primary' : 'bg-bg-card-hover text-text-secondary border border-border-default'
+      active ? 'bg-opt-yellow text-text-primary' : 'bg-bg-card-hover text-text-secondary border border-border-default'
     }`}>
       {label} <span className={`text-[10px] ${active ? 'bg-bg-primary/20 px-1.5 py-0.5 rounded-full' : ''}`}>{count}</span>
     </span>
@@ -472,14 +703,26 @@ export default function SalesOverview() {
         />
       )}
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      {/* Header — editorial */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Sales Overview</h1>
-          <p className="text-xs sm:text-sm text-text-400 mt-0.5 sm:mt-1">Performance dashboard</p>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Today</span>
+          <h1 className="h2 mt-2">Where you <em>stand</em>.</h1>
+          <p
+            className="mt-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            Performance · daily
+          </p>
         </div>
-        <div className="flex items-center gap-4">
-          {isLoading && <Loader size={16} className="animate-spin text-opt-yellow" />}
+        <div className="flex items-center gap-3">
+          {isLoading && <Loader size={14} className="animate-spin" style={{ color: 'var(--ink-3)' }} />}
           <DateRangeSelector selected={range} onChange={setRange} />
         </div>
       </div>
@@ -492,7 +735,7 @@ export default function SalesOverview() {
             {Array.from({ length: 4 }, (_, i) => <div key={i} className="tile tile-feedback h-28" />)}
           </div>
           {/* Secondary KPIs */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3">
             {Array.from({ length: 8 }, (_, i) => <div key={i} className="tile tile-feedback h-24" />)}
           </div>
           {/* Funnel + Key Rates */}
@@ -517,10 +760,10 @@ export default function SalesOverview() {
 
       {/* Pending EOD */}
       {(pendingEOD.closers.length > 0 || pendingEOD.setters.length > 0) && (
-        <div className="bg-bg-card border border-opt-yellow/20 rounded-2xl px-4 py-3 flex flex-wrap items-center gap-3">
+        <div className="bg-bg-card border border-opt-yellow/20 rounded-sm px-4 py-3 flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
-            <Clock size={14} className="text-opt-yellow" />
-            <span className="text-xs font-medium text-opt-yellow">Pending EOD Today</span>
+            <Clock size={14} className="text-text-primary" />
+            <span className="text-xs font-medium text-text-primary">Pending EOD Today</span>
           </div>
           {pendingEOD.closers.map(c => (
             <Link key={c.id} to={`/sales/eod/submit?tab=closer&member=${c.id}`} className="text-[11px] px-2 py-1 rounded-lg bg-bg-primary border border-border-default text-text-secondary hover:border-opt-yellow/30 hover:text-text-primary transition-colors">
@@ -537,35 +780,57 @@ export default function SalesOverview() {
 
       {!dataReady ? null : <>
 
-      {/* ═══ HERO KPIs ═══ */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
-        <KPICard label="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} subtitle={`${ct.closes} closes`} highlight onClick={openRevenueBreakdown} />
-        <KPICard label="Total Cash" value={`$${totalCash.toLocaleString()}`} subtitle={totalRevenue > 0 ? `${((totalCash / totalRevenue) * 100).toFixed(0)}% collected` : ''} onClick={openRevenueBreakdown} />
-        <KPICard label="Show Rate" value={`${showRate}%`} target={70} direction="above" subtitle={`${ct.liveNC}/${ct.ncBooked}`} />
-        <KPICard label="Avg STL" value={stl ? stl.avgDisplay : stlLoading ? '...' : '—'} subtitle={stl ? `${stl.pctUnder5m}% < 5m` : ''} />
-      </div>
-
-      {/* Secondary KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3">
-        <KPICard label="Trial Cash" value={`$${ct.cash.toLocaleString()}`} subtitle={`$${ct.revenue.toLocaleString()} rev`} />
-        <KPICard label="Ascend Cash" value={`$${ct.ascendCash.toLocaleString()}`} subtitle={`${ct.ascensions} ascensions`} />
-        <KPICard label="Close Rate" value={`${closeRate}%`} target={25} direction="above" subtitle={`${prospectSum.closed}/${prospectSum.live} live new`} />
-        <KPICard label="Offer Rate" value={`${offerRate}%`} target={80} direction="above" />
-        {mkt.adspend > 0 && <>
-          <KPICard label="Ad Spend" value={`$${mkt.adspend.toLocaleString()}`} />
-          <KPICard label="FE ROAS" value={`${feRoas.toFixed(2)}x`} subtitle="trial / spend" />
-          <KPICard label="NET ROAS" value={`${netRoas.toFixed(2)}x`} subtitle="all / spend" />
-          <KPICard label="CPA" value={ct.closes > 0 ? `$${Math.round(mkt.adspend / ct.closes).toLocaleString()}` : '—'} />
-        </>}
-      </div>
+      {/* ═══ Unified KPI Table — four sections, editorial ═══ */}
+      <KpiTable
+        sections={[
+          {
+            eyebrow: 'Top-line',
+            cells: [
+              { label: 'Total Revenue', value: `$${totalRevenue.toLocaleString()}`, sub: `${ct.closes} ${ct.closes === 1 ? 'close' : 'closes'}`, accent: true, onClick: openRevenueBreakdown },
+              { label: 'Total Cash',    value: `$${totalCash.toLocaleString()}`,    sub: totalRevenue > 0 ? `${((totalCash / totalRevenue) * 100).toFixed(0)}% collected` : '—', onClick: openRevenueBreakdown },
+              { label: 'Show Rate',     value: `${showRate}%`,                       sub: `${ct.liveNC}/${ct.ncBooked} live · NC` },
+              { label: 'Close Rate',    value: `${closeRate}%`,                      sub: `${prospectSum.closed}/${prospectSum.live} live prospects` },
+            ],
+          },
+          {
+            eyebrow: 'Efficiency · what we paid',
+            cells: [
+              { label: 'Ad Spend',          value: mkt.adspend > 0 ? `$${mkt.adspend.toLocaleString()}` : '—',                                        sub: mkt.adspend > 0 ? 'tracked spend' : 'no spend logged' },
+              { label: 'FE Cash ROAS',      value: mkt.adspend > 0 ? `${feRoas.toFixed(2)}x`           : '—',                                          sub: 'trial cash · spend' },
+              { label: 'Net Cash ROAS',     value: mkt.adspend > 0 ? `${netRoas.toFixed(2)}x`          : '—',                                          sub: 'all cash · spend' },
+            ],
+            cols: 3,
+          },
+          {
+            eyebrow: 'Funnel · cost per…',
+            cells: [
+              { label: 'Cost / Lead',       value: mkt.adspend > 0 && mkt.leads > 0           ? `$${Math.round(cpl).toLocaleString()}`                                  : '—', sub: mkt.leads > 0           ? `${mkt.leads} leads`               : '—' },
+              { label: 'Cost / Booked',     value: mkt.adspend > 0 && ct.booked > 0           ? `$${Math.round(mkt.adspend / ct.booked).toLocaleString()}`             : '—', sub: ct.booked > 0           ? `${ct.booked} booked`              : '—' },
+              { label: 'Cost / Q. Booked',  value: mkt.adspend > 0 && mkt.qualified_bookings > 0 ? `$${Math.round(mkt.adspend / mkt.qualified_bookings).toLocaleString()}` : '—', sub: mkt.qualified_bookings > 0 ? `${mkt.qualified_bookings} qualified` : '—' },
+              { label: 'Cost / Live',       value: mkt.adspend > 0 && ct.liveCalls > 0        ? `$${Math.round(mkt.adspend / ct.liveCalls).toLocaleString()}`          : '—', sub: ct.liveCalls > 0        ? `${ct.liveCalls} live`             : '—' },
+              { label: 'CAC',               value: mkt.adspend > 0 && ct.closes > 0 ? `$${Math.round(mkt.adspend / ct.closes).toLocaleString()}` : '—',                       sub: ct.closes > 0 ? `${ct.closes} ${ct.closes === 1 ? 'close' : 'closes'}` : 'no closes' },
+            ],
+            cols: 5,
+          },
+          {
+            eyebrow: 'Funnel · conversion & speed',
+            cells: [
+              { label: 'Lead → Set',        value: mkt.leads > 0 ? `${((ct.booked / mkt.leads) * 100).toFixed(1)}%`                                                     : '—', sub: mkt.leads > 0 ? `${ct.booked}/${mkt.leads}` : '—' },
+              { label: 'Answer Rate',       value: mkt.leads > 0 && wt.mcs > 0 ? `${((wt.mcs / mkt.leads) * 100).toFixed(1)}%`                                          : '—', sub: wt.mcs > 0 ? `${wt.mcs} MCs · ${mkt.leads} leads` : (wt.dials > 0 && mkt.leads > 0 ? `${wt.dials} dials · no MCs` : '—') },
+              { label: 'Speed to Lead',     value: stl ? stl.avgDisplay : stlLoading ? '…' : '—',                                                                              sub: stl ? `${stl.pctUnder5m}% < 5m` : '—' },
+            ],
+            cols: 3,
+          },
+        ]}
+      />
 
       {/* ═══ TWO-COLUMN: Funnel + Rates ═══ */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Sales Funnel */}
         <div className="tile tile-feedback p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4 sm:mb-5">
-            <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-              <BarChart3 size={16} className="text-opt-yellow" /> Sales Funnel
+            <h2 className="editorial-panel-title flex items-center gap-2">
+              <BarChart3 size={16} className="text-text-primary" /> Sales Funnel
             </h2>
             <div className="flex gap-3 text-[11px] text-text-400">
               {funnel.closes > 0 && <>
@@ -580,41 +845,64 @@ export default function SalesOverview() {
                 stepIndex={i} totalSteps={arr.length} />
             ))}
           </div>
-          {/* Auto vs Manual */}
-          <div className="grid grid-cols-2 gap-4 mt-5 pt-4 border-t border-border-default">
-            <div className="flex items-center gap-3">
-              <div className="w-7 h-7 rounded-lg bg-opt-yellow/10 flex items-center justify-center">
-                <Zap size={13} className="text-opt-yellow" />
-              </div>
-              <div>
-                <p className="text-xs font-medium">{funnelData.autoBookings} auto-booked</p>
-                <p className="text-[10px] text-text-400">
-                  <span className={funnelData.autoShowRate >= 70 ? 'text-success' : 'text-danger'}>{funnelData.autoShowRate}% show</span>
-                  {' · '}
-                  <span className={funnelData.autoCloseRate >= 25 ? 'text-success' : 'text-danger'}>{funnelData.autoCloseRate}% close</span>
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-7 h-7 rounded-lg bg-bg-card-hover flex items-center justify-center">
-                <Phone size={13} className="text-text-400" />
-              </div>
-              <div>
-                <p className="text-xs font-medium">{funnelData.manualSets} manual sets</p>
-                <p className="text-[10px] text-text-400">
-                  <span className={funnelData.manualShowRate >= 70 ? 'text-success' : 'text-danger'}>{funnelData.manualShowRate}% show</span>
-                  {' · '}
-                  <span className={funnelData.manualCloseRate >= 25 ? 'text-success' : 'text-danger'}>{funnelData.manualCloseRate}% close</span>
-                </p>
-              </div>
-            </div>
+          {/* Auto vs Manual — editorial */}
+          <div className="grid grid-cols-2 gap-4 mt-5 pt-4" style={{ borderTop: '1px solid var(--rule)' }}>
+            {[
+              { icon: Zap,   count: funnelData.autoBookings, label: 'auto-booked', show: funnelData.autoShowRate, close: funnelData.autoCloseRate, accent: true },
+              { icon: Phone, count: funnelData.manualSets,   label: 'manual sets', show: funnelData.manualShowRate, close: funnelData.manualCloseRate, accent: false },
+            ].map((row, i) => {
+              const Icon = row.icon
+              return (
+                <div key={i} className="flex items-center gap-3">
+                  <div
+                    style={{
+                      width: 30,
+                      height: 30,
+                      background: row.accent ? 'var(--accent-soft)' : 'var(--paper-2)',
+                      border: `1px solid ${row.accent ? 'var(--accent)' : 'var(--rule)'}`,
+                      borderRadius: 3,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Icon size={13} style={{ color: 'var(--ink)' }} />
+                  </div>
+                  <div className="min-w-0">
+                    <p
+                      style={{
+                        fontFamily: 'var(--serif)',
+                        fontSize: 14,
+                        color: 'var(--ink)',
+                        margin: 0,
+                        lineHeight: 1.2,
+                      }}
+                    >
+                      <span style={{ fontVariantNumeric: 'tabular-nums' }}>{row.count}</span> {row.label}
+                    </p>
+                    <p
+                      style={{
+                        fontFamily: 'var(--mono)',
+                        fontSize: 9.5,
+                        letterSpacing: '0.08em',
+                        color: 'var(--ink-3)',
+                        margin: '3px 0 0',
+                      }}
+                    >
+                      {row.show}% show · {row.close}% close
+                    </p>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
 
         {/* Key Rates */}
         <div className="tile tile-feedback p-4 sm:p-6">
-          <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
-            <Target size={16} className="text-opt-yellow" /> Key Rates
+          <h2 className="editorial-panel-title mb-5 flex items-center gap-2">
+            <Target size={16} className="text-text-primary" /> Key Rates
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <RateGauge label="Show Rate" value={parseFloat(showRate)} target={70} />
@@ -622,25 +910,54 @@ export default function SalesOverview() {
             <RateGauge label="Close Rate" value={parseFloat(closeRate)} target={25} max={50} />
             <RateGauge label="Reschedule" value={parseFloat(rescheduleRate)} target={15} max={40} />
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mt-4 sm:mt-5 pt-3 sm:pt-4 border-t border-border-default text-center">
-            <div>
-              <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">No Shows</p>
-              <p className={`text-base sm:text-lg font-bold ${parseFloat(noShowRate) <= 25 ? 'text-success' : 'text-danger'}`}>{noShowRate}%</p>
-              <p className="text-[9px] sm:text-[10px] text-text-400">{ct.noShows} missed</p>
-            </div>
-            <div>
-              <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">Resched</p>
-              <p className="text-base sm:text-lg font-bold text-warning">{ct.reschedules}</p>
-            </div>
-            <div>
-              <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">Ascend %</p>
-              <p className="text-base sm:text-lg font-bold">{ct.closes ? ((ct.ascensions / ct.closes) * 100).toFixed(0) : 0}%</p>
-              <p className="text-[9px] sm:text-[10px] text-text-400">{ct.ascensions}/{ct.closes}</p>
-            </div>
-            <div>
-              <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">Avg Deal</p>
-              <p className="text-base sm:text-lg font-bold text-success">${ct.closes ? Math.round(totalRevenue / ct.closes).toLocaleString() : 0}</p>
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 text-center" style={{ borderTop: '1px solid var(--rule)' }}>
+            {[
+              { label: 'No Shows', value: `${noShowRate}%`, sub: `${ct.noShows} missed`, pill: parseFloat(noShowRate) <= 25 ? 'up' : 'down' },
+              { label: 'Resched',  value: ct.reschedules, sub: null,                     pill: null },
+              { label: 'Ascend %', value: `${ct.closes ? ((ct.ascensions / ct.closes) * 100).toFixed(0) : 0}%`, sub: `${ct.ascensions}/${ct.closes}`, pill: null },
+              { label: 'Avg Deal', value: `$${ct.closes ? Math.round(totalRevenue / ct.closes).toLocaleString() : 0}`, sub: null, pill: null },
+            ].map(s => (
+              <div key={s.label}>
+                <p
+                  style={{
+                    fontFamily: 'var(--mono)',
+                    fontSize: 9,
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase',
+                    color: 'var(--ink-3)',
+                    fontWeight: 500,
+                    margin: 0,
+                  }}
+                >
+                  {s.label}
+                </p>
+                <p
+                  style={{
+                    fontFamily: 'var(--serif)',
+                    fontSize: 22,
+                    color: 'var(--ink)',
+                    fontVariantNumeric: 'tabular-nums',
+                    letterSpacing: '-0.015em',
+                    margin: '4px 0 0',
+                  }}
+                >
+                  {s.value}
+                </p>
+                {s.sub && (
+                  <p
+                    style={{
+                      fontFamily: 'var(--mono)',
+                      fontSize: 9,
+                      letterSpacing: '0.1em',
+                      color: 'var(--ink-3)',
+                      margin: '2px 0 0',
+                    }}
+                  >
+                    {s.sub}
+                  </p>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -649,37 +966,108 @@ export default function SalesOverview() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Cash Breakdown */}
         <div className="tile tile-feedback p-4 sm:p-6">
-          <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
-            <DollarSign size={16} className="text-opt-yellow" /> Cash Breakdown
+          <h2 className="editorial-panel-title mb-5 flex items-center gap-2">
+            <DollarSign size={16} className="text-text-primary" /> Cash Breakdown
           </h2>
           <div className="space-y-4">
             {[
-              { label: 'Trial Cash', val: ct.cash, color: 'bg-success' },
-              { label: 'Ascend Cash', val: ct.ascendCash, color: 'bg-blue-400' },
-            ].map(({ label, val, color }) => (
+              { label: 'Trial Cash', val: ct.cash,       fill: 'var(--ink)' },
+              { label: 'Ascend Cash', val: ct.ascendCash, fill: 'var(--accent)' },
+            ].map(({ label, val, fill }) => (
               <div key={label}>
-                <div className="flex justify-between text-xs mb-1.5">
-                  <span className="text-text-400">{label}</span>
-                  <span className="font-semibold">${val.toLocaleString()}</span>
+                <div className="flex justify-between items-baseline mb-2">
+                  <span
+                    style={{
+                      fontFamily: 'var(--mono)',
+                      fontSize: 9.5,
+                      letterSpacing: '0.14em',
+                      textTransform: 'uppercase',
+                      color: 'var(--ink-3)',
+                      fontWeight: 500,
+                    }}
+                  >
+                    {label}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: 'var(--serif)',
+                      fontSize: 17,
+                      color: 'var(--ink)',
+                      fontVariantNumeric: 'tabular-nums',
+                      letterSpacing: '-0.01em',
+                    }}
+                  >
+                    ${val.toLocaleString()}
+                  </span>
                 </div>
-                <div className="h-2 bg-bg-primary rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full transition-all duration-500 ${color}`} style={{ width: `${totalCash > 0 ? (val / totalCash) * 100 : 0}%` }} />
+                <div className="heatbar">
+                  <span style={{ width: `${totalCash > 0 ? (val / totalCash) * 100 : 0}%`, background: fill }} />
                 </div>
               </div>
             ))}
           </div>
-          <div className="mt-5 pt-4 border-t border-border-default space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-text-400">Total Cash</span>
-              <span className="font-bold text-success">${totalCash.toLocaleString()}</span>
+          <div className="mt-5 pt-4 space-y-2.5" style={{ borderTop: '1px solid var(--rule)' }}>
+            <div className="flex justify-between items-baseline">
+              <span
+                style={{
+                  fontFamily: 'var(--mono)',
+                  fontSize: 10,
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: 'var(--ink-2)',
+                  fontWeight: 500,
+                }}
+              >
+                Total Cash
+              </span>
+              <span
+                style={{
+                  fontFamily: 'var(--serif)',
+                  fontSize: 22,
+                  color: 'var(--ink)',
+                  fontVariantNumeric: 'tabular-nums',
+                  letterSpacing: '-0.015em',
+                }}
+              >
+                ${totalCash.toLocaleString()}
+              </span>
             </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-text-400">Total Revenue</span>
-              <span className="font-medium">${totalRevenue.toLocaleString()}</span>
+            <div className="flex justify-between items-baseline">
+              <span
+                style={{
+                  fontFamily: 'var(--mono)',
+                  fontSize: 9.5,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: 'var(--ink-3)',
+                }}
+              >
+                Total Revenue
+              </span>
+              <span
+                style={{
+                  fontFamily: 'var(--serif)',
+                  fontSize: 14,
+                  color: 'var(--ink-2)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                ${totalRevenue.toLocaleString()}
+              </span>
             </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-text-400">Collect %</span>
-              <span className={`font-medium ${totalRevenue > 0 && (totalCash / totalRevenue) >= 0.5 ? 'text-success' : 'text-warning'}`}>
+            <div className="flex justify-between items-baseline">
+              <span
+                style={{
+                  fontFamily: 'var(--mono)',
+                  fontSize: 9.5,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: 'var(--ink-3)',
+                }}
+              >
+                Collect %
+              </span>
+              <span className={`pill ${totalRevenue > 0 && (totalCash / totalRevenue) >= 0.5 ? 'pill-up' : 'pill-flat'}`}>
                 {totalRevenue > 0 ? ((totalCash / totalRevenue) * 100).toFixed(0) : 0}%
               </span>
             </div>
@@ -689,42 +1077,102 @@ export default function SalesOverview() {
         {/* Marketing metrics */}
         {mkt.adspend > 0 && (
           <div className="tile tile-feedback p-4 sm:p-6">
-            <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
-              <TrendingUp size={16} className="text-opt-yellow" /> Marketing
+            <h2 className="editorial-panel-title mb-5 flex items-center gap-2">
+              <TrendingUp size={16} className="text-text-primary" /> Marketing
             </h2>
-            <div className="space-y-4">
+            <div className="space-y-3">
               {[
                 { label: 'CPL', value: `$${Math.round(cpl).toLocaleString()}`, sub: `${mkt.leads} leads` },
                 { label: 'CPBC', value: cpbc > 0 ? `$${Math.round(cpbc).toLocaleString()}` : '—', sub: `${ct.booked} booked` },
               ].map(r => (
-                <div key={r.label} className="flex items-center justify-between">
+                <div key={r.label} className="flex items-baseline justify-between">
                   <div>
-                    <p className="text-xs text-text-400">{r.label}</p>
-                    <p className="text-[10px] text-text-400">{r.sub}</p>
+                    <p
+                      style={{
+                        fontFamily: 'var(--mono)',
+                        fontSize: 10,
+                        letterSpacing: '0.14em',
+                        textTransform: 'uppercase',
+                        color: 'var(--ink-2)',
+                        fontWeight: 500,
+                        margin: 0,
+                      }}
+                    >
+                      {r.label}
+                    </p>
+                    <p
+                      style={{
+                        fontFamily: 'var(--mono)',
+                        fontSize: 9,
+                        letterSpacing: '0.1em',
+                        color: 'var(--ink-3)',
+                        margin: '2px 0 0',
+                      }}
+                    >
+                      {r.sub}
+                    </p>
                   </div>
-                  <p className="text-lg font-bold">{r.value}</p>
+                  <p
+                    style={{
+                      fontFamily: 'var(--serif)',
+                      fontSize: 22,
+                      color: 'var(--ink)',
+                      fontVariantNumeric: 'tabular-nums',
+                      letterSpacing: '-0.015em',
+                      margin: 0,
+                    }}
+                  >
+                    {r.value}
+                  </p>
                 </div>
               ))}
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 mt-4 sm:mt-5 pt-3 sm:pt-4 border-t border-border-default text-center">
-              <div>
-                <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">FE ROAS</p>
-                <p className={`text-lg sm:text-xl font-bold ${feRoas >= 1 ? 'text-success' : 'text-danger'}`}>{feRoas.toFixed(2)}x</p>
-              </div>
-              <div>
-                <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium">NET ROAS</p>
-                <p className={`text-lg sm:text-xl font-bold ${netRoas >= 1 ? 'text-success' : 'text-danger'}`}>{netRoas.toFixed(2)}x</p>
-              </div>
+            <div className="grid grid-cols-2 gap-3 mt-5 pt-4 text-center" style={{ borderTop: '1px solid var(--rule)' }}>
+              {[
+                { label: 'FE ROAS',  value: `${feRoas.toFixed(2)}x`, healthy: feRoas >= 1 },
+                { label: 'NET ROAS', value: `${netRoas.toFixed(2)}x`, healthy: netRoas >= 1 },
+              ].map(s => (
+                <div key={s.label}>
+                  <p
+                    style={{
+                      fontFamily: 'var(--mono)',
+                      fontSize: 9,
+                      letterSpacing: '0.14em',
+                      textTransform: 'uppercase',
+                      color: 'var(--ink-3)',
+                      fontWeight: 500,
+                      margin: 0,
+                    }}
+                  >
+                    {s.label}
+                  </p>
+                  <p
+                    style={{
+                      fontFamily: 'var(--serif)',
+                      fontSize: 24,
+                      color: 'var(--ink)',
+                      fontVariantNumeric: 'tabular-nums',
+                      letterSpacing: '-0.015em',
+                      margin: '4px 0 6px',
+                    }}
+                  >
+                    {s.value}
+                  </p>
+                  <span className={`pill ${s.healthy ? 'pill-up' : 'pill-down'}`}>
+                    {s.healthy ? 'Profitable' : 'Below 1x'}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
         {/* WAVV Dialer */}
         <div className="tile tile-feedback p-4 sm:p-6">
-          <h2 className="text-sm font-semibold text-text-primary mb-4 sm:mb-5 flex items-center gap-2">
-            <Phone size={16} className="text-opt-yellow" /> Dialer Activity
+          <h2 className="editorial-panel-title mb-5 flex items-center gap-2">
+            <Phone size={16} className="text-text-primary" /> Dialer Activity
           </h2>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-5">
             {[
               { label: 'Dials', val: wt.dials, sub: null },
               { label: 'Pickups', val: wt.pickups, sub: wt.dials ? `${((wt.pickups / wt.dials) * 100).toFixed(1)}%` : '0%' },
@@ -733,10 +1181,46 @@ export default function SalesOverview() {
               { label: 'Avg STL', val: stl ? stl.avgDisplay : '—', raw: true, sub: stl ? `${stl.pctUnder5m}% < 5m` : null },
               { label: 'Dials/MC', val: wt.mcs ? (wt.dials / wt.mcs).toFixed(0) : '—', raw: true, sub: null, accent: true },
             ].map(m => (
-              <div key={m.label} className="text-center py-2">
-                <p className={`text-base sm:text-xl font-bold ${m.accent ? 'text-opt-yellow' : ''}`}>{m.raw ? m.val : m.val.toLocaleString()}</p>
-                <p className="text-[9px] sm:text-[10px] text-text-400 uppercase font-medium mt-0.5">{m.label}</p>
-                {m.sub && <p className="text-[10px] text-text-400">{m.sub}</p>}
+              <div key={m.label}>
+                <p
+                  style={{
+                    fontFamily: 'var(--serif)',
+                    fontSize: 26,
+                    color: 'var(--ink)',
+                    fontVariantNumeric: 'tabular-nums',
+                    letterSpacing: '-0.02em',
+                    margin: 0,
+                    lineHeight: 1.05,
+                  }}
+                >
+                  {m.raw ? m.val : (typeof m.val === 'number' ? m.val.toLocaleString() : m.val)}
+                </p>
+                <p
+                  style={{
+                    fontFamily: 'var(--mono)',
+                    fontSize: 9.5,
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase',
+                    color: 'var(--ink-3)',
+                    fontWeight: 500,
+                    margin: '4px 0 0',
+                  }}
+                >
+                  {m.label}
+                </p>
+                {m.sub && (
+                  <p
+                    style={{
+                      fontFamily: 'var(--mono)',
+                      fontSize: 9.5,
+                      letterSpacing: '0.06em',
+                      color: 'var(--ink-3)',
+                      margin: '2px 0 0',
+                    }}
+                  >
+                    {m.sub}
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -746,10 +1230,10 @@ export default function SalesOverview() {
       {/* ═══ CLOSER LEADERBOARD ═══ */}
       <div className="tile tile-feedback overflow-hidden">
         <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border-default flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-            <Award size={16} className="text-opt-yellow" /> Closer Leaderboard
+          <h2 className="editorial-panel-title flex items-center gap-2">
+            <Award size={16} className="text-text-primary" /> Closer Leaderboard
           </h2>
-          <Link to="/sales/closers" className="text-xs text-opt-yellow hover:underline flex items-center gap-1">
+          <Link to="/sales/closers" className="text-xs text-text-primary hover:underline flex items-center gap-1">
             View all <ArrowUpRight size={12} />
           </Link>
         </div>
@@ -811,10 +1295,10 @@ export default function SalesOverview() {
       {/* ═══ SETTER LEADERBOARD ═══ */}
       <div className="tile tile-feedback overflow-hidden">
         <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border-default flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-            <Phone size={16} className="text-opt-yellow" /> Setter Leaderboard
+          <h2 className="editorial-panel-title flex items-center gap-2">
+            <Phone size={16} className="text-text-primary" /> Setter Leaderboard
           </h2>
-          <Link to="/sales/setters" className="text-xs text-opt-yellow hover:underline flex items-center gap-1">
+          <Link to="/sales/setters" className="text-xs text-text-primary hover:underline flex items-center gap-1">
             View all <ArrowUpRight size={12} />
           </Link>
         </div>
@@ -850,7 +1334,7 @@ export default function SalesOverview() {
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-medium">{s.pickupPct}%</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-medium">{s.mcPct}%</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums whitespace-nowrap">{s.avgDur > 0 ? `${Math.floor(s.avgDur / 60)}:${String(s.avgDur % 60).padStart(2, '0')}` : '—'}</td>
-                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-bold text-opt-yellow">{s.sets}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-bold text-text-primary">{s.sets}</td>
                 </tr>
               ))}
             </tbody>
@@ -865,7 +1349,7 @@ export default function SalesOverview() {
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{wt.dials ? ((wt.pickups / wt.dials) * 100).toFixed(1) : 0}%</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{wt.dials ? ((wt.mcs / wt.dials) * 100).toFixed(1) : 0}%</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">—</td>
-                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-bold text-opt-yellow">{setterBoard.reduce((a, s) => a + s.sets, 0)}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-bold text-text-primary">{setterBoard.reduce((a, s) => a + s.sets, 0)}</td>
                 </tr>
               </tfoot>
             )}
@@ -875,8 +1359,8 @@ export default function SalesOverview() {
       {/* ── Recent Leads ── */}
       <div className="tile tile-feedback p-4 sm:p-6">
         <div className="flex items-center justify-between mb-4 sm:mb-5">
-          <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-            <Users size={16} className="text-opt-yellow" /> Recent Leads
+          <h2 className="editorial-panel-title flex items-center gap-2">
+            <Users size={16} className="text-text-primary" /> Recent Leads
           </h2>
           <span className="text-[11px] text-text-400">{recentLeads.length} leads</span>
         </div>
@@ -933,7 +1417,7 @@ export default function SalesOverview() {
         {recentLeads.length > 5 && (
           <button
             onClick={() => setShowAllRecentLeads(v => !v)}
-            className="w-full py-3 text-xs font-medium text-opt-yellow hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default"
+            className="w-full py-3 text-xs font-medium text-text-primary hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default"
           >
             {showAllRecentLeads ? <><ChevronUp size={14} /> Show less</> : <><ChevronDown size={14} /> Show all {recentLeads.length} leads</>}
           </button>
@@ -981,7 +1465,7 @@ export default function SalesOverview() {
             {/* Deal list */}
             <div className="overflow-y-auto max-h-[50vh]">
               {!revenueDeals ? (
-                <div className="flex items-center justify-center py-8"><Loader className="animate-spin text-opt-yellow" size={20} /></div>
+                <div className="flex items-center justify-center py-8"><Loader className="animate-spin text-text-primary" size={20} /></div>
               ) : revenueDeals.length === 0 ? (
                 <p className="text-text-400 text-sm text-center py-8">No closed deals in this period.</p>
               ) : (

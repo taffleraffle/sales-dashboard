@@ -1,39 +1,137 @@
-import { TrendingUp, TrendingDown, Minus, ArrowUpRight } from 'lucide-react'
+import { ArrowUpRight } from 'lucide-react'
 import { getColor } from '../utils/metricCalculations'
 import { ICON } from '../utils/constants'
 
-export default function KPICard({ label, value, subtitle, target, direction, trend, className = '', highlight = false, onClick }) {
-  const colorClass = target != null ? getColor(parseFloat(value), target, direction) : 'text-text-primary'
-  const hoverClass = onClick ? 'tile-hover' : 'tile-feedback'
+/*
+  Editorial scorecard cell.
+  Convention: mono small-caps label (with dash) → big serif tabular number
+  → optional subtitle and trend pill at the foot.
+*/
+
+function trendPill(trend) {
+  if (!trend) return null
+  const dir = trend.direction
+  const cls = dir === 'up' ? 'pill-up' : dir === 'down' ? 'pill-down' : 'pill-flat'
+  const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '—'
+  return (
+    <span className={`pill ${cls}`}>
+      <span className="arrow">{arrow}</span>
+      {trend.pct}%
+    </span>
+  )
+}
+
+export default function KPICard({
+  label,
+  value,
+  subtitle,
+  target,
+  direction,
+  trend,
+  className = '',
+  highlight = false,
+  onClick,
+}) {
+  const colorClass = target != null ? getColor(parseFloat(value), target, direction) : null
+  const valueColor =
+    colorClass === 'text-success' ? 'var(--up)' :
+    colorClass === 'text-warning' ? 'var(--warning, #b88200)' :
+    colorClass === 'text-danger'  ? 'var(--down)' :
+    'var(--ink)'
+
+  const interactive = !!onClick
 
   return (
     <div
       onClick={onClick}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(e) } }) : undefined}
-      className={`tile ${hoverClass} relative p-3 sm:p-5 ${highlight ? 'border-opt-yellow/40 bg-opt-yellow-subtle' : ''} ${className}`}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={interactive ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(e) } }) : undefined}
+      className={`relative editorial-kpi-card ${className}`}
+      style={{
+        background: highlight ? 'var(--accent-soft)' : 'var(--paper)',
+        border: `1px solid ${highlight ? 'var(--accent)' : 'var(--rule)'}`,
+        borderRadius: 4,
+        cursor: interactive ? 'pointer' : 'default',
+        transition: 'border-color 200ms ease, background 200ms ease',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+      onMouseEnter={(e) => {
+        if (interactive) e.currentTarget.style.borderColor = 'var(--ink-3)'
+      }}
+      onMouseLeave={(e) => {
+        if (interactive) e.currentTarget.style.borderColor = highlight ? 'var(--accent)' : 'var(--rule)'
+      }}
     >
-      {/* Arrow link icon */}
-      <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
-        <ArrowUpRight size={ICON.md} className={highlight ? 'text-opt-yellow' : 'text-text-400/50'} />
-      </div>
-
-      <p className="text-[10px] sm:text-[11px] uppercase tracking-wider text-text-400 mb-1 sm:mb-2 font-medium pr-5">{label}</p>
-      <p className={`text-lg sm:text-2xl font-bold tracking-tight ${colorClass}`}>{value ?? '—'}</p>
-      <div className="flex items-center gap-2 mt-1.5">
-        {subtitle && <p className="text-xs text-text-secondary">{subtitle}</p>}
-        {trend && (
-          <span className={`flex items-center gap-0.5 text-xs font-medium ${
-            trend.direction === 'up' ? 'text-success' : trend.direction === 'down' ? 'text-danger' : 'text-text-400'
-          }`}>
-            {trend.direction === 'up' && <TrendingUp size={ICON.sm} />}
-            {trend.direction === 'down' && <TrendingDown size={ICON.sm} />}
-            {trend.direction === 'flat' && <Minus size={ICON.sm} />}
-            {trend.pct}%
-          </span>
+      {/* Top: eyebrow + arrow */}
+      <div className="flex items-start justify-between gap-1.5">
+        <span
+          className="eyebrow"
+          style={{
+            fontSize: 9,
+            letterSpacing: '0.12em',
+            minWidth: 0,
+            flex: '1 1 0',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={label}
+        >
+          {label}
+        </span>
+        {interactive && (
+          <ArrowUpRight
+            size={ICON.sm}
+            style={{ color: highlight ? 'var(--ink)' : 'var(--ink-4)', flexShrink: 0 }}
+          />
         )}
       </div>
+
+      {/* Big editorial number — clamped + truncated to never spill */}
+      <div
+        className="mt-2"
+        style={{
+          fontFamily: 'var(--serif)',
+          fontVariantNumeric: 'tabular-nums',
+          fontSize: 'clamp(20px, 2.8vw, 28px)',
+          lineHeight: 1.05,
+          letterSpacing: '-0.02em',
+          color: valueColor,
+          fontWeight: 400,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          minWidth: 0,
+        }}
+        title={String(value ?? '')}
+      >
+        {value ?? '—'}
+      </div>
+
+      {/* Foot: subtitle + trend */}
+      {(subtitle || trend) && (
+        <div
+          className="mt-auto pt-3 flex items-center gap-2 flex-wrap"
+          style={{ color: 'var(--ink-3)', fontSize: 11 }}
+        >
+          {subtitle && (
+            <span
+              style={{
+                fontFamily: 'var(--mono)',
+                fontSize: 10,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}
+            >
+              {subtitle}
+            </span>
+          )}
+          {trendPill(trend)}
+        </div>
+      )}
     </div>
   )
 }

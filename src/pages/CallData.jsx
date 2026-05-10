@@ -13,8 +13,8 @@ function parseMarkdown(text) {
   let html = text
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/```[\s\S]*?```/g, m => `<pre class="bg-bg-primary rounded px-3 py-2 text-xs overflow-x-auto my-2">${m.slice(3, -3).trim()}</pre>`)
-    .replace(/^### (.+)$/gm, '<h4 class="text-xs font-semibold text-opt-yellow mt-3 mb-1">$1</h4>')
-    .replace(/^## (.+)$/gm, '<h3 class="text-sm font-semibold text-opt-yellow mt-3 mb-1">$1</h3>')
+    .replace(/^### (.+)$/gm, '<h4 class="text-xs font-semibold text-text-primary mt-3 mb-1">$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3 class="text-sm font-semibold text-text-primary mt-3 mb-1">$1</h3>')
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-text-primary font-semibold">$1</strong>')
     .replace(/^\|(.+)\|$/gm, (match) => {
       const cells = match.split('|').filter(c => c.trim())
@@ -77,7 +77,7 @@ function TranscriptCard({ t }) {
     : null
 
   return (
-    <div className="bg-bg-card border border-border-default rounded-xl p-3 hover:border-border-default/60 transition-colors">
+    <div className="bg-bg-card border border-border-default rounded-sm p-3 hover:border-border-default/60 transition-colors">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -94,7 +94,7 @@ function TranscriptCard({ t }) {
         <div className="flex items-center gap-1 shrink-0">
           {t.transcript_url && (
             <a href={t.transcript_url} target="_blank" rel="noopener noreferrer"
-              className="p-1 rounded-lg text-text-400 hover:text-opt-yellow hover:bg-opt-yellow/10 transition-colors" title="Open in Fathom">
+              className="p-1 rounded-lg text-text-400 hover:text-text-primary hover:bg-opt-yellow/10 transition-colors" title="Open in Fathom">
               <ExternalLink size={14} />
             </a>
           )}
@@ -257,25 +257,32 @@ export default function CallData() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-opt-yellow/10 border border-opt-yellow/20 flex items-center justify-center">
-            <Headphones size={20} className="text-opt-yellow" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold text-text-primary">Call Data</h1>
-            <p className="text-xs text-text-400">{total} transcript{total !== 1 ? 's' : ''} found</p>
-          </div>
+      {/* Header — editorial */}
+      <div className="flex items-end justify-between flex-wrap gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Call data</span>
+          <h1 className="h2 mt-2">Calls, <em>transcribed</em>.</h1>
+          <p
+            className="mt-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            {total} transcript{total !== 1 ? 's' : ''} · Fathom sync
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {syncMsg && <span className="text-[11px] text-text-400">{syncMsg}</span>}
           <button onClick={handleSync} disabled={syncing}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs border border-border-default rounded-xl hover:bg-bg-card-hover transition-colors text-text-secondary disabled:opacity-50">
+            className="flex items-center gap-1.5 px-3 py-2 text-xs border border-border-default rounded-sm hover:bg-bg-card-hover transition-colors text-text-secondary disabled:opacity-50">
             <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />Sync Fathom
           </button>
           <button onClick={() => setShowAdd(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs bg-opt-yellow text-bg-primary rounded-xl font-medium hover:brightness-110">
+            className="flex items-center gap-1.5 px-3 py-2 text-xs bg-opt-yellow text-text-primary rounded-sm font-medium hover:brightness-110">
             <Plus size={13} />Add Transcript
           </button>
         </div>
@@ -289,7 +296,7 @@ export default function CallData() {
           { icon: Headphones, label: 'This Week', value: stats.callsThisWeek },
           { icon: Users, label: 'Team Members', value: stats.memberCount },
         ].map((s, i) => (
-          <div key={i} className="bg-bg-card border border-border-default rounded-xl p-3">
+          <div key={i} className="bg-bg-card border border-border-default rounded-sm p-3">
             <div className="flex items-center gap-2 text-text-400 mb-1">
               <s.icon size={13} />
               <span className="text-[11px]">{s.label}</span>
@@ -305,16 +312,16 @@ export default function CallData() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-400" />
           <input value={search} onChange={e => { setSearch(e.target.value); setPage(0) }}
             placeholder="Search prospects or transcripts..."
-            className="w-full bg-bg-card border border-border-default rounded-xl pl-9 pr-8 py-2 text-sm text-text-primary placeholder-text-400 outline-none focus:border-opt-yellow/40" />
+            className="w-full bg-bg-card border border-border-default rounded-sm pl-9 pr-8 py-2 text-sm text-text-primary placeholder-text-400 outline-none focus:border-opt-yellow/40" />
           {search && <button onClick={() => { setSearch(''); setPage(0) }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-400 hover:text-text-primary"><X size={14} /></button>}
         </div>
         <select value={memberId} onChange={e => { setMemberId(e.target.value); setPage(0) }}
-          className="bg-bg-card border border-border-default rounded-xl px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/40">
+          className="bg-bg-card border border-border-default rounded-sm px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/40">
           <option value="">All Members</option>
           {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
         <select value={dateRange} onChange={e => { setDateRange(e.target.value); setPage(0) }}
-          className="bg-bg-card border border-border-default rounded-xl px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/40">
+          className="bg-bg-card border border-border-default rounded-sm px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/40">
           <option value="7">Last 7 days</option>
           <option value="14">Last 14 days</option>
           <option value="30">Last 30 days</option>
@@ -322,7 +329,7 @@ export default function CallData() {
           <option value="all">All time</option>
         </select>
         <select value={outcome} onChange={e => { setOutcome(e.target.value); setPage(0) }}
-          className="bg-bg-card border border-border-default rounded-xl px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/40">
+          className="bg-bg-card border border-border-default rounded-sm px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/40">
           <option value="">All Outcomes</option>
           <option value="closed">Closed</option>
           <option value="not_closed">Not Closed</option>
@@ -367,7 +374,7 @@ export default function CallData() {
           <div className="flex items-center justify-between px-4 py-3 border-b border-border-default shrink-0">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-full bg-opt-yellow/15 flex items-center justify-center">
-                <Headphones size={14} className="text-opt-yellow" />
+                <Headphones size={14} className="text-text-primary" />
               </div>
               <div>
                 <h3 className="text-xs font-semibold text-text-primary">Transcript Intelligence</h3>
@@ -388,7 +395,7 @@ export default function CallData() {
                 <p className="text-[10px] text-text-400 uppercase font-medium">Try asking...</p>
                 {SUGGESTED.map((q, i) => (
                   <button key={i} onClick={() => sendChat(q)}
-                    className="w-full text-left px-2.5 py-1.5 rounded-xl bg-bg-primary border border-border-default hover:border-opt-yellow/30 hover:bg-bg-card-hover text-[11px] text-text-secondary transition-colors">
+                    className="w-full text-left px-2.5 py-1.5 rounded-sm bg-bg-primary border border-border-default hover:border-opt-yellow/30 hover:bg-bg-card-hover text-[11px] text-text-secondary transition-colors">
                     {q}
                   </button>
                 ))}
@@ -397,8 +404,8 @@ export default function CallData() {
 
             {chatMessages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[90%] rounded-2xl px-3 py-2 ${
-                  msg.role === 'user' ? 'bg-opt-yellow text-bg-primary rounded-br-md' : 'bg-bg-primary border border-border-default rounded-bl-md'
+                <div className={`max-w-[90%] rounded-sm px-3 py-2 ${
+                  msg.role === 'user' ? 'bg-opt-yellow text-text-primary rounded-br-md' : 'bg-bg-primary border border-border-default rounded-bl-md'
                 }`}>
                   {msg.role === 'user' ? (
                     <p className="text-sm">{msg.content}</p>
@@ -411,7 +418,7 @@ export default function CallData() {
 
             {chatStreaming && chatStreamText && (
               <div className="flex justify-start">
-                <div className="max-w-[90%] rounded-2xl rounded-bl-md px-3 py-2 bg-bg-primary border border-border-default">
+                <div className="max-w-[90%] rounded-sm rounded-bl-md px-3 py-2 bg-bg-primary border border-border-default">
                   <div className="text-xs text-text-secondary leading-relaxed" dangerouslySetInnerHTML={{ __html: parseMarkdown(chatStreamText) }} />
                 </div>
               </div>
@@ -419,7 +426,7 @@ export default function CallData() {
 
             {chatStreaming && !chatStreamText && (
               <div className="flex justify-start">
-                <div className="rounded-2xl rounded-bl-md px-3 py-2 bg-bg-primary border border-border-default">
+                <div className="rounded-sm rounded-bl-md px-3 py-2 bg-bg-primary border border-border-default">
                   <div className="flex items-center gap-2 text-xs text-text-400">
                     <Loader size={12} className="animate-spin" />Analyzing transcripts...
                   </div>
@@ -438,12 +445,12 @@ export default function CallData() {
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(chatInput) } }}
                 placeholder="Ask about your calls..."
                 rows={1}
-                className="flex-1 bg-bg-primary border border-border-default rounded-xl px-3 py-2 text-sm text-text-primary placeholder-text-400 outline-none focus:border-opt-yellow/40 resize-none max-h-20"
+                className="flex-1 bg-bg-primary border border-border-default rounded-sm px-3 py-2 text-sm text-text-primary placeholder-text-400 outline-none focus:border-opt-yellow/40 resize-none max-h-20"
                 style={{ minHeight: '36px' }}
                 disabled={chatStreaming}
               />
               <button onClick={() => sendChat(chatInput)} disabled={!chatInput.trim() || chatStreaming}
-                className="w-8 h-8 rounded-xl bg-opt-yellow text-bg-primary flex items-center justify-center shrink-0 disabled:opacity-30 hover:brightness-110">
+                className="w-8 h-8 rounded-sm bg-opt-yellow text-text-primary flex items-center justify-center shrink-0 disabled:opacity-30 hover:brightness-110">
                 <Send size={14} />
               </button>
             </div>

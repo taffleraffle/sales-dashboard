@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Plus, X, ChevronDown, Loader, Check, Save, Download } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
-const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-sm text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 const selectCls = 'select-input w-full'
 
 export default function PaymentsTab({
@@ -115,7 +115,7 @@ export default function PaymentsTab({
   const clientDropdownEl = activeDropdownId && dropdownPos ? (
     <div
       ref={dropdownRef}
-      className="fixed z-[200] bg-bg-card border border-border-default rounded-xl shadow-xl shadow-black/40 py-1 w-[260px]"
+      className="fixed z-[200] bg-bg-card border border-border-default rounded-sm shadow-xl shadow-black/40 py-1 w-[260px]"
       style={{ top: dropdownPos.top, left: dropdownPos.left, maxHeight: dropdownPos.maxH }}
     >
       <div className="px-2 py-1">
@@ -172,7 +172,7 @@ export default function PaymentsTab({
             <div><label className="text-[11px] text-text-400 uppercase tracking-wider block mb-1">Payment Date</label><input type="date" value={newPayment.payment_date} onChange={e => setNewPayment(p => ({ ...p, payment_date: e.target.value }))} className={inputCls} /></div>
             <div><label className="text-[11px] text-text-400 uppercase tracking-wider block mb-1">Description</label><input value={newPayment.description} onChange={e => setNewPayment(p => ({ ...p, description: e.target.value }))} placeholder="Optional" className={inputCls} /></div>
           </div>
-          <button onClick={handleAddPayment} disabled={savingPayment} className="px-4 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:brightness-110 disabled:opacity-50 transition-all duration-150 flex items-center gap-1.5">
+          <button onClick={handleAddPayment} disabled={savingPayment} className="px-4 py-2 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 disabled:opacity-50 transition-all duration-150 flex items-center gap-1.5">
             {savingPayment ? <><Loader size={12} className="animate-spin" /> Saving...</> : <><Save size={12} /> Save Payment</>}
           </button>
         </div>
@@ -184,13 +184,13 @@ export default function PaymentsTab({
           {syncResult && <span className="text-[10px] text-success">{syncResult}</span>}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={onSync} disabled={syncing} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-purple-500/30 text-purple-400 rounded-xl hover:bg-purple-500/10 disabled:opacity-50 transition-all duration-150">
+          <button onClick={onSync} disabled={syncing} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-purple-500/30 text-purple-400 rounded-sm hover:bg-purple-500/10 disabled:opacity-50 transition-all duration-150">
             {syncing ? <><Loader size={12} className="animate-spin" /> Syncing...</> : <><Download size={12} /> Sync Stripe</>}
           </button>
-          <button onClick={onSyncFanbasis} disabled={syncingFanbasis} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-blue-500/30 text-blue-400 rounded-xl hover:bg-blue-500/10 disabled:opacity-50 transition-all duration-150">
+          <button onClick={onSyncFanbasis} disabled={syncingFanbasis} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-blue-500/30 text-blue-400 rounded-sm hover:bg-blue-500/10 disabled:opacity-50 transition-all duration-150">
             {syncingFanbasis ? <><Loader size={12} className="animate-spin" /> Syncing...</> : <><Download size={12} /> Sync Fanbasis</>}
           </button>
-          <button onClick={() => setShowAddPayment(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:brightness-110 transition-all duration-150"><Plus size={12} /> Add Payment</button>
+          <button onClick={() => setShowAddPayment(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 transition-all duration-150"><Plus size={12} /> Add Payment</button>
         </div>
       </div>
 
@@ -230,7 +230,7 @@ export default function PaymentsTab({
                       <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${
                         pastWindow ? 'text-text-400 bg-text-400/10' :
                         pn === 1 ? 'text-blue-400 bg-blue-500/15' :
-                        'text-opt-yellow bg-opt-yellow/15'
+                        'text-text-primary bg-opt-yellow/15'
                       }`}>{pnLabels[pn] || `#${pn}`}</span>
                     ) : p.matched ? <span className="text-text-400 text-[10px]">—</span> : null}
                   </td>
@@ -260,7 +260,7 @@ export default function PaymentsTab({
                         </button>
                         <button
                           onClick={(e) => openDropdown(e, p.id, true)}
-                          className="text-text-400 text-[9px] hover:text-opt-yellow transition-colors"
+                          className="text-text-400 text-[9px] hover:text-text-primary transition-colors"
                           title="Change matched client"
                         >
                           <ChevronDown size={10} />
@@ -271,7 +271,7 @@ export default function PaymentsTab({
                         <button
                           onClick={(e) => openDropdown(e, p.id, false)}
                           disabled={matchingId === p.id}
-                          className="text-warning text-[10px] font-medium flex items-center gap-1 hover:text-opt-yellow disabled:opacity-50 transition-colors"
+                          className="text-warning text-[10px] font-medium flex items-center gap-1 hover:text-text-primary disabled:opacity-50 transition-colors"
                         >
                           {matchingId === p.id ? <Loader size={10} className="animate-spin" /> : <>Match <ChevronDown size={10} /></>}
                         </button>

@@ -22,7 +22,7 @@ export default function VariantPill({ variantId, matchStatus, compact = false })
     return (
       <Link
         to={`/sales/ads/variants/${encodeURIComponent(variantId)}`}
-        className="text-[9px] font-mono text-opt-yellow hover:underline truncate"
+        className="text-[9px] font-mono text-text-primary hover:underline truncate"
         title={variantId}
       >
         {variantId}
@@ -40,7 +40,7 @@ export default function VariantPill({ variantId, matchStatus, compact = false })
       className="inline-flex items-center gap-1 text-[9px] font-mono group"
       title={variantId}
     >
-      {hook && <span className="px-1.5 py-0.5 rounded border border-opt-yellow/30 text-opt-yellow group-hover:bg-opt-yellow/10">{hook}</span>}
+      {hook && <span className="px-1.5 py-0.5 rounded border border-opt-yellow/30 text-text-primary group-hover:bg-opt-yellow/10">{hook}</span>}
       {body && <span className="px-1.5 py-0.5 rounded border border-border-default text-text-secondary group-hover:bg-bg-card-hover">{body}</span>}
       {scene && <span className="px-1.5 py-0.5 rounded border border-border-default text-text-secondary group-hover:bg-bg-card-hover">{scene}</span>}
       {creator && <span className="px-1.5 py-0.5 rounded border border-border-default text-text-secondary group-hover:bg-bg-card-hover">{creator}</span>}

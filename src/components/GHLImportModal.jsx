@@ -105,14 +105,14 @@ export default function GHLImportModal({ clients, onClose, onImported }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="tile tile-feedback shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col slide-in-right" onClick={e => e.stopPropagation()}>
+      <div className="tile tile-feedback shadow-md w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col slide-in-right" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-default">
           <div>
             <h2 className="text-sm font-bold text-text-primary">Import from GHL</h2>
             <p className="text-[10px] text-text-400">Pull closed deals from GoHighLevel pipelines</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all">
+          <button onClick={onClose} className="w-8 h-8 rounded-sm flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all">
             <X size={16} />
           </button>
         </div>
@@ -135,7 +135,7 @@ export default function GHLImportModal({ clients, onClose, onImported }) {
                     <button
                       key={p.id}
                       onClick={() => handleSelectPipeline(p)}
-                      className="w-full text-left bg-bg-primary border border-border-default rounded-xl p-3 hover:border-opt-yellow/30 hover:bg-opt-yellow/5 transition-all duration-150"
+                      className="w-full text-left bg-bg-primary border border-border-default rounded-sm p-3 hover:border-opt-yellow/30 hover:bg-opt-yellow/5 transition-all duration-150"
                     >
                       <span className="text-xs font-medium text-text-primary">{p.name}</span>
                       <span className="text-[10px] text-text-400 ml-2">({p.stages.length} stages)</span>
@@ -149,7 +149,7 @@ export default function GHLImportModal({ clients, onClose, onImported }) {
           {/* Step 2: Loading */}
           {step === 2 && (
             <div className="flex flex-col items-center justify-center py-12">
-              <Loader size={24} className="animate-spin text-opt-yellow mb-3" />
+              <Loader size={24} className="animate-spin text-text-primary mb-3" />
               <p className="text-xs text-text-primary mb-1">Fetching opportunities...</p>
               <p className="text-[10px] text-text-400">{progress.loaded} of {progress.total || '?'} loaded</p>
             </div>
@@ -168,7 +168,7 @@ export default function GHLImportModal({ clients, onClose, onImported }) {
                 </div>
               </div>
 
-              <div className="overflow-x-auto max-h-[400px] overflow-y-auto border border-border-default rounded-xl">
+              <div className="overflow-x-auto max-h-[400px] overflow-y-auto border border-border-default rounded-sm">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-bg-card z-10">
                     <tr className="text-text-400 uppercase text-[10px] tracking-wider">
@@ -228,13 +228,13 @@ export default function GHLImportModal({ clients, onClose, onImported }) {
         {/* Footer */}
         {step === 3 && (
           <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border-default">
-            <button onClick={() => setStep(1)} className="px-4 py-2 text-xs font-medium border border-border-default text-text-secondary rounded-xl hover:bg-bg-card-hover transition-all duration-150">
+            <button onClick={() => setStep(1)} className="px-4 py-2 text-xs font-medium border border-border-default text-text-secondary rounded-sm hover:bg-bg-card-hover transition-all duration-150">
               Back
             </button>
             <button
               onClick={handleImport}
               disabled={selected.size === 0 || importing}
-              className="px-5 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:brightness-110 disabled:opacity-50 transition-all duration-150 flex items-center gap-1.5"
+              className="px-5 py-2 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 disabled:opacity-50 transition-all duration-150 flex items-center gap-1.5"
             >
               {importing ? <><Loader size={12} className="animate-spin" /> Importing...</> : <><Download size={12} /> Import {selected.size} Clients</>}
             </button>
@@ -242,7 +242,7 @@ export default function GHLImportModal({ clients, onClose, onImported }) {
         )}
         {step === 4 && (
           <div className="flex items-center justify-end px-5 py-3 border-t border-border-default">
-            <button onClick={onClose} className="px-5 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:brightness-110 transition-all duration-150">
+            <button onClick={onClose} className="px-5 py-2 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 transition-all duration-150">
               Done
             </button>
           </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { X, Save, Loader } from 'lucide-react'
 
-const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-sm text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 const selectCls = 'select-input w-full'
 const labelCls = 'text-[11px] text-text-400 uppercase tracking-wider block mb-1.5'
 
@@ -71,14 +71,14 @@ export default function ClientEditPanel({ client, members, onSave, onClose }) {
       />
 
       {/* Panel */}
-      <div className="fixed top-0 right-0 h-full z-[100] w-full sm:w-[480px] bg-bg-card border-l border-border-default shadow-2xl flex flex-col slide-panel">
+      <div className="fixed top-0 right-0 h-full z-[100] w-full sm:w-[480px] bg-bg-card border-l border-border-default shadow-md flex flex-col slide-panel">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-default">
           <div>
             <h2 className="text-sm font-bold text-text-primary">Edit Client</h2>
             <p className="text-[10px] text-text-400 mt-0.5">{client.name}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all">
+          <button onClick={onClose} className="w-8 h-8 rounded-sm flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all">
             <X size={16} />
           </button>
         </div>
@@ -87,7 +87,7 @@ export default function ClientEditPanel({ client, members, onSave, onClose }) {
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {/* Identity */}
           <div>
-            <h3 className="text-[10px] text-opt-yellow uppercase tracking-wider font-medium mb-3">Identity</h3>
+            <h3 className="text-[10px] text-text-primary uppercase tracking-wider font-medium mb-3">Identity</h3>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelCls}>Name *</label>
@@ -110,7 +110,7 @@ export default function ClientEditPanel({ client, members, onSave, onClose }) {
 
           {/* Attribution */}
           <div>
-            <h3 className="text-[10px] text-opt-yellow uppercase tracking-wider font-medium mb-3">Attribution</h3>
+            <h3 className="text-[10px] text-text-primary uppercase tracking-wider font-medium mb-3">Attribution</h3>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelCls}>Closer</label>
@@ -141,7 +141,7 @@ export default function ClientEditPanel({ client, members, onSave, onClose }) {
 
           {/* Financials */}
           <div>
-            <h3 className="text-[10px] text-opt-yellow uppercase tracking-wider font-medium mb-3">Financials</h3>
+            <h3 className="text-[10px] text-text-primary uppercase tracking-wider font-medium mb-3">Financials</h3>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelCls}>Trial Amount ($)</label>
@@ -156,7 +156,7 @@ export default function ClientEditPanel({ client, members, onSave, onClose }) {
 
           {/* Dates & Billing */}
           <div>
-            <h3 className="text-[10px] text-opt-yellow uppercase tracking-wider font-medium mb-3">Dates & Billing</h3>
+            <h3 className="text-[10px] text-text-primary uppercase tracking-wider font-medium mb-3">Dates & Billing</h3>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelCls}>Trial Start Date</label>
@@ -204,14 +204,14 @@ export default function ClientEditPanel({ client, members, onSave, onClose }) {
         <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border-default">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-xs font-medium border border-border-default text-text-secondary rounded-xl hover:bg-bg-card-hover transition-all duration-150"
+            className="px-4 py-2 text-xs font-medium border border-border-default text-text-secondary rounded-sm hover:bg-bg-card-hover transition-all duration-150"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving || !form.name}
-            className="px-5 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-xl hover:brightness-110 disabled:opacity-50 transition-all duration-150 flex items-center gap-1.5"
+            className="px-5 py-2 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 disabled:opacity-50 transition-all duration-150 flex items-center gap-1.5"
           >
             {saving ? <><Loader size={12} className="animate-spin" /> Saving...</> : <><Save size={12} /> Save Client</>}
           </button>

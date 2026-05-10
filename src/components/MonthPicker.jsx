@@ -4,10 +4,11 @@ import { Calendar, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 function formatMonth(value) {
-  // value = "2026-03"
   const [y, m] = value.split('-').map(Number)
   return `${MONTH_NAMES[m - 1]} ${y}`
 }
+
+const segActive = { background: 'var(--ink)', color: 'var(--paper)', borderRadius: 3 }
 
 export default function MonthPicker({ value, onChange, disabled }) {
   const [open, setOpen] = useState(false)
@@ -15,7 +16,6 @@ export default function MonthPicker({ value, onChange, disabled }) {
 
   const [y, m] = value.split('-').map(Number)
 
-  // Close on outside click
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', handler)
@@ -36,83 +36,110 @@ export default function MonthPicker({ value, onChange, disabled }) {
 
   const [viewYear, setViewYear] = useState(y)
 
-  // Sync viewYear when value changes
   useEffect(() => { setViewYear(y) }, [y])
 
   const now = new Date()
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const isCurrentMonth = value === currentMonth
 
+  const arrowBtn = {
+    width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    color: 'var(--ink-3)', borderRadius: 3,
+  }
+
   return (
     <div className="relative" ref={ref}>
-      <div className="flex items-center gap-0.5 bg-bg-card border border-border-default rounded-xl p-1">
-        {/* Prev month */}
-        <button
-          onClick={() => shift(-1)}
-          disabled={disabled}
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all disabled:opacity-30"
-        >
-          <ChevronLeft size={14} />
+      <div
+        className="flex items-center gap-0.5"
+        style={{
+          background: 'var(--paper)',
+          border: '1px solid var(--rule)',
+          borderRadius: 3,
+          padding: 3,
+        }}
+      >
+        <button onClick={() => shift(-1)} disabled={disabled} style={{ ...arrowBtn, opacity: disabled ? 0.3 : 1 }}>
+          <ChevronLeft size={13} />
         </button>
 
-        {/* Current month display / dropdown trigger */}
         <button
           onClick={() => !disabled && setOpen(!open)}
           disabled={disabled}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
-            isCurrentMonth
-              ? 'bg-opt-yellow text-bg-primary shadow-sm'
-              : 'text-text-primary hover:bg-bg-card-hover'
-          }`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '5px 10px',
+            fontFamily: 'var(--mono)',
+            fontSize: 11,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            fontWeight: 500,
+            ...(isCurrentMonth ? segActive : { background: 'transparent', color: 'var(--ink)', borderRadius: 3 }),
+          }}
         >
-          <Calendar size={12} />
+          <Calendar size={11} />
           {formatMonth(value)}
-          <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
 
-        {/* Next month */}
-        <button
-          onClick={() => shift(1)}
-          disabled={disabled}
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all disabled:opacity-30"
-        >
-          <ChevronRight size={14} />
+        <button onClick={() => shift(1)} disabled={disabled} style={{ ...arrowBtn, opacity: disabled ? 0.3 : 1 }}>
+          <ChevronRight size={13} />
         </button>
 
-        {/* Quick: This month */}
         {!isCurrentMonth && (
           <button
             onClick={() => { onChange(currentMonth); setOpen(false) }}
             disabled={disabled}
-            className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all disabled:opacity-30 whitespace-nowrap"
+            style={{
+              padding: '5px 10px',
+              fontFamily: 'var(--mono)',
+              fontSize: 9.5,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              fontWeight: 500,
+              color: 'var(--ink-3)',
+              borderRadius: 3,
+              whiteSpace: 'nowrap',
+            }}
           >
             This month
           </button>
         )}
       </div>
 
-      {/* Month grid dropdown */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 z-50 tile tile-feedback p-4 shadow-xl shadow-black/40 w-64">
-          {/* Year nav */}
+        <div
+          className="absolute right-0 top-full mt-2 z-50 w-64"
+          style={{
+            background: 'var(--paper)',
+            border: '1px solid var(--rule)',
+            borderRadius: 4,
+            padding: 16,
+            boxShadow: '0 16px 40px rgba(10,10,10,0.12)',
+          }}
+        >
           <div className="flex items-center justify-between mb-3">
-            <button
-              onClick={() => setViewYear(v => v - 1)}
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all"
-            >
-              <ChevronLeft size={14} />
+            <button onClick={() => setViewYear(v => v - 1)} style={arrowBtn}>
+              <ChevronLeft size={13} />
             </button>
-            <span className="text-sm font-medium text-text-primary">{viewYear}</span>
-            <button
-              onClick={() => setViewYear(v => v + 1)}
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all"
+            <span
+              style={{
+                fontFamily: 'var(--serif)',
+                fontSize: 17,
+                color: 'var(--ink)',
+                fontWeight: 500,
+                letterSpacing: '-0.01em',
+              }}
             >
-              <ChevronRight size={14} />
+              {viewYear}
+            </span>
+            <button onClick={() => setViewYear(v => v + 1)} style={arrowBtn}>
+              <ChevronRight size={13} />
             </button>
           </div>
 
-          {/* Month grid */}
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-4 gap-1">
             {MONTH_NAMES.map((name, i) => {
               const monthVal = `${viewYear}-${String(i + 1).padStart(2, '0')}`
               const isSelected = monthVal === value
@@ -121,13 +148,21 @@ export default function MonthPicker({ value, onChange, disabled }) {
                 <button
                   key={name}
                   onClick={() => selectMonth(i)}
-                  className={`px-2 py-2 rounded-lg text-[11px] font-medium transition-all duration-150 ${
-                    isSelected
-                      ? 'bg-opt-yellow text-bg-primary shadow-sm'
+                  style={{
+                    padding: '8px 0',
+                    fontFamily: 'var(--mono)',
+                    fontSize: 10.5,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    fontWeight: 500,
+                    borderRadius: 3,
+                    transition: 'all 140ms ease',
+                    ...(isSelected
+                      ? { background: 'var(--ink)', color: 'var(--paper)' }
                       : isCurrent
-                        ? 'bg-opt-yellow/15 text-opt-yellow border border-opt-yellow/30'
-                        : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
-                  }`}
+                        ? { background: 'var(--accent-soft)', color: 'var(--ink)', border: '1px solid var(--accent)' }
+                        : { background: 'transparent', color: 'var(--ink-3)' }),
+                  }}
                 >
                   {name}
                 </button>

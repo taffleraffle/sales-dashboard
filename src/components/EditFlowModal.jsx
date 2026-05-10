@@ -49,7 +49,7 @@ export default function EditFlowModal({ flow, onClose, onSave }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => !saving && onClose()}>
-      <form onSubmit={handleSave} className="tile w-full max-w-md p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+      <form onSubmit={handleSave} className="tile w-full max-w-md p-6 shadow-md" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-5">
           <div>
             <h3 className="text-sm font-semibold text-text-primary">Edit Flow</h3>
@@ -70,7 +70,7 @@ export default function EditFlowModal({ flow, onClose, onSave }) {
               placeholder="e.g. Welcome Sequence"
               required
               autoFocus
-              className="w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none transition-all"
+              className="w-full px-3 py-2 bg-bg-primary border border-border-default rounded-sm text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none transition-all"
             />
           </div>
 
@@ -81,7 +81,7 @@ export default function EditFlowModal({ flow, onClose, onSave }) {
               onChange={e => setDescription(e.target.value)}
               placeholder="What this flow is for, who it's sent to…"
               rows={2}
-              className="w-full px-3 py-2 bg-bg-primary border border-border-default rounded-xl text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none transition-all resize-none"
+              className="w-full px-3 py-2 bg-bg-primary border border-border-default rounded-sm text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none transition-all resize-none"
             />
           </div>
 
@@ -103,7 +103,7 @@ export default function EditFlowModal({ flow, onClose, onSave }) {
                     className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ring-offset-2 ring-offset-bg-card ${selected ? 'ring-2 ring-text-primary scale-110' : 'ring-0 hover:scale-105'}`}
                     style={{ backgroundColor: c }}
                   >
-                    {selected && <Check size={14} className={tickDark ? 'text-bg-primary' : 'text-white'} strokeWidth={3} />}
+                    {selected && <Check size={14} className={tickDark ? 'text-text-primary' : 'text-white'} strokeWidth={3} />}
                   </button>
                 )
               })}
@@ -140,14 +140,14 @@ export default function EditFlowModal({ flow, onClose, onSave }) {
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="px-4 py-2 rounded-xl text-xs font-medium text-text-400 hover:text-text-primary hover:bg-bg-primary transition-all disabled:opacity-50"
+            className="px-4 py-2 rounded-sm text-xs font-medium text-text-400 hover:text-text-primary hover:bg-bg-primary transition-all disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={saving || !name.trim()}
-            className="px-4 py-2 rounded-xl text-xs font-semibold bg-opt-yellow hover:brightness-110 text-bg-primary transition-all inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-sm text-xs font-semibold bg-opt-yellow hover:brightness-110 text-text-primary transition-all inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {saving ? <Loader size={12} className="animate-spin" /> : <Save size={12} />}
             {saving ? 'Saving…' : 'Save Changes'}

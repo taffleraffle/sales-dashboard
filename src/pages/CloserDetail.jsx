@@ -199,15 +199,27 @@ export default function CloserDetail() {
   const avgFathomDuration = transcripts.length > 0 ? Math.round(transcripts.reduce((s, t) => s + (t.duration_seconds || 0), 0) / transcripts.length) : 0
 
   if (!member) {
-    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
   }
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
-          <h1 className="text-lg sm:text-xl font-bold">{member.name}</h1>
-          <p className="text-xs sm:text-sm text-text-400">Closer Performance</p>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Closer detail</span>
+          <h1 className="h2 mt-2">{member.name}</h1>
+          <p
+            className="mt-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            Closer · performance
+          </p>
         </div>
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
@@ -281,10 +293,10 @@ export default function CloserDetail() {
               const refClass = (outcome) => {
                 if (outcome === 'closed' || outcome === 'ascended') return 'bg-success/15 text-success border border-success/40 hover:bg-success/25'
                 if (outcome === 'no_show' || outcome === 'not_closed') return 'bg-danger/15 text-danger border border-danger/40 hover:bg-danger/25'
-                return 'bg-bg-card-hover border border-border-default hover:bg-opt-yellow/10 hover:text-opt-yellow'
+                return 'bg-bg-card-hover border border-border-default hover:bg-opt-yellow/10 hover:text-text-primary'
               }
               return (
-                <div key={i} className="border border-border-default rounded-2xl p-4">
+                <div key={i} className="border border-border-default rounded-sm p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
                       <span className="font-medium text-sm">{obj.objection_category}</span>
@@ -338,7 +350,7 @@ export default function CloserDetail() {
           </div>
         ) : transcripts.length > 0 ? (
           <div className="flex items-center justify-center gap-2 py-6">
-            <Loader size={14} className="animate-spin text-opt-yellow" />
+            <Loader size={14} className="animate-spin text-text-primary" />
             <span className="text-text-400 text-sm">Analyzing {transcripts.length} transcripts...</span>
           </div>
         ) : (
@@ -362,7 +374,7 @@ const OUTCOME_META = {
 }
 
 const TYPE_META = {
-  new_call:  { label: 'NC',  chip: 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30' },
+  new_call:  { label: 'NC',  chip: 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30' },
   follow_up: { label: 'FU',  chip: 'bg-purple-500/15 text-purple-400 border-purple-500/30' },
   ascension: { label: 'ASC', chip: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' },
 }
@@ -415,7 +427,7 @@ function CallsCalendar({ calls, selectedDate, onSelectDate, expandedCallId, onTo
   return (
     <div className="tile tile-feedback p-4 sm:p-5 mb-6">
       <div className="flex items-center gap-2 mb-3">
-        <Calendar size={16} className="text-opt-yellow" />
+        <Calendar size={16} className="text-text-primary" />
         <h2 className="text-sm font-medium">Calls Calendar</h2>
         <span className="text-xs text-text-400 ml-auto">
           {calls.length} calls · last {days} days
@@ -463,11 +475,11 @@ function CallsCalendar({ calls, selectedDate, onSelectDate, expandedCallId, onTo
                   {dayTotals.closes > 0 && <span className="text-success"> · {dayTotals.closes} closed</span>}
                   {dayTotals.ascensions > 0 && <span className="text-cyan-400"> · {dayTotals.ascensions} asc</span>}
                   {dayTotals.noShows > 0 && <span className="text-danger"> · {dayTotals.noShows} no-show</span>}
-                  {dayTotals.cash > 0 && <span className="text-opt-yellow"> · ${dayTotals.cash.toLocaleString()} cash</span>}
+                  {dayTotals.cash > 0 && <span className="text-text-primary"> · ${dayTotals.cash.toLocaleString()} cash</span>}
                 </span>
                 <button
                   onClick={() => onEditEod(selectedDate)}
-                  className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-opt-yellow border border-opt-yellow/30 hover:bg-opt-yellow/10 transition-colors"
+                  className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-primary border border-opt-yellow/30 hover:bg-opt-yellow/10 transition-colors"
                 >
                   <Edit3 size={12} />
                   Edit EOD
@@ -517,14 +529,14 @@ function DayCell({ date, calls, selected, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`flex flex-col gap-1.5 min-w-[78px] sm:min-w-[88px] px-2.5 py-2.5 rounded-2xl border transition-all text-left ${
+      className={`flex flex-col gap-1.5 min-w-[78px] sm:min-w-[88px] px-2.5 py-2.5 rounded-sm border transition-all text-left ${
         selected
           ? 'border-opt-yellow bg-opt-yellow/10'
           : 'border-border-default bg-bg-card hover:bg-bg-card-hover hover:border-border-default'
       }`}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <span className={`text-[10px] uppercase tracking-wider ${selected ? 'text-opt-yellow' : 'text-text-400'}`}>
+        <span className={`text-[10px] uppercase tracking-wider ${selected ? 'text-text-primary' : 'text-text-400'}`}>
           {fmtDayShort(date)}
         </span>
         <span className="text-[10px] text-text-400 tabular-nums">{total}</span>
@@ -564,7 +576,7 @@ function CallRow({ call, expanded, onToggle }) {
   const isMiss = call.outcome === 'no_show'
 
   return (
-    <div className={`bg-bg-card border rounded-xl overflow-hidden transition-colors ${
+    <div className={`bg-bg-card border rounded-sm overflow-hidden transition-colors ${
       isWin ? 'border-success/30' : isMiss ? 'border-danger/30' : 'border-border-default'
     }`}>
       <button
@@ -577,7 +589,7 @@ function CallRow({ call, expanded, onToggle }) {
         {time && <span className="text-[11px] text-text-400 font-mono">{time}</span>}
         <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${outcome.chip}`}>{outcome.label}</span>
         <div className="ml-auto flex items-center gap-3 text-xs">
-          {cash > 0 && <span className="text-opt-yellow font-medium">${cash.toLocaleString()} cash</span>}
+          {cash > 0 && <span className="text-text-primary font-medium">${cash.toLocaleString()} cash</span>}
           {rev > 0 && <span className="text-success">${rev.toLocaleString()} rev</span>}
         </div>
       </button>
@@ -586,7 +598,7 @@ function CallRow({ call, expanded, onToggle }) {
           {(rev > 0 || cash > 0) && (
             <div className="flex gap-4 text-xs pt-2">
               <span className="text-text-400">Revenue: <strong className="text-success">${rev.toLocaleString()}</strong></span>
-              <span className="text-text-400">Cash: <strong className="text-opt-yellow">${cash.toLocaleString()}</strong></span>
+              <span className="text-text-400">Cash: <strong className="text-text-primary">${cash.toLocaleString()}</strong></span>
             </div>
           )}
           {call.notes && (
