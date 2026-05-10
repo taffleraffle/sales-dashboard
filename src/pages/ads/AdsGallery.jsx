@@ -118,14 +118,28 @@ export default function AdsGallery() {
         transcriptByAd.set(r.ad_id, r.full_text)
       }
 
+      // HYROS ad-level attribution. lib_hyros_ad_attribution is a view rolling
+      // up calls/leads/sales per Meta ad over the last 90d. The view ad_id
+      // resolves via COALESCE(source_link_ad_id, meta_ad_id) so it covers
+      // both direct ad clicks and source-link redirects.
+      const hyrosRes = await supabase
+        .from('lib_hyros_ad_attribution')
+        .select('ad_id, calls_attributed, calls_qualified, leads_attributed, sales_attributed, revenue_attributed')
+      const hyrosByAd = new Map()
+      for (const r of hyrosRes.data || []) {
+        hyrosByAd.set(r.ad_id, r)
+      }
+
       // TODO Phase E: join lib_variant_state_history to populate variant_state.
       const enriched = ads.map(a => {
         const st = perAd[a.ad_id] || {}
         const ctr = st.impressions > 0 ? (st.clicks / st.impressions) * 100 : null
         const transcript = transcriptByAd.get(a.ad_id)
-        // Preview: first 140 chars of the spoken transcript (italic-serif
-        // quote on the card).
         const transcript_preview = transcript ? transcript.slice(0, 140) : null
+        const hy = hyrosByAd.get(a.ad_id) || {}
+        // HYROS calls = Calendly bookings, so map straight to booked. Closed
+        // requires sale.attributed events which are zero today (no Stripe →
+        // HYROS pipe yet). Once those flow, closed + revenue light up.
         return {
           ...a,
           asset_type: a.asset_type || null,
@@ -135,12 +149,13 @@ export default function AdsGallery() {
             spend: st.spend || 0,
             impressions: st.impressions || 0,
             clicks: st.clicks || 0,
-            leads: st.leads || 0,
-            booked: 0,    // populated when setter_leads.utm_content join lands
-            closed: 0,
-            revenue: 0,
+            leads: st.leads || hy.leads_attributed || 0,
+            booked: hy.calls_attributed || 0,
+            qualified: hy.calls_qualified || 0,
+            closed: hy.sales_attributed || 0,
+            revenue: parseFloat(hy.revenue_attributed || 0),
             ctr,
-            leadQualityPct: null,
+            leadQualityPct: hy.calls_attributed > 0 ? (hy.calls_qualified / hy.calls_attributed) * 100 : null,
           },
           variant_state: a.variant_id ? 'bench' : 'concept',
           duration_sec: null,

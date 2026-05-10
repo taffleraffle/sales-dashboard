@@ -35,16 +35,19 @@ export default function AdDetail() {
   const [tagOpen, setTagOpen] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
 
+  const [hyrosEvents, setHyrosEvents] = useState([])
+
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
       setError(null)
       try {
-        const [{ data: a, error: aErr }, { data: s, error: sErr }, { data: t }] = await Promise.all([
+        const [{ data: a, error: aErr }, { data: s, error: sErr }, { data: t }, { data: he }] = await Promise.all([
           supabase.from('ads').select('*').eq('ad_id', id).single(),
           supabase.from('ad_daily_stats').select('*').eq('ad_id', id).order('date', { ascending: true }),
           supabase.from('lib_creative_transcripts').select('full_text, duration_sec, created_at, source').eq('ad_id', id).eq('source', 'whisper_api').order('created_at', { ascending: false }).limit(1),
+          supabase.from('hyros_events').select('event_type, event_date, email, first_name, last_name, is_qualified, revenue, source, campaign_name, ad_name').or(`meta_ad_id.eq.${id},source_link_ad_id.eq.${id}`).order('event_date', { ascending: false }).limit(30),
         ])
         if (aErr) throw new Error(`Load ad failed: ${aErr.message}`)
         if (sErr) throw new Error(`Load stats failed: ${sErr.message}`)
@@ -52,6 +55,7 @@ export default function AdDetail() {
         setAd(a)
         setStats(s || [])
         setTranscript((t && t[0]) || null)
+        setHyrosEvents(he || [])
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -199,6 +203,9 @@ export default function AdDetail() {
         </div>
       )}
 
+      {/* HYROS attribution — calls + leads attributed to this exact ad */}
+      <HyrosSection events={hyrosEvents} />
+
       {/* Spend sparkline */}
       {chartPath && (
         <div className="bg-bg-card border border-border-default rounded-sm p-3 mb-4">
@@ -269,6 +276,68 @@ function Field({ label, value, block }) {
     <div className={block ? 'col-span-2' : ''}>
       <p className="text-[10px] uppercase tracking-wider text-text-400">{label}</p>
       <p className={`text-text-secondary ${block ? 'text-xs whitespace-pre-wrap' : 'text-xs'}`}>{value}</p>
+    </div>
+  )
+}
+
+function HyrosSection({ events }) {
+  const calls = events.filter(e => e.event_type === 'call.attributed')
+  const leads = events.filter(e => e.event_type === 'lead.attributed')
+  const sales = events.filter(e => e.event_type === 'sale.attributed')
+  const qualifiedCalls = calls.filter(c => c.is_qualified === true).length
+  const totalRevenue = sales.reduce((s, e) => s + parseFloat(e.revenue || 0), 0)
+
+  return (
+    <div className="bg-bg-card border border-border-default rounded-sm p-3 mb-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] uppercase tracking-wider text-text-400">
+          HYROS attribution · last 90 days
+        </p>
+        <p className="text-[10px] text-text-400">{events.length} events</p>
+      </div>
+
+      {/* Summary tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+        <StatTile label="Calls booked" value={fmtN(calls.length)} sub={qualifiedCalls > 0 ? `${qualifiedCalls} qualified` : null} />
+        <StatTile label="Leads" value={fmtN(leads.length)} />
+        <StatTile label="Sales" value={fmtN(sales.length)} sub={sales.length === 0 ? 'Stripe→HYROS not wired' : null} />
+        <StatTile label="Revenue" value={fmt$(totalRevenue)} sub="HYROS-attributed" />
+      </div>
+
+      {/* Event list */}
+      {events.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-text-400 text-[10px] uppercase tracking-wider">
+              <tr>
+                <th className="text-left py-1.5 font-normal">Date</th>
+                <th className="text-left py-1.5 font-normal">Type</th>
+                <th className="text-left py-1.5 font-normal">Lead</th>
+                <th className="text-left py-1.5 font-normal">Source</th>
+                <th className="text-right py-1.5 font-normal">Qualified</th>
+                <th className="text-right py-1.5 font-normal">Revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((e, i) => (
+                <tr key={i} className="border-t border-border-default/40">
+                  <td className="py-1.5 text-text-secondary">{e.event_date}</td>
+                  <td className="py-1.5 text-text-secondary">{e.event_type?.replace('.attributed', '')}</td>
+                  <td className="py-1.5 text-text-secondary">{[e.first_name, e.last_name].filter(Boolean).join(' ') || e.email || '—'}</td>
+                  <td className="py-1.5 text-text-secondary">{e.source || e.campaign_name || '—'}</td>
+                  <td className="py-1.5 text-right">{e.is_qualified === true ? 'yes' : e.is_qualified === false ? 'no' : '—'}</td>
+                  <td className="py-1.5 text-right">{parseFloat(e.revenue || 0) > 0 ? fmt$(parseFloat(e.revenue)) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-xs text-text-400 leading-relaxed">
+          No HYROS-attributed events for this ad yet. Webhook is live and the daily sync pulls /calls + /leads;
+          events arrive within minutes of a Calendly booking or form fill.
+        </p>
+      )}
     </div>
   )
 }
