@@ -27,6 +27,10 @@ export default function AdsIdeationPanel() {
   const [currentId, setCurrentId] = useState(null)
   const [history, setHistory] = useState([])     // [{id, created_at, title, transcript_count, ...}]
   const [showHistory, setShowHistory] = useState(false)
+  // T# → {name, date, url} so we can link each quote to its Fathom recording.
+  // Populated from X-Transcript-Map response header (live runs) or from the
+  // saved row (history loads).
+  const [transcriptMap, setTranscriptMap] = useState({})
   const scrollRef = useRef(null)
 
   useEffect(() => {
@@ -58,6 +62,7 @@ export default function AdsIdeationPanel() {
         : [{ role: 'assistant', content: top.initial_reply }]
       setConversation(convo)
       setMeta({ transcripts: top.transcript_count, phrases: top.phrase_count })
+      setTranscriptMap(top.transcript_map || {})
       setCurrentId(top.id)
     })()
     return () => { cancelled = true }
@@ -65,7 +70,7 @@ export default function AdsIdeationPanel() {
 
   // Persist the current ideation. Insert on first save, update afterwards so
   // follow-up exchanges are appended to the same row.
-  async function persistIdeation(convo, m, isNewGen) {
+  async function persistIdeation(convo, m, isNewGen, tMap) {
     try {
       const initial = convo.find(x => x.role === 'assistant')?.content || ''
       const title = deriveTitle(initial)
@@ -77,6 +82,7 @@ export default function AdsIdeationPanel() {
             conversation: convo,
             transcript_count: m?.transcripts || null,
             phrase_count: m?.phrases || null,
+            transcript_map: tMap || null,
             title,
           })
           .select('id, created_at')
@@ -98,7 +104,7 @@ export default function AdsIdeationPanel() {
   const loadHistory = async (id) => {
     const { data, error: err } = await supabase
       .from('lib_messaging_ideations')
-      .select('id, conversation, initial_reply, transcript_count, phrase_count')
+      .select('id, conversation, initial_reply, transcript_count, phrase_count, transcript_map')
       .eq('id', id).single()
     if (err) { setError(err.message); return }
     const convo = Array.isArray(data.conversation) && data.conversation.length
@@ -106,6 +112,7 @@ export default function AdsIdeationPanel() {
       : [{ role: 'assistant', content: data.initial_reply }]
     setConversation(convo)
     setMeta({ transcripts: data.transcript_count, phrases: data.phrase_count })
+    setTranscriptMap(data.transcript_map || {})
     setCurrentId(id)
     setShowHistory(false)
   }
@@ -132,6 +139,17 @@ export default function AdsIdeationPanel() {
     }
     const transcriptCount = parseInt(res.headers.get('X-Transcript-Count') || '0', 10) || null
     const phraseCount = parseInt(res.headers.get('X-Phrase-Count') || '0', 10) || null
+    const mapB64 = res.headers.get('X-Transcript-Map')
+    let mapFromHeaders = null
+    if (mapB64) {
+      try {
+        const jsonStr = decodeURIComponent(escape(atob(mapB64)))
+        mapFromHeaders = JSON.parse(jsonStr)
+        setTranscriptMap(mapFromHeaders)
+      } catch (e) {
+        console.warn('[ideation] transcript-map decode failed:', e.message)
+      }
+    }
     const metaFromHeaders = transcriptCount ? { transcripts: transcriptCount, phrases: phraseCount } : null
     if (metaFromHeaders) setMeta(metaFromHeaders)
 
@@ -171,7 +189,7 @@ export default function AdsIdeationPanel() {
         }
       }
     }
-    return { text: acc, meta: metaFromHeaders }
+    return { text: acc, meta: metaFromHeaders, transcriptMap: mapFromHeaders }
   }
 
   const generate = async () => {
@@ -179,11 +197,12 @@ export default function AdsIdeationPanel() {
     setGenerating(true)
     setMeta(null)
     setCurrentId(null) // start a fresh row on every Generate
+    setTranscriptMap({})
     setConversation([{ role: 'assistant', content: '' }])
     try {
-      const { text: finalText, meta: finalMeta } = await streamMessagingTopics({ mode: 'messaging_topics' })
+      const { text: finalText, meta: finalMeta, transcriptMap: finalMap } = await streamMessagingTopics({ mode: 'messaging_topics' })
       const finalConvo = [{ role: 'assistant', content: finalText }]
-      await persistIdeation(finalConvo, finalMeta, true)
+      await persistIdeation(finalConvo, finalMeta, true, finalMap)
     } catch (e) {
       console.error('[ideation] generate failed:', e)
       setError(e.message)
@@ -418,7 +437,7 @@ export default function AdsIdeationPanel() {
       {lenses && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
           {['Problems', 'Circumstances', 'Outcomes', 'Other patterns'].map(name => (
-            <LensSection key={name} name={name} block={lenses[name.toLowerCase()]} />
+            <LensSection key={name} name={name} block={lenses[name.toLowerCase()]} transcriptMap={transcriptMap} />
           ))}
         </div>
       )}
@@ -625,6 +644,76 @@ function parseIdeaLine(line) {
   return { name, strength, text, quotes, hook }
 }
 
+function QuoteBlock({ quote, transcriptMap }) {
+  // quote = { text, sourceId } where sourceId is "T7" or null
+  const attribution = quote.sourceId && transcriptMap?.[quote.sourceId]
+  const hasUrl = !!attribution?.url
+  return (
+    <div
+      style={{
+        fontFamily: 'var(--serif)',
+        fontSize: 12.5,
+        lineHeight: 1.45,
+        color: 'var(--ink-3)',
+        borderLeft: '2px solid var(--accent)',
+        paddingLeft: 8,
+      }}
+    >
+      <span style={{ fontStyle: 'italic' }}>"{quote.text}"</span>
+      {attribution ? (
+        hasUrl ? (
+          <a
+            href={attribution.url}
+            target="_blank"
+            rel="noreferrer"
+            title="Open Fathom recording"
+            style={{
+              display: 'inline-block',
+              marginLeft: 8,
+              fontFamily: 'var(--mono)',
+              fontSize: 9.5,
+              letterSpacing: '0.08em',
+              color: 'var(--ink-2)',
+              textDecoration: 'underline',
+              textDecorationColor: 'var(--ink-4)',
+              textDecorationStyle: 'dotted',
+              textUnderlineOffset: 2,
+              fontStyle: 'normal',
+            }}
+          >
+            — {attribution.name} · {attribution.date}
+          </a>
+        ) : (
+          <span
+            style={{
+              marginLeft: 8,
+              fontFamily: 'var(--mono)',
+              fontSize: 9.5,
+              letterSpacing: '0.08em',
+              color: 'var(--ink-4)',
+              fontStyle: 'normal',
+            }}
+          >
+            — {attribution.name} · {attribution.date}
+          </span>
+        )
+      ) : quote.sourceId ? (
+        <span
+          style={{
+            marginLeft: 8,
+            fontFamily: 'var(--mono)',
+            fontSize: 9.5,
+            color: 'var(--ink-4)',
+            fontStyle: 'normal',
+          }}
+        >
+          [{quote.sourceId}]
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 function StrengthBadge({ score }) {
   // Color tier: 8-10 strong (accent yellow), 5-7 mid (ink), 1-4 weak (muted)
   const tier = score >= 8 ? 'strong' : score >= 5 ? 'mid' : 'weak'
@@ -675,24 +764,27 @@ function formatDate(iso) {
 }
 
 function extractQuotes(s) {
-  // First try: extract every "..." or "..." substring.
-  const QUOTE_RE = /["“]([^"”]+?)["”]/g
+  // Match quote + optional [T#] tag immediately after the closing quote
+  //   "the verbatim text" [T7]
+  const QUOTE_TAG_RE = /["“]([^"”]+?)["”]\s*\[([Tt]\d+)\]/g
   const out = []
   let m
-  while ((m = QUOTE_RE.exec(s)) !== null) {
-    const q = m[1].trim()
-    if (q) out.push(q)
+  while ((m = QUOTE_TAG_RE.exec(s)) !== null) {
+    out.push({ text: m[1].trim(), sourceId: m[2].toUpperCase() })
   }
   if (out.length) return out
-  // Fallback: split on " · " / " | " / " ; " and treat each part as a quote,
-  // stripping any stray quote chars.
-  return s
-    .split(/\s+[·|;]\s+/)
-    .map(t => t.replace(/^["“]|["”]\s*$/g, '').trim())
-    .filter(Boolean)
+
+  // Fallback for quotes without [T#] tags (legacy generations or model drift)
+  const QUOTE_RE = /["“]([^"”]+?)["”]/g
+  const fallback = []
+  while ((m = QUOTE_RE.exec(s)) !== null) {
+    const q = m[1].trim()
+    if (q) fallback.push({ text: q, sourceId: null })
+  }
+  return fallback
 }
 
-function LensSection({ name, block }) {
+function LensSection({ name, block, transcriptMap }) {
   if (!block || (!block.opener && (!block.ideas || block.ideas.length === 0))) return null
   return (
     <section>
@@ -732,7 +824,7 @@ function LensSection({ name, block }) {
       {block.ideas && block.ideas.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {block.ideas.map((idea, i) => (
-            <IdeaRow key={i} idea={idea} />
+            <IdeaRow key={i} idea={idea} transcriptMap={transcriptMap} />
           ))}
         </div>
       )}
@@ -740,7 +832,7 @@ function LensSection({ name, block }) {
   )
 }
 
-function IdeaRow({ idea }) {
+function IdeaRow({ idea, transcriptMap }) {
   return (
     <div
       style={{
@@ -785,22 +877,9 @@ function IdeaRow({ idea }) {
           </div>
         )}
         {idea.quotes && idea.quotes.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
             {idea.quotes.map((q, i) => (
-              <div
-                key={i}
-                style={{
-                  fontFamily: 'var(--serif)',
-                  fontSize: 12.5,
-                  lineHeight: 1.45,
-                  fontStyle: 'italic',
-                  color: 'var(--ink-3)',
-                  borderLeft: '2px solid var(--accent)',
-                  paddingLeft: 8,
-                }}
-              >
-                "{q}"
-              </div>
+              <QuoteBlock key={i} quote={q} transcriptMap={transcriptMap} />
             ))}
           </div>
         )}

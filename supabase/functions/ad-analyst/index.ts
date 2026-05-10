@@ -89,18 +89,33 @@ DIMENSIONS TO COVER (don't restrict to the top recurring pain — go broad):
   failures with specific dollar figures
 - Anything else recurring that doesn't fit cleanly above
 
+CRITICAL — WHERE QUOTES COME FROM
+You receive THREE data sources. Each has a different role:
+  A. PROSPECT TRANSCRIPTS — Daniel's Fathom recordings of OPT prospects.
+     Each transcript is tagged with a stable ID like [T1], [T2], [T3]...
+     **Every "Anchored in" quote MUST come from one of these, AND every
+     quote MUST be tagged with the [T#] of the transcript it came from.**
+  B. AD PHRASES — top-decile phrases from OPT's live ad copy. Use these
+     ONLY to understand which language has worked in ads. NEVER quote
+     them as "what prospects said". They are NOT prospect language.
+  C. SPOKEN CREATIVE TRANSCRIPTS — Whisper transcripts of OPT's own
+     filmed ads. These are what OPT'S CREATORS said in their videos —
+     NOT what prospects said. NEVER use these as "Anchored in" quotes.
+     Use them ONLY to understand OPT's brand voice. If a quote is from a
+     spoken creative, it's a creator saying it, not a prospect.
+
+If you can't find at least 3 quotes from the prospect transcripts (A) for an
+angle, DROP IT — don't pad with phrase data or spoken-creative content.
+
 EVERY IDEA MUST HAVE:
 - A short, distinctive name (3-6 words, no clichés)
 - A strength score 1-10 reflecting how many independent prospects mentioned
-  this angle in the transcripts (1 = one mention, anecdotal; 10 = it came up
-  in 10+ different prospect calls)
+  this angle ACROSS the [T#] transcripts (1 = one mention, anecdotal;
+  10 = it came up in 10+ different prospect calls)
 - One sentence explaining the angle
-- 3-6 verbatim supporting quotes from the transcripts (more is better for
-  strong angles — if you have 6+, include up to 6)
+- 3-6 verbatim supporting quotes from the prospect transcripts (A only).
+  Each quote MUST be tagged with the [T#] it came from — no exceptions.
 - A hook line you could test as an ad opener
-
-If you can't ground an idea in at least 3 real quotes, drop it (or lower its
-strength score honestly).
 
 OUTPUT FORMAT (exactly three sections required, optional fourth):
 
@@ -108,7 +123,7 @@ OUTPUT FORMAT (exactly three sections required, optional fourth):
 Brief opener: 1-2 sentences on the pain landscape.
 
 Then 10-15 messaging ideas, each as a single bullet in this exact shape:
-- **[Angle name]** [Strength: N/10] — One sentence explaining the angle. Anchored in: "first verbatim quote" · "second verbatim quote" · "third quote" · "fourth quote if applicable" · "fifth/sixth if strong". Hook: "an ad hook line to test"
+- **[Angle name]** [Strength: N/10] — One sentence explaining the angle. Anchored in: "first verbatim quote" [T7] · "second verbatim quote" [T12] · "third quote" [T3]. Hook: "an ad hook line to test"
 
 ## Circumstances
 Brief opener: 1-2 sentences on the situations prospects sit in.
@@ -239,18 +254,40 @@ serve(async (req) => {
       return json({ error: 'No prospect transcripts found in window — check closer_transcripts table' }, 422)
     }
 
-    const userMsg = `Generate a broad messaging idea list for OPT Digital, organized under Jeremy Haynes' three lenses. No audience description is provided — the audience is fixed (restoration / plumbing / pool / remodeling contractors). Mine the data below for real prospect language and produce 10-15 ideas under each lens, plus an optional "Other patterns" section for cross-cutting themes (service lines, competitor reframes, geographic plays, etc).
+    // Build a stable [T#] → transcript map so every quote can be tied back
+    // to a specific Fathom recording the operator can review. T1 = most
+    // recent. The map is also emitted on a response header so the client
+    // can render attribution links.
+    const transcriptEntries: Array<{ id: string; prospect_name: string; meeting_date: string; transcript_url: string | null; summary: string }> = context.transcripts.map((t: any, i: number) => ({
+      id: `T${i + 1}`,
+      prospect_name: t.prospect_name || t.prospect_email || 'Unknown',
+      meeting_date: t.meeting_date,
+      transcript_url: t.transcript_url || null,
+      summary: t.summary || '',
+    }))
+    const transcriptMap: Record<string, { name: string; date: string; url: string | null }> = {}
+    for (const e of transcriptEntries) {
+      transcriptMap[e.id] = { name: e.prospect_name, date: e.meeting_date, url: e.transcript_url }
+    }
 
-=== Daniel's prospect-call transcripts (last ${days} days, ${context.transcripts.length} calls) ===
-${JSON.stringify(context.transcripts, null, 2)}
+    const transcriptBlock = transcriptEntries.map(e =>
+      `[${e.id}] (${e.prospect_name}, ${e.meeting_date})\n${e.summary}`
+    ).join('\n\n---\n\n')
 
-=== Top-decile phrases from OUR live ad copy ===
+    const userMsg = `Generate a broad messaging idea list for OPT Digital, organized under Jeremy Haynes' three lenses. No audience description is provided — the audience is fixed (restoration / plumbing / pool / remodeling contractors). Produce 10-15 ideas under each lens.
+
+CRITICAL: Every "Anchored in" quote MUST be a verbatim string from a prospect transcript below, AND MUST be tagged with its [T#] source. Quotes from the phrase data or spoken-creative corpus are NOT allowed as anchors — those are style references only.
+
+=== A. PROSPECT TRANSCRIPTS (Daniel's Fathom recordings — quote ONLY from these) ===
+${transcriptBlock}
+
+=== B. AD PHRASES (style only — do NOT quote as prospect language) ===
 ${JSON.stringify(context.topPhrases, null, 2)}
 
-=== Spoken transcripts from OUR filmed creatives (brand voice corpus) ===
+=== C. SPOKEN CREATIVE TRANSCRIPTS (OPT's own creators speaking — style only, NEVER quote as prospect) ===
 ${JSON.stringify(context.spokenTranscripts, null, 2)}
 
-Output: ## Problems, ## Circumstances, ## Outcomes (required, 10-15 ideas each, each idea anchored in 2-4 verbatim quotes). Optional ## Other patterns (5-10 ideas, cross-cutting). Every idea ends with a Hook: line.`
+Output: ## Problems, ## Circumstances, ## Outcomes (required, 10-15 ideas each). Optional ## Other patterns (5-10 ideas). Every quote tagged [T#].`
 
     // Stream the response. The broader prompt + corpus pushes us close to the
     // 60s Edge Function wall clock when we wait for the full JSON body, so we
@@ -274,6 +311,11 @@ Output: ## Problems, ## Circumstances, ## Outcomes (required, 10-15 ideas each, 
       const err = await upstream.text()
       return json({ error: `Anthropic: ${upstream.status} ${err.slice(0, 200)}` }, 502)
     }
+    // Base64-encoded JSON so the client can decode the [T#] → {name,date,url}
+    // lookup and render attribution links on each rendered quote.
+    const mapJson = JSON.stringify(transcriptMap)
+    const mapB64 = btoa(unescape(encodeURIComponent(mapJson)))
+
     return new Response(upstream.body, {
       headers: {
         ...corsHeaders,
@@ -282,6 +324,8 @@ Output: ## Problems, ## Circumstances, ## Outcomes (required, 10-15 ideas each, 
         'Connection': 'keep-alive',
         'X-Transcript-Count': String(context.transcripts.length),
         'X-Phrase-Count': String(context.topPhrases.length),
+        'X-Transcript-Map': mapB64,
+        'Access-Control-Expose-Headers': 'X-Transcript-Count, X-Phrase-Count, X-Transcript-Map',
       },
     })
   }
