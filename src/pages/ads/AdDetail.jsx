@@ -29,6 +29,7 @@ export default function AdDetail() {
   const { id } = useParams()
   const [ad, setAd] = useState(null)
   const [stats, setStats] = useState([])
+  const [transcript, setTranscript] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [tagOpen, setTagOpen] = useState(false)
@@ -40,15 +41,17 @@ export default function AdDetail() {
       setLoading(true)
       setError(null)
       try {
-        const [{ data: a, error: aErr }, { data: s, error: sErr }] = await Promise.all([
+        const [{ data: a, error: aErr }, { data: s, error: sErr }, { data: t }] = await Promise.all([
           supabase.from('ads').select('*').eq('ad_id', id).single(),
           supabase.from('ad_daily_stats').select('*').eq('ad_id', id).order('date', { ascending: true }),
+          supabase.from('lib_creative_transcripts').select('full_text, duration_sec, created_at, source').eq('ad_id', id).eq('source', 'whisper_api').order('created_at', { ascending: false }).limit(1),
         ])
         if (aErr) throw new Error(`Load ad failed: ${aErr.message}`)
         if (sErr) throw new Error(`Load stats failed: ${sErr.message}`)
         if (cancelled) return
         setAd(a)
         setStats(s || [])
+        setTranscript((t && t[0]) || null)
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -174,6 +177,27 @@ export default function AdDetail() {
         <StatTile label="Results" value={fmtN(totals.results)} sub={totals.cpa != null ? fmt$(totals.cpa) + ' CPA' : '—'} />
         <StatTile label="Hook · Hold" value={`${fmtPct(totals.hook_rate)} · ${fmtPct(totals.hold_rate)}`} />
       </div>
+
+      {/* Transcript — only for video ads */}
+      {ad.asset_type === 'video' && (
+        <div className="bg-bg-card border border-border-default rounded-sm p-3 mb-4">
+          <p className="text-[10px] uppercase tracking-wider text-text-400 mb-2">
+            Spoken transcript
+            {transcript ? ` · ${Math.round(transcript.duration_sec || 0)}s · Whisper` : ''}
+          </p>
+          {transcript ? (
+            <div className="whitespace-pre-wrap text-sm text-text-secondary leading-relaxed font-serif italic">
+              "{transcript.full_text}"
+            </div>
+          ) : (
+            <div className="text-xs text-text-400 leading-relaxed">
+              No transcript on file for this ad yet. Meta's Graph API restricts the video source URL on ad-creative
+              videos, so we can't auto-pull and transcribe. To get a transcript, drop the source MP4 via the upload
+              button on this ad's card in the gallery — it runs Whisper server-side and links the transcript here.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Spend sparkline */}
       {chartPath && (
