@@ -7,20 +7,29 @@
 // Runs incrementally — only transcribes ads that don't already have a
 // whisper_api transcript. Caps each invocation at `maxRun` (default 25) so a
 // single invocation stays under Edge Function 60s wall-clock limit.
-//
-// Secrets required in Supabase project:
-//   - OPENAI_API_KEY            OpenAI API key (Whisper access)
-//   - META_ADS_ACCOUNT_ID       Meta ad account id
-//   - META_ADS_ACCESS_TOKEN     Meta long-lived token
-//   - SUPABASE_URL              (auto-provided by Supabase)
-//   - SUPABASE_SERVICE_ROLE_KEY (auto-provided by Supabase)
-//
-// Body: { maxRun?: number }    — default 25
-// Returns: { ok: true, processed, errors, totalPending }
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { handleCors, getCorsHeaders } from '../_shared/cors.ts'
+
+// CORS inlined (Management-API deploys can't easily resolve `../_shared/cors.ts`).
+const ALLOWED_ORIGINS = [
+  'https://sales-dashboard-ftct.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:4173',
+]
+function getCorsHeaders(req?: Request): Record<string, string> {
+  const origin = req?.headers?.get('origin') || ''
+  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  return {
+    'Access-Control-Allow-Origin': allowed,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+  }
+}
+function handleCors(req: Request): Response | null {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: getCorsHeaders(req) })
+  return null
+}
 
 const OPENAI_KEY = Deno.env.get('OPENAI_API_KEY')
 const META_ACCOUNT = Deno.env.get('META_ADS_ACCOUNT_ID')
@@ -33,10 +42,7 @@ serve(async (req) => {
   if (cors) return cors
   const corsHeaders = getCorsHeaders(req)
   const json = (body: unknown, status = 200) =>
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
   if (!OPENAI_KEY) return json({ error: 'OPENAI_API_KEY not set in Supabase secrets' }, 500)
   if (!META_ACCOUNT || !META_TOKEN) return json({ error: 'Meta credentials not set in Supabase secrets' }, 500)
@@ -49,7 +55,7 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
 
-  // ── 1. Pull video catalog from Meta (id → source URL)
+  // 1. Pull video catalog from Meta
   const videoMap = new Map<string, { source: string; length: number; title: string }>()
   let url = `https://graph.facebook.com/v21.0/act_${META_ACCOUNT}/advideos?` + new URLSearchParams({
     access_token: META_TOKEN,
@@ -70,7 +76,7 @@ serve(async (req) => {
     url = j.paging?.next || ''
   }
 
-  // ── 2. Join to public.ads.raw_payload.creative.video_id
+  // 2. Join to public.ads
   const adsRes = await supabase.from('ads')
     .select('ad_id, ad_name, raw_payload, asset_type')
     .eq('asset_type', 'video')
@@ -86,7 +92,7 @@ serve(async (req) => {
     pairs.push({ ad_id: a.ad_id, video_id: vid, source: v.source, length: v.length })
   }
 
-  // ── 3. Filter to ads without an existing whisper_api transcript
+  // 3. Filter to ads without an existing whisper_api transcript
   const doneRes = await supabase.from('lib_creative_transcripts')
     .select('ad_id').eq('source', 'whisper_api')
   if (doneRes.error) return json({ error: `transcript read: ${doneRes.error.message}` }, 500)
@@ -97,7 +103,7 @@ serve(async (req) => {
     return json({ ok: true, processed: 0, errors: 0, totalPending: 0, message: 'All video ads already transcribed.' })
   }
 
-  // ── 4. For each: download video, call Whisper, upsert transcript
+  // 4. Download + Whisper + upsert
   let processed = 0
   let errors = 0
   const startedAt = Date.now()
@@ -124,10 +130,7 @@ serve(async (req) => {
       }
       const wJson = await wRes.json()
       const fullText = (wJson.text || '').trim()
-      if (!fullText) {
-        errors++
-        continue
-      }
+      if (!fullText) { errors++; continue }
       const segments = (wJson.segments || []).map((s: any) => ({
         t0: s.start, t1: s.end, text: s.text.trim(),
       }))
@@ -151,11 +154,9 @@ serve(async (req) => {
       console.error('transcribe error', p.ad_id, (e as Error).message)
       errors++
     }
-    // Edge Functions have a 60s wall-clock. Bail if we're close.
     if (Date.now() - startedAt > 50_000) break
   }
 
-  // ── 5. Total pending (so the UI can show how much is left)
   const remainingRes = await supabase.from('lib_creative_transcripts')
     .select('ad_id').eq('source', 'whisper_api')
   const newDone = new Set((remainingRes.data || []).map((r: any) => r.ad_id))

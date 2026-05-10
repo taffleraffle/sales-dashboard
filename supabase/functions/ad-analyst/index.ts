@@ -1,23 +1,32 @@
 // ad-analyst — Supabase Edge Function
 //
 // Server-side proxy for the Ad Analyst panel. Keeps ANTHROPIC_API_KEY out of
-// the browser bundle. Two modes:
-//   { mode: 'quick',  promptId, dateRange? }   — runs a deterministic data
-//                                                 fetch + a single LLM call,
-//                                                 returns the full reply.
-//   { mode: 'chat',   messages }                — streams an open-chat reply
-//                                                 (SSE passthrough to Claude).
-//
-// Secrets required:
-//   - ANTHROPIC_API_KEY        Anthropic key (already in Supabase secrets — used by sales-chat)
-//   - SUPABASE_URL             auto-provided
-//   - SUPABASE_SERVICE_ROLE_KEY auto-provided
-//
-// CORS via _shared/cors.ts (allowed: render.com prod + localhost dev).
+// the browser bundle.
+//   { mode: 'quick',  promptId, dateRange? }  — non-streaming reply
+//   { mode: 'chat',   messages }               — streamed SSE passthrough
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { handleCors, getCorsHeaders } from '../_shared/cors.ts'
+
+// CORS inlined
+const ALLOWED_ORIGINS = [
+  'https://sales-dashboard-ftct.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:4173',
+]
+function getCorsHeaders(req?: Request): Record<string, string> {
+  const origin = req?.headers?.get('origin') || ''
+  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  return {
+    'Access-Control-Allow-Origin': allowed,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+  }
+}
+function handleCors(req: Request): Response | null {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: getCorsHeaders(req) })
+  return null
+}
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY')
 const ANTHROPIC_MODEL = Deno.env.get('ANTHROPIC_MODEL') || 'claude-sonnet-4-20250514'
@@ -65,7 +74,6 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
 
-  // ─── chat mode: stream the response ───
   if (mode === 'chat') {
     const messages = body.messages
     if (!Array.isArray(messages) || !messages.length) return json({ error: 'messages array required' }, 400)
@@ -95,7 +103,6 @@ serve(async (req) => {
     })
   }
 
-  // ─── quick mode: deterministic data fetch + non-streaming reply ───
   if (mode === 'quick') {
     const promptId = body.promptId
     const promptText = QUICK_PROMPTS[promptId]
@@ -169,7 +176,6 @@ async function buildContext(supabase: any, promptId: string, dateRange: any) {
   }
 
   if (promptId === 'next_wave') {
-    // Daniel's prospect calls only (exclude OPT team meeting + Constantine @ scaleclients.io per Ben 2026-05-10)
     const trRes = await supabase.from('closer_transcripts')
       .select('prospect_name, prospect_email, meeting_date, summary')
       .eq('closer_id', '76f61d92-83d8-45ec-87a7-82b0dc6d607e')
