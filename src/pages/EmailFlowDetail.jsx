@@ -207,17 +207,17 @@ export default function EmailFlowDetail() {
     setLoadingRecipients(false)
   }
 
-  const rateColor = (v, good, ok) => v >= good ? 'text-success' : v >= ok ? 'text-opt-yellow' : 'text-danger'
+  const rateColor = (v, good, ok) => v >= good ? 'text-success' : v >= ok ? 'text-text-primary' : 'text-danger'
 
   if (loading) {
-    return <div className="flex items-center justify-center py-20"><Loader className="animate-spin text-opt-yellow" size={24} /></div>
+    return <div className="flex items-center justify-center py-20"><Loader className="animate-spin text-text-primary" size={24} /></div>
   }
 
   if (error || !flow) {
     return (
       <div className="py-20 text-center">
         <p className="text-danger text-sm mb-4">{error || 'Flow not found'}</p>
-        <Link to="/sales/email-flows" className="text-opt-yellow text-xs hover:underline">← Back to Email Flows</Link>
+        <Link to="/sales/email-flows" className="text-text-primary text-xs hover:underline">← Back to Email Flows</Link>
       </div>
     )
   }
@@ -227,25 +227,23 @@ export default function EmailFlowDetail() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/sales/email-flows')} className="p-2 rounded-xl hover:bg-bg-card text-text-400 hover:text-text-primary transition-colors">
+          <button onClick={() => navigate('/sales/email-flows')} style={{ color: 'var(--ink-3)', marginBottom: 4 }}>
             <ArrowLeft size={18} />
           </button>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-8 rounded-full" style={{ backgroundColor: flow.color || '#f0e050' }} />
+          <div className="flex items-end gap-3">
+            <div style={{ width: 3, height: 36, background: flow.color || 'var(--accent)' }} />
             <div>
-              <h1 className="text-lg font-bold text-text-primary">{flow.name}</h1>
-              <p className="text-xs text-text-400">
-                Email Flows / <span className="text-text-primary">{flow.name}</span>
-              </p>
+              <span className="eyebrow eyebrow-accent">Email flow · detail</span>
+              <h1 className="h2 mt-2">{flow.name}</h1>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <DateRangeSelector selected={range} onChange={setRange} />
-          <button onClick={() => setShowEdit(true)} className="p-2 rounded-xl text-text-400 hover:text-opt-yellow hover:bg-opt-yellow-subtle transition-all" title="Edit flow">
+          <button onClick={() => setShowEdit(true)} className="p-2 rounded-sm text-text-400 hover:text-text-primary hover:bg-opt-yellow-subtle transition-all" title="Edit flow">
             <Pencil size={16} />
           </button>
-          <button onClick={() => setShowDelete(true)} className="p-2 rounded-xl text-text-400 hover:text-danger hover:bg-danger/10 transition-all" title="Delete flow">
+          <button onClick={() => setShowDelete(true)} className="p-2 rounded-sm text-text-400 hover:text-danger hover:bg-danger/10 transition-all" title="Delete flow">
             <Trash2 size={16} />
           </button>
         </div>
@@ -260,20 +258,20 @@ export default function EmailFlowDetail() {
             <h2 className="text-xs text-text-400 uppercase font-medium">
               Emails in Sequence ({flowEmails.length})
             </h2>
-            <button onClick={() => setShowAddEmails(!showAddEmails)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-opt-yellow text-bg-primary hover:brightness-110">
+            <button onClick={() => setShowAddEmails(!showAddEmails)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-xs font-medium bg-opt-yellow text-text-primary hover:brightness-110">
               <Plus size={14} /> Add Emails
             </button>
           </div>
 
           {/* Add emails picker */}
           {showAddEmails && (
-            <div className="mb-4 bg-bg-card border border-opt-yellow/30 rounded-2xl p-4">
+            <div className="mb-4 bg-bg-card border border-opt-yellow/30 rounded-sm p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Search size={14} className="text-text-400" />
                 <input
                   autoFocus value={emailSearch} onChange={e => setEmailSearch(e.target.value)}
                   placeholder="Search email subjects to add..."
-                  className="flex-1 bg-bg-primary border border-border-default rounded-xl px-3 py-2 text-xs text-text-primary outline-none focus:border-opt-yellow/40"
+                  className="flex-1 bg-bg-primary border border-border-default rounded-sm px-3 py-2 text-xs text-text-primary outline-none focus:border-opt-yellow/40"
                 />
                 <button onClick={() => { setShowAddEmails(false); setEmailSearch('') }} className="p-1.5 text-text-400 hover:text-text-primary">
                   <X size={16} />
@@ -287,7 +285,7 @@ export default function EmailFlowDetail() {
                   <button
                     key={s.subject}
                     onClick={() => handleAddEmail(s.subject)}
-                    className="w-full text-left flex items-center justify-between px-3 py-2 rounded-xl hover:bg-opt-yellow/10 transition-colors"
+                    className="w-full text-left flex items-center justify-between px-3 py-2 rounded-sm hover:bg-opt-yellow/10 transition-colors"
                   >
                     <span className="text-xs text-text-primary truncate flex-1 mr-3">{s.subject}</span>
                     <span className="text-[11px] text-text-400 shrink-0">{s.sent} sent · {s.openRate}% open</span>
@@ -303,7 +301,7 @@ export default function EmailFlowDetail() {
               <Mail size={28} className="text-text-400/30 mx-auto mb-3" />
               <p className="text-text-primary font-medium mb-1">No emails in this flow</p>
               <p className="text-xs text-text-400 mb-4">Add emails to track their performance in sequence.</p>
-              <button onClick={() => setShowAddEmails(true)} className="px-4 py-2 rounded-xl text-xs font-medium bg-opt-yellow text-bg-primary hover:brightness-110">
+              <button onClick={() => setShowAddEmails(true)} className="px-4 py-2 rounded-sm text-xs font-medium bg-opt-yellow text-text-primary hover:brightness-110">
                 <Plus size={14} className="inline mr-1.5" /> Add First Email
               </button>
             </div>
@@ -362,7 +360,7 @@ export default function EmailFlowDetail() {
                     const barWidth = e.openRate > 0 ? Math.max(8, (e.openRate / Math.max(...flowEmails.map(x => x.openRate || 1))) * 100) : 8
                     return (
                       <div key={e.subject} className="flex items-center gap-2">
-                        <span className="text-[10px] text-opt-yellow font-bold w-4 shrink-0">{i + 1}</span>
+                        <span className="text-[10px] text-text-primary font-bold w-4 shrink-0">{i + 1}</span>
                         <div className="flex-1 bg-bg-primary rounded-full h-4 overflow-hidden">
                           <div
                             className="h-full rounded-full bg-opt-yellow/40 flex items-center px-2"
@@ -418,7 +416,7 @@ function SortableEmailRow({ email, index, isExpanded, isLast, reordering, onTogg
         <button
           {...attributes}
           {...listeners}
-          className="p-1 text-text-400/40 hover:text-opt-yellow cursor-grab active:cursor-grabbing touch-none"
+          className="p-1 text-text-400/40 hover:text-text-primary cursor-grab active:cursor-grabbing touch-none"
           title="Drag to reorder"
           aria-label="Drag to reorder email"
         >
@@ -430,16 +428,16 @@ function SortableEmailRow({ email, index, isExpanded, isLast, reordering, onTogg
           <button
             onClick={onMoveUp}
             disabled={index === 0 || reordering}
-            className="p-0.5 text-text-400 hover:text-opt-yellow disabled:opacity-20 disabled:hover:text-text-400 transition-colors"
+            className="p-0.5 text-text-400 hover:text-text-primary disabled:opacity-20 disabled:hover:text-text-400 transition-colors"
             aria-label="Move up"
           >
             <ArrowUp size={12} />
           </button>
-          <span className="text-[11px] font-bold text-opt-yellow w-5 text-center">{index + 1}</span>
+          <span className="text-[11px] font-bold text-text-primary w-5 text-center">{index + 1}</span>
           <button
             onClick={onMoveDown}
             disabled={isLast || reordering}
-            className="p-0.5 text-text-400 hover:text-opt-yellow disabled:opacity-20 disabled:hover:text-text-400 transition-colors"
+            className="p-0.5 text-text-400 hover:text-text-primary disabled:opacity-20 disabled:hover:text-text-400 transition-colors"
             aria-label="Move down"
           >
             <ArrowDown size={12} />
@@ -449,7 +447,7 @@ function SortableEmailRow({ email, index, isExpanded, isLast, reordering, onTogg
         {/* Subject */}
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onToggleDetail}>
           <div className="flex items-center gap-2">
-            {isExpanded ? <ChevronUp size={14} className="text-opt-yellow shrink-0" /> : <ChevronDown size={14} className="text-text-400 shrink-0" />}
+            {isExpanded ? <ChevronUp size={14} className="text-text-primary shrink-0" /> : <ChevronDown size={14} className="text-text-400 shrink-0" />}
             <span className="text-sm text-text-primary truncate">{email.subject}</span>
             {email.variants > 1 && <span className="text-[10px] text-text-400">({email.variants}v)</span>}
           </div>
@@ -504,7 +502,7 @@ function StatRow({ label, value, sub, color = 'text-text-primary' }) {
 function RecipientDetail({ recipients, loading }) {
   const [statusFilter, setStatusFilter] = useState('all')
 
-  if (loading) return <div className="flex items-center justify-center py-4"><Loader size={16} className="animate-spin text-opt-yellow" /></div>
+  if (loading) return <div className="flex items-center justify-center py-4"><Loader size={16} className="animate-spin text-text-primary" /></div>
   if (!recipients?.length) return <p className="text-xs text-text-400 text-center py-3">No recipient data available.</p>
 
   // See EmailFlows.RecipientDetail for rationale — count placeholder names
@@ -531,7 +529,7 @@ function RecipientDetail({ recipients, loading }) {
   const filters = [
     { key: 'all', label: 'All', color: 'text-text-primary' },
     { key: 'delivered', label: 'Delivered', color: 'text-text-400' },
-    { key: 'opened', label: 'Opened', color: 'text-opt-yellow' },
+    { key: 'opened', label: 'Opened', color: 'text-text-primary' },
     { key: 'clicked', label: 'Clicked', color: 'text-success' },
     { key: 'replied', label: 'Replied', color: 'text-blue-400' },
     { key: 'failed', label: 'Failed', color: 'text-danger' },
@@ -540,7 +538,7 @@ function RecipientDetail({ recipients, loading }) {
   const statusBadge = (status, replied) => {
     if (replied) return <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-semibold">Replied</span>
     if (status === 'clicked') return <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/20 text-success font-semibold">Clicked</span>
-    if (status === 'opened') return <span className="text-[10px] px-2 py-0.5 rounded-full bg-opt-yellow/20 text-opt-yellow font-semibold">Opened</span>
+    if (status === 'opened') return <span className="text-[10px] px-2 py-0.5 rounded-full bg-opt-yellow/20 text-text-primary font-semibold">Opened</span>
     if (status === 'delivered') return <span className="text-[10px] px-2 py-0.5 rounded-full bg-text-400/15 text-text-400 font-semibold">Delivered</span>
     if (status === 'failed') return <span className="text-[10px] px-2 py-0.5 rounded-full bg-danger/20 text-danger font-semibold">Failed</span>
     return <span className="text-[10px] text-text-400">{status || '—'}</span>
@@ -552,7 +550,7 @@ function RecipientDetail({ recipients, loading }) {
       <div className="flex items-center gap-1.5 mb-3 flex-wrap">
         {unresolvedCount > 0 && (
           <span className="order-last ml-auto inline-flex items-center gap-1.5 text-[10px] text-text-400 italic">
-            <Loader size={10} className="animate-spin text-opt-yellow" />
+            <Loader size={10} className="animate-spin text-text-primary" />
             Resolving {unresolvedCount} name{unresolvedCount === 1 ? '' : 's'}…
           </span>
         )}
@@ -562,7 +560,7 @@ function RecipientDetail({ recipients, loading }) {
             onClick={() => setStatusFilter(f.key)}
             className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
               statusFilter === f.key
-                ? 'bg-opt-yellow/20 text-opt-yellow'
+                ? 'bg-opt-yellow/20 text-text-primary'
                 : 'bg-bg-primary text-text-400 hover:text-text-primary'
             }`}
           >

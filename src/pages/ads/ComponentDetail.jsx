@@ -23,17 +23,17 @@ const TYPE_META = {
 
 const VARIANT_STATUS_TONE = {
   planned: 'bg-bg-card-hover text-text-400 border-border-default',
-  editing: 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30',
+  editing: 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30',
   ready:   'bg-success/10 text-success border-success/30',
   live:    'bg-success/20 text-success border-success/40',
-  paused:  'bg-opt-yellow/10 text-opt-yellow border-opt-yellow/20',
+  paused:  'bg-opt-yellow/10 text-text-primary border-opt-yellow/20',
   killed:  'bg-danger/10 text-danger border-danger/30',
-  winner:  'bg-opt-yellow/30 text-opt-yellow border-opt-yellow/60',
+  winner:  'bg-opt-yellow/30 text-text-primary border-opt-yellow/60',
 }
 
 function StatTile({ label, value, sub }) {
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl p-3">
+    <div className="bg-bg-card border border-border-default rounded-sm p-3">
       <p className="text-[10px] uppercase tracking-wider text-text-400">{label}</p>
       <p className="text-lg font-semibold text-text-primary mt-0.5">{value}</p>
       {sub && <p className="text-[10px] text-text-400 mt-0.5">{sub}</p>}
@@ -90,13 +90,13 @@ export default function ComponentDetail() {
   const meta = component ? TYPE_META[component.type] : null
   const Icon = meta?.icon
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
 
   if (error || !component) {
     return (
       <div>
-        <Link to="/sales/ads" className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3"><ChevronLeft size={14} /> Back</Link>
-        <div className="bg-danger/10 border border-danger/30 text-danger rounded-2xl p-4 flex items-center gap-2">
+        <Link to="/sales/ads" className="text-xs text-text-400 hover:text-text-primary flex items-center gap-1 mb-3"><ChevronLeft size={14} /> Back</Link>
+        <div className="bg-danger/10 border border-danger/30 text-danger rounded-sm p-4 flex items-center gap-2">
           <AlertTriangle size={16} /> <span>{error || `Component ${componentId} not found`}</span>
         </div>
       </div>
@@ -105,13 +105,13 @@ export default function ComponentDetail() {
 
   return (
     <div>
-      <Link to={meta.backTo} className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3">
+      <Link to={meta.backTo} className="text-xs text-text-400 hover:text-text-primary flex items-center gap-1 mb-3">
         <ChevronLeft size={14} /> Back to {meta.label}s
       </Link>
 
-      <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-4">
+      <div className="bg-bg-card border border-border-default rounded-sm p-4 mb-4">
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-opt-yellow/15 text-opt-yellow flex items-center justify-center">
+          <div className="w-10 h-10 rounded-sm bg-opt-yellow/15 text-text-primary flex items-center justify-center">
             {Icon && <Icon size={18} />}
           </div>
           <div className="flex-1 min-w-0">
@@ -120,7 +120,7 @@ export default function ComponentDetail() {
               <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border-default text-text-400">
                 {meta.label}
               </span>
-              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-opt-yellow/30 bg-opt-yellow/10 text-opt-yellow">
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-opt-yellow/30 bg-opt-yellow/10 text-text-primary">
                 {component.status?.replace('_', ' ')}
               </span>
             </div>
@@ -149,7 +149,7 @@ export default function ComponentDetail() {
                 {/\.(mp4|webm|mov)(\?|$)/i.test(component.asset_url) ? (
                   <video src={component.asset_url} controls className="mt-1 w-full max-w-md rounded-lg" />
                 ) : (
-                  <a href={component.asset_url} target="_blank" rel="noreferrer" className="text-opt-yellow hover:underline break-all">{component.asset_url}</a>
+                  <a href={component.asset_url} target="_blank" rel="noreferrer" className="text-text-primary hover:underline break-all">{component.asset_url}</a>
                 )}
               </div>
             )}
@@ -180,11 +180,11 @@ export default function ComponentDetail() {
 
       <h3 className="text-xs uppercase tracking-wider text-text-400 mb-2">Variants using this component · {variants.length}</h3>
       {variants.length === 0 ? (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-6 text-center text-text-400 text-sm">
+        <div className="bg-bg-card border border-border-default rounded-sm p-6 text-center text-text-400 text-sm">
           No variants reference this component yet.
         </div>
       ) : (
-        <div className="bg-bg-card border border-border-default rounded-2xl overflow-x-auto">
+        <div className="bg-bg-card border border-border-default rounded-sm overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="text-text-400 text-[10px] uppercase tracking-wider">
               <tr className="border-b border-border-default">
@@ -199,7 +199,7 @@ export default function ComponentDetail() {
               {variants.map(v => (
                 <tr key={v.id} className="border-b border-border-default/40 hover:bg-bg-card-hover">
                   <td className="px-3 py-2">
-                    <Link to={`/sales/ads/variants/${encodeURIComponent(v.variant_id)}`} className="text-opt-yellow font-mono text-[11px] hover:underline">
+                    <Link to={`/sales/ads/variants/${encodeURIComponent(v.variant_id)}`} className="text-text-primary font-mono text-[11px] hover:underline">
                       {v.variant_id}
                     </Link>
                   </td>
@@ -211,7 +211,7 @@ export default function ComponentDetail() {
                   <td className="px-3 py-2 text-text-secondary">v{v.iteration}</td>
                   <td className="px-3 py-2">
                     {v.meta_ad_id ? (
-                      <Link to={`/sales/ads/ad/${v.meta_ad_id}`} className="text-text-secondary hover:text-opt-yellow truncate block max-w-xs" title={v.meta_ad_name || v.meta_ad_id}>
+                      <Link to={`/sales/ads/ad/${v.meta_ad_id}`} className="text-text-secondary hover:text-text-primary truncate block max-w-xs" title={v.meta_ad_name || v.meta_ad_id}>
                         {v.meta_ad_name || v.meta_ad_id}
                       </Link>
                     ) : <span className="text-text-400">—</span>}

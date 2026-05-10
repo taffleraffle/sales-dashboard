@@ -56,13 +56,16 @@ export default function LeadAttribution() {
   ]
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
   }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Lead Attribution</h1>
+      <div className="flex items-end justify-between mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Attribution</span>
+          <h1 className="h2 mt-2">Where the <em>leads</em> came from.</h1>
+        </div>
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
 
@@ -77,7 +80,7 @@ export default function LeadAttribution() {
       <div className="flex gap-1 mb-4 flex-wrap">
         <button
           onClick={() => setFilter('all')}
-          className={`px-3 py-1 rounded text-xs ${filter === 'all' ? 'bg-opt-yellow text-bg-primary' : 'bg-bg-card text-text-secondary border border-border-default'}`}
+          className={`px-3 py-1 rounded text-xs ${filter === 'all' ? 'bg-opt-yellow text-text-primary' : 'bg-bg-card text-text-secondary border border-border-default'}`}
         >
           All ({leads.length})
         </button>
@@ -88,7 +91,7 @@ export default function LeadAttribution() {
             <button
               key={s}
               onClick={() => setFilter(s)}
-              className={`px-3 py-1 rounded text-xs ${filter === s ? 'bg-opt-yellow text-bg-primary' : 'bg-bg-card text-text-secondary border border-border-default'}`}
+              className={`px-3 py-1 rounded text-xs ${filter === s ? 'bg-opt-yellow text-text-primary' : 'bg-bg-card text-text-secondary border border-border-default'}`}
             >
               {s.replace('_', ' ')} ({count})
             </button>

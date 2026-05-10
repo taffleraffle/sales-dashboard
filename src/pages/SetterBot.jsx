@@ -131,7 +131,7 @@ function CadenceDocPanel({ cadenceName }) {
         {doc.steps.map((step, i) => (
           <div key={i} className="flex gap-3">
             <div className="flex-shrink-0 w-5 h-5 rounded-full bg-opt-yellow/10 flex items-center justify-center mt-0.5">
-              <span className="text-[9px] font-bold text-opt-yellow">{i + 1}</span>
+              <span className="text-[9px] font-bold text-text-primary">{i + 1}</span>
             </div>
             <div>
               <p className="text-xs font-medium text-text-primary">{step.label}</p>
@@ -189,13 +189,13 @@ function CadenceCard({ cadence, conversations, onSave }) {
   const ruleCls = 'w-full py-2 px-3 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 
   return (
-    <div className={`bg-bg-card border rounded-2xl overflow-hidden transition-all hover:border-opt-yellow/20 ${enabled ? 'border-border-default' : 'border-border-default/40'}`}>
+    <div className={`bg-bg-card border rounded-sm overflow-hidden transition-all hover:border-opt-yellow/20 ${enabled ? 'border-border-default' : 'border-border-default/40'}`}>
       {/* Header */}
       <div className="p-5">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2.5">
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${enabled ? 'bg-opt-yellow/10' : 'bg-text-400/10'}`}>
-              <Icon size={18} className={enabled ? 'text-opt-yellow' : 'text-text-400'} />
+            <div className={`w-9 h-9 rounded-sm flex items-center justify-center transition-colors ${enabled ? 'bg-opt-yellow/10' : 'bg-text-400/10'}`}>
+              <Icon size={18} className={enabled ? 'text-text-primary' : 'text-text-400'} />
             </div>
             <div>
               <p className="text-text-primary font-bold text-sm">{cadence.display_name}</p>
@@ -229,7 +229,7 @@ function CadenceCard({ cadence, conversations, onSave }) {
         <button
           onClick={() => { setShowDoc(!showDoc); if (!showDoc) setExpanded(false) }}
           className={`flex-1 px-5 py-2.5 flex items-center justify-center gap-1.5 text-[10px] transition-colors border-r border-border-default/50 ${
-            showDoc ? 'text-opt-yellow bg-opt-yellow-subtle' : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
+            showDoc ? 'text-text-primary bg-opt-yellow-subtle' : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
           }`}
         >
           <AlertTriangle size={11} />
@@ -238,7 +238,7 @@ function CadenceCard({ cadence, conversations, onSave }) {
         <button
           onClick={() => { setExpanded(!expanded); if (!expanded) setShowDoc(false) }}
           className={`flex-1 px-5 py-2.5 flex items-center justify-center gap-1.5 text-[10px] transition-colors ${
-            expanded ? 'text-opt-yellow bg-opt-yellow-subtle' : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
+            expanded ? 'text-text-primary bg-opt-yellow-subtle' : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
           }`}
         >
           {expanded ? <><ChevronUp size={12} /> Hide settings</> : <><ChevronDown size={12} /> Configure</>}
@@ -259,7 +259,7 @@ function CadenceCard({ cadence, conversations, onSave }) {
             {cadence.name === 'speed_to_lead' && (
               <>
                 <div>
-                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">After-Hours Start Time</label>
+                  <label className="text-[10px] text-text-primary uppercase font-medium block mb-1">After-Hours Start Time</label>
                   <p className="text-[9px] text-text-400 mb-1.5">Bot activates after this hour (leads arriving after business hours)</p>
                   <div className="flex items-center gap-2">
                     <select
@@ -274,7 +274,7 @@ function CadenceCard({ cadence, conversations, onSave }) {
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">Wait Before Contacting</label>
+                  <label className="text-[10px] text-text-primary uppercase font-medium block mb-1">Wait Before Contacting</label>
                   <p className="text-[9px] text-text-400 mb-1.5">Minutes to wait for a setter to claim the lead before bot reaches out</p>
                   <div className="flex items-center gap-2">
                     <input
@@ -291,7 +291,7 @@ function CadenceCard({ cadence, conversations, onSave }) {
             {cadence.name === 'call_confirmation' && (
               <>
                 <div>
-                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">Confirmation Window</label>
+                  <label className="text-[10px] text-text-primary uppercase font-medium block mb-1">Confirmation Window</label>
                   <p className="text-[9px] text-text-400 mb-1.5">How many hours before the call to send a confirmation message</p>
                   <div className="flex items-center gap-2">
                     <input
@@ -304,7 +304,7 @@ function CadenceCard({ cadence, conversations, onSave }) {
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">Non-Responsive Alert</label>
+                  <label className="text-[10px] text-text-primary uppercase font-medium block mb-1">Non-Responsive Alert</label>
                   <p className="text-[9px] text-text-400 mb-1.5">If lead hasn't replied by this many hours before the call, flag as at-risk</p>
                   <div className="flex items-center gap-2">
                     <input
@@ -321,7 +321,7 @@ function CadenceCard({ cadence, conversations, onSave }) {
             {cadence.name === 're_engage' && (
               <>
                 <div>
-                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">Cold Lead Threshold</label>
+                  <label className="text-[10px] text-text-primary uppercase font-medium block mb-1">Cold Lead Threshold</label>
                   <p className="text-[9px] text-text-400 mb-1.5">Hours of no reply before the lead is considered cold and re-engagement starts</p>
                   <div className="flex items-center gap-2">
                     <input
@@ -334,7 +334,7 @@ function CadenceCard({ cadence, conversations, onSave }) {
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] text-opt-yellow uppercase font-medium block mb-1">Follow-Up Schedule</label>
+                  <label className="text-[10px] text-text-primary uppercase font-medium block mb-1">Follow-Up Schedule</label>
                   <p className="text-[9px] text-text-400 mb-1.5">Days after going cold to send each follow-up (comma separated)</p>
                   <div className="flex items-center gap-2">
                     <input
@@ -360,7 +360,7 @@ function CadenceCard({ cadence, conversations, onSave }) {
             <button
               onClick={handleSave}
               disabled={saving || !hasChanges}
-              className="flex items-center gap-1.5 px-5 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-30 transition-all"
+              className="flex items-center gap-1.5 px-5 py-2 text-xs font-medium bg-opt-yellow text-text-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-30 transition-all"
             >
               {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
               {saving ? 'Saving...' : 'Save Settings'}
@@ -387,7 +387,7 @@ function ConversationRow({ convo }) {
           <div className="flex items-center gap-2">
             <ChevronDown size={12} className={`text-text-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
             <div>
-              <p className="text-sm text-text-primary font-medium group-hover:text-opt-yellow transition-colors">{convo.prospect_name || 'Unknown'}</p>
+              <p className="text-sm text-text-primary font-medium group-hover:text-text-primary transition-colors">{convo.prospect_name || 'Unknown'}</p>
               <p className="text-[10px] text-text-400 font-mono">{convo.prospect_phone}</p>
             </div>
           </div>
@@ -414,7 +414,7 @@ function ConversationRow({ convo }) {
           <td colSpan={8} className="p-0">
             <div className="bg-bg-primary/50 border-t border-border-default px-6 py-4 max-h-[400px] overflow-y-auto">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-[10px] text-opt-yellow uppercase tracking-wider font-semibold">Conversation History</p>
+                <p className="text-[10px] text-text-primary uppercase tracking-wider font-semibold">Conversation History</p>
                 {convo.appointment_time && (
                   <p className="text-[10px] text-text-400">Call: {formatTime(convo.appointment_time)}</p>
                 )}
@@ -425,7 +425,7 @@ function ConversationRow({ convo }) {
                 <div className="space-y-2">
                   {messages.map((msg, i) => (
                     <div key={i} className={`flex ${msg.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[75%] rounded-xl px-3 py-2 ${
+                      <div className={`max-w-[75%] rounded-sm px-3 py-2 ${
                         msg.direction === 'outbound'
                           ? 'bg-blue-500/15 border border-blue-500/20'
                           : 'bg-bg-card border border-border-default'
@@ -489,7 +489,7 @@ export default function SetterBot() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-opt-yellow" />
+        <Loader2 className="w-8 h-8 animate-spin text-text-primary" />
       </div>
     )
   }
@@ -497,24 +497,31 @@ export default function SetterBot() {
   return (
     <div>
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-opt-yellow/10 flex items-center justify-center">
-            <Bot className="w-5 h-5 text-opt-yellow" />
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Setter bot</span>
+          <div className="flex items-center gap-3 mt-2">
+            <h1 className="h2">The <em>autonomous</em> setter.</h1>
+            <span className="tag" style={{ background: '#fff4d6', color: '#8a5a00', borderColor: '#d6b876' }}>Dry run</span>
           </div>
-          <div>
-            <h1 className="text-lg sm:text-xl font-bold text-text-primary">Setter Bot</h1>
-            <p className="text-[10px] text-text-400">Automated lead engagement and follow-up</p>
-          </div>
-          <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-400 border border-amber-500/20">
-            Dry Run
-          </span>
+          <p
+            className="mt-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            Automated lead engagement · follow-up
+          </p>
         </div>
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
 
       {/* KPI Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
         <KPICard label="Conversations" value={stats.total} />
         <KPICard label="Active" value={stats.active} />
         <KPICard label="Reply Rate" value={`${stats.replyRate}%`} />
@@ -567,7 +574,7 @@ export default function SetterBot() {
           <div key={s.id} className="tile tile-feedback p-5 hover:border-opt-yellow/10 transition-colors">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-8 h-8 rounded-full bg-opt-yellow/10 flex items-center justify-center">
-                <span className="text-opt-yellow font-bold text-sm">{s.name?.[0]}</span>
+                <span className="text-text-primary font-bold text-sm">{s.name?.[0]}</span>
               </div>
               <div>
                 <p className="text-text-primary font-semibold">{s.name}</p>
@@ -589,7 +596,7 @@ export default function SetterBot() {
               </div>
               <div className="py-1">
                 <p className="text-text-400 text-[10px] uppercase tracking-wider">Booked</p>
-                <p className="text-opt-yellow font-bold text-lg">{s.booked}</p>
+                <p className="text-text-primary font-bold text-lg">{s.booked}</p>
               </div>
             </div>
           </div>

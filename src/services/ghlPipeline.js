@@ -29,7 +29,7 @@ function classifyWavvTags(tags) {
 // Stage name patterns → bucket categories
 const STAGE_BUCKETS = [
   { key: 'new_leads', label: 'New Leads', pattern: /^new.lead/i, color: 'text-blue-400' },
-  { key: 'contacting', label: 'Contacting', pattern: /^contact(ed)?\s*\d|^lead.contact/i, color: 'text-opt-yellow' },
+  { key: 'contacting', label: 'Contacting', pattern: /^contact(ed)?\s*\d|^lead.contact/i, color: 'text-text-primary' },
   { key: 'triage', label: 'Triage', pattern: /triage|auto.booked/i, color: 'text-purple-400' },
   { key: 'set_calls', label: 'Set Calls', pattern: /set.call|proposal/i, color: 'text-cyan-400' },
   { key: 'no_shows', label: 'No Shows', pattern: /no.show/i, color: 'text-danger' },

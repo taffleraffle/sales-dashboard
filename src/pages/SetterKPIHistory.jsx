@@ -118,7 +118,7 @@ export default function SetterKPIHistory() {
 
   if (loading) return (
     <div className="flex items-center justify-center py-20">
-      <Loader className="animate-spin text-opt-yellow" size={24} />
+      <Loader className="animate-spin text-text-primary" size={24} />
     </div>
   )
 
@@ -173,11 +173,11 @@ export default function SetterKPIHistory() {
   const stlPct = stl ? stl.pctUnder5m : null
   const stlHit = stlPct != null && stlPct >= kpiTargets.stl_pct
 
-  const cellColor = (hit, pct) => hit ? 'text-success' : pct >= 70 ? 'text-opt-yellow' : 'text-danger'
+  const cellColor = (hit, pct) => hit ? 'text-success' : pct >= 70 ? 'text-text-primary' : 'text-danger'
   const barColor = (hit, pct) => hit ? 'bg-success' : pct >= 70 ? 'bg-opt-yellow' : 'bg-danger'
   const hitBadge = n => {
     const total = stlPct != null ? 3 : 2
-    return n === total ? 'bg-success/20 text-success' : n >= total - 1 ? 'bg-opt-yellow/20 text-opt-yellow' : 'bg-danger/20 text-danger'
+    return n === total ? 'bg-success/20 text-success' : n >= total - 1 ? 'bg-opt-yellow/20 text-text-primary' : 'bg-danger/20 text-danger'
   }
   const kpiTotal = stlPct != null ? 3 : 2
 
@@ -189,15 +189,27 @@ export default function SetterKPIHistory() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <div className="flex items-center gap-3">
-          <Link to={`/sales/setters/${id}`} className="text-text-400 hover:text-opt-yellow transition-colors">
+      {/* Header — editorial */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div className="flex items-end gap-3">
+          <Link to={`/sales/setters/${id}`} style={{ color: 'var(--ink-3)', marginBottom: 4 }}>
             <ArrowLeft size={18} />
           </Link>
           <div>
-            <h1 className="text-lg sm:text-xl font-bold">{member?.name || 'Setter'}</h1>
-            <p className="text-xs text-text-400">KPI & Target History <span className="text-text-400/60">(Mon–Fri only)</span></p>
+            <span className="eyebrow eyebrow-accent">Setter · KPI history</span>
+            <h1 className="h2 mt-2">{member?.name || 'Setter'}</h1>
+            <p
+              className="mt-2"
+              style={{
+                fontFamily: 'var(--mono)',
+                fontSize: 10,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: 'var(--ink-3)',
+              }}
+            >
+              Targets · Mon-Fri only
+            </p>
           </div>
         </div>
         <DateRangeSelector selected={range} onChange={setRange} />
@@ -245,7 +257,7 @@ export default function SetterKPIHistory() {
       {/* Hit rate bar */}
       <div className="tile tile-feedback p-4 mb-6">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-[11px] text-opt-yellow uppercase font-medium flex items-center gap-1.5">
+          <span className="text-[11px] text-text-primary uppercase font-medium flex items-center gap-1.5">
             <Target size={12} /> Target Hit Rate
           </span>
           <span className="text-sm font-bold">{hitPct}%</span>
@@ -259,7 +271,7 @@ export default function SetterKPIHistory() {
       {/* Daily table */}
       <div className="tile tile-feedback overflow-hidden">
         <div className="px-4 py-3 border-b border-border-default">
-          <h3 className="text-[11px] text-opt-yellow uppercase font-medium flex items-center gap-1.5">
+          <h3 className="text-[11px] text-text-primary uppercase font-medium flex items-center gap-1.5">
             <TrendingUp size={12} /> Daily Breakdown <span className="text-text-400 font-normal normal-case">(Mon–Fri)</span>
           </h3>
         </div>
@@ -324,7 +336,7 @@ export default function SetterKPIHistory() {
               {/* Averages footer */}
               <tfoot>
                 <tr className="border-t-2 border-border-default bg-bg-primary/50 font-semibold text-text-primary">
-                  <td className="px-4 py-2.5 text-[10px] uppercase text-opt-yellow">Avg / Day</td>
+                  <td className="px-4 py-2.5 text-[10px] uppercase text-text-primary">Avg / Day</td>
                   <td className={`text-right px-3 py-2.5 ${parseFloat(avgLeads) >= kpiTargets.leads_day ? 'text-success' : 'text-danger'}`}>
                     {avgLeads} <span className="text-text-400 font-normal text-[10px]">/ {kpiTargets.leads_day}</span>
                   </td>
@@ -345,7 +357,7 @@ export default function SetterKPIHistory() {
                   <td className="text-right px-3 py-2.5">{avgPickups}</td>
                   <td className="text-right px-3 py-2.5">{avgMCs}</td>
                   <td className="text-center px-3 py-2.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${parseInt(hitPct) >= 70 ? 'bg-success/20 text-success' : parseInt(hitPct) >= 40 ? 'bg-opt-yellow/20 text-opt-yellow' : 'bg-danger/20 text-danger'}`}>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${parseInt(hitPct) >= 70 ? 'bg-success/20 text-success' : parseInt(hitPct) >= 40 ? 'bg-opt-yellow/20 text-text-primary' : 'bg-danger/20 text-danger'}`}>
                       {hitPct}%
                     </span>
                   </td>

@@ -6,12 +6,12 @@ import AddVariantModal from '../../components/ads/AddVariantModal'
 
 const STATUS_TONE = {
   planned: 'bg-bg-card-hover text-text-400 border-border-default',
-  editing: 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30',
+  editing: 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30',
   ready:   'bg-success/10 text-success border-success/30',
   live:    'bg-success/20 text-success border-success/40',
-  paused:  'bg-opt-yellow/10 text-opt-yellow border-opt-yellow/20',
+  paused:  'bg-opt-yellow/10 text-text-primary border-opt-yellow/20',
   killed:  'bg-danger/10 text-danger border-danger/30',
-  winner:  'bg-opt-yellow/30 text-opt-yellow border-opt-yellow/60',
+  winner:  'bg-opt-yellow/30 text-text-primary border-opt-yellow/60',
 }
 
 export default function AdsVariants() {
@@ -49,7 +49,7 @@ export default function AdsVariants() {
       .filter(v => !q || (v.variant_id || '').toLowerCase().includes(q) || (v.notes || '').toLowerCase().includes(q))
   }, [rows, statusFilter, search])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
 
   return (
     <div>
@@ -62,19 +62,19 @@ export default function AdsVariants() {
         </div>
         <button
           onClick={() => { setEditing(null); setModalOpen(true) }}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-opt-yellow rounded-lg hover:bg-opt-yellow/20 whitespace-nowrap"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-text-primary rounded-lg hover:bg-opt-yellow/20 whitespace-nowrap"
         >
           <Plus size={13} /> Add variant
         </button>
       </div>
 
       {error && (
-        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-xl px-3 py-2">
+        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-sm px-3 py-2">
           <AlertTriangle size={14} /> <span>{error}</span>
         </div>
       )}
 
-      <div className="bg-bg-card border border-border-default rounded-2xl p-3 mb-3 flex flex-col sm:flex-row sm:items-center gap-2">
+      <div className="bg-bg-card border border-border-default rounded-sm p-3 mb-3 flex flex-col sm:flex-row sm:items-center gap-2">
         <div className="flex gap-1 flex-wrap">
           {['all', 'live', 'ready', 'editing', 'planned', 'paused', 'killed', 'winner'].map(s => (
             <button
@@ -82,7 +82,7 @@ export default function AdsVariants() {
               onClick={() => setStatusFilter(s)}
               className={`px-2.5 py-1 text-[11px] rounded-lg border transition-colors ${
                 statusFilter === s
-                  ? 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow'
+                  ? 'bg-opt-yellow/15 border-opt-yellow/40 text-text-primary'
                   : 'border-border-default text-text-secondary hover:bg-bg-card-hover'
               }`}
             >{s}</button>
@@ -101,11 +101,11 @@ export default function AdsVariants() {
       </div>
 
       {!filtered.length ? (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400 text-sm">
+        <div className="bg-bg-card border border-border-default rounded-sm p-8 text-center text-text-400 text-sm">
           {rows.length === 0 ? 'No variants in the library yet. Add rows to library.variants.' : 'No variants match the filter.'}
         </div>
       ) : (
-        <div className="bg-bg-card border border-border-default rounded-2xl overflow-x-auto">
+        <div className="bg-bg-card border border-border-default rounded-sm overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="text-text-400 text-[10px] uppercase tracking-wider">
               <tr className="border-b border-border-default">
@@ -122,7 +122,7 @@ export default function AdsVariants() {
               {filtered.map(v => (
                 <tr key={v.id} className="border-b border-border-default/40 hover:bg-bg-card-hover">
                   <td className="px-3 py-2">
-                    <Link to={`/sales/ads/variants/${encodeURIComponent(v.variant_id)}`} className="text-opt-yellow font-mono text-[11px] hover:underline">
+                    <Link to={`/sales/ads/variants/${encodeURIComponent(v.variant_id)}`} className="text-text-primary font-mono text-[11px] hover:underline">
                       {v.variant_id}
                     </Link>
                   </td>
@@ -134,7 +134,7 @@ export default function AdsVariants() {
                   <td className="px-3 py-2 text-text-secondary">v{v.iteration}</td>
                   <td className="px-3 py-2 text-text-secondary truncate max-w-md" title={v.meta_ad_name || v.meta_ad_id}>
                     {v.meta_ad_id
-                      ? <Link to={`/sales/ads/ad/${v.meta_ad_id}`} className="hover:text-opt-yellow">{v.meta_ad_name || v.meta_ad_id}</Link>
+                      ? <Link to={`/sales/ads/ad/${v.meta_ad_id}`} className="hover:text-text-primary">{v.meta_ad_name || v.meta_ad_id}</Link>
                       : <span className="text-text-400">—</span>
                     }
                   </td>
@@ -143,7 +143,7 @@ export default function AdsVariants() {
                   <td className="px-3 py-2 text-right">
                     <button
                       onClick={() => { setEditing(v); setModalOpen(true) }}
-                      className="text-[10px] text-text-400 hover:text-opt-yellow uppercase tracking-wider"
+                      className="text-[10px] text-text-400 hover:text-text-primary uppercase tracking-wider"
                     >edit</button>
                   </td>
                 </tr>

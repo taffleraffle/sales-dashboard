@@ -17,7 +17,7 @@ export default function LoginPage() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-bg-primary flex items-center justify-center">
-        <Loader className="animate-spin text-opt-yellow" size={32} />
+        <Loader className="animate-spin text-text-primary" size={32} />
       </div>
     )
   }
@@ -58,19 +58,34 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-bg-primary flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        {/* Logo */}
+        {/* Logo + masthead — editorial */}
         <div className="text-center mb-10">
-          <div className="w-14 h-14 rounded-2xl bg-opt-yellow flex items-center justify-center mx-auto mb-4 shadow-[0_0_40px_rgba(212,245,12,0.15)]">
-            <BarChart3 size={28} className="text-bg-primary" />
+          <div
+            className="flex items-center justify-center mx-auto mb-5"
+            style={{ width: 52, height: 52, background: 'var(--accent)', borderRadius: 999 }}
+          >
+            <BarChart3 size={26} style={{ color: 'var(--ink)' }} />
           </div>
-          <h1 className="text-2xl font-bold text-text-primary tracking-tight">OPT SALES</h1>
-          <p className="text-text-400 text-sm mt-1">
-            {forgotMode ? 'Reset your password' : 'Sign in to your dashboard'}
+          <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center' }}>OPT Digital</span>
+          <h1 className="h2 mt-3" style={{ fontSize: 36, lineHeight: 1.05 }}>
+            Sales <em>Dashboard</em>.
+          </h1>
+          <p
+            className="mt-3"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            {forgotMode ? 'Reset · password' : 'Sign in · continue'}
           </p>
         </div>
 
         {/* Card */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-7">
+        <div className="bg-bg-card border border-border-default rounded-sm p-7">
           {forgotMode ? (
             resetSent ? (
               <div className="text-center py-4">
@@ -83,7 +98,7 @@ export default function LoginPage() {
                 </p>
                 <button
                   onClick={() => { setForgotMode(false); setResetSent(false); setError(null) }}
-                  className="text-xs text-opt-yellow hover:underline"
+                  className="text-xs text-text-primary hover:underline"
                 >
                   Back to sign in
                 </button>
@@ -98,13 +113,13 @@ export default function LoginPage() {
                     onChange={e => setEmail(e.target.value)}
                     required
                     autoFocus
-                    className="w-full bg-bg-primary border border-border-default rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
+                    className="w-full bg-bg-primary border border-border-default rounded-sm px-4 py-3 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
                     placeholder="you@optdigital.io"
                   />
                 </div>
 
                 {error && (
-                  <div className="bg-danger/10 border border-danger/20 rounded-xl px-4 py-3 text-xs text-danger">
+                  <div className="bg-danger/10 border border-danger/20 rounded-sm px-4 py-3 text-xs text-danger">
                     {error}
                   </div>
                 )}
@@ -112,7 +127,7 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="w-full flex items-center justify-center gap-2 bg-opt-yellow text-bg-primary font-semibold rounded-xl px-4 py-3 text-sm hover:brightness-110 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
+                  className="w-full flex items-center justify-center gap-2 bg-opt-yellow text-text-primary font-semibold rounded-sm px-4 py-3 text-sm hover:brightness-110 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
                 >
                   {submitting ? <Loader size={16} className="animate-spin" /> : <Mail size={16} />}
                   {submitting ? 'Sending...' : 'Send Reset Link'}
@@ -140,7 +155,7 @@ export default function LoginPage() {
                   required
                   autoComplete="email"
                   autoFocus
-                  className="w-full bg-bg-primary border border-border-default rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
+                  className="w-full bg-bg-primary border border-border-default rounded-sm px-4 py-3 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
                   placeholder="you@optdigital.io"
                 />
               </div>
@@ -152,7 +167,7 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => { setForgotMode(true); setError(null) }}
-                    className="text-[11px] text-opt-yellow hover:underline"
+                    className="text-[11px] text-text-primary hover:underline"
                   >
                     Forgot password?
                   </button>
@@ -164,7 +179,7 @@ export default function LoginPage() {
                     onChange={e => setPassword(e.target.value)}
                     required
                     autoComplete="current-password"
-                    className="w-full bg-bg-primary border border-border-default rounded-xl px-4 py-3 pr-11 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
+                    className="w-full bg-bg-primary border border-border-default rounded-sm px-4 py-3 pr-11 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
                     placeholder="Enter password"
                   />
                   <button
@@ -180,7 +195,7 @@ export default function LoginPage() {
 
               {/* Error */}
               {error && (
-                <div className="bg-danger/10 border border-danger/20 rounded-xl px-4 py-3 text-xs text-danger">
+                <div className="bg-danger/10 border border-danger/20 rounded-sm px-4 py-3 text-xs text-danger">
                   {error}
                 </div>
               )}
@@ -189,7 +204,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full flex items-center justify-center gap-2 bg-opt-yellow text-bg-primary font-semibold rounded-xl px-4 py-3 text-sm hover:brightness-110 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
+                className="w-full flex items-center justify-center gap-2 bg-opt-yellow text-text-primary font-semibold rounded-sm px-4 py-3 text-sm hover:brightness-110 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
               >
                 {submitting ? <Loader size={16} className="animate-spin" /> : <LogIn size={16} />}
                 {submitting ? 'Signing in...' : 'Sign In'}

@@ -53,16 +53,31 @@ export default function SetPasswordPage() {
     <div className="min-h-screen bg-bg-primary flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-10">
-          <div className="w-14 h-14 rounded-2xl bg-opt-yellow flex items-center justify-center mx-auto mb-4 shadow-[0_0_40px_rgba(212,245,12,0.15)]">
-            <BarChart3 size={28} className="text-bg-primary" />
+          <div
+            className="flex items-center justify-center mx-auto mb-5"
+            style={{ width: 52, height: 52, background: 'var(--accent)', borderRadius: 999 }}
+          >
+            <BarChart3 size={26} style={{ color: 'var(--ink)' }} />
           </div>
-          <h1 className="text-2xl font-bold text-text-primary tracking-tight">Welcome to OPT SALES</h1>
-          <p className="text-text-400 text-sm mt-1">
-            {profile?.name ? `Hey ${profile.name}, set` : 'Set'} your password to get started
+          <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center' }}>OPT Digital · Welcome</span>
+          <h1 className="h2 mt-3" style={{ fontSize: 32, lineHeight: 1.05 }}>
+            {profile?.name ? <>Hey <em>{profile.name}</em>.</> : <>Welcome to <em>OPT Sales</em>.</>}
+          </h1>
+          <p
+            className="mt-3"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            Set · password · get started
           </p>
         </div>
 
-        <div className="bg-bg-card border border-border-default rounded-2xl p-7">
+        <div className="bg-bg-card border border-border-default rounded-sm p-7">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-xs text-text-400 uppercase tracking-wider mb-2 font-medium">New Password</label>
@@ -73,7 +88,7 @@ export default function SetPasswordPage() {
                   onChange={e => setPass(e.target.value)}
                   required
                   autoFocus
-                  className="w-full bg-bg-primary border border-border-default rounded-xl px-4 py-3 pr-11 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
+                  className="w-full bg-bg-primary border border-border-default rounded-sm px-4 py-3 pr-11 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
                   placeholder="Min 6 characters"
                 />
                 <button
@@ -94,13 +109,13 @@ export default function SetPasswordPage() {
                 value={confirm}
                 onChange={e => setConfirm(e.target.value)}
                 required
-                className="w-full bg-bg-primary border border-border-default rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
+                className="w-full bg-bg-primary border border-border-default rounded-sm px-4 py-3 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
                 placeholder="Re-enter password"
               />
             </div>
 
             {error && (
-              <div className="bg-danger/10 border border-danger/20 rounded-xl px-4 py-3 text-xs text-danger">
+              <div className="bg-danger/10 border border-danger/20 rounded-sm px-4 py-3 text-xs text-danger">
                 {error}
               </div>
             )}
@@ -108,7 +123,7 @@ export default function SetPasswordPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full flex items-center justify-center gap-2 bg-opt-yellow text-bg-primary font-semibold rounded-xl px-4 py-3 text-sm hover:brightness-110 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
+              className="w-full flex items-center justify-center gap-2 bg-opt-yellow text-text-primary font-semibold rounded-sm px-4 py-3 text-sm hover:brightness-110 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
             >
               {submitting ? <Loader size={16} className="animate-spin" /> : <Lock size={16} />}
               {submitting ? 'Setting password...' : 'Set Password & Continue'}

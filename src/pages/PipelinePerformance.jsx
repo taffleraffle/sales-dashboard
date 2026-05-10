@@ -116,8 +116,23 @@ export default function PipelinePerformance() {
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Pipeline Performance</h1>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Pipeline</span>
+          <h1 className="h2 mt-2">Where the <em>deals</em> live.</h1>
+          <p
+            className="mt-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            {totalLeads.toLocaleString()} leads in flight
+          </p>
+        </div>
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
 
@@ -136,7 +151,7 @@ export default function PipelinePerformance() {
             <button
               onClick={handleRetry}
               disabled={loadingPipeline}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-opt-yellow border border-opt-yellow/30 hover:bg-opt-yellow/10 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-primary border border-opt-yellow/30 hover:bg-opt-yellow/10 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={12} className={loadingPipeline ? 'animate-spin' : ''} />
               Retry
@@ -196,13 +211,13 @@ export default function PipelinePerformance() {
                                   </span>
                                 )}
                               </td>
-                              <td className="px-3 py-1.5 text-opt-yellow">{setterName}</td>
+                              <td className="px-3 py-1.5 text-text-primary">{setterName}</td>
                               <td className="px-3 py-1.5 text-text-400">{new Date(l.created).toLocaleString('en-US', tzOpts)}</td>
                               <td className="px-3 py-1.5 text-text-400">{l.calledAt ? new Date(l.calledAt).toLocaleString('en-US', tzOpts) : <span className="text-danger text-[10px] font-medium px-1.5 py-0.5 rounded bg-danger/10">NOT CALLED</span>}</td>
                               <td className={`px-3 py-1.5 text-right ${l.talkTime > 60 ? 'text-success' : 'text-text-400'}`}>
                                 {l.talkTime > 0 ? <><span className="font-medium">{l.talkTimeDisplay}</span>{l.callCount > 1 && <span className="text-[9px] text-text-400 ml-1">({l.callCount})</span>}</> : '—'}
                               </td>
-                              <td className={`px-3 py-1.5 text-right font-medium ${l.uncalled ? 'text-danger' : l.responseSecs < 300 ? 'text-success' : l.responseSecs < 3600 ? 'text-opt-yellow' : 'text-danger'}`}>
+                              <td className={`px-3 py-1.5 text-right font-medium ${l.uncalled ? 'text-danger' : l.responseSecs < 300 ? 'text-success' : l.responseSecs < 3600 ? 'text-text-primary' : 'text-danger'}`}>
                                 {l.responseDisplay}
                               </td>
                             </tr>
@@ -216,7 +231,7 @@ export default function PipelinePerformance() {
           ) : (
             <div className="tile tile-feedback p-6 text-center min-h-[180px] flex items-center justify-center">
               {loadingPipeline || !stlCalls ? (
-                <div><Loader className="animate-spin text-opt-yellow mx-auto mb-2 h-4 w-4" /><span className="text-xs text-text-400">Loading speed to lead data...</span></div>
+                <div><Loader className="animate-spin text-text-primary mx-auto mb-2 h-4 w-4" /><span className="text-xs text-text-400">Loading speed to lead data...</span></div>
               ) : !hasWavv ? (
                 <span className="text-xs text-text-400">No WAVV call data yet — publish your Zapier zap to start tracking speed to lead</span>
               ) : (
@@ -251,7 +266,7 @@ export default function PipelinePerformance() {
                 const s = pipe.summary
                 const hasZapier = hasWavv
                 const tw = hasZapier ? wavvAgg.totals : (s.totalWavv || { dials: 0, pickups: 0, mcs: 0 })
-                const rateColor = (v, good, ok) => v === '—' ? 'text-text-400' : parseFloat(v) >= good ? 'text-success' : parseFloat(v) >= ok ? 'text-opt-yellow' : 'text-danger'
+                const rateColor = (v, good, ok) => v === '—' ? 'text-text-400' : parseFloat(v) >= good ? 'text-success' : parseFloat(v) >= ok ? 'text-text-primary' : 'text-danger'
                 const fmtRate = (num, den) => den > 0 ? ((num / den) * 100).toFixed(1) : '—'
                 return (
                   <div key={pipe.id} className="tile tile-feedback overflow-hidden">
@@ -348,7 +363,7 @@ export default function PipelinePerformance() {
               if (/no.show/.test(n)) return 'bg-danger/15 text-danger'
               if (/set.call|proposal|24.hour/.test(n)) return 'bg-cyan-400/15 text-cyan-400'
               if (/triage|auto.booked/.test(n)) return 'bg-purple-400/15 text-purple-400'
-              if (/contact/.test(n)) return 'bg-opt-yellow/15 text-opt-yellow'
+              if (/contact/.test(n)) return 'bg-opt-yellow/15 text-text-primary'
               if (/follow.up|nurture/.test(n)) return 'bg-orange-400/15 text-orange-400'
               if (/not.interested|unqualified|dead|not.responsive/.test(n)) return 'bg-text-400/15 text-text-400'
               if (/new.lead/.test(n)) return 'bg-blue-400/15 text-blue-400'
@@ -409,7 +424,7 @@ export default function PipelinePerformance() {
                   {ghlLeads.length > 10 && (
                     <button
                       onClick={() => setShowAllLeads(v => !v)}
-                      className="w-full py-3 text-xs font-medium text-opt-yellow hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default"
+                      className="w-full py-3 text-xs font-medium text-text-primary hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default"
                     >
                       {showAllLeads ? <><ChevronUp size={14} /> Show less</> : <><ChevronDown size={14} /> Show all {Math.min(ghlLeads.length, 50)} leads</>}
                     </button>

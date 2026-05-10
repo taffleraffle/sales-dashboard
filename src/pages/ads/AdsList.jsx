@@ -31,7 +31,7 @@ function StatusPill({ status, effective }) {
   const s = (effective || status || 'UNKNOWN').toUpperCase()
   const tone =
     s === 'ACTIVE' ? 'bg-success/15 text-success border-success/30' :
-    s === 'PAUSED' ? 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30' :
+    s === 'PAUSED' ? 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30' :
     s === 'DELETED' || s === 'ARCHIVED' ? 'bg-bg-card-hover text-text-400 border-border-default' :
     'bg-danger/15 text-danger border-danger/30'
   return <span className={`text-[9px] uppercase tracking-wider font-medium px-1.5 py-0.5 rounded border ${tone}`}>{s}</span>
@@ -75,7 +75,7 @@ function Stat({ label, value, highlight }) {
   return (
     <div>
       <p className="uppercase tracking-wider text-text-400 text-[8px] mb-0.5">{label}</p>
-      <p className={`font-medium ${highlight ? 'text-opt-yellow' : 'text-text-primary'}`}>{value}</p>
+      <p className={`font-medium ${highlight ? 'text-text-primary' : 'text-text-primary'}`}>{value}</p>
     </div>
   )
 }
@@ -246,7 +246,7 @@ export default function AdsList() {
     ads: a.ads + 1,
   }), { spend: 0, ads: 0 }), [filtered])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
 
   return (
     <div>
@@ -263,7 +263,7 @@ export default function AdsList() {
           <button
             onClick={handleSync}
             disabled={syncing}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs border border-border-default rounded-2xl text-text-secondary hover:bg-bg-card-hover disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs border border-border-default rounded-sm text-text-secondary hover:bg-bg-card-hover disabled:opacity-50"
           >
             <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
             {syncing ? 'Syncing…' : 'Refresh now'}
@@ -273,18 +273,18 @@ export default function AdsList() {
       </div>
 
       {error && (
-        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-xl px-3 py-2">
+        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-sm px-3 py-2">
           <AlertTriangle size={14} /> <span className="flex-1">{error}</span>
           <button onClick={() => setError(null)} className="opacity-70 hover:opacity-100">dismiss</button>
         </div>
       )}
       {syncMessage && (
-        <div className="mb-3 bg-opt-yellow/10 border border-opt-yellow/30 text-opt-yellow text-xs rounded-xl px-3 py-2">
+        <div className="mb-3 bg-opt-yellow/10 border border-opt-yellow/30 text-text-primary text-xs rounded-sm px-3 py-2">
           {syncMessage}
         </div>
       )}
 
-      <div className="bg-bg-card border border-border-default rounded-2xl p-3 mb-4 flex flex-col sm:flex-row sm:items-center gap-2">
+      <div className="bg-bg-card border border-border-default rounded-sm p-3 mb-4 flex flex-col sm:flex-row sm:items-center gap-2">
         <div className="flex items-center gap-1 text-text-400 text-xs"><Filter size={12} /> Filter</div>
         <div className="flex gap-1">
           {[['active', 'Active'], ['paused', 'Paused'], ['spent', 'Spent'], ['all', 'All']].map(([k, label]) => (
@@ -293,7 +293,7 @@ export default function AdsList() {
               onClick={() => setStatusFilter(k)}
               className={`px-2.5 py-1 text-[11px] rounded-lg border transition-colors ${
                 statusFilter === k
-                  ? 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow'
+                  ? 'bg-opt-yellow/15 border-opt-yellow/40 text-text-primary'
                   : 'border-border-default text-text-secondary hover:bg-bg-card-hover'
               }`}
             >
@@ -337,21 +337,21 @@ export default function AdsList() {
       </div>
 
       {!filtered.length && (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400">
+        <div className="bg-bg-card border border-border-default rounded-sm p-8 text-center text-text-400">
           {ads.length === 0 ? (
             <div>
               {syncing ? (
                 <>
                   <div className="flex items-center justify-center gap-2 mb-2">
-                    <Loader size={14} className="animate-spin text-opt-yellow" />
-                    <p className="text-sm text-opt-yellow">Auto-syncing from Meta…</p>
+                    <Loader size={14} className="animate-spin text-text-primary" />
+                    <p className="text-sm text-text-primary">Auto-syncing from Meta…</p>
                   </div>
                   <p className="text-xs">First sync usually completes within ~30 seconds. The page will populate automatically when it finishes.</p>
                 </>
               ) : (
                 <>
                   <p className="text-sm mb-2">No ads synced yet.</p>
-                  <p className="text-xs">Auto-sync runs hourly in the background and on every dashboard load. First sync usually completes within ~30 seconds. Click <span className="text-opt-yellow">Refresh now</span> if it stalls.</p>
+                  <p className="text-xs">Auto-sync runs hourly in the background and on every dashboard load. First sync usually completes within ~30 seconds. Click <span className="text-text-primary">Refresh now</span> if it stalls.</p>
                 </>
               )}
             </div>
@@ -367,12 +367,12 @@ export default function AdsList() {
             <Link
               key={ad.ad_id}
               to={`/sales/ads/ad/${ad.ad_id}`}
-              className="bg-bg-card border border-border-default rounded-2xl p-3 hover:border-opt-yellow/40 transition-colors group"
+              className="bg-bg-card border border-border-default rounded-sm p-3 hover:border-opt-yellow/40 transition-colors group"
             >
               <AssetPreview ad={ad} />
               <div className="mt-2 flex items-start gap-2">
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-text-primary truncate group-hover:text-opt-yellow transition-colors">
+                  <p className="text-xs font-medium text-text-primary truncate group-hover:text-text-primary transition-colors">
                     {ad.ad_name || ad.ad_id}
                   </p>
                   <p className="text-[10px] text-text-400 truncate">{ad.campaign_name || '—'}</p>

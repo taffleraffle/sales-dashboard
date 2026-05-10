@@ -29,7 +29,7 @@ export default function AdsOrphans() {
 
   useEffect(() => { load() }, [load])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
 
   return (
     <div>
@@ -41,17 +41,17 @@ export default function AdsOrphans() {
       </div>
 
       {error && (
-        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-xl px-3 py-2">
+        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-sm px-3 py-2">
           <AlertTriangle size={14} /> <span>{error}</span>
         </div>
       )}
 
       {!rows.length ? (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400 text-sm">
+        <div className="bg-bg-card border border-border-default rounded-sm p-8 text-center text-text-400 text-sm">
           No orphan ads. Every synced ad either matches a variant in the library or is mapped via legacy_ad_mapping.
         </div>
       ) : (
-        <div className="bg-bg-card border border-border-default rounded-2xl overflow-x-auto">
+        <div className="bg-bg-card border border-border-default rounded-sm overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="text-text-400 text-[10px] uppercase tracking-wider">
               <tr className="border-b border-border-default">
@@ -68,7 +68,7 @@ export default function AdsOrphans() {
               {rows.map(r => (
                 <tr key={r.id} className="border-b border-border-default/40 hover:bg-bg-card-hover">
                   <td className="px-3 py-2">
-                    <Link to={`/sales/ads/ad/${r.meta_ad_id}`} className="text-opt-yellow font-mono text-[11px] hover:underline">{r.meta_ad_id}</Link>
+                    <Link to={`/sales/ads/ad/${r.meta_ad_id}`} className="text-text-primary font-mono text-[11px] hover:underline">{r.meta_ad_id}</Link>
                   </td>
                   <td className="px-3 py-2 text-text-secondary truncate max-w-md" title={r.meta_ad_name}>{r.meta_ad_name || '—'}</td>
                   <td className="px-3 py-2 text-text-400 font-mono text-[10px]">{r.parser_attempted || '—'}</td>
@@ -83,7 +83,7 @@ export default function AdsOrphans() {
                     {!r.resolved && (
                       <button
                         onClick={() => setTagging({ ad_id: r.meta_ad_id, ad_name: r.meta_ad_name })}
-                        className="inline-flex items-center gap-1 text-[10px] text-opt-yellow hover:underline uppercase tracking-wider"
+                        className="inline-flex items-center gap-1 text-[10px] text-text-primary hover:underline uppercase tracking-wider"
                       >
                         <Tag size={10} /> Tag
                       </button>

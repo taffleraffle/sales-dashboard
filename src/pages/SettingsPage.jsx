@@ -64,10 +64,13 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold tracking-tight mb-6">Settings</h1>
+      <div className="mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <span className="eyebrow eyebrow-accent">OPT Sales · Settings</span>
+        <h1 className="h2 mt-2">The <em>back</em> office.</h1>
+      </div>
 
       <div className="space-y-4">
-        <h2 className="text-sm font-medium text-text-secondary">API Connections</h2>
+        <h2 className="kicker" style={{ marginBottom: 12 }}>API Connections</h2>
 
         {apiConfigs.map(api => {
           const connected = getStatus(api.envVar)
@@ -106,7 +109,7 @@ export default function SettingsPage() {
                 </p>
               )}
               {api.key === 'ghl' && syncing === 'ghl' && ghlProgress && (
-                <p className="text-xs mt-2 text-opt-yellow">{ghlProgress}</p>
+                <p className="text-xs mt-2 text-text-primary">{ghlProgress}</p>
               )}
             </div>
           )
@@ -131,7 +134,7 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <Brain size={14} className="text-opt-yellow" />
+                <Brain size={14} className="text-text-primary" />
                 <span className="font-medium text-sm">Objection Analysis</span>
               </div>
               <p className="text-xs text-text-400">Analyzes Fathom transcripts with Claude to identify common objections per closer</p>
@@ -240,7 +243,7 @@ function InviteSection() {
       <h2 className="text-sm font-medium text-text-secondary mb-3">Invite Team Members</h2>
       <div className="tile tile-feedback p-5">
         <div className="flex items-center gap-2 mb-4">
-          <UserPlus size={14} className="text-opt-yellow" />
+          <UserPlus size={14} className="text-text-primary" />
           <span className="font-medium text-sm">Send Dashboard Invite</span>
         </div>
         <p className="text-xs text-text-400 mb-4">
@@ -307,7 +310,7 @@ function InviteSection() {
           <button
             onClick={handleInvite}
             disabled={!name || !email || sending}
-            className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs bg-opt-yellow/15 text-opt-yellow border border-opt-yellow/30 hover:bg-opt-yellow/25 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs bg-opt-yellow/15 text-text-primary border border-opt-yellow/30 hover:bg-opt-yellow/25 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {sending ? <Loader size={12} className="animate-spin" /> : <Send size={12} />}
             {sending ? 'Sending...' : 'Send Invite'}
@@ -386,7 +389,7 @@ function PasswordResetSection() {
       <h2 className="text-sm font-medium text-text-secondary mb-3">Password Management</h2>
       <div className="tile tile-feedback p-5">
         <div className="flex items-center gap-2 mb-4">
-          <KeyRound size={14} className="text-opt-yellow" />
+          <KeyRound size={14} className="text-text-primary" />
           <span className="font-medium text-sm">Reset Team Member Password</span>
         </div>
 
@@ -434,7 +437,7 @@ function PasswordResetSection() {
           <button
             onClick={handleReset}
             disabled={!selectedMember || !newPassword || resetting}
-            className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs bg-opt-yellow/15 text-opt-yellow border border-opt-yellow/30 hover:bg-opt-yellow/25 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs bg-opt-yellow/15 text-text-primary border border-opt-yellow/30 hover:bg-opt-yellow/25 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Lock size={12} />
             {resetting ? 'Resetting...' : 'Reset Password'}

@@ -21,17 +21,17 @@ const COMPONENT_ICON = { hook: Sparkles, body_angle: MessageSquare, scene: Camer
 function ComponentSlot({ slot, component }) {
   const Icon = COMPONENT_ICON[slot]
   if (!component) return (
-    <div className="bg-bg-card border border-dashed border-border-default rounded-2xl p-3">
+    <div className="bg-bg-card border border-dashed border-border-default rounded-sm p-3">
       <p className="text-[9px] uppercase tracking-wider text-text-400">{slot.replace('_', ' ')}</p>
       <p className="text-sm text-text-400 mt-1">Not set</p>
     </div>
   )
   return (
-    <Link to={`/sales/ads/components/${encodeURIComponent(component.component_id)}`} className="bg-bg-card border border-border-default rounded-2xl p-3 hover:border-opt-yellow/40 transition-colors block">
+    <Link to={`/sales/ads/components/${encodeURIComponent(component.component_id)}`} className="bg-bg-card border border-border-default rounded-sm p-3 hover:border-opt-yellow/40 transition-colors block">
       <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-wider text-text-400">
         <Icon size={10} /> {slot.replace('_', ' ')}
       </div>
-      <p className="text-sm font-mono text-opt-yellow mt-1">{component.component_id}</p>
+      <p className="text-sm font-mono text-text-primary mt-1">{component.component_id}</p>
       <p className="text-xs text-text-secondary truncate">{component.label}</p>
     </Link>
   )
@@ -118,13 +118,13 @@ export default function VariantDetail() {
     }
   }, [perf])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
 
   if (error || !variant) {
     return (
       <div>
-        <Link to="/sales/ads" className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3"><ChevronLeft size={14} /> Back</Link>
-        <div className="bg-danger/10 border border-danger/30 text-danger rounded-2xl p-4 flex items-center gap-2">
+        <Link to="/sales/ads" className="text-xs text-text-400 hover:text-text-primary flex items-center gap-1 mb-3"><ChevronLeft size={14} /> Back</Link>
+        <div className="bg-danger/10 border border-danger/30 text-danger rounded-sm p-4 flex items-center gap-2">
           <AlertTriangle size={16} /> <span>{error || `Variant ${variantId} not found`}</span>
         </div>
       </div>
@@ -140,16 +140,16 @@ export default function VariantDetail() {
             if (window.history.length > 1) navigate(-1)
             else navigate('/sales/ads/variants')
           }}
-          className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1"
+          className="text-xs text-text-400 hover:text-text-primary flex items-center gap-1"
         >
           <ChevronLeft size={14} /> Back
         </button>
-        <Link to="/sales/ads/variants" className="text-[10px] text-text-400 hover:text-opt-yellow uppercase tracking-wider">
+        <Link to="/sales/ads/variants" className="text-[10px] text-text-400 hover:text-text-primary uppercase tracking-wider">
           All variants
         </Link>
       </div>
 
-      <div className="bg-bg-card border border-border-default rounded-2xl p-4 mb-4">
+      <div className="bg-bg-card border border-border-default rounded-sm p-4 mb-4">
         <div className="flex items-start gap-3 flex-wrap">
           <div>
             <h2 className="text-lg font-semibold text-text-primary font-mono">{variant.variant_id}</h2>
@@ -174,7 +174,7 @@ export default function VariantDetail() {
       </div>
 
       {variant.asset_url && (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-3 mb-4">
+        <div className="bg-bg-card border border-border-default rounded-sm p-3 mb-4">
           <p className="text-[10px] uppercase tracking-wider text-text-400 mb-1.5">Final asset</p>
           {/\.(mp4|webm|mov)(\?|$)/i.test(variant.asset_url) ? (
             <video src={variant.asset_url} controls className="w-full max-w-2xl rounded-lg" />
@@ -208,13 +208,13 @@ export default function VariantDetail() {
 
       <h3 className="text-xs uppercase tracking-wider text-text-400 mb-2">Linked Meta ads · {linkedAds.length}</h3>
       {linkedAds.length === 0 ? (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-6 text-center text-text-400 text-sm">
+        <div className="bg-bg-card border border-border-default rounded-sm p-6 text-center text-text-400 text-sm">
           No Meta ads currently linked to this variant. Once a Meta ad with this variant_id in its name is synced, it will auto-link here.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
           {linkedAds.map(a => (
-            <Link key={a.ad_id} to={`/sales/ads/ad/${a.ad_id}`} className="bg-bg-card border border-border-default rounded-2xl p-3 hover:border-opt-yellow/40 transition-colors">
+            <Link key={a.ad_id} to={`/sales/ads/ad/${a.ad_id}`} className="bg-bg-card border border-border-default rounded-sm p-3 hover:border-opt-yellow/40 transition-colors">
               {a.thumbnail_url && <img src={a.thumbnail_url} alt="" className="aspect-video object-cover rounded-lg mb-2" loading="lazy" />}
               <p className="text-xs text-text-primary truncate">{a.ad_name || a.ad_id}</p>
               <p className="text-[10px] text-text-400">{a.effective_status || a.status} · {a.campaign_name || '—'}</p>
@@ -228,9 +228,9 @@ export default function VariantDetail() {
 
 function Tile({ label, value, highlight }) {
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl p-3">
+    <div className="bg-bg-card border border-border-default rounded-sm p-3">
       <p className="text-[10px] uppercase tracking-wider text-text-400">{label}</p>
-      <p className={`text-lg font-semibold mt-0.5 ${highlight ? 'text-opt-yellow' : 'text-text-primary'}`}>{value}</p>
+      <p className={`text-lg font-semibold mt-0.5 ${highlight ? 'text-text-primary' : 'text-text-primary'}`}>{value}</p>
     </div>
   )
 }

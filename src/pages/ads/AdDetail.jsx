@@ -17,7 +17,7 @@ function fmtN(n) { return n == null || isNaN(n) ? '—' : Math.round(n).toLocale
 
 function StatTile({ label, value, sub }) {
   return (
-    <div className="bg-bg-card border border-border-default rounded-2xl p-3">
+    <div className="bg-bg-card border border-border-default rounded-sm p-3">
       <p className="text-[10px] uppercase tracking-wider text-text-400">{label}</p>
       <p className="text-lg font-semibold text-text-primary mt-0.5">{value}</p>
       {sub && <p className="text-[10px] text-text-400 mt-0.5">{sub}</p>}
@@ -97,13 +97,13 @@ export default function AdDetail() {
     return { path: `M ${points.join(' L ')}`, w, h }
   }, [stats])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
 
   if (error || !ad) {
     return (
       <div className="max-w-3xl mx-auto">
-        <Link to="/sales/ads/list" className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3"><ChevronLeft size={14} /> Back to Ad Performance</Link>
-        <div className="bg-danger/10 border border-danger/30 text-danger rounded-2xl p-4 flex items-center gap-2">
+        <Link to="/sales/ads/list" className="text-xs text-text-400 hover:text-text-primary flex items-center gap-1 mb-3"><ChevronLeft size={14} /> Back to Ad Performance</Link>
+        <div className="bg-danger/10 border border-danger/30 text-danger rounded-sm p-4 flex items-center gap-2">
           <AlertTriangle size={16} /> <span>{error || `Ad ${id} not found`}</span>
         </div>
       </div>
@@ -112,13 +112,13 @@ export default function AdDetail() {
 
   return (
     <div className="max-w-[1400px] mx-auto">
-      <Link to="/sales/ads/list" className="text-xs text-text-400 hover:text-opt-yellow flex items-center gap-1 mb-3">
+      <Link to="/sales/ads/list" className="text-xs text-text-400 hover:text-text-primary flex items-center gap-1 mb-3">
         <ChevronLeft size={14} /> Back to Ad Performance
       </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         {/* Creative preview */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-3">
+        <div className="bg-bg-card border border-border-default rounded-sm p-3">
           {ad.asset_type === 'video' && ad.asset_url ? (
             <video src={ad.asset_url} poster={ad.thumbnail_url || undefined} controls preload="metadata" className="w-full rounded-lg bg-bg-primary" />
           ) : ad.thumbnail_url || ad.asset_url ? (
@@ -129,7 +129,7 @@ export default function AdDetail() {
         </div>
 
         {/* Meta */}
-        <div className="bg-bg-card border border-border-default rounded-2xl p-4 space-y-3">
+        <div className="bg-bg-card border border-border-default rounded-sm p-4 space-y-3">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-text-400">Ad</p>
             <p className="text-lg font-semibold text-text-primary">{ad.ad_name || ad.ad_id}</p>
@@ -137,7 +137,7 @@ export default function AdDetail() {
               <VariantPill variantId={ad.variant_id} matchStatus={ad.variant_match_status} />
               <button
                 onClick={() => setTagOpen(true)}
-                className="flex items-center gap-1 text-[10px] text-opt-yellow hover:underline uppercase tracking-wider"
+                className="flex items-center gap-1 text-[10px] text-text-primary hover:underline uppercase tracking-wider"
               >
                 <Tag size={10} /> {ad.variant_id ? 'Re-tag' : 'Tag with variant'}
               </button>
@@ -156,7 +156,7 @@ export default function AdDetail() {
           {ad.destination_url && (
             <div>
               <p className="text-[10px] uppercase tracking-wider text-text-400">Destination</p>
-              <a href={ad.destination_url} target="_blank" rel="noreferrer" className="text-xs text-opt-yellow hover:underline flex items-center gap-1 break-all">
+              <a href={ad.destination_url} target="_blank" rel="noreferrer" className="text-xs text-text-primary hover:underline flex items-center gap-1 break-all">
                 {ad.destination_url} <ExternalLink size={10} />
               </a>
             </div>
@@ -177,16 +177,16 @@ export default function AdDetail() {
 
       {/* Spend sparkline */}
       {chartPath && (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-3 mb-4">
+        <div className="bg-bg-card border border-border-default rounded-sm p-3 mb-4">
           <p className="text-[10px] uppercase tracking-wider text-text-400 mb-1.5">Daily spend ({stats[0].date} → {stats[stats.length - 1].date})</p>
           <svg viewBox={`0 0 ${chartPath.w} ${chartPath.h}`} className="w-full h-20">
-            <path d={chartPath.path} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-opt-yellow" />
+            <path d={chartPath.path} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-text-primary" />
           </svg>
         </div>
       )}
 
       {/* Daily table */}
-      <div className="bg-bg-card border border-border-default rounded-2xl p-3 overflow-x-auto">
+      <div className="bg-bg-card border border-border-default rounded-sm p-3 overflow-x-auto">
         <p className="text-[10px] uppercase tracking-wider text-text-400 mb-2">Daily breakdown</p>
         <table className="w-full text-xs">
           <thead className="text-text-400 text-[10px] uppercase tracking-wider">
@@ -219,7 +219,7 @@ export default function AdDetail() {
                   <td className="py-1.5 text-right">{fmt$(cpm)}</td>
                   <td className="py-1.5 text-right">{fmtPct(hook)}</td>
                   <td className="py-1.5 text-right">{fmtN(s.results)}</td>
-                  <td className="py-1.5 text-right text-opt-yellow">{fmt$(cpa)}</td>
+                  <td className="py-1.5 text-right text-text-primary">{fmt$(cpa)}</td>
                 </tr>
               )
             })}

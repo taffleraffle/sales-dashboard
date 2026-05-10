@@ -130,10 +130,10 @@ export default function SetterOverview() {
     return (
       <div className="space-y-6 animate-pulse">
         <div className="flex items-center justify-between">
-          <div className="h-8 w-48 bg-bg-card rounded-xl" />
-          <div className="h-8 w-40 bg-bg-card rounded-xl" />
+          <div className="h-8 w-48 bg-bg-card rounded-sm" />
+          <div className="h-8 w-40 bg-bg-card rounded-sm" />
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
           {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="tile tile-feedback h-24" />)}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -298,10 +298,13 @@ export default function SetterOverview() {
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Setter Performance</h1>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Setters</span>
+          <h1 className="h2 mt-2">The <em>setter</em> floor.</h1>
+        </div>
         <div className="flex items-center gap-3">
-          <Link to="/sales/eod/submit?tab=setter" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-opt-yellow text-bg-primary text-xs font-semibold hover:brightness-110 transition-colors">
+          <Link to="/sales/eod/submit?tab=setter" className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-opt-yellow text-text-primary text-xs font-semibold hover:brightness-110 transition-colors">
             <Plus size={14} />
             New EOD
           </Link>
@@ -312,7 +315,7 @@ export default function SetterOverview() {
       <div className="max-w-[1600px] mx-auto">
 
       {/* Company-Level KPIs - two rows */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3 mb-6">
         <KPICard label="Total Dials" value={companyActivity.dials.toLocaleString()} />
         <KPICard label="Pickups" value={companyActivity.pickups.toLocaleString()} subtitle={`${pickupRate}% pickup`} />
         <KPICard label="Leads Worked" value={companyActivity.leads.toLocaleString()} />
@@ -367,17 +370,17 @@ export default function SetterOverview() {
                     <td className="px-3 py-2 text-right text-success">{booking.autoShows}</td>
                     <td className="px-3 py-2 text-right text-danger">{booking.autoNoShows}</td>
                     <td className="px-3 py-2 text-right font-medium text-text-primary">{booking.autoCloses}</td>
-                    <td className={`px-3 py-2 text-right font-medium ${booking.autoShowRate >= 70 ? 'text-success' : booking.autoShowRate >= 50 ? 'text-opt-yellow' : 'text-danger'}`}>{booking.autoShowRate}%</td>
-                    <td className={`px-3 py-2 text-right font-medium ${booking.autoCloseRate >= 25 ? 'text-success' : booking.autoCloseRate >= 15 ? 'text-opt-yellow' : 'text-danger'}`}>{booking.autoCloseRate}%</td>
+                    <td className={`px-3 py-2 text-right font-medium ${booking.autoShowRate >= 70 ? 'text-success' : booking.autoShowRate >= 50 ? 'text-text-primary' : 'text-danger'}`}>{booking.autoShowRate}%</td>
+                    <td className={`px-3 py-2 text-right font-medium ${booking.autoCloseRate >= 25 ? 'text-success' : booking.autoCloseRate >= 15 ? 'text-text-primary' : 'text-danger'}`}>{booking.autoCloseRate}%</td>
                   </tr>
                   <tr className="border-b border-border-default/30">
-                    <td className="px-3 py-2 font-medium text-opt-yellow">Manual Sets</td>
+                    <td className="px-3 py-2 font-medium text-text-primary">Manual Sets</td>
                     <td className="px-3 py-2 text-right font-medium">{booking.manualTotal}</td>
                     <td className="px-3 py-2 text-right text-success">{booking.manualShows}</td>
                     <td className="px-3 py-2 text-right text-danger">{booking.manualNoShows}</td>
                     <td className="px-3 py-2 text-right font-medium text-text-primary">{booking.manualCloses}</td>
-                    <td className={`px-3 py-2 text-right font-medium ${booking.manualShowRate >= 70 ? 'text-success' : booking.manualShowRate >= 50 ? 'text-opt-yellow' : 'text-danger'}`}>{booking.manualShowRate}%</td>
-                    <td className={`px-3 py-2 text-right font-medium ${booking.manualCloseRate >= 25 ? 'text-success' : booking.manualCloseRate >= 15 ? 'text-opt-yellow' : 'text-danger'}`}>{booking.manualCloseRate}%</td>
+                    <td className={`px-3 py-2 text-right font-medium ${booking.manualShowRate >= 70 ? 'text-success' : booking.manualShowRate >= 50 ? 'text-text-primary' : 'text-danger'}`}>{booking.manualShowRate}%</td>
+                    <td className={`px-3 py-2 text-right font-medium ${booking.manualCloseRate >= 25 ? 'text-success' : booking.manualCloseRate >= 15 ? 'text-text-primary' : 'text-danger'}`}>{booking.manualCloseRate}%</td>
                   </tr>
                 </tbody>
                 <tfoot>
@@ -402,7 +405,7 @@ export default function SetterOverview() {
         <span className="text-text-secondary">
           Looking for Speed to Lead, GHL Pipeline Performance, or the live leads table?
         </span>
-        <Link to="/sales/pipeline" className="text-opt-yellow font-medium hover:underline whitespace-nowrap">
+        <Link to="/sales/pipeline" className="text-text-primary font-medium hover:underline whitespace-nowrap">
           Open Pipeline Performance →
         </Link>
       </div>
@@ -490,12 +493,12 @@ export default function SetterOverview() {
             const tMcSet = totMcs > 0 ? ((totSets / totMcs) * 100).toFixed(1) : 0
             const tCallSet = totDials > 0 ? ((totSets / totDials) * 100).toFixed(1) : 0
             return (
-              <div className="bg-opt-yellow/[0.06] border border-opt-yellow/30 rounded-2xl px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
+              <div className="bg-opt-yellow/[0.06] border border-opt-yellow/30 rounded-sm px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
                 <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
                   <div className="w-9 h-9 rounded-full bg-opt-yellow/25 border border-opt-yellow/50 flex items-center justify-center">
-                    <span className="text-[11px] font-bold text-opt-yellow">∑</span>
+                    <span className="text-[11px] font-bold text-text-primary">∑</span>
                   </div>
-                  <span className="text-sm font-semibold text-opt-yellow">Team Total</span>
+                  <span className="text-sm font-semibold text-text-primary">Team Total</span>
                 </div>
                 <div className="flex items-baseline gap-4 sm:gap-6">
                   <SetterStatBlock label="Sets" value={totSets} />
@@ -548,7 +551,7 @@ export default function SetterOverview() {
                   return (
                     <tr key={l.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50">
                       <td className="px-3 py-1.5 font-medium text-text-primary truncate max-w-[160px]">{l.lead_name || '—'}</td>
-                      <td className="px-3 py-1.5 text-opt-yellow">{setterName}</td>
+                      <td className="px-3 py-1.5 text-text-primary">{setterName}</td>
                       <td className="px-3 py-1.5 text-text-400 capitalize truncate max-w-[100px]" title={l.lead_source || ''}>{sourceLabel}</td>
                       <td className="px-3 py-1.5">
                         <span className={`text-[10px] px-1.5 py-0.5 rounded capitalize ${statusStyle(l.status)}`}>
@@ -572,7 +575,7 @@ export default function SetterOverview() {
           {allLeads.length > 10 && (
             <button
               onClick={() => setShowAllRecent(v => !v)}
-              className="w-full py-3 text-xs font-medium text-opt-yellow hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default shrink-0"
+              className="w-full py-3 text-xs font-medium text-text-primary hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default shrink-0"
             >
               {showAllRecent ? 'Show less' : `Show all ${Math.min(allLeads.length, 50)} leads`}
             </button>
@@ -598,7 +601,7 @@ function setterInitials(name) {
 
 function SetterPill({ label, value, good, ok }) {
   const color = good ? 'bg-success/15 text-success border-success/30'
-    : ok ? 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30'
+    : ok ? 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30'
     : 'bg-danger/15 text-danger border-danger/30'
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium ${color}`}>
@@ -610,7 +613,7 @@ function SetterPill({ label, value, good, ok }) {
 
 function SetterStatBlock({ label, value, accent }) {
   const color = accent === 'success' ? 'text-success'
-    : accent === 'opt-yellow' ? 'text-opt-yellow'
+    : accent === 'opt-yellow' ? 'text-text-primary'
     : accent === 'muted' ? 'text-text-secondary'
     : 'text-text-primary'
   return (
@@ -637,7 +640,7 @@ function SetterLeaderboardRow({ setter, onClick }) {
     >
       {/* Name + initials */}
       <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
-        <div className="w-9 h-9 rounded-full bg-opt-yellow/15 border border-opt-yellow/30 flex items-center justify-center shrink-0 text-[11px] font-bold text-opt-yellow">
+        <div className="w-9 h-9 rounded-full bg-opt-yellow/15 border border-opt-yellow/30 flex items-center justify-center shrink-0 text-[11px] font-bold text-text-primary">
           {setterInitials(s.name)}
         </div>
         <div className="min-w-0">

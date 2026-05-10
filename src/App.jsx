@@ -21,6 +21,8 @@ const SetterKPIHistory = lazy(() => import('./pages/SetterKPIHistory'))
 const PipelinePerformance = lazy(() => import('./pages/PipelinePerformance'))
 const MarketingPerformance = lazy(() => import('./pages/MarketingPerformance'))
 const AdsLayout = lazy(() => import('./pages/ads/AdsLayout'))
+const AdsGallery = lazy(() => import('./pages/ads/AdsGallery'))
+const AdsMessaging = lazy(() => import('./pages/ads/AdsMessaging'))
 const AdsList = lazy(() => import('./pages/ads/AdsList'))
 const AdsHooks = lazy(() => import('./pages/ads/AdsHooks'))
 const AdsBodies = lazy(() => import('./pages/ads/AdsBodies'))
@@ -65,8 +67,8 @@ function PageSkeleton() {
   return (
     <div className="space-y-4 animate-pulse max-w-[1600px] mx-auto">
       <div className="flex items-center justify-between">
-        <div className="h-7 w-48 bg-bg-card rounded-xl" />
-        <div className="h-8 w-40 bg-bg-card rounded-xl" />
+        <div className="h-7 w-48 bg-bg-card rounded-sm" />
+        <div className="h-8 w-40 bg-bg-card rounded-sm" />
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[1, 2, 3, 4].map(i => <div key={i} className="tile tile-feedback h-24" />)}
@@ -82,7 +84,7 @@ function ProtectedRoute({ children }) {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-bg-primary flex items-center justify-center">
-        <Loader className="animate-spin text-opt-yellow" size={32} />
+        <Loader className="animate-spin text-text-primary" size={32} />
       </div>
     )
   }
@@ -124,7 +126,9 @@ export default function App() {
               <Route path="/sales/pipeline" element={<Suspense fallback={<PageSkeleton />}><PipelinePerformance /></Suspense>} />
               <Route path="/sales/marketing" element={<Suspense fallback={<PageSkeleton />}><MarketingPerformance /></Suspense>} />
               <Route path="/sales/ads" element={<Suspense fallback={<PageSkeleton />}><AdsLayout /></Suspense>}>
-                <Route index element={<Navigate to="/sales/ads/list" replace />} />
+                <Route index element={<Navigate to="/sales/ads/gallery" replace />} />
+                <Route path="gallery" element={<Suspense fallback={<PageSkeleton />}><AdsGallery /></Suspense>} />
+                <Route path="messaging" element={<Suspense fallback={<PageSkeleton />}><AdsMessaging /></Suspense>} />
                 <Route path="list" element={<Suspense fallback={<PageSkeleton />}><AdsList /></Suspense>} />
                 <Route path="hooks" element={<Suspense fallback={<PageSkeleton />}><AdsHooks /></Suspense>} />
                 <Route path="bodies" element={<Suspense fallback={<PageSkeleton />}><AdsBodies /></Suspense>} />

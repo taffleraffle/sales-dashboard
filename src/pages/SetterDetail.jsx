@@ -212,7 +212,7 @@ export default function SetterDetail() {
   }
 
   if (!member) {
-    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
   }
 
   // WAVV-based stats from pre-aggregated data
@@ -294,10 +294,22 @@ export default function SetterDetail() {
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
-          <h1 className="text-lg sm:text-xl font-bold">{member.name}</h1>
-          <p className="text-xs sm:text-sm text-text-400">Setter Performance</p>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Setter detail</span>
+          <h1 className="h2 mt-2">{member.name}</h1>
+          <p
+            className="mt-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            Setter · performance
+          </p>
         </div>
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
@@ -335,10 +347,10 @@ export default function SetterDetail() {
         return (
           <div className="tile tile-feedback p-4 mb-6">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-[11px] text-opt-yellow uppercase font-medium">Daily KPI Targets</h3>
+              <h3 className="text-[11px] text-text-primary uppercase font-medium">Daily KPI Targets</h3>
               <button
                 onClick={() => setEditingKpis(!editingKpis)}
-                className="text-[10px] text-text-400 hover:text-opt-yellow transition-colors flex items-center gap-1"
+                className="text-[10px] text-text-400 hover:text-text-primary transition-colors flex items-center gap-1"
               >
                 <Edit3 size={10} />
                 {editingKpis ? 'Done' : 'Edit Targets'}
@@ -350,7 +362,7 @@ export default function SetterDetail() {
                 const isHit = k.value >= k.target
                 const isClose = pct >= 70
                 const color = isHit ? 'bg-success' : isClose ? 'bg-opt-yellow' : 'bg-danger'
-                const textColor = isHit ? 'text-success' : isClose ? 'text-opt-yellow' : 'text-danger'
+                const textColor = isHit ? 'text-success' : isClose ? 'text-text-primary' : 'text-danger'
                 return (
                   <div key={k.key}>
                     <div className="flex items-baseline justify-between mb-1">
@@ -388,8 +400,8 @@ export default function SetterDetail() {
             {/* STL Configuration — always visible */}
             <div className="mt-4 pt-3 border-t border-border-default/50">
               <div className="flex items-center gap-1.5 mb-2">
-                <Clock size={11} className="text-opt-yellow" />
-                <span className="text-[11px] text-opt-yellow uppercase font-medium">Speed to Lead Config</span>
+                <Clock size={11} className="text-text-primary" />
+                <span className="text-[11px] text-text-primary uppercase font-medium">Speed to Lead Config</span>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -447,10 +459,10 @@ export default function SetterDetail() {
                   </select>
                 </div>
               </div>
-              {savingStlHours && <p className="text-[9px] text-opt-yellow mt-1">Saving...</p>}
+              {savingStlHours && <p className="text-[9px] text-text-primary mt-1">Saving...</p>}
             </div>
 
-            <Link to={`/sales/setters/${id}/kpi-history`} className="text-xs text-opt-yellow hover:underline mt-3 inline-block">
+            <Link to={`/sales/setters/${id}/kpi-history`} className="text-xs text-text-primary hover:underline mt-3 inline-block">
               View KPI & Target History →
             </Link>
           </div>
@@ -461,7 +473,7 @@ export default function SetterDetail() {
       <CommissionWidget memberId={id} />
 
       {/* Activity KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
         <KPICard label="Total Dials" value={effectiveDials.toLocaleString()} subtitle={hasWavvData ? 'WAVV' : ''} />
         <KPICard label="Leads Called" value={effectiveLeads} subtitle={hasWavvData ? 'unique contacts' : ''} />
         <KPICard label="Pickups" value={effectivePickups} subtitle={`${effectivePickupRate}% rate`} />
@@ -568,14 +580,14 @@ export default function SetterDetail() {
                       const bestCall = g.calls.reduce((best, c) => (c.call_duration || 0) > (best.call_duration || 0) ? c : best, g.calls[0])
                       const bestDur = bestCall.call_duration || 0
                       const bestType = bestDur >= 60 ? 'MC' : bestDur > 45 ? 'Pickup' : 'No Answer'
-                      const bestColor = bestDur >= 60 ? 'text-success' : bestDur > 45 ? 'text-opt-yellow' : 'text-text-400'
+                      const bestColor = bestDur >= 60 ? 'text-success' : bestDur > 45 ? 'text-text-primary' : 'text-text-400'
                       const lastCall = g.calls[0] // already sorted desc
                       const isExpanded = expandedCall === g.key
                       const hasMultiple = g.calls.length > 1
                       const pipeInfo = phoneToPipeline[normPhone(g.phone)]
                       const stageColor = pipeInfo?.stage ? (
                         /new lead|triage/i.test(pipeInfo.stage) ? 'text-blue-400'
-                        : /contact|booked/i.test(pipeInfo.stage) ? 'text-opt-yellow'
+                        : /contact|booked/i.test(pipeInfo.stage) ? 'text-text-primary'
                         : /set call|strategy/i.test(pipeInfo.stage) ? 'text-success'
                         : /no show|lost|dead/i.test(pipeInfo.stage) ? 'text-danger'
                         : /nurture|follow/i.test(pipeInfo.stage) ? 'text-purple-400'
@@ -610,7 +622,7 @@ export default function SetterDetail() {
                           {isExpanded && g.calls.map((c, ci) => {
                             const dur = c.call_duration || 0
                             const type = dur >= 60 ? 'MC' : dur > 45 ? 'Pickup' : 'No Answer'
-                            const typeColor = dur >= 60 ? 'text-success' : dur > 45 ? 'text-opt-yellow' : 'text-text-400'
+                            const typeColor = dur >= 60 ? 'text-success' : dur > 45 ? 'text-text-primary' : 'text-text-400'
                             return (
                               <tr key={ci} className="bg-bg-primary/50 border-b border-border-default/20">
                                 <td className="px-3 py-1"></td>
@@ -661,7 +673,7 @@ export default function SetterDetail() {
                 <tbody>
                   {myEodReports.map(eod => (
                     <tr key={eod.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer" onClick={() => navigate(`/sales/eod/submit?tab=setter&member=${id}&date=${eod.report_date}`)}>
-                      <td className="px-3 py-2 font-medium text-opt-yellow hover:underline">{eod.report_date}</td>
+                      <td className="px-3 py-2 font-medium text-text-primary hover:underline">{eod.report_date}</td>
                       <td className="px-3 py-2 text-right">{eod.outbound_calls || 0}</td>
                       <td className="px-3 py-2 text-right">{eod.total_leads || 0}</td>
                       <td className="px-3 py-2 text-right">{eod.pickups || 0}</td>

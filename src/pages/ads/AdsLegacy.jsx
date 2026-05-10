@@ -44,7 +44,7 @@ export default function AdsLegacy() {
     return () => { cancelled = true }
   }, [])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
 
   return (
     <div>
@@ -56,17 +56,17 @@ export default function AdsLegacy() {
       </div>
 
       {error && (
-        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-xl px-3 py-2">
+        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-sm px-3 py-2">
           <AlertTriangle size={14} /> <span>{error}</span>
         </div>
       )}
 
       {!rows.length ? (
-        <div className="bg-bg-card border border-border-default rounded-2xl p-8 text-center text-text-400 text-sm">
+        <div className="bg-bg-card border border-border-default rounded-sm p-8 text-center text-text-400 text-sm">
           No legacy mappings. Add rows to library.legacy_ad_mapping to attribute pre-SOP ads.
         </div>
       ) : (
-        <div className="bg-bg-card border border-border-default rounded-2xl overflow-x-auto">
+        <div className="bg-bg-card border border-border-default rounded-sm overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="text-text-400 text-[10px] uppercase tracking-wider">
               <tr className="border-b border-border-default">
@@ -81,12 +81,12 @@ export default function AdsLegacy() {
               {rows.map(r => (
                 <tr key={r.id} className="border-b border-border-default/40 hover:bg-bg-card-hover">
                   <td className="px-3 py-2">
-                    <Link to={`/sales/ads/ad/${r.meta_ad_id}`} className="text-opt-yellow font-mono text-[11px] hover:underline">{r.meta_ad_id}</Link>
+                    <Link to={`/sales/ads/ad/${r.meta_ad_id}`} className="text-text-primary font-mono text-[11px] hover:underline">{r.meta_ad_id}</Link>
                     {r.meta_ad_name && <p className="text-[10px] text-text-400 truncate max-w-xs">{r.meta_ad_name}</p>}
                   </td>
                   <td className="px-3 py-2">
                     {r.variant?.variant_id
-                      ? <Link to={`/sales/ads/variants/${encodeURIComponent(r.variant.variant_id)}`} className="text-opt-yellow font-mono text-[11px] hover:underline">{r.variant.variant_id}</Link>
+                      ? <Link to={`/sales/ads/variants/${encodeURIComponent(r.variant.variant_id)}`} className="text-text-primary font-mono text-[11px] hover:underline">{r.variant.variant_id}</Link>
                       : <span className="text-text-400">—</span>
                     }
                   </td>

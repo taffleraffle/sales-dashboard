@@ -454,7 +454,7 @@ function DealUpdater({ closerId, onClose, onSaved }) {
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
           <div className="flex items-center gap-2">
-            <Edit3 size={14} className="text-opt-yellow" />
+            <Edit3 size={14} className="text-text-primary" />
             <span className="text-sm font-semibold">Update Deal</span>
           </div>
           <button onClick={onClose} className="text-text-400 hover:text-text-primary"><X size={14} /></button>
@@ -465,7 +465,7 @@ function DealUpdater({ closerId, onClose, onSaved }) {
             <div className="text-3xl mb-2">&#10003;</div>
             <p className="text-sm font-medium text-success mb-1">Deal updated successfully</p>
             <p className="text-xs text-text-400">Stats have been retroactively updated for {selected?.date}</p>
-            <button onClick={onClose} className="mt-4 px-4 py-2 rounded-xl bg-opt-yellow text-bg-primary text-sm font-semibold hover:brightness-110 transition-all">Done</button>
+            <button onClick={onClose} className="mt-4 px-4 py-2 rounded-sm bg-opt-yellow text-text-primary text-sm font-semibold hover:brightness-110 transition-all">Done</button>
           </div>
         ) : !selected ? (
           <>
@@ -523,10 +523,10 @@ function DealUpdater({ closerId, onClose, onSaved }) {
         ) : (
           <div className="p-4 space-y-4">
             {/* Selected deal header */}
-            <div className="bg-bg-primary rounded-xl p-3">
+            <div className="bg-bg-primary rounded-sm p-3">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-semibold">{selected.name}</span>
-                <button onClick={() => setSelected(null)} className="text-[10px] text-text-400 hover:text-opt-yellow">Change</button>
+                <button onClick={() => setSelected(null)} className="text-[10px] text-text-400 hover:text-text-primary">Change</button>
               </div>
               <div className="flex items-center gap-2 text-[10px] text-text-400">
                 <span>Original date: {selected.date}</span>
@@ -600,7 +600,7 @@ function DealUpdater({ closerId, onClose, onSaved }) {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-opt-yellow text-bg-primary font-semibold text-sm hover:brightness-110 transition-all disabled:opacity-50"
+                className="flex items-center gap-1.5 px-5 py-2 rounded-sm bg-opt-yellow text-text-primary font-semibold text-sm hover:brightness-110 transition-all disabled:opacity-50"
               >
                 {saving ? <Loader size={14} className="animate-spin" /> : <Check size={14} />}
                 {saving ? 'Updating...' : 'Update Deal'}
@@ -717,8 +717,8 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
 
   return (
     <div className="relative">
-      <div className="flex items-center gap-2 bg-bg-card border border-opt-yellow/30 rounded-2xl px-3 py-2">
-        <span className="text-xs text-opt-yellow">{label} {index + 1}:</span>
+      <div className="flex items-center gap-2 bg-bg-card border border-opt-yellow/30 rounded-sm px-3 py-2">
+        <span className="text-xs text-text-primary">{label} {index + 1}:</span>
         <Search size={12} className="text-text-400" />
         <input
           ref={inputRef}
@@ -969,7 +969,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
       {confirmed && (
         <div className="space-y-4">
           {/* Header with View/Edit buttons */}
-          <div className="bg-bg-card border border-success/30 rounded-2xl p-4">
+          <div className="bg-bg-card border border-success/30 rounded-sm p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-success/15 flex items-center justify-center">
@@ -982,7 +982,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
               </div>
               <button
                 onClick={() => setConfirmed(false)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-opt-yellow border border-border-default hover:border-opt-yellow/30 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-text-primary border border-border-default hover:border-opt-yellow/30 transition-colors"
               >
                 <Edit3 size={12} />
                 Edit
@@ -992,7 +992,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
 
           {/* Activity — read-only cards matching edit layout */}
           <div className="tile tile-feedback p-4">
-            <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">
+            <h3 className="text-[11px] text-text-primary uppercase font-medium mb-3">
               {selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()} &middot; Activity
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
@@ -1017,19 +1017,19 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           {/* Sets — assigned leads read-only */}
           {savedSetterLeads.filter(l => l.status !== 'rescheduled').length > 0 && (
             <div className="tile tile-feedback p-4">
-              <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">
+              <h3 className="text-[11px] text-text-primary uppercase font-medium mb-3">
                 Sets ({savedSetterLeads.filter(l => l.status !== 'rescheduled').length})
               </h3>
               <div className="space-y-2">
                 {savedSetterLeads.filter(l => l.status !== 'rescheduled').map((lead, i) => {
                   const statusBadge = lead.status === 'set' ? { label: 'Set', cls: 'bg-success/15 text-success' }
-                    : lead.status === 'showed' || lead.status === 'not_closed' ? { label: 'Showed', cls: 'bg-opt-yellow/15 text-opt-yellow' }
+                    : lead.status === 'showed' || lead.status === 'not_closed' ? { label: 'Showed', cls: 'bg-opt-yellow/15 text-text-primary' }
                     : lead.status === 'closed' ? { label: 'Closed', cls: 'bg-success/15 text-success' }
                     : lead.status === 'no_show' ? { label: 'No Show', cls: 'bg-danger/15 text-danger' }
                     : { label: lead.status || 'Set', cls: 'bg-success/15 text-success' }
                   return (
-                    <div key={lead.id} className="bg-bg-primary border border-border-default rounded-xl px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-2 sm:gap-3">
-                      <span className="text-[10px] text-opt-yellow font-semibold w-12">Set {i + 1}:</span>
+                    <div key={lead.id} className="bg-bg-primary border border-border-default rounded-sm px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-2 sm:gap-3">
+                      <span className="text-[10px] text-text-primary font-semibold w-12">Set {i + 1}:</span>
                       <span className="font-medium text-sm">{lead.lead_name}</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${statusBadge.cls}`}>{statusBadge.label}</span>
                       {lead.lead_source && lead.lead_source !== 'manual' && (
@@ -1056,7 +1056,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
               </h3>
               <div className="space-y-2">
                 {savedSetterLeads.filter(l => l.status === 'rescheduled').map((lead, i) => (
-                  <div key={lead.id} className="bg-bg-primary border border-border-default rounded-xl px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-2 sm:gap-3">
+                  <div key={lead.id} className="bg-bg-primary border border-border-default rounded-sm px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-2 sm:gap-3">
                     <span className="text-[10px] text-blue-400 font-semibold w-16">Resched {i + 1}:</span>
                     <span className="font-medium text-sm">{lead.lead_name}</span>
                     <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-500/15 text-blue-400">Rescheduled</span>
@@ -1102,7 +1102,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           <p className="text-text-400 text-sm mb-3">No end of day submitted for {selectedName} on {formatDateLabel(selectedDate).split(' — ').pop() || selectedDate}.</p>
           <button
             onClick={() => setFilingNew(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium bg-opt-yellow text-bg-primary hover:bg-opt-yellow/80 transition-colors"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-sm text-xs font-medium bg-opt-yellow text-text-primary hover:bg-opt-yellow/80 transition-colors"
           >
             <Plus size={14} />
             File EOD
@@ -1111,10 +1111,10 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
       )}
 
       {/* Pipeline KPIs — always show */}
-      {!confirmed && (eodExists !== false || filingNew) && <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
+      {!confirmed && (eodExists !== false || filingNew) && <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2">
         {[
           ['Sets (30d)', pipeline.total, ''],
-          ['Pending', pipeline.set, 'text-opt-yellow'],
+          ['Pending', pipeline.set, 'text-text-primary'],
           ['Showed', pipeline.showed, 'text-success'],
           ['No Shows', pipeline.noShow, 'text-danger'],
           ['Closed', pipeline.closed, 'text-success'],
@@ -1135,12 +1135,12 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           {/* Activity inputs */}
           <div className="tile tile-feedback p-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-[11px] text-opt-yellow uppercase font-medium">
+              <h3 className="text-[11px] text-text-primary uppercase font-medium">
                 {selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()} &middot; Activity
               </h3>
               {wavvStats && (
                 <span className="flex items-center gap-1 text-[10px] text-text-400">
-                  <Zap size={10} className="text-opt-yellow" />
+                  <Zap size={10} className="text-text-primary" />
                   WAVV: {wavvStats.dials} dials auto-filled
                 </span>
               )}
@@ -1175,7 +1175,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           {/* Lead assignment for each set */}
           {setterData.sets > 0 && (
             <div className="tile tile-feedback p-4">
-              <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">
+              <h3 className="text-[11px] text-text-primary uppercase font-medium mb-3">
                 Assign Leads to Sets ({setLeads.filter(Boolean).length}/{setterData.sets})
               </h3>
               <p className="text-[10px] text-text-400 mb-3">Search and select the lead for each set appointment.</p>
@@ -1257,7 +1257,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
             <button
               onClick={handleConfirmSetter}
               disabled={submitting || !allLeadsAssigned}
-              className="flex items-center gap-2 px-6 py-2 rounded font-medium text-sm bg-opt-yellow text-bg-primary hover:bg-opt-yellow/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-2 px-6 py-2 rounded font-medium text-sm bg-opt-yellow text-text-primary hover:bg-opt-yellow/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {submitting ? <Loader size={14} className="animate-spin" /> : <Check size={14} />}
               {submitting ? 'Saving...' : 'Confirm EOD'}
@@ -1325,7 +1325,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
         {/* Right: weekly summary sidebar */}
         <div>
           <div className="tile tile-feedback p-4 sticky top-20">
-            <h3 className="text-[11px] text-opt-yellow uppercase font-medium mb-3">This Week</h3>
+            <h3 className="text-[11px] text-text-primary uppercase font-medium mb-3">This Week</h3>
 
             <div className="grid grid-cols-3 gap-2 mb-3">
               <div className="text-center">
@@ -2225,17 +2225,29 @@ export default function EODReview() {
   if (eodView === 'history') {
     return (
       <div>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">End of Day</h1>
-            <p className="text-xs sm:text-sm text-text-400 mt-0.5 sm:mt-1">Team submission history</p>
+            <span className="eyebrow eyebrow-accent">OPT Sales · End of day · History</span>
+            <h1 className="h2 mt-2">A <em>record</em> of the days.</h1>
+            <p
+              className="mt-2"
+              style={{
+                fontFamily: 'var(--mono)',
+                fontSize: 10,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: 'var(--ink-3)',
+              }}
+            >
+              Team submission history
+            </p>
           </div>
         </div>
         <div className="flex gap-2 mb-6">
-          <button onClick={() => setEodView('submit')} className="px-4 py-2 rounded-xl text-xs font-medium text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all">
+          <button onClick={() => setEodView('submit')} className="px-4 py-2 rounded-sm text-xs font-medium text-text-400 hover:text-text-primary hover:bg-bg-card-hover transition-all">
             Submit EOD
           </button>
-          <button className="px-4 py-2 rounded-xl text-xs font-medium bg-opt-yellow text-bg-primary shadow-sm">
+          <button className="px-4 py-2 rounded-sm text-xs font-medium bg-opt-yellow text-text-primary shadow-sm">
             History
           </button>
         </div>
@@ -2246,23 +2258,42 @@ export default function EODReview() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+      {/* Header — editorial */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
           <button
             onClick={() => window.location.assign('/sales/eod')}
-            className="flex items-center gap-1 text-[11px] text-text-400 hover:text-opt-yellow transition-colors mb-1"
+            className="flex items-center gap-1 mb-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 9.5,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
           >
             ← Back to Dashboard
           </button>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">End of Day</h1>
-          <p className="text-xs sm:text-sm text-text-400 mt-0.5 sm:mt-1">{eodStarted ? 'File your daily report' : 'Review and submit EOD reports'}</p>
+          <span className="eyebrow eyebrow-accent">OPT Sales · End of day</span>
+          <h1 className="h2 mt-2">{eodStarted ? <>File <em>today's</em> report.</> : <>The <em>day's</em> review.</>}</h1>
+          <p
+            className="mt-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            {eodStarted ? 'File · daily report' : 'Review · submit EOD'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {!eodStarted && (
             <button
               onClick={() => setEodView('history')}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-border-default text-text-400 hover:text-text-primary hover:bg-bg-card-hover font-medium text-sm transition-all"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-sm border border-border-default text-text-400 hover:text-text-primary hover:bg-bg-card-hover font-medium text-sm transition-all"
             >
               History
             </button>
@@ -2270,7 +2301,7 @@ export default function EODReview() {
           {!eodStarted && (
             <button
               onClick={() => setEodStarted(true)}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-opt-yellow text-bg-primary font-semibold text-sm hover:brightness-110 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
+              className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-sm bg-opt-yellow text-text-primary font-semibold text-sm hover:brightness-110 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
             >
               <Plus size={16} />
               New EOD
@@ -2294,7 +2325,7 @@ export default function EODReview() {
                   key={card.t}
                   onClick={() => { if (allowed) { setTab(card.t); setEodStarted(true) } }}
                   disabled={!allowed}
-                  className={`bg-bg-card border rounded-2xl p-6 text-left transition-all ${
+                  className={`bg-bg-card border rounded-sm p-6 text-left transition-all ${
                     allowed ? 'border-border-default hover:border-opt-yellow/40 hover:bg-bg-card-hover cursor-pointer' : 'border-border-default opacity-50 cursor-not-allowed'
                   }`}
                 >
@@ -2343,7 +2374,7 @@ export default function EODReview() {
                         >
                           <td className="py-2 px-4 text-text-secondary">{formatDateLabel(eod.report_date)}</td>
                           <td className="py-2 px-4 font-medium">{name}</td>
-                          <td className="py-2 px-4"><span className="text-[10px] px-1.5 py-0.5 rounded bg-opt-yellow-subtle text-opt-yellow">{tab}</span></td>
+                          <td className="py-2 px-4"><span className="text-[10px] px-1.5 py-0.5 rounded bg-opt-yellow-subtle text-text-primary">{tab}</span></td>
                           <td className="py-2 px-4 text-right font-semibold">{tab === 'closer' ? (eod.closes || 0) : (eod.sets || 0)}</td>
                           <td className="py-2 px-4 text-right text-success font-medium">{tab === 'closer' ? `$${parseFloat(eod.total_cash_collected || 0).toLocaleString()}` : (eod.outbound_calls || 0)}</td>
                         </tr>
@@ -2379,7 +2410,7 @@ export default function EODReview() {
                 }}
                 disabled={!allowed}
                 className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 transition-all ${
-                  tab === t ? 'bg-opt-yellow text-bg-primary font-semibold'
+                  tab === t ? 'bg-opt-yellow text-text-primary font-semibold'
                     : allowed ? 'bg-bg-card text-text-secondary border border-border-default hover:bg-bg-card-hover'
                     : 'bg-bg-card text-text-400/50 border border-border-default cursor-not-allowed'
                 }`}
@@ -2393,7 +2424,7 @@ export default function EODReview() {
         <select
           value={selectedMember}
           onChange={e => { setSelectedMember(e.target.value); setConfirmed(false) }}
-          className="bg-bg-card border border-border-default rounded-xl px-3 py-1.5 text-sm text-text-primary"
+          className="bg-bg-card border border-border-default rounded-sm px-3 py-1.5 text-sm text-text-primary"
         >
           <option value="">Select {tab}...</option>
           {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -2417,7 +2448,7 @@ export default function EODReview() {
           value={selectedDate}
           max={today}
           onChange={e => setSelectedDate(e.target.value)}
-          className="bg-bg-card border border-border-default rounded-xl px-3 py-1.5 text-sm text-text-primary"
+          className="bg-bg-card border border-border-default rounded-sm px-3 py-1.5 text-sm text-text-primary"
         />
         <button
           onClick={() => shiftDate(1)}
@@ -2430,7 +2461,7 @@ export default function EODReview() {
         {selectedDate !== today && (
           <button
             onClick={() => setSelectedDate(today)}
-            className="text-[10px] text-opt-yellow hover:underline ml-1"
+            className="text-[10px] text-text-primary hover:underline ml-1"
           >
             Jump to today
           </button>
@@ -2439,7 +2470,7 @@ export default function EODReview() {
           <button
             onClick={tab === 'closer' ? handleRefreshCloser : handleRefreshSetter}
             disabled={syncing}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-text-400 hover:text-opt-yellow border border-border-default hover:border-opt-yellow/30 ml-auto disabled:opacity-50"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-text-400 hover:text-text-primary border border-border-default hover:border-opt-yellow/30 ml-auto disabled:opacity-50"
             title={tab === 'closer' ? 'Refresh calendar, Fathom transcripts & leads' : 'Refresh WAVV dials & stats'}
           >
             <RefreshCw size={10} className={syncing ? 'animate-spin' : ''} />
@@ -2454,7 +2485,7 @@ export default function EODReview() {
           {/* Confirmed state — read-only summary + call details with Edit button */}
           {confirmed && (
             <div className="space-y-4 mb-4">
-              <div className="bg-bg-card border border-success/30 rounded-2xl p-6">
+              <div className="bg-bg-card border border-success/30 rounded-sm p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-success/15 flex items-center justify-center">
@@ -2468,7 +2499,7 @@ export default function EODReview() {
                   {(isAdmin || (profile?.teamMemberId === selectedMember)) && (
                     <button
                       onClick={() => setConfirmed(false)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-opt-yellow border border-border-default hover:border-opt-yellow/30 transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-text-primary border border-border-default hover:border-opt-yellow/30 transition-colors"
                     >
                       <Edit3 size={12} />
                       Edit
@@ -2483,7 +2514,7 @@ export default function EODReview() {
                   const newCount = newCallsSinceSubmit.length
                   if (pendingCount === 0 && newCount === 0) return null
                   return (
-                    <div className="mb-4 flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-amber-400/40 bg-amber-400/10 text-amber-300">
+                    <div className="mb-4 flex items-center justify-between gap-3 px-4 py-2.5 rounded-sm border border-amber-400/40 bg-amber-400/10 text-amber-300">
                       <div className="text-xs">
                         <span className="font-semibold uppercase tracking-wide text-amber-200">Needs review</span>
                         <span className="ml-2">
@@ -2505,35 +2536,35 @@ export default function EODReview() {
                 })()}
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                  <div className="text-center p-3 bg-bg-primary rounded-sm">
                     <p className="text-xl font-bold">{summary.booked}</p>
                     <p className="text-[10px] text-text-400 uppercase">Booked</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-2xl" title={`${summary.liveNc} new (counted) · ${summary.liveFu} follow-up (separate)`}>
+                  <div className="text-center p-3 bg-bg-primary rounded-sm" title={`${summary.liveNc} new (counted) · ${summary.liveFu} follow-up (separate)`}>
                     <p className="text-xl font-bold">{summary.liveNc}</p>
                     <p className="text-[10px] text-text-400 uppercase">Net New</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                  <div className="text-center p-3 bg-bg-primary rounded-sm">
                     <p className="text-xl font-bold text-danger">{summary.noShows}</p>
                     <p className="text-[10px] text-text-400 uppercase">No Shows</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                  <div className="text-center p-3 bg-bg-primary rounded-sm">
                     <p className="text-xl font-bold text-blue-400">{summary.rescheduled}</p>
                     <p className="text-[10px] text-text-400 uppercase">Rescheduled</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                  <div className="text-center p-3 bg-bg-primary rounded-sm">
                     <p className="text-xl font-bold">{summary.offers}</p>
                     <p className="text-[10px] text-text-400 uppercase">Offers</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                  <div className="text-center p-3 bg-bg-primary rounded-sm">
                     <p className="text-xl font-bold text-success">{summary.closes}</p>
                     <p className="text-[10px] text-text-400 uppercase">Closes</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
-                    <p className="text-xl font-bold text-opt-yellow">${summary.cash.toLocaleString()}</p>
+                  <div className="text-center p-3 bg-bg-primary rounded-sm">
+                    <p className="text-xl font-bold text-text-primary">${summary.cash.toLocaleString()}</p>
                     <p className="text-[10px] text-text-400 uppercase">Cash</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-2xl">
+                  <div className="text-center p-3 bg-bg-primary rounded-sm">
                     <p className="text-xl font-bold text-success">${summary.revenue.toLocaleString()}</p>
                     <p className="text-[10px] text-text-400 uppercase">Revenue</p>
                   </div>
@@ -2569,7 +2600,7 @@ export default function EODReview() {
                         : { label: call.outcome || '—', cls: 'bg-text-400/15 text-text-400' }
                       const typeBadge = isAsc ? { label: 'ASC', cls: 'text-cyan-400' }
                         : call.call_type === 'follow_up' ? { label: 'FU', cls: 'text-purple-400' }
-                        : { label: 'NC', cls: 'text-opt-yellow' }
+                        : { label: 'NC', cls: 'text-text-primary' }
                       const isExpanded = expandedCall === key
                       const hasDetail = call.notes || call.fathom_summary || call.contact_email || call.contact_phone
 
@@ -2588,7 +2619,7 @@ export default function EODReview() {
                             )}
                             <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${outcomeBadge.cls}`}>{outcomeBadge.label}</span>
                             <div className="ml-auto flex items-center gap-3 text-xs">
-                              {call.cash_collected > 0 && <span className="text-opt-yellow font-medium">${parseFloat(call.cash_collected).toLocaleString()} cash</span>}
+                              {call.cash_collected > 0 && <span className="text-text-primary font-medium">${parseFloat(call.cash_collected).toLocaleString()} cash</span>}
                               {call.revenue > 0 && <span className="text-success">${parseFloat(call.revenue).toLocaleString()} rev</span>}
                               {call.fathom_summary && <MessageSquare size={10} className="text-text-400" />}
                             </div>
@@ -2606,12 +2637,12 @@ export default function EODReview() {
                               {(call.revenue > 0 || call.cash_collected > 0) && (
                                 <div className="flex gap-4 text-xs">
                                   <span className="text-text-400">Revenue: <strong className="text-success">${parseFloat(call.revenue || 0).toLocaleString()}</strong></span>
-                                  <span className="text-text-400">Cash: <strong className="text-opt-yellow">${parseFloat(call.cash_collected || 0).toLocaleString()}</strong></span>
+                                  <span className="text-text-400">Cash: <strong className="text-text-primary">${parseFloat(call.cash_collected || 0).toLocaleString()}</strong></span>
                                 </div>
                               )}
                               {/* Fathom summary */}
                               {call.fathom_summary && (
-                                <div className="bg-bg-primary rounded-xl p-3">
+                                <div className="bg-bg-primary rounded-sm p-3">
                                   <p className="text-[10px] text-text-400 uppercase mb-1 flex items-center gap-1">
                                     <MessageSquare size={10} /> Fathom Summary
                                     {call.fathom_duration && <span className="ml-1">({Math.round(call.fathom_duration / 60)}m)</span>}
@@ -2658,7 +2689,7 @@ export default function EODReview() {
               <div className="mt-3 flex items-center justify-center gap-2">
                 <button
                   onClick={() => setShowLeadPicker(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-opt-yellow border border-opt-yellow/30 hover:bg-opt-yellow/10 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-primary border border-opt-yellow/30 hover:bg-opt-yellow/10 transition-colors"
                 >
                   <Plus size={12} />
                   Add Call Manually
@@ -2717,11 +2748,11 @@ export default function EODReview() {
                     const showInputs = isClosedOrAscended
                     const typeBadge = isAscension ? { label: 'ASC', cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' }
                       : call.call_type === 'follow_up' ? { label: 'FU', cls: 'bg-purple-500/15 text-purple-400 border-purple-500/30' }
-                      : { label: 'NC', cls: 'bg-opt-yellow/15 text-opt-yellow border-opt-yellow/30' }
+                      : { label: 'NC', cls: 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30' }
 
                     return (
                     <div key={call.ghl_event_id || call.lead_id || `manual-${i}`}
-                      className={`bg-bg-card border rounded-2xl overflow-hidden transition-colors ${
+                      className={`bg-bg-card border rounded-sm overflow-hidden transition-colors ${
                         isPending ? 'border-amber-400/50 ring-1 ring-amber-400/20'
                         : isClosedOrAscended ? 'border-success/30'
                         : isNoShow ? 'border-danger/30'
@@ -2740,7 +2771,7 @@ export default function EODReview() {
                             {call.setter_name && call.setter_name !== '—' && (
                               <span className="text-[10px] text-text-400 flex-shrink-0 bg-bg-primary px-1.5 py-0.5 rounded">{call.setter_name}</span>
                             )}
-                            {call.is_manual && <span className="text-[10px] text-opt-yellow flex-shrink-0">manual</span>}
+                            {call.is_manual && <span className="text-[10px] text-text-primary flex-shrink-0">manual</span>}
                           </div>
                           <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
                             <select value={call.call_type}
@@ -2799,7 +2830,7 @@ export default function EODReview() {
                             <button
                               onClick={() => updateCall(i, 'offered', true)}
                               className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all ${
-                                call.offered ? 'bg-opt-yellow text-bg-primary' : 'bg-bg-primary text-text-400 border border-border-default hover:text-text-primary'
+                                call.offered ? 'bg-opt-yellow text-text-primary' : 'bg-bg-primary text-text-400 border border-border-default hover:text-text-primary'
                               }`}
                             >Yes</button>
                             <button
@@ -2820,7 +2851,7 @@ export default function EODReview() {
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-text-400">$</span>
                                 <input type="number" value={call.cash_collected || ''} placeholder="0"
                                   onChange={e => updateCall(i, 'cash_collected', parseFloat(e.target.value) || 0)}
-                                  className="bg-bg-primary border border-border-default rounded pl-5 pr-2 py-1.5 text-sm text-right w-28 text-opt-yellow" />
+                                  className="bg-bg-primary border border-border-default rounded pl-5 pr-2 py-1.5 text-sm text-right w-28 text-text-primary" />
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
@@ -2884,7 +2915,7 @@ export default function EODReview() {
                 <div className="mt-2 flex items-center gap-2">
                   <button
                     onClick={() => setShowLeadPicker(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-opt-yellow border border-dashed border-border-default hover:border-opt-yellow/30 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-400 hover:text-text-primary border border-dashed border-border-default hover:border-opt-yellow/30 transition-colors"
                   >
                     <Plus size={12} />
                     Add Call
@@ -2912,7 +2943,7 @@ export default function EODReview() {
               {/* Right: summary sidebar */}
               <div className="space-y-3">
                 <div className="tile tile-feedback p-5 sticky top-20">
-                  <h3 className="text-xs text-opt-yellow uppercase font-medium mb-4">{selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()}</h3>
+                  <h3 className="text-xs text-text-primary uppercase font-medium mb-4">{selectedName} &middot; {formatDateLabel(selectedDate).split(' — ').pop()}</h3>
 
                   <div className="grid grid-cols-3 gap-3 mb-4">
                     <div className="text-center">
@@ -2976,7 +3007,7 @@ export default function EODReview() {
                   <div className="border-t border-border-default pt-3 mt-3 space-y-2">
                     <div className="flex justify-between text-xs">
                       <span className="text-text-400">Trial Cash</span>
-                      <span className="text-opt-yellow font-medium">${summary.cash.toLocaleString()}</span>
+                      <span className="text-text-primary font-medium">${summary.cash.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-text-400">Trial Revenue</span>
@@ -3014,7 +3045,7 @@ export default function EODReview() {
                     className={`w-full mt-4 flex items-center justify-center gap-2 px-4 py-2.5 rounded font-medium text-sm transition-colors ${
                       confirmed
                         ? 'bg-success/20 text-success border border-success/30'
-                        : 'bg-opt-yellow text-bg-primary hover:bg-opt-yellow/90'
+                        : 'bg-opt-yellow text-text-primary hover:bg-opt-yellow/90'
                     }`}
                   >
                     {submitting ? <Loader size={14} className="animate-spin" /> : <Check size={14} />}
@@ -3079,9 +3110,9 @@ export default function EODReview() {
                             <td className="px-3 py-2.5 text-right text-danger">{noShows}</td>
                             <td className="px-3 py-2.5 text-right font-medium">{eod.closes || 0}</td>
                             <td className="px-3 py-2.5 text-right text-cyan-400">{eod.deposits || 0}</td>
-                            <td className={`px-3 py-2.5 text-right ${closePct !== '—' && parseFloat(closePct) >= 30 ? 'text-success' : closePct !== '—' && parseFloat(closePct) >= 15 ? 'text-opt-yellow' : 'text-danger'}`}>{closePct !== '—' ? `${closePct}%` : '—'}</td>
-                            <td className={`px-3 py-2.5 text-right ${showPct !== '—' && parseFloat(showPct) >= 70 ? 'text-success' : showPct !== '—' && parseFloat(showPct) >= 50 ? 'text-opt-yellow' : 'text-danger'}`}>{showPct !== '—' ? `${showPct}%` : '—'}</td>
-                            <td className="px-3 py-2.5 text-right text-opt-yellow">{cash > 0 ? `$${cash.toLocaleString()}` : '—'}</td>
+                            <td className={`px-3 py-2.5 text-right ${closePct !== '—' && parseFloat(closePct) >= 30 ? 'text-success' : closePct !== '—' && parseFloat(closePct) >= 15 ? 'text-text-primary' : 'text-danger'}`}>{closePct !== '—' ? `${closePct}%` : '—'}</td>
+                            <td className={`px-3 py-2.5 text-right ${showPct !== '—' && parseFloat(showPct) >= 70 ? 'text-success' : showPct !== '—' && parseFloat(showPct) >= 50 ? 'text-text-primary' : 'text-danger'}`}>{showPct !== '—' ? `${showPct}%` : '—'}</td>
+                            <td className="px-3 py-2.5 text-right text-text-primary">{cash > 0 ? `$${cash.toLocaleString()}` : '—'}</td>
                             <td className="px-3 py-2.5 text-right text-success">{rev > 0 ? `$${rev.toLocaleString()}` : '—'}</td>
                           </tr>
                         )
@@ -3121,7 +3152,7 @@ export default function EODReview() {
                   </div>
                 )}
                 {closers.length > 0 && pending.length === 0 && (
-                  <div className="bg-success/10 border border-success/30 rounded-2xl p-3 mb-3 flex items-center gap-2">
+                  <div className="bg-success/10 border border-success/30 rounded-sm p-3 mb-3 flex items-center gap-2">
                     <Check size={16} className="text-success" />
                     <span className="text-xs text-success font-medium">All closers have submitted EODs for {formatDateLabel(selectedDate).split(' — ').pop()}</span>
                   </div>
@@ -3189,7 +3220,7 @@ export default function EODReview() {
                         <tr key={eod.id} className={`border-b border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer ${(eod.closes || 0) > 0 ? 'bg-success/5' : ''}`}
                           onClick={() => { setSelectedMember(eod.closer_id); setConfirmed(false) }}
                         >
-                          <td className="px-3 py-2 font-medium text-opt-yellow">{eod.closer?.name || '—'}</td>
+                          <td className="px-3 py-2 font-medium text-text-primary">{eod.closer?.name || '—'}</td>
                           <td className="px-3 py-2 text-right">{booked}</td>
                           <td className="px-3 py-2 text-right">{liveNc}</td>
                           <td className="px-3 py-2 text-right text-text-400">{liveFu}</td>
@@ -3197,8 +3228,8 @@ export default function EODReview() {
                           <td className="px-3 py-2 text-right text-danger">{noShows}</td>
                           <td className="px-3 py-2 text-right font-medium">{eod.closes || 0}</td>
                           <td className="px-3 py-2 text-right text-cyan-400">{eod.deposits || 0}</td>
-                          <td className={`px-3 py-2 text-right ${showPct !== '—' && parseFloat(showPct) >= 70 ? 'text-success' : showPct !== '—' && parseFloat(showPct) >= 50 ? 'text-opt-yellow' : 'text-danger'}`}>{showPct !== '—' ? `${showPct}%` : '—'}</td>
-                          <td className="px-3 py-2 text-right text-opt-yellow">{cash > 0 ? `$${cash.toLocaleString()}` : '—'}</td>
+                          <td className={`px-3 py-2 text-right ${showPct !== '—' && parseFloat(showPct) >= 70 ? 'text-success' : showPct !== '—' && parseFloat(showPct) >= 50 ? 'text-text-primary' : 'text-danger'}`}>{showPct !== '—' ? `${showPct}%` : '—'}</td>
+                          <td className="px-3 py-2 text-right text-text-primary">{cash > 0 ? `$${cash.toLocaleString()}` : '—'}</td>
                           <td className="px-3 py-2 text-right text-success">{rev > 0 ? `$${rev.toLocaleString()}` : '—'}</td>
                         </tr>
                       )
@@ -3257,7 +3288,7 @@ export default function EODReview() {
                           onClick={() => { setSelectedMember(eod.closer_id); setSelectedDate(eod.report_date); setConfirmed(false) }}
                         >
                           <td className="px-3 py-2.5 text-text-400">{formatDateLabel(eod.report_date)}</td>
-                          <td className="px-3 py-2.5 text-opt-yellow font-medium">{eod.closer?.name || '—'}</td>
+                          <td className="px-3 py-2.5 text-text-primary font-medium">{eod.closer?.name || '—'}</td>
                           <td className="px-3 py-2.5 text-right">{booked}</td>
                           <td className="px-3 py-2.5 text-right">{liveNc}</td>
                           <td className="px-3 py-2.5 text-right text-text-400">{liveFu}</td>
@@ -3265,8 +3296,8 @@ export default function EODReview() {
                           <td className="px-3 py-2.5 text-right text-danger">{noShows}</td>
                           <td className="px-3 py-2.5 text-right font-medium">{eod.closes || 0}</td>
                           <td className="px-3 py-2.5 text-right text-cyan-400">{eod.deposits || 0}</td>
-                          <td className={`px-3 py-2.5 text-right ${showPct !== '—' && parseFloat(showPct) >= 70 ? 'text-success' : showPct !== '—' && parseFloat(showPct) >= 50 ? 'text-opt-yellow' : 'text-danger'}`}>{showPct !== '—' ? `${showPct}%` : '—'}</td>
-                          <td className="px-3 py-2.5 text-right text-opt-yellow">{cash > 0 ? `$${cash.toLocaleString()}` : '—'}</td>
+                          <td className={`px-3 py-2.5 text-right ${showPct !== '—' && parseFloat(showPct) >= 70 ? 'text-success' : showPct !== '—' && parseFloat(showPct) >= 50 ? 'text-text-primary' : 'text-danger'}`}>{showPct !== '—' ? `${showPct}%` : '—'}</td>
+                          <td className="px-3 py-2.5 text-right text-text-primary">{cash > 0 ? `$${cash.toLocaleString()}` : '—'}</td>
                           <td className="px-3 py-2.5 text-right text-success">{rev > 0 ? `$${rev.toLocaleString()}` : '—'}</td>
                         </tr>
                       )
@@ -3329,7 +3360,7 @@ export default function EODReview() {
                   </div>
                 )}
                 {setters.length > 0 && pending.length === 0 && (
-                  <div className="bg-success/10 border border-success/30 rounded-2xl p-3 mb-3 flex items-center gap-2">
+                  <div className="bg-success/10 border border-success/30 rounded-sm p-3 mb-3 flex items-center gap-2">
                     <Check size={16} className="text-success" />
                     <span className="text-xs text-success font-medium">All setters have submitted EODs for {formatDateLabel(selectedDate).split(' — ').pop()}</span>
                   </div>
@@ -3385,7 +3416,7 @@ export default function EODReview() {
                       <tr key={eod.id} className={`border-b border-border-default/30 hover:bg-bg-card-hover/50 cursor-pointer ${(eod.sets || 0) > 0 ? 'bg-success/5' : ''}`}
                         onClick={() => { setSelectedMember(eod.setter_id); setConfirmed(!!eod.is_confirmed) }}
                       >
-                        <td className="px-3 py-2 font-medium text-opt-yellow">{eod.setter?.name || '—'}</td>
+                        <td className="px-3 py-2 font-medium text-text-primary">{eod.setter?.name || '—'}</td>
                         <td className="px-3 py-2 text-right">{eod.total_leads || 0}</td>
                         <td className="px-3 py-2 text-right">{eod.outbound_calls || 0}</td>
                         <td className="px-3 py-2 text-right">{eod.pickups || 0}</td>
@@ -3437,7 +3468,7 @@ export default function EODReview() {
                         onClick={() => { setSelectedMember(eod.setter_id); setSelectedDate(eod.report_date); setConfirmed(!!eod.is_confirmed) }}
                       >
                         <td className="px-3 py-2.5 text-text-400">{formatDateLabel(eod.report_date)}</td>
-                        <td className="px-3 py-2.5 text-opt-yellow font-medium">{eod.setter?.name || '—'}</td>
+                        <td className="px-3 py-2.5 text-text-primary font-medium">{eod.setter?.name || '—'}</td>
                         <td className="px-3 py-2.5 text-right">{eod.total_leads || 0}</td>
                         <td className="px-3 py-2.5 text-right">{eod.outbound_calls || 0}</td>
                         <td className="px-3 py-2.5 text-right">{eod.pickups || 0}</td>

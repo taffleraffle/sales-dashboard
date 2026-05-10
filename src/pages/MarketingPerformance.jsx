@@ -110,7 +110,7 @@ const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev,
   return (
     <Wrapper
       onClick={onClick}
-      className={`bg-bg-card border rounded-2xl p-3 relative group ${hasWhatIfDelta ? 'border-opt-yellow/40' : 'border-border-default'} ${interactiveCls}`}
+      className={`bg-bg-card border rounded-sm p-3 relative group ${hasWhatIfDelta ? 'border-opt-yellow/40' : 'border-border-default'} ${interactiveCls}`}
     >
       <div className="flex items-center gap-1">
         <p className="text-[9px] uppercase tracking-wider text-text-400 mb-0.5 leading-tight truncate">{label}</p>
@@ -182,7 +182,7 @@ function MTDFunnel({ stats }) {
   return (
     <div className="tile tile-feedback p-5">
       <h2 className="text-sm font-medium mb-4 flex items-center gap-2">
-        <span className="text-opt-yellow">&#9660;</span> MTD Funnel
+        <span className="text-text-primary">&#9660;</span> MTD Funnel
       </h2>
       <div className="space-y-1.5">
         {steps.map((step, i) => {
@@ -237,10 +237,10 @@ function TrailingTable({ entries }) {
 
   const rateColor = (k, v) => {
     if (v === 0) return ''
-    if (k === 'show_rate') return v >= 70 ? 'text-success' : v >= 50 ? 'text-opt-yellow' : 'text-danger'
-    if (k === 'close_rate') return v >= 25 ? 'text-success' : v >= 15 ? 'text-opt-yellow' : 'text-danger'
-    if (k === 'offer_rate') return v >= 80 ? 'text-success' : v >= 60 ? 'text-opt-yellow' : 'text-danger'
-    if (k.includes('roas')) return v >= 2 ? 'text-success' : v >= 1 ? 'text-opt-yellow' : 'text-danger'
+    if (k === 'show_rate') return v >= 70 ? 'text-success' : v >= 50 ? 'text-text-primary' : 'text-danger'
+    if (k === 'close_rate') return v >= 25 ? 'text-success' : v >= 15 ? 'text-text-primary' : 'text-danger'
+    if (k === 'offer_rate') return v >= 80 ? 'text-success' : v >= 60 ? 'text-text-primary' : 'text-danger'
+    if (k.includes('roas')) return v >= 2 ? 'text-success' : v >= 1 ? 'text-text-primary' : 'text-danger'
     return ''
   }
 
@@ -296,7 +296,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
   const toggleSort = k => { if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortKey(k); setSortDir('desc') } }
 
   const TH = ({ k, label }) => (
-    <th className="px-2 py-1.5 text-right cursor-pointer hover:text-opt-yellow select-none whitespace-nowrap" onClick={() => toggleSort(k)}>
+    <th className="px-2 py-1.5 text-right cursor-pointer hover:text-text-primary select-none whitespace-nowrap" onClick={() => toggleSort(k)}>
       {label}{sortKey === k ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
     </th>
   )
@@ -343,8 +343,8 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
   const getLive = e => e.live_calls || e.net_live_calls || 0
 
   // Color helpers for table cells
-  const clrRate = (v, good, ok) => v >= good ? 'text-success' : v >= ok ? 'text-opt-yellow' : 'text-danger'
-  const clrRoas = v => v >= 2 ? 'text-success' : v >= 1 ? 'text-opt-yellow' : 'text-danger'
+  const clrRate = (v, good, ok) => v >= good ? 'text-success' : v >= ok ? 'text-text-primary' : 'text-danger'
+  const clrRoas = v => v >= 2 ? 'text-success' : v >= 1 ? 'text-text-primary' : 'text-danger'
   const clrCash = v => v > 0 ? 'text-success' : ''
 
   const dataCols = [
@@ -395,7 +395,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
           <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="bg-bg-primary border border-border-default rounded px-2 py-1 text-xs text-text-primary" />
           <span className="text-text-400 text-xs">to</span>
           <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="bg-bg-primary border border-border-default rounded px-2 py-1 text-xs text-text-primary" />
-          <button onClick={() => { setFromDate(''); setToDate('') }} className="px-3 py-1 rounded text-xs font-medium bg-opt-yellow text-bg-primary">FILTER</button>
+          <button onClick={() => { setFromDate(''); setToDate('') }} className="px-3 py-1 rounded text-xs font-medium bg-opt-yellow text-text-primary">FILTER</button>
           <span className="text-xs text-text-400">{filtered.length} days</span>
         </div>
       </div>
@@ -415,7 +415,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
               const isEd = editDate === e.date
               return (
                 <tr key={e.date} className={`border-b border-border-default/30 hover:bg-bg-card-hover/50 group ${isEd ? 'bg-opt-yellow/5 border-opt-yellow/20' : ''}`}>
-                  <td className={`px-2 py-1 font-medium whitespace-nowrap sticky left-0 z-10 ${isEd ? 'text-opt-yellow bg-opt-yellow/5' : 'text-text-primary bg-bg-card group-hover:bg-bg-card-hover/50'}`}>{e.date}</td>
+                  <td className={`px-2 py-1 font-medium whitespace-nowrap sticky left-0 z-10 ${isEd ? 'text-text-primary bg-opt-yellow/5' : 'text-text-primary bg-bg-card group-hover:bg-bg-card-hover/50'}`}>{e.date}</td>
                   {dataCols.map((c, i) => {
                     let val
                     if (c.calc) {
@@ -430,7 +430,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
                   })}
                   <td className="px-2 py-1.5">
                     <div className="flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => startEdit(e)} className="w-6 h-6 rounded-md text-text-400 hover:text-opt-yellow hover:bg-opt-yellow/10 flex items-center justify-center transition-colors"><Edit3 size={11} /></button>
+                      <button onClick={() => startEdit(e)} className="w-6 h-6 rounded-md text-text-400 hover:text-text-primary hover:bg-opt-yellow/10 flex items-center justify-center transition-colors"><Edit3 size={11} /></button>
                       <button onClick={() => onDelete(e.date)} className="w-6 h-6 rounded-md text-text-400 hover:text-danger hover:bg-danger/10 flex items-center justify-center transition-colors"><Trash2 size={11} /></button>
                     </div>
                   </td>
@@ -448,7 +448,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
           <div className="tile tile-feedback w-full max-w-[520px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-border-default">
               <div className="flex items-center gap-2">
-                <Edit3 size={14} className="text-opt-yellow" />
+                <Edit3 size={14} className="text-text-primary" />
                 <h3 className="text-sm font-semibold">Edit {editDate}</h3>
               </div>
               <button onClick={() => setEditDate(null)} className="text-text-400 hover:text-text-primary"><X size={14} /></button>
@@ -480,7 +480,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border-default">
               <button onClick={() => setEditDate(null)} className="px-4 py-1.5 text-xs text-text-400 border border-border-default rounded-lg hover:bg-bg-card-hover transition-colors">Cancel</button>
-              <button onClick={saveEdit} disabled={saving} className="px-5 py-1.5 text-xs font-semibold bg-opt-yellow text-bg-primary rounded-lg hover:brightness-110 disabled:opacity-50 transition-all">
+              <button onClick={saveEdit} disabled={saving} className="px-5 py-1.5 text-xs font-semibold bg-opt-yellow text-text-primary rounded-lg hover:brightness-110 disabled:opacity-50 transition-all">
                 {saving ? 'Saving...' : 'Save'}
               </button>
             </div>
@@ -549,7 +549,7 @@ function AddEntryModal({ onSave, onClose }) {
               lastGroup = f.group
               return (
                 <div key={f.key} className={f.full ? 'col-span-2' : ''}>
-                  {showGroup && <p className="col-span-2 text-[10px] uppercase tracking-widest text-opt-yellow font-medium mt-2 mb-1 border-t border-border-default pt-2">{f.group}</p>}
+                  {showGroup && <p className="col-span-2 text-[10px] uppercase tracking-widest text-text-primary font-medium mt-2 mb-1 border-t border-border-default pt-2">{f.group}</p>}
                   <label className="text-[10px] uppercase text-text-400 block mb-0.5 flex items-center gap-1">
                     {f.label}
                     {f.auto && <span className="text-[8px] px-1 py-0 rounded bg-success/15 text-success normal-case">auto: {f.auto}</span>}
@@ -563,7 +563,7 @@ function AddEntryModal({ onSave, onClose }) {
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <button type="button" onClick={onClose} className="px-4 py-1.5 text-xs text-text-400 border border-border-default rounded">Cancel</button>
-            <button type="submit" disabled={saving} className="px-4 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded disabled:opacity-50">
+            <button type="submit" disabled={saving} className="px-4 py-1.5 text-xs font-medium bg-opt-yellow text-text-primary rounded disabled:opacity-50">
               {saving ? 'Saving...' : 'Save Entry'}
             </button>
           </div>
@@ -626,7 +626,7 @@ function BenchmarksModal({ benchmarks, onSave, onClose }) {
         </div>
         <div className="flex justify-end gap-2 mt-4">
           <button onClick={onClose} className="px-4 py-1.5 text-xs text-text-400 border border-border-default rounded">Cancel</button>
-          <button onClick={handleSave} disabled={saving} className="px-4 py-1.5 text-xs font-medium bg-opt-yellow text-bg-primary rounded disabled:opacity-50">
+          <button onClick={handleSave} disabled={saving} className="px-4 py-1.5 text-xs font-medium bg-opt-yellow text-text-primary rounded disabled:opacity-50">
             {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
@@ -813,7 +813,7 @@ function CSVImportModal({ onClose, onImport }) {
       <div className="tile tile-feedback w-full max-w-[640px] max-h-[85vh] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-default">
           <div className="flex items-center gap-2">
-            <Upload size={16} className="text-opt-yellow" />
+            <Upload size={16} className="text-text-primary" />
             <h3 className="text-sm font-semibold">Import Historical Data</h3>
           </div>
           <button onClick={onClose} className="text-text-400 hover:text-text-primary"><X size={14} /></button>
@@ -823,7 +823,7 @@ function CSVImportModal({ onClose, onImport }) {
           {/* Upload area */}
           <div
             onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-border-default rounded-xl p-6 text-center cursor-pointer hover:border-opt-yellow/40 transition-colors"
+            className="border-2 border-dashed border-border-default rounded-sm p-6 text-center cursor-pointer hover:border-opt-yellow/40 transition-colors"
           >
             <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleFile} className="hidden" />
             <Upload size={24} className="mx-auto text-text-400 mb-2" />
@@ -832,11 +832,11 @@ function CSVImportModal({ onClose, onImport }) {
           </div>
 
           {/* Template download */}
-          <button onClick={downloadTemplate} className="text-[11px] text-opt-yellow hover:underline">
+          <button onClick={downloadTemplate} className="text-[11px] text-text-primary hover:underline">
             Download CSV template with all supported columns
           </button>
 
-          {loading && <div className="flex items-center justify-center py-4"><Loader size={16} className="animate-spin text-opt-yellow" /><span className="text-xs text-text-400 ml-2">Comparing with existing data...</span></div>}
+          {loading && <div className="flex items-center justify-center py-4"><Loader size={16} className="animate-spin text-text-primary" /><span className="text-xs text-text-400 ml-2">Comparing with existing data...</span></div>}
 
           {error && <p className="text-xs text-danger bg-danger/10 rounded-lg px-3 py-2">{error}</p>}
 
@@ -844,13 +844,13 @@ function CSVImportModal({ onClose, onImport }) {
           {preview && (
             <div className="space-y-3">
               {/* Summary */}
-              <div className="bg-bg-primary rounded-xl p-3">
-                <h4 className="text-xs font-semibold text-opt-yellow mb-2">Import Summary</h4>
+              <div className="bg-bg-primary rounded-sm p-3">
+                <h4 className="text-xs font-semibold text-text-primary mb-2">Import Summary</h4>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                   <div><span className="text-text-400">Rows:</span> <strong>{preview.rows.length}</strong></div>
                   <div><span className="text-text-400">Date range:</span> <strong>{preview.dateRange[0]} → {preview.dateRange[1]}</strong></div>
                   <div><span className="text-text-400">New entries:</span> <strong className="text-success">{preview.newCount}</strong></div>
-                  <div><span className="text-text-400">Will overwrite:</span> <strong className={preview.overwriteCount > 0 ? 'text-opt-yellow' : ''}>{preview.overwriteCount}</strong></div>
+                  <div><span className="text-text-400">Will overwrite:</span> <strong className={preview.overwriteCount > 0 ? 'text-text-primary' : ''}>{preview.overwriteCount}</strong></div>
                 </div>
                 <div className="mt-2">
                   <span className="text-[10px] text-text-400">Matched columns:</span>
@@ -864,8 +864,8 @@ function CSVImportModal({ onClose, onImport }) {
 
               {/* Overwrite diff */}
               {preview.overwriteCount > 0 && (
-                <div className="bg-bg-primary rounded-xl p-3">
-                  <h4 className="text-xs font-semibold text-opt-yellow mb-2">Values Being Overwritten</h4>
+                <div className="bg-bg-primary rounded-sm p-3">
+                  <h4 className="text-xs font-semibold text-text-primary mb-2">Values Being Overwritten</h4>
                   <p className="text-[10px] text-text-400 mb-2">CSV data will replace these existing values:</p>
                   <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
                     {preview.changes.filter(c => c.type === 'update').map((c, i) => (
@@ -889,7 +889,7 @@ function CSVImportModal({ onClose, onImport }) {
 
               {/* New entries preview */}
               {preview.newCount > 0 && (
-                <div className="bg-bg-primary rounded-xl p-3">
+                <div className="bg-bg-primary rounded-sm p-3">
                   <h4 className="text-xs font-semibold text-success mb-2">New Entries ({preview.newCount})</h4>
                   <div className="overflow-x-auto">
                     <table className="text-[10px] w-full">
@@ -919,13 +919,13 @@ function CSVImportModal({ onClose, onImport }) {
 
               {/* Confirmation */}
               <div className="text-[10px] bg-opt-yellow/5 border border-opt-yellow/20 rounded-lg px-3 py-2">
-                <strong className="text-opt-yellow">CSV data takes priority.</strong>
+                <strong className="text-text-primary">CSV data takes priority.</strong>
                 <span className="text-text-400"> Non-empty CSV values will override existing data. Empty cells and zeros in the CSV are skipped — they won't wipe existing data.</span>
               </div>
 
               <button
                 onClick={handleImport}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-opt-yellow text-bg-primary font-semibold text-sm hover:brightness-110 transition-all"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-sm bg-opt-yellow text-text-primary font-semibold text-sm hover:brightness-110 transition-all"
               >
                 <Check size={14} />
                 Confirm Import — {preview.rows.length} entries
@@ -1134,11 +1134,11 @@ const DRILLDOWN_CONFIG = {
     fetcher: fetchLiveCalls,
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
-      { key: 'closer', label: 'Closer', cls: 'text-opt-yellow' },
+      { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
       { key: 'type', label: 'Type', cls: 'text-[10px] uppercase text-text-400' },
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
       { key: 'email', label: 'Email', render: r => r.email
-        ? <a href={`mailto:${r.email}`} className="text-opt-yellow hover:underline" onClick={e => e.stopPropagation()}>{r.email}</a>
+        ? <a href={`mailto:${r.email}`} className="text-text-primary hover:underline" onClick={e => e.stopPropagation()}>{r.email}</a>
         : <span className="text-text-400/60">—</span> },
       { key: 'outcome', label: 'Outcome', render: r => <span className={r.outcome === 'closed' ? 'text-success' : 'text-text-secondary'}>{r.outcome}</span> },
       { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
@@ -1167,7 +1167,7 @@ const DRILLDOWN_CONFIG = {
     fetcher: fetchReschCancel,
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
-      { key: 'closer', label: 'Closer', cls: 'text-opt-yellow' },
+      { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
       { key: 'type', label: 'Type', cls: 'text-[10px] uppercase text-text-400' },
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
       { key: 'outcome', label: 'Outcome', render: r => r.outcome === 'canceled'
@@ -1196,7 +1196,7 @@ const DRILLDOWN_CONFIG = {
     fetcher: fetchCloses,
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
-      { key: 'closer', label: 'Closer', cls: 'text-opt-yellow' },
+      { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
       { key: 'type', label: 'Type', cls: 'text-[10px] uppercase text-text-400' },
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
       { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
@@ -1211,7 +1211,7 @@ const DRILLDOWN_CONFIG = {
     fetcher: fetchAscensions,
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
-      { key: 'closer', label: 'Closer', cls: 'text-opt-yellow' },
+      { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
       { key: 'outcome', label: 'Outcome', render: r => <span className={r.outcome === 'ascended' ? 'text-success' : 'text-text-secondary'}>{r.outcome}</span> },
       { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
@@ -1423,7 +1423,7 @@ function DrilldownModal({ kind, range, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-bg-card border border-border-default rounded-2xl max-w-4xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-bg-card border border-border-default rounded-sm max-w-4xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border-default">
           <div>
             <h2 className="text-sm font-semibold">{config.title}</h2>
@@ -1859,15 +1859,27 @@ export default function MarketingPerformance() {
     }
   }, [deleteEntry, toast])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-opt-yellow" /></div>
+  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
 
   return (
     <div className="max-w-[1600px] mx-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+      {/* Header — editorial */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Marketing Performance</h1>
-          <p className="text-xs text-text-400">{entries.length} entries</p>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Marketing</span>
+          <h1 className="h2 mt-2">The <em>state</em> of acquisition.</h1>
+          <p
+            className="mt-2"
+            style={{
+              fontFamily: 'var(--mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+            }}
+          >
+            {entries.length} entries · daily attribution
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <SyncStatusIndicator />
@@ -1884,18 +1896,18 @@ export default function MarketingPerformance() {
           <Upload size={14} className="text-text-400" />
           <span className="text-xs text-text-secondary">Import CSV</span>
         </button>
-        {importStatus && <span className="text-xs text-opt-yellow">{importStatus}</span>}
+        {importStatus && <span className="text-xs text-text-primary">{importStatus}</span>}
         <div className="sm:ml-auto flex gap-2">
           <button
             onClick={() => { startTransition(() => { setWhatIfActive(!whatIfActive); if (whatIfActive) { setWhatIfOverrides({}); setWhatIfDraft({}) } }) }}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs border rounded-2xl transition-colors ${whatIfActive ? 'bg-opt-yellow/15 border-opt-yellow/40 text-opt-yellow' : 'text-text-secondary border-border-default hover:bg-bg-card-hover'}`}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs border rounded-sm transition-colors ${whatIfActive ? 'bg-opt-yellow/15 border-opt-yellow/40 text-text-primary' : 'text-text-secondary border-border-default hover:bg-bg-card-hover'}`}
           >
             <Edit3 size={14} /> What-If
           </button>
-          <button onClick={() => setShowBenchmarks(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs text-text-secondary border border-border-default rounded-2xl hover:bg-bg-card-hover transition-colors">
+          <button onClick={() => setShowBenchmarks(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs text-text-secondary border border-border-default rounded-sm hover:bg-bg-card-hover transition-colors">
             <SlidersHorizontal size={14} /> Benchmarks
           </button>
-          <button onClick={() => setShowAddEntry(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-opt-yellow text-bg-primary rounded-2xl hover:bg-opt-yellow/80 transition-colors">
+          <button onClick={() => setShowAddEntry(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:bg-opt-yellow/80 transition-colors">
             <Plus size={14} /> Add Entry
           </button>
         </div>
@@ -1903,10 +1915,10 @@ export default function MarketingPerformance() {
 
       {/* ═══ What-If Input Bar ═══ */}
       {whatIfActive && (
-        <div className="bg-bg-card border border-opt-yellow/30 rounded-2xl p-3 mb-2">
+        <div className="bg-bg-card border border-opt-yellow/30 rounded-sm p-3 mb-2">
           <div className="flex items-center gap-2 mb-2">
-            <Edit3 size={14} className="text-opt-yellow" />
-            <span className="text-xs font-medium text-opt-yellow">What-If Forecast</span>
+            <Edit3 size={14} className="text-text-primary" />
+            <span className="text-xs font-medium text-text-primary">What-If Forecast</span>
             <span className="text-[10px] text-text-400 ml-1">Adjust any value — changes cascade through the funnel automatically</span>
             <button onClick={() => { setWhatIfOverrides({}); setWhatIfDraft({}) }} className="ml-auto text-[10px] text-text-400 hover:text-text-secondary">Reset</button>
           </div>

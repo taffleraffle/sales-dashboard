@@ -96,7 +96,7 @@ export default function EODHistory({ embedded = false }) {
 
   if (loading) return (
     <div className="flex items-center justify-center py-20">
-      <Loader className="animate-spin text-opt-yellow" size={24} />
+      <Loader className="animate-spin text-text-primary" size={24} />
     </div>
   )
 
@@ -105,10 +105,22 @@ export default function EODHistory({ embedded = false }) {
   return (
     <div>
       {!embedded && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
           <div>
-            <h1 className="text-lg sm:text-xl font-bold">EOD History</h1>
-            <p className="text-xs text-text-400">Team submission overview & daily details</p>
+            <span className="eyebrow eyebrow-accent">OPT Sales · EOD history</span>
+            <h1 className="h2 mt-2">The <em>archive</em>.</h1>
+            <p
+              className="mt-2"
+              style={{
+                fontFamily: 'var(--mono)',
+                fontSize: 10,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                color: 'var(--ink-3)',
+              }}
+            >
+              Team submission overview · daily details
+            </p>
           </div>
         </div>
       )}
@@ -119,14 +131,14 @@ export default function EODHistory({ embedded = false }) {
           type="date"
           value={dateRange.from}
           onChange={e => setDateRange(prev => ({ ...prev, from: e.target.value }))}
-          className="bg-bg-card border border-border-default rounded-xl px-3 py-1.5 text-xs text-text-primary [color-scheme:dark]"
+          className="bg-bg-card border border-border-default rounded-sm px-3 py-1.5 text-xs text-text-primary [color-scheme:light]"
         />
         <span className="text-text-400 text-xs">to</span>
         <input
           type="date"
           value={dateRange.to}
           onChange={e => setDateRange(prev => ({ ...prev, to: e.target.value }))}
-          className="bg-bg-card border border-border-default rounded-xl px-3 py-1.5 text-xs text-text-primary [color-scheme:dark]"
+          className="bg-bg-card border border-border-default rounded-sm px-3 py-1.5 text-xs text-text-primary [color-scheme:light]"
         />
         <span className="text-[10px] text-text-400">{dates.length} days</span>
       </div>
@@ -134,7 +146,7 @@ export default function EODHistory({ embedded = false }) {
       {/* Submission Matrix with inline expand */}
       <div className="tile tile-feedback overflow-hidden mb-6">
         <div className="px-4 py-3 border-b border-border-default">
-          <h3 className="text-[11px] text-opt-yellow uppercase font-medium">Submission Matrix — click a cell to open that EOD</h3>
+          <h3 className="text-[11px] text-text-primary uppercase font-medium">Submission Matrix — click a cell to open that EOD</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -178,7 +190,7 @@ export default function EODHistory({ embedded = false }) {
                     className={`border-b border-border-default/50 hover:bg-bg-card-hover transition-colors ${weekend ? 'opacity-60' : ''} ${i % 2 === 0 ? '' : 'bg-bg-primary/30'} ${isExpanded ? 'bg-opt-yellow/5' : ''}`}
                   >
                     <td className="px-2 py-2 text-center cursor-pointer" onClick={() => toggleDate(date)}>
-                      {isExpanded ? <ChevronUp size={12} className="text-opt-yellow" /> : <ChevronDown size={12} className="text-text-400" />}
+                      {isExpanded ? <ChevronUp size={12} className="text-text-primary" /> : <ChevronDown size={12} className="text-text-400" />}
                     </td>
                     <td className="px-3 py-2 text-text-primary font-medium whitespace-nowrap cursor-pointer" onClick={() => toggleDate(date)}>
                       <span className="flex items-center gap-1.5">
@@ -230,7 +242,7 @@ export default function EODHistory({ embedded = false }) {
                       ) : (
                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                           rate === 100 ? 'bg-success/20 text-success' :
-                          rate >= 50 ? 'bg-opt-yellow/20 text-opt-yellow' :
+                          rate >= 50 ? 'bg-opt-yellow/20 text-text-primary' :
                           'bg-danger/20 text-danger'
                         }`}>
                           {rate}%
@@ -242,10 +254,10 @@ export default function EODHistory({ embedded = false }) {
                     <tr key={`${date}-expanded`} className="bg-bg-primary/40">
                       <td colSpan={totalCols} className="px-4 py-3">
                         <div className="flex items-center justify-between mb-3">
-                          <h4 className="text-xs font-semibold text-opt-yellow">{fmtDate(date)} — Full Details</h4>
+                          <h4 className="text-xs font-semibold text-text-primary">{fmtDate(date)} — Full Details</h4>
                           <button
                             onClick={e => goToDateEOD(date, e)}
-                            className="text-[10px] text-opt-yellow hover:underline"
+                            className="text-[10px] text-text-primary hover:underline"
                           >
                             Open EOD Form for {fmtDate(date)} →
                           </button>
@@ -362,7 +374,7 @@ export default function EODHistory({ embedded = false }) {
                                         <td className="text-right px-2 py-1.5 text-success font-semibold">{ed.sets || 0}</td>
                                         <td className="text-right px-2 py-1.5">
                                           {ed.self_rating ? (
-                                            <span className={`font-semibold ${ed.self_rating >= 7 ? 'text-success' : ed.self_rating >= 5 ? 'text-opt-yellow' : 'text-danger'}`}>
+                                            <span className={`font-semibold ${ed.self_rating >= 7 ? 'text-success' : ed.self_rating >= 5 ? 'text-text-primary' : 'text-danger'}`}>
                                               {ed.self_rating}/10
                                             </span>
                                           ) : '—'}

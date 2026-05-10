@@ -461,9 +461,14 @@ async function fetchAdLevelInsights(days = 90) {
   const adIds = new Set()
   let rowsUpserted = 0
   let errors = 0
+  let pageNum = 0
+  const startedAt = Date.now()
   let url = `${BASE_URL}/act_${ACCOUNT_ID}/insights?${params}`
 
+  console.log(`[meta-sync] insights: ${days}d window, paginating...`)
+
   while (url) {
+    pageNum++
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 30000)
     let res
@@ -481,19 +486,20 @@ async function fetchAdLevelInsights(days = 90) {
     const json = await res.json()
     const rows = json.data || []
 
+    // Build the page's batch — one upsert call per Meta page (~500 rows max)
+    // instead of one round-trip per row. Cuts 90d × 369ads from ~30min to ~30s.
+    const batch = []
     for (const row of rows) {
       if (!row.ad_id) continue
       adIds.add(row.ad_id)
 
-      // 3-sec views come from the `actions` array as action_type='video_view'
-      // (Meta deprecated the standalone video_3_sec_watched_actions field).
-      const v3sAction = (row.actions || []).find(a => a.action_type === 'video_view')
-      const thruAction = (row.video_thruplay_watched_actions || []).find(a => a.action_type === 'video_view')
+      const v3sAction     = (row.actions || []).find(a => a.action_type === 'video_view')
+      const thruAction    = (row.video_thruplay_watched_actions || []).find(a => a.action_type === 'video_view')
       const avgTimeAction = (row.video_avg_time_watched_actions || []).find(a => a.action_type === 'video_view')
-      const resultAction = (row.actions || []).find(a => ['lead', 'offsite_conversion.fb_pixel_lead', 'onsite_conversion.lead_grouped'].includes(a.action_type))
-      const costPerResult = (row.cost_per_action_type || []).find(a => ['lead', 'offsite_conversion.fb_pixel_lead', 'onsite_conversion.lead_grouped'].includes(a.action_type))
+      const resultAction  = (row.actions || []).find(a => ['lead','offsite_conversion.fb_pixel_lead','onsite_conversion.lead_grouped'].includes(a.action_type))
+      const costPerResult = (row.cost_per_action_type || []).find(a => ['lead','offsite_conversion.fb_pixel_lead','onsite_conversion.lead_grouped'].includes(a.action_type))
 
-      const stat = {
+      batch.push({
         ad_id: row.ad_id,
         date: row.date_start,
         spend: parseFloat(row.spend || 0),
@@ -512,22 +518,27 @@ async function fetchAdLevelInsights(days = 90) {
         cost_per_result: costPerResult ? parseFloat(costPerResult.value) : null,
         raw_payload: row,
         synced_at: new Date().toISOString(),
-      }
+      })
+    }
 
+    if (batch.length) {
       const { error } = await supabase
         .from('ad_daily_stats')
-        .upsert(stat, { onConflict: 'ad_id,date' })
+        .upsert(batch, { onConflict: 'ad_id,date' })
       if (error) {
-        console.error('[ad_daily_stats] upsert failed for', row.ad_id, row.date_start, error)
-        errors++
+        console.error('[ad_daily_stats] batch upsert failed (page', pageNum, '):', error)
+        errors += batch.length
       } else {
-        rowsUpserted++
+        rowsUpserted += batch.length
       }
     }
+
+    console.log(`[meta-sync] insights page ${pageNum}: ${batch.length} rows upserted (${rowsUpserted} total, ${adIds.size} unique ads, ${((Date.now() - startedAt) / 1000).toFixed(1)}s elapsed)`)
 
     url = json.paging?.next || null
   }
 
+  console.log(`[meta-sync] insights done: ${rowsUpserted} rows, ${adIds.size} ads, ${errors} errors, ${((Date.now() - startedAt) / 1000).toFixed(1)}s`)
   return { rowsUpserted, adIds, errors }
 }
 
@@ -539,11 +550,17 @@ async function fetchAdLevelInsights(days = 90) {
  * @returns {Promise<{ adsUpserted: number, errors: number }>}
  */
 async function fetchAdCreatives(adIds) {
-  let adsUpserted = 0
-  let errors = 0
   const ids = [...adIds]
+  const total = ids.length
+  if (!total) return { adsUpserted: 0, errors: 0 }
 
-  for (const ad_id of ids) {
+  console.log(`[meta-sync] fetching ${total} creatives in parallel (concurrency=8)...`)
+  const startedAt = Date.now()
+
+  // Fetch one ad's creative + transform to `ads` row.
+  // No video-source secondary fetch — Meta restricts that field for unpublished
+  // ad videos so it returned nothing useful while doubling network time.
+  const fetchOne = async (ad_id) => {
     const params = new URLSearchParams({
       access_token: ACCESS_TOKEN,
       fields: META_FIELDS_CREATIVE,
@@ -551,78 +568,81 @@ async function fetchAdCreatives(adIds) {
     const url = `${BASE_URL}/${ad_id}?${params}`
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 20000)
-    let res
     try {
-      res = await fetch(url, { signal: controller.signal })
+      const res = await fetch(url, { signal: controller.signal })
+      clearTimeout(timeout)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.error('[ad creative]', ad_id, res.status, err.error?.message || res.statusText)
+        return { error: true }
+      }
+      const json = await res.json()
+      const creative = json.creative || null
+      const meta = extractCreativeMeta(creative, json)
+      const asset_type = detectAssetType(creative)
+      const thumbnail_url = creative?.thumbnail_url || creative?.image_url || null
+      const asset_url = creative?.image_url || null
+      const archived = ['DELETED', 'ARCHIVED'].includes(json.effective_status || json.status)
+
+      return {
+        record: {
+          ad_id,
+          platform: 'meta',
+          ad_name: json.name || null,
+          status: json.status || null,
+          effective_status: json.effective_status || null,
+          creative_id: creative?.id || json.creative_id || null,
+          asset_type,
+          asset_url,
+          thumbnail_url,
+          ...meta,
+          raw_payload: json,
+          last_synced_at: new Date().toISOString(),
+          archived_at: archived ? new Date().toISOString() : null,
+        }
+      }
     } catch (e) {
       clearTimeout(timeout)
       console.error('[ad creative] fetch failed for', ad_id, e.message)
-      errors++
-      continue
-    }
-    clearTimeout(timeout)
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      console.error('[ad creative]', ad_id, res.status, err.error?.message || res.statusText)
-      errors++
-      continue
-    }
-
-    const json = await res.json()
-    const creative = json.creative || null
-    const meta = extractCreativeMeta(creative, json)
-    const asset_type = detectAssetType(creative)
-
-    // Resolve video source URL if asset is video
-    let asset_url = creative?.image_url || null
-    const thumbnail_url = creative?.thumbnail_url || creative?.image_url || null
-    if (asset_type === 'video' && creative?.video_id) {
-      const vCtrl = new AbortController()
-      const vTimeout = setTimeout(() => vCtrl.abort(), 15000)
-      try {
-        const vRes = await fetch(
-          `${BASE_URL}/${creative.video_id}?access_token=${ACCESS_TOKEN}&fields=source,permalink_url,picture`,
-          { signal: vCtrl.signal }
-        )
-        if (vRes.ok) {
-          const vJson = await vRes.json()
-          asset_url = vJson.source || vJson.permalink_url || asset_url
-        }
-      } catch (e) {
-        console.warn('[ad creative] video source resolve failed for', ad_id, e.message)
-      } finally {
-        clearTimeout(vTimeout)
-      }
-    }
-
-    const archived = ['DELETED', 'ARCHIVED'].includes(json.effective_status || json.status)
-    const record = {
-      ad_id,
-      platform: 'meta',
-      ad_name: json.name || null,
-      status: json.status || null,
-      effective_status: json.effective_status || null,
-      creative_id: creative?.id || json.creative_id || null,
-      asset_type,
-      asset_url,
-      thumbnail_url,
-      ...meta,
-      raw_payload: json,
-      last_synced_at: new Date().toISOString(),
-      archived_at: archived ? new Date().toISOString() : null,
-    }
-
-    const { error } = await supabase
-      .from('ads')
-      .upsert(record, { onConflict: 'ad_id' })
-    if (error) {
-      console.error('[ads] upsert failed for', ad_id, error)
-      errors++
-    } else {
-      adsUpserted++
+      return { error: true }
     }
   }
 
+  // Run with bounded concurrency. 8 in flight = ~46 batches for 369 ads,
+  // ~600ms per round-trip = ~30s total instead of ~3-6 min sequential.
+  const concurrency = 8
+  const records = []
+  let errors = 0
+  let done = 0
+  for (let i = 0; i < ids.length; i += concurrency) {
+    const slice = ids.slice(i, i + concurrency)
+    const results = await Promise.all(slice.map(fetchOne))
+    for (const r of results) {
+      if (r.error) errors++
+      else if (r.record) records.push(r.record)
+    }
+    done += slice.length
+    if (done % 50 < concurrency || done === ids.length) {
+      console.log(`[meta-sync] creatives: ${done}/${total} (${((Date.now() - startedAt) / 1000).toFixed(1)}s elapsed)`)
+    }
+  }
+
+  // Single batch upsert into ads (Supabase handles thousands of rows fine)
+  let adsUpserted = 0
+  if (records.length) {
+    console.log(`[meta-sync] upserting ${records.length} ads in one batch...`)
+    const { error } = await supabase
+      .from('ads')
+      .upsert(records, { onConflict: 'ad_id' })
+    if (error) {
+      console.error('[ads] batch upsert failed:', error)
+      errors += records.length
+    } else {
+      adsUpserted = records.length
+    }
+  }
+
+  console.log(`[meta-sync] creative fetch done: ${adsUpserted} upserted, ${errors} errors, ${((Date.now() - startedAt) / 1000).toFixed(1)}s total`)
   return { adsUpserted, errors }
 }
 
