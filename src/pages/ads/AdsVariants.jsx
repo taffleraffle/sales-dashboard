@@ -1,17 +1,45 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader, AlertTriangle, GitBranch, Search, Plus } from 'lucide-react'
+import { Plus, Loader, AlertCircle, Search, GitBranch, ExternalLink } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import AddVariantModal from '../../components/ads/AddVariantModal'
 
-const STATUS_TONE = {
-  planned: 'bg-bg-card-hover text-text-400 border-border-default',
-  editing: 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30',
-  ready:   'bg-success/10 text-success border-success/30',
-  live:    'bg-success/20 text-success border-success/40',
-  paused:  'bg-opt-yellow/10 text-text-primary border-opt-yellow/20',
-  killed:  'bg-danger/10 text-danger border-danger/30',
-  winner:  'bg-opt-yellow/30 text-text-primary border-opt-yellow/60',
+/*
+  Variants page — performance-first. Sorted by 30d spend on the linked Meta
+  ad so winners + their splice recipes are immediately obvious. Each row
+  shows the production state (5 stages: raw → rough → final → approved →
+  uploaded) and which atomic clips were spliced together.
+
+  Source: public.lib_variants_with_performance view (joins library.variants
+  to ads + ad_daily_stats + lib_hyros_ad_attribution).
+*/
+
+const STAGES = [
+  { key: 'raw',        label: 'Raw' },
+  { key: 'rough_cut',  label: 'Rough' },
+  { key: 'final_cut',  label: 'Final' },
+  { key: 'approved',   label: 'Approved' },
+  { key: 'uploaded',   label: 'Uploaded' },
+]
+
+const STATUS_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'live', label: 'Live' },
+  { value: 'ready', label: 'Ready' },
+  { value: 'editing', label: 'Editing' },
+  { value: 'planned', label: 'Planned' },
+  { value: 'winner', label: 'Winner' },
+  { value: 'killed', label: 'Killed' },
+]
+
+function fmt$(n) {
+  if (n == null || isNaN(n) || n === 0) return '—'
+  if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`
+  return `$${Math.round(n).toLocaleString()}`
+}
+function fmtN(n) {
+  if (n == null || isNaN(n) || n === 0) return '—'
+  return Math.round(n).toLocaleString()
 }
 
 export default function AdsVariants() {
@@ -22,138 +50,157 @@ export default function AdsVariants() {
   const [search, setSearch] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [savingStage, setSavingStage] = useState(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  const load = async () => {
+    setLoading(true); setError(null)
     try {
-      const { data, error: e } = await supabase
-        .from('lib_variants')
+      const { data, error: err } = await supabase
+        .from('lib_variants_with_performance')
         .select('*')
-        .order('created_at', { ascending: false })
-      if (e) throw new Error(e.message)
+        .order('spend_30d', { ascending: false, nullsFirst: false })
+      if (err) throw new Error(err.message)
       setRows(data || [])
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
+  }
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [])
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return rows
-      .filter(v => statusFilter === 'all' || v.status === statusFilter)
-      .filter(v => !q || (v.variant_id || '').toLowerCase().includes(q) || (v.notes || '').toLowerCase().includes(q))
+    let out = rows
+    if (statusFilter !== 'all') out = out.filter(v => v.status === statusFilter)
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      out = out.filter(v =>
+        (v.variant_id || '').toLowerCase().includes(q) ||
+        (v.notes || '').toLowerCase().includes(q) ||
+        (v.meta_ad_name || '').toLowerCase().includes(q) ||
+        (v.hook_clip_id || '').toLowerCase().includes(q) ||
+        (v.body_clip_id || '').toLowerCase().includes(q)
+      )
+    }
+    return out
   }, [rows, statusFilter, search])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
+  const toggleStage = async (variant, stageKey) => {
+    const next = !variant[`stage_${stageKey}`]
+    setSavingStage(`${variant.variant_id}:${stageKey}`)
+    setRows(prev => prev.map(r => r.variant_id === variant.variant_id ? { ...r, [`stage_${stageKey}`]: next } : r))
+    try {
+      const { error: err } = await supabase.rpc('lib_variant_set_stage', {
+        p_variant_id: variant.variant_id,
+        p_stage: stageKey,
+        p_value: next,
+      })
+      if (err) throw new Error(err.message)
+    } catch (e) {
+      setRows(prev => prev.map(r => r.variant_id === variant.variant_id ? { ...r, [`stage_${stageKey}`]: !next } : r))
+      setError(`Stage update failed: ${e.message}`)
+    } finally {
+      setSavingStage(null)
+    }
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3 gap-2">
-        <div className="flex items-center gap-2 flex-1">
-          <GitBranch size={16} className="text-text-400" />
-          <p className="text-xs text-text-secondary">
-            Every assembled variant. A variant is one specific (hook, body angle, scene, creator) combination at a given iteration.
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 mb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div>
+          <span className="eyebrow eyebrow-accent">Production · Spliced variants</span>
+          <h2 className="h3 mt-2" style={{ fontSize: 22 }}>The <em>variant</em> board.</h2>
+          <p
+            className="mt-2"
+            style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}
+          >
+            {rows.length} variants · sorted by 30d spend · winning recipes float to top
           </p>
         </div>
         <button
           onClick={() => { setEditing(null); setModalOpen(true) }}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-opt-yellow/15 border border-opt-yellow/40 text-text-primary rounded-lg hover:bg-opt-yellow/20 whitespace-nowrap"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px',
+            background: 'var(--accent)', color: 'var(--ink)', border: '1px solid var(--accent)', borderRadius: 3,
+            fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
+          }}
         >
           <Plus size={13} /> Add variant
         </button>
       </div>
 
-      {error && (
-        <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-sm px-3 py-2">
-          <AlertTriangle size={14} /> <span>{error}</span>
-        </div>
-      )}
-
-      <div className="bg-bg-card border border-border-default rounded-sm p-3 mb-3 flex flex-col sm:flex-row sm:items-center gap-2">
-        <div className="flex gap-1 flex-wrap">
-          {['all', 'live', 'ready', 'editing', 'planned', 'paused', 'killed', 'winner'].map(s => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className={`px-2.5 py-1 text-[11px] rounded-lg border transition-colors ${
-                statusFilter === s
-                  ? 'bg-opt-yellow/15 border-opt-yellow/40 text-text-primary'
-                  : 'border-border-default text-text-secondary hover:bg-bg-card-hover'
-              }`}
-            >{s}</button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1.5 bg-bg-primary border border-border-default rounded-lg px-2 py-1 sm:w-60 sm:ml-auto flex-1 sm:flex-none">
-          <Search size={12} className="text-text-400" />
+      {/* Filter bar */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: 8,
+        padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 16,
+      }}>
+        <ChipGroup label="Status" value={statusFilter} setValue={setStatusFilter} options={STATUS_OPTIONS} />
+        <div style={{ flex: '1 1 200px', minWidth: 180, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+          <Search size={12} style={{ color: 'var(--ink-3)', flexShrink: 0, marginLeft: 4 }} />
           <input
-            type="search"
-            placeholder="Search variants…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="bg-transparent text-xs text-text-primary outline-none w-full"
+            type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search variant ID, clips, ad name…"
+            style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }}
           />
         </div>
       </div>
 
-      {!filtered.length ? (
-        <div className="bg-bg-card border border-border-default rounded-sm p-8 text-center text-text-400 text-sm">
-          {rows.length === 0 ? 'No variants in the library yet. Add rows to library.variants.' : 'No variants match the filter.'}
-        </div>
-      ) : (
-        <div className="bg-bg-card border border-border-default rounded-sm overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="text-text-400 text-[10px] uppercase tracking-wider">
-              <tr className="border-b border-border-default">
-                <th className="text-left px-3 py-2 font-normal">Variant ID</th>
-                <th className="text-left px-3 py-2 font-normal">Status</th>
-                <th className="text-left px-3 py-2 font-normal">Iter</th>
-                <th className="text-left px-3 py-2 font-normal">Meta ad</th>
-                <th className="text-left px-3 py-2 font-normal">Launched</th>
-                <th className="text-left px-3 py-2 font-normal">Created</th>
-                <th className="text-right px-3 py-2 font-normal w-12"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(v => (
-                <tr key={v.id} className="border-b border-border-default/40 hover:bg-bg-card-hover">
-                  <td className="px-3 py-2">
-                    <Link to={`/sales/ads/variants/${encodeURIComponent(v.variant_id)}`} className="text-text-primary font-mono text-[11px] hover:underline">
-                      {v.variant_id}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={`text-[9px] uppercase tracking-wider font-medium px-1.5 py-0.5 rounded border ${STATUS_TONE[v.status] || STATUS_TONE.planned}`}>
-                      {v.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-text-secondary">v{v.iteration}</td>
-                  <td className="px-3 py-2 text-text-secondary truncate max-w-md" title={v.meta_ad_name || v.meta_ad_id}>
-                    {v.meta_ad_id
-                      ? <Link to={`/sales/ads/ad/${v.meta_ad_id}`} className="hover:text-text-primary">{v.meta_ad_name || v.meta_ad_id}</Link>
-                      : <span className="text-text-400">—</span>
-                    }
-                  </td>
-                  <td className="px-3 py-2 text-text-400">{v.launched_at ? new Date(v.launched_at).toLocaleDateString() : '—'}</td>
-                  <td className="px-3 py-2 text-text-400">{v.created_at ? new Date(v.created_at).toLocaleDateString() : '—'}</td>
-                  <td className="px-3 py-2 text-right">
-                    <button
-                      onClick={() => { setEditing(v); setModalOpen(true) }}
-                      className="text-[10px] text-text-400 hover:text-text-primary uppercase tracking-wider"
-                    >edit</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Error banner */}
+      {error && (
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10,
+          padding: '12px 14px', background: 'var(--down-soft)', border: '1px solid var(--down)', borderLeftWidth: 3,
+          borderRadius: '0 3px 3px 0', color: 'var(--down)', marginBottom: 16, fontSize: 13,
+        }}>
+          <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 4 }}>Variants error</div>
+            {error}
+          </div>
         </div>
       )}
 
-      <p className="text-[10px] text-text-400 mt-2 px-1">
+      {loading && (
+        <div className="flex items-center justify-center py-16">
+          <Loader className="animate-spin" style={{ color: 'var(--ink-3)' }} />
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && rows.length === 0 && !error && (
+        <div style={{
+          border: '1px dashed var(--rule)', borderRadius: 4, padding: 32, textAlign: 'center', background: 'var(--paper-2)',
+        }}>
+          <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center', display: 'inline-flex', marginBottom: 12 }}>No variants yet</span>
+          <h3 className="h3" style={{ fontSize: 22, marginBottom: 10 }}>Start the <em>variant board</em>.</h3>
+          <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', maxWidth: '50ch', margin: '0 auto 18px', lineHeight: 1.55 }}>
+            A variant is one spliced combination — hook clip + body clip + creator. Add atomic clips on the Clips tab first, then assemble them into variants here. Each variant tracks its production through five stages and links to its Meta ad once shipped, so live performance flows straight back to the splice recipe.
+          </p>
+          <button onClick={() => { setEditing(null); setModalOpen(true) }} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px',
+            background: 'var(--accent)', color: 'var(--ink)', border: '1px solid var(--accent)',
+            borderRadius: 3, fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
+          }}>
+            <Plus size={13} /> Add first variant
+          </button>
+        </div>
+      )}
+
+      {/* Variant rows */}
+      {!loading && filtered.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {filtered.map(v => (
+            <VariantRow
+              key={v.variant_id}
+              variant={v}
+              onToggleStage={toggleStage}
+              savingStage={savingStage}
+              onEdit={() => { setEditing(v); setModalOpen(true) }}
+            />
+          ))}
+        </div>
+      )}
+
+      <p style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 12 }}>
         {filtered.length} of {rows.length} variants
       </p>
 
@@ -163,6 +210,197 @@ export default function AdsVariants() {
         onClose={() => { setModalOpen(false); setEditing(null) }}
         onSaved={() => load()}
       />
+    </div>
+  )
+}
+
+function VariantRow({ variant: v, onToggleStage, savingStage, onEdit }) {
+  const hasPerf = (v.spend_30d || 0) > 0
+  const accent = v.status === 'winner' ? 'var(--accent)' :
+                 v.status === 'live' ? 'var(--ink)' :
+                 v.status === 'killed' ? 'var(--down)' :
+                 'var(--rule)'
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: hasPerf ? '120px minmax(0, 1fr) auto' : 'minmax(0, 1fr) auto',
+      gap: 16,
+      padding: '14px 16px',
+      background: 'var(--paper)',
+      border: '1px solid var(--rule)',
+      borderLeftWidth: 3,
+      borderLeftColor: accent,
+      borderRadius: 3,
+    }}>
+      {/* Left thumbnail (if linked to a live ad) */}
+      {hasPerf && (
+        <div style={{ aspectRatio: '1', overflow: 'hidden', background: 'var(--paper-2)', borderRadius: 2 }}>
+          {v.ad_thumbnail_url ? (
+            <img src={v.ad_thumbnail_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : null}
+        </div>
+      )}
+
+      {/* Middle column */}
+      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {/* Variant ID + status pill */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Link to={`/sales/ads/variants/${encodeURIComponent(v.variant_id)}`} style={{
+            fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: 'var(--ink)',
+            textDecoration: 'none', letterSpacing: '0.04em',
+          }}>{v.variant_id}</Link>
+          <StatusPill status={v.status} />
+          {v.priority && <PriorityChip p={v.priority} />}
+          {v.editor && (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+              · {v.editor}
+            </span>
+          )}
+        </div>
+
+        {/* Splice recipe */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.08em' }}>
+          {v.hook_clip_id && <ChipLabel>HOOK · {v.hook_clip_id}</ChipLabel>}
+          {v.body_clip_id && <ChipLabel>BODY · {v.body_clip_id}</ChipLabel>}
+          {v.frame_clip_id && <ChipLabel>FRAME · {v.frame_clip_id}</ChipLabel>}
+          {v.creator_id && <ChipLabel>CREATOR · {v.creator_id}</ChipLabel>}
+          {!v.hook_clip_id && !v.body_clip_id && (
+            <span style={{ fontStyle: 'italic', color: 'var(--ink-4)', textTransform: 'none', letterSpacing: 0, fontFamily: 'var(--serif)', fontSize: 12 }}>
+              No clips assigned yet
+            </span>
+          )}
+        </div>
+
+        {/* Linked Meta ad */}
+        {v.meta_ad_id ? (
+          <div style={{ fontFamily: 'var(--serif)', fontSize: 12, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Link to={`/sales/ads/ad/${v.meta_ad_id}`} style={{ color: 'var(--ink-2)', textDecoration: 'underline', textDecorationColor: 'var(--ink-4)' }}>
+              {v.meta_ad_name || v.meta_ad_id}
+            </Link>
+            <ExternalLink size={10} style={{ color: 'var(--ink-4)' }} />
+          </div>
+        ) : (
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            Not linked to a Meta ad yet
+          </div>
+        )}
+
+        {/* Performance row */}
+        {hasPerf && (
+          <div style={{ display: 'flex', gap: 14, marginTop: 4 }}>
+            <Metric label="Spend 30d" value={fmt$(v.spend_30d)} />
+            <Metric label="Booked" value={fmtN(v.hyros_calls)} sub={v.hyros_qualified ? `${v.hyros_qualified} qual.` : null} />
+            <Metric label="Leads" value={fmtN(v.results_30d)} />
+            <Metric label="Revenue" value={fmt$(parseFloat(v.hyros_revenue || 0))} />
+          </div>
+        )}
+      </div>
+
+      {/* Right column — production stages + edit */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end', minWidth: 200 }}>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {STAGES.map(s => (
+            <StageButton
+              key={s.key}
+              label={s.label}
+              checked={v[`stage_${s.key}`]}
+              saving={savingStage === `${v.variant_id}:${s.key}`}
+              onClick={() => onToggleStage(v, s.key)}
+            />
+          ))}
+        </div>
+        <button onClick={onEdit} style={{
+          padding: '4px 10px', background: 'transparent', color: 'var(--ink-3)', border: '1px solid var(--rule)',
+          borderRadius: 2, fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+          cursor: 'pointer',
+        }}>Edit</button>
+      </div>
+    </div>
+  )
+}
+
+function ChipLabel({ children }) {
+  return (
+    <span style={{
+      padding: '2px 6px', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2,
+      fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-2)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500,
+    }}>{children}</span>
+  )
+}
+
+function StatusPill({ status }) {
+  if (!status) return null
+  const isWinner = status === 'winner'
+  const isLive = status === 'live'
+  const bg = isWinner ? 'var(--accent)' : isLive ? 'var(--ink)' : 'var(--paper-2)'
+  const fg = isWinner ? 'var(--ink)' : isLive ? 'var(--paper)' : 'var(--ink-2)'
+  return (
+    <span style={{
+      padding: '2px 8px', background: bg, color: fg, border: '1px solid', borderColor: bg, borderRadius: 2,
+      fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600,
+    }}>{status}</span>
+  )
+}
+
+function PriorityChip({ p }) {
+  return (
+    <span style={{
+      padding: '2px 7px', background: p === 'high' ? 'var(--accent-soft)' : 'transparent',
+      border: '1px solid var(--rule)', borderRadius: 2,
+      fontFamily: 'var(--mono)', fontSize: 9, color: p === 'high' ? 'var(--ink)' : 'var(--ink-3)', letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+    }}>{p}</span>
+  )
+}
+
+function StageButton({ label, checked, saving, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={saving}
+      title={checked ? `${label} — done (click to undo)` : `Mark ${label} done`}
+      style={{
+        padding: '3px 8px',
+        background: checked ? 'var(--accent)' : 'var(--paper-2)',
+        color: checked ? 'var(--ink)' : 'var(--ink-3)',
+        border: '1px solid', borderColor: checked ? 'var(--accent)' : 'var(--rule)',
+        borderRadius: 2,
+        fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+        cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.5 : 1,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function Metric({ label, value, sub }) {
+  return (
+    <div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>{label}</div>
+      <div style={{ fontFamily: 'var(--serif)', fontSize: 14, fontWeight: 500, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-4)', letterSpacing: '0.08em' }}>{sub}</div>}
+    </div>
+  )
+}
+
+function ChipGroup({ label, value, setValue, options }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500, marginRight: 4 }}>{label}</span>
+      <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: 2 }}>
+        {options.map(opt => {
+          const active = value === opt.value
+          return (
+            <button key={String(opt.value)} onClick={() => setValue(opt.value)} style={{
+              padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500,
+              background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink-3)', borderRadius: 2,
+              border: 'none', cursor: 'pointer',
+            }}>{opt.label}</button>
+          )
+        })}
+      </div>
     </div>
   )
 }

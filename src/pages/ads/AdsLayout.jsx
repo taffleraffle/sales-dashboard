@@ -1,9 +1,11 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Megaphone, Sparkles, MessageSquare, Camera, Users, AlertCircle, Archive, GitBranch, LayoutGrid, Type } from 'lucide-react'
+import { Megaphone, Sparkles, MessageSquare, Camera, Users, AlertCircle, Archive, GitBranch, LayoutGrid, Type, Scissors } from 'lucide-react'
 
 const PRIMARY = [
   { to: '/sales/ads/gallery',   label: 'Gallery',   icon: LayoutGrid },
   { to: '/sales/ads/messaging', label: 'Messaging', icon: Type },
+  { to: '/sales/ads/clips',     label: 'Clips',     icon: Scissors },
+  { to: '/sales/ads/variants',  label: 'Variants',  icon: GitBranch },
   { to: '/sales/ads/list',      label: 'Ads',       icon: Megaphone },
   { to: '/sales/ads/hooks',     label: 'Hooks',     icon: Sparkles },
   { to: '/sales/ads/bodies',    label: 'Bodies',    icon: MessageSquare },
@@ -12,7 +14,6 @@ const PRIMARY = [
 ]
 
 const SECONDARY = [
-  { to: '/sales/ads/variants', label: 'Variants', icon: GitBranch },
   { to: '/sales/ads/orphans',  label: 'Orphans',  icon: AlertCircle },
   { to: '/sales/ads/legacy',   label: 'Legacy',   icon: Archive },
 ]

@@ -29,6 +29,7 @@ const AdsBodies = lazy(() => import('./pages/ads/AdsBodies'))
 const AdsScenes = lazy(() => import('./pages/ads/AdsScenes'))
 const AdsCreators = lazy(() => import('./pages/ads/AdsCreators'))
 const AdsVariants = lazy(() => import('./pages/ads/AdsVariants'))
+const AdsClips = lazy(() => import('./pages/ads/AdsClips'))
 const AdsOrphans = lazy(() => import('./pages/ads/AdsOrphans'))
 const AdsLegacy = lazy(() => import('./pages/ads/AdsLegacy'))
 const ComponentDetail = lazy(() => import('./pages/ads/ComponentDetail'))
@@ -134,6 +135,7 @@ export default function App() {
                 <Route path="bodies" element={<Suspense fallback={<PageSkeleton />}><AdsBodies /></Suspense>} />
                 <Route path="scenes" element={<Suspense fallback={<PageSkeleton />}><AdsScenes /></Suspense>} />
                 <Route path="creators" element={<Suspense fallback={<PageSkeleton />}><AdsCreators /></Suspense>} />
+                <Route path="clips" element={<Suspense fallback={<PageSkeleton />}><AdsClips /></Suspense>} />
                 <Route path="variants" element={<Suspense fallback={<PageSkeleton />}><AdsVariants /></Suspense>} />
                 <Route path="variants/:variantId" element={<Suspense fallback={<PageSkeleton />}><VariantDetail /></Suspense>} />
                 <Route path="components/:id" element={<Suspense fallback={<PageSkeleton />}><ComponentDetail /></Suspense>} />
