@@ -588,11 +588,23 @@ function parseIdeaLine(line) {
   if (!body) return null
 
   // 1. Pull the bold angle name from the front
-  const nameMatch = body.match(/^\*\*([^*]+?)\*\*\s*(?:—|-|–|:)?\s*/)
+  const nameMatch = body.match(/^\*\*([^*]+?)\*\*\s*/)
   const name = nameMatch ? nameMatch[1].trim() : null
   let rest = nameMatch ? body.slice(nameMatch[0].length) : body
 
-  // 2. Split off the Hook section if present (always at the end)
+  // 2. Strength score: "[Strength: 8/10]" — optional, immediately after the name
+  let strength = null
+  const strengthMatch = rest.match(/^\[?\s*Strength:?\s*(\d+)\s*\/\s*10\s*\]?\s*(?:—|-|–|:)?\s*/i)
+  if (strengthMatch) {
+    strength = parseInt(strengthMatch[1], 10)
+    rest = rest.slice(strengthMatch[0].length)
+  } else {
+    // Tolerate "— " separator before any strength tag
+    const sep = rest.match(/^(?:—|-|–|:)\s*/)
+    if (sep) rest = rest.slice(sep[0].length)
+  }
+
+  // 3. Split off the Hook section (always at the end)
   let hook = null
   const hookMatch = rest.match(/(?:^|\s)Hook:?\s*(.+?)\s*$/i)
   if (hookMatch) {
@@ -600,20 +612,47 @@ function parseIdeaLine(line) {
     rest = rest.slice(0, hookMatch.index).trim()
   }
 
-  // 3. Split off the Anchored-in section
+  // 4. Split off the Anchored-in section
   let quotes = []
   const anchorMatch = rest.match(/(?:^|\s)Anchored\s+in:?\s*(.+?)\s*$/i)
   if (anchorMatch) {
     const anchorBody = anchorMatch[1].trim().replace(/\.$/, '')
-    // Quotes may be separated by " · " (middle dot, our preferred), " | ",
-    // " ; ", or " and ". We also accept multi-quote strings where each is
-    // wrapped in straight or smart double-quotes.
     quotes = extractQuotes(anchorBody)
     rest = rest.slice(0, anchorMatch.index).trim()
   }
 
   const text = rest.replace(/[.\s]+$/, '').trim()
-  return { name, text, quotes, hook }
+  return { name, strength, text, quotes, hook }
+}
+
+function StrengthBadge({ score }) {
+  // Color tier: 8-10 strong (accent yellow), 5-7 mid (ink), 1-4 weak (muted)
+  const tier = score >= 8 ? 'strong' : score >= 5 ? 'mid' : 'weak'
+  const bg = tier === 'strong' ? 'var(--accent)' : tier === 'mid' ? 'var(--paper-2)' : 'transparent'
+  const fg = tier === 'strong' ? 'var(--ink)' : tier === 'mid' ? 'var(--ink)' : 'var(--ink-4)'
+  const border = tier === 'strong' ? 'var(--accent)' : 'var(--rule)'
+  return (
+    <span
+      title={`Strength: ${score}/10 — ${tier === 'strong' ? 'recurring theme across many calls' : tier === 'mid' ? 'solid pattern in several calls' : 'anecdotal, fewer mentions'}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '2px 7px',
+        background: bg,
+        color: fg,
+        border: `1px solid ${border}`,
+        borderRadius: 2,
+        fontFamily: 'var(--mono)',
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        flexShrink: 0,
+      }}
+    >
+      {score}/10
+    </span>
+  )
 }
 
 function deriveTitle(text) {
@@ -717,17 +756,19 @@ function IdeaRow({ idea }) {
       {/* Left: the idea + supporting quotes */}
       <div>
         {idea.name && (
-          <div
-            style={{
-              fontFamily: 'var(--serif)',
-              fontSize: 15,
-              lineHeight: 1.3,
-              fontWeight: 500,
-              color: 'var(--ink)',
-              marginBottom: 4,
-            }}
-          >
-            {idea.name}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+            <div
+              style={{
+                fontFamily: 'var(--serif)',
+                fontSize: 15,
+                lineHeight: 1.3,
+                fontWeight: 500,
+                color: 'var(--ink)',
+              }}
+            >
+              {idea.name}
+            </div>
+            {Number.isFinite(idea.strength) && <StrengthBadge score={idea.strength} />}
           </div>
         )}
         {idea.text && (

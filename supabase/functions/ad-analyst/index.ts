@@ -91,11 +91,16 @@ DIMENSIONS TO COVER (don't restrict to the top recurring pain — go broad):
 
 EVERY IDEA MUST HAVE:
 - A short, distinctive name (3-6 words, no clichés)
+- A strength score 1-10 reflecting how many independent prospects mentioned
+  this angle in the transcripts (1 = one mention, anecdotal; 10 = it came up
+  in 10+ different prospect calls)
 - One sentence explaining the angle
-- 2-4 verbatim supporting quotes from the transcripts (NOT one)
+- 3-6 verbatim supporting quotes from the transcripts (more is better for
+  strong angles — if you have 6+, include up to 6)
 - A hook line you could test as an ad opener
 
-If you can't ground an idea in at least 2 real quotes, drop it.
+If you can't ground an idea in at least 3 real quotes, drop it (or lower its
+strength score honestly).
 
 OUTPUT FORMAT (exactly three sections required, optional fourth):
 
@@ -103,24 +108,32 @@ OUTPUT FORMAT (exactly three sections required, optional fourth):
 Brief opener: 1-2 sentences on the pain landscape.
 
 Then 10-15 messaging ideas, each as a single bullet in this exact shape:
-- **[Angle name]** — One sentence explaining the angle. Anchored in: "first verbatim quote" · "second verbatim quote" · "third quote if applicable". Hook: "an ad hook line to test"
+- **[Angle name]** [Strength: N/10] — One sentence explaining the angle. Anchored in: "first verbatim quote" · "second verbatim quote" · "third quote" · "fourth quote if applicable" · "fifth/sixth if strong". Hook: "an ad hook line to test"
 
 ## Circumstances
 Brief opener: 1-2 sentences on the situations prospects sit in.
 
-Then 10-15 messaging ideas, same bullet shape. Cover service-line specifics,
-triggering moments, business-stage variations.
+Then 10-15 messaging ideas, same bullet shape (with strength score). Cover
+service-line specifics, triggering moments, business-stage variations.
 
 ## Outcomes
 Brief opener: 1-2 sentences on the end-states prospects describe.
 
-Then 10-15 messaging ideas, same bullet shape. Where prospects gave specific
-numbers ("$100k/month per truck", "100 calls per week"), USE them in the hook.
+Then 10-15 messaging ideas, same bullet shape (with strength score). Where
+prospects gave specific numbers ("$100k/month per truck", "100 calls per
+week"), USE them in the hook.
 
 ## Other patterns (optional)
 If there are recurring patterns that don't cleanly fit the three lenses —
 e.g. specific service-line opportunities, competitor reframes, geographic
 plays, persona variants — surface them here, same bullet shape. 5-10 ideas.
+
+STRENGTH-SCORING RUBRIC (be honest, not generous):
+- 9-10: came up in 10+ different prospect calls, this is THE recurring theme
+- 7-8 : came up in 6-9 calls, strong pattern
+- 5-6 : came up in 3-5 calls, solid but not dominant
+- 3-4 : came up in 2 calls, worth testing but speculative
+- 1-2 : only mentioned once, anecdotal — usually skip these entirely
 
 VOICE RULES (hard):
 - Pull quotes verbatim. Don't summarize them into prettier prose.
