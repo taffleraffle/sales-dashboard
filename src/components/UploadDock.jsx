@@ -99,19 +99,27 @@ function RunCard({ run, onDismiss }) {
         />
       </div>
 
-      {/* Failed list (if any) */}
+      {/* Failed list (if any) — filename + reason inline so the operator
+          doesn't have to hover to find out what broke. */}
       {hasFailures && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)' }}>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--down)', marginBottom: 4 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--down)', marginBottom: 6 }}>
             Failed
           </div>
-          {run.failed.slice(0, 3).map((f, i) => (
-            <div key={i} title={f.error} style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {f.file}
-            </div>
-          ))}
-          {run.failed.length > 3 && (
-            <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>+{run.failed.length - 3} more</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
+            {run.failed.slice(0, 6).map((f, i) => (
+              <div key={i} style={{ borderLeft: '2px solid var(--down)', paddingLeft: 8 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)', wordBreak: 'break-all' }}>
+                  {f.file}
+                </div>
+                <div style={{ fontFamily: 'var(--serif)', fontSize: 11, fontStyle: 'italic', color: 'var(--ink-3)', lineHeight: 1.35, marginTop: 1 }}>
+                  {f.error || 'unknown error'}
+                </div>
+              </div>
+            ))}
+          </div>
+          {run.failed.length > 6 && (
+            <div style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 4 }}>+{run.failed.length - 6} more (see console)</div>
           )}
         </div>
       )}

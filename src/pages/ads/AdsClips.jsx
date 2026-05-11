@@ -37,31 +37,54 @@ const STAGES = [
   { key: 'approved',  label: 'Approved' },
 ]
 
-// Filename parser — produces { clip_id, clip_type, creator_id } from
-// well-formed filenames. Anything it can't infer is left null so the row
-// still inserts and the operator can fill it inline.
+// Filename parser. Works on the structured pattern (H1.1-OSO.MP4,
+// BODY-B1-OSO.mp4, FRAME-OSO.mov, CLIP-CLIENT-ADAM.MP4) AND on real-world
+// descriptive names ("Eric — Complete Flood testimonial footage.mp4").
+// Anything it can't infer is left null so the row still inserts and the
+// operator can fill it inline.
 function parseFilename(filename) {
   const ext = filename.match(/\.(mp4|mov|webm)$/i)
   const base = ext ? filename.slice(0, ext.index) : filename
+  const upper = base.toUpperCase()
+
+  // Tokenize on any non-alphanumeric so em-dashes, spaces, underscores all
+  // become token boundaries.
+  const tokens = upper.split(/[^A-Z0-9]+/).filter(Boolean)
+  const firstTok = tokens[0] || ''
 
   let clip_type = null
-  let creator_id = null
-
-  const upper = base.toUpperCase()
-  const firstTok = upper.split('-')[0]
   if (/^H\d/.test(firstTok)) clip_type = 'hook'
   else if (firstTok === 'P' || /^P\d/.test(firstTok)) clip_type = 'hook_proof'
-  else if (firstTok === 'BODY') clip_type = 'body'
-  else if (firstTok === 'FRAME') clip_type = 'frame'
-  else if (upper.startsWith('CLIP-CLIENT') || firstTok === 'TESTIMONIAL') clip_type = 'client_clip'
+  else if (tokens.includes('BODY')) clip_type = 'body'
+  else if (tokens.includes('FRAME')) clip_type = 'frame'
+  else if (upper.includes('TESTIMONIAL') || tokens.includes('CLIENT')) clip_type = 'client_clip'
 
-  if (upper.endsWith('-RESTO-AI')) creator_id = 'RESTO-AI'
+  let creator_id = null
+  if (upper.includes('RESTO-AI') || upper.includes('RESTOAI')) creator_id = 'RESTO-AI'
   else {
-    const lastTok = upper.split('-').pop()
-    if (KNOWN_CREATORS.includes(lastTok)) creator_id = lastTok
+    for (const tok of tokens) {
+      if (KNOWN_CREATORS.includes(tok)) { creator_id = tok; break }
+    }
   }
 
   return { clip_id: base, clip_type, creator_id }
+}
+
+// Sanitize a string for use as a Supabase Storage key. Storage rejects
+// most Unicode (em-dashes etc), spaces, and several ASCII punctuation
+// characters. Slug the path while keeping a length cap so absurdly long
+// filenames don't hit the 255-byte key limit.
+function sanitizeStorageSlug(name) {
+  const slug = name
+    .toLowerCase()
+    .normalize('NFKD')                  // decompose accents (é → e + combining)
+    .replace(/[̀-ͯ]/g, '')    // strip combining marks
+    .replace(/[—–]/g, '-')               // em/en dashes → hyphen
+    .replace(/[^a-z0-9-]+/g, '-')        // anything else not safe → hyphen
+    .replace(/-+/g, '-')                 // collapse runs
+    .replace(/^-|-$/g, '')               // trim
+    .slice(0, 80)
+  return slug || `clip-${Date.now().toString(36)}`
 }
 
 function parseTsv(text) {
@@ -143,33 +166,67 @@ export default function AdsClips() {
   // Uses the global UploadProvider so progress persists across page nav
   // and a toast fires on completion regardless of where the operator went.
   const handleFiles = async (fileList) => {
-    const files = Array.from(fileList).filter(f => /\.(mp4|mov|webm)$/i.test(f.name))
-    if (!files.length) {
-      toast.error('Drop .mp4, .mov, or .webm files only')
+    const raw = Array.from(fileList)
+    const valid = []
+    const preflightFails = []
+    const SIZE_CAP = 262144000  // 250 MB (matches bucket file_size_limit)
+
+    for (const f of raw) {
+      if (!/\.(mp4|mov|webm)$/i.test(f.name)) {
+        preflightFails.push({ file: f.name, error: 'Unsupported format — drop .mp4 / .mov / .webm only' })
+        continue
+      }
+      if (f.size > SIZE_CAP) {
+        preflightFails.push({ file: f.name, error: `Too large (${(f.size / 1e6).toFixed(0)}MB > 250MB bucket cap)` })
+        continue
+      }
+      valid.push(f)
+    }
+
+    if (!valid.length && preflightFails.length) {
+      const runId = uploads.start({ label: 'Clips upload · skipped', total: preflightFails.length })
+      for (const fail of preflightFails) { uploads.fail(runId, fail); uploads.progress(runId, { added: 1 }) }
+      uploads.done(runId)
+      toast.error(`${preflightFails.length} file${preflightFails.length > 1 ? 's' : ''} skipped — check upload card`)
       return
     }
-    setError(null)
-    const runId = uploads.start({ label: `Clips upload · ${files.length} file${files.length > 1 ? 's' : ''}`, total: files.length })
+    if (!valid.length) {
+      toast.error('No valid files — drop .mp4 / .mov / .webm only')
+      return
+    }
 
-    // Run uploads in parallel with bounded concurrency (4) — 50 sequential
-    // 50MB uploads would take forever. 4 parallel is a polite balance.
+    setError(null)
+    const runId = uploads.start({ label: `Clips upload · ${valid.length} file${valid.length > 1 ? 's' : ''}`, total: valid.length + preflightFails.length })
+    // Surface preflight failures on the same run card
+    for (const fail of preflightFails) { uploads.fail(runId, fail); uploads.progress(runId, { added: 1 }) }
+
+    // Run uploads in parallel with bounded concurrency (4)
     const concurrency = 4
     let succeeded = 0
-    const queue = [...files]
-    const workers = Array.from({ length: Math.min(concurrency, files.length) }, async () => {
+    const queue = [...valid]
+    const workers = Array.from({ length: Math.min(concurrency, valid.length) }, async () => {
       while (queue.length) {
         const file = queue.shift()
         if (!file) break
         try {
           const parsed = parseFilename(file.name)
-          const path = `clips/${parsed.clip_id}${file.name.match(/\.[^.]+$/)[0]}`
+          const ext = file.name.match(/\.[^.]+$/)?.[0] || '.mp4'
+          // Storage path uses a SANITIZED slug — em-dashes, spaces and other
+          // non-URL-safe characters break Supabase Storage paths. The clip_id
+          // in the database keeps the original descriptive name.
+          const safeSlug = sanitizeStorageSlug(parsed.clip_id)
+          const path = `clips/${safeSlug}${ext.toLowerCase()}`
+
           const { error: uErr } = await supabase.storage
             .from('ad-source-videos')
             .upload(path, file, { upsert: true, contentType: file.type || 'video/mp4' })
-          if (uErr) throw new Error(`upload: ${uErr.message}`)
-          const { data: signed } = await supabase.storage
+          if (uErr) throw new Error(uErr.message)
+
+          const { data: signed, error: sErr } = await supabase.storage
             .from('ad-source-videos')
             .createSignedUrl(path, 60 * 60 * 24 * 7)
+          if (sErr) throw new Error(`sign URL: ${sErr.message}`)
+
           const { error: insertErr } = await supabase.rpc('lib_clip_upsert', {
             p_clip_id: parsed.clip_id,
             p_clip_type: parsed.clip_type || 'hook',
@@ -177,22 +234,26 @@ export default function AdsClips() {
             p_source_file_url: signed?.signedUrl || null,
             p_source_file_name: file.name,
           })
-          if (insertErr) throw new Error(`insert: ${insertErr.message}`)
+          if (insertErr) throw new Error(`DB insert: ${insertErr.message}`)
           succeeded++
           uploads.progress(runId, { added: 1 })
         } catch (e) {
           console.warn(`[clips] upload ${file.name} failed:`, e.message)
           uploads.fail(runId, { file: file.name, error: e.message })
-          uploads.progress(runId, { added: 1 })  // count the attempt so the bar finishes
+          uploads.progress(runId, { added: 1 })
         }
       }
     })
     await Promise.all(workers)
     uploads.done(runId)
-    if (succeeded === files.length) {
+
+    const totalAttempted = valid.length + preflightFails.length
+    if (succeeded === totalAttempted) {
       toast.success(`${succeeded} clip${succeeded > 1 ? 's' : ''} uploaded`)
+    } else if (succeeded > 0) {
+      toast.error(`${succeeded}/${totalAttempted} uploaded · ${totalAttempted - succeeded} failed — see upload card`)
     } else {
-      toast.error(`${succeeded}/${files.length} uploaded · ${files.length - succeeded} failed (see upload card)`)
+      toast.error(`All ${totalAttempted} uploads failed — see upload card for reasons`)
     }
     await load()
   }
