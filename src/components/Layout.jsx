@@ -4,7 +4,9 @@ import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogO
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
+import UploadDock from './UploadDock'
 import { ToastProvider } from '../hooks/useToast'
+import { UploadProvider } from '../hooks/useUploads'
 import { startAutoSync, stopAutoSync } from '../services/autoSync'
 import { ICON } from '../utils/constants'
 
@@ -116,7 +118,9 @@ export default function Layout() {
 
   return (
     <ToastProvider>
+      <UploadProvider>
       <div className="min-h-screen flex" style={{ background: 'var(--paper)' }}>
+        <UploadDock />
         {/* ── Left Sidebar (desktop) ── editorial paper, hairline border, ink icons */}
         <aside
           className="hidden md:flex w-16 flex-col items-center py-5 fixed top-0 left-0 h-screen z-50"
@@ -372,6 +376,7 @@ export default function Layout() {
         {/* Sales chat */}
         <SalesChatWidget />
       </div>
+      </UploadProvider>
     </ToastProvider>
   )
 }

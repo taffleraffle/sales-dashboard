@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader, AlertCircle, Search, Upload, ClipboardPaste, Plus, Trash2, FileVideo } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { useUploads } from '../../hooks/useUploads'
+import { useToast } from '../../hooks/useToast'
 
 /*
   Clips page — spreadsheet-style. Three bulk-import paths so Ben never has to
@@ -93,11 +95,12 @@ export default function AdsClips() {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [selected, setSelected] = useState(new Set())     // clip_ids
-  const [uploading, setUploading] = useState(null)        // { current, total }
   const [showTsv, setShowTsv] = useState(false)
   const fileInputRef = useRef(null)
   const dragCounter = useRef(0)
   const [dragOver, setDragOver] = useState(false)
+  const uploads = useUploads()
+  const toast = useToast()
 
   const load = async () => {
     setLoading(true); setError(null)
@@ -137,51 +140,59 @@ export default function AdsClips() {
   }, [clips, typeFilter, search])
 
   // ── Bulk file upload ──────────────────────────────────────────────
+  // Uses the global UploadProvider so progress persists across page nav
+  // and a toast fires on completion regardless of where the operator went.
   const handleFiles = async (fileList) => {
     const files = Array.from(fileList).filter(f => /\.(mp4|mov|webm)$/i.test(f.name))
     if (!files.length) {
-      setError('Drop .mp4, .mov, or .webm files only')
+      toast.error('Drop .mp4, .mov, or .webm files only')
       return
     }
     setError(null)
-    setUploading({ current: 0, total: files.length })
+    const runId = uploads.start({ label: `Clips upload · ${files.length} file${files.length > 1 ? 's' : ''}`, total: files.length })
 
+    // Run uploads in parallel with bounded concurrency (4) — 50 sequential
+    // 50MB uploads would take forever. 4 parallel is a polite balance.
+    const concurrency = 4
     let succeeded = 0
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      setUploading({ current: i + 1, total: files.length })
-      try {
-        const parsed = parseFilename(file.name)
-        const path = `clips/${parsed.clip_id}${file.name.match(/\.[^.]+$/)[0]}`
-
-        // Upload to bucket
-        const { error: uErr } = await supabase.storage
-          .from('ad-source-videos')
-          .upload(path, file, { upsert: true, contentType: file.type || 'video/mp4' })
-        if (uErr) throw new Error(`upload: ${uErr.message}`)
-
-        // Get a long-lived signed URL (7 days) for the source_file_url cell
-        const { data: signed } = await supabase.storage
-          .from('ad-source-videos')
-          .createSignedUrl(path, 60 * 60 * 24 * 7)
-
-        // Upsert the clip row
-        const { error: insertErr } = await supabase.rpc('lib_clip_upsert', {
-          p_clip_id: parsed.clip_id,
-          p_clip_type: parsed.clip_type || 'hook',
-          p_creator_id: parsed.creator_id || null,
-          p_source_file_url: signed?.signedUrl || null,
-          p_source_file_name: file.name,
-        })
-        if (insertErr) throw new Error(`insert: ${insertErr.message}`)
-        succeeded++
-      } catch (e) {
-        console.warn(`[clips] upload ${file.name} failed:`, e.message)
+    const queue = [...files]
+    const workers = Array.from({ length: Math.min(concurrency, files.length) }, async () => {
+      while (queue.length) {
+        const file = queue.shift()
+        if (!file) break
+        try {
+          const parsed = parseFilename(file.name)
+          const path = `clips/${parsed.clip_id}${file.name.match(/\.[^.]+$/)[0]}`
+          const { error: uErr } = await supabase.storage
+            .from('ad-source-videos')
+            .upload(path, file, { upsert: true, contentType: file.type || 'video/mp4' })
+          if (uErr) throw new Error(`upload: ${uErr.message}`)
+          const { data: signed } = await supabase.storage
+            .from('ad-source-videos')
+            .createSignedUrl(path, 60 * 60 * 24 * 7)
+          const { error: insertErr } = await supabase.rpc('lib_clip_upsert', {
+            p_clip_id: parsed.clip_id,
+            p_clip_type: parsed.clip_type || 'hook',
+            p_creator_id: parsed.creator_id || null,
+            p_source_file_url: signed?.signedUrl || null,
+            p_source_file_name: file.name,
+          })
+          if (insertErr) throw new Error(`insert: ${insertErr.message}`)
+          succeeded++
+          uploads.progress(runId, { added: 1 })
+        } catch (e) {
+          console.warn(`[clips] upload ${file.name} failed:`, e.message)
+          uploads.fail(runId, { file: file.name, error: e.message })
+          uploads.progress(runId, { added: 1 })  // count the attempt so the bar finishes
+        }
       }
-    }
-    setUploading(null)
-    if (succeeded < files.length) {
-      setError(`${succeeded}/${files.length} clips uploaded. Check console for failures.`)
+    })
+    await Promise.all(workers)
+    uploads.done(runId)
+    if (succeeded === files.length) {
+      toast.success(`${succeeded} clip${succeeded > 1 ? 's' : ''} uploaded`)
+    } else {
+      toast.error(`${succeeded}/${files.length} uploaded · ${files.length - succeeded} failed (see upload card)`)
     }
     await load()
   }
@@ -190,11 +201,12 @@ export default function AdsClips() {
   const handleTsv = async (text) => {
     const rows = parseTsv(text)
     if (!rows.length) {
-      setError('No rows parsed from clipboard. Expected tab-separated columns starting with clip_id.')
+      toast.error('No rows parsed from clipboard. Expected tab-separated columns starting with clip_id.')
       return
     }
     setError(null)
-    setUploading({ current: 0, total: rows.length })
+    setShowTsv(false)
+    const runId = uploads.start({ label: `TSV import · ${rows.length} row${rows.length > 1 ? 's' : ''}`, total: rows.length })
 
     let succeeded = 0
     await Promise.all(rows.map(async (row, i) => {
@@ -210,13 +222,19 @@ export default function AdsClips() {
         })
         if (e) throw new Error(e.message)
         succeeded++
+        uploads.progress(runId, { added: 1 })
       } catch (e) {
         console.warn(`[clips] TSV row ${i} (${row.clip_id}) failed:`, e.message)
+        uploads.fail(runId, { file: row.clip_id || `row ${i}`, error: e.message })
+        uploads.progress(runId, { added: 1 })
       }
     }))
-    setUploading(null)
-    setShowTsv(false)
-    if (succeeded < rows.length) setError(`${succeeded}/${rows.length} rows imported. Check console.`)
+    uploads.done(runId)
+    if (succeeded === rows.length) {
+      toast.success(`${succeeded} clip${succeeded > 1 ? 's' : ''} imported from TSV`)
+    } else {
+      toast.error(`${succeeded}/${rows.length} imported · ${rows.length - succeeded} failed`)
+    }
     await load()
   }
 
@@ -372,14 +390,6 @@ export default function AdsClips() {
             style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }} />
         </div>
       </div>
-
-      {/* Upload progress */}
-      {uploading && (
-        <div style={{ padding: '10px 14px', background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3, marginBottom: 12, fontSize: 13, color: 'var(--ink)' }}>
-          <Loader size={13} className="animate-spin" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 8 }} />
-          Uploading {uploading.current}/{uploading.total}…
-        </div>
-      )}
 
       {/* Error banner */}
       {error && (
