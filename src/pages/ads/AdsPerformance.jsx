@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader, AlertCircle, ChevronRight, ChevronDown, Search } from 'lucide-react'
+import { Loader, AlertCircle, ChevronRight, ChevronDown, Search, Circle, CircleDot } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
 /*
@@ -19,10 +19,12 @@ import { supabase } from '../../lib/supabase'
   PostgREST's default cap.
 */
 
+// Active is the default — Ben said he doesn't want to see every single thing,
+// the live work should be what shows up first. "All" is the escape hatch.
 const STATUS_OPTIONS = [
-  { value: 'all',    label: 'All' },
   { value: 'ACTIVE', label: 'Active' },
   { value: 'PAUSED', label: 'Paused' },
+  { value: 'all',    label: 'All' },
 ]
 const SORT_OPTIONS = [
   { value: 'spend_desc',  label: 'Spend ↓' },
@@ -49,7 +51,7 @@ export default function AdsPerformance() {
   const [error, setError] = useState(null)
   const [expandedCampaigns, setExpandedCampaigns] = useState(new Set())
   const [expandedAdSets, setExpandedAdSets] = useState(new Set())
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('ACTIVE')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('spend_desc')
 
@@ -109,12 +111,16 @@ export default function AdsPerformance() {
   }
   useEffect(() => { load() }, [])
 
-  // Build the hierarchical tree: campaign → adset → ads, with rollups
+  // Build the hierarchical tree: campaign → adset → ads, with rollups.
+  // Parent status is derived bottom-up: if ANY descendant ad is ACTIVE the
+  // parent counts as active. Used both for the status dot and for hiding
+  // all-paused branches when statusFilter === 'ACTIVE'.
   const tree = useMemo(() => {
     const q = search.trim().toLowerCase()
     const filteredAds = ads.filter(a => {
-      if (statusFilter === 'ACTIVE' && a.effective_status !== 'ACTIVE') return false
-      if (statusFilter === 'PAUSED' && a.effective_status === 'ACTIVE') return false
+      // Per-ad status filter only applies AT the ad level for the
+      // current filter mode. We still need ALL ads to compute parent
+      // rollups; we hide branches in a second pass.
       if (q) {
         const blob = `${a.ad_name || ''} ${a.campaign_name || ''} ${a.adset_name || ''}`.toLowerCase()
         if (!blob.includes(q)) return false
@@ -122,38 +128,69 @@ export default function AdsPerformance() {
       return true
     })
 
-    const campaigns = new Map() // campaign_id → { name, ad_sets: Map, rollup }
+    const campaigns = new Map()
     for (const a of filteredAds) {
       const cid = a.campaign_id || 'no-campaign'
       const cname = a.campaign_name || 'Untitled campaign'
       if (!campaigns.has(cid)) {
-        campaigns.set(cid, { id: cid, name: cname, ad_sets: new Map(), rollup: emptyRollup() })
+        campaigns.set(cid, { id: cid, name: cname, ad_sets: new Map(), rollup: emptyRollup(), activeAdCount: 0, totalAdCount: 0 })
       }
       const camp = campaigns.get(cid)
 
       const asid = a.adset_id || 'no-adset'
       const asname = a.adset_name || 'Untitled ad set'
       if (!camp.ad_sets.has(asid)) {
-        camp.ad_sets.set(asid, { id: asid, name: asname, ads: [], rollup: emptyRollup() })
+        camp.ad_sets.set(asid, { id: asid, name: asname, ads: [], rollup: emptyRollup(), activeAdCount: 0, totalAdCount: 0 })
       }
       const adset = camp.ad_sets.get(asid)
 
       const adRollup = adRollupFrom(a, stats, hyros)
-      adset.ads.push({ ad: a, rollup: adRollup })
+      const isActive = a.effective_status === 'ACTIVE'
+
+      adset.ads.push({ ad: a, rollup: adRollup, isActive })
+      adset.totalAdCount++
+      camp.totalAdCount++
+      if (isActive) { adset.activeAdCount++; camp.activeAdCount++ }
+
       addRollup(adset.rollup, adRollup)
       addRollup(camp.rollup, adRollup)
     }
 
-    // Sort ads inside each ad set, ad sets inside each campaign, and campaigns
-    const compare = (a, b) => sortCompare(a.rollup, b.rollup, sort)
-    const campaignArr = Array.from(campaigns.values()).sort(compare)
-    for (const c of campaignArr) {
-      const setArr = Array.from(c.ad_sets.values()).sort(compare)
-      c.ad_sets_sorted = setArr
-      for (const s of setArr) s.ads.sort(compare)
+    // Now apply the status filter at each level
+    const visibleCampaigns = []
+    for (const camp of campaigns.values()) {
+      const visibleSets = []
+      for (const set of camp.ad_sets.values()) {
+        let ads = set.ads
+        if (statusFilter === 'ACTIVE') ads = ads.filter(x => x.isActive)
+        else if (statusFilter === 'PAUSED') ads = ads.filter(x => !x.isActive)
+        if (!ads.length) continue
+        visibleSets.push({ ...set, ads })
+      }
+      if (!visibleSets.length) continue
+      const compareAds = (a, b) => sortCompare(a.rollup, b.rollup, sort)
+      for (const s of visibleSets) s.ads.sort(compareAds)
+      const compareSets = (a, b) => sortCompare(a.rollup, b.rollup, sort)
+      visibleSets.sort(compareSets)
+      visibleCampaigns.push({ ...camp, ad_sets_sorted: visibleSets })
     }
-    return campaignArr
+    const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sort)
+    visibleCampaigns.sort(compareCamps)
+    return visibleCampaigns
   }, [ads, stats, hyros, statusFilter, search, sort])
+
+  // When filter or data changes and the user hasn't manually toggled
+  // anything, auto-expand the visible campaigns. This way Ben lands on a
+  // page with ALL his active campaigns already open — no extra clicks.
+  useEffect(() => {
+    if (!tree.length) return
+    setExpandedCampaigns(prev => {
+      // Only auto-expand on the FIRST load after data lands. If the user
+      // has already collapsed something, don't override them.
+      if (prev.size > 0) return prev
+      return new Set(tree.map(c => c.id))
+    })
+  }, [tree.length])
 
   const totals = useMemo(() => {
     const t = emptyRollup()
@@ -270,17 +307,48 @@ export default function AdsPerformance() {
 }
 
 function CampaignBlock({ camp, open, onToggle, expandedAdSets, onToggleAdSet }) {
+  const anyActive = camp.activeAdCount > 0
   return (
     <>
-      <tr onClick={onToggle} style={{ cursor: 'pointer', borderBottom: '1px solid var(--rule)', background: 'var(--paper)' }}>
+      <tr
+        onClick={onToggle}
+        style={{
+          cursor: 'pointer',
+          borderTop: '2px solid var(--ink)',
+          borderBottom: '1px solid var(--rule)',
+          background: 'var(--paper-2)',
+        }}
+      >
         <Td>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            <span style={{ fontFamily: 'var(--serif)', fontSize: 14.5, fontWeight: 500, color: 'var(--ink)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {open ? <ChevronDown size={15} style={{ color: 'var(--ink)' }} /> : <ChevronRight size={15} style={{ color: 'var(--ink)' }} />}
+            <StatusDot active={anyActive} size={9} />
+            <span
+              style={{
+                fontFamily: 'var(--serif)',
+                fontSize: 17,
+                fontWeight: 500,
+                color: 'var(--ink)',
+                letterSpacing: '-0.005em',
+              }}
+            >
               {camp.name}
             </span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.1em', marginLeft: 6 }}>
-              {camp.ad_sets_sorted.length} AD SET{camp.ad_sets_sorted.length === 1 ? '' : 'S'}
+            <span
+              style={{
+                fontFamily: 'var(--mono)',
+                fontSize: 9,
+                color: anyActive ? 'var(--ink-2)' : 'var(--ink-4)',
+                letterSpacing: '0.1em',
+                marginLeft: 10,
+                padding: '2px 6px',
+                background: anyActive ? 'var(--accent-soft)' : 'transparent',
+                border: anyActive ? '1px solid var(--accent)' : '1px solid var(--rule)',
+                borderRadius: 2,
+                fontWeight: 600,
+              }}
+            >
+              {camp.activeAdCount}/{camp.totalAdCount} ACTIVE · {camp.ad_sets_sorted.length} AD SET{camp.ad_sets_sorted.length === 1 ? '' : 'S'}
             </span>
           </div>
         </Td>
@@ -302,37 +370,40 @@ function CampaignBlock({ camp, open, onToggle, expandedAdSets, onToggleAdSet }) 
 }
 
 function AdSetBlock({ set, open, onToggle }) {
+  const anyActive = set.activeAdCount > 0
   return (
     <>
-      <tr onClick={onToggle} style={{ cursor: 'pointer', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+      <tr onClick={onToggle} style={{ cursor: 'pointer', borderBottom: '1px solid var(--rule)', background: 'var(--paper)' }}>
         <Td>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 28 }}>
             {open ? <ChevronDown size={12} style={{ color: 'var(--ink-3)' }} /> : <ChevronRight size={12} style={{ color: 'var(--ink-3)' }} />}
-            <span style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink-2)' }}>
+            <StatusDot active={anyActive} size={7} />
+            <span style={{ fontFamily: 'var(--serif)', fontSize: 13.5, color: 'var(--ink-2)', fontWeight: 400 }}>
               {set.name}
             </span>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.1em', marginLeft: 6 }}>
-              {set.ads.length} AD{set.ads.length === 1 ? '' : 'S'}
+              {set.activeAdCount}/{set.totalAdCount} ACTIVE · {set.ads.length} SHOWN
             </span>
           </div>
         </Td>
         <RollupCells rollup={set.rollup} />
       </tr>
-      {open && set.ads.map(({ ad, rollup }) => (
+      {open && set.ads.map(({ ad, rollup, isActive }) => (
         <tr key={ad.ad_id} style={{ borderBottom: '1px solid var(--rule)' }}>
           <Td>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 52 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 56 }}>
+              <StatusDot active={isActive} size={6} />
               {ad.thumbnail_url || ad.asset_url ? (
                 <img src={ad.asset_url || ad.thumbnail_url} alt="" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 2, background: 'var(--paper-2)', flexShrink: 0 }} />
               ) : (
                 <div style={{ width: 28, height: 28, background: 'var(--paper-2)', borderRadius: 2, flexShrink: 0 }} />
               )}
-              <Link to={`/sales/ads/ad/${ad.ad_id}`} style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink)', textDecoration: 'underline', textDecorationColor: 'var(--ink-4)', textDecorationStyle: 'dotted' }}>
+              <Link to={`/sales/ads/ad/${ad.ad_id}`} style={{ fontFamily: 'var(--serif)', fontSize: 13, color: isActive ? 'var(--ink)' : 'var(--ink-3)', textDecoration: 'underline', textDecorationColor: 'var(--ink-4)', textDecorationStyle: 'dotted' }}>
                 {ad.ad_name || ad.ad_id}
               </Link>
             </div>
           </Td>
-          <RollupCells rollup={rollup} />
+          <RollupCells rollup={rollup} muted={!isActive} />
           <Td>
             <StatusPill status={ad.effective_status || ad.status} />
           </Td>
@@ -342,17 +413,36 @@ function AdSetBlock({ set, open, onToggle }) {
   )
 }
 
-function RollupCells({ rollup, bold }) {
+// Solid filled dot for active, hollow ring for paused. Visual at-a-glance
+// signal at every hierarchy level (campaign / ad set / ad).
+function StatusDot({ active, size = 8 }) {
+  return (
+    <span
+      title={active ? 'Has active ads' : 'No active ads'}
+      style={{
+        display: 'inline-block',
+        width: size, height: size,
+        flexShrink: 0,
+        borderRadius: '50%',
+        background: active ? 'var(--accent)' : 'transparent',
+        border: active ? '1px solid var(--accent)' : `1.5px solid var(--ink-4)`,
+      }}
+    />
+  )
+}
+
+function RollupCells({ rollup, bold, muted }) {
   const wt = bold ? 600 : 400
+  const color = muted ? 'var(--ink-3)' : undefined
   return (
     <>
-      <Td right mono style={{ fontWeight: wt }}>{fmt$(rollup.spend)}</Td>
-      <Td right mono style={{ fontWeight: wt }}>{fmtN(rollup.booked)}</Td>
-      <Td right mono style={{ fontWeight: wt }}>{fmtN(rollup.qualified)}</Td>
-      <Td right mono style={{ fontWeight: wt }}>{fmtN(rollup.leads)}</Td>
-      <Td right mono style={{ fontWeight: wt }}>{fmt$(rollup.revenue)}</Td>
-      <Td right mono style={{ fontWeight: wt }}>{rollup.booked > 0 ? fmt$(rollup.spend / rollup.booked) : '—'}</Td>
-      <Td right mono style={{ fontWeight: wt }}>{rollup.qualified > 0 ? fmt$(rollup.spend / rollup.qualified) : '—'}</Td>
+      <Td right mono style={{ fontWeight: wt, color }}>{fmt$(rollup.spend)}</Td>
+      <Td right mono style={{ fontWeight: wt, color }}>{fmtN(rollup.booked)}</Td>
+      <Td right mono style={{ fontWeight: wt, color }}>{fmtN(rollup.qualified)}</Td>
+      <Td right mono style={{ fontWeight: wt, color }}>{fmtN(rollup.leads)}</Td>
+      <Td right mono style={{ fontWeight: wt, color }}>{fmt$(rollup.revenue)}</Td>
+      <Td right mono style={{ fontWeight: wt, color }}>{rollup.booked > 0 ? fmt$(rollup.spend / rollup.booked) : '—'}</Td>
+      <Td right mono style={{ fontWeight: wt, color }}>{rollup.qualified > 0 ? fmt$(rollup.spend / rollup.qualified) : '—'}</Td>
     </>
   )
 }
