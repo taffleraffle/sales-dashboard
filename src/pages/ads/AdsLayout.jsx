@@ -1,16 +1,10 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Megaphone, Sparkles, MessageSquare, Camera, Users, AlertCircle, Archive, GitBranch, LayoutGrid, Type, Scissors } from 'lucide-react'
+import { TrendingUp, Type, FlaskConical, AlertCircle, Archive } from 'lucide-react'
 
 const PRIMARY = [
-  { to: '/sales/ads/gallery',   label: 'Gallery',   icon: LayoutGrid },
-  { to: '/sales/ads/messaging', label: 'Messaging', icon: Type },
-  { to: '/sales/ads/clips',     label: 'Clips',     icon: Scissors },
-  { to: '/sales/ads/variants',  label: 'Variants',  icon: GitBranch },
-  { to: '/sales/ads/list',      label: 'Ads',       icon: Megaphone },
-  { to: '/sales/ads/hooks',     label: 'Hooks',     icon: Sparkles },
-  { to: '/sales/ads/bodies',    label: 'Bodies',    icon: MessageSquare },
-  { to: '/sales/ads/scenes',    label: 'Scenes',    icon: Camera },
-  { to: '/sales/ads/creators',  label: 'Creators',  icon: Users },
+  { to: '/sales/ads/performance', label: 'Performance',      icon: TrendingUp },
+  { to: '/sales/ads/messaging',   label: 'Messaging',        icon: Type },
+  { to: '/sales/ads/creative',    label: 'Creative testing', icon: FlaskConical },
 ]
 
 const SECONDARY = [

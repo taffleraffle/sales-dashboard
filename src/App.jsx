@@ -30,6 +30,8 @@ const AdsScenes = lazy(() => import('./pages/ads/AdsScenes'))
 const AdsCreators = lazy(() => import('./pages/ads/AdsCreators'))
 const AdsVariants = lazy(() => import('./pages/ads/AdsVariants'))
 const AdsClips = lazy(() => import('./pages/ads/AdsClips'))
+const AdsPerformance = lazy(() => import('./pages/ads/AdsPerformance'))
+const AdsCreativeTestingLayout = lazy(() => import('./pages/ads/AdsCreativeTestingLayout'))
 const AdsOrphans = lazy(() => import('./pages/ads/AdsOrphans'))
 const AdsLegacy = lazy(() => import('./pages/ads/AdsLegacy'))
 const ComponentDetail = lazy(() => import('./pages/ads/ComponentDetail'))
@@ -127,16 +129,28 @@ export default function App() {
               <Route path="/sales/pipeline" element={<Suspense fallback={<PageSkeleton />}><PipelinePerformance /></Suspense>} />
               <Route path="/sales/marketing" element={<Suspense fallback={<PageSkeleton />}><MarketingPerformance /></Suspense>} />
               <Route path="/sales/ads" element={<Suspense fallback={<PageSkeleton />}><AdsLayout /></Suspense>}>
-                <Route index element={<Navigate to="/sales/ads/gallery" replace />} />
-                <Route path="gallery" element={<Suspense fallback={<PageSkeleton />}><AdsGallery /></Suspense>} />
+                <Route index element={<Navigate to="/sales/ads/performance" replace />} />
+                <Route path="performance" element={<Suspense fallback={<PageSkeleton />}><AdsPerformance /></Suspense>} />
                 <Route path="messaging" element={<Suspense fallback={<PageSkeleton />}><AdsMessaging /></Suspense>} />
-                <Route path="list" element={<Suspense fallback={<PageSkeleton />}><AdsList /></Suspense>} />
-                <Route path="hooks" element={<Suspense fallback={<PageSkeleton />}><AdsHooks /></Suspense>} />
-                <Route path="bodies" element={<Suspense fallback={<PageSkeleton />}><AdsBodies /></Suspense>} />
-                <Route path="scenes" element={<Suspense fallback={<PageSkeleton />}><AdsScenes /></Suspense>} />
-                <Route path="creators" element={<Suspense fallback={<PageSkeleton />}><AdsCreators /></Suspense>} />
-                <Route path="clips" element={<Suspense fallback={<PageSkeleton />}><AdsClips /></Suspense>} />
-                <Route path="variants" element={<Suspense fallback={<PageSkeleton />}><AdsVariants /></Suspense>} />
+
+                {/* Creative testing — wrapper with sub-nav for Clips · Variants · Ads */}
+                <Route path="creative" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeTestingLayout /></Suspense>}>
+                  <Route index element={<Navigate to="/sales/ads/creative/clips" replace />} />
+                  <Route path="clips" element={<Suspense fallback={<PageSkeleton />}><AdsClips /></Suspense>} />
+                  <Route path="variants" element={<Suspense fallback={<PageSkeleton />}><AdsVariants /></Suspense>} />
+                  <Route path="ads" element={<Suspense fallback={<PageSkeleton />}><AdsList /></Suspense>} />
+                </Route>
+
+                {/* Back-compat redirects for old direct URLs */}
+                <Route path="clips" element={<Navigate to="/sales/ads/creative/clips" replace />} />
+                <Route path="variants" element={<Navigate to="/sales/ads/creative/variants" replace />} />
+                <Route path="list" element={<Navigate to="/sales/ads/creative/ads" replace />} />
+                <Route path="hooks" element={<Navigate to="/sales/ads/creative" replace />} />
+                <Route path="bodies" element={<Navigate to="/sales/ads/creative" replace />} />
+                <Route path="scenes" element={<Navigate to="/sales/ads/creative" replace />} />
+                <Route path="creators" element={<Navigate to="/sales/ads/creative" replace />} />
+
+                {/* Detail pages — independent of the sub-nav */}
                 <Route path="variants/:variantId" element={<Suspense fallback={<PageSkeleton />}><VariantDetail /></Suspense>} />
                 <Route path="components/:id" element={<Suspense fallback={<PageSkeleton />}><ComponentDetail /></Suspense>} />
                 <Route path="orphans" element={<Suspense fallback={<PageSkeleton />}><AdsOrphans /></Suspense>} />
