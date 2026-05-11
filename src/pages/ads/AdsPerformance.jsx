@@ -47,6 +47,9 @@ export default function AdsPerformance() {
   const [ads, setAds] = useState([])
   const [stats, setStats] = useState({})       // ad_id → {spend, impressions, clicks, results}
   const [hyros, setHyros] = useState({})       // ad_id → {calls_attributed, calls_qualified, revenue_attributed}
+  const [attrHealth, setAttrHealth] = useState(null)  // attribution-health rollup (30d)
+  const [unattributed, setUnattributed] = useState([]) // sample list of un-linkable HYROS events
+  const [showUnattr, setShowUnattr] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [expandedCampaigns, setExpandedCampaigns] = useState(new Set())
@@ -106,6 +109,21 @@ export default function AdsPerformance() {
       const hyMap = {}
       for (const h of hRows || []) hyMap[h.ad_id] = h
       setHyros(hyMap)
+
+      // 4. Attribution health rollup
+      const { data: health } = await supabase
+        .from('lib_hyros_attribution_health').select('*').single()
+      if (health) setAttrHealth(health)
+
+      // 5. Sample of unattributed events (so the operator can see who they are)
+      const { data: unattr } = await supabase
+        .from('hyros_events')
+        .select('event_type, event_date, first_name, last_name, email, is_qualified, lead_tags')
+        .is('meta_ad_id', null)
+        .gte('event_date', new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0])
+        .order('event_date', { ascending: false })
+        .limit(50)
+      setUnattributed(unattr || [])
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
@@ -230,6 +248,16 @@ export default function AdsPerformance() {
         </div>
       </div>
 
+      {/* Attribution-health banner — shown when the HYROS gap is wide so
+          Ben understands why the dashboard "leads" number is less than what
+          he sees in HYROS itself. */}
+      {attrHealth && attrHealth.fully_unattributed > 0 && (
+        <AttributionHealthBanner
+          health={attrHealth}
+          onShowUnattributed={() => setShowUnattr(true)}
+        />
+      )}
+
       {/* Totals strip */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 16 }}>
         <TotalsTile label="Spend 30d" value={fmt$(totals.spend)} />
@@ -301,6 +329,11 @@ export default function AdsPerformance() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Unattributed-events drawer */}
+      {showUnattr && (
+        <UnattributedDrawer events={unattributed} onClose={() => setShowUnattr(false)} />
       )}
     </div>
   )
@@ -459,6 +492,121 @@ function StatusPill({ status }) {
       borderRadius: 2,
       fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
     }}>{status}</span>
+  )
+}
+
+// Attribution health banner — explains where HYROS leads went and why the
+// dashboard's per-ad rollup can't show all of them.
+function AttributionHealthBanner({ health, onShowUnattributed }) {
+  const total = health.total_events || 0
+  const withAd = health.attributed_to_ad || 0
+  const unattr = health.fully_unattributed || 0
+  const pct = total > 0 ? Math.round((withAd / total) * 100) : 0
+  const isWarning = pct < 50
+  return (
+    <div style={{
+      display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16,
+      padding: '12px 16px',
+      background: isWarning ? 'var(--down-soft, rgba(180,30,30,0.06))' : 'var(--accent-soft)',
+      border: '1px solid', borderColor: isWarning ? 'var(--down, #b41e1e)' : 'var(--accent)',
+      borderLeftWidth: 3,
+      borderRadius: '0 3px 3px 0',
+      marginBottom: 16,
+    }}>
+      <div style={{ flex: '1 1 280px', minWidth: 280 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: isWarning ? 'var(--down, #b41e1e)' : 'var(--ink-3)', fontWeight: 600, marginBottom: 4 }}>
+          {isWarning ? 'Attribution gap · last 30 days' : 'Attribution health · last 30 days'}
+        </div>
+        <div style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink)', lineHeight: 1.5 }}>
+          HYROS recorded <strong>{total}</strong> events ({health.calls_total} calls + {health.leads_total} leads).
+          {' '}
+          <strong>{withAd}</strong> ({pct}%) link back to a specific Meta ad and show in the rollup below.
+          {' '}
+          <strong>{unattr}</strong> arrived with no ad / campaign / source data — they're real leads HYROS captured but can't tie to an ad.
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+        <HealthTile label="Ad-attributed" value={withAd} sub={`${pct}%`} />
+        <HealthTile label="Unattributed" value={unattr} warning />
+        <button onClick={onShowUnattributed} style={{
+          padding: '8px 14px',
+          background: 'var(--paper)',
+          color: 'var(--ink)',
+          border: '1px solid var(--ink)',
+          borderRadius: 3,
+          fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+        }}>
+          View {unattr} unattributed →
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function HealthTile({ label, value, sub, warning }) {
+  return (
+    <div style={{ textAlign: 'right' }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: warning ? 'var(--down, #b41e1e)' : 'var(--ink-3)' }}>{label}</div>
+      <div style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, color: warning ? 'var(--down, #b41e1e)' : 'var(--ink)', lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      {sub && <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-4)' }}>{sub}</div>}
+    </div>
+  )
+}
+
+// Drawer listing the unattributed events so the operator can see WHO they
+// are and confirm they're real leads.
+function UnattributedDrawer({ events, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 560, height: '100vh', overflowY: 'auto',
+        background: 'var(--paper)', borderLeft: '1px solid var(--rule)', padding: 24,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+          <div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }}>Unattributed leads · last 30 days</div>
+            <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, margin: 0 }}>{events.length} events HYROS couldn't tie to an ad.</h3>
+            <p style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink-3)', marginTop: 8, lineHeight: 1.5 }}>
+              These are leads + calls HYROS recorded with no ad / campaign / source data — typically organic, direct, referral, or webhook-races where attribution settled after the event fired. They're real prospects; they just can't roll up under a specific Meta ad.
+            </p>
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+            <X size={14} />
+          </button>
+        </div>
+
+        {events.length === 0 ? (
+          <p style={{ fontStyle: 'italic', color: 'var(--ink-3)' }}>No unattributed events in the window. Attribution is clean.</p>
+        ) : (
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--rule)' }}>
+                <th style={{ textAlign: 'left', padding: '8px 6px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500 }}>Date</th>
+                <th style={{ textAlign: 'left', padding: '8px 6px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500 }}>Type</th>
+                <th style={{ textAlign: 'left', padding: '8px 6px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500 }}>Lead</th>
+                <th style={{ textAlign: 'right', padding: '8px 6px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500 }}>Qual?</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((e, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid var(--rule)' }}>
+                  <td style={{ padding: '6px 6px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)' }}>{e.event_date}</td>
+                  <td style={{ padding: '6px 6px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>{e.event_type?.replace('.attributed', '')}</td>
+                  <td style={{ padding: '6px 6px', fontFamily: 'var(--serif)', fontSize: 12, color: 'var(--ink)' }}>
+                    {[e.first_name, e.last_name].filter(Boolean).join(' ') || e.email || <span style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '6px 6px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 10 }}>
+                    {e.is_qualified === true ? <span style={{ color: 'var(--ink)' }}>YES</span> : e.is_qualified === false ? <span style={{ color: 'var(--ink-4)' }}>no</span> : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
   )
 }
 
