@@ -1,70 +1,65 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Loader, AlertCircle, Search, GitBranch, ExternalLink } from 'lucide-react'
+import { Loader, AlertCircle, Search, Plus, Grid3x3, Trash2, ExternalLink } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import AddVariantModal from '../../components/ads/AddVariantModal'
 
 /*
-  Variants page — performance-first. Sorted by 30d spend on the linked Meta
-  ad so winners + their splice recipes are immediately obvious. Each row
-  shows the production state (5 stages: raw → rough → final → approved →
-  uploaded) and which atomic clips were spliced together.
+  Variants page — spreadsheet-style.
 
-  Source: public.lib_variants_with_performance view (joins library.variants
-  to ads + ad_daily_stats + lib_hyros_ad_attribution).
+  Three ways to populate:
+    1. Matrix generator — pick hook-clips × body-clips (× optional frame)
+       and the system creates ONE variant per combination via the
+       lib_variants_bulk_from_clips RPC. Supports partial composition:
+       just hooks (no body) or just bodies works too.
+    2. "Add row" — single blank variant, click cells to fill.
+    3. Edit any existing row inline.
+
+  Performance-first sort: highest 30d-spend live variants float to the top
+  so the splice recipe of a winner is immediately visible. Rows that are
+  not linked to a Meta ad are shown below the live ones.
 */
 
 const STAGES = [
-  { key: 'raw',        label: 'Raw' },
-  { key: 'rough_cut',  label: 'Rough' },
-  { key: 'final_cut',  label: 'Final' },
-  { key: 'approved',   label: 'Approved' },
-  { key: 'uploaded',   label: 'Uploaded' },
+  { key: 'raw',       label: 'Raw' },
+  { key: 'rough_cut', label: 'Rough' },
+  { key: 'final_cut', label: 'Final' },
+  { key: 'approved',  label: 'Approved' },
+  { key: 'uploaded',  label: 'Uploaded' },
 ]
 
-const STATUS_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'live', label: 'Live' },
-  { value: 'ready', label: 'Ready' },
-  { value: 'editing', label: 'Editing' },
-  { value: 'planned', label: 'Planned' },
-  { value: 'winner', label: 'Winner' },
-  { value: 'killed', label: 'Killed' },
-]
+const STATUS_OPTIONS = ['planned', 'editing', 'ready', 'live', 'paused', 'killed', 'winner']
+const PRIORITY_OPTIONS = ['', 'high', 'med', 'low']
 
 function fmt$(n) {
   if (n == null || isNaN(n) || n === 0) return '—'
   if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`
   return `$${Math.round(n).toLocaleString()}`
 }
-function fmtN(n) {
-  if (n == null || isNaN(n) || n === 0) return '—'
-  return Math.round(n).toLocaleString()
-}
+function fmtN(n) { return n == null || isNaN(n) || n === 0 ? '—' : Math.round(n).toLocaleString() }
 
 export default function AdsVariants() {
   const [rows, setRows] = useState([])
+  const [clips, setClips] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
-  const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const [savingStage, setSavingStage] = useState(null)
+  const [selected, setSelected] = useState(new Set())
+  const [showMatrix, setShowMatrix] = useState(false)
 
   const load = async () => {
     setLoading(true); setError(null)
     try {
-      const { data, error: err } = await supabase
-        .from('lib_variants_with_performance')
-        .select('*')
-        .order('spend_30d', { ascending: false, nullsFirst: false })
-      if (err) throw new Error(err.message)
-      setRows(data || [])
+      const [{ data: variants, error: vErr }, { data: clipData }] = await Promise.all([
+        supabase.from('lib_variants_with_performance').select('*').order('spend_30d', { ascending: false, nullsFirst: false }),
+        supabase.from('lib_clips').select('clip_id, clip_type, description').order('clip_id'),
+      ])
+      if (vErr) throw new Error(vErr.message)
+      setRows(variants || [])
+      setClips(clipData || [])
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
-
   useEffect(() => { load() }, [])
 
   const filtered = useMemo(() => {
@@ -74,33 +69,85 @@ export default function AdsVariants() {
       const q = search.trim().toLowerCase()
       out = out.filter(v =>
         (v.variant_id || '').toLowerCase().includes(q) ||
-        (v.notes || '').toLowerCase().includes(q) ||
-        (v.meta_ad_name || '').toLowerCase().includes(q) ||
         (v.hook_clip_id || '').toLowerCase().includes(q) ||
-        (v.body_clip_id || '').toLowerCase().includes(q)
+        (v.body_clip_id || '').toLowerCase().includes(q) ||
+        (v.notes || '').toLowerCase().includes(q) ||
+        (v.meta_ad_name || '').toLowerCase().includes(q)
       )
     }
     return out
   }, [rows, statusFilter, search])
 
+  // Save a single cell inline. Optimistic.
+  const saveField = async (variant, field, value) => {
+    if (variant[field] === value) return
+    setRows(prev => prev.map(r => r.variant_id === variant.variant_id ? { ...r, [field]: value } : r))
+    try {
+      const { error: e } = await supabase.rpc('lib_variant_upsert', {
+        p_variant_id: variant.variant_id,
+        p_status: field === 'status' ? value : (variant.status || 'planned'),
+        p_iteration: variant.iteration || 1,
+        p_hook_clip_id: field === 'hook_clip_id' ? value : (variant.hook_clip_id || null),
+        p_body_clip_id: field === 'body_clip_id' ? value : (variant.body_clip_id || null),
+        p_frame_clip_id: field === 'frame_clip_id' ? value : (variant.frame_clip_id || null),
+        p_editor: field === 'editor' ? value : (variant.editor || null),
+        p_priority: field === 'priority' ? value : (variant.priority || null),
+        p_meta_ad_id: field === 'meta_ad_id' ? value : (variant.meta_ad_id || null),
+        p_meta_ad_name: field === 'meta_ad_name' ? value : (variant.meta_ad_name || null),
+        p_notes: field === 'notes' ? value : (variant.notes || null),
+      })
+      if (e) throw new Error(e.message)
+    } catch (e) {
+      setError(`Save failed: ${e.message}`)
+      setRows(prev => prev.map(r => r.variant_id === variant.variant_id ? { ...r, [field]: variant[field] } : r))
+    }
+  }
+
   const toggleStage = async (variant, stageKey) => {
     const next = !variant[`stage_${stageKey}`]
-    setSavingStage(`${variant.variant_id}:${stageKey}`)
     setRows(prev => prev.map(r => r.variant_id === variant.variant_id ? { ...r, [`stage_${stageKey}`]: next } : r))
     try {
-      const { error: err } = await supabase.rpc('lib_variant_set_stage', {
-        p_variant_id: variant.variant_id,
-        p_stage: stageKey,
-        p_value: next,
-      })
-      if (err) throw new Error(err.message)
+      const { error: e } = await supabase.rpc('lib_variant_set_stage', { p_variant_id: variant.variant_id, p_stage: stageKey, p_value: next })
+      if (e) throw new Error(e.message)
     } catch (e) {
       setRows(prev => prev.map(r => r.variant_id === variant.variant_id ? { ...r, [`stage_${stageKey}`]: !next } : r))
       setError(`Stage update failed: ${e.message}`)
-    } finally {
-      setSavingStage(null)
     }
   }
+
+  const addBlankRow = async () => {
+    const stub = `VAR-${Date.now().toString(36).slice(-5).toUpperCase()}`
+    try {
+      const { error: e } = await supabase.rpc('lib_variant_upsert', { p_variant_id: stub })
+      if (e) throw new Error(e.message)
+      await load()
+    } catch (e) { setError(`Add row failed: ${e.message}`) }
+  }
+
+  const deleteSelected = async () => {
+    if (!selected.size) return
+    if (!confirm(`Delete ${selected.size} variant${selected.size > 1 ? 's' : ''}?`)) return
+    try {
+      await Promise.all(Array.from(selected).map(variant_id =>
+        supabase.rpc('lib_variant_delete', { p_variant_id: variant_id })
+      ))
+      setSelected(new Set())
+      await load()
+    } catch (e) { setError(`Delete failed: ${e.message}`) }
+  }
+
+  const toggleSelect = (vid) => {
+    setSelected(prev => { const next = new Set(prev); next.has(vid) ? next.delete(vid) : next.add(vid); return next })
+  }
+  const toggleSelectAll = () => {
+    if (selected.size === filtered.length) setSelected(new Set())
+    else setSelected(new Set(filtered.map(v => v.variant_id)))
+  }
+
+  const clipOptions = (type) => [
+    '',
+    ...clips.filter(c => !type || c.clip_type === type).map(c => c.clip_id),
+  ]
 
   return (
     <div>
@@ -109,279 +156,347 @@ export default function AdsVariants() {
         <div>
           <span className="eyebrow eyebrow-accent">Production · Spliced variants</span>
           <h2 className="h3 mt-2" style={{ fontSize: 22 }}>The <em>variant</em> board.</h2>
-          <p
-            className="mt-2"
-            style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}
-          >
-            {rows.length} variants · sorted by 30d spend · winning recipes float to top
+          <p className="mt-2" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+            {rows.length} variants · sorted by 30d spend · winners float up · click cells to edit
           </p>
         </div>
-        <button
-          onClick={() => { setEditing(null); setModalOpen(true) }}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px',
-            background: 'var(--accent)', color: 'var(--ink)', border: '1px solid var(--accent)', borderRadius: 3,
-            fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
-          }}
-        >
-          <Plus size={13} /> Add variant
-        </button>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button onClick={() => setShowMatrix(true)} style={btnPrimary}>
+            <Grid3x3 size={13} /> Matrix splice
+          </button>
+          <button onClick={addBlankRow} style={btnGhost}>
+            <Plus size={13} /> Add row
+          </button>
+        </div>
       </div>
 
       {/* Filter bar */}
-      <div style={{
-        display: 'flex', flexWrap: 'wrap', gap: 8,
-        padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 16,
-      }}>
-        <ChipGroup label="Status" value={statusFilter} setValue={setStatusFilter} options={STATUS_OPTIONS} />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 16 }}>
+        <ChipGroup label="Status" value={statusFilter} setValue={setStatusFilter}
+          options={[{ value: 'all', label: 'All' }, ...STATUS_OPTIONS.map(s => ({ value: s, label: s }))]} />
         <div style={{ flex: '1 1 200px', minWidth: 180, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
           <Search size={12} style={{ color: 'var(--ink-3)', flexShrink: 0, marginLeft: 4 }} />
-          <input
-            type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search variant ID, clips, ad name…"
-            style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }}
-          />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search variant ID, clips, ad…"
+            style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }} />
         </div>
       </div>
 
       {/* Error banner */}
       {error && (
-        <div style={{
-          display: 'flex', alignItems: 'flex-start', gap: 10,
-          padding: '12px 14px', background: 'var(--down-soft)', border: '1px solid var(--down)', borderLeftWidth: 3,
-          borderRadius: '0 3px 3px 0', color: 'var(--down)', marginBottom: 16, fontSize: 13,
-        }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', background: 'var(--down-soft)', border: '1px solid var(--down)', borderLeftWidth: 3, borderRadius: '0 3px 3px 0', color: 'var(--down)', marginBottom: 16, fontSize: 13 }}>
           <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-          <div>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 500, marginBottom: 4 }}>Variants error</div>
-            {error}
-          </div>
+          <div>{error}</div>
         </div>
       )}
 
-      {loading && (
-        <div className="flex items-center justify-center py-16">
-          <Loader className="animate-spin" style={{ color: 'var(--ink-3)' }} />
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--ink)', color: 'var(--paper)', borderRadius: 3, marginBottom: 12 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em' }}>{selected.size} SELECTED</span>
+          <button onClick={deleteSelected} style={{ marginLeft: 'auto', padding: '5px 10px', background: 'var(--down)', color: 'var(--paper)', border: 'none', borderRadius: 2, fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer' }}>
+            <Trash2 size={11} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4 }} />Delete
+          </button>
+          <button onClick={() => setSelected(new Set())} style={{ padding: '5px 10px', background: 'transparent', color: 'var(--paper)', border: '1px solid var(--paper-2)', borderRadius: 2, fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer' }}>Clear</button>
         </div>
       )}
+
+      {loading && <div className="flex items-center justify-center py-16"><Loader className="animate-spin" style={{ color: 'var(--ink-3)' }} /></div>}
 
       {/* Empty state */}
       {!loading && rows.length === 0 && !error && (
-        <div style={{
-          border: '1px dashed var(--rule)', borderRadius: 4, padding: 32, textAlign: 'center', background: 'var(--paper-2)',
-        }}>
-          <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center', display: 'inline-flex', marginBottom: 12 }}>No variants yet</span>
-          <h3 className="h3" style={{ fontSize: 22, marginBottom: 10 }}>Start the <em>variant board</em>.</h3>
-          <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', maxWidth: '50ch', margin: '0 auto 18px', lineHeight: 1.55 }}>
-            A variant is one spliced combination — hook clip + body clip + creator. Add atomic clips on the Clips tab first, then assemble them into variants here. Each variant tracks its production through five stages and links to its Meta ad once shipped, so live performance flows straight back to the splice recipe.
+        <div style={{ border: '2px dashed var(--rule)', borderRadius: 4, padding: 48, textAlign: 'center', background: 'var(--paper-2)' }}>
+          <Grid3x3 size={48} style={{ color: 'var(--ink-4)', margin: '0 auto 12px' }} />
+          <h3 className="h3" style={{ fontSize: 22, marginBottom: 8 }}>Splice your first variants.</h3>
+          <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', maxWidth: '52ch', margin: '0 auto 18px', lineHeight: 1.55 }}>
+            Pick hooks × bodies from your Clips catalog and the matrix generator creates one variant row per combination. Or add rows one at a time. You can test just a hook + body — frame and creator are optional.
           </p>
-          <button onClick={() => { setEditing(null); setModalOpen(true) }} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px',
-            background: 'var(--accent)', color: 'var(--ink)', border: '1px solid var(--accent)',
-            borderRadius: 3, fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
-          }}>
-            <Plus size={13} /> Add first variant
+          <button onClick={() => setShowMatrix(true)} style={{ ...btnPrimary, padding: '10px 18px' }}>
+            <Grid3x3 size={13} /> Open matrix splicer
           </button>
         </div>
       )}
 
-      {/* Variant rows */}
+      {/* Spreadsheet */}
       {!loading && filtered.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {filtered.map(v => (
-            <VariantRow
-              key={v.variant_id}
-              variant={v}
-              onToggleStage={toggleStage}
-              savingStage={savingStage}
-              onEdit={() => { setEditing(v); setModalOpen(true) }}
-            />
-          ))}
+        <div style={{ overflowX: 'auto', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3 }}>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
+                <Th w={32} center>
+                  <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleSelectAll} />
+                </Th>
+                <Th w={150}>Variant ID</Th>
+                <Th w={90}>Status</Th>
+                <Th w={130}>Hook clip</Th>
+                <Th w={130}>Body clip</Th>
+                <Th w={120}>Frame clip</Th>
+                <Th w={80}>Editor</Th>
+                <Th w={70}>Priority</Th>
+                {STAGES.map(s => <Th key={s.key} w={52} center>{s.label}</Th>)}
+                <Th w={140}>Linked Meta ad</Th>
+                <Th w={70} center>Spend 30d</Th>
+                <Th w={60} center>Booked</Th>
+                <Th w={70} center>Revenue</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(v => (
+                <tr key={v.variant_id} style={{ borderBottom: '1px solid var(--rule)', background: v.status === 'winner' ? 'var(--accent-soft)' : undefined }}>
+                  <Td center><input type="checkbox" checked={selected.has(v.variant_id)} onChange={() => toggleSelect(v.variant_id)} /></Td>
+                  <Td mono>{v.variant_id}</Td>
+                  <Td><InlineSelect value={v.status} options={STATUS_OPTIONS} onSave={val => saveField(v, 'status', val)} /></Td>
+                  <Td><InlineSelect value={v.hook_clip_id} options={clipOptions('hook').concat(clipOptions('hook_proof').slice(1))} onSave={val => saveField(v, 'hook_clip_id', val || null)} placeholder="—" /></Td>
+                  <Td><InlineSelect value={v.body_clip_id} options={clipOptions('body')} onSave={val => saveField(v, 'body_clip_id', val || null)} placeholder="—" /></Td>
+                  <Td><InlineSelect value={v.frame_clip_id} options={clipOptions('frame').concat(clipOptions('client_clip').slice(1))} onSave={val => saveField(v, 'frame_clip_id', val || null)} placeholder="—" /></Td>
+                  <Td><InlineEdit value={v.editor} onSave={val => saveField(v, 'editor', val || null)} /></Td>
+                  <Td><InlineSelect value={v.priority} options={PRIORITY_OPTIONS} onSave={val => saveField(v, 'priority', val || null)} /></Td>
+                  {STAGES.map(s => (
+                    <Td key={s.key} center><StageCheckbox checked={v[`stage_${s.key}`]} onChange={() => toggleStage(v, s.key)} /></Td>
+                  ))}
+                  <Td>
+                    {v.meta_ad_id ? (
+                      <Link to={`/sales/ads/ad/${v.meta_ad_id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontFamily: 'var(--serif)', fontSize: 12, color: 'var(--ink-2)', textDecoration: 'underline', textDecorationColor: 'var(--ink-4)' }}>
+                        {v.meta_ad_name ? (v.meta_ad_name.length > 22 ? v.meta_ad_name.slice(0, 20) + '…' : v.meta_ad_name) : v.meta_ad_id.slice(-8)}
+                        <ExternalLink size={9} />
+                      </Link>
+                    ) : (
+                      <InlineEdit value={v.meta_ad_id} onSave={val => saveField(v, 'meta_ad_id', val || null)} placeholder="link…" mono />
+                    )}
+                  </Td>
+                  <Td center mono>{fmt$(v.spend_30d)}</Td>
+                  <Td center mono>{fmtN(v.hyros_calls)}</Td>
+                  <Td center mono>{fmt$(parseFloat(v.hyros_revenue || 0))}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
-      <p style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 12 }}>
-        {filtered.length} of {rows.length} variants
-      </p>
-
-      <AddVariantModal
-        open={modalOpen}
-        existing={editing}
-        onClose={() => { setModalOpen(false); setEditing(null) }}
-        onSaved={() => load()}
-      />
+      {/* Matrix splice modal */}
+      {showMatrix && (
+        <MatrixSpliceModal
+          clips={clips}
+          onClose={() => setShowMatrix(false)}
+          onCreated={() => { setShowMatrix(false); load() }}
+        />
+      )}
     </div>
   )
 }
 
-function VariantRow({ variant: v, onToggleStage, savingStage, onEdit }) {
-  const hasPerf = (v.spend_30d || 0) > 0
-  const accent = v.status === 'winner' ? 'var(--accent)' :
-                 v.status === 'live' ? 'var(--ink)' :
-                 v.status === 'killed' ? 'var(--down)' :
-                 'var(--rule)'
+// ── Matrix splicer modal ────────────────────────────────────────────
+function MatrixSpliceModal({ clips, onClose, onCreated }) {
+  const hooks = clips.filter(c => c.clip_type === 'hook' || c.clip_type === 'hook_proof')
+  const bodies = clips.filter(c => c.clip_type === 'body')
+  const frames = clips.filter(c => c.clip_type === 'frame' || c.clip_type === 'client_clip')
+
+  const [selectedHooks, setSelectedHooks] = useState(new Set())
+  const [selectedBodies, setSelectedBodies] = useState(new Set())
+  const [selectedFrame, setSelectedFrame] = useState('')
+  const [editor, setEditor] = useState('')
+  const [priority, setPriority] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const toggle = (set, setSet, id) => {
+    const next = new Set(set); next.has(id) ? next.delete(id) : next.add(id); setSet(next)
+  }
+
+  // Pre-compute combinations count for the operator
+  const hookCount = selectedHooks.size || 1   // matrix RPC treats 0 as 1 (with NULL)
+  const bodyCount = selectedBodies.size || 1
+  const willCreate = (selectedHooks.size === 0 && selectedBodies.size === 0) ? 0 : hookCount * bodyCount
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setErr(null); setCreating(true)
+    try {
+      const { data, error } = await supabase.rpc('lib_variants_bulk_from_clips', {
+        p_hook_clip_ids: Array.from(selectedHooks),
+        p_body_clip_ids: Array.from(selectedBodies),
+        p_frame_clip_id: selectedFrame || null,
+        p_editor: editor || null,
+        p_priority: priority || null,
+      })
+      if (error) throw new Error(error.message)
+      onCreated(data || 0)
+    } catch (e) { setErr(e.message); setCreating(false) }
+  }
 
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: hasPerf ? '120px minmax(0, 1fr) auto' : 'minmax(0, 1fr) auto',
-      gap: 16,
-      padding: '14px 16px',
-      background: 'var(--paper)',
-      border: '1px solid var(--rule)',
-      borderLeftWidth: 3,
-      borderLeftColor: accent,
-      borderRadius: 3,
-    }}>
-      {/* Left thumbnail (if linked to a live ad) */}
-      {hasPerf && (
-        <div style={{ aspectRatio: '1', overflow: 'hidden', background: 'var(--paper-2)', borderRadius: 2 }}>
-          {v.ad_thumbnail_url ? (
-            <img src={v.ad_thumbnail_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : null}
-        </div>
-      )}
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <form onClick={e => e.stopPropagation()} onSubmit={submit} style={{ width: '100%', maxWidth: 760, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 4, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
+        <h3 style={{ fontFamily: 'var(--serif)', fontSize: 24, fontWeight: 500, margin: '0 0 6px 0' }}>Matrix splicer</h3>
+        <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18, fontFamily: 'var(--serif)' }}>
+          Pick hooks × bodies. Click <em>Generate</em> and the system creates one variant per combination. Pick just one of each to test a single hook+body. Leave both empty to skip the matrix.
+        </p>
 
-      {/* Middle column */}
-      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {/* Variant ID + status pill */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <Link to={`/sales/ads/variants/${encodeURIComponent(v.variant_id)}`} style={{
-            fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: 'var(--ink)',
-            textDecoration: 'none', letterSpacing: '0.04em',
-          }}>{v.variant_id}</Link>
-          <StatusPill status={v.status} />
-          {v.priority && <PriorityChip p={v.priority} />}
-          {v.editor && (
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-              · {v.editor}
-            </span>
-          )}
-        </div>
+        {/* Hooks */}
+        <SelectGroup
+          label={`Hook clips · ${selectedHooks.size} selected`}
+          items={hooks}
+          selected={selectedHooks}
+          onToggle={id => toggle(selectedHooks, setSelectedHooks, id)}
+          emptyMsg="No hook clips on file yet. Upload some on the Clips tab."
+        />
 
-        {/* Splice recipe */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.08em' }}>
-          {v.hook_clip_id && <ChipLabel>HOOK · {v.hook_clip_id}</ChipLabel>}
-          {v.body_clip_id && <ChipLabel>BODY · {v.body_clip_id}</ChipLabel>}
-          {v.frame_clip_id && <ChipLabel>FRAME · {v.frame_clip_id}</ChipLabel>}
-          {v.creator_id && <ChipLabel>CREATOR · {v.creator_id}</ChipLabel>}
-          {!v.hook_clip_id && !v.body_clip_id && (
-            <span style={{ fontStyle: 'italic', color: 'var(--ink-4)', textTransform: 'none', letterSpacing: 0, fontFamily: 'var(--serif)', fontSize: 12 }}>
-              No clips assigned yet
-            </span>
-          )}
+        {/* Bodies */}
+        <SelectGroup
+          label={`Body clips · ${selectedBodies.size} selected`}
+          items={bodies}
+          selected={selectedBodies}
+          onToggle={id => toggle(selectedBodies, setSelectedBodies, id)}
+          emptyMsg="No body clips on file yet."
+        />
+
+        {/* Frame (single-select) + editor + priority */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 18 }}>
+          <Field label="Frame clip (single, optional)">
+            <select value={selectedFrame} onChange={e => setSelectedFrame(e.target.value)} style={inputStyle}>
+              <option value="">—</option>
+              {frames.map(f => <option key={f.clip_id} value={f.clip_id}>{f.clip_id}</option>)}
+            </select>
+          </Field>
+          <Field label="Editor">
+            <input value={editor} onChange={e => setEditor(e.target.value)} style={inputStyle} placeholder="Mohamed" />
+          </Field>
+          <Field label="Priority">
+            <select value={priority} onChange={e => setPriority(e.target.value)} style={inputStyle}>
+              {PRIORITY_OPTIONS.map(p => <option key={p} value={p}>{p || '—'}</option>)}
+            </select>
+          </Field>
         </div>
 
-        {/* Linked Meta ad */}
-        {v.meta_ad_id ? (
-          <div style={{ fontFamily: 'var(--serif)', fontSize: 12, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Link to={`/sales/ads/ad/${v.meta_ad_id}`} style={{ color: 'var(--ink-2)', textDecoration: 'underline', textDecorationColor: 'var(--ink-4)' }}>
-              {v.meta_ad_name || v.meta_ad_id}
-            </Link>
-            <ExternalLink size={10} style={{ color: 'var(--ink-4)' }} />
+        {/* Preview */}
+        <div style={{ marginTop: 18, padding: '12px 14px', background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }}>Will create</div>
+          <div style={{ fontFamily: 'var(--serif)', fontSize: 20, color: 'var(--ink)', fontWeight: 500 }}>
+            {willCreate === 0 ? 'No variants — pick at least one hook or body' : `${willCreate} variant${willCreate > 1 ? 's' : ''}`}
+            {selectedFrame && willCreate > 0 ? ` · all use frame ${selectedFrame}` : ''}
           </div>
-        ) : (
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-            Not linked to a Meta ad yet
-          </div>
-        )}
-
-        {/* Performance row */}
-        {hasPerf && (
-          <div style={{ display: 'flex', gap: 14, marginTop: 4 }}>
-            <Metric label="Spend 30d" value={fmt$(v.spend_30d)} />
-            <Metric label="Booked" value={fmtN(v.hyros_calls)} sub={v.hyros_qualified ? `${v.hyros_qualified} qual.` : null} />
-            <Metric label="Leads" value={fmtN(v.results_30d)} />
-            <Metric label="Revenue" value={fmt$(parseFloat(v.hyros_revenue || 0))} />
-          </div>
-        )}
-      </div>
-
-      {/* Right column — production stages + edit */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end', minWidth: 200 }}>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {STAGES.map(s => (
-            <StageButton
-              key={s.key}
-              label={s.label}
-              checked={v[`stage_${s.key}`]}
-              saving={savingStage === `${v.variant_id}:${s.key}`}
-              onClick={() => onToggleStage(v, s.key)}
-            />
-          ))}
         </div>
-        <button onClick={onEdit} style={{
-          padding: '4px 10px', background: 'transparent', color: 'var(--ink-3)', border: '1px solid var(--rule)',
-          borderRadius: 2, fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
-          cursor: 'pointer',
-        }}>Edit</button>
-      </div>
+
+        {err && <div style={{ marginTop: 8, color: 'var(--down)', fontSize: 12 }}>{err}</div>}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+          <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
+          <button type="submit" disabled={creating || willCreate === 0} style={btnPrimary}>
+            {creating ? 'Generating…' : `Generate ${willCreate} variant${willCreate === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }
 
-function ChipLabel({ children }) {
+function SelectGroup({ label, items, selected, onToggle, emptyMsg }) {
   return (
-    <span style={{
-      padding: '2px 6px', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2,
-      fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-2)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 500,
-    }}>{children}</span>
+    <div style={{ marginTop: 18 }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500, marginBottom: 8 }}>
+        {label}
+      </div>
+      {items.length === 0 ? (
+        <div style={{ fontStyle: 'italic', color: 'var(--ink-4)', fontFamily: 'var(--serif)', fontSize: 13 }}>{emptyMsg}</div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 200, overflowY: 'auto', padding: 6, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2 }}>
+          {items.map(c => {
+            const active = selected.has(c.clip_id)
+            return (
+              <button key={c.clip_id} type="button" onClick={() => onToggle(c.clip_id)}
+                title={c.description || ''}
+                style={{
+                  padding: '5px 10px',
+                  fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.05em', fontWeight: 500,
+                  background: active ? 'var(--accent)' : 'var(--paper)', color: 'var(--ink)',
+                  border: '1px solid', borderColor: active ? 'var(--accent)' : 'var(--rule)', borderRadius: 2,
+                  cursor: 'pointer',
+                }}
+              >
+                {c.clip_id}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
-function StatusPill({ status }) {
-  if (!status) return null
-  const isWinner = status === 'winner'
-  const isLive = status === 'live'
-  const bg = isWinner ? 'var(--accent)' : isLive ? 'var(--ink)' : 'var(--paper-2)'
-  const fg = isWinner ? 'var(--ink)' : isLive ? 'var(--paper)' : 'var(--ink-2)'
-  return (
-    <span style={{
-      padding: '2px 8px', background: bg, color: fg, border: '1px solid', borderColor: bg, borderRadius: 2,
-      fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600,
-    }}>{status}</span>
-  )
-}
-
-function PriorityChip({ p }) {
-  return (
-    <span style={{
-      padding: '2px 7px', background: p === 'high' ? 'var(--accent-soft)' : 'transparent',
-      border: '1px solid var(--rule)', borderRadius: 2,
-      fontFamily: 'var(--mono)', fontSize: 9, color: p === 'high' ? 'var(--ink)' : 'var(--ink-3)', letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
-    }}>{p}</span>
-  )
-}
-
-function StageButton({ label, checked, saving, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={saving}
-      title={checked ? `${label} — done (click to undo)` : `Mark ${label} done`}
-      style={{
-        padding: '3px 8px',
-        background: checked ? 'var(--accent)' : 'var(--paper-2)',
-        color: checked ? 'var(--ink)' : 'var(--ink-3)',
-        border: '1px solid', borderColor: checked ? 'var(--accent)' : 'var(--rule)',
-        borderRadius: 2,
-        fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
-        cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.5 : 1,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {label}
-    </button>
-  )
-}
-
-function Metric({ label, value, sub }) {
+function Field({ label, children }) {
   return (
     <div>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>{label}</div>
-      <div style={{ fontFamily: 'var(--serif)', fontSize: 14, fontWeight: 500, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{value}</div>
-      {sub && <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-4)', letterSpacing: '0.08em' }}>{sub}</div>}
+      <label style={{ display: 'block', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500, marginBottom: 4 }}>{label}</label>
+      {children}
     </div>
+  )
+}
+
+// ── Shared spreadsheet cell components ──────────────────────────────
+function Th({ children, w, center }) {
+  return (
+    <th style={{
+      padding: '8px 10px', textAlign: center ? 'center' : 'left',
+      fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+      color: 'var(--ink-3)', fontWeight: 500, width: w ? w : undefined, whiteSpace: 'nowrap',
+    }}>{children}</th>
+  )
+}
+function Td({ children, center, mono }) {
+  return (
+    <td style={{
+      padding: '4px 8px', textAlign: center ? 'center' : 'left', verticalAlign: 'middle',
+      fontFamily: mono ? 'var(--mono)' : undefined, fontSize: 12, color: 'var(--ink)',
+    }}>{children}</td>
+  )
+}
+
+function InlineEdit({ value, onSave, placeholder, mono }) {
+  const [editing, setEditing] = useState(false)
+  const [v, setV] = useState(value || '')
+  useEffect(() => { setV(value || '') }, [value])
+  if (editing) {
+    return (
+      <input autoFocus value={v} onChange={e => setV(e.target.value)}
+        onBlur={() => { setEditing(false); onSave(v.trim()) }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); e.target.blur() }
+          if (e.key === 'Escape') { setV(value || ''); setEditing(false) }
+        }}
+        style={{ width: '100%', minWidth: 60, background: 'var(--paper)', border: '1px solid var(--accent)', padding: '3px 6px', fontFamily: mono ? 'var(--mono)' : 'var(--sans)', fontSize: 12, color: 'var(--ink)', outline: 'none', borderRadius: 2 }} />
+    )
+  }
+  return (
+    <span onClick={() => setEditing(true)} style={{ display: 'inline-block', minWidth: 40, padding: '3px 6px', cursor: 'text', fontFamily: mono ? 'var(--mono)' : 'var(--sans)', color: value ? 'var(--ink)' : 'var(--ink-4)', borderRadius: 2 }}>
+      {value || placeholder || '—'}
+    </span>
+  )
+}
+
+function InlineSelect({ value, options, onSave, placeholder }) {
+  return (
+    <select value={value || ''} onChange={e => onSave(e.target.value || null)}
+      style={{ width: '100%', background: 'transparent', border: '1px solid transparent', padding: '3px 6px', fontFamily: 'var(--mono)', fontSize: 11, color: value ? 'var(--ink)' : 'var(--ink-4)', cursor: 'pointer', borderRadius: 2, outline: 'none' }}>
+      {!value && <option value="">{placeholder || '—'}</option>}
+      {options.map(o => {
+        const val = typeof o === 'string' ? o : o.value
+        const label = typeof o === 'string' ? o : o.label
+        return <option key={val} value={val}>{label || placeholder || '—'}</option>
+      })}
+    </select>
+  )
+}
+
+function StageCheckbox({ checked, onChange }) {
+  return (
+    <button onClick={onChange} style={{
+      width: 18, height: 18,
+      background: checked ? 'var(--accent)' : 'var(--paper-2)',
+      border: '1px solid', borderColor: checked ? 'var(--accent)' : 'var(--rule)',
+      borderRadius: 2, cursor: 'pointer',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      color: 'var(--ink)', fontSize: 11, lineHeight: 1,
+    }}>{checked ? '✓' : ''}</button>
   )
 }
 
@@ -403,4 +518,23 @@ function ChipGroup({ label, value, setValue, options }) {
       </div>
     </div>
   )
+}
+
+const inputStyle = {
+  width: '100%', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3,
+  padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', color: 'var(--ink)', outline: 'none',
+}
+const btnPrimary = {
+  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+  background: 'var(--accent)', color: 'var(--ink)', border: '1px solid var(--accent)', borderRadius: 3,
+  fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
+}
+const btnGhost = {
+  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+  background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 3,
+  fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
+}
+const btnSecondary = {
+  padding: '8px 16px', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 3,
+  fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
 }
