@@ -1,11 +1,25 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Loader, AlertCircle, Search, Plus, Grid3x3, Trash2, ExternalLink, FlaskConical,
-  LayoutGrid, Table2, X, Link2, TrendingUp, Trophy
+  LayoutGrid, Table2, X, Link2, TrendingUp, Trophy, Sparkles, Type, MessageSquare
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useToast } from '../../hooks/useToast'
+
+// Status color tokens — every status gets a consistent tint everywhere it
+// appears (drawer dropdown, sheet pill, matrix cell, by-hook row).
+// bg = filled background for the pill, fg = text color, accent = left-rule
+// indicator color for table rows.
+const STATUS_COLORS = {
+  planned:  { bg: 'var(--paper-2)',                 fg: 'var(--ink-3)', accent: 'var(--rule)'   },
+  editing:  { bg: 'rgba(10,10,10,0.08)',            fg: 'var(--ink)',   accent: 'var(--ink-3)'  },
+  ready:    { bg: 'rgba(244,225,74,0.22)',          fg: 'var(--ink)',   accent: 'var(--accent)' },
+  live:     { bg: 'var(--accent)',                  fg: 'var(--ink)',   accent: 'var(--accent)' },
+  paused:   { bg: 'rgba(10,10,10,0.04)',            fg: 'var(--ink-3)', accent: 'var(--ink-4)'  },
+  killed:   { bg: 'var(--down-soft, rgba(180,30,30,0.08))', fg: 'var(--down, #b41e1e)', accent: 'var(--down, #b41e1e)' },
+  winner:   { bg: 'var(--accent)',                  fg: 'var(--ink)',   accent: 'var(--accent)' },
+}
 
 /*
   Variant board — Matrix-first.
@@ -77,6 +91,7 @@ export default function AdsVariants() {
   const [selectedVariant, setSelectedVariant] = useState(null)  // for the detail drawer
   const [seeding, setSeeding] = useState(false)
   const [showMatrix, setShowMatrix] = useState(false)
+  const [showAddClip, setShowAddClip] = useState(null)  // 'hook' | 'body' | 'frame' | null
   const toast = useToast()
 
   // Two-stage load: variants first (paints the page fast), clips + ads in
@@ -284,8 +299,19 @@ export default function AdsVariants() {
             {rows.length} variants · {hooks.length} hooks × {bodies.length} bodies = {summary.totalCombos} combos · {summary.testedCombos} tested
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           <ViewToggle view={view} setView={setView} />
+          <span style={{ width: 1, height: 22, background: 'var(--rule)' }} />
+          <button onClick={() => setShowAddClip('hook')} style={btnGhost} title="Add a new hook idea — no MP4 required">
+            <Sparkles size={12} /> + Hook
+          </button>
+          <button onClick={() => setShowAddClip('body')} style={btnGhost} title="Add a new body idea">
+            <MessageSquare size={12} /> + Body
+          </button>
+          <button onClick={() => setShowAddClip('frame')} style={btnGhost} title="Add a new frame intro">
+            <Type size={12} /> + Frame
+          </button>
+          <span style={{ width: 1, height: 22, background: 'var(--rule)' }} />
           <button onClick={() => setShowMatrix(true)} style={btnPrimary}>
             <Grid3x3 size={13} /> Splice
           </button>
@@ -297,6 +323,17 @@ export default function AdsVariants() {
           )}
         </div>
       </div>
+
+      {/* "How this works" callout — only shown on first visits (when no
+          variants exist yet) so it doesn't clutter for power users */}
+      {rows.length === 0 && !loading && (
+        <div className="what-it-means" style={{ marginBottom: 24 }}>
+          <div className="wim-tag">How this board works</div>
+          <div className="wim-body">
+            <strong>Clips</strong> are atomic edits (one hook, one body, one frame). Use <em>+ Hook</em>/<em>+ Body</em>/<em>+ Frame</em> to add new ideas — you don't need an MP4 to start, just a label. <strong>Variants</strong> are spliced combinations: pick hooks × bodies via <em>Splice</em> and the system creates one row per combination. Once a variant is filmed and uploaded as a Meta ad, click any cell to open the drawer and link it to the live ad — spend, booked calls, and revenue flow back automatically.
+          </div>
+        </div>
+      )}
 
       {/* Pattern summary — only when we have variants */}
       {rows.length > 0 && (
@@ -388,6 +425,96 @@ export default function AdsVariants() {
           onCreated={() => { setShowMatrix(false); load() }}
         />
       )}
+
+      {/* Quick-add clip modal (hook / body / frame) — no MP4 required */}
+      {showAddClip && (
+        <QuickAddClipModal
+          clipType={showAddClip}
+          onClose={() => setShowAddClip(null)}
+          onCreated={() => { setShowAddClip(null); load() }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Quick-add clip modal — used to seed a new hook / body / frame idea
+// straight from the Variants page without going to the Clips upload flow.
+// Operator can attach an MP4 later via Clips → just need a label here.
+// ────────────────────────────────────────────────────────────────────
+function QuickAddClipModal({ clipType, onClose, onCreated }) {
+  const [clipId, setClipId] = useState('')
+  const [description, setDescription] = useState('')
+  const [creator, setCreator] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const typeLabel = clipType === 'hook' ? 'hook' : clipType === 'body' ? 'body' : 'frame'
+  const placeholderId =
+    clipType === 'hook'  ? 'H6-OSO' :
+    clipType === 'body'  ? 'BODY-C-OSO' :
+                           'FRAME-RESTO-V2'
+  const placeholderDesc =
+    clipType === 'hook'  ? 'Phone-stopped-ringing concern (~15s)' :
+    clipType === 'body'  ? 'Body C (proof + reviews) — UGC' :
+                           'Testimonial intro — RESTO-AI v2'
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!clipId.trim()) return
+    setSaving(true); setErr(null)
+    try {
+      const { error } = await supabase.rpc('lib_clip_upsert', {
+        p_clip_id: clipId.trim(),
+        p_clip_type: typeLabel,
+        p_description: description.trim() || null,
+        p_creator_id: creator.trim() || null,
+      })
+      if (error) throw new Error(error.message)
+      onCreated()
+    } catch (e) {
+      setErr(e.message); setSaving(false)
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)', zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <form onClick={e => e.stopPropagation()} onSubmit={submit} style={{ width: '100%', maxWidth: 460, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 4, padding: 24 }}>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }}>Add new clip</div>
+          <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, margin: 0 }}>
+            New <em>{typeLabel}</em>.
+          </h3>
+          <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6, fontFamily: 'var(--serif)', lineHeight: 1.45 }}>
+            Adds the clip stub. You can drop the source MP4 later from the Clips tab.
+          </p>
+        </div>
+
+        <Field label={`${typeLabel} ID *`}>
+          <input
+            autoFocus required value={clipId} onChange={e => setClipId(e.target.value)}
+            style={inputStyle} placeholder={placeholderId}
+          />
+        </Field>
+
+        <Field label="Description">
+          <input value={description} onChange={e => setDescription(e.target.value)} style={inputStyle} placeholder={placeholderDesc} />
+        </Field>
+
+        <Field label="Creator">
+          <input value={creator} onChange={e => setCreator(e.target.value)} style={inputStyle} placeholder="OSO" />
+        </Field>
+
+        {err && <div style={{ color: 'var(--down, #b41e1e)', fontSize: 12, marginTop: 4 }}>{err}</div>}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+          <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
+          <button type="submit" disabled={saving || !clipId.trim()} style={btnPrimary}>
+            {saving ? 'Saving…' : `Add ${typeLabel}`}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }
@@ -681,28 +808,44 @@ function ByHookView({ rows, hooks, hookPerf, clipById, onVariantClick }) {
               )}
             </div>
             <div style={{ padding: '10px 18px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {variants.map(v => (
-                <div key={v.variant_id} onClick={() => onVariantClick(v)} style={{
-                  display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px',
-                  background: v.status === 'winner' ? 'var(--accent-soft)' : 'var(--paper)',
-                  border: '1px solid var(--rule)', borderRadius: 2, cursor: 'pointer',
-                }}>
-                  <div style={{ minWidth: 140 }}>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: 'var(--ink)' }}>
-                      {v.body_clip_id ? shortClipId(v.body_clip_id, 'body') : '(no body)'}
-                    </span>
+              {variants.map(v => {
+                const c = STATUS_COLORS[v.status] || STATUS_COLORS.planned
+                return (
+                  <div key={v.variant_id} onClick={() => onVariantClick(v)} style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px',
+                    background: v.status === 'winner' ? 'var(--accent-soft)' : 'var(--paper)',
+                    border: '1px solid var(--rule)', borderLeftWidth: 3, borderLeftColor: c.accent,
+                    borderRadius: 2, cursor: 'pointer',
+                  }}>
+                    {/* Body + frame composition */}
+                    <div style={{ minWidth: 200, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.1em' }}>BODY ·</span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600, color: 'var(--ink)' }}>
+                          {v.body_clip_id ? shortClipId(v.body_clip_id, 'body') : '(none)'}
+                        </span>
+                      </div>
+                      {v.frame_clip_id && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.1em' }}>FRAME ·</span>
+                          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, color: 'var(--ink-2)' }}>
+                            {shortClipId(v.frame_clip_id, 'frame')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <StatusPill status={v.status} />
+                    <div style={{ flex: 1, fontFamily: 'var(--serif)', fontSize: 12, color: 'var(--ink-3)' }}>
+                      {v.meta_ad_name || (v.meta_ad_id ? `Linked: ${v.meta_ad_id.slice(-8)}` : <span style={{ fontStyle: 'italic' }}>not linked · click to link →</span>)}
+                    </div>
+                    <div style={{ display: 'flex', gap: 16, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)', letterSpacing: '0.04em' }}>
+                      <Metric label="Spend" value={fmt$(v.spend_30d)} />
+                      <Metric label="Booked" value={fmtN(v.hyros_calls)} />
+                      <Metric label="Revenue" value={fmt$(parseFloat(v.hyros_revenue || 0))} />
+                    </div>
                   </div>
-                  <StatusPill status={v.status} />
-                  <div style={{ flex: 1, fontFamily: 'var(--serif)', fontSize: 12, color: 'var(--ink-3)' }}>
-                    {v.meta_ad_name || (v.meta_ad_id ? `Linked: ${v.meta_ad_id.slice(-8)}` : <span style={{ fontStyle: 'italic' }}>not linked</span>)}
-                  </div>
-                  <div style={{ display: 'flex', gap: 16, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)', letterSpacing: '0.04em' }}>
-                    <Metric label="Spend" value={fmt$(v.spend_30d)} />
-                    <Metric label="Booked" value={fmtN(v.hyros_calls)} />
-                    <Metric label="Revenue" value={fmt$(parseFloat(v.hyros_revenue || 0))} />
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )
@@ -759,12 +902,27 @@ function SheetView({ filtered, clips, search, setSearch, statusFilter, setStatus
             </tr>
           </thead>
           <tbody>
-            {filtered.map(v => (
-              <tr key={v.variant_id} style={{ borderBottom: '1px solid var(--rule)', background: v.status === 'winner' ? 'var(--accent-soft)' : undefined, cursor: 'pointer' }}>
+            {filtered.map(v => {
+              const c = STATUS_COLORS[v.status] || STATUS_COLORS.planned
+              return (
+              <tr key={v.variant_id} style={{
+                borderBottom: '1px solid var(--rule)',
+                background: v.status === 'winner' ? 'var(--accent-soft)' : undefined,
+                cursor: 'pointer',
+                borderLeft: `3px solid ${c.accent}`,
+              }}>
                 <Td mono onClick={() => onRowClick(v)} style={{ wordBreak: 'break-all' }}>
-                  {shortClipId(v.hook_clip_id, 'hook') || '—'} × {shortClipId(v.body_clip_id, 'body') || '—'}
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600 }}>{shortClipId(v.hook_clip_id, 'hook') || '—'}</span>
+                    <span style={{ color: 'var(--ink-4)', fontWeight: 300 }}>×</span>
+                    <span style={{ fontWeight: 600 }}>{shortClipId(v.body_clip_id, 'body') || '—'}</span>
+                    {v.frame_clip_id && (<>
+                      <span style={{ color: 'var(--ink-4)', fontWeight: 300 }}>×</span>
+                      <span style={{ fontWeight: 500, color: 'var(--ink-2)' }}>{shortClipId(v.frame_clip_id, 'frame')}</span>
+                    </>)}
+                  </div>
                 </Td>
-                <Td><InlineSelect value={v.status} options={STATUS_OPTIONS} onSave={val => onSaveField(v, 'status', val)} /></Td>
+                <Td><StatusPicker value={v.status} onChange={val => onSaveField(v, 'status', val)} /></Td>
                 <Td><InlineSelect value={v.hook_clip_id} options={clipOptions(['hook', 'hook_proof'])} onSave={val => onSaveField(v, 'hook_clip_id', val || null)} /></Td>
                 <Td><InlineSelect value={v.body_clip_id} options={clipOptions('body')} onSave={val => onSaveField(v, 'body_clip_id', val || null)} /></Td>
                 <Td><InlineSelect value={v.frame_clip_id} options={clipOptions(['frame', 'client_clip'])} onSave={val => onSaveField(v, 'frame_clip_id', val || null)} /></Td>
@@ -788,7 +946,8 @@ function SheetView({ filtered, clips, search, setSearch, statusFilter, setStatus
                   </button>
                 </Td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -853,9 +1012,9 @@ function VariantDrawer({ variant, clips, ads, clipById, onClose, onSaveField, on
         <Section title="Production">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
             <Field label="Status">
-              <select value={variant.status || 'planned'} onChange={e => onSaveField(variant, 'status', e.target.value)} style={inputStyle}>
-                {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <div style={{ paddingTop: 2 }}>
+                <StatusPicker value={variant.status} onChange={val => onSaveField(variant, 'status', val)} />
+              </div>
             </Field>
             <Field label="Priority">
               <select value={variant.priority || ''} onChange={e => onSaveField(variant, 'priority', e.target.value || null)} style={inputStyle}>
@@ -1248,16 +1407,101 @@ function ChipGroup({ label, value, setValue, options }) {
 }
 function StatusPill({ status, small }) {
   if (!status) return null
-  const isWinner = status === 'winner'
-  const isLive = status === 'live' || status === 'ACTIVE'
-  const bg = isWinner ? 'var(--accent)' : isLive ? 'var(--ink)' : 'var(--paper-2)'
-  const fg = isWinner ? 'var(--ink)' : isLive ? 'var(--paper)' : 'var(--ink-2)'
+  // Meta ad's effective_status sometimes comes through as ACTIVE — alias it
+  // to 'live' so it lands on the right palette.
+  const key = status === 'ACTIVE' ? 'live' : (status === 'CAMPAIGN_PAUSED' || status === 'ADSET_PAUSED' || status === 'PAUSED') ? 'paused' : status
+  const c = STATUS_COLORS[key] || STATUS_COLORS.planned
+  const isWinner = key === 'winner'
   return (
     <span style={{
-      padding: small ? '1px 6px' : '2px 8px', background: bg, color: fg, border: '1px solid', borderColor: bg, borderRadius: 2,
-      fontFamily: 'var(--mono)', fontSize: small ? 8 : 9, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+      padding: small ? '1px 6px' : '2px 8px',
+      background: c.bg, color: c.fg,
+      border: '1px solid', borderColor: c.accent,
+      borderRadius: 2,
+      fontFamily: 'var(--mono)', fontSize: small ? 8 : 9, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
       whiteSpace: 'nowrap',
-    }}>{status}</span>
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+    }}>
+      {isWinner && '★ '}
+      {status}
+    </span>
+  )
+}
+
+// Branded status picker — replaces the native <select> with a colored
+// pill that opens a popover of status options, each rendered with its own
+// color so the operator picks visually.
+function StatusPicker({ value, onChange, options = STATUS_OPTIONS }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
+
+  const current = value || 'planned'
+  const c = STATUS_COLORS[current] || STATUS_COLORS.planned
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(o => !o) }}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '4px 10px',
+          background: c.bg, color: c.fg,
+          border: '1px solid', borderColor: c.accent,
+          borderRadius: 2,
+          fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
+          cursor: 'pointer',
+          minWidth: 90, justifyContent: 'space-between',
+        }}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          {current === 'winner' && '★ '}
+          {current}
+        </span>
+        <span style={{ fontSize: 8, opacity: 0.7 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, marginTop: 4,
+          background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3,
+          boxShadow: '0 6px 20px rgba(10,10,10,0.10)',
+          zIndex: 50, padding: 4, minWidth: 140,
+          display: 'flex', flexDirection: 'column', gap: 3,
+        }}>
+          {options.map(opt => {
+            const oc = STATUS_COLORS[opt] || STATUS_COLORS.planned
+            const isActive = opt === current
+            return (
+              <button
+                key={opt}
+                onClick={(e) => { e.stopPropagation(); onChange(opt); setOpen(false) }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '5px 8px',
+                  background: isActive ? oc.bg : 'transparent',
+                  color: isActive ? oc.fg : 'var(--ink)',
+                  border: '1px solid', borderColor: isActive ? oc.accent : 'transparent',
+                  borderRadius: 2,
+                  fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
+                  cursor: 'pointer', textAlign: 'left',
+                }}
+                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--paper-2)' }}
+                onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+              >
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: oc.accent, flexShrink: 0 }} />
+                {opt === 'winner' && '★ '}{opt}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
