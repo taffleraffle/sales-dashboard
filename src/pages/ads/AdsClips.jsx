@@ -52,13 +52,6 @@ function parseFilename(filename) {
   const tokens = upper.split(/[^A-Z0-9]+/).filter(Boolean)
   const firstTok = tokens[0] || ''
 
-  let clip_type = null
-  if (/^H\d/.test(firstTok)) clip_type = 'hook'
-  else if (firstTok === 'P' || /^P\d/.test(firstTok)) clip_type = 'hook_proof'
-  else if (tokens.includes('BODY')) clip_type = 'body'
-  else if (tokens.includes('FRAME')) clip_type = 'frame'
-  else if (upper.includes('TESTIMONIAL') || tokens.includes('CLIENT')) clip_type = 'client_clip'
-
   let creator_id = null
   if (upper.includes('RESTO-AI') || upper.includes('RESTOAI')) creator_id = 'RESTO-AI'
   else {
@@ -66,6 +59,20 @@ function parseFilename(filename) {
       if (KNOWN_CREATORS.includes(tok)) { creator_id = tok; break }
     }
   }
+
+  let clip_type = null
+  if (/^H\d/.test(firstTok)) clip_type = 'hook'
+  else if (firstTok === 'P' || /^P\d/.test(firstTok)) clip_type = 'hook_proof'
+  else if (tokens.includes('BODY')) clip_type = 'body'
+  else if (tokens.includes('FRAME')) clip_type = 'frame'
+  // Phrases like "what one of our restoration clients said" or "client said"
+  // describe a testimonial-intro frame. Detect them so RESTO-AI / talent clips
+  // with descriptive names get the right type.
+  else if (/what\s+one\s+of\s+our|client\s+said|owner\s+said|customer\s+said/i.test(base)) clip_type = 'frame'
+  else if (upper.includes('TESTIMONIAL') || tokens.includes('CLIENT')) clip_type = 'client_clip'
+  // RESTO-AI is OPT's AI talking-head used almost exclusively for testimonial
+  // intro frames. Default to frame when we can't otherwise classify.
+  else if (creator_id === 'RESTO-AI') clip_type = 'frame'
 
   return { clip_id: base, clip_type, creator_id }
 }

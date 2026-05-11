@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader, AlertCircle, Search, Plus, Grid3x3, Trash2, ExternalLink } from 'lucide-react'
+import { Loader, AlertCircle, Search, Plus, Grid3x3, Trash2, ExternalLink, FlaskConical } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { useToast } from '../../hooks/useToast'
 
 /*
   Variants page — spreadsheet-style.
@@ -46,19 +47,33 @@ export default function AdsVariants() {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState(new Set())
   const [showMatrix, setShowMatrix] = useState(false)
+  const [seeding, setSeeding] = useState(false)
+  const toast = useToast()
 
+  // Two-stage load: variants come first so the spreadsheet paints fast,
+  // clips (for the inline-select picker options) load in parallel and slot
+  // in when ready. Avoids blocking the table render on the secondary query.
   const load = async () => {
-    setLoading(true); setError(null)
+    setError(null)
+    setLoading(true)
+    const clipsPromise = supabase
+      .from('lib_clips')
+      .select('clip_id, clip_type, description')
+      .order('clip_id')
+      .then(({ data }) => setClips(data || []))
     try {
-      const [{ data: variants, error: vErr }, { data: clipData }] = await Promise.all([
-        supabase.from('lib_variants_with_performance').select('*').order('spend_30d', { ascending: false, nullsFirst: false }),
-        supabase.from('lib_clips').select('clip_id, clip_type, description').order('clip_id'),
-      ])
+      const { data: variants, error: vErr } = await supabase
+        .from('lib_variants_with_performance')
+        .select('*')
+        .order('spend_30d', { ascending: false, nullsFirst: false })
       if (vErr) throw new Error(vErr.message)
       setRows(variants || [])
-      setClips(clipData || [])
-    } catch (e) { setError(e.message) }
-    finally { setLoading(false) }
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+    await clipsPromise
   }
   useEffect(() => { load() }, [])
 
@@ -124,6 +139,52 @@ export default function AdsVariants() {
     } catch (e) { setError(`Add row failed: ${e.message}`) }
   }
 
+  // Seed a small realistic dataset so the spreadsheet has something to look
+  // at before any real clips/variants have been added. Creates 5 clips
+  // (2 hooks + 2 bodies + 1 frame) and runs the matrix splicer to generate
+  // 4 spliced variants from them. All test rows are prefixed "DEMO-" so they
+  // can be bulk-deleted via the trash icons later.
+  const seedSampleData = async () => {
+    setSeeding(true); setError(null)
+    try {
+      const DEMO_CLIPS = [
+        { id: 'DEMO-H1-OSO',       type: 'hook',       creator: 'OSO',    desc: 'Referrals & word of mouth (~15s)' },
+        { id: 'DEMO-H2-OSO',       type: 'hook',       creator: 'OSO',    desc: 'Burning Google Ads budget (~16s)' },
+        { id: 'DEMO-BODY-B1-OSO',  type: 'body',       creator: 'OSO',    desc: 'Body B1 (location pages) — UGC' },
+        { id: 'DEMO-BODY-B5-OSO',  type: 'body',       creator: 'OSO',    desc: 'Body B5 (reviews) — UGC' },
+        { id: 'DEMO-FRAME-RESTO',  type: 'frame',      creator: 'RESTO-AI', desc: 'Testimonial intro — locked to Script 3' },
+      ]
+
+      for (const c of DEMO_CLIPS) {
+        await supabase.rpc('lib_clip_upsert', {
+          p_clip_id: c.id,
+          p_clip_type: c.type,
+          p_creator_id: c.creator,
+          p_description: c.desc,
+          p_section: 'Demo · sample data',
+          p_priority: 'med',
+        })
+      }
+
+      // Now matrix splice 2 hooks × 2 bodies = 4 variants
+      const { error: matrixErr } = await supabase.rpc('lib_variants_bulk_from_clips', {
+        p_hook_clip_ids: ['DEMO-H1-OSO', 'DEMO-H2-OSO'],
+        p_body_clip_ids: ['DEMO-BODY-B1-OSO', 'DEMO-BODY-B5-OSO'],
+        p_frame_clip_id: 'DEMO-FRAME-RESTO',
+        p_editor: 'Mohamed',
+        p_priority: 'med',
+      })
+      if (matrixErr) throw new Error(matrixErr.message)
+
+      toast.success('5 demo clips + 4 demo variants created — try the spreadsheet now')
+      await load()
+    } catch (e) {
+      setError(`Seed failed: ${e.message}`)
+    } finally {
+      setSeeding(false)
+    }
+  }
+
   const deleteSelected = async () => {
     if (!selected.size) return
     if (!confirm(`Delete ${selected.size} variant${selected.size > 1 ? 's' : ''}?`)) return
@@ -167,6 +228,14 @@ export default function AdsVariants() {
           <button onClick={addBlankRow} style={btnGhost}>
             <Plus size={13} /> Add row
           </button>
+          {rows.length === 0 && (
+            <button onClick={seedSampleData} disabled={seeding} style={btnGhost}>
+              {seeding
+                ? <Loader size={13} className="animate-spin" />
+                : <FlaskConical size={13} />}
+              {seeding ? 'Seeding…' : 'Seed demo data'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -208,11 +277,17 @@ export default function AdsVariants() {
           <Grid3x3 size={48} style={{ color: 'var(--ink-4)', margin: '0 auto 12px' }} />
           <h3 className="h3" style={{ fontSize: 22, marginBottom: 8 }}>Splice your first variants.</h3>
           <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', maxWidth: '52ch', margin: '0 auto 18px', lineHeight: 1.55 }}>
-            Pick hooks × bodies from your Clips catalog and the matrix generator creates one variant row per combination. Or add rows one at a time. You can test just a hook + body — frame and creator are optional.
+            Pick hooks × bodies from your Clips catalog and the matrix generator creates one variant row per combination. Or seed sample data to see what the spreadsheet looks like before committing real clips.
           </p>
-          <button onClick={() => setShowMatrix(true)} style={{ ...btnPrimary, padding: '10px 18px' }}>
-            <Grid3x3 size={13} /> Open matrix splicer
-          </button>
+          <div style={{ display: 'inline-flex', gap: 8 }}>
+            <button onClick={() => setShowMatrix(true)} style={{ ...btnPrimary, padding: '10px 18px' }}>
+              <Grid3x3 size={13} /> Open matrix splicer
+            </button>
+            <button onClick={seedSampleData} disabled={seeding} style={{ ...btnGhost, padding: '10px 18px' }}>
+              {seeding ? <Loader size={13} className="animate-spin" /> : <FlaskConical size={13} />}
+              {seeding ? 'Seeding…' : 'Seed demo data'}
+            </button>
+          </div>
         </div>
       )}
 

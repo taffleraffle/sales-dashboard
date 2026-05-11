@@ -10,6 +10,10 @@ export default function UploadDock() {
   const { runs, dismiss } = useUploads()
   if (!runs.length) return null
 
+  const hasMultiple = runs.length > 1
+  const allDone = runs.every(r => r.status === 'done')
+  const dismissAll = () => { for (const r of runs) dismiss(r.id) }
+
   return (
     <div
       style={{
@@ -20,11 +24,33 @@ export default function UploadDock() {
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-        width: 280,
+        width: 300,
         maxWidth: '90vw',
         pointerEvents: 'none',
       }}
     >
+      {hasMultiple && allDone && (
+        <button
+          onClick={dismissAll}
+          style={{
+            alignSelf: 'flex-end',
+            pointerEvents: 'auto',
+            padding: '4px 10px',
+            background: 'var(--paper)',
+            color: 'var(--ink-3)',
+            border: '1px solid var(--rule)',
+            borderRadius: 2,
+            fontFamily: 'var(--mono)',
+            fontSize: 9,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          Dismiss all · {runs.length}
+        </button>
+      )}
       {runs.map(r => <RunCard key={r.id} run={r} onDismiss={() => dismiss(r.id)} />)}
     </div>
   )
