@@ -176,6 +176,12 @@ export default function AdsPerformance() {
   const [closeAd, setCloseAd] = useState({})
   const [closeAdset, setCloseAdset] = useState({})
   const [closeCampaign, setCloseCampaign] = useState({})
+  // GHL-contact-attributed lead counts. Critical for paid-Meta-Lead-Form
+  // campaigns where leads never touched Typeform (~1,500 leads invisible
+  // to the dashboard before this).
+  const [ghlLeadsAd, setGhlLeadsAd] = useState({})
+  const [ghlLeadsAdset, setGhlLeadsAdset] = useState({})
+  const [ghlLeadsCampaign, setGhlLeadsCampaign] = useState({})
   const [orphanCloses, setOrphanCloses] = useState({ count: 0, revenue: 0, cash: 0, rows: [] })
   const [showOrphans, setShowOrphans] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -369,6 +375,34 @@ export default function AdsPerformance() {
       setCloseCampaign(cCamp)
       setOrphanCloses({ count: orphans.length, revenue: orphanRev, cash: orphanCash, rows: orphans })
 
+      // 6. GHL-contact-attributed leads. Paid Meta Lead Form prospects
+      // never touched Typeform; they live exclusively on ghl_contacts.
+      // Pull per-contact rows filtered by date, aggregate client-side.
+      const ghlRows = []
+      let gOff = 0
+      while (true) {
+        const { data, error: gErr } = await supabase
+          .from('lib_ghl_leads_detail')
+          .select('ghl_contact_id, landed_at, ad_id, adset_id, utm_campaign')
+          .gte('landed_at', startStr + 'T00:00:00Z')
+          .lte('landed_at', endStr   + 'T23:59:59Z')
+          .range(gOff, gOff + PAGE - 1)
+        if (gErr) throw new Error(gErr.message)
+        if (!data || !data.length) break
+        ghlRows.push(...data)
+        if (data.length < PAGE) break
+        gOff += PAGE
+      }
+      const gAd = {}, gAdset = {}, gCamp = {}
+      for (const r of ghlRows) {
+        if (r.ad_id)        gAd[r.ad_id]        = (gAd[r.ad_id]        || 0) + 1
+        if (r.adset_id)     gAdset[r.adset_id]  = (gAdset[r.adset_id]  || 0) + 1
+        if (r.utm_campaign) gCamp[r.utm_campaign] = (gCamp[r.utm_campaign] || 0) + 1
+      }
+      setGhlLeadsAd(gAd)
+      setGhlLeadsAdset(gAdset)
+      setGhlLeadsCampaign(gCamp)
+
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
@@ -408,7 +442,7 @@ export default function AdsPerformance() {
       }
       const adset = camp.ad_sets.get(asid)
 
-      const adRollup = adRollupFrom(a, stats, hyros, tfAd, closeAd)
+      const adRollup = adRollupFrom(a, stats, hyros, tfAd, closeAd, ghlLeadsAd)
       const isActive = a.effective_status === 'ACTIVE'
 
       adset.ads.push({ ad: a, rollup: adRollup, isActive })
@@ -436,11 +470,16 @@ export default function AdsPerformance() {
         if (tf) overlayTypeformIfHigher(set.rollup, tf)
         const cs = closeAdset[set.id]
         if (cs) overlayClose(set.rollup, cs)
+        // GHL lead count for this adset — takes MAX of bottom-up sum and view-level count.
+        const ghlSet = ghlLeadsAdset[set.id] || 0
+        if (ghlSet > (set.rollup.tfLeads || 0)) set.rollup.tfLeads = ghlSet
       }
       const tfc = tfCampaign[camp.name]
       if (tfc) overlayTypeformIfHigher(camp.rollup, tfc)
       const cc = closeCampaign[camp.name]
       if (cc) overlayClose(camp.rollup, cc)
+      const ghlCamp = ghlLeadsCampaign[camp.name] || 0
+      if (ghlCamp > (camp.rollup.tfLeads || 0)) camp.rollup.tfLeads = ghlCamp
     }
 
     // Now apply the status filter at each level
@@ -464,7 +503,7 @@ export default function AdsPerformance() {
     const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
     visibleCampaigns.sort(compareCamps)
     return visibleCampaigns
-  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, statusFilter, search, sortKey, sortDir])
+  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, statusFilter, search, sortKey, sortDir])
 
   // When filter or data changes and the user hasn't manually toggled
   // anything, auto-expand the visible campaigns. This way Ben lands on a
@@ -1068,18 +1107,25 @@ function emptyRollup() {
     tfCash: 0,
   }
 }
-function adRollupFrom(ad, stats, hyros, tfAd, closeAd) {
+function adRollupFrom(ad, stats, hyros, tfAd, closeAd, ghlLeadsAd) {
   const s = stats[ad.ad_id] || {}
   const h = hyros[ad.ad_id] || {}
   const t = tfAd[ad.ad_id] || {}
   const c = closeAd[ad.ad_id] || {}
+  const g = ghlLeadsAd[ad.ad_id] || 0
+  // Leads pulls from BOTH sources. typeform-funnel ads get t.leads; paid-
+  // lead-form ads get g (GHL contacts). Most ads will only have ONE of
+  // the two non-zero, so MAX is the right operator. If somehow both are
+  // populated (shouldn't happen — typeform vs Lead Form are different
+  // funnels), MAX keeps us honest by not double-counting.
+  const leadsCombined = Math.max(t.leads || 0, g)
   return {
     spend: s.spend || 0,
     leads: s.results || 0,
     booked: h.calls_attributed || 0,
     qualified: h.calls_qualified || 0,
     revenue: parseFloat(h.revenue_attributed || 0),
-    tfLeads:      t.leads || 0,
+    tfLeads:      leadsCombined,
     tfQualLeads:  t.qualified_leads || 0,
     tfBooked:     t.booked_calls || 0,
     tfQualBooked: t.qualified_booked_calls || 0,
