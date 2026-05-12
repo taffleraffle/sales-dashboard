@@ -170,6 +170,14 @@ export default function AdsPerformance() {
   const [tfAd, setTfAd] = useState({})         // ad_id → Typeform-attributed counts
   const [tfAdset, setTfAdset] = useState({})   // adset_id → Typeform-attributed counts
   const [tfCampaign, setTfCampaign] = useState({}) // utm_campaign (string) → Typeform counts
+  // Unified close attribution. Maps from lib_close_resolved aggregated
+  // client-side by ad / adset / campaign. Includes BOTH typeform-derived
+  // closes AND HYROS-attributed closes (e.g. Shain Mann, Jeff Stovall).
+  const [closeAd, setCloseAd] = useState({})
+  const [closeAdset, setCloseAdset] = useState({})
+  const [closeCampaign, setCloseCampaign] = useState({})
+  const [orphanCloses, setOrphanCloses] = useState({ count: 0, revenue: 0, cash: 0, rows: [] })
+  const [showOrphans, setShowOrphans] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [expandedCampaigns, setExpandedCampaigns] = useState(new Set())
@@ -305,6 +313,52 @@ export default function AdsPerformance() {
       setTfAdset(tfAdsetMap)
       setTfCampaign(tfCampMap)
 
+      // 5. UNIFIED close attribution. Pulls every closed closer_call
+      // (typeform-attributed + HYROS-attributed + orphan) filtered by
+      // the date range, then aggregates by ad / adset / campaign.
+      const closeRows = []
+      let cOff = 0
+      while (true) {
+        const { data, error: ccErr } = await supabase
+          .from('lib_close_resolved')
+          .select('closer_call_id, prospect_name, clean_name, revenue, cash_collected, created_at, resolved_ad_id, resolved_adset_id, resolved_campaign, attribution_source')
+          .gte('created_at', startStr + 'T00:00:00Z')
+          .lte('created_at', endStr   + 'T23:59:59Z')
+          .range(cOff, cOff + PAGE - 1)
+        if (ccErr) throw new Error(ccErr.message)
+        if (!data || !data.length) break
+        closeRows.push(...data)
+        if (data.length < PAGE) break
+        cOff += PAGE
+      }
+      const cAd = {}, cAdset = {}, cCamp = {}
+      const orphans = []
+      let orphanRev = 0, orphanCash = 0
+      for (const r of closeRows) {
+        const rev = parseFloat(r.revenue || 0)
+        const cash = parseFloat(r.cash_collected || 0)
+        const bump = (target, key) => {
+          if (!key) return
+          let row = target[key]
+          if (!row) row = target[key] = { closes: 0, revenue: 0, cash: 0 }
+          row.closes++
+          row.revenue += rev
+          row.cash    += cash
+        }
+        bump(cAd,    r.resolved_ad_id)
+        bump(cAdset, r.resolved_adset_id)
+        bump(cCamp,  r.resolved_campaign)
+        if (r.attribution_source === 'orphan') {
+          orphans.push(r)
+          orphanRev += rev
+          orphanCash += cash
+        }
+      }
+      setCloseAd(cAd)
+      setCloseAdset(cAdset)
+      setCloseCampaign(cCamp)
+      setOrphanCloses({ count: orphans.length, revenue: orphanRev, cash: orphanCash, rows: orphans })
+
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
@@ -344,7 +398,7 @@ export default function AdsPerformance() {
       }
       const adset = camp.ad_sets.get(asid)
 
-      const adRollup = adRollupFrom(a, stats, hyros, tfAd)
+      const adRollup = adRollupFrom(a, stats, hyros, tfAd, closeAd)
       const isActive = a.effective_status === 'ACTIVE'
 
       adset.ads.push({ ad: a, rollup: adRollup, isActive })
@@ -360,15 +414,23 @@ export default function AdsPerformance() {
       addRollup(camp.rollup, adRollup)
     }
 
-    // Overlay ad-set-level Typeform numbers (catches leads where the
-    // utm_content didn't match a specific ad name but utm_term did).
+    // Overlay ad-set + campaign-level Typeform numbers (catches leads
+    // where utm_content didn't match a specific ad name but utm_term
+    // or utm_campaign did). Also overlay unified close attribution at
+    // each parent level so HYROS-attributed closes (Shain Mann, Jeff
+    // Stovall, etc) flow up correctly even when the closer_call had no
+    // typeform behind it.
     for (const camp of campaigns.values()) {
       for (const set of camp.ad_sets.values()) {
         const tf = tfAdset[set.id]
         if (tf) overlayTypeformIfHigher(set.rollup, tf)
+        const cs = closeAdset[set.id]
+        if (cs) overlayClose(set.rollup, cs)
       }
       const tfc = tfCampaign[camp.name]
       if (tfc) overlayTypeformIfHigher(camp.rollup, tfc)
+      const cc = closeCampaign[camp.name]
+      if (cc) overlayClose(camp.rollup, cc)
     }
 
     // Now apply the status filter at each level
@@ -392,7 +454,7 @@ export default function AdsPerformance() {
     const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
     visibleCampaigns.sort(compareCamps)
     return visibleCampaigns
-  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, statusFilter, search, sortKey, sortDir])
+  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, statusFilter, search, sortKey, sortDir])
 
   // When filter or data changes and the user hasn't manually toggled
   // anything, auto-expand the visible campaigns. This way Ben lands on a
@@ -448,6 +510,38 @@ export default function AdsPerformance() {
           <button onClick={collapseAll} style={btnGhost}>Collapse</button>
         </div>
       </div>
+
+      {/* Orphan-closes banner — visible whenever the closer logged closes
+          that we couldn't attribute to any ad via typeform or HYROS. Click
+          to see who. Keeps the operator honest about closed-deal coverage. */}
+      {orphanCloses.count > 0 && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14,
+          padding: '10px 14px',
+          background: 'rgba(184,135,20,0.10)',
+          border: '1px solid #b88714',
+          borderLeftWidth: 3,
+          borderRadius: '0 3px 3px 0',
+          marginBottom: 8,
+          fontSize: 13,
+        }}>
+          <div style={{ flex: '1 1 280px' }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7d5a0a', fontWeight: 600, marginBottom: 3 }}>
+              Closes with no ad attribution · in range
+            </div>
+            <div style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink)' }}>
+              <strong>{orphanCloses.count}</strong> close{orphanCloses.count > 1 ? 's' : ''} ({fmt$(orphanCloses.revenue)} contract, {fmt$(orphanCloses.cash)} cash)
+              couldn't be matched to a Meta ad via Typeform or HYROS. They're real revenue, not lost — but not credited to any creative below.
+            </div>
+          </div>
+          <button onClick={() => setShowOrphans(true)} style={{
+            padding: '7px 12px', background: 'var(--paper)', color: 'var(--ink)',
+            border: '1px solid var(--ink)', borderRadius: 3,
+            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+            cursor: 'pointer', whiteSpace: 'nowrap',
+          }}>View {orphanCloses.count} →</button>
+        </div>
+      )}
 
       {/* Totals strip */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
@@ -611,6 +705,52 @@ export default function AdsPerformance() {
       )}
 
       {drill && <ProspectDrillModal drill={drill} onClose={() => setDrill(null)} />}
+      {showOrphans && <OrphanClosesModal rows={orphanCloses.rows} onClose={() => setShowOrphans(false)} />}
+    </div>
+  )
+}
+
+// ── Orphan closes modal ─────────────────────────────────────────────
+function OrphanClosesModal({ rows, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.5)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 680, height: '100vh', overflowY: 'auto',
+        background: 'var(--paper)', borderLeft: '1px solid var(--rule)', padding: '24px 28px',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, paddingBottom: 12, borderBottom: '1px solid var(--rule)' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }}>Orphan closes</div>
+            <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, margin: 0 }}>{rows.length} close{rows.length > 1 ? 's' : ''} with no ad match</h3>
+            <p style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink-3)', marginTop: 6, lineHeight: 1.5 }}>
+              These prospects closed but couldn't be matched to any Meta ad via Typeform (no form submission) or HYROS (no attributed event with a meta_ad_id). Likely cold outreach, old funnel re-engagements, or historical backfills. The revenue is real — just not creditable to a creative.
+            </p>
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+            <X size={14} />
+          </button>
+        </div>
+        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--rule)' }}>
+              <th style={drillTh}>Date</th>
+              <th style={drillTh}>Prospect</th>
+              <th style={{ ...drillTh, textAlign: 'right' }}>Revenue</th>
+              <th style={{ ...drillTh, textAlign: 'right' }}>Cash</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.closer_call_id} style={{ borderBottom: '1px solid var(--rule)' }}>
+                <td style={drillTd}>{(r.created_at || '').slice(0, 10)}</td>
+                <td style={drillTd}>{r.clean_name || r.prospect_name}</td>
+                <td style={{ ...drillTd, textAlign: 'right', color: r.revenue > 0 ? 'var(--ink)' : 'var(--ink-4)' }}>{r.revenue > 0 ? fmt$(parseFloat(r.revenue)) : '—'}</td>
+                <td style={{ ...drillTd, textAlign: 'right', color: r.cash_collected > 0 ? '#1f7a3a' : 'var(--ink-4)' }}>{r.cash_collected > 0 ? fmt$(parseFloat(r.cash_collected)) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -906,10 +1046,11 @@ function emptyRollup() {
     tfCash: 0,
   }
 }
-function adRollupFrom(ad, stats, hyros, tfAd) {
+function adRollupFrom(ad, stats, hyros, tfAd, closeAd) {
   const s = stats[ad.ad_id] || {}
   const h = hyros[ad.ad_id] || {}
   const t = tfAd[ad.ad_id] || {}
+  const c = closeAd[ad.ad_id] || {}
   return {
     spend: s.spend || 0,
     leads: s.results || 0,
@@ -921,9 +1062,12 @@ function adRollupFrom(ad, stats, hyros, tfAd) {
     tfBooked:     t.booked_calls || 0,
     tfQualBooked: t.qualified_booked_calls || 0,
     tfLive:       t.live_calls || 0,
-    tfCloses:     t.closes || 0,
-    tfRevenue:    parseFloat(t.revenue_attributed || 0),
-    tfCash:       parseFloat(t.cash_attributed || 0),
+    // Closes / revenue / cash come from the UNIFIED close attribution
+    // (typeform + HYROS resolved). Falls back to typeform-only data when
+    // closeAd is empty for the ad.
+    tfCloses:     c.closes || t.closes || 0,
+    tfRevenue:    parseFloat(c.revenue ?? t.revenue_attributed ?? 0),
+    tfCash:       parseFloat(c.cash    ?? t.cash_attributed    ?? 0),
   }
 }
 function addRollup(target, src) {
@@ -941,6 +1085,18 @@ function addRollup(target, src) {
   target.tfRevenue    += src.tfRevenue
   target.tfCash       += src.tfCash
 }
+// Overlay unified close-attribution numbers (from lib_close_per_adset /
+// per_campaign) at the parent level. Closes can come from HYROS even when
+// no typeform exists, so use MAX of bottom-up sum and view-level number.
+function overlayClose(target, cRow) {
+  const closes = Math.max(target.tfCloses || 0, cRow.closes || 0)
+  const rev    = Math.max(target.tfRevenue || 0, cRow.revenue || 0)
+  const cash   = Math.max(target.tfCash    || 0, cRow.cash    || 0)
+  target.tfCloses  = closes
+  target.tfRevenue = rev
+  target.tfCash    = cash
+}
+
 // If the parent-level Typeform view has higher counts than the bottom-up
 // sum (meaning leads landed at adset/campaign but not at an exact ad_name),
 // take the view's values for the Typeform-side metrics. Spend stays bottom-up.
