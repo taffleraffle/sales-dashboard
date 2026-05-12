@@ -220,6 +220,11 @@ export default function AdsPerformance() {
   const [ghlLivesAdset, setGhlLivesAdset] = useState({})
   const [ghlLivesCampaign, setGhlLivesCampaign] = useState({})
   const [orphanCloses, setOrphanCloses] = useState({ count: 0, revenue: 0, cash: 0, rows: [] })
+  // Source-of-truth totals from marketing_tracker (the same table the marketing
+  // dashboard reads). Keeping these separate from the per-campaign rollup
+  // makes the "attributed vs total" gap explicit — the headline can never
+  // silently undercount because we compare it against the EOD-aggregated truth.
+  const [truthTotals, setTruthTotals] = useState({ leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 })
   const [showOrphans, setShowOrphans] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -345,10 +350,10 @@ export default function AdsPerformance() {
       const startTs = startStr + 'T00:00:00Z'
       const endTs   = endStr   + 'T23:59:59Z'
 
-      // Kick off ALL date-scoped fetches in parallel. Five independent
-      // detail-view queries each paged to bypass the 1000-row cap.
+      // Kick off ALL date-scoped fetches in parallel. Seven independent
+      // queries each paged to bypass the 1000-row cap.
       // Previously these ran sequentially → ~5x slowdown per chip click.
-      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows] = await Promise.all([
+      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows, mtRows] = await Promise.all([
         fetchAllPaged(() => supabase
           .from('ad_daily_stats')
           .select('ad_id, spend, impressions, clicks, results')
@@ -374,7 +379,29 @@ export default function AdsPerformance() {
           .from('lib_ghl_lives_detail')
           .select('closer_call_id, landed_at, ad_id, adset_id, utm_campaign')
           .gte('landed_at', startTs).lte('landed_at', endTs)),
+        // marketing_tracker is the same source the marketing dashboard
+        // uses — daily aggregated EOD report totals. We pull it here so
+        // the headline KPI block can show the source-of-truth totals
+        // (vs ads-attributed sub-counts) and surface the gap explicitly.
+        fetchAllPaged(() => supabase
+          .from('marketing_tracker')
+          .select('date, leads, net_new_calls, nc_booked, new_live_calls, live_calls, offers, closes, trial_cash, trial_revenue')
+          .gte('date', startStr).lte('date', endStr)),
       ])
+
+      // Aggregate marketing_tracker totals (source-of-truth headline numbers).
+      // Note net_new_calls is the daily NC-bookings column — same one the
+      // marketing dashboard sums into the "Booked" KPI.
+      const truth = { leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 }
+      for (const r of mtRows) {
+        truth.leads   += parseInt(r.leads || 0)
+        truth.booked  += parseInt((r.net_new_calls ?? r.nc_booked) || 0)
+        truth.live    += parseInt((r.new_live_calls ?? r.live_calls) || 0)
+        truth.closes  += parseInt(r.closes || 0)
+        truth.revenue += parseFloat(r.trial_revenue || 0)
+        truth.cash    += parseFloat(r.trial_cash || 0)
+      }
+      setTruthTotals(truth)
 
       // 2. Stats — aggregate by ad_id
       const perAd = {}
@@ -692,38 +719,54 @@ export default function AdsPerformance() {
         </div>
       )}
 
-      {/* Totals strip */}
+      {/* Totals strip — values come from marketing_tracker (same source
+          the marketing dashboard uses). The attributed/gap sub-line shows
+          how many we managed to credit to a Meta ad. If those numbers
+          diverge from the marketing dashboard, that's a sync issue and
+          would be visible here. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
-        <TotalsTile label="Spend 30d" value={fmt$(totals.spend)} />
-        <TotalsTile label="Leads" value={fmtN(totals.tfLeads)} sub={totals.tfQualLeads ? `${totals.tfQualLeads} qualified` : null} />
-        <TotalsTile label="Booked" value={fmtN(totals.tfBooked)} sub={totals.tfQualBooked ? `${totals.tfQualBooked} qualified` : null} />
-        <TotalsTile label="Live calls" value={fmtN(totals.tfLive)} />
+        <TotalsTile label="Spend" value={fmt$(totals.spend)} />
+        <TotalsTile
+          label="Leads"
+          value={fmtN(truthTotals.leads)}
+          sub={`${fmtN(totals.tfLeads)} attributed${truthTotals.leads > totals.tfLeads ? ` · ${fmtN(truthTotals.leads - totals.tfLeads)} unattributed` : ''}`}
+        />
+        <TotalsTile
+          label="Booked"
+          value={fmtN(truthTotals.booked)}
+          sub={`${fmtN(totals.tfBooked)} attributed${truthTotals.booked > totals.tfBooked ? ` · ${fmtN(truthTotals.booked - totals.tfBooked)} unattributed` : ''}`}
+        />
+        <TotalsTile
+          label="Live calls"
+          value={fmtN(truthTotals.live)}
+          sub={`${fmtN(totals.tfLive)} attributed${truthTotals.live > totals.tfLive ? ` · ${fmtN(truthTotals.live - totals.tfLive)} unattributed` : ''}`}
+        />
         <TotalsTile
           label="Closes"
-          value={fmtN(totals.tfCloses)}
-          sub={totals.tfRevenue ? fmt$(totals.tfRevenue) + ' rev' : null}
-          valueColor={totals.tfCloses > 0 ? '#1f7a3a' : undefined}
+          value={fmtN(truthTotals.closes)}
+          sub={`${fmtN(totals.tfCloses)} attributed${truthTotals.closes > totals.tfCloses ? ` · ${fmtN(truthTotals.closes - totals.tfCloses)} unattributed` : ''} · ${fmt$(truthTotals.revenue)} rev`}
+          valueColor={truthTotals.closes > 0 ? '#1f7a3a' : undefined}
         />
         <TotalsTile
           label="$ / Lead"
-          value={totals.tfLeads > 0 ? fmt$(totals.spend / totals.tfLeads) : '—'}
-          valueColor={kpiColor(totals.tfLeads > 0 ? totals.spend / totals.tfLeads : null, KPI.costPerLead)}
+          value={truthTotals.leads > 0 ? fmt$(totals.spend / truthTotals.leads) : '—'}
+          valueColor={kpiColor(truthTotals.leads > 0 ? totals.spend / truthTotals.leads : null, KPI.costPerLead)}
         />
         <TotalsTile
-          label="$ / Qual booked"
-          value={totals.tfQualBooked > 0 ? fmt$(totals.spend / totals.tfQualBooked) : '—'}
-          valueColor={kpiColor(totals.tfQualBooked > 0 ? totals.spend / totals.tfQualBooked : null, KPI.costPerQualBooked)}
+          label="$ / Booked"
+          value={truthTotals.booked > 0 ? fmt$(totals.spend / truthTotals.booked) : '—'}
+          valueColor={kpiColor(truthTotals.booked > 0 ? totals.spend / truthTotals.booked : null, KPI.costPerQualBooked)}
         />
         <TotalsTile
           label="$ / Live"
-          value={totals.tfLive > 0 ? fmt$(totals.spend / totals.tfLive) : '—'}
-          valueColor={kpiColor(totals.tfLive > 0 ? totals.spend / totals.tfLive : null, KPI.costPerLive)}
+          value={truthTotals.live > 0 ? fmt$(totals.spend / truthTotals.live) : '—'}
+          valueColor={kpiColor(truthTotals.live > 0 ? totals.spend / truthTotals.live : null, KPI.costPerLive)}
         />
         <TotalsTile
-          label="CAC (blended)"
-          value={totals.tfCloses > 0 ? fmt$(totals.spend / totals.tfCloses) : '—'}
-          sub={totals.tfCloses > 0 ? `${fmt$(totals.spend)} ÷ ${totals.tfCloses} closes — incl. campaigns w/ no closes` : null}
-          valueColor={kpiColor(totals.tfCloses > 0 ? totals.spend / totals.tfCloses : null, KPI.costPerClose)}
+          label="CAC"
+          value={truthTotals.closes > 0 ? fmt$(totals.spend / truthTotals.closes) : '—'}
+          sub={truthTotals.closes > 0 ? `${fmt$(totals.spend)} ÷ ${truthTotals.closes} closes` : null}
+          valueColor={kpiColor(truthTotals.closes > 0 ? totals.spend / truthTotals.closes : null, KPI.costPerClose)}
         />
       </div>
 
