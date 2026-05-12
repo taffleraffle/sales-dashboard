@@ -116,7 +116,7 @@ export default function AdsVariants() {
   }
   useEffect(() => { load() }, [])
 
-  const hooks = useMemo(() => clips.filter(c => c.clip_type === 'hook' || c.clip_type === 'hook_proof'), [clips])
+  const hooks = useMemo(() => clips.filter(c => c.clip_type === 'hook'), [clips])
   const bodies = useMemo(() => clips.filter(c => c.clip_type === 'body'), [clips])
   const clipById = useMemo(() => Object.fromEntries(clips.map(c => [c.clip_id, c])), [clips])
 
@@ -923,7 +923,7 @@ function SheetView({ filtered, clips, search, setSearch, statusFilter, setStatus
                   </div>
                 </Td>
                 <Td><StatusPicker value={v.status} onChange={val => onSaveField(v, 'status', val)} /></Td>
-                <Td><InlineSelect value={v.hook_clip_id} options={clipOptions(['hook', 'hook_proof'])} onSave={val => onSaveField(v, 'hook_clip_id', val || null)} /></Td>
+                <Td><InlineSelect value={v.hook_clip_id} options={clipOptions('hook')} onSave={val => onSaveField(v, 'hook_clip_id', val || null)} /></Td>
                 <Td><InlineSelect value={v.body_clip_id} options={clipOptions('body')} onSave={val => onSaveField(v, 'body_clip_id', val || null)} /></Td>
                 <Td><InlineSelect value={v.frame_clip_id} options={clipOptions(['full_video','testimonial'])} onSave={val => onSaveField(v, 'frame_clip_id', val || null)} /></Td>
                 <Td><InlineEdit value={v.editor} onSave={val => onSaveField(v, 'editor', val || null)} /></Td>
@@ -1220,7 +1220,7 @@ function EmptyState({ onMatrix, onSeed, seeding }) {
 // Matrix splice modal (unchanged from prior commit, with clip option fix)
 // ────────────────────────────────────────────────────────────────────
 function MatrixSpliceModal({ clips, onClose, onCreated }) {
-  const hooks = clips.filter(c => c.clip_type === 'hook' || c.clip_type === 'hook_proof')
+  const hooks = clips.filter(c => c.clip_type === 'hook')
   const bodies = clips.filter(c => c.clip_type === 'body')
   const fullVideos = clips.filter(c => c.clip_type === 'full_video' || c.clip_type === 'testimonial')
 
