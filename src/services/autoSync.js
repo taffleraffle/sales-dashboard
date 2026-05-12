@@ -16,6 +16,8 @@ const SYNC_INTERVALS = {
   meta: 1 * 60 * 60 * 1000,          // 1 hour — Meta Ads spend + GHL pipeline leads/bookings
   metaAds: 1 * 60 * 60 * 1000,       // 1 hour — per-ad insights + creative metadata
   typeform: 1 * 60 * 60 * 1000,      // 1 hour — Typeform responses (h4il4Sla + WndFLJux)
+  ghlContacts: 2 * 60 * 60 * 1000,   // 2 hours — full contact + attribution refresh
+  hyrosBackfill: 6 * 60 * 60 * 1000, // 6 hours — wide-window HYROS pull (slow)
 }
 
 const SYNC_LABELS = {
@@ -27,6 +29,8 @@ const SYNC_LABELS = {
   meta: 'Marketing (Meta + GHL)',
   metaAds: 'Meta Ads (per-ad)',
   typeform: 'Typeform responses',
+  ghlContacts: 'GHL contacts (attribution)',
+  hyrosBackfill: 'HYROS (retroactive)',
 }
 
 function lastRun(key) {
@@ -121,13 +125,14 @@ async function syncGHL(force = false) {
   if (!shouldRun('ghlAppointments', force)) return
   markRun('ghlAppointments')
   try {
-    // Pull a window that covers BOTH past calls (for outcome reconciliation)
-    // and future-scheduled calls (for cost-per-booking + cohort show-rate
-    // math). Without the forward window, calls booked today for next week
-    // never enter ghl_appointments — they're filtered out by GHL's
-    // /calendars/events endpoint, which queries by event time, not booked_at.
+    // Pull a wide window: 1 year back for retroactive coverage (so historical
+    // appointments tied to closer EOD entries can be matched) + 60 days
+    // forward (for cost-per-booking + cohort show-rate math). Without the
+    // forward window, calls booked today for next week never enter
+    // ghl_appointments — they're filtered out by GHL's /calendars/events
+    // endpoint, which queries by event time, not booked_at.
     const past = new Date()
-    past.setDate(past.getDate() - 30)
+    past.setDate(past.getDate() - 365)
     const future = new Date()
     future.setDate(future.getDate() + 60)
     await syncGHLAppointments(toLocalDateStr(past), toLocalDateStr(future))
@@ -205,7 +210,7 @@ async function syncTypeform(force = false) {
         'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ days: 90 }),
+      body: JSON.stringify({ days: 730 }),  // retroactive — every typeform submission, ever
     })
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     const data = await r.json()
@@ -217,6 +222,62 @@ async function syncTypeform(force = false) {
     console.warn('[auto-sync] Typeform failed:', e.message)
     markError('typeform', e)
     if (isRateLimitErr(e)) markCooldown('typeform')
+  } finally { notify() }
+}
+
+// GHL contacts — pulls every contact + their Meta-lead attribution
+// (adId, adSetId, campaignId, utmCampaign, utmContent, formName) stored
+// on attributionSource / lastAttributionSource. Feeds the close-attribution
+// resolver so paid-lead closes outside the typeform funnel still credit
+// the exact ad creative.
+async function syncGhlContacts(force = false) {
+  if (!shouldRun('ghlContacts', force)) return
+  markRun('ghlContacts')
+  try {
+    const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/sync-ghl-contacts', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ days: 730 }),
+    })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const data = await r.json()
+    console.log('[auto-sync] GHL contacts:', data.fetched || 0, 'fetched,', data.withAttribution || 0, 'with attribution')
+    clearError('ghlContacts')
+    clearCooldown('ghlContacts')
+  } catch (e) {
+    console.warn('[auto-sync] GHL contacts failed:', e.message)
+    markError('ghlContacts', e)
+    if (isRateLimitErr(e)) markCooldown('ghlContacts')
+  } finally { notify() }
+}
+
+// HYROS retroactive — pulls a 365-day window so historical calls + leads
+// stay reachable by the resolver. Slow because HYROS pagination is heavy
+// at this depth, hence the 6-hour interval.
+async function syncHyrosBackfill(force = false) {
+  if (!shouldRun('hyrosBackfill', force)) return
+  markRun('hyrosBackfill')
+  try {
+    const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/hyros-sync', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ days: 365 }),
+    })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const data = await r.json()
+    console.log('[auto-sync] HYROS retroactive:', data.calls || 0, 'calls,', data.leads || 0, 'leads')
+    clearError('hyrosBackfill')
+    clearCooldown('hyrosBackfill')
+  } catch (e) {
+    console.warn('[auto-sync] HYROS retroactive failed:', e.message)
+    markError('hyrosBackfill', e)
+    if (isRateLimitErr(e)) markCooldown('hyrosBackfill')
   } finally { notify() }
 }
 
@@ -253,7 +314,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
  * steady-state cost of sequential execution is essentially zero.
  */
 export async function runAutoSync({ force = false } = {}) {
-  const tasks = [syncStripe, syncFanbasis, syncGHL, syncEmails, syncMarketingTracker, syncMeta, syncMetaAdLevel, syncTypeform]
+  const tasks = [syncStripe, syncFanbasis, syncGHL, syncEmails, syncMarketingTracker, syncMeta, syncMetaAdLevel, syncTypeform, syncGhlContacts, syncHyrosBackfill]
   for (const task of tasks) {
     try { await task(force) } catch (_e) { void _e }
     await sleep(500)
