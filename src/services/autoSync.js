@@ -185,7 +185,10 @@ async function syncMetaAdLevel(force = false) {
   markRun('metaAds')
   try {
     const { syncMetaAdsAtAdLevel } = await import('./metaAdsSync')
-    const result = await syncMetaAdsAtAdLevel(90)
+    // Pull 365d so the dashboard's "All time" preset has real historical
+    // spend data (previously only 30d was reaching ad_daily_stats because
+    // older days were rotating out faster than the sync could backfill them).
+    const result = await syncMetaAdsAtAdLevel(365)
     console.log('[auto-sync] Meta ad-level done:', result)
     clearError('metaAds')
     clearCooldown('metaAds')

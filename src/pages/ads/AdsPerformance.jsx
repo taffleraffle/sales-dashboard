@@ -201,6 +201,9 @@ export default function AdsPerformance() {
   }
   // Drill-down modal state: { scope: { level, id, label }, metric, title }
   const [drill, setDrill] = useState(null)
+  // Earliest + latest date in ad_daily_stats — shown next to the date range
+  // so the operator can see what historical spend has actually been synced.
+  const [dataCoverage, setDataCoverage] = useState(null)
   // Date range: { preset, startStr, endStr }. `preset` is one of 7|30|90|all|custom.
   // startStr/endStr are 'YYYY-MM-DD' strings. Default = last 30 days.
   const [dateRange, setDateRange] = useState(() => initialDateRange(30))
@@ -227,6 +230,13 @@ export default function AdsPerformance() {
         adOffset += AD_PAGE
       }
       setAds(adsLoaded)
+
+      // Stats coverage check — tells the operator what date range Meta has
+      // actually synced into ad_daily_stats, since the dashboard's date
+      // picker can ask for periods that don't exist yet.
+      const { data: covMin } = await supabase.from('ad_daily_stats').select('date').order('date', { ascending: true }).limit(1)
+      const { data: covMax } = await supabase.from('ad_daily_stats').select('date').order('date', { ascending: false }).limit(1)
+      if (covMin?.[0] && covMax?.[0]) setDataCoverage({ earliest: covMin[0].date, latest: covMax[0].date })
 
       const adIds = adsLoaded.map(a => a.ad_id)
       if (!adIds.length) { setLoading(false); return }
@@ -641,6 +651,11 @@ export default function AdsPerformance() {
       {/* Current range — always visible so it's clear what window is in play */}
       <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 12 }}>
         Showing: {rangeLabel(dateRange)}
+        {dataCoverage && (
+          <span style={{ marginLeft: 12, color: 'var(--ink-4)' }}>
+            · spend synced from Meta: {dataCoverage.earliest} → {dataCoverage.latest}
+          </span>
+        )}
       </div>
 
       {error && (
@@ -1164,6 +1179,7 @@ const dateInputStyle = {
 // booked, qual_booked, live, closed).
 function ProspectDrillModal({ drill, onClose }) {
   const [rows, setRows] = useState([])
+  const [source, setSource] = useState('typeform')  // 'typeform' | 'closed'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -1172,18 +1188,32 @@ function ProspectDrillModal({ drill, onClose }) {
     async function run() {
       setLoading(true); setError(null)
       try {
+        // Closes / CAC come from the UNIFIED close attribution view, which
+        // includes typeform + GHL + HYROS + manual sources. Everything else
+        // is typeform-side data so it stays on lib_typeform_response_detail.
+        const wantClosed = drill.metric === 'closed'
+        if (wantClosed) {
+          setSource('closed')
+          let q = supabase.from('lib_close_resolved').select('*')
+            .order('created_at', { ascending: false })
+          if (drill.scope.level === 'ad')           q = q.eq('resolved_ad_id',    drill.scope.id)
+          else if (drill.scope.level === 'adset')   q = q.eq('resolved_adset_id', drill.scope.id)
+          else if (drill.scope.level === 'campaign')q = q.eq('resolved_campaign', drill.scope.id)
+          const { data, error: e } = await q
+          if (e) throw new Error(e.message)
+          if (!cancelled) setRows(data || [])
+          return
+        }
+        setSource('typeform')
         let q = supabase.from('lib_typeform_response_detail').select('*')
           .order('submitted_at', { ascending: false })
-        // Scope filter
         if (drill.scope.level === 'ad')           q = q.eq('ad_id',        drill.scope.id)
         else if (drill.scope.level === 'adset')   q = q.eq('adset_id',     drill.scope.id)
         else if (drill.scope.level === 'campaign')q = q.eq('utm_campaign', drill.scope.id)
-        // Metric filter
         if (drill.metric === 'qualified')   q = q.eq('qualified',  true)
         if (drill.metric === 'booked')      q = q.eq('is_booked',  true)
         if (drill.metric === 'qual_booked') q = q.eq('is_booked',  true).eq('qualified', true)
         if (drill.metric === 'live')        q = q.eq('is_live',    true)
-        if (drill.metric === 'closed')      q = q.eq('is_closed',  true)
         const { data, error: e } = await q
         if (e) throw new Error(e.message)
         if (!cancelled) setRows(data || [])
@@ -1244,7 +1274,42 @@ function ProspectDrillModal({ drill, onClose }) {
           </p>
         )}
 
-        {!loading && rows.length > 0 && (
+        {!loading && rows.length > 0 && source === 'closed' && (
+          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--rule)' }}>
+                <th style={drillTh}>Closed at</th>
+                <th style={drillTh}>Prospect</th>
+                <th style={drillTh}>Attribution</th>
+                <th style={{ ...drillTh, textAlign: 'right' }}>Revenue</th>
+                <th style={{ ...drillTh, textAlign: 'right' }}>Cash</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.closer_call_id} style={{ borderBottom: '1px solid var(--rule)' }}>
+                  <td style={drillTd}>{(r.created_at || '').slice(0, 10)}</td>
+                  <td style={drillTd}>
+                    <div style={{ fontFamily: 'var(--serif)', fontWeight: 500, color: 'var(--ink)', fontSize: 14 }}>{r.clean_name || r.prospect_name}</div>
+                  </td>
+                  <td style={drillTd}>
+                    <span style={{
+                      padding: '2px 8px', borderRadius: 2,
+                      fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+                      background: r.attribution_source === 'manual' ? 'var(--accent-soft)' : 'transparent',
+                      border: '1px solid', borderColor: r.attribution_source === 'manual' ? 'var(--accent)' : 'var(--rule)',
+                      color: 'var(--ink)',
+                    }}>{r.attribution_source}</span>
+                  </td>
+                  <td style={{ ...drillTd, textAlign: 'right' }}>{r.revenue > 0 ? fmt$(parseFloat(r.revenue)) : '—'}</td>
+                  <td style={{ ...drillTd, textAlign: 'right', color: r.cash_collected > 0 ? '#1f7a3a' : 'var(--ink-4)' }}>{r.cash_collected > 0 ? fmt$(parseFloat(r.cash_collected)) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {!loading && rows.length > 0 && source === 'typeform' && (
           <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--rule)' }}>
