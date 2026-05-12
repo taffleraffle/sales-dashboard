@@ -620,8 +620,9 @@ export default function AdsPerformance() {
           valueColor={kpiColor(totals.tfLive > 0 ? totals.spend / totals.tfLive : null, KPI.costPerLive)}
         />
         <TotalsTile
-          label="CAC"
+          label="CAC (blended)"
           value={totals.tfCloses > 0 ? fmt$(totals.spend / totals.tfCloses) : '—'}
+          sub={totals.tfCloses > 0 ? `${fmt$(totals.spend)} ÷ ${totals.tfCloses} closes — incl. campaigns w/ no closes` : null}
           valueColor={kpiColor(totals.tfCloses > 0 ? totals.spend / totals.tfCloses : null, KPI.costPerClose)}
         />
       </div>
@@ -758,7 +759,7 @@ export default function AdsPerformance() {
         </div>
       )}
 
-      {drill && <ProspectDrillModal drill={drill} onClose={() => setDrill(null)} />}
+      {drill && <ProspectDrillModal drill={drill} dateRange={dateRange} onClose={() => setDrill(null)} />}
       {showOrphans && <OrphanClosesModal rows={orphanCloses.rows} onClose={() => setShowOrphans(false)} />}
     </div>
   )
@@ -896,18 +897,19 @@ function AdSetBlock({ set, open, onToggle, onDrill }) {
         borderLeft: isRowProfitable(set.rollup) ? '3px solid #1f7a3a' : undefined,
       }}>
         <Td>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 28 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 36 }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-4)' }}>↳</span>
             {open ? <ChevronDown size={12} style={{ color: 'var(--ink-3)' }} /> : <ChevronRight size={12} style={{ color: 'var(--ink-3)' }} />}
             <StatusDot active={anyActive} size={7} />
-            <span style={{ fontFamily: 'var(--serif)', fontSize: 13.5, color: 'var(--ink-2)', fontWeight: 400 }}>
+            <span style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink-3)', fontStyle: 'italic', fontWeight: 400 }}>
               {set.name}
             </span>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.1em', marginLeft: 6 }}>
-              {set.activeAdCount}/{set.totalAdCount} ACTIVE · {set.ads.length} SHOWN
+              {set.activeAdCount}/{set.totalAdCount} ACTIVE · {set.ads.length} SHOWN · ⊂ part of parent campaign
             </span>
           </div>
         </Td>
-        <RollupCells rollup={set.rollup} scope={adsetScope} onDrill={onDrill} />
+        <RollupCells rollup={set.rollup} scope={adsetScope} onDrill={onDrill} muted />
         <Td />
       </tr>
       {open && set.ads.map(({ ad, rollup, isActive }) => (
@@ -1225,14 +1227,51 @@ const dateInputStyle = {
   outline: 'none',
 }
 
+// ── Drill-down helpers ──────────────────────────────────────────────
+async function fetchTypeformDetail(drill, sinceISO, untilISO) {
+  let q = supabase.from('lib_typeform_response_detail').select('*')
+    .gte('submitted_at', sinceISO).lte('submitted_at', untilISO)
+    .order('submitted_at', { ascending: false })
+  if (drill.scope.level === 'ad')           q = q.eq('ad_id',        drill.scope.id)
+  else if (drill.scope.level === 'adset')   q = q.eq('adset_id',     drill.scope.id)
+  else if (drill.scope.level === 'campaign')q = q.eq('utm_campaign', drill.scope.id)
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return data || []
+}
+
+async function fetchGhlDetail(drill, sinceISO, untilISO) {
+  // Same OR-trick the closes drill uses: include rows that match scope by
+  // ad_id, adset_id, OR utm_campaign string. Covers data drift.
+  let q = supabase.from('lib_ghl_leads_detail').select('*')
+    .gte('landed_at', sinceISO).lte('landed_at', untilISO)
+    .order('landed_at', { ascending: false })
+  if (drill.scope.level === 'ad') {
+    q = q.eq('ad_id', drill.scope.id)
+  } else if (drill.scope.level === 'adset') {
+    const adIds = drill.scope.adIds || []
+    if (adIds.length > 0) q = q.or(`adset_id.eq.${drill.scope.id},ad_id.in.(${adIds.join(',')})`)
+    else                  q = q.eq('adset_id', drill.scope.id)
+  } else if (drill.scope.level === 'campaign') {
+    const ors = []
+    if (drill.scope.id) ors.push(`utm_campaign.eq.${encodeURIComponent(drill.scope.id)}`)
+    if ((drill.scope.adsetIds || []).length) ors.push(`adset_id.in.(${drill.scope.adsetIds.join(',')})`)
+    if ((drill.scope.adIds    || []).length) ors.push(`ad_id.in.(${drill.scope.adIds.join(',')})`)
+    if (ors.length) q = q.or(ors.join(','))
+  }
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return data || []
+}
+
 // ── Drill-down modal ────────────────────────────────────────────────
 // Backs the click-to-see-the-actual-prospects behaviour on any number
-// cell in the rollup table. Queries lib_typeform_response_detail with the
-// scope (ad / adset / campaign) + the metric filter (leads, qualified,
-// booked, qual_booked, live, closed).
-function ProspectDrillModal({ drill, onClose }) {
+// cell in the rollup table. Queries multiple sources (typeform + GHL +
+// closer_calls) so every metric pulls from the source that actually has
+// the rows. Respects the active date range.
+function ProspectDrillModal({ drill, dateRange, onClose }) {
   const [rows, setRows] = useState([])
-  const [source, setSource] = useState('typeform')  // 'typeform' | 'closed'
+  const [source, setSource] = useState('typeform')  // 'typeform' | 'closed' | 'ghl' | 'mixed'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -1241,58 +1280,57 @@ function ProspectDrillModal({ drill, onClose }) {
     async function run() {
       setLoading(true); setError(null)
       try {
-        // Closes / CAC come from the UNIFIED close attribution view, which
-        // includes typeform + GHL + HYROS + manual sources. Everything else
-        // is typeform-side data so it stays on lib_typeform_response_detail.
-        const wantClosed = drill.metric === 'closed'
-        if (wantClosed) {
+        const sinceISO = (dateRange?.startStr || '2024-01-01') + 'T00:00:00Z'
+        const untilISO = (dateRange?.endStr   || '2099-12-31') + 'T23:59:59Z'
+
+        // ── CLOSED ─────────────────────────────────────────────────
+        if (drill.metric === 'closed') {
           setSource('closed')
-          // Query by the SAME identifiers the rollup uses. The campaign +
-          // adset rows bubble closes up through ad-level rollup (closeAd),
-          // not by string-matching the campaign name. So we have to mirror
-          // that: include every close whose resolved_ad_id is in the
-          // scope's ad list, OR whose resolved_adset_id is in scope, OR
-          // whose resolved_campaign matches the scope name. Belt-and-braces
-          // — covers data drift where Meta renamed a campaign after the
-          // contact's utmCampaign was captured.
           let q = supabase.from('lib_close_resolved').select('*')
+            .gte('created_at', sinceISO).lte('created_at', untilISO)
             .order('created_at', { ascending: false })
           if (drill.scope.level === 'ad') {
             q = q.eq('resolved_ad_id', drill.scope.id)
           } else if (drill.scope.level === 'adset') {
             const adIds = drill.scope.adIds || []
-            if (adIds.length > 0) {
-              q = q.or(`resolved_adset_id.eq.${drill.scope.id},resolved_ad_id.in.(${adIds.join(',')})`)
-            } else {
-              q = q.eq('resolved_adset_id', drill.scope.id)
-            }
+            if (adIds.length > 0) q = q.or(`resolved_adset_id.eq.${drill.scope.id},resolved_ad_id.in.(${adIds.join(',')})`)
+            else                  q = q.eq('resolved_adset_id', drill.scope.id)
           } else if (drill.scope.level === 'campaign') {
-            const adIds = drill.scope.adIds || []
-            const adsetIds = drill.scope.adsetIds || []
             const ors = []
             if (drill.scope.id) ors.push(`resolved_campaign.eq.${encodeURIComponent(drill.scope.id)}`)
-            if (adsetIds.length > 0) ors.push(`resolved_adset_id.in.(${adsetIds.join(',')})`)
-            if (adIds.length > 0)    ors.push(`resolved_ad_id.in.(${adIds.join(',')})`)
+            if ((drill.scope.adsetIds || []).length) ors.push(`resolved_adset_id.in.(${drill.scope.adsetIds.join(',')})`)
+            if ((drill.scope.adIds    || []).length) ors.push(`resolved_ad_id.in.(${drill.scope.adIds.join(',')})`)
             if (ors.length) q = q.or(ors.join(','))
           }
           const { data, error: e } = await q
           if (e) throw new Error(e.message)
-          if (!cancelled) setRows(data || [])
+          if (!cancelled) setRows((data || []).map(r => ({ kind: 'close', ...r })))
           return
         }
-        setSource('typeform')
-        let q = supabase.from('lib_typeform_response_detail').select('*')
-          .order('submitted_at', { ascending: false })
-        if (drill.scope.level === 'ad')           q = q.eq('ad_id',        drill.scope.id)
-        else if (drill.scope.level === 'adset')   q = q.eq('adset_id',     drill.scope.id)
-        else if (drill.scope.level === 'campaign')q = q.eq('utm_campaign', drill.scope.id)
-        if (drill.metric === 'qualified')   q = q.eq('qualified',  true)
-        if (drill.metric === 'booked')      q = q.eq('is_booked',  true)
-        if (drill.metric === 'qual_booked') q = q.eq('is_booked',  true).eq('qualified', true)
-        if (drill.metric === 'live')        q = q.eq('is_live',    true)
-        const { data, error: e } = await q
-        if (e) throw new Error(e.message)
-        if (!cancelled) setRows(data || [])
+
+        // ── LEADS / QUAL / BOOKED / LIVE ─────────────────────────
+        // Pull from BOTH sources. Same merge logic the rollup uses.
+        // 1) Typeform side — has qualified / is_booked / is_live / is_closed flags
+        // 2) GHL side — has only the contact info; we treat each row as a lead
+        const [tfData, ghlData] = await Promise.all([
+          fetchTypeformDetail(drill, sinceISO, untilISO),
+          drill.metric === 'leads' ? fetchGhlDetail(drill, sinceISO, untilISO) : Promise.resolve([]),
+        ])
+
+        let tf = tfData
+        // Typeform-side metric filtering
+        if (drill.metric === 'qualified')   tf = tf.filter(r => r.qualified)
+        if (drill.metric === 'booked')      tf = tf.filter(r => r.is_booked)
+        if (drill.metric === 'qual_booked') tf = tf.filter(r => r.is_booked && r.qualified)
+        if (drill.metric === 'live')        tf = tf.filter(r => r.is_live)
+
+        const tfTagged  = tf.map(r => ({ kind: 'tf',  ...r }))
+        const ghlTagged = ghlData.map(r => ({ kind: 'ghl', ...r }))
+        const merged = [...tfTagged, ...ghlTagged].sort((a, b) =>
+          (b.submitted_at || b.landed_at || '').localeCompare(a.submitted_at || a.landed_at || ''))
+
+        setSource(ghlTagged.length && tfTagged.length ? 'mixed' : (ghlTagged.length ? 'ghl' : 'typeform'))
+        if (!cancelled) setRows(merged)
       } catch (e) {
         if (!cancelled) setError(e.message)
       } finally {
@@ -1301,7 +1339,7 @@ function ProspectDrillModal({ drill, onClose }) {
     }
     run()
     return () => { cancelled = true }
-  }, [drill.scope.level, drill.scope.id, drill.metric])
+  }, [drill.scope.level, drill.scope.id, drill.metric, dateRange?.startStr, dateRange?.endStr])
 
   const levelLabel = drill.scope.level === 'ad' ? 'Ad' : drill.scope.level === 'adset' ? 'Ad set' : 'Campaign'
 
@@ -1385,48 +1423,58 @@ function ProspectDrillModal({ drill, onClose }) {
           </table>
         )}
 
-        {!loading && rows.length > 0 && source === 'typeform' && (
+        {!loading && rows.length > 0 && source !== 'closed' && (
           <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--rule)' }}>
                 <th style={drillTh}>Submitted</th>
                 <th style={drillTh}>Prospect</th>
-                <th style={drillTh}>Revenue tier</th>
+                <th style={drillTh}>Source</th>
+                <th style={drillTh}>Revenue tier / form</th>
                 <th style={{ ...drillTh, textAlign: 'right' }}>Booked</th>
                 <th style={{ ...drillTh, textAlign: 'right' }}>Live</th>
                 <th style={{ ...drillTh, textAlign: 'right' }}>Closed</th>
-                <th style={{ ...drillTh, textAlign: 'right' }}>Cash</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
-                <tr key={r.response_id} style={{ borderBottom: '1px solid var(--rule)' }}>
-                  <td style={drillTd}>{(r.submitted_at || '').slice(0, 10) || '—'}</td>
-                  <td style={drillTd}>
-                    <div style={{ fontFamily: 'var(--serif)', fontWeight: 500, color: 'var(--ink)', fontSize: 14 }}>{r.display_name}</div>
-                    {r.email && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.email}</div>}
-                    {r.phone && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.phone}</div>}
-                  </td>
-                  <td style={drillTd}>
-                    <span style={{
-                      padding: '2px 8px',
-                      borderRadius: 2,
-                      fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em',
-                      background: r.qualified ? 'var(--accent-soft)' : 'transparent',
-                      border: '1px solid', borderColor: r.qualified ? 'var(--accent)' : 'var(--rule)',
-                      color: 'var(--ink)',
-                    }}>
-                      {r.revenue_tier || (r.tier === 'abandoned' ? 'abandoned' : '—')}
-                    </span>
-                  </td>
-                  <td style={{ ...drillTd, textAlign: 'right' }}>{r.is_booked  ? '●' : '—'}</td>
-                  <td style={{ ...drillTd, textAlign: 'right' }}>{r.is_live    ? '●' : '—'}</td>
-                  <td style={{ ...drillTd, textAlign: 'right', color: r.is_closed ? '#1f7a3a' : 'var(--ink-4)' }}>{r.is_closed ? '●' : '—'}</td>
-                  <td style={{ ...drillTd, textAlign: 'right', color: r.cash_collected > 0 ? '#1f7a3a' : 'var(--ink-4)' }}>
-                    {r.cash_collected > 0 ? fmt$(r.cash_collected) : '—'}
-                  </td>
-                </tr>
-              ))}
+              {rows.map(r => {
+                const isGhl = r.kind === 'ghl'
+                const id = r.response_id || r.ghl_contact_id
+                const when = (r.submitted_at || r.landed_at || '').slice(0, 10) || '—'
+                return (
+                  <tr key={id} style={{ borderBottom: '1px solid var(--rule)' }}>
+                    <td style={drillTd}>{when}</td>
+                    <td style={drillTd}>
+                      <div style={{ fontFamily: 'var(--serif)', fontWeight: 500, color: 'var(--ink)', fontSize: 14 }}>{r.display_name}</div>
+                      {r.email && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.email}</div>}
+                      {r.phone && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.phone}</div>}
+                    </td>
+                    <td style={drillTd}>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 2,
+                        fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: isGhl ? 'rgba(38,117,212,0.10)' : 'rgba(184,135,20,0.10)',
+                        border: '1px solid', borderColor: isGhl ? '#2675d4' : '#b88714',
+                        color: 'var(--ink)',
+                      }}>{isGhl ? 'lead form' : 'typeform'}</span>
+                    </td>
+                    <td style={drillTd}>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 2,
+                        fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em',
+                        background: r.qualified ? 'var(--accent-soft)' : 'transparent',
+                        border: '1px solid', borderColor: r.qualified ? 'var(--accent)' : 'var(--rule)',
+                        color: 'var(--ink)',
+                      }}>
+                        {r.revenue_tier || r.form_name || (r.tier === 'abandoned' ? 'abandoned' : '—')}
+                      </span>
+                    </td>
+                    <td style={{ ...drillTd, textAlign: 'right' }}>{r.is_booked  ? '●' : '—'}</td>
+                    <td style={{ ...drillTd, textAlign: 'right' }}>{r.is_live    ? '●' : '—'}</td>
+                    <td style={{ ...drillTd, textAlign: 'right', color: r.is_closed ? '#1f7a3a' : 'var(--ink-4)' }}>{r.is_closed ? '●' : '—'}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
