@@ -771,7 +771,13 @@ function OrphanClosesModal({ rows, onClose }) {
 }
 
 function CampaignBlock({ camp, open, onToggle, expandedAdSets, onToggleAdSet, onDrill }) {
-  const scope = { level: 'campaign', id: camp.name, label: camp.name }
+  // Carry the full ad_id list in the campaign's scope so the drill modal can
+  // resolve closes by ad_id IN (...) instead of by campaign-name string match.
+  // The string can drift (Meta lets you rename a campaign while GHL keeps
+  // the original utmCampaign on the contact) which makes string-match miss.
+  const adIds = camp.ad_sets_sorted.flatMap(s => s.ads.map(x => x.ad.ad_id))
+  const adsetIds = camp.ad_sets_sorted.map(s => s.id).filter(Boolean)
+  const scope = { level: 'campaign', id: camp.name, label: camp.name, adIds, adsetIds }
   const anyActive = camp.activeAdCount > 0
   return (
     <>
@@ -839,7 +845,8 @@ function CampaignBlock({ camp, open, onToggle, expandedAdSets, onToggleAdSet, on
 
 function AdSetBlock({ set, open, onToggle, onDrill }) {
   const anyActive = set.activeAdCount > 0
-  const adsetScope = { level: 'adset', id: set.id, label: set.name }
+  const adIds = set.ads.map(x => x.ad.ad_id)
+  const adsetScope = { level: 'adset', id: set.id, label: set.name, adIds }
   return (
     <>
       <tr onClick={onToggle} style={{
@@ -1194,11 +1201,34 @@ function ProspectDrillModal({ drill, onClose }) {
         const wantClosed = drill.metric === 'closed'
         if (wantClosed) {
           setSource('closed')
+          // Query by the SAME identifiers the rollup uses. The campaign +
+          // adset rows bubble closes up through ad-level rollup (closeAd),
+          // not by string-matching the campaign name. So we have to mirror
+          // that: include every close whose resolved_ad_id is in the
+          // scope's ad list, OR whose resolved_adset_id is in scope, OR
+          // whose resolved_campaign matches the scope name. Belt-and-braces
+          // — covers data drift where Meta renamed a campaign after the
+          // contact's utmCampaign was captured.
           let q = supabase.from('lib_close_resolved').select('*')
             .order('created_at', { ascending: false })
-          if (drill.scope.level === 'ad')           q = q.eq('resolved_ad_id',    drill.scope.id)
-          else if (drill.scope.level === 'adset')   q = q.eq('resolved_adset_id', drill.scope.id)
-          else if (drill.scope.level === 'campaign')q = q.eq('resolved_campaign', drill.scope.id)
+          if (drill.scope.level === 'ad') {
+            q = q.eq('resolved_ad_id', drill.scope.id)
+          } else if (drill.scope.level === 'adset') {
+            const adIds = drill.scope.adIds || []
+            if (adIds.length > 0) {
+              q = q.or(`resolved_adset_id.eq.${drill.scope.id},resolved_ad_id.in.(${adIds.join(',')})`)
+            } else {
+              q = q.eq('resolved_adset_id', drill.scope.id)
+            }
+          } else if (drill.scope.level === 'campaign') {
+            const adIds = drill.scope.adIds || []
+            const adsetIds = drill.scope.adsetIds || []
+            const ors = []
+            if (drill.scope.id) ors.push(`resolved_campaign.eq.${encodeURIComponent(drill.scope.id)}`)
+            if (adsetIds.length > 0) ors.push(`resolved_adset_id.in.(${adsetIds.join(',')})`)
+            if (adIds.length > 0)    ors.push(`resolved_ad_id.in.(${adIds.join(',')})`)
+            if (ors.length) q = q.or(ors.join(','))
+          }
           const { data, error: e } = await q
           if (e) throw new Error(e.message)
           if (!cancelled) setRows(data || [])
