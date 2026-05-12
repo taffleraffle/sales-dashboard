@@ -7,6 +7,15 @@ import {
 import { supabase } from '../../lib/supabase'
 import { useToast } from '../../hooks/useToast'
 
+// Clip-type colour tokens — keep in sync with CLIP_TYPES in AdsClips.jsx
+// so the type chips read the same across both pages.
+const CLIP_TYPE_COLORS = {
+  hook:        'var(--ink)',
+  body:        '#b8810b',
+  testimonial: '#1f7a3a',
+  full_video:  '#7a3aa6',
+}
+
 // Status color tokens — every status gets a consistent tint everywhere it
 // appears (drawer dropdown, sheet pill, matrix cell, by-hook row).
 // bg = filled background for the pill, fg = text color, accent = left-rule
@@ -601,11 +610,12 @@ function MatrixView({ hooks, bodies, variantByCombo, hookPerf, bodyPerf, maxSpen
                 <th key={b.clip_id} style={{
                   padding: '10px 8px',
                   background: 'var(--paper-2)',
-                  borderBottom: '1px solid var(--rule)', borderRight: '1px solid var(--rule)',
+                  borderBottom: `2px solid ${CLIP_TYPE_COLORS.body}`, borderRight: '1px solid var(--rule)',
                   fontWeight: 400,
                   minWidth: 120,
                   textAlign: 'left',
                 }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '0.14em', fontWeight: 700, textTransform: 'uppercase', color: CLIP_TYPE_COLORS.body, marginBottom: 3 }}>Body</div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: 'var(--ink)', letterSpacing: '0.04em' }} title={b.description || ''}>
                     {shortClipId(b.clip_id, 'body')}
                   </div>
@@ -628,9 +638,10 @@ function MatrixView({ hooks, bodies, variantByCombo, hookPerf, bodyPerf, maxSpen
                   position: 'sticky', left: 0, zIndex: 1,
                   padding: '10px 12px',
                   background: 'var(--paper)',
-                  borderRight: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)',
+                  borderRight: `2px solid ${CLIP_TYPE_COLORS.hook}`, borderBottom: '1px solid var(--rule)',
                   textAlign: 'left', fontWeight: 400, verticalAlign: 'middle',
                 }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '0.14em', fontWeight: 700, textTransform: 'uppercase', color: CLIP_TYPE_COLORS.hook, marginBottom: 3 }}>Hook</div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600, color: 'var(--ink)', letterSpacing: '0.04em' }} title={h.description || ''}>
                     {shortClipId(h.clip_id, 'hook')}
                   </div>
@@ -817,17 +828,31 @@ function ByHookView({ rows, hooks, hookPerf, clipById, onVariantClick }) {
                     border: '1px solid var(--rule)', borderLeftWidth: 3, borderLeftColor: c.accent,
                     borderRadius: 2, cursor: 'pointer',
                   }}>
-                    {/* Body + full-video composition */}
-                    <div style={{ minWidth: 200, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {/* Body + full-video composition — color-coded labels
+                        match the Clips page palette so the type signals
+                        are visually consistent across both surfaces. */}
+                    <div style={{ minWidth: 200, display: 'flex', flexDirection: 'column', gap: 3 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.1em' }}>BODY ·</span>
+                        <span style={{
+                          fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', fontWeight: 700,
+                          color: CLIP_TYPE_COLORS.body,
+                          padding: '2px 6px',
+                          background: 'rgba(184,129,11,0.12)',
+                          borderRadius: 2,
+                        }}>BODY</span>
                         <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600, color: 'var(--ink)' }}>
                           {v.body_clip_id ? shortClipId(v.body_clip_id, 'body') : '(none)'}
                         </span>
                       </div>
                       {v.frame_clip_id && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.1em' }}>FULL VIDEO ·</span>
+                          <span style={{
+                            fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', fontWeight: 700,
+                            color: CLIP_TYPE_COLORS.full_video,
+                            padding: '2px 6px',
+                            background: 'rgba(122,58,166,0.10)',
+                            borderRadius: 2,
+                          }}>FULL VIDEO</span>
                           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, color: 'var(--ink-2)' }}>
                             {shortClipId(v.frame_clip_id, 'full_video')}
                           </span>

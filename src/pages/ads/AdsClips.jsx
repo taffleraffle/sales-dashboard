@@ -272,6 +272,22 @@ export default function AdsClips() {
     uploads.done(runId)
 
     const total = valid.length + preflightFails.length
+    if (succeeded === total && valid.length === 1) {
+      // Single-file upload: auto-open the new clip's drawer so the operator
+      // sees exactly where it landed + can fix the auto-classification.
+      const justUploaded = valid[0]
+      const parsed = parseFilename(justUploaded.name)
+      toast.success(`${parsed.clip_id} uploaded as ${typeMeta(parsed.clip_type || 'hook').label}`)
+      await load()
+      setTimeout(() => {
+        setClips(prev => {
+          const match = prev.find(c => c.clip_id === parsed.clip_id)
+          if (match) setEditing(match)
+          return prev
+        })
+      }, 200)
+      return
+    }
     if (succeeded === total) toast.success(`${succeeded} clip${succeeded > 1 ? 's' : ''} uploaded`)
     else if (succeeded > 0)  toast.error(`${succeeded}/${total} uploaded · ${total - succeeded} failed`)
     else                     toast.error(`All ${total} uploads failed`)
@@ -435,9 +451,6 @@ export default function AdsClips() {
           <button onClick={() => fileInputRef.current?.click()} style={btnSolid}>
             <Upload size={13} /> Upload
           </button>
-          <button onClick={() => setShowTsv(true)} style={btnGhost}>
-            <ClipboardPaste size={13} /> Paste TSV
-          </button>
           <button onClick={addBlankClip} style={btnGhost}>
             <Plus size={13} /> New clip
           </button>
@@ -600,9 +613,18 @@ function ClipCard({ clip, onOpen }) {
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: hover && clip.source_file_url ? 'none' : 'block' }}
             onError={(e) => { e.target.style.opacity = 0.25 }}
           />
+        ) : clip.source_file_url ? (
+          // Fallback: render the video itself with preload='metadata' so
+          // the browser captures the first frame as a poster. Saves the
+          // operator from ever seeing "No preview" when an MP4 is on file.
+          <video
+            src={clip.source_file_url}
+            muted playsInline preload="metadata"
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: hover ? 'none' : 'block', background: '#0c0c0c' }}
+          />
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-4)', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-            No preview
+            No file
           </div>
         )}
         {hover && clip.source_file_url && (
