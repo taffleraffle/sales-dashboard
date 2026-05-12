@@ -101,6 +101,25 @@ function extractFields(answers: any[]): {
   return { first_name, last_name, email, phone, revenue_tier }
 }
 
+// Fetch the form definition to get the thank-you screen ref→title map.
+// The Responses API returns thankyou_screen_ref as a UUID; we need to
+// resolve it so we can detect which prospects landed on the actual
+// "30k+ Booking Confirmation" page (the typeform-side signal that they
+// completed the booking step). Without resolving this, ending_screen is
+// just an opaque UUID and we can't tell a booker from a DQ.
+async function fetchScreenMap(formId: string): Promise<Record<string, string>> {
+  const res = await fetch(`${TYPEFORM_BASE}/forms/${formId}`, {
+    headers: { Authorization: `Bearer ${TYPEFORM_KEY}`, Accept: 'application/json' },
+  })
+  if (!res.ok) throw new Error(`Typeform /forms/${formId} ${res.status}`)
+  const def = await res.json()
+  const map: Record<string, string> = {}
+  for (const s of def.thankyou_screens || []) {
+    if (s.ref && s.title) map[s.ref] = s.title.trim()
+  }
+  return map
+}
+
 async function fetchPagedResponses(formId: string, since: string | null) {
   const PAGE_SIZE = 1000
   const all: any[] = []
@@ -131,10 +150,15 @@ async function fetchPagedResponses(formId: string, since: string | null) {
   return all
 }
 
-function toRow(formId: string, formName: string, raw: any) {
+function toRow(formId: string, formName: string, raw: any, screenMap: Record<string, string>) {
   const hidden = raw.hidden || {}
   const { first_name, last_name, email, phone, revenue_tier } = extractFields(raw.answers || [])
-  const tier = classifyTier(revenue_tier, raw.thankyou_screen_ref || null)
+  const ref = raw.thankyou_screen_ref || null
+  // Resolve UUID → readable title when we know the form. Falls back to the
+  // raw ref so we still capture *something* for screens added after the
+  // last form-definition fetch.
+  const ending_screen = ref ? (screenMap[ref] || ref) : null
+  const tier = classifyTier(revenue_tier, ending_screen)
   return {
     response_id: raw.response_id || raw.token,
     form_id: formId,
@@ -147,7 +171,7 @@ function toRow(formId: string, formName: string, raw: any) {
     phone: phone || hidden.phone_number || null,
     revenue_tier,
     tier,
-    ending_screen: raw.thankyou_screen_ref || null,
+    ending_screen,
     utm_source: hidden.utm_source || null,
     utm_medium: hidden.utm_medium || null,
     utm_campaign: hidden.utm_campaign || null,
@@ -178,8 +202,9 @@ serve(async (req) => {
 
   for (const f of forms) {
     try {
+      const screenMap = await fetchScreenMap(f.id)
       const items = await fetchPagedResponses(f.id, sinceTs)
-      const rows = items.map(r => toRow(f.id, f.name, r))
+      const rows = items.map(r => toRow(f.id, f.name, r, screenMap))
       if (rows.length) {
         const { error } = await supabase
           .from('typeform_responses')
