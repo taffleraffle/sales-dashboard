@@ -309,25 +309,29 @@ export default function AdsPerformance() {
       for (const h of hRows || []) hyMap[h.ad_id] = h
       setHyros(hyMap)
 
-      // GHL bookings + lives — aggregate-across-time rollup views.
-      // These do not depend on the dashboard's date filter (attribution
-      // to ad is permanent), so we fetch them once on mount.
-      const [bAd, bAdset, bCamp, lAd, lAdset, lCamp] = await Promise.all([
-        supabase.from('lib_ghl_booked_per_ad').select('ad_id, booked_calls'),
-        supabase.from('lib_ghl_booked_per_adset').select('adset_id, booked_calls'),
-        supabase.from('lib_ghl_booked_per_campaign').select('utm_campaign, booked_calls'),
-        supabase.from('lib_ghl_lives_per_ad').select('ad_id, live_calls'),
-        supabase.from('lib_ghl_lives_per_adset').select('adset_id, live_calls'),
-        supabase.from('lib_ghl_lives_per_campaign').select('utm_campaign, live_calls'),
-      ])
-      const toMap = (rows, key, val) => Object.fromEntries((rows.data || []).map(r => [r[key], val(r)]))
-      setGhlBookedAd      (toMap(bAd,    'ad_id',        r => r.booked_calls))
-      setGhlBookedAdset   (toMap(bAdset, 'adset_id',     r => r.booked_calls))
-      setGhlBookedCampaign(toMap(bCamp,  'utm_campaign', r => r.booked_calls))
-      setGhlLivesAd       (toMap(lAd,    'ad_id',        r => r.live_calls))
-      setGhlLivesAdset    (toMap(lAdset, 'adset_id',     r => r.live_calls))
-      setGhlLivesCampaign (toMap(lCamp,  'utm_campaign', r => r.live_calls))
+      // NOTE: booked + live counts used to be fetched from the
+      // all-time aggregate views here. Removed in favour of date-scoped
+      // detail queries inside load() so a paused campaign doesn't show
+      // 80 historical bookings against 0 in-range spend.
     } catch (e) { setError(e.message) }
+  }
+
+  // Helper: paginate a Supabase query through PostgREST's 1000-row cap.
+  // The callsites used to inline this loop 5 times; one helper keeps
+  // the pagination math out of the load() body.
+  const fetchAllPaged = async (queryBuilder) => {
+    const PAGE = 1000
+    const out = []
+    let off = 0
+    while (true) {
+      const { data, error } = await queryBuilder().range(off, off + PAGE - 1)
+      if (error) throw new Error(error.message)
+      if (!data || !data.length) break
+      out.push(...data)
+      if (data.length < PAGE) break
+      off += PAGE
+    }
+    return out
   }
 
   const load = async () => {
@@ -338,62 +342,59 @@ export default function AdsPerformance() {
       const adsLoaded = adsCacheRef.data || []
       const adIds = adsLoaded.map(a => a.ad_id)
       if (!adIds.length) { setLoading(false); return }
+      const startTs = startStr + 'T00:00:00Z'
+      const endTs   = endStr   + 'T23:59:59Z'
 
-      // 2. Stats — paged to bypass PostgREST 1000-row cap. Filtered to
-      // the active date range.
-      const perAd = {}
-      const PAGE = 1000
-      let offset = 0
-      while (true) {
-        const { data, error: sErr } = await supabase
+      // Kick off ALL date-scoped fetches in parallel. Five independent
+      // detail-view queries each paged to bypass the 1000-row cap.
+      // Previously these ran sequentially → ~5x slowdown per chip click.
+      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows] = await Promise.all([
+        fetchAllPaged(() => supabase
           .from('ad_daily_stats')
           .select('ad_id, spend, impressions, clicks, results')
           .in('ad_id', adIds)
-          .gte('date', startStr)
-          .lte('date', endStr)
-          .range(offset, offset + PAGE - 1)
-        if (sErr) throw new Error(sErr.message)
-        if (!data || !data.length) break
-        for (const s of data) {
-          const r = perAd[s.ad_id] || { spend: 0, impressions: 0, clicks: 0, results: 0 }
-          r.spend += parseFloat(s.spend || 0)
-          r.impressions += parseInt(s.impressions || 0)
-          r.clicks += parseInt(s.clicks || 0)
-          r.results += parseInt(s.results || 0)
-          perAd[s.ad_id] = r
-        }
-        if (data.length < PAGE) break
-        offset += PAGE
+          .gte('date', startStr).lte('date', endStr)),
+        fetchAllPaged(() => supabase
+          .from('lib_typeform_response_detail')
+          .select('response_id, submitted_at, ad_id, adset_id, utm_campaign, qualified, is_booked, is_live, is_closed, revenue, cash_collected')
+          .gte('submitted_at', startTs).lte('submitted_at', endTs)),
+        fetchAllPaged(() => supabase
+          .from('lib_close_resolved')
+          .select('closer_call_id, prospect_name, clean_name, revenue, cash_collected, created_at, resolved_ad_id, resolved_adset_id, resolved_campaign, attribution_source')
+          .gte('created_at', startTs).lte('created_at', endTs)),
+        fetchAllPaged(() => supabase
+          .from('lib_ghl_leads_detail')
+          .select('ghl_contact_id, landed_at, ad_id, adset_id, utm_campaign')
+          .gte('landed_at', startTs).lte('landed_at', endTs)),
+        fetchAllPaged(() => supabase
+          .from('lib_ghl_booked_detail')
+          .select('appointment_id, landed_at, ad_id, adset_id, utm_campaign')
+          .gte('landed_at', startTs).lte('landed_at', endTs)),
+        fetchAllPaged(() => supabase
+          .from('lib_ghl_lives_detail')
+          .select('closer_call_id, landed_at, ad_id, adset_id, utm_campaign')
+          .gte('landed_at', startTs).lte('landed_at', endTs)),
+      ])
+
+      // 2. Stats — aggregate by ad_id
+      const perAd = {}
+      for (const s of statRows) {
+        const r = perAd[s.ad_id] || { spend: 0, impressions: 0, clicks: 0, results: 0 }
+        r.spend       += parseFloat(s.spend || 0)
+        r.impressions += parseInt(s.impressions || 0)
+        r.clicks      += parseInt(s.clicks || 0)
+        r.results     += parseInt(s.results || 0)
+        perAd[s.ad_id] = r
       }
       setStats(perAd)
 
-      // 4. Typeform attribution — query the per-prospect detail view
-      // directly, filter by submitted_at, and aggregate client-side.
-      // We do this instead of querying the pre-aggregated rollup views
-      // because those don't honour a date filter.
-      const detailRows = []
-      let dOff = 0
-      while (true) {
-        const { data, error: dErr } = await supabase
-          .from('lib_typeform_response_detail')
-          .select('response_id, submitted_at, ad_id, adset_id, utm_campaign, qualified, is_booked, is_live, is_closed, revenue, cash_collected')
-          .gte('submitted_at', startStr + 'T00:00:00Z')
-          .lte('submitted_at', endStr   + 'T23:59:59Z')
-          .range(dOff, dOff + PAGE - 1)
-        if (dErr) throw new Error(dErr.message)
-        if (!data || !data.length) break
-        detailRows.push(...data)
-        if (data.length < PAGE) break
-        dOff += PAGE
-      }
+      // 3. Typeform — per ad/adset/campaign
       const tfAdMap = {}, tfAdsetMap = {}, tfCampMap = {}
-      for (const r of detailRows) {
+      for (const r of tfRows) {
         const stamp = (target, key) => {
           if (!key) return
           let row = target[key]
-          if (!row) {
-            row = target[key] = { leads: 0, qualified_leads: 0, booked_calls: 0, qualified_booked_calls: 0, live_calls: 0, closes: 0, revenue_attributed: 0, cash_attributed: 0 }
-          }
+          if (!row) row = target[key] = { leads: 0, qualified_leads: 0, booked_calls: 0, qualified_booked_calls: 0, live_calls: 0, closes: 0, revenue_attributed: 0, cash_attributed: 0 }
           row.leads++
           if (r.qualified)               row.qualified_leads++
           if (r.is_booked)               row.booked_calls++
@@ -409,28 +410,9 @@ export default function AdsPerformance() {
         stamp(tfAdsetMap, r.adset_id)
         stamp(tfCampMap,  r.utm_campaign)
       }
-      setTfAd(tfAdMap)
-      setTfAdset(tfAdsetMap)
-      setTfCampaign(tfCampMap)
+      setTfAd(tfAdMap); setTfAdset(tfAdsetMap); setTfCampaign(tfCampMap)
 
-      // 5. UNIFIED close attribution. Pulls every closed closer_call
-      // (typeform-attributed + HYROS-attributed + orphan) filtered by
-      // the date range, then aggregates by ad / adset / campaign.
-      const closeRows = []
-      let cOff = 0
-      while (true) {
-        const { data, error: ccErr } = await supabase
-          .from('lib_close_resolved')
-          .select('closer_call_id, prospect_name, clean_name, revenue, cash_collected, created_at, resolved_ad_id, resolved_adset_id, resolved_campaign, attribution_source')
-          .gte('created_at', startStr + 'T00:00:00Z')
-          .lte('created_at', endStr   + 'T23:59:59Z')
-          .range(cOff, cOff + PAGE - 1)
-        if (ccErr) throw new Error(ccErr.message)
-        if (!data || !data.length) break
-        closeRows.push(...data)
-        if (data.length < PAGE) break
-        cOff += PAGE
-      }
+      // 4. Closes — per ad/adset/campaign + orphan tracking
       const cAd = {}, cAdset = {}, cCamp = {}
       const orphans = []
       let orphanRev = 0, orphanCash = 0
@@ -441,48 +423,35 @@ export default function AdsPerformance() {
           if (!key) return
           let row = target[key]
           if (!row) row = target[key] = { closes: 0, revenue: 0, cash: 0 }
-          row.closes++
-          row.revenue += rev
-          row.cash    += cash
+          row.closes++; row.revenue += rev; row.cash += cash
         }
         bump(cAd,    r.resolved_ad_id)
         bump(cAdset, r.resolved_adset_id)
         bump(cCamp,  r.resolved_campaign)
         if (r.attribution_source === 'orphan') {
-          orphans.push(r)
-          orphanRev += rev
-          orphanCash += cash
+          orphans.push(r); orphanRev += rev; orphanCash += cash
         }
       }
-      setCloseAd(cAd)
-      setCloseAdset(cAdset)
-      setCloseCampaign(cCamp)
+      setCloseAd(cAd); setCloseAdset(cAdset); setCloseCampaign(cCamp)
       setOrphanCloses({ count: orphans.length, revenue: orphanRev, cash: orphanCash, rows: orphans })
 
-      // 6. GHL-contact-attributed leads. Paid Meta Lead Form prospects
-      // never touched Typeform; they live exclusively on ghl_contacts.
-      // Pull per-contact rows filtered by date, aggregate client-side.
-      const ghlRows = []
-      let gOff = 0
-      while (true) {
-        const { data, error: gErr } = await supabase
-          .from('lib_ghl_leads_detail')
-          .select('ghl_contact_id, landed_at, ad_id, adset_id, utm_campaign')
-          .gte('landed_at', startStr + 'T00:00:00Z')
-          .lte('landed_at', endStr   + 'T23:59:59Z')
-          .range(gOff, gOff + PAGE - 1)
-        if (gErr) throw new Error(gErr.message)
-        if (!data || !data.length) break
-        ghlRows.push(...data)
-        if (data.length < PAGE) break
-        gOff += PAGE
+      // 5. GHL leads + 6. booked + 7. lives — three identical aggregation
+      // shapes (count per ad/adset/campaign).
+      const tally = (rows, idKey = 'ad_id', asKey = 'adset_id', cKey = 'utm_campaign') => {
+        const a = {}, ads = {}, c = {}
+        for (const r of rows) {
+          if (r[idKey])  a[r[idKey]]   = (a[r[idKey]]   || 0) + 1
+          if (r[asKey])  ads[r[asKey]] = (ads[r[asKey]] || 0) + 1
+          if (r[cKey])   c[r[cKey]]    = (c[r[cKey]]    || 0) + 1
+        }
+        return [a, ads, c]
       }
-      const gAd = {}, gAdset = {}, gCamp = {}
-      for (const r of ghlRows) {
-        if (r.ad_id)        gAd[r.ad_id]        = (gAd[r.ad_id]        || 0) + 1
-        if (r.adset_id)     gAdset[r.adset_id]  = (gAdset[r.adset_id]  || 0) + 1
-        if (r.utm_campaign) gCamp[r.utm_campaign] = (gCamp[r.utm_campaign] || 0) + 1
-      }
+      const [gLeadAd, gLeadAdset, gLeadCamp]     = tally(ghlLeadRows)
+      const [gBookAd, gBookAdset, gBookCamp]     = tally(ghlBookedRows)
+      const [gLiveAd, gLiveAdset, gLiveCamp]     = tally(ghlLiveRows)
+      setGhlBookedAd(gBookAd); setGhlBookedAdset(gBookAdset); setGhlBookedCampaign(gBookCamp)
+      setGhlLivesAd(gLiveAd);  setGhlLivesAdset(gLiveAdset);  setGhlLivesCampaign(gLiveCamp)
+      const gAd = gLeadAd, gAdset = gLeadAdset, gCamp = gLeadCamp
       setGhlLeadsAd(gAd)
       setGhlLeadsAdset(gAdset)
       setGhlLeadsCampaign(gCamp)

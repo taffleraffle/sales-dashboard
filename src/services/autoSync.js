@@ -249,30 +249,11 @@ async function syncGhlContacts(force = false) {
     const data = await r.json()
     console.log('[auto-sync] GHL contacts:', data.fetched || 0, 'fetched,', data.withAttribution || 0, 'with attribution')
 
-    // Bridge GHL pipeline closes -> closer_calls so the dashboard's close
-    // count matches GHL pipeline status. Closers don't always log every
-    // close in EOD; this fills the gap.
-    try {
-      const sb = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/rest/v1/rpc/sync_ghl_closes_to_closer_calls', {
-        method: 'POST',
-        headers: {
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      })
-      if (sb.ok) {
-        const sbd = await sb.json()
-        const row = Array.isArray(sbd) ? sbd[0] : sbd
-        if (row?.inserted_count > 0) {
-          console.log('[auto-sync] GHL closes bridged:', row.inserted_count, 'new of', row.total_in_pipeline)
-        }
-      } else {
-        console.warn('[auto-sync] GHL close bridge RPC failed:', sb.status)
-      }
-    } catch (bridgeErr) {
-      console.warn('[auto-sync] GHL close bridge error:', bridgeErr.message)
-    }
+    // NOTE: removed the auto-call to sync_ghl_closes_to_closer_calls. The
+    // GHL "Closed" pipeline stage is not reliable enough to auto-promote
+    // to closer_calls.outcome='closed' — some opportunities sit in Closed
+    // without being actual closes. EOD reports are the source of truth.
+    // The RPC still exists in the DB for manual one-off runs if needed.
 
     clearError('ghlContacts')
     clearCooldown('ghlContacts')
