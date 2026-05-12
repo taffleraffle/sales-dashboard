@@ -103,13 +103,17 @@ export function useCloserCallProspectMetrics() {
       const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ')
       const liveSet = new Set()
       const closedSet = new Set()
-      // call_type=new_call AND outcome IN ('closed','not_closed') = live NC
-      // closed prospect: any new_call or follow_up with outcome='closed'
-      // Ascensions excluded.
+      // Exclusion: "Historical Close YYYY-MM-DD #N" rows are synthetic
+      // backfill entries that pre-date per-prospect tracking. Each one is
+      // a self-100%-close (1 NC, 1 close, no real prospect) and inflates
+      // the overall rate. Both numerator AND denominator skip them.
+      const isHistoricalPlaceholder = (raw) => /^historical close\b/i.test((raw || '').trim())
+
       for (const c of data.calls) {
         if (!reportInRange.has(c.eod_report_id)) continue
         const name = norm(c.prospect_name)
         if (!name) continue
+        if (isHistoricalPlaceholder(c.prospect_name)) continue
         const isNew = c.call_type === 'new_call'
         const isFu  = c.call_type === 'follow_up'
         if (isNew && (c.outcome === 'closed' || c.outcome === 'not_closed')) {

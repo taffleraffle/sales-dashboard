@@ -139,11 +139,18 @@ export function useCloserCallBreakdown(closerId, days = 30) {
       // Build Sets of prospect names per closer. Sets handle the dedup —
       // adding the same name twice is a no-op, so multiple FUs on one
       // prospect collapse naturally.
+      // EXCLUSION: synthetic "Historical Close YYYY-MM-DD #N" rows are
+      // backfill entries that pre-date per-prospect tracking. Each one is
+      // a self-100% close (1 NC + 1 close, no real prospect) and inflates
+      // the overall close rate by ~13 percentage points on the 90d window.
+      // Drop them from both numerator and denominator.
+      const isHistoricalPlaceholder = (raw) => /^historical close\b/i.test((raw || '').trim())
       const sets = {}  // closerId -> { live: Set, closed: Set }
       const counts = {} // closerId -> call-row counters (kept for any legacy reader)
       for (const c of (calls || [])) {
         const cid = reportToCloser[c.eod_report_id]
         if (!cid) continue
+        if (isHistoricalPlaceholder(c.prospect_name)) continue
         if (!sets[cid]) sets[cid] = { live: new Set(), closed: new Set() }
         if (!counts[cid]) counts[cid] = { ncCloses: 0, fuCloses: 0, ncLive: 0, fuLive: 0, allCloses: 0 }
         const isNew = c.call_type === 'new_call'
