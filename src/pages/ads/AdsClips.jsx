@@ -28,13 +28,18 @@ import { extractVideoPoster } from '../../lib/videoPoster'
       tiny modal and calls lib_creator_add / lib_editor_add then re-fetches.
 */
 
-// ─── Type vocabularies (color-coded per category) ───────────────────
+// ─── Type vocabularies — simplified taxonomy per Ben (2026-05-12) ───
+// Old types hook_proof / frame / client_clip folded down to 4 clean ones.
+// Old → new mapping (applied via migration):
+//   hook_proof   → hook
+//   client_clip  → testimonial
+//   frame        → testimonial (existing frames were all testimonial intros)
+// "full_video" is new — a fully-finished ad clip that doesn't need splicing.
 const CLIP_TYPES = [
-  { value: 'hook',         label: 'Hook',         color: '#3b6dff', bg: 'rgba(59,109,255,0.10)' },
-  { value: 'hook_proof',   label: 'Hook · Proof', color: '#0aa1a1', bg: 'rgba(10,161,161,0.10)' },
-  { value: 'body',         label: 'Body',         color: '#b8810b', bg: 'rgba(184,129,11,0.12)' },
-  { value: 'frame',        label: 'Frame',        color: '#7a3aa6', bg: 'rgba(122,58,166,0.10)' },
-  { value: 'client_clip',  label: 'Client',       color: '#1f7a3a', bg: 'rgba(31,122,58,0.10)' },
+  { value: 'hook',        label: 'Hook',        color: 'var(--ink)',     bg: 'rgba(10,10,10,0.06)' },
+  { value: 'body',        label: 'Body',        color: '#b8810b',         bg: 'rgba(184,129,11,0.12)' },
+  { value: 'testimonial', label: 'Testimonial', color: '#1f7a3a',         bg: 'rgba(31,122,58,0.10)' },
+  { value: 'full_video',  label: 'Full video',  color: '#7a3aa6',         bg: 'rgba(122,58,166,0.10)' },
 ]
 const FUNNEL_POSITIONS = [
   { value: 'top',    label: 'Top of funnel',    short: 'TOF', color: '#2675d4', bg: 'rgba(38,117,212,0.10)' },
@@ -55,6 +60,7 @@ const STAGES = [
 const KNOWN_CREATORS_FALLBACK = ['OSO', 'SOFIA', 'NATALIE', 'CLIENT', 'ADAM', 'ERIC', 'MORGAN', 'RESTO-AI']
 
 const typeMeta = (t) => CLIP_TYPES.find(x => x.value === t) || { label: t || '—', color: 'var(--ink-3)', bg: 'transparent' }
+const pluralLabel = (t) => ({ hook: 'Hooks', body: 'Bodies', testimonial: 'Testimonials', full_video: 'Full videos' }[t] || t)
 const funnelMeta = (f) => FUNNEL_POSITIONS.find(x => x.value === f)
 const priorityMeta = (p) => PRIORITIES.find(x => x.value === p)
 
@@ -74,12 +80,15 @@ function parseFilename(filename) {
   }
   let clip_type = null
   if (/^H\d/.test(firstTok)) clip_type = 'hook'
-  else if (firstTok === 'P' || /^P\d/.test(firstTok)) clip_type = 'hook_proof'
+  else if (firstTok === 'P' || /^P\d/.test(firstTok)) clip_type = 'hook'  // proof hooks fold to hook
   else if (tokens.includes('BODY')) clip_type = 'body'
-  else if (tokens.includes('FRAME')) clip_type = 'frame'
-  else if (/what\s+one\s+of\s+our|client\s+said|owner\s+said|customer\s+said/i.test(base)) clip_type = 'frame'
-  else if (upper.includes('TESTIMONIAL') || tokens.includes('CLIENT')) clip_type = 'client_clip'
-  else if (creator_id === 'RESTO-AI') clip_type = 'frame'
+  else if (tokens.includes('FULL') || tokens.includes('FULLVIDEO')) clip_type = 'full_video'
+  // Testimonial-style phrasings — client/owner/customer talking, or any
+  // FRAME-prefixed clip from the previous taxonomy
+  else if (tokens.includes('FRAME')) clip_type = 'testimonial'
+  else if (/what\s+one\s+of\s+our|client\s+said|owner\s+said|customer\s+said/i.test(base)) clip_type = 'testimonial'
+  else if (upper.includes('TESTIMONIAL') || tokens.includes('CLIENT')) clip_type = 'testimonial'
+  else if (creator_id === 'RESTO-AI') clip_type = 'testimonial'
   return { clip_id: base, clip_type, creator_id }
 }
 function sanitizeStorageSlug(name) {
@@ -472,11 +481,39 @@ export default function AdsClips() {
       )}
 
       {!loading && filtered.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
-          {filtered.map(c => (
-            <ClipCard key={c.clip_id} clip={c} onOpen={() => setEditing(c)} />
-          ))}
-        </div>
+        // Section-grouped layout: when filter.type='all' the operator sees
+        // four stacked sections (Hooks / Bodies / Testimonials / Full
+        // videos) instead of one big mixed grid. When a specific type is
+        // chosen via filter chip, we collapse to a single section.
+        filter.type !== 'all'
+          ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+              {filtered.map(c => <ClipCard key={c.clip_id} clip={c} onOpen={() => setEditing(c)} />)}
+            </div>
+          )
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 36 }}>
+              {CLIP_TYPES.map(t => {
+                const items = filtered.filter(c => c.clip_type === t.value)
+                if (!items.length) return null
+                return (
+                  <section key={t.value}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12, paddingBottom: 6, borderBottom: `2px solid ${t.color}` }}>
+                      <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, color: 'var(--ink)', margin: 0, letterSpacing: '-0.005em' }}>
+                        {pluralLabel(t.value)}
+                      </h3>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500 }}>
+                        {items.length} clip{items.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+                      {items.map(c => <ClipCard key={c.clip_id} clip={c} onOpen={() => setEditing(c)} />)}
+                    </div>
+                  </section>
+                )
+              })}
+            </div>
+          )
       )}
 
       {/* Drawer + modals */}

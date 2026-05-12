@@ -91,7 +91,7 @@ export default function AdsVariants() {
   const [selectedVariant, setSelectedVariant] = useState(null)  // for the detail drawer
   const [seeding, setSeeding] = useState(false)
   const [showMatrix, setShowMatrix] = useState(false)
-  const [showAddClip, setShowAddClip] = useState(null)  // 'hook' | 'body' | 'frame' | null
+  const [showAddClip, setShowAddClip] = useState(null)  // 'hook' | 'body' | 'full_video' | null
   const toast = useToast()
 
   // Two-stage load: variants first (paints the page fast), clips + ads in
@@ -268,7 +268,7 @@ export default function AdsVariants() {
         { id: 'DEMO-H3-SOFIA',     type: 'hook',  creator: 'SOFIA',    desc: 'HomeAdvisor / Angi tire-kickers (~16s)' },
         { id: 'DEMO-BODY-B1-OSO',  type: 'body',  creator: 'OSO',      desc: 'Body B1 (location pages) — UGC' },
         { id: 'DEMO-BODY-B5-OSO',  type: 'body',  creator: 'OSO',      desc: 'Body B5 (reviews) — UGC' },
-        { id: 'DEMO-FRAME-RESTO',  type: 'frame', creator: 'RESTO-AI', desc: 'Testimonial intro — locked to Script 3' },
+        { id: 'DEMO-FRAME-RESTO',  type: 'testimonial', creator: 'RESTO-AI', desc: 'Testimonial intro — locked to Script 3' },
       ]
       for (const c of DEMO_CLIPS) {
         await supabase.rpc('lib_clip_upsert', {
@@ -308,7 +308,7 @@ export default function AdsVariants() {
           <button onClick={() => setShowAddClip('body')} style={btnGhost} title="Add a new body idea">
             <MessageSquare size={12} /> + Body
           </button>
-          <button onClick={() => setShowAddClip('frame')} style={btnGhost} title="Add a new frame intro">
+          <button onClick={() => setShowAddClip('full_video')} style={btnGhost} title="Add a new full-video clip">
             <Type size={12} /> + Frame
           </button>
           <span style={{ width: 1, height: 22, background: 'var(--rule)' }} />
@@ -330,7 +330,7 @@ export default function AdsVariants() {
         <div className="what-it-means" style={{ marginBottom: 24 }}>
           <div className="wim-tag">How this board works</div>
           <div className="wim-body">
-            <strong>Clips</strong> are atomic edits (one hook, one body, one frame). Use <em>+ Hook</em>/<em>+ Body</em>/<em>+ Frame</em> to add new ideas — you don't need an MP4 to start, just a label. <strong>Variants</strong> are spliced combinations: pick hooks × bodies via <em>Splice</em> and the system creates one row per combination. Once a variant is filmed and uploaded as a Meta ad, click any cell to open the drawer and link it to the live ad — spend, booked calls, and revenue flow back automatically.
+            <strong>Clips</strong> are atomic edits (one hook, one body, one full video). Use <em>+ Hook</em>/<em>+ Body</em>/<em>+ Full Video</em> to add new ideas — you don't need an MP4 to start, just a label. <strong>Variants</strong> are spliced combinations: pick hooks × bodies via <em>Splice</em> and the system creates one row per combination. Once a variant is filmed and uploaded as a Meta ad, click any cell to open the drawer and link it to the live ad — spend, booked calls, and revenue flow back automatically.
           </div>
         </div>
       )}
@@ -426,7 +426,7 @@ export default function AdsVariants() {
         />
       )}
 
-      {/* Quick-add clip modal (hook / body / frame) — no MP4 required */}
+      {/* Quick-add clip modal (hook / body / full_video) — no MP4 required */}
       {showAddClip && (
         <QuickAddClipModal
           clipType={showAddClip}
@@ -439,7 +439,7 @@ export default function AdsVariants() {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Quick-add clip modal — used to seed a new hook / body / frame idea
+// Quick-add clip modal — used to seed a new hook / body / full-video idea
 // straight from the Variants page without going to the Clips upload flow.
 // Operator can attach an MP4 later via Clips → just need a label here.
 // ────────────────────────────────────────────────────────────────────
@@ -450,15 +450,15 @@ function QuickAddClipModal({ clipType, onClose, onCreated }) {
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
 
-  const typeLabel = clipType === 'hook' ? 'hook' : clipType === 'body' ? 'body' : 'frame'
+  const typeLabel = clipType === 'hook' ? 'hook' : clipType === 'body' ? 'body' : 'full_video'
   const placeholderId =
     clipType === 'hook'  ? 'H6-OSO' :
     clipType === 'body'  ? 'BODY-C-OSO' :
-                           'FRAME-RESTO-V2'
+                           'FULL-VIDEO-OSO-V1'
   const placeholderDesc =
     clipType === 'hook'  ? 'Phone-stopped-ringing concern (~15s)' :
     clipType === 'body'  ? 'Body C (proof + reviews) — UGC' :
-                           'Testimonial intro — RESTO-AI v2'
+                           'Complete final ad video (no splicing needed)'
 
   const submit = async (e) => {
     e.preventDefault()
@@ -817,7 +817,7 @@ function ByHookView({ rows, hooks, hookPerf, clipById, onVariantClick }) {
                     border: '1px solid var(--rule)', borderLeftWidth: 3, borderLeftColor: c.accent,
                     borderRadius: 2, cursor: 'pointer',
                   }}>
-                    {/* Body + frame composition */}
+                    {/* Body + full-video composition */}
                     <div style={{ minWidth: 200, display: 'flex', flexDirection: 'column', gap: 2 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.1em' }}>BODY ·</span>
@@ -827,9 +827,9 @@ function ByHookView({ rows, hooks, hookPerf, clipById, onVariantClick }) {
                       </div>
                       {v.frame_clip_id && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.1em' }}>FRAME ·</span>
+                          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.1em' }}>FULL VIDEO ·</span>
                           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, color: 'var(--ink-2)' }}>
-                            {shortClipId(v.frame_clip_id, 'frame')}
+                            {shortClipId(v.frame_clip_id, 'full_video')}
                           </span>
                         </div>
                       )}
@@ -918,14 +918,14 @@ function SheetView({ filtered, clips, search, setSearch, statusFilter, setStatus
                     <span style={{ fontWeight: 600 }}>{shortClipId(v.body_clip_id, 'body') || '—'}</span>
                     {v.frame_clip_id && (<>
                       <span style={{ color: 'var(--ink-4)', fontWeight: 300 }}>×</span>
-                      <span style={{ fontWeight: 500, color: 'var(--ink-2)' }}>{shortClipId(v.frame_clip_id, 'frame')}</span>
+                      <span style={{ fontWeight: 500, color: 'var(--ink-2)' }}>{shortClipId(v.frame_clip_id, 'full_video')}</span>
                     </>)}
                   </div>
                 </Td>
                 <Td><StatusPicker value={v.status} onChange={val => onSaveField(v, 'status', val)} /></Td>
                 <Td><InlineSelect value={v.hook_clip_id} options={clipOptions(['hook', 'hook_proof'])} onSave={val => onSaveField(v, 'hook_clip_id', val || null)} /></Td>
                 <Td><InlineSelect value={v.body_clip_id} options={clipOptions('body')} onSave={val => onSaveField(v, 'body_clip_id', val || null)} /></Td>
-                <Td><InlineSelect value={v.frame_clip_id} options={clipOptions(['frame', 'client_clip'])} onSave={val => onSaveField(v, 'frame_clip_id', val || null)} /></Td>
+                <Td><InlineSelect value={v.frame_clip_id} options={clipOptions(['full_video','testimonial'])} onSave={val => onSaveField(v, 'frame_clip_id', val || null)} /></Td>
                 <Td><InlineEdit value={v.editor} onSave={val => onSaveField(v, 'editor', val || null)} /></Td>
                 {STAGES.map(s => (
                   <Td key={s.key} center><StageCheckbox checked={v[`stage_${s.key}`]} onChange={() => onToggleStage(v, s.key)} /></Td>
@@ -962,7 +962,7 @@ function VariantDrawer({ variant, clips, ads, clipById, onClose, onSaveField, on
   const [adSearch, setAdSearch] = useState('')
   const hook = variant.hook_clip_id ? clipById[variant.hook_clip_id] : null
   const body = variant.body_clip_id ? clipById[variant.body_clip_id] : null
-  const frame = variant.frame_clip_id ? clipById[variant.frame_clip_id] : null
+  const fullVideo = variant.frame_clip_id ? clipById[variant.frame_clip_id] : null
 
   const filteredAds = useMemo(() => {
     if (!adSearch.trim()) return ads.slice(0, 10)
@@ -1005,7 +1005,7 @@ function VariantDrawer({ variant, clips, ads, clipById, onClose, onSaveField, on
         <Section title="Splice recipe">
           <RecipeRow label="Hook" clip={hook} />
           <RecipeRow label="Body" clip={body} />
-          <RecipeRow label="Frame" clip={frame} />
+          <RecipeRow label="Full video" clip={fullVideo} />
         </Section>
 
         {/* Status + priority + editor */}
@@ -1222,11 +1222,11 @@ function EmptyState({ onMatrix, onSeed, seeding }) {
 function MatrixSpliceModal({ clips, onClose, onCreated }) {
   const hooks = clips.filter(c => c.clip_type === 'hook' || c.clip_type === 'hook_proof')
   const bodies = clips.filter(c => c.clip_type === 'body')
-  const frames = clips.filter(c => c.clip_type === 'frame' || c.clip_type === 'client_clip')
+  const fullVideos = clips.filter(c => c.clip_type === 'full_video' || c.clip_type === 'testimonial')
 
   const [selectedHooks, setSelectedHooks] = useState(new Set())
   const [selectedBodies, setSelectedBodies] = useState(new Set())
-  const [selectedFrame, setSelectedFrame] = useState('')
+  const [selectedFullVideo, setSelectedFullVideo] = useState('')
   const [editor, setEditor] = useState('')
   const [priority, setPriority] = useState('')
   const [creating, setCreating] = useState(false)
@@ -1245,7 +1245,7 @@ function MatrixSpliceModal({ clips, onClose, onCreated }) {
       const { data, error } = await supabase.rpc('lib_variants_bulk_from_clips', {
         p_hook_clip_ids: Array.from(selectedHooks),
         p_body_clip_ids: Array.from(selectedBodies),
-        p_frame_clip_id: selectedFrame || null,
+        p_frame_clip_id: selectedFullVideo || null,
         p_editor: editor || null,
         p_priority: priority || null,
       })
@@ -1266,10 +1266,10 @@ function MatrixSpliceModal({ clips, onClose, onCreated }) {
         <SelectGroup label={`Body clips · ${selectedBodies.size} selected`} items={bodies} selected={selectedBodies} onToggle={id => toggle(selectedBodies, setSelectedBodies, id)} emptyMsg="No body clips yet." />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 18 }}>
-          <Field label="Frame clip (single, optional)">
-            <select value={selectedFrame} onChange={e => setSelectedFrame(e.target.value)} style={inputStyle}>
+          <Field label="Full-video clip (single, optional)">
+            <select value={selectedFullVideo} onChange={e => setSelectedFullVideo(e.target.value)} style={inputStyle}>
               <option value="">—</option>
-              {frames.map(f => <option key={f.clip_id} value={f.clip_id}>{f.clip_id}</option>)}
+              {fullVideos.map(f => <option key={f.clip_id} value={f.clip_id}>{f.clip_id}</option>)}
             </select>
           </Field>
           <Field label="Editor">
