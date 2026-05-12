@@ -61,6 +61,19 @@ function rangeLabel(r) {
   return `Last ${r.preset} days (${r.startStr} → ${r.endStr})`
 }
 
+// Detect mobile viewport for the page wrapper + table behaviour. Avoids
+// the negative-margin "break out of editorial gutter" trick on phones,
+// which leaves the table hanging off the right edge.
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < breakpoint : false)
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < breakpoint)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [breakpoint])
+  return isMobile
+}
+
 function fmt$(n) {
   if (n == null || isNaN(n) || n === 0) return '—'
   if (n >= 10000) return `$${(n / 1000).toFixed(1)}k`
@@ -137,6 +150,23 @@ function CostCell({ value, threshold, bold, muted, onClick }) {
   )
 }
 
+// Show-rate cell: Live / Booked as %. Color-coded:
+//   green ≥ 50%,  amber ≥ 25%,  red < 25%.  '—' when no bookings.
+function ShowRateCell({ live, booked, bold, muted }) {
+  const wt = bold ? 600 : 400
+  if (!booked || booked === 0) {
+    return <Td right mono style={{ fontWeight: wt, color: muted ? 'var(--ink-3)' : 'var(--ink-4)' }}>—</Td>
+  }
+  const pct = (live / booked) * 100
+  const color = muted ? 'var(--ink-3)'
+    : pct >= 50 ? '#1f7a3a'
+    : pct >= 25 ? '#b88714'
+    : '#b41e1e'
+  return (
+    <Td right mono style={{ fontWeight: wt, color }}>{pct.toFixed(0)}%</Td>
+  )
+}
+
 // Render a count cell. Clickable (with dotted underline) when onClick is given.
 function CountCell({ value, bold, muted, color, onClick }) {
   const wt = bold ? 600 : 400
@@ -190,6 +220,18 @@ export default function AdsPerformance() {
   const [expandedAdSets, setExpandedAdSets] = useState(new Set())
   const [statusFilter, setStatusFilter] = useState('ACTIVE')
   const [search, setSearch] = useState('')
+  // Advanced numeric filters. All optional, all min/max ranges. Empty string =
+  // not applied. Filter runs at the campaign-row level (the top of the tree)
+  // so individual ads inside a campaign aren't hidden by their parent's
+  // aggregate not matching.
+  const [advFilter, setAdvFilter] = useState({
+    spendMin: '', spendMax: '',
+    leadsMin: '', leadsMax: '',
+    closesMin: '', closesMax: '',
+    showMin: '',  showMax: '',
+    cacMin: '',   cacMax: '',
+  })
+  const [showAdv, setShowAdv] = useState(false)
   // sortKey is a rollup field name; sortDir is 'asc' | 'desc'. For cost-per
   // metrics, we use a synthetic key (e.g. 'cpQualBooked') that the comparator
   // resolves at sort time by dividing spend by the appropriate denominator.
@@ -210,6 +252,7 @@ export default function AdsPerformance() {
   // Earliest + latest date in ad_daily_stats — shown next to the date range
   // so the operator can see what historical spend has actually been synced.
   const [dataCoverage, setDataCoverage] = useState(null)
+  const isMobile = useIsMobile()
   // Date range: { preset, startStr, endStr }. `preset` is one of 7|30|90|all|custom.
   // startStr/endStr are 'YYYY-MM-DD' strings. Default = last 30 days.
   const [dateRange, setDateRange] = useState(() => initialDateRange(30))
@@ -482,6 +525,33 @@ export default function AdsPerformance() {
       if (ghlCamp > (camp.rollup.tfLeads || 0)) camp.rollup.tfLeads = ghlCamp
     }
 
+    // Parse advanced numeric filters once.
+    const num = (v) => (v === '' || v == null ? null : parseFloat(v))
+    const f = {
+      spendMin:  num(advFilter.spendMin),  spendMax:  num(advFilter.spendMax),
+      leadsMin:  num(advFilter.leadsMin),  leadsMax:  num(advFilter.leadsMax),
+      closesMin: num(advFilter.closesMin), closesMax: num(advFilter.closesMax),
+      showMin:   num(advFilter.showMin),   showMax:   num(advFilter.showMax),
+      cacMin:    num(advFilter.cacMin),    cacMax:    num(advFilter.cacMax),
+    }
+    const passesAdv = (r) => {
+      if (f.spendMin  != null && (r.spend || 0) < f.spendMin)  return false
+      if (f.spendMax  != null && (r.spend || 0) > f.spendMax)  return false
+      if (f.leadsMin  != null && (r.tfLeads || 0) < f.leadsMin)  return false
+      if (f.leadsMax  != null && (r.tfLeads || 0) > f.leadsMax)  return false
+      if (f.closesMin != null && (r.tfCloses || 0) < f.closesMin) return false
+      if (f.closesMax != null && (r.tfCloses || 0) > f.closesMax) return false
+      const showPct = r.tfBooked > 0 ? (r.tfLive / r.tfBooked) * 100 : 0
+      if (f.showMin   != null && showPct < f.showMin) return false
+      if (f.showMax   != null && showPct > f.showMax) return false
+      const cac = r.tfCloses > 0 ? r.spend / r.tfCloses : Infinity
+      if (f.cacMin    != null && cac < f.cacMin) return false
+      if (f.cacMax    != null && cac > f.cacMax && cac !== Infinity) return false
+      // For "max CAC" with finite limit, a campaign with no closes (cac=Infinity) should be excluded.
+      if (f.cacMax    != null && cac === Infinity) return false
+      return true
+    }
+
     // Now apply the status filter at each level
     const visibleCampaigns = []
     for (const camp of campaigns.values()) {
@@ -494,6 +564,8 @@ export default function AdsPerformance() {
         visibleSets.push({ ...set, ads })
       }
       if (!visibleSets.length) continue
+      // Advanced filter runs at the campaign rollup level.
+      if (!passesAdv(camp.rollup)) continue
       const compareAds = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
       for (const s of visibleSets) s.ads.sort(compareAds)
       const compareSets = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
@@ -503,7 +575,7 @@ export default function AdsPerformance() {
     const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
     visibleCampaigns.sort(compareCamps)
     return visibleCampaigns
-  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, statusFilter, search, sortKey, sortDir])
+  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, statusFilter, search, sortKey, sortDir, advFilter])
 
   // When filter or data changes and the user hasn't manually toggled
   // anything, auto-expand the visible campaigns. This way Ben lands on a
@@ -544,7 +616,15 @@ export default function AdsPerformance() {
     // md:px-8 / md:py-6 wrapper and uses the full viewport width. The
     // table is dense — 16 columns with cost-per-X metrics — and the
     // editorial gutter steals real estate without giving anything back.
-    <div style={{ margin: '-16px -32px -40px -32px', padding: '16px 24px' }}>
+    <div style={{
+      // Desktop: break out of Layout's md:px-8 gutter so the wide table
+      // gets full-viewport width. Mobile: stay within the layout — the
+      // negative margins would leave the table hanging off-screen.
+      margin: isMobile ? 0 : '-16px -32px -40px -32px',
+      padding: isMobile ? 0 : '16px 24px',
+      // Allow horizontal scroll on the page itself if anything overflows.
+      overflowX: 'auto',
+    }}>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 mb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
@@ -686,7 +766,39 @@ export default function AdsPerformance() {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search campaign / ad set / ad…"
             style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }} />
         </div>
+        <button onClick={() => setShowAdv(v => !v)} style={{ ...btnGhost, padding: '4px 10px', fontSize: 9.5 }}>
+          {showAdv ? '− Advanced' : '+ Advanced'}
+        </button>
       </div>
+
+      {/* Advanced numeric filters. All min/max ranges over campaign rollups. */}
+      {showAdv && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+          gap: 12,
+          padding: '12px 14px',
+          background: 'var(--paper)',
+          border: '1px solid var(--rule)',
+          borderRadius: 3,
+          marginBottom: 8,
+        }}>
+          <RangeFilter label="Spend ($)"        valueMin={advFilter.spendMin}  valueMax={advFilter.spendMax}
+            onMin={v => setAdvFilter({ ...advFilter, spendMin: v })}  onMax={v => setAdvFilter({ ...advFilter, spendMax: v })} />
+          <RangeFilter label="Leads"            valueMin={advFilter.leadsMin}  valueMax={advFilter.leadsMax}
+            onMin={v => setAdvFilter({ ...advFilter, leadsMin: v })}  onMax={v => setAdvFilter({ ...advFilter, leadsMax: v })} />
+          <RangeFilter label="Closes"           valueMin={advFilter.closesMin} valueMax={advFilter.closesMax}
+            onMin={v => setAdvFilter({ ...advFilter, closesMin: v })} onMax={v => setAdvFilter({ ...advFilter, closesMax: v })} />
+          <RangeFilter label="Show rate (%)"    valueMin={advFilter.showMin}   valueMax={advFilter.showMax}
+            onMin={v => setAdvFilter({ ...advFilter, showMin: v })}   onMax={v => setAdvFilter({ ...advFilter, showMax: v })} />
+          <RangeFilter label="CAC ($)"          valueMin={advFilter.cacMin}    valueMax={advFilter.cacMax}
+            onMin={v => setAdvFilter({ ...advFilter, cacMin: v })}    onMax={v => setAdvFilter({ ...advFilter, cacMax: v })} />
+          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+            <button onClick={() => setAdvFilter({ spendMin:'',spendMax:'',leadsMin:'',leadsMax:'',closesMin:'',closesMax:'',showMin:'',showMax:'',cacMin:'',cacMax:'' })}
+              style={{ ...btnGhost, padding: '6px 12px', fontSize: 10 }}>Clear advanced</button>
+          </div>
+        </div>
+      )}
 
       {/* Current range — always visible so it's clear what window is in play */}
       <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 12 }}>
@@ -728,6 +840,7 @@ export default function AdsPerformance() {
                 <Th right w={60}  sortKey="tfBooked"     activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Booked</Th>
                 <Th right w={75}  sortKey="tfQualBooked" activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Qual Booked</Th>
                 <Th right w={55}  sortKey="tfLive"       activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Live</Th>
+                <Th right w={65}  sortKey="showRate"    activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Show %</Th>
                 <Th right w={55}  sortKey="tfCloses"     activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Closes</Th>
                 <Th right w={75}  sortKey="tfRevenue"    activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Revenue</Th>
                 <Th right w={70}  sortKey="cpLead"       activeSort={sortKey} sortDir={sortDir} onSort={setSort}>$ / Lead</Th>
@@ -981,6 +1094,7 @@ function RollupCells({ rollup, bold, muted, scope, onDrill }) {
       <CountCell value={rollup.tfBooked}     bold={bold} muted={muted} onClick={drill('booked',      'Booked calls')} />
       <CountCell value={rollup.tfQualBooked} bold={bold} muted={muted} onClick={drill('qual_booked', 'Qualified booked calls')} />
       <CountCell value={rollup.tfLive}       bold={bold} muted={muted} onClick={drill('live',        'Live calls')} />
+      <ShowRateCell live={rollup.tfLive} booked={rollup.tfBooked} bold={bold} muted={muted} />
       <CountCell value={rollup.tfCloses}     bold={bold} muted={muted} color={greenIfPos(rollup.tfCloses)} onClick={drill('closed', 'Closed deals')} />
       <Td right mono style={{ fontWeight: wt, color: greenIfPos(revShown) }}>{fmt$(revShown)}</Td>
       <CostCell value={cpLead}     threshold={KPI.costPerLead}        bold={bold} muted={muted} onClick={drill('leads',       'Leads')} />
@@ -1014,6 +1128,22 @@ function TotalsTile({ label, value, sub, valueColor }) {
       <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 2 }}>{label}</div>
       <div style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, color: valueColor || 'var(--ink)', lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
       {sub && <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.08em', marginTop: 2 }}>{sub}</div>}
+    </div>
+  )
+}
+
+// Two number inputs for min / max range filters. Empty = no filter applied.
+function RangeFilter({ label, valueMin, valueMax, onMin, onMax }) {
+  return (
+    <div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4, fontWeight: 600 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <input type="number" min="0" value={valueMin} onChange={e => onMin(e.target.value)} placeholder="min"
+          style={{ width: '100%', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 7px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none' }} />
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>→</span>
+        <input type="number" min="0" value={valueMax} onChange={e => onMax(e.target.value)} placeholder="max"
+          style={{ width: '100%', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 7px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none' }} />
+      </div>
     </div>
   )
 }
@@ -1197,6 +1327,7 @@ function sortValue(r, key) {
     case 'tfBooked':      return r.tfBooked || 0
     case 'tfQualBooked':  return r.tfQualBooked || 0
     case 'tfLive':        return r.tfLive || 0
+    case 'showRate':      return r.tfBooked > 0 ? (r.tfLive || 0) / r.tfBooked : 0
     case 'tfCloses':      return r.tfCloses || 0
     case 'tfRevenue':     return (r.tfRevenue || r.revenue) || 0
     case 'cpLead':        return r.tfLeads      > 0 ? r.spend / r.tfLeads      : Infinity
