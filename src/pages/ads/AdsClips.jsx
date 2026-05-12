@@ -1,131 +1,127 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Loader, AlertCircle, Search, Upload, ClipboardPaste, Plus, Trash2, FileVideo } from 'lucide-react'
+import { Loader, AlertCircle, Search, Upload, ClipboardPaste, Plus, Trash2, X, Pencil, Play } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useUploads } from '../../hooks/useUploads'
 import { useToast } from '../../hooks/useToast'
+import { extractVideoPoster } from '../../lib/videoPoster'
 
 /*
-  Clips page — spreadsheet-style. Three bulk-import paths so Ben never has to
-  fill a one-row modal:
+  Clips page — card-grid view with thumbnails, drawer-style editing, and
+  multi-dimensional filtering. Replaces the old spreadsheet-style table.
 
-    1. Drag-and-drop MP4s → filename parser → upload + insert rows
-       Filenames like "H1.1-OSO.MP4" / "BODY-B1-OSO.mov" / "FRAME-OSO.mp4"
-       auto-fill clip_id, clip_type, creator_id. Random filenames still land
-       as a row with the filename as clip_id; operator fills the rest inline.
+  Schema additions in migration 040:
+    - library.clips.funnel_position  ('top' | 'middle' | 'bottom' | null)
+    - library.clips.thumbnail_url    (poster frame, captured at upload)
+    - library.editors                (managed editor entity)
+    - library.components type=creator (managed creator entity, already existed)
 
-    2. Paste TSV from Google Sheets → bulk insert rows
-       Tab-separated columns:
-         clip_id  clip_type  section  description  creator_id  editor  priority
+  Upload pipeline:
+    1. Drop / pick MP4s → for each:
+       a. extractVideoPoster()                              → JPEG blob
+       b. storage.upload(clip path) + storage.upload(poster path)
+       c. createSignedUrl for both
+       d. lib_clip_upsert RPC with creator_id from filename parse + thumbnail_url
 
-    3. "Add row" → blank row appears at the bottom, click to edit cells
-
-  Every cell is click-to-edit. Tab moves to the next editable cell. Enter
-  saves and starts a new row when on the last row.
-
-  Stage checkboxes (Raw / Rough / Final / Approved) update via the existing
-  lib_clip_set_stage RPC. Writes are optimistic — revert on error.
+  Edit pipeline:
+    - Click a card → ClipDrawer opens with the full form
+    - Creator / editor dropdowns have an "+ Add new" option that opens a
+      tiny modal and calls lib_creator_add / lib_editor_add then re-fetches.
 */
 
-const CLIP_TYPES = ['hook', 'hook_proof', 'body', 'frame', 'client_clip']
-const PRIORITY_OPTIONS = ['', 'high', 'med', 'low']
-const KNOWN_CREATORS = ['OSO', 'SOFIA', 'NATALIE', 'CLIENT', 'ADAM', 'ERIC', 'MORGAN', 'RESTO-AI']
-
+// ─── Type vocabularies (color-coded per category) ───────────────────
+const CLIP_TYPES = [
+  { value: 'hook',         label: 'Hook',         color: '#3b6dff', bg: 'rgba(59,109,255,0.10)' },
+  { value: 'hook_proof',   label: 'Hook · Proof', color: '#0aa1a1', bg: 'rgba(10,161,161,0.10)' },
+  { value: 'body',         label: 'Body',         color: '#b8810b', bg: 'rgba(184,129,11,0.12)' },
+  { value: 'frame',        label: 'Frame',        color: '#7a3aa6', bg: 'rgba(122,58,166,0.10)' },
+  { value: 'client_clip',  label: 'Client',       color: '#1f7a3a', bg: 'rgba(31,122,58,0.10)' },
+]
+const FUNNEL_POSITIONS = [
+  { value: 'top',    label: 'Top of funnel',    short: 'TOF', color: '#2675d4', bg: 'rgba(38,117,212,0.10)' },
+  { value: 'middle', label: 'Middle of funnel', short: 'MOF', color: '#b88714', bg: 'rgba(184,135,20,0.12)' },
+  { value: 'bottom', label: 'Bottom of funnel', short: 'BOF', color: '#c64a2a', bg: 'rgba(198,74,42,0.10)' },
+]
+const PRIORITIES = [
+  { value: 'high', label: 'High', color: '#b41e1e' },
+  { value: 'med',  label: 'Med',  color: '#b88714' },
+  { value: 'low',  label: 'Low',  color: 'var(--ink-3)' },
+]
 const STAGES = [
   { key: 'raw',       label: 'Raw' },
   { key: 'rough_cut', label: 'Rough' },
   { key: 'final_cut', label: 'Final' },
   { key: 'approved',  label: 'Approved' },
 ]
+const KNOWN_CREATORS_FALLBACK = ['OSO', 'SOFIA', 'NATALIE', 'CLIENT', 'ADAM', 'ERIC', 'MORGAN', 'RESTO-AI']
 
-// Filename parser. Works on the structured pattern (H1.1-OSO.MP4,
-// BODY-B1-OSO.mp4, FRAME-OSO.mov, CLIP-CLIENT-ADAM.MP4) AND on real-world
-// descriptive names ("Eric — Complete Flood testimonial footage.mp4").
-// Anything it can't infer is left null so the row still inserts and the
-// operator can fill it inline.
+const typeMeta = (t) => CLIP_TYPES.find(x => x.value === t) || { label: t || '—', color: 'var(--ink-3)', bg: 'transparent' }
+const funnelMeta = (f) => FUNNEL_POSITIONS.find(x => x.value === f)
+const priorityMeta = (p) => PRIORITIES.find(x => x.value === p)
+
+// ─── Filename / TSV parsers (carried over) ──────────────────────────
 function parseFilename(filename) {
   const ext = filename.match(/\.(mp4|mov|webm)$/i)
   const base = ext ? filename.slice(0, ext.index) : filename
   const upper = base.toUpperCase()
-
-  // Tokenize on any non-alphanumeric so em-dashes, spaces, underscores all
-  // become token boundaries.
   const tokens = upper.split(/[^A-Z0-9]+/).filter(Boolean)
   const firstTok = tokens[0] || ''
-
   let creator_id = null
   if (upper.includes('RESTO-AI') || upper.includes('RESTOAI')) creator_id = 'RESTO-AI'
   else {
     for (const tok of tokens) {
-      if (KNOWN_CREATORS.includes(tok)) { creator_id = tok; break }
+      if (KNOWN_CREATORS_FALLBACK.includes(tok)) { creator_id = tok; break }
     }
   }
-
   let clip_type = null
   if (/^H\d/.test(firstTok)) clip_type = 'hook'
   else if (firstTok === 'P' || /^P\d/.test(firstTok)) clip_type = 'hook_proof'
   else if (tokens.includes('BODY')) clip_type = 'body'
   else if (tokens.includes('FRAME')) clip_type = 'frame'
-  // Phrases like "what one of our restoration clients said" or "client said"
-  // describe a testimonial-intro frame. Detect them so RESTO-AI / talent clips
-  // with descriptive names get the right type.
   else if (/what\s+one\s+of\s+our|client\s+said|owner\s+said|customer\s+said/i.test(base)) clip_type = 'frame'
   else if (upper.includes('TESTIMONIAL') || tokens.includes('CLIENT')) clip_type = 'client_clip'
-  // RESTO-AI is OPT's AI talking-head used almost exclusively for testimonial
-  // intro frames. Default to frame when we can't otherwise classify.
   else if (creator_id === 'RESTO-AI') clip_type = 'frame'
-
   return { clip_id: base, clip_type, creator_id }
 }
-
-// Sanitize a string for use as a Supabase Storage key. Storage rejects
-// most Unicode (em-dashes etc), spaces, and several ASCII punctuation
-// characters. Slug the path while keeping a length cap so absurdly long
-// filenames don't hit the 255-byte key limit.
 function sanitizeStorageSlug(name) {
-  const slug = name
-    .toLowerCase()
-    .normalize('NFKD')                  // decompose accents (é → e + combining)
-    .replace(/[̀-ͯ]/g, '')    // strip combining marks
-    .replace(/[—–]/g, '-')               // em/en dashes → hyphen
-    .replace(/[^a-z0-9-]+/g, '-')        // anything else not safe → hyphen
-    .replace(/-+/g, '-')                 // collapse runs
-    .replace(/^-|-$/g, '')               // trim
-    .slice(0, 80)
+  const slug = name.toLowerCase()
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/[—–]/g, '-').replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 80)
   return slug || `clip-${Date.now().toString(36)}`
 }
-
 function parseTsv(text) {
-  // Expected header order (tab-separated):
-  // clip_id  clip_type  section  description  creator_id  editor  priority
   const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim())
   if (!lines.length) return []
-  // Skip header if first row contains "clip_id"
   const startIdx = /clip[_\s]*id/i.test(lines[0]) ? 1 : 0
   const out = []
   for (let i = startIdx; i < lines.length; i++) {
     const cols = lines[i].split('\t')
     if (!cols[0]?.trim()) continue
     out.push({
-      clip_id:     cols[0]?.trim() || null,
-      clip_type:   cols[1]?.trim() || null,
-      section:     cols[2]?.trim() || null,
+      clip_id: cols[0]?.trim() || null,
+      clip_type: cols[1]?.trim() || null,
+      section: cols[2]?.trim() || null,
       description: cols[3]?.trim() || null,
-      creator_id:  cols[4]?.trim() || null,
-      editor:      cols[5]?.trim() || null,
-      priority:    cols[6]?.trim() || null,
+      creator_id: cols[4]?.trim() || null,
+      editor: cols[5]?.trim() || null,
+      priority: cols[6]?.trim() || null,
     })
   }
   return out
 }
 
+// ─── Main page ──────────────────────────────────────────────────────
 export default function AdsClips() {
   const [clips, setClips] = useState([])
+  const [creators, setCreators] = useState([])  // [{ component_id, label }]
+  const [editors, setEditors] = useState([])    // [{ editor_id, label }]
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('all')
-  const [selected, setSelected] = useState(new Set())     // clip_ids
+  const [filter, setFilter] = useState({ type: 'all', funnel: 'all', creator: 'all', editor: 'all', stage: 'all' })
+  const [editing, setEditing] = useState(null)   // clip object opened in drawer
   const [showTsv, setShowTsv] = useState(false)
+  const [addingKind, setAddingKind] = useState(null)  // 'creator' | 'editor' | null
   const fileInputRef = useRef(null)
   const dragCounter = useRef(0)
   const [dragOver, setDragOver] = useState(false)
@@ -135,80 +131,74 @@ export default function AdsClips() {
   const load = async () => {
     setLoading(true); setError(null)
     try {
-      const { data, error: err } = await supabase
-        .from('lib_clips')
-        .select('*')
-        .order('section', { ascending: true, nullsFirst: false })
-        .order('clip_id', { ascending: true })
-      if (err) throw new Error(err.message)
-      setClips(data || [])
+      const [{ data: cs }, { data: cr }, { data: ed }] = await Promise.all([
+        supabase.from('lib_clips').select('*').order('created_at', { ascending: false }),
+        supabase.from('lib_components').select('component_id, label').eq('type', 'creator').order('label'),
+        supabase.from('lib_editors').select('editor_id, label'),
+      ])
+      setClips(cs || [])
+      setCreators(cr || [])
+      setEditors(ed || [])
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [])
 
-  const editors = useMemo(() => {
-    const set = new Set()
-    for (const c of clips) if (c.editor) set.add(c.editor)
-    return Array.from(set).sort()
-  }, [clips])
-
   const filtered = useMemo(() => {
     let out = clips
-    if (typeFilter !== 'all') out = out.filter(c => c.clip_type === typeFilter)
+    if (filter.type !== 'all')    out = out.filter(c => c.clip_type === filter.type)
+    if (filter.funnel !== 'all')  out = out.filter(c => c.funnel_position === filter.funnel)
+    if (filter.creator !== 'all') out = out.filter(c => c.creator_id === filter.creator)
+    if (filter.editor !== 'all')  out = out.filter(c => c.editor === filter.editor)
+    if (filter.stage !== 'all') {
+      out = out.filter(c => c[`stage_${filter.stage}`])
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       out = out.filter(c =>
         (c.clip_id || '').toLowerCase().includes(q) ||
         (c.description || '').toLowerCase().includes(q) ||
         (c.section || '').toLowerCase().includes(q) ||
+        (c.notes || '').toLowerCase().includes(q) ||
         (c.creator_id || '').toLowerCase().includes(q) ||
         (c.editor || '').toLowerCase().includes(q)
       )
     }
     return out
-  }, [clips, typeFilter, search])
+  }, [clips, filter, search])
 
-  // ── Bulk file upload ──────────────────────────────────────────────
-  // Uses the global UploadProvider so progress persists across page nav
-  // and a toast fires on completion regardless of where the operator went.
+  // ─── Upload pipeline w/ poster extraction ──────────────────────────
   const handleFiles = async (fileList) => {
     const raw = Array.from(fileList)
     const valid = []
     const preflightFails = []
-    const SIZE_CAP = 262144000  // 250 MB (matches bucket file_size_limit)
+    const SIZE_CAP = 262144000
 
     for (const f of raw) {
       if (!/\.(mp4|mov|webm)$/i.test(f.name)) {
-        preflightFails.push({ file: f.name, error: 'Unsupported format — drop .mp4 / .mov / .webm only' })
+        preflightFails.push({ file: f.name, error: 'Unsupported — drop .mp4 / .mov / .webm' })
         continue
       }
       if (f.size > SIZE_CAP) {
-        preflightFails.push({ file: f.name, error: `Too large (${(f.size / 1e6).toFixed(0)}MB > 250MB bucket cap)` })
+        preflightFails.push({ file: f.name, error: `Too large (${(f.size / 1e6).toFixed(0)}MB > 250MB)` })
         continue
       }
       valid.push(f)
     }
-
     if (!valid.length && preflightFails.length) {
       const runId = uploads.start({ label: 'Clips upload · skipped', total: preflightFails.length })
       for (const fail of preflightFails) { uploads.fail(runId, fail); uploads.progress(runId, { added: 1 }) }
       uploads.done(runId)
-      toast.error(`${preflightFails.length} file${preflightFails.length > 1 ? 's' : ''} skipped — check upload card`)
+      toast.error(`${preflightFails.length} file${preflightFails.length > 1 ? 's' : ''} skipped`)
       return
     }
-    if (!valid.length) {
-      toast.error('No valid files — drop .mp4 / .mov / .webm only')
-      return
-    }
+    if (!valid.length) { toast.error('No valid files — drop .mp4 / .mov / .webm'); return }
 
     setError(null)
-    const runId = uploads.start({ label: `Clips upload · ${valid.length} file${valid.length > 1 ? 's' : ''}`, total: valid.length + preflightFails.length })
-    // Surface preflight failures on the same run card
+    const runId = uploads.start({ label: `Clips · ${valid.length} file${valid.length > 1 ? 's' : ''}`, total: valid.length + preflightFails.length })
     for (const fail of preflightFails) { uploads.fail(runId, fail); uploads.progress(runId, { added: 1 }) }
 
-    // Run uploads in parallel with bounded concurrency (4)
-    const concurrency = 4
+    const concurrency = 3
     let succeeded = 0
     const queue = [...valid]
     const workers = Array.from({ length: Math.min(concurrency, valid.length) }, async () => {
@@ -218,28 +208,46 @@ export default function AdsClips() {
         try {
           const parsed = parseFilename(file.name)
           const ext = file.name.match(/\.[^.]+$/)?.[0] || '.mp4'
-          // Storage path uses a SANITIZED slug — em-dashes, spaces and other
-          // non-URL-safe characters break Supabase Storage paths. The clip_id
-          // in the database keeps the original descriptive name.
           const safeSlug = sanitizeStorageSlug(parsed.clip_id)
-          const path = `clips/${safeSlug}${ext.toLowerCase()}`
+          const vidPath = `clips/${safeSlug}${ext.toLowerCase()}`
+          const thumbPath = `clips/thumbs/${safeSlug}.jpg`
 
+          // 1. Upload the video
           const { error: uErr } = await supabase.storage
             .from('ad-source-videos')
-            .upload(path, file, { upsert: true, contentType: file.type || 'video/mp4' })
+            .upload(vidPath, file, { upsert: true, contentType: file.type || 'video/mp4' })
           if (uErr) throw new Error(uErr.message)
-
           const { data: signed, error: sErr } = await supabase.storage
             .from('ad-source-videos')
-            .createSignedUrl(path, 60 * 60 * 24 * 7)
+            .createSignedUrl(vidPath, 60 * 60 * 24 * 7)
           if (sErr) throw new Error(`sign URL: ${sErr.message}`)
 
+          // 2. Extract poster frame + upload (best-effort — if it fails the
+          //    clip still saves without a thumbnail).
+          let thumbUrl = null
+          try {
+            const blob = await extractVideoPoster(file)
+            if (blob) {
+              const { error: tErr } = await supabase.storage
+                .from('ad-source-videos')
+                .upload(thumbPath, blob, { upsert: true, contentType: 'image/jpeg' })
+              if (!tErr) {
+                const { data: tSigned } = await supabase.storage
+                  .from('ad-source-videos')
+                  .createSignedUrl(thumbPath, 60 * 60 * 24 * 7)
+                thumbUrl = tSigned?.signedUrl || null
+              }
+            }
+          } catch (e) { /* non-fatal */ }
+
+          // 3. Insert the row
           const { error: insertErr } = await supabase.rpc('lib_clip_upsert', {
             p_clip_id: parsed.clip_id,
             p_clip_type: parsed.clip_type || 'hook',
             p_creator_id: parsed.creator_id || null,
             p_source_file_url: signed?.signedUrl || null,
             p_source_file_name: file.name,
+            p_thumbnail_url: thumbUrl,
           })
           if (insertErr) throw new Error(`DB insert: ${insertErr.message}`)
           succeeded++
@@ -254,28 +262,21 @@ export default function AdsClips() {
     await Promise.all(workers)
     uploads.done(runId)
 
-    const totalAttempted = valid.length + preflightFails.length
-    if (succeeded === totalAttempted) {
-      toast.success(`${succeeded} clip${succeeded > 1 ? 's' : ''} uploaded`)
-    } else if (succeeded > 0) {
-      toast.error(`${succeeded}/${totalAttempted} uploaded · ${totalAttempted - succeeded} failed — see upload card`)
-    } else {
-      toast.error(`All ${totalAttempted} uploads failed — see upload card for reasons`)
-    }
+    const total = valid.length + preflightFails.length
+    if (succeeded === total) toast.success(`${succeeded} clip${succeeded > 1 ? 's' : ''} uploaded`)
+    else if (succeeded > 0)  toast.error(`${succeeded}/${total} uploaded · ${total - succeeded} failed`)
+    else                     toast.error(`All ${total} uploads failed`)
     await load()
   }
 
-  // ── TSV paste import ──────────────────────────────────────────────
   const handleTsv = async (text) => {
     const rows = parseTsv(text)
     if (!rows.length) {
       toast.error('No rows parsed from clipboard. Expected tab-separated columns starting with clip_id.')
       return
     }
-    setError(null)
-    setShowTsv(false)
-    const runId = uploads.start({ label: `TSV import · ${rows.length} row${rows.length > 1 ? 's' : ''}`, total: rows.length })
-
+    setError(null); setShowTsv(false)
+    const runId = uploads.start({ label: `TSV import · ${rows.length}`, total: rows.length })
     let succeeded = 0
     await Promise.all(rows.map(async (row, i) => {
       try {
@@ -292,21 +293,18 @@ export default function AdsClips() {
         succeeded++
         uploads.progress(runId, { added: 1 })
       } catch (e) {
-        console.warn(`[clips] TSV row ${i} (${row.clip_id}) failed:`, e.message)
+        console.warn(`[clips] TSV row ${i} failed:`, e.message)
         uploads.fail(runId, { file: row.clip_id || `row ${i}`, error: e.message })
         uploads.progress(runId, { added: 1 })
       }
     }))
     uploads.done(runId)
-    if (succeeded === rows.length) {
-      toast.success(`${succeeded} clip${succeeded > 1 ? 's' : ''} imported from TSV`)
-    } else {
-      toast.error(`${succeeded}/${rows.length} imported · ${rows.length - succeeded} failed`)
-    }
+    if (succeeded === rows.length) toast.success(`${succeeded} imported`)
+    else toast.error(`${succeeded}/${rows.length} imported`)
     await load()
   }
 
-  // ── Drag-and-drop handlers (full-page drop zone) ──────────────────
+  // ─── Drag-drop ────────────────────────────────────────────────────
   const onDragEnter = (e) => {
     e.preventDefault(); e.stopPropagation()
     dragCounter.current++
@@ -320,326 +318,532 @@ export default function AdsClips() {
   const onDragOver = (e) => { e.preventDefault(); e.stopPropagation() }
   const onDrop = (e) => {
     e.preventDefault(); e.stopPropagation()
-    dragCounter.current = 0
-    setDragOver(false)
+    dragCounter.current = 0; setDragOver(false)
     if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files)
   }
 
-  // ── Inline cell save ───────────────────────────────────────────────
-  const saveField = async (clip, field, value) => {
-    if (clip[field] === value) return
+  // ─── Save / delete / stages ───────────────────────────────────────
+  const saveClip = async (clip, updates) => {
+    const merged = { ...clip, ...updates }
     // Optimistic
-    setClips(prev => prev.map(c => c.clip_id === clip.clip_id ? { ...c, [field]: value } : c))
+    setClips(prev => prev.map(c => c.clip_id === clip.clip_id ? merged : c))
+    if (editing && editing.clip_id === clip.clip_id) setEditing(merged)
     try {
       const { error: e } = await supabase.rpc('lib_clip_upsert', {
-        p_clip_id: clip.clip_id,
-        p_clip_type: field === 'clip_type' ? value : (clip.clip_type || 'hook'),
-        p_section: field === 'section' ? value : (clip.section || null),
-        p_description: field === 'description' ? value : (clip.description || null),
-        p_creator_id: field === 'creator_id' ? value : (clip.creator_id || null),
-        p_editor: field === 'editor' ? value : (clip.editor || null),
-        p_priority: field === 'priority' ? value : (clip.priority || null),
-        p_duration_sec: clip.duration_sec || null,
-        p_source_file_url: clip.source_file_url || null,
-        p_source_file_name: clip.source_file_name || null,
-        p_notes: clip.notes || null,
+        p_clip_id: merged.clip_id,
+        p_clip_type: merged.clip_type || 'hook',
+        p_section: merged.section || null,
+        p_description: merged.description || null,
+        p_creator_id: merged.creator_id || null,
+        p_editor: merged.editor || null,
+        p_priority: merged.priority || null,
+        p_duration_sec: merged.duration_sec || null,
+        p_source_file_url: merged.source_file_url || null,
+        p_source_file_name: merged.source_file_name || null,
+        p_notes: merged.notes || null,
+        p_funnel_position: merged.funnel_position || null,
+        p_thumbnail_url: merged.thumbnail_url || null,
       })
       if (e) throw new Error(e.message)
     } catch (e) {
-      setError(`Save failed: ${e.message}`)
+      toast.error(`Save failed: ${e.message}`)
       // Revert
-      setClips(prev => prev.map(c => c.clip_id === clip.clip_id ? { ...c, [field]: clip[field] } : c))
+      setClips(prev => prev.map(c => c.clip_id === clip.clip_id ? clip : c))
+      if (editing && editing.clip_id === clip.clip_id) setEditing(clip)
     }
   }
-
   const toggleStage = async (clip, stageKey) => {
     const next = !clip[`stage_${stageKey}`]
-    setClips(prev => prev.map(c => c.clip_id === clip.clip_id ? { ...c, [`stage_${stageKey}`]: next } : c))
+    const updated = { ...clip, [`stage_${stageKey}`]: next }
+    setClips(prev => prev.map(c => c.clip_id === clip.clip_id ? updated : c))
+    if (editing && editing.clip_id === clip.clip_id) setEditing(updated)
     try {
       const { error: e } = await supabase.rpc('lib_clip_set_stage', { p_clip_id: clip.clip_id, p_stage: stageKey, p_value: next })
       if (e) throw new Error(e.message)
     } catch (e) {
-      setClips(prev => prev.map(c => c.clip_id === clip.clip_id ? { ...c, [`stage_${stageKey}`]: !next } : c))
-      setError(`Stage update failed: ${e.message}`)
+      setClips(prev => prev.map(c => c.clip_id === clip.clip_id ? clip : c))
+      if (editing && editing.clip_id === clip.clip_id) setEditing(clip)
+      toast.error(`Stage update failed: ${e.message}`)
     }
   }
-
-  const addBlankRow = async () => {
+  const deleteClip = async (clip) => {
+    if (!confirm(`Delete clip "${clip.clip_id}"?`)) return
+    try {
+      const { error: e } = await supabase.rpc('lib_clip_delete', { p_clip_id: clip.clip_id })
+      if (e) throw new Error(e.message)
+      setClips(prev => prev.filter(c => c.clip_id !== clip.clip_id))
+      if (editing && editing.clip_id === clip.clip_id) setEditing(null)
+      toast.success('Clip deleted')
+    } catch (e) { toast.error(`Delete failed: ${e.message}`) }
+  }
+  const addBlankClip = async () => {
     const stub = `CLIP-${Date.now().toString(36).slice(-5).toUpperCase()}`
     try {
-      const { error: e } = await supabase.rpc('lib_clip_upsert', {
-        p_clip_id: stub, p_clip_type: 'hook',
-      })
+      const { error: e } = await supabase.rpc('lib_clip_upsert', { p_clip_id: stub, p_clip_type: 'hook' })
       if (e) throw new Error(e.message)
       await load()
-    } catch (e) { setError(`Add row failed: ${e.message}`) }
+      // Open the drawer on the new row so editor can fill it
+      setTimeout(() => {
+        const newRow = { clip_id: stub, clip_type: 'hook', stage_raw: false, stage_rough_cut: false, stage_final_cut: false, stage_approved: false }
+        setEditing(newRow)
+      }, 100)
+    } catch (e) { toast.error(`Add failed: ${e.message}`) }
   }
 
-  const deleteSelected = async () => {
-    if (!selected.size) return
-    if (!confirm(`Delete ${selected.size} clip${selected.size > 1 ? 's' : ''}?`)) return
+  // ─── Add new creator / editor (managed lists) ─────────────────────
+  const addCreator = async (id, label) => {
     try {
-      await Promise.all(Array.from(selected).map(clip_id =>
-        supabase.rpc('lib_clip_delete', { p_clip_id: clip_id })
-      ))
-      setSelected(new Set())
+      const { error: e } = await supabase.rpc('lib_creator_add', { p_id: id, p_label: label || id })
+      if (e) throw new Error(e.message)
+      toast.success(`Creator ${id.toUpperCase()} added`)
       await load()
-    } catch (e) { setError(`Delete failed: ${e.message}`) }
+    } catch (e) { toast.error(`Add creator failed: ${e.message}`) }
   }
-
-  const toggleSelect = (clipId) => {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(clipId)) next.delete(clipId)
-      else next.add(clipId)
-      return next
-    })
-  }
-  const toggleSelectAll = () => {
-    if (selected.size === filtered.length) setSelected(new Set())
-    else setSelected(new Set(filtered.map(c => c.clip_id)))
+  const addEditor = async (name) => {
+    try {
+      const { error: e } = await supabase.rpc('lib_editor_add', { p_editor: name })
+      if (e) throw new Error(e.message)
+      toast.success(`Editor ${name} added`)
+      await load()
+    } catch (e) { toast.error(`Add editor failed: ${e.message}`) }
   }
 
   return (
     <div
-      onDragEnter={onDragEnter}
-      onDragLeave={onDragLeave}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      style={{ position: 'relative', minHeight: 400 }}
+      onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDragOver={onDragOver} onDrop={onDrop}
+      style={{ position: 'relative' }}
     >
-      {/* Drag-over overlay */}
-      {dragOver && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(244,225,74,0.18)',
-          border: '3px dashed var(--accent)', zIndex: 1000,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: 'var(--serif)', fontSize: 28, color: 'var(--ink)', fontStyle: 'italic',
-          pointerEvents: 'none',
-        }}>
-          Drop MP4s to upload + create clip rows
-        </div>
-      )}
-
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 mb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 mb-4" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
-          <span className="eyebrow eyebrow-accent">Production · Atomic clips</span>
-          <h2 className="h3 mt-2" style={{ fontSize: 22 }}>The <em>clip</em> catalog.</h2>
+          <span className="eyebrow eyebrow-accent">Creative · Clips</span>
+          <h2 className="h3 mt-2" style={{ fontSize: 22 }}>The <em>clip</em> library.</h2>
           <p className="mt-2" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
-            {clips.length} clips · drop MP4s anywhere on this page · paste from Sheets · click cells to edit
+            {filtered.length} of {clips.length} clips · drop a .mp4 anywhere on this page to upload
           </p>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button onClick={() => fileInputRef.current?.click()} style={btnPrimary}>
-            <Upload size={13} /> Upload MP4s
+          <button onClick={() => fileInputRef.current?.click()} style={btnSolid}>
+            <Upload size={13} /> Upload
           </button>
-          <input
-            ref={fileInputRef} type="file" multiple accept="video/mp4,video/quicktime,video/webm"
-            onChange={e => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = '' }}
-            style={{ display: 'none' }}
-          />
           <button onClick={() => setShowTsv(true)} style={btnGhost}>
             <ClipboardPaste size={13} /> Paste TSV
           </button>
-          <button onClick={addBlankRow} style={btnGhost}>
-            <Plus size={13} /> Add row
+          <button onClick={addBlankClip} style={btnGhost}>
+            <Plus size={13} /> New clip
           </button>
+          <input ref={fileInputRef} type="file" accept=".mp4,.mov,.webm" multiple style={{ display: 'none' }}
+            onChange={(e) => e.target.files && handleFiles(e.target.files)} />
         </div>
       </div>
 
       {/* Filter bar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 16 }}>
-        <ChipGroup label="Type" value={typeFilter} setValue={setTypeFilter}
-          options={[{ value: 'all', label: 'All' }, ...CLIP_TYPES.map(t => ({ value: t, label: t }))]} />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 16, alignItems: 'center' }}>
+        <FilterChips label="Type" value={filter.type} setValue={(v) => setFilter({ ...filter, type: v })}
+          options={[{ value: 'all', label: 'All' }, ...CLIP_TYPES.map(t => ({ value: t.value, label: t.label, color: t.color }))]} />
+        <FilterChips label="Funnel" value={filter.funnel} setValue={(v) => setFilter({ ...filter, funnel: v })}
+          options={[{ value: 'all', label: 'All' }, ...FUNNEL_POSITIONS.map(f => ({ value: f.value, label: f.short, color: f.color }))]} />
+        <FilterSelect label="Creator" value={filter.creator} setValue={(v) => setFilter({ ...filter, creator: v })}
+          options={[{ value: 'all', label: 'All creators' }, ...creators.map(c => ({ value: c.component_id, label: c.label || c.component_id }))]} />
+        <FilterSelect label="Editor" value={filter.editor} setValue={(v) => setFilter({ ...filter, editor: v })}
+          options={[{ value: 'all', label: 'All editors' }, ...editors.map(e => ({ value: e.label, label: e.label }))]} />
+        <FilterChips label="Stage" value={filter.stage} setValue={(v) => setFilter({ ...filter, stage: v })}
+          options={[{ value: 'all', label: 'Any' }, ...STAGES.map(s => ({ value: s.key, label: s.label }))]} />
         <div style={{ flex: '1 1 200px', minWidth: 180, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
           <Search size={12} style={{ color: 'var(--ink-3)', flexShrink: 0, marginLeft: 4 }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name / description / notes…"
             style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }} />
         </div>
       </div>
 
-      {/* Error banner */}
       {error && (
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', background: 'var(--down-soft)', border: '1px solid var(--down)', borderLeftWidth: 3, borderRadius: '0 3px 3px 0', color: 'var(--down)', marginBottom: 16, fontSize: 13 }}>
-          <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-          <div>{error}</div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', background: 'var(--down-soft, rgba(180,30,30,0.06))', border: '1px solid var(--down, #b41e1e)', borderLeftWidth: 3, borderRadius: '0 3px 3px 0', color: 'var(--down, #b41e1e)', marginBottom: 16, fontSize: 13 }}>
+          <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} /><div>{error}</div>
         </div>
       )}
 
-      {/* Bulk action bar */}
-      {selected.size > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--ink)', color: 'var(--paper)', borderRadius: 3, marginBottom: 12 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em' }}>{selected.size} SELECTED</span>
-          <button onClick={deleteSelected} style={{ marginLeft: 'auto', padding: '5px 10px', background: 'var(--down)', color: 'var(--paper)', border: 'none', borderRadius: 2, fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer' }}>
-            <Trash2 size={11} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4 }} />Delete
-          </button>
-          <button onClick={() => setSelected(new Set())} style={{ padding: '5px 10px', background: 'transparent', color: 'var(--paper)', border: '1px solid var(--paper-2)', borderRadius: 2, fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer' }}>Clear</button>
+      {loading && <div className="flex items-center justify-center py-16"><Loader className="animate-spin" style={{ color: 'var(--ink-3)' }} /></div>}
+
+      {!loading && !filtered.length && (
+        <div style={{ border: '1px dashed var(--rule)', borderRadius: 4, padding: 40, textAlign: 'center', background: 'var(--paper-2)' }}>
+          <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center', display: 'inline-flex', marginBottom: 12 }}>Empty</span>
+          <h3 className="h3" style={{ fontSize: 20, marginBottom: 10 }}>{clips.length ? 'Nothing matches your filters.' : 'No clips yet — drop a file to start.'}</h3>
         </div>
       )}
 
-      {loading && (
-        <div className="flex items-center justify-center py-16">
-          <Loader className="animate-spin" style={{ color: 'var(--ink-3)' }} />
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && clips.length === 0 && !error && (
-        <div style={{ border: '2px dashed var(--rule)', borderRadius: 4, padding: 48, textAlign: 'center', background: 'var(--paper-2)' }}>
-          <FileVideo size={48} style={{ color: 'var(--ink-4)', margin: '0 auto 12px' }} />
-          <h3 className="h3" style={{ fontSize: 22, marginBottom: 8 }}>Drop your clips here.</h3>
-          <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', maxWidth: '52ch', margin: '0 auto', lineHeight: 1.55 }}>
-            Drag MP4s onto this page and the system will parse the filenames (<em>H1.1-OSO.MP4</em>, <em>BODY-B1-OSO.mp4</em>, <em>FRAME-OSO.mp4</em>) into rows. Or paste TSV from Google Sheets, or click "Add row" to start manually.
-          </p>
-        </div>
-      )}
-
-      {/* Spreadsheet */}
       {!loading && filtered.length > 0 && (
-        <div style={{ overflowX: 'auto', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3 }}>
-          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
-                <Th w={32} center>
-                  <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleSelectAll} />
-                </Th>
-                <Th w={160}>Clip ID</Th>
-                <Th w={100}>Type</Th>
-                <Th w={140}>Section</Th>
-                <Th w={260}>Description</Th>
-                <Th w={80}>Creator</Th>
-                <Th w={90}>Editor</Th>
-                <Th w={70}>Priority</Th>
-                {STAGES.map(s => <Th key={s.key} w={56} center>{s.label}</Th>)}
-                <Th w={90}>File</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(c => (
-                <tr key={c.clip_id} style={{ borderBottom: '1px solid var(--rule)' }}>
-                  <Td center>
-                    <input type="checkbox" checked={selected.has(c.clip_id)} onChange={() => toggleSelect(c.clip_id)} />
-                  </Td>
-                  <Td mono>{c.clip_id}</Td>
-                  <Td><InlineSelect value={c.clip_type} options={CLIP_TYPES} onSave={v => saveField(c, 'clip_type', v)} /></Td>
-                  <Td><InlineEdit value={c.section} onSave={v => saveField(c, 'section', v || null)} placeholder="—" /></Td>
-                  <Td><InlineEdit value={c.description} onSave={v => saveField(c, 'description', v || null)} placeholder="—" serif /></Td>
-                  <Td><InlineEdit value={c.creator_id} onSave={v => saveField(c, 'creator_id', v || null)} placeholder="—" mono /></Td>
-                  <Td><InlineEdit value={c.editor} onSave={v => saveField(c, 'editor', v || null)} placeholder="—" /></Td>
-                  <Td><InlineSelect value={c.priority} options={PRIORITY_OPTIONS} onSave={v => saveField(c, 'priority', v || null)} placeholder="—" /></Td>
-                  {STAGES.map(s => (
-                    <Td key={s.key} center>
-                      <StageCheckbox checked={c[`stage_${s.key}`]} onChange={() => toggleStage(c, s.key)} />
-                    </Td>
-                  ))}
-                  <Td>
-                    {c.source_file_url ? (
-                      <a href={c.source_file_url} target="_blank" rel="noreferrer" style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)', display: 'inline-flex', alignItems: 'center', gap: 3 }} title={c.source_file_name}>
-                        <FileVideo size={11} />open
-                      </a>
-                    ) : <span style={{ color: 'var(--ink-4)' }}>—</span>}
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+          {filtered.map(c => (
+            <ClipCard key={c.clip_id} clip={c} onOpen={() => setEditing(c)} />
+          ))}
         </div>
       )}
 
-      {/* TSV paste modal */}
-      {showTsv && <TsvPasteModal onClose={() => setShowTsv(false)} onImport={handleTsv} />}
+      {/* Drawer + modals */}
+      {editing && (
+        <ClipDrawer
+          clip={editing}
+          creators={creators}
+          editors={editors}
+          onSave={(updates) => saveClip(editing, updates)}
+          onToggleStage={(stage) => toggleStage(editing, stage)}
+          onDelete={() => deleteClip(editing)}
+          onClose={() => setEditing(null)}
+          onAddCreator={() => setAddingKind('creator')}
+          onAddEditor={() => setAddingKind('editor')}
+        />
+      )}
+      {showTsv && <TsvModal onClose={() => setShowTsv(false)} onSubmit={handleTsv} />}
+      {addingKind && (
+        <AddEntityModal
+          kind={addingKind}
+          onClose={() => setAddingKind(null)}
+          onSubmit={async (val) => {
+            if (addingKind === 'creator') await addCreator(val.id, val.label)
+            else                          await addEditor(val.label)
+            setAddingKind(null)
+          }}
+        />
+      )}
+
+      {/* Full-page drop overlay */}
+      {dragOver && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(31,122,58,0.10)', border: '4px dashed #1f7a3a', zIndex: 150, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+          <div style={{ fontFamily: 'var(--serif)', fontSize: 28, color: '#1f7a3a', fontWeight: 500 }}>Drop video files to upload</div>
+        </div>
+      )}
     </div>
   )
 }
 
-function Th({ children, w, center }) {
-  return (
-    <th style={{
-      padding: '8px 10px', textAlign: center ? 'center' : 'left',
-      fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
-      color: 'var(--ink-3)', fontWeight: 500, width: w ? w : undefined, whiteSpace: 'nowrap',
-    }}>{children}</th>
-  )
-}
-function Td({ children, center, mono }) {
-  return (
-    <td style={{
-      padding: '4px 8px', textAlign: center ? 'center' : 'left', verticalAlign: 'middle',
-      fontFamily: mono ? 'var(--mono)' : undefined, fontSize: 12, color: 'var(--ink)',
-    }}>{children}</td>
-  )
-}
+// ─── ClipCard ───────────────────────────────────────────────────────
+function ClipCard({ clip, onOpen }) {
+  const [hover, setHover] = useState(false)
+  const videoRef = useRef(null)
+  const tMeta = typeMeta(clip.clip_type)
+  const fMeta = funnelMeta(clip.funnel_position)
+  const pMeta = priorityMeta(clip.priority)
 
-function InlineEdit({ value, onSave, placeholder, serif, mono }) {
-  const [editing, setEditing] = useState(false)
-  const [v, setV] = useState(value || '')
-  useEffect(() => { setV(value || '') }, [value])
-  if (editing) {
-    return (
-      <input
-        autoFocus
-        value={v}
-        onChange={e => setV(e.target.value)}
-        onBlur={() => { setEditing(false); onSave(v.trim()) }}
-        onKeyDown={e => {
-          if (e.key === 'Enter') { e.preventDefault(); e.target.blur() }
-          if (e.key === 'Escape') { setV(value || ''); setEditing(false) }
-        }}
-        style={{
-          width: '100%', minWidth: 60, background: 'var(--paper)', border: '1px solid var(--accent)',
-          padding: '3px 6px', fontFamily: mono ? 'var(--mono)' : (serif ? 'var(--serif)' : 'var(--sans)'),
-          fontSize: 12, color: 'var(--ink)', outline: 'none', borderRadius: 2,
-        }}
-      />
-    )
-  }
-  return (
-    <span onClick={() => setEditing(true)} style={{
-      display: 'inline-block', minWidth: 40, padding: '3px 6px', cursor: 'text',
-      fontFamily: mono ? 'var(--mono)' : (serif ? 'var(--serif)' : 'var(--sans)'),
-      color: value ? 'var(--ink)' : 'var(--ink-4)', borderRadius: 2,
-    }}>
-      {value || placeholder || '—'}
-    </span>
-  )
-}
+  // On hover, play the source video as a preview if available. Tries to
+  // start from the same seek-point as the poster frame to feel continuous.
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    if (hover) {
+      v.currentTime = 0
+      v.play().catch(() => { /* autoplay may be blocked; thumbnail still shows */ })
+    } else {
+      v.pause()
+      v.currentTime = 0
+    }
+  }, [hover])
 
-function InlineSelect({ value, options, onSave, placeholder }) {
   return (
-    <select
-      value={value || ''}
-      onChange={e => onSave(e.target.value || null)}
+    <div
+      onClick={onOpen}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
-        width: '100%', background: 'transparent', border: '1px solid transparent',
-        padding: '3px 6px', fontFamily: 'var(--mono)', fontSize: 11, color: value ? 'var(--ink)' : 'var(--ink-4)',
-        cursor: 'pointer', borderRadius: 2, outline: 'none',
+        background: 'var(--paper)',
+        border: '1px solid var(--rule)',
+        borderLeft: `3px solid ${tMeta.color}`,
+        borderRadius: 4,
+        overflow: 'hidden',
+        cursor: 'pointer',
+        transition: 'box-shadow 120ms',
+        boxShadow: hover ? '0 4px 16px rgba(0,0,0,0.10)' : 'none',
       }}
     >
-      {!value && <option value="">{placeholder || '—'}</option>}
-      {options.map(o => {
-        const val = typeof o === 'string' ? o : o.value
-        const label = typeof o === 'string' ? o : o.label
-        return <option key={val} value={val}>{label || placeholder || '—'}</option>
-      })}
+      {/* Thumbnail */}
+      <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', background: '#0c0c0c', overflow: 'hidden' }}>
+        {clip.thumbnail_url ? (
+          <img
+            src={clip.thumbnail_url}
+            alt=""
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: hover && clip.source_file_url ? 'none' : 'block' }}
+            onError={(e) => { e.target.style.opacity = 0.25 }}
+          />
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-4)', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            No preview
+          </div>
+        )}
+        {hover && clip.source_file_url && (
+          <video
+            ref={videoRef}
+            src={clip.source_file_url}
+            muted playsInline preload="metadata"
+            style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', inset: 0 }}
+          />
+        )}
+        {/* Top-left: type chip */}
+        <span style={{
+          position: 'absolute', top: 8, left: 8,
+          padding: '3px 8px',
+          background: tMeta.color, color: '#fff',
+          fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+          borderRadius: 2,
+        }}>{tMeta.label}</span>
+        {/* Top-right: funnel chip */}
+        {fMeta && (
+          <span style={{
+            position: 'absolute', top: 8, right: 8,
+            padding: '3px 8px',
+            background: fMeta.bg, color: fMeta.color, border: `1px solid ${fMeta.color}`,
+            fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+            borderRadius: 2,
+          }}>{fMeta.short}</span>
+        )}
+        {/* Bottom-right: priority */}
+        {pMeta && (
+          <span style={{
+            position: 'absolute', bottom: 8, right: 8,
+            padding: '2px 7px',
+            background: 'rgba(0,0,0,0.6)', color: pMeta.color,
+            fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700,
+            borderRadius: 2,
+          }}>{pMeta.label} priority</span>
+        )}
+        {/* Play indicator when hover starts to load video */}
+        {hover && !clip.source_file_url && (
+          <Play size={28} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: 'rgba(255,255,255,0.5)' }} />
+        )}
+      </div>
+
+      {/* Body */}
+      <div style={{ padding: '10px 12px' }}>
+        <div style={{ fontFamily: 'var(--serif)', fontSize: 14, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.3, wordBreak: 'break-word' }}>
+          {clip.clip_id}
+        </div>
+        <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+          {clip.creator_id && <span>· {clip.creator_id}</span>}
+          {clip.editor && <span>· ed: {clip.editor}</span>}
+        </div>
+        {/* Stage dots */}
+        <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+          {STAGES.map(s => (
+            <span key={s.key} title={s.label} style={{
+              width: 14, height: 14, borderRadius: 2,
+              border: `1px solid ${clip[`stage_${s.key}`] ? '#1f7a3a' : 'var(--rule)'}`,
+              background: clip[`stage_${s.key}`] ? '#1f7a3a' : 'transparent',
+              fontFamily: 'var(--mono)', fontSize: 8, color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>{s.label[0]}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── ClipDrawer ─────────────────────────────────────────────────────
+function ClipDrawer({ clip, creators, editors, onSave, onToggleStage, onDelete, onClose, onAddCreator, onAddEditor }) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.45)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxWidth: 520, height: '100vh', overflowY: 'auto',
+        background: 'var(--paper)', borderLeft: '1px solid var(--rule)', padding: '20px 24px',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <span className="eyebrow eyebrow-accent">Edit clip</span>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Thumbnail preview */}
+        <div style={{ width: '100%', aspectRatio: '16/9', background: '#0c0c0c', borderRadius: 3, overflow: 'hidden', marginBottom: 14 }}>
+          {clip.source_file_url ? (
+            <video src={clip.source_file_url} controls muted playsInline poster={clip.thumbnail_url || undefined}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : clip.thumbnail_url ? (
+            <img src={clip.thumbnail_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
+          ) : (
+            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+              No video / preview
+            </div>
+          )}
+        </div>
+
+        <Field label="Clip name / ID">
+          <input value={clip.clip_id || ''} disabled
+            style={{ ...inputStyle, color: 'var(--ink-3)', cursor: 'not-allowed' }} />
+        </Field>
+
+        <FieldRow>
+          <Field label="Type" flex>
+            <select value={clip.clip_type || ''} onChange={e => onSave({ clip_type: e.target.value })} style={inputStyle}>
+              {CLIP_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Funnel position" flex>
+            <select value={clip.funnel_position || ''} onChange={e => onSave({ funnel_position: e.target.value || null })} style={inputStyle}>
+              <option value="">—</option>
+              {FUNNEL_POSITIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          </Field>
+        </FieldRow>
+
+        <FieldRow>
+          <Field label="Creator" flex>
+            <SelectWithAdd value={clip.creator_id || ''} onChange={(v) => onSave({ creator_id: v || null })}
+              options={creators.map(c => ({ value: c.component_id, label: c.label || c.component_id }))}
+              onAddNew={onAddCreator} addLabel="+ Add new creator" emptyOption="—" />
+          </Field>
+          <Field label="Editor" flex>
+            <SelectWithAdd value={clip.editor || ''} onChange={(v) => onSave({ editor: v || null })}
+              options={editors.map(e => ({ value: e.label, label: e.label }))}
+              onAddNew={onAddEditor} addLabel="+ Add new editor" emptyOption="—" />
+          </Field>
+        </FieldRow>
+
+        <FieldRow>
+          <Field label="Priority" flex>
+            <select value={clip.priority || ''} onChange={e => onSave({ priority: e.target.value || null })} style={inputStyle}>
+              <option value="">—</option>
+              {PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Section" flex>
+            <input value={clip.section || ''}
+              onChange={e => onSave({ section: e.target.value })}
+              placeholder="e.g. Adam · April 2026"
+              style={inputStyle} />
+          </Field>
+        </FieldRow>
+
+        <Field label="Description">
+          <textarea value={clip.description || ''} onChange={e => onSave({ description: e.target.value })}
+            rows={2} style={{ ...inputStyle, resize: 'vertical' }} />
+        </Field>
+
+        <Field label="Notes">
+          <textarea value={clip.notes || ''} onChange={e => onSave({ notes: e.target.value })}
+            rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
+        </Field>
+
+        <Field label="Production stage">
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {STAGES.map(s => (
+              <button key={s.key} onClick={() => onToggleStage(s.key)} style={{
+                padding: '7px 12px',
+                fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
+                background: clip[`stage_${s.key}`] ? '#1f7a3a' : 'var(--paper-2)',
+                color: clip[`stage_${s.key}`] ? '#fff' : 'var(--ink-2)',
+                border: `1px solid ${clip[`stage_${s.key}`] ? '#1f7a3a' : 'var(--rule)'}`,
+                borderRadius: 2, cursor: 'pointer',
+              }}>{s.label}</button>
+            ))}
+          </div>
+        </Field>
+
+        <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--rule)', display: 'flex', justifyContent: 'space-between' }}>
+          <button onClick={onDelete} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+            background: 'transparent', color: '#b41e1e', border: '1px solid #b41e1e', borderRadius: 3,
+            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+            cursor: 'pointer',
+          }}>
+            <Trash2 size={12} /> Delete
+          </button>
+          <button onClick={onClose} style={btnSolid}>Done</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── SelectWithAdd ──────────────────────────────────────────────────
+function SelectWithAdd({ value, onChange, options, onAddNew, addLabel = '+ Add new', emptyOption }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => {
+        if (e.target.value === '__add__') { onAddNew(); return }
+        onChange(e.target.value)
+      }}
+      style={inputStyle}
+    >
+      {emptyOption !== undefined && <option value="">{emptyOption}</option>}
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      <option disabled style={{ color: 'var(--ink-4)' }}>──────────</option>
+      <option value="__add__" style={{ color: '#1f7a3a', fontWeight: 600 }}>{addLabel}</option>
     </select>
   )
 }
 
-function StageCheckbox({ checked, onChange }) {
+// ─── AddEntityModal (used for both creator + editor) ────────────────
+function AddEntityModal({ kind, onClose, onSubmit }) {
+  const [id, setId] = useState('')
+  const [label, setLabel] = useState('')
+  const isCreator = kind === 'creator'
+
   return (
-    <button onClick={onChange} style={{
-      width: 18, height: 18,
-      background: checked ? 'var(--accent)' : 'var(--paper-2)',
-      border: '1px solid', borderColor: checked ? 'var(--accent)' : 'var(--rule)',
-      borderRadius: 2, cursor: 'pointer',
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      color: 'var(--ink)', fontSize: 11, lineHeight: 1,
-    }}>{checked ? '✓' : ''}</button>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.5)', zIndex: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'var(--paper)', borderRadius: 4, padding: '20px 24px', width: 380,
+        border: '1px solid var(--rule)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <span className="eyebrow eyebrow-accent">{isCreator ? 'Add creator' : 'Add editor'}</span>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+            <X size={14} />
+          </button>
+        </div>
+        {isCreator && (
+          <Field label="ID (short, uppercase)">
+            <input value={id} onChange={e => setId(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''))}
+              placeholder="e.g. LUCAS" style={inputStyle} autoFocus />
+          </Field>
+        )}
+        <Field label={isCreator ? 'Display name' : 'Editor name'}>
+          <input value={label} onChange={e => setLabel(e.target.value)}
+            placeholder={isCreator ? 'e.g. Lucas' : 'e.g. Mohamed'} style={inputStyle} autoFocus={!isCreator} />
+        </Field>
+        <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={btnGhost}>Cancel</button>
+          <button
+            disabled={isCreator ? !id || !label : !label}
+            onClick={() => onSubmit(isCreator ? { id, label } : { label })}
+            style={{ ...btnSolid, opacity: (isCreator ? (!id || !label) : !label) ? 0.4 : 1 }}
+          >Add</button>
+        </div>
+      </div>
+    </div>
   )
 }
 
-function ChipGroup({ label, value, setValue, options }) {
+// ─── TsvModal ───────────────────────────────────────────────────────
+function TsvModal({ onClose, onSubmit }) {
+  const [text, setText] = useState('')
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.5)', zIndex: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'var(--paper)', borderRadius: 4, padding: '20px 24px', width: 640, maxWidth: '95vw',
+        border: '1px solid var(--rule)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <span className="eyebrow eyebrow-accent">Paste TSV from Google Sheets</span>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+            <X size={14} />
+          </button>
+        </div>
+        <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.06em', marginBottom: 8 }}>
+          Columns: clip_id ⇥ clip_type ⇥ section ⇥ description ⇥ creator_id ⇥ editor ⇥ priority
+        </p>
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={12}
+          placeholder={'H4.2\thook\t...\t...\tOSO\tMohamed\thigh\n'} style={{ ...inputStyle, fontFamily: 'var(--mono)', fontSize: 12, resize: 'vertical' }} autoFocus />
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={btnGhost}>Cancel</button>
+          <button onClick={() => onSubmit(text)} disabled={!text.trim()} style={{ ...btnSolid, opacity: text.trim() ? 1 : 0.4 }}>Import</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Filter helpers ─────────────────────────────────────────────────
+function FilterChips({ label, value, setValue, options }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500, marginRight: 4 }}>{label}</span>
@@ -648,9 +852,11 @@ function ChipGroup({ label, value, setValue, options }) {
           const active = value === opt.value
           return (
             <button key={String(opt.value)} onClick={() => setValue(opt.value)} style={{
-              padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500,
-              background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink-3)', borderRadius: 2,
-              border: 'none', cursor: 'pointer',
+              padding: '4px 9px',
+              fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500,
+              background: active ? (opt.color || 'var(--ink)') : 'transparent',
+              color: active ? '#fff' : 'var(--ink-3)', borderRadius: 2,
+              border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
             }}>{opt.label}</button>
           )
         })}
@@ -658,40 +864,45 @@ function ChipGroup({ label, value, setValue, options }) {
     </div>
   )
 }
-
-function TsvPasteModal({ onClose, onImport }) {
-  const [text, setText] = useState('')
+function FilterSelect({ label, value, setValue, options }) {
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 680, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 4, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
-        <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, margin: '0 0 8px 0' }}>Paste from Sheets</h3>
-        <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 12, fontFamily: 'var(--serif)' }}>
-          Select rows in Google Sheets (Ctrl+C), paste below. Column order:
-        </p>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 12, padding: '8px 10px', background: 'var(--paper-2)', borderRadius: 2 }}>
-          clip_id &nbsp; clip_type &nbsp; section &nbsp; description &nbsp; creator_id &nbsp; editor &nbsp; priority
-        </div>
-        <textarea autoFocus value={text} onChange={e => setText(e.target.value)} placeholder="H1.1-OSO	hook	Informative hooks	Referrals & word of mouth	OSO	Mohamed	high" rows={12} style={{ width: '100%', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3, padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)', outline: 'none', resize: 'vertical' }} />
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-          <button onClick={onClose} style={btnSecondary}>Cancel</button>
-          <button onClick={() => onImport(text)} disabled={!text.trim()} style={btnPrimary}>Import rows</button>
-        </div>
-      </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500 }}>{label}</span>
+      <select value={value} onChange={(e) => setValue(e.target.value)} style={{
+        background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2,
+        padding: '4px 6px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none',
+      }}>
+        {options.map(o => <option key={String(o.value)} value={o.value}>{o.label}</option>)}
+      </select>
     </div>
   )
 }
 
-const btnPrimary = {
+// ─── Tiny form primitives ───────────────────────────────────────────
+function Field({ label, children, flex }) {
+  return (
+    <div style={{ marginBottom: 12, flex: flex ? 1 : undefined, minWidth: flex ? 0 : undefined }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600, marginBottom: 5 }}>{label}</div>
+      {children}
+    </div>
+  )
+}
+function FieldRow({ children }) {
+  return <div style={{ display: 'flex', gap: 10 }}>{children}</div>
+}
+
+const inputStyle = {
+  width: '100%',
+  background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2,
+  padding: '7px 9px', fontFamily: 'var(--sans, system-ui)', fontSize: 13, color: 'var(--ink)', outline: 'none',
+}
+const btnSolid = {
   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-  background: 'var(--accent)', color: 'var(--ink)', border: '1px solid var(--accent)', borderRadius: 3,
+  background: 'var(--ink)', color: 'var(--paper)', border: '1px solid var(--ink)', borderRadius: 3,
   fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
 }
 const btnGhost = {
   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
   background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 3,
   fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
-}
-const btnSecondary = {
-  padding: '8px 16px', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 3,
-  fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
 }

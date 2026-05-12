@@ -34,11 +34,6 @@ const STATUS_OPTIONS = [
   { value: 'PAUSED', label: 'Paused' },
   { value: 'all',    label: 'All' },
 ]
-const SORT_OPTIONS = [
-  { value: 'spend_desc',  label: 'Spend ↓' },
-  { value: 'booked_desc', label: 'Booked ↓' },
-  { value: 'cpa_asc',     label: 'Cost / qual booked ↑' },
-]
 
 // Date utilities for the range picker. Returns { preset, startStr, endStr }
 // where startStr/endStr are 'YYYY-MM-DD'. preset values: '7' | '30' | '90' | 'all' | 'custom'.
@@ -181,7 +176,21 @@ export default function AdsPerformance() {
   const [expandedAdSets, setExpandedAdSets] = useState(new Set())
   const [statusFilter, setStatusFilter] = useState('ACTIVE')
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState('spend_desc')
+  // sortKey is a rollup field name; sortDir is 'asc' | 'desc'. For cost-per
+  // metrics, we use a synthetic key (e.g. 'cpQualBooked') that the comparator
+  // resolves at sort time by dividing spend by the appropriate denominator.
+  const [sortKey, setSortKey] = useState('spend')
+  const [sortDir, setSortDir] = useState('desc')
+  const setSort = (key) => {
+    if (key === sortKey) {
+      setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    } else {
+      setSortKey(key)
+      // Cost-per metrics default to ascending (cheaper is better);
+      // everything else defaults to descending (more is better).
+      setSortDir(key.startsWith('cp') ? 'asc' : 'desc')
+    }
+  }
   // Drill-down modal state: { scope: { level, id, label }, metric, title }
   const [drill, setDrill] = useState(null)
   // Date range: { preset, startStr, endStr }. `preset` is one of 7|30|90|all|custom.
@@ -193,14 +202,22 @@ export default function AdsPerformance() {
     try {
       const { startStr, endStr } = dateRange
 
-      // 1. Ads
-      const { data: adRows, error: aErr } = await supabase
-        .from('ads')
-        .select('ad_id, ad_name, status, effective_status, campaign_id, campaign_name, adset_id, adset_name, thumbnail_url, asset_url, asset_type, first_seen_at')
-        .order('first_seen_at', { ascending: false })
-        .limit(1000)
-      if (aErr) throw new Error(aErr.message)
-      const adsLoaded = adRows || []
+      // 1. Ads — paginated so we never silently cap at 1000.
+      const adsLoaded = []
+      let adOffset = 0
+      const AD_PAGE = 1000
+      while (true) {
+        const { data: adRows, error: aErr } = await supabase
+          .from('ads')
+          .select('ad_id, ad_name, status, effective_status, campaign_id, campaign_name, adset_id, adset_name, thumbnail_url, asset_url, asset_type, first_seen_at')
+          .order('first_seen_at', { ascending: false })
+          .range(adOffset, adOffset + AD_PAGE - 1)
+        if (aErr) throw new Error(aErr.message)
+        if (!adRows || !adRows.length) break
+        adsLoaded.push(...adRows)
+        if (adRows.length < AD_PAGE) break
+        adOffset += AD_PAGE
+      }
       setAds(adsLoaded)
 
       const adIds = adsLoaded.map(a => a.ad_id)
@@ -366,16 +383,16 @@ export default function AdsPerformance() {
         visibleSets.push({ ...set, ads })
       }
       if (!visibleSets.length) continue
-      const compareAds = (a, b) => sortCompare(a.rollup, b.rollup, sort)
+      const compareAds = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
       for (const s of visibleSets) s.ads.sort(compareAds)
-      const compareSets = (a, b) => sortCompare(a.rollup, b.rollup, sort)
+      const compareSets = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
       visibleSets.sort(compareSets)
       visibleCampaigns.push({ ...camp, ad_sets_sorted: visibleSets })
     }
-    const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sort)
+    const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
     visibleCampaigns.sort(compareCamps)
     return visibleCampaigns
-  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, statusFilter, search, sort])
+  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, statusFilter, search, sortKey, sortDir])
 
   // When filter or data changes and the user hasn't manually toggled
   // anything, auto-expand the visible campaigns. This way Ben lands on a
@@ -510,7 +527,16 @@ export default function AdsPerformance() {
           </div>
         )}
         <ChipGroup label="Status" value={statusFilter} setValue={setStatusFilter} options={STATUS_OPTIONS} />
-        <ChipGroup label="Sort"   value={sort}         setValue={setSort}         options={SORT_OPTIONS} />
+        <button
+          onClick={() => {
+            setStatusFilter('ACTIVE')
+            setDateRange(rangeFromPreset('30'))
+            setSearch('')
+            setSortKey('spend'); setSortDir('desc')
+          }}
+          style={{ ...btnGhost, padding: '4px 10px', fontSize: 9.5 }}
+          title="Reset every filter to defaults"
+        >Reset</button>
         <div style={{ flex: '1 1 200px', minWidth: 180, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
           <Search size={12} style={{ color: 'var(--ink-3)', flexShrink: 0, marginLeft: 4 }} />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search campaign / ad set / ad…"
@@ -547,20 +573,20 @@ export default function AdsPerformance() {
             <thead>
               <tr style={{ background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
                 <Th style={{ minWidth: 280 }}>Name</Th>
-                <Th right w={70}>Spend</Th>
-                <Th right w={60}>Leads</Th>
-                <Th right w={70}>Qual Leads</Th>
-                <Th right w={60}>Booked</Th>
-                <Th right w={75}>Qual Booked</Th>
-                <Th right w={55}>Live</Th>
-                <Th right w={55}>Closes</Th>
-                <Th right w={75}>Revenue</Th>
-                <Th right w={70}>$ / Lead</Th>
-                <Th right w={80}>$ / Qual</Th>
-                <Th right w={70}>$ / Book</Th>
-                <Th right w={85}>$ / QBook</Th>
-                <Th right w={70}>$ / Live</Th>
-                <Th right w={70}>CAC</Th>
+                <Th right w={70}  sortKey="spend"        activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Spend</Th>
+                <Th right w={60}  sortKey="tfLeads"      activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Leads</Th>
+                <Th right w={70}  sortKey="tfQualLeads"  activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Qual Leads</Th>
+                <Th right w={60}  sortKey="tfBooked"     activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Booked</Th>
+                <Th right w={75}  sortKey="tfQualBooked" activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Qual Booked</Th>
+                <Th right w={55}  sortKey="tfLive"       activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Live</Th>
+                <Th right w={55}  sortKey="tfCloses"     activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Closes</Th>
+                <Th right w={75}  sortKey="tfRevenue"    activeSort={sortKey} sortDir={sortDir} onSort={setSort}>Revenue</Th>
+                <Th right w={70}  sortKey="cpLead"       activeSort={sortKey} sortDir={sortDir} onSort={setSort}>$ / Lead</Th>
+                <Th right w={80}  sortKey="cpQualLead"   activeSort={sortKey} sortDir={sortDir} onSort={setSort}>$ / Qual</Th>
+                <Th right w={70}  sortKey="cpBooked"     activeSort={sortKey} sortDir={sortDir} onSort={setSort}>$ / Book</Th>
+                <Th right w={85}  sortKey="cpQualBooked" activeSort={sortKey} sortDir={sortDir} onSort={setSort}>$ / QBook</Th>
+                <Th right w={70}  sortKey="cpLive"       activeSort={sortKey} sortDir={sortDir} onSort={setSort}>$ / Live</Th>
+                <Th right w={70}  sortKey="cpClose"      activeSort={sortKey} sortDir={sortDir} onSort={setSort}>CAC</Th>
                 <Th w={70}>Status</Th>
               </tr>
             </thead>
@@ -820,16 +846,31 @@ function ChipGroup({ label, value, setValue, options }) {
   )
 }
 
-function Th({ children, w, right, style }) {
+function Th({ children, w, right, style, sortKey, activeSort, sortDir, onSort }) {
+  const isActive = sortKey && activeSort === sortKey
+  const clickable = !!sortKey && !!onSort
   return (
-    <th style={{
-      padding: '12px 10px',
-      textAlign: right ? 'right' : 'left',
-      fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
-      color: 'var(--ink-3)', fontWeight: 600, width: w ? w : undefined, whiteSpace: 'nowrap',
-      borderRight: '1px solid var(--rule)',
-      ...style,
-    }}>{children}</th>
+    <th
+      onClick={clickable ? () => onSort(sortKey) : undefined}
+      style={{
+        padding: '12px 10px',
+        textAlign: right ? 'right' : 'left',
+        fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
+        color: isActive ? 'var(--ink)' : 'var(--ink-3)',
+        fontWeight: isActive ? 700 : 600,
+        width: w ? w : undefined, whiteSpace: 'nowrap',
+        borderRight: '1px solid var(--rule)',
+        cursor: clickable ? 'pointer' : undefined,
+        background: isActive ? 'var(--accent-soft, rgba(244,225,74,0.18))' : undefined,
+        userSelect: 'none',
+        ...style,
+      }}
+    >
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, justifyContent: right ? 'flex-end' : 'flex-start' }}>
+        {children}
+        {isActive && (sortDir === 'asc' ? <ArrowUp size={9} strokeWidth={2.5} /> : <ArrowDown size={9} strokeWidth={2.5} />)}
+      </span>
+    </th>
   )
 }
 function Td({ children, right, mono, style }) {
@@ -919,17 +960,33 @@ function overlayTypeformIfHigher(target, tfRow) {
     if (v > (target[t] || 0)) target[t] = v
   }
 }
-function sortCompare(a, b, mode) {
-  if (mode === 'booked_desc') return (b.tfBooked || b.booked || 0) - (a.tfBooked || a.booked || 0)
-  if (mode === 'cpa_asc') {
-    // Prefer Typeform qualified booked when available; fall back to HYROS booked.
-    const aDen = a.tfQualBooked || a.booked
-    const bDen = b.tfQualBooked || b.booked
-    const aCpa = aDen > 0 ? a.spend / aDen : Infinity
-    const bCpa = bDen > 0 ? b.spend / bDen : Infinity
-    return aCpa - bCpa
+// Pull the sort value for a rollup based on the active sort key.
+// Cost-per keys (cp*) compute on the fly from spend / count.
+function sortValue(r, key) {
+  if (!r) return 0
+  switch (key) {
+    case 'spend':         return r.spend || 0
+    case 'tfLeads':       return r.tfLeads || 0
+    case 'tfQualLeads':   return r.tfQualLeads || 0
+    case 'tfBooked':      return r.tfBooked || 0
+    case 'tfQualBooked':  return r.tfQualBooked || 0
+    case 'tfLive':        return r.tfLive || 0
+    case 'tfCloses':      return r.tfCloses || 0
+    case 'tfRevenue':     return (r.tfRevenue || r.revenue) || 0
+    case 'cpLead':        return r.tfLeads      > 0 ? r.spend / r.tfLeads      : Infinity
+    case 'cpQualLead':    return r.tfQualLeads  > 0 ? r.spend / r.tfQualLeads  : Infinity
+    case 'cpBooked':      return r.tfBooked     > 0 ? r.spend / r.tfBooked     : Infinity
+    case 'cpQualBooked':  return r.tfQualBooked > 0 ? r.spend / r.tfQualBooked : Infinity
+    case 'cpLive':        return r.tfLive       > 0 ? r.spend / r.tfLive       : Infinity
+    case 'cpClose':       return r.tfCloses     > 0 ? r.spend / r.tfCloses     : Infinity
+    default:              return r.spend || 0
   }
-  return (b.spend || 0) - (a.spend || 0)
+}
+function sortCompare(a, b, key, dir) {
+  const av = sortValue(a, key)
+  const bv = sortValue(b, key)
+  const cmp = av - bv
+  return dir === 'asc' ? cmp : -cmp
 }
 
 const btnGhost = {
