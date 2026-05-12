@@ -1268,7 +1268,7 @@ export default function SalesOverview() {
                   <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-medium ${getColor(parseFloat(c.offerPct), 80, 'above')}`}>{c.offerPct}%</td>
                   <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-medium ${getColor(parseFloat(c.closePct), 25, 'above')}`}>{c.closePct}%</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums whitespace-nowrap">${c.cash.toLocaleString()}</td>
-                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums text-blue-400 whitespace-nowrap">${c.ascendCash.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums text-text-secondary whitespace-nowrap">${c.ascendCash.toLocaleString()}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-bold text-success whitespace-nowrap">${c.totalCash.toLocaleString()}</td>
                 </tr>
               ))}
@@ -1283,7 +1283,7 @@ export default function SalesOverview() {
                   <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums ${getColor(parseFloat(offerRate), 80, 'above')}`}>{offerRate}%</td>
                   <td className={`py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums ${getColor(parseFloat(closeRate), 25, 'above')}`}>{closeRate}%</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums whitespace-nowrap">${ct.cash.toLocaleString()}</td>
-                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums text-blue-400 whitespace-nowrap">${ct.ascendCash.toLocaleString()}</td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums text-text-secondary whitespace-nowrap">${ct.ascendCash.toLocaleString()}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums font-bold text-success whitespace-nowrap">${totalCash.toLocaleString()}</td>
                 </tr>
               </tfoot>
@@ -1388,7 +1388,7 @@ export default function SalesOverview() {
                   <td className="py-2 sm:py-3 px-2 sm:px-4">
                     <span className={`text-[10px] sm:text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${
                       lead.status === 'closed' ? 'bg-success/15 text-success' :
-                      lead.status === 'showed' ? 'bg-blue-500/15 text-blue-400' :
+                      lead.status === 'showed' ? 'bg-bg-card-hover text-text-secondary' :
                       lead.status === 'no_show' ? 'bg-danger/15 text-danger' :
                       lead.status === 'not_closed' ? 'bg-warning/15 text-warning' :
                       'bg-bg-primary text-text-400'

@@ -361,9 +361,9 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
       color: e => { const cal = getCalls(e); return cal > 0 ? clrRate(getLive(e) / cal * 100, 70, 50) : '' } },
     { k: null, label: 'Net Show%', calc: e => { const net = getCalls(e) - (e.cancelled_dtf || 0) - (e.cancelled_by_prospect || 0) - (e.reschedules || 0); return net > 0 ? fmtP(getLive(e), net) : '-' },
       color: e => { const net = getCalls(e) - (e.cancelled_dtf || 0) - (e.cancelled_by_prospect || 0) - (e.reschedules || 0); return net > 0 ? clrRate(getLive(e) / net * 100, 80, 60) : '' } },
-    { k: 'reschedules', label: 'Resch', fmt: fN, color: e => (e.reschedules || 0) > 0 ? 'text-blue-400' : '' },
+    { k: 'reschedules', label: 'Resch', fmt: fN, color: e => (e.reschedules || 0) > 0 ? 'text-text-secondary' : '' },
     { k: null, label: 'R%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(e.reschedules, cal) : '-' },
-      color: e => { const cal = getCalls(e); return cal > 0 && (e.reschedules || 0) > 0 ? 'text-blue-400' : '' } },
+      color: e => { const cal = getCalls(e); return cal > 0 && (e.reschedules || 0) > 0 ? 'text-text-secondary' : '' } },
     { k: 'offers', label: 'Offer', fmt: fN },
     { k: null, label: 'Ofr%', calc: e => getLive(e) > 0 ? fmtP(e.offers, getLive(e)) : '-',
       color: e => getLive(e) > 0 ? clrRate((e.offers || 0) / getLive(e) * 100, 80, 60) : '' },
@@ -1173,7 +1173,7 @@ const DRILLDOWN_CONFIG = {
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
       { key: 'outcome', label: 'Outcome', render: r => r.outcome === 'canceled'
         ? <span className="text-orange-400">Canceled</span>
-        : <span className="text-blue-400">Rescheduled</span> },
+        : <span className="text-text-secondary">Rescheduled</span> },
     ],
     emptyMsg: 'No reschedules or cancellations in this window.',
   },

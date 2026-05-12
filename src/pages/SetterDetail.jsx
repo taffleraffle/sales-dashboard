@@ -586,7 +586,7 @@ export default function SetterDetail() {
                       const hasMultiple = g.calls.length > 1
                       const pipeInfo = phoneToPipeline[normPhone(g.phone)]
                       const stageColor = pipeInfo?.stage ? (
-                        /new lead|triage/i.test(pipeInfo.stage) ? 'text-blue-400'
+                        /new lead|triage/i.test(pipeInfo.stage) ? 'text-text-secondary'
                         : /contact|booked/i.test(pipeInfo.stage) ? 'text-text-primary'
                         : /set call|strategy/i.test(pipeInfo.stage) ? 'text-success'
                         : /no show|lost|dead/i.test(pipeInfo.stage) ? 'text-danger'

@@ -512,7 +512,7 @@ function TeamMembersSection() {
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-sm">{m.name}</span>
-                <span className={`text-[11px] px-2 py-0.5 rounded ${m.role === 'closer' ? 'bg-blue-500/15 text-blue-400' : 'bg-success/15 text-success'}`}>
+                <span className={`text-[11px] px-2 py-0.5 rounded ${m.role === 'closer' ? 'bg-bg-card-hover text-text-secondary' : 'bg-success/15 text-success'}`}>
                   {m.role}
                 </span>
                 {!m.is_active && <span className="text-[11px] px-2 py-0.5 rounded bg-red-500/15 text-red-400">Inactive</span>}

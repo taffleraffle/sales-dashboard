@@ -4,7 +4,7 @@ import { Loader, Calendar, Phone, CheckCircle, ChevronDown, MessageSquare, Mail,
 const tierStyles = {
   critical: 'bg-danger/10 border-l-2 border-danger',
   warning: 'bg-warning/10 border-l-2 border-warning',
-  monitor: 'bg-blue-500/5 border-l-2 border-blue-500/40',
+  monitor: 'bg-bg-card border-l-2 border-border-strong',
   confirmed: '',
   cancel_risk: 'bg-danger/10 border-l-2 border-danger',
 }
@@ -12,7 +12,7 @@ const tierStyles = {
 const tierBadge = {
   critical: 'bg-danger/15 text-danger border-danger/30',
   warning: 'bg-warning/15 text-warning border-warning/30',
-  monitor: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  monitor: 'bg-bg-card-hover text-text-secondary border-border-default',
   confirmed: 'bg-success/15 text-success border-success/30',
   cancel_risk: 'bg-danger/15 text-danger border-danger/30',
 }
@@ -33,7 +33,7 @@ const channelIcons = {
 }
 
 const channelColors = {
-  Call: 'text-blue-400',
+  Call: 'text-text-secondary',
   SMS: 'text-text-primary',
   Email: 'text-purple-400',
   Social: 'text-pink-400',

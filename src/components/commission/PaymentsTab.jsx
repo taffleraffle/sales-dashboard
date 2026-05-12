@@ -187,7 +187,7 @@ export default function PaymentsTab({
           <button onClick={onSync} disabled={syncing} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-purple-500/30 text-purple-400 rounded-sm hover:bg-purple-500/10 disabled:opacity-50 transition-all duration-150">
             {syncing ? <><Loader size={12} className="animate-spin" /> Syncing...</> : <><Download size={12} /> Sync Stripe</>}
           </button>
-          <button onClick={onSyncFanbasis} disabled={syncingFanbasis} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-blue-500/30 text-blue-400 rounded-sm hover:bg-blue-500/10 disabled:opacity-50 transition-all duration-150">
+          <button onClick={onSyncFanbasis} disabled={syncingFanbasis} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border-default text-text-secondary rounded-sm hover:bg-bg-card disabled:opacity-50 transition-all duration-150">
             {syncingFanbasis ? <><Loader size={12} className="animate-spin" /> Syncing...</> : <><Download size={12} /> Sync Fanbasis</>}
           </button>
           <button onClick={() => setShowAddPayment(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 transition-all duration-150"><Plus size={12} /> Add Payment</button>
@@ -229,7 +229,7 @@ export default function PaymentsTab({
                     {pn ? (
                       <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${
                         pastWindow ? 'text-text-400 bg-text-400/10' :
-                        pn === 1 ? 'text-blue-400 bg-blue-500/15' :
+                        pn === 1 ? 'text-text-secondary bg-bg-card-hover' :
                         'text-text-primary bg-opt-yellow/15'
                       }`}>{pnLabels[pn] || `#${pn}`}</span>
                     ) : p.matched ? <span className="text-text-400 text-[10px]">—</span> : null}
@@ -238,7 +238,7 @@ export default function PaymentsTab({
                   <td className="px-3 py-2">
                     <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${
                       p.source === 'stripe' ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' :
-                      p.source === 'fanbasis' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
+                      p.source === 'fanbasis' ? 'bg-bg-card-hover text-text-secondary border-border-default' :
                       'bg-text-400/15 text-text-400 border-text-400/30'
                     }`}>{p.source}</span>
                   </td>

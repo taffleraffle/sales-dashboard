@@ -531,12 +531,12 @@ function RecipientDetail({ recipients, loading }) {
     { key: 'delivered', label: 'Delivered', color: 'text-text-400' },
     { key: 'opened', label: 'Opened', color: 'text-text-primary' },
     { key: 'clicked', label: 'Clicked', color: 'text-success' },
-    { key: 'replied', label: 'Replied', color: 'text-blue-400' },
+    { key: 'replied', label: 'Replied', color: 'text-text-secondary' },
     { key: 'failed', label: 'Failed', color: 'text-danger' },
   ]
 
   const statusBadge = (status, replied) => {
-    if (replied) return <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-semibold">Replied</span>
+    if (replied) return <span className="text-[10px] px-2 py-0.5 rounded-full bg-bg-card text-text-secondary font-semibold">Replied</span>
     if (status === 'clicked') return <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/20 text-success font-semibold">Clicked</span>
     if (status === 'opened') return <span className="text-[10px] px-2 py-0.5 rounded-full bg-opt-yellow/20 text-text-primary font-semibold">Opened</span>
     if (status === 'delivered') return <span className="text-[10px] px-2 py-0.5 rounded-full bg-text-400/15 text-text-400 font-semibold">Delivered</span>

@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 
 const TYPE_COLORS = {
-  trial: { bg: 'bg-blue-500', ring: 'ring-blue-500/30', text: 'text-blue-400' },
+  trial: { bg: 'bg-text-secondary', ring: 'ring-border-strong', text: 'text-text-secondary' },
   monthly: { bg: 'bg-opt-yellow', ring: 'ring-opt-yellow/30', text: 'text-text-primary' },
   ascension: { bg: 'bg-opt-yellow', ring: 'ring-opt-yellow/30', text: 'text-text-primary' },
   recurring: { bg: 'bg-success', ring: 'ring-success/30', text: 'text-success' },
@@ -61,7 +61,7 @@ export default function ClientPaymentTimeline({ client, payments, onClose }) {
                           </span>
                           <span className={`inline-flex px-2 py-0.5 rounded text-[9px] font-medium border capitalize ${
                             p.source === 'stripe' ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' :
-                            p.source === 'fanbasis' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
+                            p.source === 'fanbasis' ? 'bg-bg-card-hover text-text-secondary border-border-default' :
                             'bg-text-400/15 text-text-400 border-text-400/30'
                           }`}>{p.source}</span>
                         </div>

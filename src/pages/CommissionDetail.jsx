@@ -9,7 +9,7 @@ import KPICard from '../components/KPICard'
 import MonthPicker from '../components/MonthPicker'
 
 const TYPE_COLORS = {
-  trial_close: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  trial_close: 'bg-bg-card-hover text-text-secondary border-border-default',
   ascension: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
   recurring: 'bg-success/15 text-success border-success/30',
   bonus: 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30',
@@ -24,7 +24,7 @@ const TYPE_LABELS = {
 
 const STATUS_COLORS = {
   pending: 'bg-warning/15 text-warning border-warning/30',
-  approved: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  approved: 'bg-bg-card-hover text-text-secondary border-border-default',
   paid: 'bg-success/15 text-success border-success/30',
 }
 

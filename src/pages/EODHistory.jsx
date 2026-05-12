@@ -157,7 +157,7 @@ export default function EODHistory({ embedded = false }) {
                 {closers.map(m => (
                   <th key={m.id} className="px-2 py-2.5 text-center min-w-[60px]">
                     <div className="text-[10px] text-text-primary font-medium">{m.name}</div>
-                    <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-semibold">C</span>
+                    <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-bg-card text-text-secondary font-semibold">C</span>
                   </th>
                 ))}
                 {setters.map(m => (
@@ -195,7 +195,7 @@ export default function EODHistory({ embedded = false }) {
                     <td className="px-3 py-2 text-text-primary font-medium whitespace-nowrap cursor-pointer" onClick={() => toggleDate(date)}>
                       <span className="flex items-center gap-1.5">
                         {fmtDate(date)}
-                        {weekend && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium">WE</span>}
+                        {weekend && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-bg-card text-text-secondary font-medium">WE</span>}
                       </span>
                     </td>
                     {closers.map(m => {
@@ -210,7 +210,7 @@ export default function EODHistory({ embedded = false }) {
                           {eod ? (
                             <Check size={14} className="text-success mx-auto" />
                           ) : weekend ? (
-                            <span className="text-blue-400 text-sm font-bold">—</span>
+                            <span className="text-text-secondary text-sm font-bold">—</span>
                           ) : (
                             <X size={14} className="text-danger/50 mx-auto" />
                           )}
@@ -229,7 +229,7 @@ export default function EODHistory({ embedded = false }) {
                           {eod ? (
                             <Check size={14} className="text-success mx-auto" />
                           ) : weekend ? (
-                            <span className="text-blue-400 text-sm font-bold">—</span>
+                            <span className="text-text-secondary text-sm font-bold">—</span>
                           ) : (
                             <X size={14} className="text-danger/50 mx-auto" />
                           )}
@@ -238,7 +238,7 @@ export default function EODHistory({ embedded = false }) {
                     })}
                     <td className="px-3 py-2 text-center cursor-pointer" onClick={() => toggleDate(date)}>
                       {weekend ? (
-                        <span className="text-blue-400 text-[10px] font-medium">—</span>
+                        <span className="text-text-secondary text-[10px] font-medium">—</span>
                       ) : (
                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                           rate === 100 ? 'bg-success/20 text-success' :
@@ -292,7 +292,7 @@ export default function EODHistory({ embedded = false }) {
                         {/* Closer EODs */}
                         {dayCloserEODs.length > 0 && (
                           <div className="mb-3">
-                            <h5 className="text-[10px] text-blue-400 uppercase font-semibold mb-1.5">Closers ({dayCloserEODs.length})</h5>
+                            <h5 className="text-[10px] text-text-secondary uppercase font-semibold mb-1.5">Closers ({dayCloserEODs.length})</h5>
                             <div className="overflow-x-auto">
                               <table className="w-full text-xs">
                                 <thead>

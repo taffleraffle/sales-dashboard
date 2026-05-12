@@ -12,7 +12,7 @@ import { reconcileAttribution } from '../services/attributionReconciliation'
 const closingOutcomes = [
   { value: 'no_show', label: 'No Show', color: 'text-danger' },
   { value: 'canceled', label: 'Canceled', color: 'text-orange-400' },
-  { value: 'rescheduled', label: 'Rescheduled', color: 'text-blue-400' },
+  { value: 'rescheduled', label: 'Rescheduled', color: 'text-text-secondary' },
   { value: 'not_closed', label: 'Not Closed', color: 'text-text-400' },
   { value: 'closed', label: 'Closed', color: 'text-success' },
 ]
@@ -157,7 +157,7 @@ function LeadPicker({ onSelect, onClose }) {
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{lead.lead_name}</span>
                 <span className={`text-[9px] px-1 py-0.5 rounded font-medium ${
-                  lead._source === 'ghl' || lead._source === 'ghl_live' ? 'bg-success/15 text-success' : 'bg-blue-500/15 text-blue-400'
+                  lead._source === 'ghl' || lead._source === 'ghl_live' ? 'bg-success/15 text-success' : 'bg-bg-card-hover text-text-secondary'
                 }`}>
                   {lead._source === 'ghl_live' ? 'GHL Contact' : lead._source === 'ghl' ? 'GHL' : 'Lead'}
                 </span>
@@ -446,7 +446,7 @@ function DealUpdater({ closerId, onClose, onSaved }) {
     setSaving(false)
   }
 
-  const outcomeColor = (o) => o === 'closed' ? 'text-success' : o === 'not_closed' ? 'text-text-400' : o === 'no_show' ? 'text-danger' : o === 'rescheduled' ? 'text-blue-400' : o === 'canceled' ? 'text-orange-400' : 'text-text-400'
+  const outcomeColor = (o) => o === 'closed' ? 'text-success' : o === 'not_closed' ? 'text-text-400' : o === 'no_show' ? 'text-danger' : o === 'rescheduled' ? 'text-text-secondary' : o === 'canceled' ? 'text-orange-400' : 'text-text-400'
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
@@ -503,7 +503,7 @@ function DealUpdater({ closerId, onClose, onSaved }) {
                         item.outcome === 'closed' ? 'bg-success/15 text-success' :
                         item.outcome === 'not_closed' ? 'bg-text-400/10 text-text-400' :
                         item.outcome === 'no_show' ? 'bg-danger/15 text-danger' :
-                        item.outcome === 'rescheduled' ? 'bg-blue-500/15 text-blue-400' :
+                        item.outcome === 'rescheduled' ? 'bg-bg-card-hover text-text-secondary' :
                         'bg-text-400/10 text-text-400'
                       }`}>{item._label}</span>
                     </div>
@@ -548,7 +548,7 @@ function DealUpdater({ closerId, onClose, onSaved }) {
                       outcome === o.value
                         ? o.value === 'closed' ? 'bg-success/20 text-success ring-1 ring-success/40'
                         : o.value === 'not_closed' ? 'bg-text-400/15 text-text-primary ring-1 ring-text-400/30'
-                        : o.value === 'rescheduled' ? 'bg-blue-500/20 text-blue-400 ring-1 ring-blue-400/40'
+                        : o.value === 'rescheduled' ? 'bg-bg-card-hover text-text-secondary ring-1 ring-border-strong'
                         : 'bg-danger/20 text-danger ring-1 ring-danger/40'
                         : 'bg-bg-primary text-text-400 hover:text-text-primary'
                     }`}
@@ -706,7 +706,7 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
           />
         </div>
         <span className={`text-[9px] px-1 py-0.5 rounded ${
-          selectedLead._source === 'ghl' || selectedLead._source === 'ghl_live' ? 'bg-success/15 text-success' : 'bg-blue-500/15 text-blue-400'
+          selectedLead._source === 'ghl' || selectedLead._source === 'ghl_live' ? 'bg-success/15 text-success' : 'bg-bg-card-hover text-text-secondary'
         }`}>
           {selectedLead._source === 'ghl_live' ? 'GHL' : selectedLead._source === 'ghl' ? 'GHL' : 'Lead'}
         </span>
@@ -744,7 +744,7 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{lead.lead_name}</span>
                 <span className={`text-[9px] px-1 py-0.5 rounded font-medium ${
-                  lead._source === 'ghl' || lead._source === 'ghl_live' ? 'bg-success/15 text-success' : 'bg-blue-500/15 text-blue-400'
+                  lead._source === 'ghl' || lead._source === 'ghl_live' ? 'bg-success/15 text-success' : 'bg-bg-card-hover text-text-secondary'
                 }`}>
                   {lead._source === 'ghl_live' ? 'GHL Contact' : lead._source === 'ghl' ? 'GHL' : 'Lead'}
                 </span>
@@ -1002,7 +1002,7 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
                 ['Pickups', setterData.pickups],
                 ['MCs', setterData.meaningful_conversations],
                 ['Sets', setterData.sets, 'text-success'],
-                ['Reschedules', setterData.reschedules, setterData.reschedules > 0 ? 'text-blue-400' : ''],
+                ['Reschedules', setterData.reschedules, setterData.reschedules > 0 ? 'text-text-secondary' : ''],
               ].map(([label, val, color]) => (
                 <div key={label}>
                   <label className="text-[10px] text-text-400 uppercase block mb-1">{label}</label>
@@ -1051,15 +1051,15 @@ function SetterDashboard({ setterId, selectedDate, selectedName, formatDateLabel
           {/* Reschedules — read-only */}
           {savedSetterLeads.filter(l => l.status === 'rescheduled').length > 0 && (
             <div className="tile tile-feedback p-4">
-              <h3 className="text-[11px] text-blue-400 uppercase font-medium mb-3">
+              <h3 className="text-[11px] text-text-secondary uppercase font-medium mb-3">
                 Reschedules ({savedSetterLeads.filter(l => l.status === 'rescheduled').length})
               </h3>
               <div className="space-y-2">
                 {savedSetterLeads.filter(l => l.status === 'rescheduled').map((lead, i) => (
                   <div key={lead.id} className="bg-bg-primary border border-border-default rounded-sm px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-2 sm:gap-3">
-                    <span className="text-[10px] text-blue-400 font-semibold w-16">Resched {i + 1}:</span>
+                    <span className="text-[10px] text-text-secondary font-semibold w-16">Resched {i + 1}:</span>
                     <span className="font-medium text-sm">{lead.lead_name}</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-500/15 text-blue-400">Rescheduled</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-bg-card-hover text-text-secondary">Rescheduled</span>
                     {lead.appointment_date && (
                       <span className="text-[10px] text-text-400 ml-auto">Appt: {lead.appointment_date}</span>
                     )}
@@ -2549,7 +2549,7 @@ export default function EODReview() {
                     <p className="text-[10px] text-text-400 uppercase">No Shows</p>
                   </div>
                   <div className="text-center p-3 bg-bg-primary rounded-sm">
-                    <p className="text-xl font-bold text-blue-400">{summary.rescheduled}</p>
+                    <p className="text-xl font-bold text-text-secondary">{summary.rescheduled}</p>
                     <p className="text-[10px] text-text-400 uppercase">Rescheduled</p>
                   </div>
                   <div className="text-center p-3 bg-bg-primary rounded-sm">
@@ -2594,7 +2594,7 @@ export default function EODReview() {
                         : call.outcome === 'ascended' ? { label: 'Ascended', cls: 'bg-cyan-500/15 text-cyan-400' }
                         : call.outcome === 'no_show' ? { label: 'No Show', cls: 'bg-danger/15 text-danger' }
                         : call.outcome === 'canceled' ? { label: 'Canceled', cls: 'bg-orange-400/15 text-orange-400' }
-                        : call.outcome === 'rescheduled' ? { label: 'Rescheduled', cls: 'bg-blue-500/15 text-blue-400' }
+                        : call.outcome === 'rescheduled' ? { label: 'Rescheduled', cls: 'bg-bg-card-hover text-text-secondary' }
                         : call.outcome === 'not_closed' ? { label: 'Not Closed', cls: 'bg-text-400/15 text-text-400' }
                         : call.outcome === 'not_ascended' ? { label: "Didn't Ascend", cls: 'bg-text-400/15 text-text-400' }
                         : { label: call.outcome || '—', cls: 'bg-text-400/15 text-text-400' }
@@ -2721,7 +2721,7 @@ export default function EODReview() {
                           </span>
                         )}
                         {hasLeads && (
-                          <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/15 text-blue-400">
+                          <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-bg-card-hover text-text-secondary">
                             + Leads
                           </span>
                         )}
@@ -2757,7 +2757,7 @@ export default function EODReview() {
                         : isClosedOrAscended ? 'border-success/30'
                         : isNoShow ? 'border-danger/30'
                         : isCanceled ? 'border-orange-400/30'
-                        : isRescheduled ? 'border-blue-400/30'
+                        : isRescheduled ? 'border-border-default'
                         : 'border-border-default'
                       }`}
                     >
@@ -2812,7 +2812,7 @@ export default function EODReview() {
                                   ? o.value === 'closed' || o.value === 'ascended' ? 'bg-success text-white'
                                     : o.value === 'no_show' ? 'bg-danger text-white'
                                     : o.value === 'canceled' ? 'bg-orange-400 text-white'
-                                    : o.value === 'rescheduled' ? 'bg-blue-500 text-white'
+                                    : o.value === 'rescheduled' ? 'bg-text-secondary text-white'
                                     : o.value === 'not_ascended' ? 'bg-text-400/80 text-white'
                                     : 'bg-text-400/60 text-white'
                                   : 'bg-bg-primary text-text-400 hover:text-text-primary hover:bg-bg-primary/80 border border-border-default'
@@ -2976,7 +2976,7 @@ export default function EODReview() {
                     {summary.rescheduled > 0 && (
                       <div className="flex justify-between text-xs">
                         <span className="text-text-400">Reschedule Rate</span>
-                        <span className="text-blue-400">{rescheduleRate}%</span>
+                        <span className="text-text-secondary">{rescheduleRate}%</span>
                       </div>
                     )}
                   </div>
@@ -2999,7 +2999,7 @@ export default function EODReview() {
                     {summary.rescheduled > 0 && (
                       <div className="flex justify-between text-xs">
                         <span className="text-text-400">Rescheduled</span>
-                        <span className="text-blue-400">{summary.rescheduled}</span>
+                        <span className="text-text-secondary">{summary.rescheduled}</span>
                       </div>
                     )}
                   </div>

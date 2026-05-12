@@ -370,7 +370,7 @@ const OUTCOME_META = {
   not_closed:   { label: 'Not Closed',  bar: 'bg-text-400',    chip: 'bg-text-400/15 text-text-400 border-border-default' },
   not_ascended: { label: "Didn't Asc",  bar: 'bg-text-400',    chip: 'bg-text-400/15 text-text-400 border-border-default' },
   no_show:      { label: 'No Show',     bar: 'bg-danger',      chip: 'bg-danger/15 text-danger border-danger/30' },
-  rescheduled:  { label: 'Rescheduled', bar: 'bg-blue-400',    chip: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
+  rescheduled:  { label: 'Rescheduled', bar: 'bg-text-secondary',    chip: 'bg-bg-card-hover text-text-secondary border-border-default' },
 }
 
 const TYPE_META = {

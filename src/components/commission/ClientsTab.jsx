@@ -7,7 +7,7 @@ import ClientPaymentTimeline from '../ClientPaymentTimeline'
 import GHLImportModal from '../GHLImportModal'
 
 const STAGE_COLORS = {
-  trial: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  trial: 'bg-bg-card-hover text-text-secondary border-border-default',
   ascended: 'bg-success/15 text-success border-success/30',
   churned: 'bg-danger/15 text-danger border-danger/30',
   paused: 'bg-warning/15 text-warning border-warning/30',
@@ -356,7 +356,7 @@ export default function ClientsTab({ clients, members, payments, refreshClients,
                       {(() => {
                         const pc = c.payment_count || 0
                         const labels = ['No payments', 'Trial', 'Month 1', 'Month 2', 'Month 3', 'Month 4+']
-                        const colors = ['text-danger', 'text-blue-400', 'text-text-primary', 'text-text-primary', 'text-success', 'text-success']
+                        const colors = ['text-danger', 'text-text-secondary', 'text-text-primary', 'text-text-primary', 'text-success', 'text-success']
                         return <span className={`text-[10px] font-medium ${colors[Math.min(pc, 5)]}`}>{labels[Math.min(pc, 5)]}</span>
                       })()}
                     </td>

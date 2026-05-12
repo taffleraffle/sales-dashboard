@@ -8,7 +8,7 @@ import { Bot, Loader2, ChevronDown, ChevronUp, Filter, Zap, Phone, RefreshCw, Ch
 
 const SEQ_COLORS = {
   pre_call: 'bg-emerald-500/20 text-emerald-400',
-  after_hours: 'bg-blue-500/20 text-blue-400',
+  after_hours: 'bg-bg-card text-text-secondary',
   post_call: 'bg-purple-500/20 text-purple-400',
   re_engage: 'bg-amber-500/20 text-amber-400',
   non_responsive_confirm: 'bg-red-500/20 text-red-400',
@@ -405,7 +405,7 @@ function ConversationRow({ convo }) {
         <td className="py-2.5 px-3 text-xs text-text-400">{timeAgo(convo.updated_at)}</td>
         <td className="py-2.5 px-3 text-xs text-text-secondary max-w-[200px] truncate">
           {lastMsg?.direction === 'inbound' && <span className="text-emerald-400 mr-1">&larr;</span>}
-          {lastMsg?.direction === 'outbound' && <span className="text-blue-400 mr-1">&rarr;</span>}
+          {lastMsg?.direction === 'outbound' && <span className="text-text-secondary mr-1">&rarr;</span>}
           {lastMsg?.content?.slice(0, 50) || ''}
         </td>
       </tr>
@@ -427,7 +427,7 @@ function ConversationRow({ convo }) {
                     <div key={i} className={`flex ${msg.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[75%] rounded-sm px-3 py-2 ${
                         msg.direction === 'outbound'
-                          ? 'bg-blue-500/15 border border-blue-500/20'
+                          ? 'bg-bg-card-hover border border-border-default'
                           : 'bg-bg-card border border-border-default'
                       }`}>
                         <p className="text-sm text-text-primary">{msg.content}</p>
