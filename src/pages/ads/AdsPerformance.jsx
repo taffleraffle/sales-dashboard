@@ -385,18 +385,20 @@ export default function AdsPerformance() {
         // (vs ads-attributed sub-counts) and surface the gap explicitly.
         fetchAllPaged(() => supabase
           .from('marketing_tracker')
-          .select('date, leads, net_new_calls, nc_booked, new_live_calls, live_calls, offers, closes, trial_cash, trial_revenue')
+          .select('date, leads, net_new_calls, new_live_calls, live_calls, offers, closes, trial_cash, trial_revenue')
           .gte('date', startStr).lte('date', endStr)),
       ])
 
       // Aggregate marketing_tracker totals (source-of-truth headline numbers).
-      // Note net_new_calls is the daily NC-bookings column — same one the
-      // marketing dashboard sums into the "Booked" KPI.
+      // net_new_calls is the daily NC-bookings column (the marketing
+      // dashboard's "Booked" KPI). new_live_calls is the NC-only live count;
+      // live_calls is the NC+FU total — we use new_live_calls when present
+      // so headline math matches the marketing dashboard's NC-only path.
       const truth = { leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 }
       for (const r of mtRows) {
         truth.leads   += parseInt(r.leads || 0)
-        truth.booked  += parseInt((r.net_new_calls ?? r.nc_booked) || 0)
-        truth.live    += parseInt((r.new_live_calls ?? r.live_calls) || 0)
+        truth.booked  += parseInt(r.net_new_calls || 0)
+        truth.live    += parseInt((r.new_live_calls != null ? r.new_live_calls : r.live_calls) || 0)
         truth.closes  += parseInt(r.closes || 0)
         truth.revenue += parseFloat(r.trial_revenue || 0)
         truth.cash    += parseFloat(r.trial_cash || 0)
