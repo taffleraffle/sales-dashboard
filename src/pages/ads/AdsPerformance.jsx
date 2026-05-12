@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader, AlertCircle, ChevronRight, ChevronDown, Search, ArrowDown, ArrowUp } from 'lucide-react'
+import { Loader, AlertCircle, ChevronRight, ChevronDown, Search, ArrowDown, ArrowUp, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
 /*
