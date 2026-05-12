@@ -264,36 +264,78 @@ export default function AdsPerformance() {
   // startStr/endStr are 'YYYY-MM-DD' strings. Default = last 30 days.
   const [dateRange, setDateRange] = useState(() => initialDateRange(30))
 
-  const load = async () => {
-    setLoading(true); setError(null)
-    try {
-      const { startStr, endStr } = dateRange
+  // Internal: ad list cached on the instance so date-scoped reloads don't
+  // re-paginate the full ads table on every chip click. Cleared on unmount
+  // by React when the component disposes.
+  const adsCacheRef = (typeof window !== 'undefined') ? (window.__adsPerfAdsCache || (window.__adsPerfAdsCache = { data: null })) : { data: null }
 
+  // Static load: things that don't change with the date window. Runs once
+  // on mount. Includes ads list, HYROS, GHL booked/lives rollups (all
+  // aggregate-across-time views).
+  const loadStatic = async () => {
+    try {
       // 1. Ads — paginated so we never silently cap at 1000.
-      const adsLoaded = []
-      let adOffset = 0
-      const AD_PAGE = 1000
-      while (true) {
-        const { data: adRows, error: aErr } = await supabase
-          .from('ads')
-          .select('ad_id, ad_name, status, effective_status, campaign_id, campaign_name, adset_id, adset_name, thumbnail_url, asset_url, asset_type, first_seen_at')
-          .order('first_seen_at', { ascending: false })
-          .range(adOffset, adOffset + AD_PAGE - 1)
-        if (aErr) throw new Error(aErr.message)
-        if (!adRows || !adRows.length) break
-        adsLoaded.push(...adRows)
-        if (adRows.length < AD_PAGE) break
-        adOffset += AD_PAGE
+      let adsLoaded = adsCacheRef.data
+      if (!adsLoaded) {
+        adsLoaded = []
+        let adOffset = 0
+        const AD_PAGE = 1000
+        while (true) {
+          const { data: adRows, error: aErr } = await supabase
+            .from('ads')
+            .select('ad_id, ad_name, status, effective_status, campaign_id, campaign_name, adset_id, adset_name, thumbnail_url, asset_url, asset_type, first_seen_at')
+            .order('first_seen_at', { ascending: false })
+            .range(adOffset, adOffset + AD_PAGE - 1)
+          if (aErr) throw new Error(aErr.message)
+          if (!adRows || !adRows.length) break
+          adsLoaded.push(...adRows)
+          if (adRows.length < AD_PAGE) break
+          adOffset += AD_PAGE
+        }
+        adsCacheRef.data = adsLoaded
       }
       setAds(adsLoaded)
 
-      // Stats coverage check — tells the operator what date range Meta has
-      // actually synced into ad_daily_stats, since the dashboard's date
-      // picker can ask for periods that don't exist yet.
+      // Stats coverage (range Meta has actually synced)
       const { data: covMin } = await supabase.from('ad_daily_stats').select('date').order('date', { ascending: true }).limit(1)
       const { data: covMax } = await supabase.from('ad_daily_stats').select('date').order('date', { ascending: false }).limit(1)
       if (covMin?.[0] && covMax?.[0]) setDataCoverage({ earliest: covMin[0].date, latest: covMax[0].date })
 
+      // HYROS attribution (already aggregated across time)
+      const { data: hRows } = await supabase
+        .from('lib_hyros_ad_attribution')
+        .select('ad_id, calls_attributed, calls_qualified, revenue_attributed')
+      const hyMap = {}
+      for (const h of hRows || []) hyMap[h.ad_id] = h
+      setHyros(hyMap)
+
+      // GHL bookings + lives — aggregate-across-time rollup views.
+      // These do not depend on the dashboard's date filter (attribution
+      // to ad is permanent), so we fetch them once on mount.
+      const [bAd, bAdset, bCamp, lAd, lAdset, lCamp] = await Promise.all([
+        supabase.from('lib_ghl_booked_per_ad').select('ad_id, booked_calls'),
+        supabase.from('lib_ghl_booked_per_adset').select('adset_id, booked_calls'),
+        supabase.from('lib_ghl_booked_per_campaign').select('utm_campaign, booked_calls'),
+        supabase.from('lib_ghl_lives_per_ad').select('ad_id, live_calls'),
+        supabase.from('lib_ghl_lives_per_adset').select('adset_id, live_calls'),
+        supabase.from('lib_ghl_lives_per_campaign').select('utm_campaign, live_calls'),
+      ])
+      const toMap = (rows, key, val) => Object.fromEntries((rows.data || []).map(r => [r[key], val(r)]))
+      setGhlBookedAd      (toMap(bAd,    'ad_id',        r => r.booked_calls))
+      setGhlBookedAdset   (toMap(bAdset, 'adset_id',     r => r.booked_calls))
+      setGhlBookedCampaign(toMap(bCamp,  'utm_campaign', r => r.booked_calls))
+      setGhlLivesAd       (toMap(lAd,    'ad_id',        r => r.live_calls))
+      setGhlLivesAdset    (toMap(lAdset, 'adset_id',     r => r.live_calls))
+      setGhlLivesCampaign (toMap(lCamp,  'utm_campaign', r => r.live_calls))
+    } catch (e) { setError(e.message) }
+  }
+
+  const load = async () => {
+    setLoading(true); setError(null)
+    try {
+      const { startStr, endStr } = dateRange
+      // Ads list comes from the static cache (loadStatic guarantees it's set first)
+      const adsLoaded = adsCacheRef.data || []
       const adIds = adsLoaded.map(a => a.ad_id)
       if (!adIds.length) { setLoading(false); return }
 
@@ -324,14 +366,6 @@ export default function AdsPerformance() {
         offset += PAGE
       }
       setStats(perAd)
-
-      // 3. HYROS attribution (unchanged — already 90d in the view)
-      const { data: hRows } = await supabase
-        .from('lib_hyros_ad_attribution')
-        .select('ad_id, calls_attributed, calls_qualified, revenue_attributed')
-      const hyMap = {}
-      for (const h of hRows || []) hyMap[h.ad_id] = h
-      setHyros(hyMap)
 
       // 4. Typeform attribution — query the per-prospect detail view
       // directly, filter by submitted_at, and aggregate client-side.
@@ -453,30 +487,16 @@ export default function AdsPerformance() {
       setGhlLeadsAdset(gAdset)
       setGhlLeadsCampaign(gCamp)
 
-      // 7. GHL bookings + lives (paid-lead-form leads who booked / showed),
-      //    plus real payment revenue. These views aggregate across all
-      //    time (not date-filtered) because attribution to ad is permanent.
-      const [bAd, bAdset, bCamp, lAd, lAdset, lCamp] = await Promise.all([
-        supabase.from('lib_ghl_booked_per_ad').select('ad_id, booked_calls'),
-        supabase.from('lib_ghl_booked_per_adset').select('adset_id, booked_calls'),
-        supabase.from('lib_ghl_booked_per_campaign').select('utm_campaign, booked_calls'),
-        supabase.from('lib_ghl_lives_per_ad').select('ad_id, live_calls'),
-        supabase.from('lib_ghl_lives_per_adset').select('adset_id, live_calls'),
-        supabase.from('lib_ghl_lives_per_campaign').select('utm_campaign, live_calls'),
-      ])
-      const toMap = (rows, key, val) => Object.fromEntries((rows.data || []).map(r => [r[key], val(r)]))
-      setGhlBookedAd      (toMap(bAd,    'ad_id',        r => r.booked_calls))
-      setGhlBookedAdset   (toMap(bAdset, 'adset_id',     r => r.booked_calls))
-      setGhlBookedCampaign(toMap(bCamp,  'utm_campaign', r => r.booked_calls))
-      setGhlLivesAd       (toMap(lAd,    'ad_id',        r => r.live_calls))
-      setGhlLivesAdset    (toMap(lAdset, 'adset_id',     r => r.live_calls))
-      setGhlLivesCampaign (toMap(lCamp,  'utm_campaign', r => r.live_calls))
-
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
-  // Re-run on date-range change.
-  useEffect(() => { load() }, [dateRange.startStr, dateRange.endStr])
+  // Mount: fetch all date-invariant data once, then the date-scoped load.
+  useEffect(() => { (async () => { await loadStatic(); await load() })() }, [])
+  // Subsequent date-range changes only re-run the date-scoped load.
+  useEffect(() => {
+    if (!adsCacheRef.data) return  // first mount path handled above
+    load()
+  }, [dateRange.startStr, dateRange.endStr])
 
   // Build the hierarchical tree: campaign → adset → ads, with rollups.
   // Parent status is derived bottom-up: if ANY descendant ad is ACTIVE the
