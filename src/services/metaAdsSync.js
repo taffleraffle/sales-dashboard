@@ -502,20 +502,23 @@ async function fetchAdLevelInsights(days = 90) {
       batch.push({
         ad_id: row.ad_id,
         date: row.date_start,
-        spend: parseFloat(row.spend || 0),
+        // The OPT ad account bills in NZD. Convert at sync time so the
+        // dashboard never has to know about the currency mismatch — every
+        // spend / cpc / cpm value in ad_daily_stats is USD.
+        spend: parseFloat(row.spend || 0) * NZD_TO_USD,
         impressions: parseInt(row.impressions || 0),
         reach: parseInt(row.reach || 0),
         frequency: parseFloat(row.frequency || 0),
         clicks: parseInt(row.clicks || 0),
         unique_clicks: parseInt(row.unique_clicks || 0),
         ctr: row.ctr != null ? parseFloat(row.ctr) : null,
-        cpc: row.cpc != null ? parseFloat(row.cpc) : null,
-        cpm: row.cpm != null ? parseFloat(row.cpm) : null,
+        cpc: row.cpc != null ? parseFloat(row.cpc) * NZD_TO_USD : null,
+        cpm: row.cpm != null ? parseFloat(row.cpm) * NZD_TO_USD : null,
         video_3s_views: v3sAction ? parseInt(v3sAction.value) : 0,
         video_thruplays: thruAction ? parseInt(thruAction.value) : 0,
         video_avg_time_watched: avgTimeAction ? parseFloat(avgTimeAction.value) : null,
         results: resultAction ? parseInt(resultAction.value) : 0,
-        cost_per_result: costPerResult ? parseFloat(costPerResult.value) : null,
+        cost_per_result: costPerResult ? parseFloat(costPerResult.value) * NZD_TO_USD : null,
         raw_payload: row,
         synced_at: new Date().toISOString(),
       })
