@@ -40,6 +40,32 @@ const SORT_OPTIONS = [
   { value: 'cpa_asc',     label: 'Cost / qual booked ↑' },
 ]
 
+// Date utilities for the range picker. Returns { preset, startStr, endStr }
+// where startStr/endStr are 'YYYY-MM-DD'. preset values: '7' | '30' | '90' | 'all' | 'custom'.
+function initialDateRange(days) {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - days + 1)
+  return {
+    preset: String(days),
+    startStr: start.toISOString().split('T')[0],
+    endStr:   end.toISOString().split('T')[0],
+  }
+}
+function rangeFromPreset(preset) {
+  if (preset === 'all') {
+    // 'all' = last 2 years — long enough to feel like all-time without
+    // pulling ten years of ad_daily_stats.
+    return initialDateRange(730)
+  }
+  return initialDateRange(parseInt(preset, 10) || 30)
+}
+function rangeLabel(r) {
+  if (r.preset === 'all') return 'All time (last 2 years)'
+  if (r.preset === 'custom') return `${r.startStr} → ${r.endStr}`
+  return `Last ${r.preset} days (${r.startStr} → ${r.endStr})`
+}
+
 function fmt$(n) {
   if (n == null || isNaN(n) || n === 0) return '—'
   if (n >= 10000) return `$${(n / 1000).toFixed(1)}k`
@@ -50,6 +76,7 @@ function fmtN(n) {
   if (n == null || isNaN(n) || n === 0) return '—'
   return Math.round(n).toLocaleString()
 }
+
 
 // KPI cost-per-metric benchmarks (USD). Below green = great. Between green and
 // yellow = OK. Above yellow = burning money. All thresholds picked off OPT's
@@ -71,6 +98,17 @@ function kpiColor(value, threshold) {
   if (value <= threshold.yellow) return '#b88714'  // amber — borderline
   return '#b41e1e'                                  // red — over budget
 }
+
+// "Profitable" = at least one closed deal AND CAC is in the green tier.
+// Used to light up the entire row in pale green so winners are obvious
+// at a glance across the campaign / adset / ad hierarchy.
+function isRowProfitable(rollup) {
+  if (!rollup || !rollup.tfCloses || rollup.tfCloses <= 0) return false
+  if (!rollup.spend || rollup.spend <= 0) return false
+  const cac = rollup.spend / rollup.tfCloses
+  return cac <= KPI.costPerClose.green
+}
+const PROFITABLE_BG = 'rgba(31, 122, 58, 0.10)'   // pale green tint
 
 // Render a cost cell with color + up/down arrow vs benchmark.
 // onClick (optional) makes the value clickable for drill-down.
@@ -146,10 +184,15 @@ export default function AdsPerformance() {
   const [sort, setSort] = useState('spend_desc')
   // Drill-down modal state: { scope: { level, id, label }, metric, title }
   const [drill, setDrill] = useState(null)
+  // Date range: { preset, startStr, endStr }. `preset` is one of 7|30|90|all|custom.
+  // startStr/endStr are 'YYYY-MM-DD' strings. Default = last 30 days.
+  const [dateRange, setDateRange] = useState(() => initialDateRange(30))
 
   const load = async () => {
     setLoading(true); setError(null)
     try {
+      const { startStr, endStr } = dateRange
+
       // 1. Ads
       const { data: adRows, error: aErr } = await supabase
         .from('ads')
@@ -163,9 +206,8 @@ export default function AdsPerformance() {
       const adIds = adsLoaded.map(a => a.ad_id)
       if (!adIds.length) { setLoading(false); return }
 
-      // 2. Stats — paged to bypass PostgREST 1000-row cap
-      const since = new Date(); since.setDate(since.getDate() - 30)
-      const sinceStr = since.toISOString().split('T')[0]
+      // 2. Stats — paged to bypass PostgREST 1000-row cap. Filtered to
+      // the active date range.
       const perAd = {}
       const PAGE = 1000
       let offset = 0
@@ -174,7 +216,8 @@ export default function AdsPerformance() {
           .from('ad_daily_stats')
           .select('ad_id, spend, impressions, clicks, results')
           .in('ad_id', adIds)
-          .gte('date', sinceStr)
+          .gte('date', startStr)
+          .lte('date', endStr)
           .range(offset, offset + PAGE - 1)
         if (sErr) throw new Error(sErr.message)
         if (!data || !data.length) break
@@ -191,7 +234,7 @@ export default function AdsPerformance() {
       }
       setStats(perAd)
 
-      // 3. HYROS attribution
+      // 3. HYROS attribution (unchanged — already 90d in the view)
       const { data: hRows } = await supabase
         .from('lib_hyros_ad_attribution')
         .select('ad_id, calls_attributed, calls_qualified, revenue_attributed')
@@ -199,28 +242,57 @@ export default function AdsPerformance() {
       for (const h of hRows || []) hyMap[h.ad_id] = h
       setHyros(hyMap)
 
-      // 3a. Typeform attribution — per ad, per ad set, per campaign.
-      // All three levels because some leads only attribute up to adset or
-      // campaign (the utm_content didn't match an exact ad name).
-      const [{ data: tfAdRows }, { data: tfAdsetRows }, { data: tfCampRows }] = await Promise.all([
-        supabase.from('lib_typeform_ad_attribution').select('*'),
-        supabase.from('lib_typeform_adset_attribution').select('*'),
-        supabase.from('lib_typeform_campaign_attribution').select('*'),
-      ])
-      const tfAdMap = {}
-      for (const r of tfAdRows || []) tfAdMap[r.ad_id] = r
+      // 4. Typeform attribution — query the per-prospect detail view
+      // directly, filter by submitted_at, and aggregate client-side.
+      // We do this instead of querying the pre-aggregated rollup views
+      // because those don't honour a date filter.
+      const detailRows = []
+      let dOff = 0
+      while (true) {
+        const { data, error: dErr } = await supabase
+          .from('lib_typeform_response_detail')
+          .select('response_id, submitted_at, ad_id, adset_id, utm_campaign, qualified, is_booked, is_live, is_closed, revenue, cash_collected')
+          .gte('submitted_at', startStr + 'T00:00:00Z')
+          .lte('submitted_at', endStr   + 'T23:59:59Z')
+          .range(dOff, dOff + PAGE - 1)
+        if (dErr) throw new Error(dErr.message)
+        if (!data || !data.length) break
+        detailRows.push(...data)
+        if (data.length < PAGE) break
+        dOff += PAGE
+      }
+      const tfAdMap = {}, tfAdsetMap = {}, tfCampMap = {}
+      for (const r of detailRows) {
+        const stamp = (target, key) => {
+          if (!key) return
+          let row = target[key]
+          if (!row) {
+            row = target[key] = { leads: 0, qualified_leads: 0, booked_calls: 0, qualified_booked_calls: 0, live_calls: 0, closes: 0, revenue_attributed: 0, cash_attributed: 0 }
+          }
+          row.leads++
+          if (r.qualified)               row.qualified_leads++
+          if (r.is_booked)               row.booked_calls++
+          if (r.is_booked && r.qualified) row.qualified_booked_calls++
+          if (r.is_live)                 row.live_calls++
+          if (r.is_closed) {
+            row.closes++
+            row.revenue_attributed += parseFloat(r.revenue || 0)
+            row.cash_attributed    += parseFloat(r.cash_collected || 0)
+          }
+        }
+        stamp(tfAdMap,    r.ad_id)
+        stamp(tfAdsetMap, r.adset_id)
+        stamp(tfCampMap,  r.utm_campaign)
+      }
       setTfAd(tfAdMap)
-      const tfAdsetMap = {}
-      for (const r of tfAdsetRows || []) tfAdsetMap[r.adset_id] = r
       setTfAdset(tfAdsetMap)
-      const tfCampMap = {}
-      for (const r of tfCampRows || []) tfCampMap[r.utm_campaign] = r
       setTfCampaign(tfCampMap)
 
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
-  useEffect(() => { load() }, [])
+  // Re-run on date-range change.
+  useEffect(() => { load() }, [dateRange.startStr, dateRange.endStr])
 
   // Build the hierarchical tree: campaign → adset → ads, with rollups.
   // Parent status is derived bottom-up: if ANY descendant ad is ACTIVE the
@@ -403,7 +475,40 @@ export default function AdsPerformance() {
       </div>
 
       {/* Filter bar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 16 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
+        <ChipGroup
+          label="Range"
+          value={dateRange.preset}
+          setValue={(v) => setDateRange(v === 'custom'
+            ? { ...dateRange, preset: 'custom' }
+            : rangeFromPreset(v))}
+          options={[
+            { value: '7',      label: '7d' },
+            { value: '30',     label: '30d' },
+            { value: '90',     label: '90d' },
+            { value: 'all',    label: 'All' },
+            { value: 'custom', label: 'Custom' },
+          ]}
+        />
+        {dateRange.preset === 'custom' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="date"
+              value={dateRange.startStr}
+              max={dateRange.endStr}
+              onChange={e => setDateRange({ ...dateRange, preset: 'custom', startStr: e.target.value })}
+              style={dateInputStyle}
+            />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>→</span>
+            <input
+              type="date"
+              value={dateRange.endStr}
+              min={dateRange.startStr}
+              onChange={e => setDateRange({ ...dateRange, preset: 'custom', endStr: e.target.value })}
+              style={dateInputStyle}
+            />
+          </div>
+        )}
         <ChipGroup label="Status" value={statusFilter} setValue={setStatusFilter} options={STATUS_OPTIONS} />
         <ChipGroup label="Sort"   value={sort}         setValue={setSort}         options={SORT_OPTIONS} />
         <div style={{ flex: '1 1 200px', minWidth: 180, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
@@ -411,6 +516,11 @@ export default function AdsPerformance() {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search campaign / ad set / ad…"
             style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }} />
         </div>
+      </div>
+
+      {/* Current range — always visible so it's clear what window is in play */}
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 12 }}>
+        Showing: {rangeLabel(dateRange)}
       </div>
 
       {error && (
@@ -490,7 +600,8 @@ function CampaignBlock({ camp, open, onToggle, expandedAdSets, onToggleAdSet, on
           cursor: 'pointer',
           borderTop: '2px solid var(--ink)',
           borderBottom: '1px solid var(--rule)',
-          background: 'var(--paper-2)',
+          background: isRowProfitable(camp.rollup) ? PROFITABLE_BG : 'var(--paper-2)',
+          borderLeft: isRowProfitable(camp.rollup) ? '3px solid #1f7a3a' : undefined,
         }}
       >
         <Td>
@@ -550,7 +661,13 @@ function AdSetBlock({ set, open, onToggle, onDrill }) {
   const adsetScope = { level: 'adset', id: set.id, label: set.name }
   return (
     <>
-      <tr onClick={onToggle} style={{ cursor: 'pointer', borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+      <tr onClick={onToggle} style={{
+        cursor: 'pointer',
+        borderTop: '1px solid var(--rule)',
+        borderBottom: '1px solid var(--rule)',
+        background: isRowProfitable(set.rollup) ? PROFITABLE_BG : 'var(--paper-2)',
+        borderLeft: isRowProfitable(set.rollup) ? '3px solid #1f7a3a' : undefined,
+      }}>
         <Td>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 28 }}>
             {open ? <ChevronDown size={12} style={{ color: 'var(--ink-3)' }} /> : <ChevronRight size={12} style={{ color: 'var(--ink-3)' }} />}
@@ -567,7 +684,11 @@ function AdSetBlock({ set, open, onToggle, onDrill }) {
         <Td />
       </tr>
       {open && set.ads.map(({ ad, rollup, isActive }) => (
-        <tr key={ad.ad_id} style={{ borderBottom: '1px solid var(--rule)' }}>
+        <tr key={ad.ad_id} style={{
+          borderBottom: '1px solid var(--rule)',
+          background: isRowProfitable(rollup) ? PROFITABLE_BG : undefined,
+          borderLeft: isRowProfitable(rollup) ? '3px solid #1f7a3a' : undefined,
+        }}>
           <Td>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 56 }}>
               <StatusDot active={isActive} size={6} />
@@ -815,6 +936,12 @@ const btnGhost = {
   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
   background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 3,
   fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
+}
+
+const dateInputStyle = {
+  background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2,
+  padding: '4px 6px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)',
+  outline: 'none',
 }
 
 // ── Drill-down modal ────────────────────────────────────────────────
