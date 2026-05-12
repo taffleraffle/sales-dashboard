@@ -15,6 +15,7 @@ const SYNC_INTERVALS = {
   marketingTracker: 1 * 60 * 60 * 1000, // 1 hour
   meta: 1 * 60 * 60 * 1000,          // 1 hour — Meta Ads spend + GHL pipeline leads/bookings
   metaAds: 1 * 60 * 60 * 1000,       // 1 hour — per-ad insights + creative metadata
+  typeform: 1 * 60 * 60 * 1000,      // 1 hour — Typeform responses (h4il4Sla + WndFLJux)
 }
 
 const SYNC_LABELS = {
@@ -25,6 +26,7 @@ const SYNC_LABELS = {
   marketingTracker: 'Marketing (EOD)',
   meta: 'Marketing (Meta + GHL)',
   metaAds: 'Meta Ads (per-ad)',
+  typeform: 'Typeform responses',
 }
 
 function lastRun(key) {
@@ -189,6 +191,35 @@ async function syncMetaAdLevel(force = false) {
   } finally { notify() }
 }
 
+// Typeform responses — feeds public.typeform_responses, which the
+// lib_typeform_*_attribution views join to public.ads + ghl_appointments
+// to surface cost/lead, cost/booked, cost/qual_booked, cost/live, cost/close
+// at the ad / ad-set / campaign level on /sales/ads/performance.
+async function syncTypeform(force = false) {
+  if (!shouldRun('typeform', force)) return
+  markRun('typeform')
+  try {
+    const r = await fetch('https://kjfaqhmllagbxjdxlopm.supabase.co/functions/v1/sync-typeform', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ days: 90 }),
+    })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const data = await r.json()
+    const totalFetched = Object.values(data.forms || {}).reduce((sum, f) => sum + (f.fetched || 0), 0)
+    console.log('[auto-sync] Typeform:', totalFetched, 'responses,', data.ad_resolved || 0, 'ad_ids resolved')
+    clearError('typeform')
+    clearCooldown('typeform')
+  } catch (e) {
+    console.warn('[auto-sync] Typeform failed:', e.message)
+    markError('typeform', e)
+    if (isRateLimitErr(e)) markCooldown('typeform')
+  } finally { notify() }
+}
+
 // Meta Ads spend + GHL pipeline leads + GHL calendar bookings — all in one call.
 // This was previously ONLY triggered by a manual "Sync Data" button on the marketing page.
 async function syncMeta(force = false) {
@@ -222,7 +253,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
  * steady-state cost of sequential execution is essentially zero.
  */
 export async function runAutoSync({ force = false } = {}) {
-  const tasks = [syncStripe, syncFanbasis, syncGHL, syncEmails, syncMarketingTracker, syncMeta, syncMetaAdLevel]
+  const tasks = [syncStripe, syncFanbasis, syncGHL, syncEmails, syncMarketingTracker, syncMeta, syncMetaAdLevel, syncTypeform]
   for (const task of tasks) {
     try { await task(force) } catch (_e) { void _e }
     await sleep(500)
