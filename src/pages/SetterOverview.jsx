@@ -330,7 +330,14 @@ export default function SetterOverview() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 mb-6">
         <Gauge label="Pickup Rate" value={parseFloat(pickupRate)} target={30} />
         <Gauge label="Show Rate" value={parseFloat(showRate)} target={70} />
-        <Gauge label="Close Rate" value={parseFloat(closeRate)} target={25} />
+        {/* Close rate here is SCOPED to setter-booked leads only (subset of
+            closer universe). The company close rate on /sales/closers and
+            /sales/marketing measures all live new-calls, not just
+            setter-booked. Labelling explicitly so the difference doesn't
+            read as a bug. */}
+        <div title="Of the leads setters booked that showed (showed + not_closed + closed), what % closed. This is a SUBSET of company close rate — setter-booked leads typically convert higher than the full lead universe seen on /sales/closers and /sales/marketing.">
+          <Gauge label="Close · Setter-booked" value={parseFloat(closeRate)} target={25} />
+        </div>
         <Gauge label="MC → Set %" value={companyRates.mcToSet} target={30} max={100} />
       </div>
 
@@ -436,10 +443,12 @@ export default function SetterOverview() {
                 </div>
               </div>
 
-              {/* Gauges */}
+              {/* Gauges — Close rate label notes the setter-booked scope */}
               <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3 sm:mb-4">
                 <Gauge label="Show Rate" value={s.showRate} target={70} />
-                <Gauge label="Close Rate" value={s.closeRate} target={25} />
+                <div title="Of YOUR booked leads that showed, what % closed. Subset of company close rate.">
+                  <Gauge label="Close · Booked" value={s.closeRate} target={25} />
+                </div>
                 <Gauge label="Pickup %" value={s.pickupRate} target={30} />
               </div>
 

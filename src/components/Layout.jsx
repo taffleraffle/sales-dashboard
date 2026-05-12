@@ -10,15 +10,17 @@ import { UploadProvider } from '../hooks/useUploads'
 import { startAutoSync, stopAutoSync } from '../services/autoSync'
 import { ICON } from '../utils/constants'
 
+// Archived nav: Pipeline + Call Data are routes that still work via direct
+// URL but are hidden from the sidebar. Pipeline overlaps with Setters /
+// Marketing data; Call Data hasn't been used as a primary surface in months.
+// Keeping the routes registered in App.jsx so any deep links survive.
 const navItems = [
   { to: '/sales', icon: BarChart3, label: 'Overview', end: true },
   { to: '/sales/closers', icon: UserCheck, label: 'Closers' },
   { to: '/sales/setters', icon: Users, label: 'Setters' },
-  { to: '/sales/pipeline', icon: Workflow, label: 'Pipeline' },
   { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
   { to: '/sales/ads', icon: Megaphone, label: 'Ads' },
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
-  { to: '/sales/call-data', icon: Headphones, label: 'Call Data' },
   { to: '/sales/commissions', icon: DollarSign, label: 'Commissions' },
   { to: '/sales/setter-bot', icon: Bot, label: 'Setter Bot' },
   { to: '/sales/email-flows', icon: Mail, label: 'Email Flows' },
