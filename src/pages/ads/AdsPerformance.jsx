@@ -225,6 +225,10 @@ export default function AdsPerformance() {
   // makes the "attributed vs total" gap explicit — the headline can never
   // silently undercount because we compare it against the EOD-aggregated truth.
   const [truthTotals, setTruthTotals] = useState({ leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 })
+  // Per-query failure list. Populated if any of the parallel fetches
+  // throws; rendered as a banner so a broken source can't silently
+  // produce wrong numbers.
+  const [dataIssues, setDataIssues] = useState([])
   const [showOrphans, setShowOrphans] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -351,9 +355,10 @@ export default function AdsPerformance() {
       const endTs   = endStr   + 'T23:59:59Z'
 
       // Kick off ALL date-scoped fetches in parallel. Seven independent
-      // queries each paged to bypass the 1000-row cap.
-      // Previously these ran sequentially → ~5x slowdown per chip click.
-      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows, mtRows] = await Promise.all([
+      // queries each paged to bypass the 1000-row cap. Use allSettled
+      // so one missing/failing source (e.g., a view not yet migrated)
+      // degrades gracefully instead of blanking the entire page.
+      const results = await Promise.allSettled([
         fetchAllPaged(() => supabase
           .from('ad_daily_stats')
           .select('ad_id, spend, impressions, clicks, results')
@@ -388,6 +393,28 @@ export default function AdsPerformance() {
           .select('date, leads, net_new_calls, new_live_calls, live_calls, offers, closes, trial_cash, trial_revenue')
           .gte('date', startStr).lte('date', endStr)),
       ])
+
+      // Per-query degradation: log any failure but use [] so downstream
+      // aggregation still runs. Failed queries surface in the UI via the
+      // dataIssues banner so Ben can see exactly which source is broken.
+      const newIssues = []
+      const unpack = (i, label) => {
+        if (results[i].status === 'fulfilled') return results[i].value
+        const reason = results[i].reason?.message || String(results[i].reason)
+        console.warn(`[AdsPerformance] ${label} failed:`, reason)
+        newIssues.push(`${label}: ${reason}`)
+        return []
+      }
+      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows, mtRows] = [
+        unpack(0, 'Meta spend (ad_daily_stats)'),
+        unpack(1, 'Typeform leads'),
+        unpack(2, 'Resolved closes'),
+        unpack(3, 'GHL leads'),
+        unpack(4, 'GHL bookings'),
+        unpack(5, 'GHL live calls'),
+        unpack(6, 'Marketing tracker (EOD totals)'),
+      ]
+      setDataIssues(newIssues)
 
       // Aggregate marketing_tracker totals (source-of-truth headline numbers).
       // net_new_calls is the daily NC-bookings column (the marketing
@@ -721,55 +748,82 @@ export default function AdsPerformance() {
         </div>
       )}
 
-      {/* Totals strip — values come from marketing_tracker (same source
-          the marketing dashboard uses). The attributed/gap sub-line shows
-          how many we managed to credit to a Meta ad. If those numbers
-          diverge from the marketing dashboard, that's a sync issue and
-          would be visible here. */}
+      {/* Per-query failure banner — visible whenever any of the parallel
+          fetches threw. Without this, a missing view or a column name typo
+          silently zeros a KPI and the rest of the page looks fine. */}
+      {dataIssues.length > 0 && (
+        <div style={{
+          padding: '10px 14px',
+          background: 'rgba(180, 30, 30, 0.07)',
+          border: '1px solid #b41e1e',
+          borderLeftWidth: 3,
+          borderRadius: '0 3px 3px 0',
+          marginBottom: 8,
+          fontSize: 13,
+        }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7d1a1a', fontWeight: 600, marginBottom: 4 }}>
+            Data source error · {dataIssues.length} of 7 queries failed
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--ink)' }}>
+            {dataIssues.map((m, i) => <li key={i} style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{m}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Totals strip — headline values come from marketing_tracker (same
+          source the marketing dashboard uses). When the EOD truth is 0
+          (no reports in window), we fall back to showing the attributed
+          number so the tile isn't deceptively blank. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
         <TotalsTile label="Spend" value={fmt$(totals.spend)} />
-        <TotalsTile
-          label="Leads"
-          value={fmtN(truthTotals.leads)}
-          sub={`${fmtN(totals.tfLeads)} attributed${truthTotals.leads > totals.tfLeads ? ` · ${fmtN(truthTotals.leads - totals.tfLeads)} unattributed` : ''}`}
-        />
-        <TotalsTile
-          label="Booked"
-          value={fmtN(truthTotals.booked)}
-          sub={`${fmtN(totals.tfBooked)} attributed${truthTotals.booked > totals.tfBooked ? ` · ${fmtN(truthTotals.booked - totals.tfBooked)} unattributed` : ''}`}
-        />
-        <TotalsTile
-          label="Live calls"
-          value={fmtN(truthTotals.live)}
-          sub={`${fmtN(totals.tfLive)} attributed${truthTotals.live > totals.tfLive ? ` · ${fmtN(truthTotals.live - totals.tfLive)} unattributed` : ''}`}
-        />
-        <TotalsTile
-          label="Closes"
-          value={fmtN(truthTotals.closes)}
-          sub={`${fmtN(totals.tfCloses)} attributed${truthTotals.closes > totals.tfCloses ? ` · ${fmtN(truthTotals.closes - totals.tfCloses)} unattributed` : ''} · ${fmt$(truthTotals.revenue)} rev`}
-          valueColor={truthTotals.closes > 0 ? '#1f7a3a' : undefined}
-        />
-        <TotalsTile
-          label="$ / Lead"
-          value={truthTotals.leads > 0 ? fmt$(totals.spend / truthTotals.leads) : '—'}
-          valueColor={kpiColor(truthTotals.leads > 0 ? totals.spend / truthTotals.leads : null, KPI.costPerLead)}
-        />
-        <TotalsTile
-          label="$ / Booked"
-          value={truthTotals.booked > 0 ? fmt$(totals.spend / truthTotals.booked) : '—'}
-          valueColor={kpiColor(truthTotals.booked > 0 ? totals.spend / truthTotals.booked : null, KPI.costPerQualBooked)}
-        />
-        <TotalsTile
-          label="$ / Live"
-          value={truthTotals.live > 0 ? fmt$(totals.spend / truthTotals.live) : '—'}
-          valueColor={kpiColor(truthTotals.live > 0 ? totals.spend / truthTotals.live : null, KPI.costPerLive)}
-        />
-        <TotalsTile
-          label="CAC"
-          value={truthTotals.closes > 0 ? fmt$(totals.spend / truthTotals.closes) : '—'}
-          sub={truthTotals.closes > 0 ? `${fmt$(totals.spend)} ÷ ${truthTotals.closes} closes` : null}
-          valueColor={kpiColor(truthTotals.closes > 0 ? totals.spend / truthTotals.closes : null, KPI.costPerClose)}
-        />
+        {(() => {
+          // Helper: build a tile that shows the truth number when EOD has
+          // data, otherwise the attributed number with an "(attributed only)"
+          // note so the UI is never misleading.
+          const tile = (label, truthVal, attrVal, extraSub = '') => {
+            const hasTruth = truthVal > 0
+            const value = hasTruth ? truthVal : attrVal
+            const gap = hasTruth ? truthVal - attrVal : 0
+            let sub
+            if (!hasTruth) sub = attrVal > 0 ? 'attributed only · no EOD' : null
+            else if (gap > 0) sub = `${fmtN(attrVal)} attributed · ${fmtN(gap)} unattributed${extraSub}`
+            else sub = `all ${fmtN(attrVal)} attributed${extraSub}`
+            return { value: fmtN(value), sub }
+          }
+          return (
+            <>
+              {(() => { const t = tile('Leads',  truthTotals.leads,  totals.tfLeads);  return <TotalsTile label="Leads"      value={t.value} sub={t.sub} /> })()}
+              {(() => { const t = tile('Booked', truthTotals.booked, totals.tfBooked); return <TotalsTile label="Booked"     value={t.value} sub={t.sub} /> })()}
+              {(() => { const t = tile('Live',   truthTotals.live,   totals.tfLive);   return <TotalsTile label="Live calls" value={t.value} sub={t.sub} /> })()}
+              {(() => {
+                const revStr = truthTotals.revenue > 0 ? ` · ${fmt$(truthTotals.revenue)} rev` : ''
+                const t = tile('Closes', truthTotals.closes, totals.tfCloses, revStr)
+                return <TotalsTile label="Closes" value={t.value} sub={t.sub} valueColor={(truthTotals.closes || totals.tfCloses) > 0 ? '#1f7a3a' : undefined} />
+              })()}
+            </>
+          )
+        })()}
+        {/* Cost-per metrics use the truth denominator when present, else attributed. */}
+        {(() => {
+          const denom = (truthVal, attrVal) => truthVal > 0 ? truthVal : (attrVal > 0 ? attrVal : 0)
+          const cpL = denom(truthTotals.leads,  totals.tfLeads)
+          const cpB = denom(truthTotals.booked, totals.tfBooked)
+          const cpV = denom(truthTotals.live,   totals.tfLive)
+          const cpC = denom(truthTotals.closes, totals.tfCloses)
+          return (
+            <>
+              <TotalsTile label="$ / Lead"   value={cpL > 0 ? fmt$(totals.spend / cpL) : '—'} valueColor={kpiColor(cpL > 0 ? totals.spend / cpL : null, KPI.costPerLead)} />
+              <TotalsTile label="$ / Booked" value={cpB > 0 ? fmt$(totals.spend / cpB) : '—'} valueColor={kpiColor(cpB > 0 ? totals.spend / cpB : null, KPI.costPerQualBooked)} />
+              <TotalsTile label="$ / Live"   value={cpV > 0 ? fmt$(totals.spend / cpV) : '—'} valueColor={kpiColor(cpV > 0 ? totals.spend / cpV : null, KPI.costPerLive)} />
+              <TotalsTile
+                label="CAC"
+                value={cpC > 0 ? fmt$(totals.spend / cpC) : '—'}
+                sub={cpC > 0 ? `${fmt$(totals.spend)} ÷ ${cpC} closes` : null}
+                valueColor={kpiColor(cpC > 0 ? totals.spend / cpC : null, KPI.costPerClose)}
+              />
+            </>
+          )
+        })()}
       </div>
 
       {/* Legend */}
