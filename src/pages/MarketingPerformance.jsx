@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition } from 'react'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
+import { useCloserCallProspectMetrics } from '../hooks/useCloserCallProspectMetrics'
 import DateRangeSelector from '../components/DateRangeSelector'
 import SyncStatusIndicator from '../components/SyncStatusIndicator'
 import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check } from 'lucide-react'
@@ -1629,9 +1630,56 @@ export default function MarketingPerformance() {
   const rangeEntries = useMemo(() => filterByDays(entries, range), [entries, range])
   const mtdEntries = useMemo(() => filterByDays(entries, 'mtd'), [entries])
   const prevEntries = useMemo(() => filterPreviousPeriod(entries, range), [entries, range])
-  const stats = useMemo(() => computeMarketingStats(rangeEntries), [rangeEntries])
-  const stats30 = useMemo(() => computeMarketingStats(filterByDays(entries, 30)), [entries])
-  const statsMTD = useMemo(() => computeMarketingStats(mtdEntries), [mtdEntries])
+
+  // Per-call prospect-deduped close-rate. Single source of truth shared
+  // with CloserOverview / CloserDetail / SalesOverview. Replaces the
+  // self-reported EOD summary counters which drift from the actual
+  // call rows the closer entered.
+  const { byRange: prospectMetricsByRange } = useCloserCallProspectMetrics()
+
+  // Helper: apply prospect-deduped overrides to a computed stats bundle.
+  // We override new_live_calls and closes (and recompute close_rate +
+  // cpa_trial) so the Marketing page now reports the same numbers as the
+  // Closer dashboard. Other ratios that depend on closes (ascend_rate,
+  // trial cash per close, etc.) follow automatically.
+  const applyProspectMetrics = (statsBundle, days) => {
+    if (!statsBundle) return statsBundle
+    const pm = prospectMetricsByRange(days)
+    const liveProspects = pm.liveProspects
+    const closedProspects = pm.closedProspects
+    // Only override when we actually have call-row data; if a window had
+    // no closer_calls rows, keep the original numbers.
+    if (liveProspects === 0 && closedProspects === 0) return statsBundle
+    const new_live_calls = liveProspects
+    const closes = closedProspects
+    const close_rate = new_live_calls > 0 ? (closes / new_live_calls) * 100 : 0
+    const cpa_trial = closes > 0 ? statsBundle.adspend / closes : 0
+    const ascend_rate = closes > 0 ? (statsBundle.ascensions / closes) * 100 : 0
+    const trial_cash_per_close = closes > 0 ? statsBundle.trial_cash / closes : 0
+    return {
+      ...statsBundle,
+      new_live_calls,
+      closes,
+      close_rate,
+      cpa_trial,
+      ascend_rate,
+      trial_cash_per_close,
+      _prospect_metrics_applied: true,
+    }
+  }
+
+  // MTD = first-of-month → today (variable day count). For everything else,
+  // `range` is already a day count.
+  const mtdDays = useMemo(() => new Date().getDate(), [])
+  const rangeDays = typeof range === 'number' ? range : 30
+
+  const stats = useMemo(() => applyProspectMetrics(computeMarketingStats(rangeEntries), rangeDays), [rangeEntries, rangeDays, prospectMetricsByRange])
+  const stats30 = useMemo(() => applyProspectMetrics(computeMarketingStats(filterByDays(entries, 30)), 30), [entries, prospectMetricsByRange])
+  const statsMTD = useMemo(() => applyProspectMetrics(computeMarketingStats(mtdEntries), mtdDays), [mtdEntries, mtdDays, prospectMetricsByRange])
+  // Previous-period stays on legacy EOD-counter math because applying
+  // call-row dedup retroactively to N-days-ago needs the same call cache;
+  // it's also a comparison delta where consistency-within-method matters
+  // more than absolute accuracy.
   const statsPrev = useMemo(() => computeMarketingStats(prevEntries), [prevEntries])
   const bm = benchmarks
 
