@@ -212,6 +212,18 @@ export default function AdsPerformance() {
   const [ghlLeadsAd, setGhlLeadsAd] = useState({})
   const [ghlLeadsAdset, setGhlLeadsAdset] = useState({})
   const [ghlLeadsCampaign, setGhlLeadsCampaign] = useState({})
+  // GHL-attributed bookings/lives (paid-lead-form leads who booked / showed)
+  const [ghlBookedAd, setGhlBookedAd] = useState({})
+  const [ghlBookedAdset, setGhlBookedAdset] = useState({})
+  const [ghlBookedCampaign, setGhlBookedCampaign] = useState({})
+  const [ghlLivesAd, setGhlLivesAd] = useState({})
+  const [ghlLivesAdset, setGhlLivesAdset] = useState({})
+  const [ghlLivesCampaign, setGhlLivesCampaign] = useState({})
+  // Stripe / Fanbasis payments attributed to ads via ghl_contact email match.
+  // This is real revenue, not closer-reported.
+  const [payAd, setPayAd] = useState({})
+  const [payAdset, setPayAdset] = useState({})
+  const [payCampaign, setPayCampaign] = useState({})
   const [orphanCloses, setOrphanCloses] = useState({ count: 0, revenue: 0, cash: 0, rows: [] })
   const [showOrphans, setShowOrphans] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -446,6 +458,31 @@ export default function AdsPerformance() {
       setGhlLeadsAdset(gAdset)
       setGhlLeadsCampaign(gCamp)
 
+      // 7. GHL bookings + lives (paid-lead-form leads who booked / showed),
+      //    plus real payment revenue. These views aggregate across all
+      //    time (not date-filtered) because attribution to ad is permanent.
+      const [bAd, bAdset, bCamp, lAd, lAdset, lCamp, pAd, pAdset, pCamp] = await Promise.all([
+        supabase.from('lib_ghl_booked_per_ad').select('ad_id, booked_calls'),
+        supabase.from('lib_ghl_booked_per_adset').select('adset_id, booked_calls'),
+        supabase.from('lib_ghl_booked_per_campaign').select('utm_campaign, booked_calls'),
+        supabase.from('lib_ghl_lives_per_ad').select('ad_id, live_calls'),
+        supabase.from('lib_ghl_lives_per_adset').select('adset_id, live_calls'),
+        supabase.from('lib_ghl_lives_per_campaign').select('utm_campaign, live_calls'),
+        supabase.from('lib_payment_per_ad').select('ad_id, revenue, net_revenue, paying_customers'),
+        supabase.from('lib_payment_per_adset').select('adset_id, revenue, net_revenue'),
+        supabase.from('lib_payment_per_campaign').select('utm_campaign, revenue, net_revenue'),
+      ])
+      const toMap = (rows, key, val) => Object.fromEntries((rows.data || []).map(r => [r[key], val(r)]))
+      setGhlBookedAd      (toMap(bAd,    'ad_id',        r => r.booked_calls))
+      setGhlBookedAdset   (toMap(bAdset, 'adset_id',     r => r.booked_calls))
+      setGhlBookedCampaign(toMap(bCamp,  'utm_campaign', r => r.booked_calls))
+      setGhlLivesAd       (toMap(lAd,    'ad_id',        r => r.live_calls))
+      setGhlLivesAdset    (toMap(lAdset, 'adset_id',     r => r.live_calls))
+      setGhlLivesCampaign (toMap(lCamp,  'utm_campaign', r => r.live_calls))
+      setPayAd            (toMap(pAd,    'ad_id',        r => ({ revenue: parseFloat(r.revenue||0), net: parseFloat(r.net_revenue||0), customers: r.paying_customers||0 })))
+      setPayAdset         (toMap(pAdset, 'adset_id',     r => ({ revenue: parseFloat(r.revenue||0), net: parseFloat(r.net_revenue||0) })))
+      setPayCampaign      (toMap(pCamp,  'utm_campaign', r => ({ revenue: parseFloat(r.revenue||0), net: parseFloat(r.net_revenue||0) })))
+
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
@@ -485,7 +522,7 @@ export default function AdsPerformance() {
       }
       const adset = camp.ad_sets.get(asid)
 
-      const adRollup = adRollupFrom(a, stats, hyros, tfAd, closeAd, ghlLeadsAd)
+      const adRollup = adRollupFrom(a, stats, hyros, tfAd, closeAd, ghlLeadsAd, ghlBookedAd, ghlLivesAd, payAd)
       const isActive = a.effective_status === 'ACTIVE'
 
       adset.ads.push({ ad: a, rollup: adRollup, isActive })
@@ -507,22 +544,35 @@ export default function AdsPerformance() {
     // each parent level so HYROS-attributed closes (Shain Mann, Jeff
     // Stovall, etc) flow up correctly even when the closer_call had no
     // typeform behind it.
+    // Overlay all parent-level counts. MAX of bottom-up sum vs view value
+    // for each metric. Payment revenue is overlaid SUM-style because each
+    // payment maps to one ad already; the parent should sum its children.
+    const overlayMax = (target, val, field) => { if (val > (target[field] || 0)) target[field] = val }
     for (const camp of campaigns.values()) {
       for (const set of camp.ad_sets.values()) {
         const tf = tfAdset[set.id]
         if (tf) overlayTypeformIfHigher(set.rollup, tf)
         const cs = closeAdset[set.id]
         if (cs) overlayClose(set.rollup, cs)
-        // GHL lead count for this adset — takes MAX of bottom-up sum and view-level count.
-        const ghlSet = ghlLeadsAdset[set.id] || 0
-        if (ghlSet > (set.rollup.tfLeads || 0)) set.rollup.tfLeads = ghlSet
+        overlayMax(set.rollup, ghlLeadsAdset[set.id]  || 0, 'tfLeads')
+        overlayMax(set.rollup, ghlBookedAdset[set.id] || 0, 'tfBooked')
+        overlayMax(set.rollup, ghlLivesAdset[set.id]  || 0, 'tfLive')
+        const ps = payAdset[set.id]
+        if (ps && (ps.revenue || 0) > (set.rollup.tfRevenue || 0)) {
+          set.rollup.tfRevenue = ps.revenue
+        }
       }
       const tfc = tfCampaign[camp.name]
       if (tfc) overlayTypeformIfHigher(camp.rollup, tfc)
       const cc = closeCampaign[camp.name]
       if (cc) overlayClose(camp.rollup, cc)
-      const ghlCamp = ghlLeadsCampaign[camp.name] || 0
-      if (ghlCamp > (camp.rollup.tfLeads || 0)) camp.rollup.tfLeads = ghlCamp
+      overlayMax(camp.rollup, ghlLeadsCampaign[camp.name]  || 0, 'tfLeads')
+      overlayMax(camp.rollup, ghlBookedCampaign[camp.name] || 0, 'tfBooked')
+      overlayMax(camp.rollup, ghlLivesCampaign[camp.name]  || 0, 'tfLive')
+      const pc = payCampaign[camp.name]
+      if (pc && (pc.revenue || 0) > (camp.rollup.tfRevenue || 0)) {
+        camp.rollup.tfRevenue = pc.revenue
+      }
     }
 
     // Parse advanced numeric filters once.
@@ -575,7 +625,7 @@ export default function AdsPerformance() {
     const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
     visibleCampaigns.sort(compareCamps)
     return visibleCampaigns
-  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, statusFilter, search, sortKey, sortDir, advFilter])
+  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, ghlBookedAd, ghlBookedAdset, ghlBookedCampaign, ghlLivesAd, ghlLivesAdset, ghlLivesCampaign, payAd, payAdset, payCampaign, statusFilter, search, sortKey, sortDir, advFilter])
 
   // When filter or data changes and the user hasn't manually toggled
   // anything, auto-expand the visible campaigns. This way Ben lands on a
@@ -715,87 +765,94 @@ export default function AdsPerformance() {
         <span style={{ color: 'var(--ink-4)' }}>Targets editable in code · KPI block</span>
       </div>
 
-      {/* Filter bar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
-        <ChipGroup
-          label="Range"
-          value={dateRange.preset}
-          setValue={(v) => setDateRange(v === 'custom'
-            ? { ...dateRange, preset: 'custom' }
-            : rangeFromPreset(v))}
-          options={[
-            { value: '7',      label: '7d' },
-            { value: '30',     label: '30d' },
-            { value: '90',     label: '90d' },
-            { value: 'all',    label: 'All' },
-            { value: 'custom', label: 'Custom' },
-          ]}
-        />
-        {dateRange.preset === 'custom' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input
-              type="date"
-              value={dateRange.startStr}
-              max={dateRange.endStr}
-              onChange={e => setDateRange({ ...dateRange, preset: 'custom', startStr: e.target.value })}
-              style={dateInputStyle}
-            />
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>→</span>
-            <input
-              type="date"
-              value={dateRange.endStr}
-              min={dateRange.startStr}
-              onChange={e => setDateRange({ ...dateRange, preset: 'custom', endStr: e.target.value })}
-              style={dateInputStyle}
-            />
-          </div>
-        )}
-        <ChipGroup label="Status" value={statusFilter} setValue={setStatusFilter} options={STATUS_OPTIONS} />
-        <button
-          onClick={() => {
-            setStatusFilter('ACTIVE')
-            setDateRange(rangeFromPreset('30'))
-            setSearch('')
-            setSortKey('spend'); setSortDir('desc')
-          }}
-          style={{ ...btnGhost, padding: '4px 10px', fontSize: 9.5 }}
-          title="Reset every filter to defaults"
-        >Reset</button>
-        <div style={{ flex: '1 1 200px', minWidth: 180, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
-          <Search size={12} style={{ color: 'var(--ink-3)', flexShrink: 0, marginLeft: 4 }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search campaign / ad set / ad…"
-            style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }} />
+      {/* Compact filter bar — primary controls + active-filter pills + Filters button */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
+        {/* Search — primary */}
+        <div style={{ flex: '1 1 240px', minWidth: 180, display: 'flex', alignItems: 'center', gap: 6, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3, padding: '4px 8px' }}>
+          <Search size={13} style={{ color: 'var(--ink-3)', flexShrink: 0 }} />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search campaign / ad set / ad"
+            style={{ flex: 1, background: 'transparent', border: 'none', fontSize: 13, color: 'var(--ink)', outline: 'none' }} />
         </div>
-        <button onClick={() => setShowAdv(v => !v)} style={{ ...btnGhost, padding: '4px 10px', fontSize: 9.5 }}>
-          {showAdv ? '− Advanced' : '+ Advanced'}
+        {/* Range chips inline */}
+        <ChipGroup label="Range" value={dateRange.preset} setValue={(v) => setDateRange(v === 'custom' ? { ...dateRange, preset: 'custom' } : rangeFromPreset(v))}
+          options={[{ value: '7', label: '7d' }, { value: '30', label: '30d' }, { value: '90', label: '90d' }, { value: 'all', label: 'All' }]} />
+        {/* Filters button — opens drawer with everything else */}
+        <button onClick={() => setShowAdv(true)} style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+          background: 'var(--ink)', color: 'var(--paper)', border: '1px solid var(--ink)', borderRadius: 3,
+          fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
+        }}>
+          Filters {activeFilterCount({ statusFilter, dateRange, advFilter }) ? `· ${activeFilterCount({ statusFilter, dateRange, advFilter })}` : ''}
         </button>
+        {/* Active-filter pills — quick removal */}
+        {statusFilter !== 'ACTIVE' && (
+          <ActiveFilterPill label={`Status: ${statusFilter}`} onClear={() => setStatusFilter('ACTIVE')} />
+        )}
+        {Object.entries(advFilter).filter(([_,v]) => v !== '' && v != null).map(([k, v]) => (
+          <ActiveFilterPill key={k} label={`${advFilterLabel(k)}: ${v}`} onClear={() => setAdvFilter(prev => ({ ...prev, [k]: '' }))} />
+        ))}
       </div>
 
-      {/* Advanced numeric filters. All min/max ranges over campaign rollups. */}
+      {/* Slide-out filter drawer */}
       {showAdv && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-          gap: 12,
-          padding: '12px 14px',
-          background: 'var(--paper)',
-          border: '1px solid var(--rule)',
-          borderRadius: 3,
-          marginBottom: 8,
-        }}>
-          <RangeFilter label="Spend ($)"        valueMin={advFilter.spendMin}  valueMax={advFilter.spendMax}
-            onMin={v => setAdvFilter({ ...advFilter, spendMin: v })}  onMax={v => setAdvFilter({ ...advFilter, spendMax: v })} />
-          <RangeFilter label="Leads"            valueMin={advFilter.leadsMin}  valueMax={advFilter.leadsMax}
-            onMin={v => setAdvFilter({ ...advFilter, leadsMin: v })}  onMax={v => setAdvFilter({ ...advFilter, leadsMax: v })} />
-          <RangeFilter label="Closes"           valueMin={advFilter.closesMin} valueMax={advFilter.closesMax}
-            onMin={v => setAdvFilter({ ...advFilter, closesMin: v })} onMax={v => setAdvFilter({ ...advFilter, closesMax: v })} />
-          <RangeFilter label="Show rate (%)"    valueMin={advFilter.showMin}   valueMax={advFilter.showMax}
-            onMin={v => setAdvFilter({ ...advFilter, showMin: v })}   onMax={v => setAdvFilter({ ...advFilter, showMax: v })} />
-          <RangeFilter label="CAC ($)"          valueMin={advFilter.cacMin}    valueMax={advFilter.cacMax}
-            onMin={v => setAdvFilter({ ...advFilter, cacMin: v })}    onMax={v => setAdvFilter({ ...advFilter, cacMax: v })} />
-          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-            <button onClick={() => setAdvFilter({ spendMin:'',spendMax:'',leadsMin:'',leadsMax:'',closesMin:'',closesMax:'',showMin:'',showMax:'',cacMin:'',cacMax:'' })}
-              style={{ ...btnGhost, padding: '6px 12px', fontSize: 10 }}>Clear advanced</button>
+        <div onClick={() => setShowAdv(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.45)', zIndex: 220, display: 'flex', justifyContent: 'flex-end' }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width: '100%', maxWidth: 460, height: '100vh', overflowY: 'auto',
+            background: 'var(--paper)', borderLeft: '1px solid var(--rule)', padding: '22px 26px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <span className="eyebrow eyebrow-accent">Filters</span>
+              <button onClick={() => setShowAdv(false)} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+                <X size={14} />
+              </button>
+            </div>
+
+            <FilterSection title="Status">
+              <ChipGroup label="" value={statusFilter} setValue={setStatusFilter} options={STATUS_OPTIONS} />
+            </FilterSection>
+
+            <FilterSection title="Date range">
+              <ChipGroup label="" value={dateRange.preset}
+                setValue={(v) => setDateRange(v === 'custom' ? { ...dateRange, preset: 'custom' } : rangeFromPreset(v))}
+                options={[{ value: '7', label: '7d' }, { value: '30', label: '30d' }, { value: '90', label: '90d' }, { value: 'all', label: 'All' }, { value: 'custom', label: 'Custom' }]} />
+              {dateRange.preset === 'custom' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
+                  <input type="date" value={dateRange.startStr} max={dateRange.endStr}
+                    onChange={e => setDateRange({ ...dateRange, preset: 'custom', startStr: e.target.value })} style={dateInputStyle} />
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>→</span>
+                  <input type="date" value={dateRange.endStr} min={dateRange.startStr}
+                    onChange={e => setDateRange({ ...dateRange, preset: 'custom', endStr: e.target.value })} style={dateInputStyle} />
+                </div>
+              )}
+            </FilterSection>
+
+            <FilterSection title="Numeric ranges" subtitle="Filter campaigns by performance numbers. Leave blank to skip.">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <RangeFilter label="Spend ($)"     valueMin={advFilter.spendMin}  valueMax={advFilter.spendMax}
+                  onMin={v => setAdvFilter({ ...advFilter, spendMin: v })}  onMax={v => setAdvFilter({ ...advFilter, spendMax: v })} />
+                <RangeFilter label="Leads"         valueMin={advFilter.leadsMin}  valueMax={advFilter.leadsMax}
+                  onMin={v => setAdvFilter({ ...advFilter, leadsMin: v })}  onMax={v => setAdvFilter({ ...advFilter, leadsMax: v })} />
+                <RangeFilter label="Closes"        valueMin={advFilter.closesMin} valueMax={advFilter.closesMax}
+                  onMin={v => setAdvFilter({ ...advFilter, closesMin: v })} onMax={v => setAdvFilter({ ...advFilter, closesMax: v })} />
+                <RangeFilter label="Show rate %"   valueMin={advFilter.showMin}   valueMax={advFilter.showMax}
+                  onMin={v => setAdvFilter({ ...advFilter, showMin: v })}   onMax={v => setAdvFilter({ ...advFilter, showMax: v })} />
+                <RangeFilter label="CAC ($)"       valueMin={advFilter.cacMin}    valueMax={advFilter.cacMax}
+                  onMin={v => setAdvFilter({ ...advFilter, cacMin: v })}    onMax={v => setAdvFilter({ ...advFilter, cacMax: v })} />
+              </div>
+            </FilterSection>
+
+            <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--rule)', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <button onClick={() => {
+                setStatusFilter('ACTIVE'); setDateRange(rangeFromPreset('30')); setSearch('')
+                setSortKey('spend'); setSortDir('desc')
+                setAdvFilter({ spendMin:'',spendMax:'',leadsMin:'',leadsMax:'',closesMin:'',closesMax:'',showMin:'',showMax:'',cacMin:'',cacMax:'' })
+              }} style={{ ...btnGhost, padding: '8px 14px', fontSize: 11 }}>Reset all</button>
+              <button onClick={() => setShowAdv(false)} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+                background: 'var(--ink)', color: 'var(--paper)', border: '1px solid var(--ink)', borderRadius: 3,
+                fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
+              }}>Done</button>
+            </div>
           </div>
         </div>
       )}
@@ -1132,6 +1189,48 @@ function TotalsTile({ label, value, sub, valueColor }) {
   )
 }
 
+// Helpers for the Filters drawer.
+function activeFilterCount({ statusFilter, dateRange, advFilter }) {
+  let n = 0
+  if (statusFilter !== 'ACTIVE') n++
+  if (dateRange.preset !== '30') n++
+  for (const v of Object.values(advFilter)) if (v !== '' && v != null) n++
+  return n
+}
+function advFilterLabel(k) {
+  const map = { spendMin:'Spend ≥', spendMax:'Spend ≤', leadsMin:'Leads ≥', leadsMax:'Leads ≤',
+    closesMin:'Closes ≥', closesMax:'Closes ≤', showMin:'Show % ≥', showMax:'Show % ≤',
+    cacMin:'CAC ≥', cacMax:'CAC ≤' }
+  return map[k] || k
+}
+function ActiveFilterPill({ label, onClear }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '4px 8px 4px 10px',
+      background: 'var(--accent-soft, rgba(244,225,74,0.18))',
+      border: '1px solid var(--accent)',
+      borderRadius: 2,
+      fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', color: 'var(--ink)',
+    }}>
+      {label}
+      <button onClick={onClear} aria-label="Remove" style={{
+        background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--ink-3)',
+        padding: 0, marginLeft: 2, fontFamily: 'inherit', fontSize: 12, lineHeight: 1,
+      }}>×</button>
+    </span>
+  )
+}
+function FilterSection({ title, subtitle, children }) {
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600, marginBottom: 4 }}>{title}</div>
+      {subtitle && <div style={{ fontFamily: 'var(--serif)', fontSize: 12, color: 'var(--ink-3)', marginBottom: 10, fontStyle: 'italic' }}>{subtitle}</div>}
+      {children}
+    </div>
+  )
+}
+
 // Two number inputs for min / max range filters. Empty = no filter applied.
 function RangeFilter({ label, valueMin, valueMax, onMin, onMax }) {
   return (
@@ -1239,34 +1338,32 @@ function emptyRollup() {
     tfCash: 0,
   }
 }
-function adRollupFrom(ad, stats, hyros, tfAd, closeAd, ghlLeadsAd) {
+function adRollupFrom(ad, stats, hyros, tfAd, closeAd, ghlLeadsAd, ghlBookedAd, ghlLivesAd, payAd) {
   const s = stats[ad.ad_id] || {}
   const h = hyros[ad.ad_id] || {}
   const t = tfAd[ad.ad_id] || {}
   const c = closeAd[ad.ad_id] || {}
-  const g = ghlLeadsAd[ad.ad_id] || 0
-  // Leads pulls from BOTH sources. typeform-funnel ads get t.leads; paid-
-  // lead-form ads get g (GHL contacts). Most ads will only have ONE of
-  // the two non-zero, so MAX is the right operator. If somehow both are
-  // populated (shouldn't happen — typeform vs Lead Form are different
-  // funnels), MAX keeps us honest by not double-counting.
-  const leadsCombined = Math.max(t.leads || 0, g)
+  const g  = ghlLeadsAd[ad.ad_id]  || 0
+  const gB = ghlBookedAd[ad.ad_id] || 0
+  const gL = ghlLivesAd[ad.ad_id]  || 0
+  const p  = payAd[ad.ad_id] || null
+  // MAX of (typeform funnel) + (paid-lead-form via GHL) at every metric.
+  // Different funnels — won't overlap, so MAX picks the populated source.
   return {
     spend: s.spend || 0,
     leads: s.results || 0,
     booked: h.calls_attributed || 0,
     qualified: h.calls_qualified || 0,
     revenue: parseFloat(h.revenue_attributed || 0),
-    tfLeads:      leadsCombined,
+    tfLeads:      Math.max(t.leads || 0, g),
     tfQualLeads:  t.qualified_leads || 0,
-    tfBooked:     t.booked_calls || 0,
+    tfBooked:     Math.max(t.booked_calls || 0, gB),
     tfQualBooked: t.qualified_booked_calls || 0,
-    tfLive:       t.live_calls || 0,
-    // Closes / revenue / cash come from the UNIFIED close attribution
-    // (typeform + HYROS resolved). Falls back to typeform-only data when
-    // closeAd is empty for the ad.
+    tfLive:       Math.max(t.live_calls || 0, gL),
     tfCloses:     c.closes || t.closes || 0,
-    tfRevenue:    parseFloat(c.revenue ?? t.revenue_attributed ?? 0),
+    // Revenue: real Stripe/Fanbasis payments take priority over closer-
+    // reported revenue. Falls back to closer-reported when no payment match.
+    tfRevenue:    p ? p.revenue : parseFloat(c.revenue ?? t.revenue_attributed ?? 0),
     tfCash:       parseFloat(c.cash    ?? t.cash_attributed    ?? 0),
   }
 }
