@@ -224,7 +224,17 @@ export default function AdsPerformance() {
   // dashboard reads). Keeping these separate from the per-campaign rollup
   // makes the "attributed vs total" gap explicit — the headline can never
   // silently undercount because we compare it against the EOD-aggregated truth.
-  const [truthTotals, setTruthTotals] = useState({ leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 })
+  // Row-count totals. These come from the SAME row tables the drill-down
+  // modals query (lib_close_resolved, lib_ghl_booked_detail, etc.), so the
+  // headline number is guaranteed to equal what you see when you click in.
+  // Each metric has a `total` (all rows) and `attributed` (rows resolved
+  // to a Meta campaign). Gap = total - attributed.
+  const [rowTotals, setRowTotals] = useState({
+    leads:    { total: 0, attributed: 0 },
+    booked:   { total: 0, attributed: 0 },
+    live:     { total: 0, attributed: 0 },
+    closes:   { total: 0, attributed: 0, revenue: 0, cash: 0 },
+  })
   // Per-query failure list. Populated if any of the parallel fetches
   // throws; rendered as a banner so a broken source can't silently
   // produce wrong numbers.
@@ -388,10 +398,6 @@ export default function AdsPerformance() {
         // uses — daily aggregated EOD report totals. We pull it here so
         // the headline KPI block can show the source-of-truth totals
         // (vs ads-attributed sub-counts) and surface the gap explicitly.
-        fetchAllPaged(() => supabase
-          .from('marketing_tracker')
-          .select('date, leads, net_new_calls, new_live_calls, live_calls, offers, closes, trial_cash, trial_revenue')
-          .gte('date', startStr).lte('date', endStr)),
       ])
 
       // Per-query degradation: log any failure but use [] so downstream
@@ -405,32 +411,38 @@ export default function AdsPerformance() {
         newIssues.push(`${label}: ${reason}`)
         return []
       }
-      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows, mtRows] = [
+      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows] = [
         unpack(0, 'Meta spend (ad_daily_stats)'),
         unpack(1, 'Typeform leads'),
         unpack(2, 'Resolved closes'),
         unpack(3, 'GHL leads'),
         unpack(4, 'GHL bookings'),
         unpack(5, 'GHL live calls'),
-        unpack(6, 'Marketing tracker (EOD totals)'),
       ]
       setDataIssues(newIssues)
 
-      // Aggregate marketing_tracker totals (source-of-truth headline numbers).
-      // net_new_calls is the daily NC-bookings column (the marketing
-      // dashboard's "Booked" KPI). new_live_calls is the NC-only live count;
-      // live_calls is the NC+FU total — we use new_live_calls when present
-      // so headline math matches the marketing dashboard's NC-only path.
-      const truth = { leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 }
-      for (const r of mtRows) {
-        truth.leads   += parseInt(r.leads || 0)
-        truth.booked  += parseInt(r.net_new_calls || 0)
-        truth.live    += parseInt((r.new_live_calls != null ? r.new_live_calls : r.live_calls) || 0)
-        truth.closes  += parseInt(r.closes || 0)
-        truth.revenue += parseFloat(r.trial_revenue || 0)
-        truth.cash    += parseFloat(r.trial_cash || 0)
+      // Headline totals come directly from the row tables the drill-downs
+      // query. Total = row count in window. Attributed = rows that resolve
+      // to a Meta campaign. By construction, click-to-drill always shows
+      // exactly `total` rows — no mystery numbers, no aggregate vs row
+      // discrepancy.
+      const tfLeadEmails = new Set()
+      for (const r of tfRows) if (r.email) tfLeadEmails.add(r.email.toLowerCase())
+      const ghlLeadEmails = new Set()
+      for (const r of ghlLeadRows) {
+        const e = (r.email || '').toLowerCase()
+        if (e && !tfLeadEmails.has(e)) ghlLeadEmails.add(e)
       }
-      setTruthTotals(truth)
+      const totalLeads = tfRows.length + ghlLeadRows.filter(r => !r.email || !tfLeadEmails.has(r.email.toLowerCase())).length
+      const attrLeads = tfRows.filter(r => r.ad_id).length + ghlLeadRows.filter(r => r.ad_id && !tfLeadEmails.has((r.email || '').toLowerCase())).length
+      const closeRev = closeRows.reduce((s, r) => s + parseFloat(r.revenue || 0), 0)
+      const closeCash = closeRows.reduce((s, r) => s + parseFloat(r.cash_collected || 0), 0)
+      setRowTotals({
+        leads:  { total: totalLeads, attributed: attrLeads },
+        booked: { total: ghlBookedRows.length, attributed: ghlBookedRows.filter(r => r.ad_id).length },
+        live:   { total: ghlLiveRows.length,   attributed: ghlLiveRows.filter(r => r.ad_id).length },
+        closes: { total: closeRows.length, attributed: closeRows.filter(r => r.resolved_ad_id || r.resolved_campaign).length, revenue: closeRev, cash: closeCash },
+      })
 
       // 2. Stats — aggregate by ad_id
       const perAd = {}
@@ -770,60 +782,43 @@ export default function AdsPerformance() {
         </div>
       )}
 
-      {/* Totals strip — headline values come from marketing_tracker (same
-          source the marketing dashboard uses). When the EOD truth is 0
-          (no reports in window), we fall back to showing the attributed
-          number so the tile isn't deceptively blank. */}
+      {/* Totals strip — every number = count of rows that the drill-down
+          would show. Clickable to open the drill. Gap (unattributed) is
+          shown when total > attributed so coverage is always visible. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
         <TotalsTile label="Spend" value={fmt$(totals.spend)} />
         {(() => {
-          // Helper: build a tile that shows the truth number when EOD has
-          // data, otherwise the attributed number with an "(attributed only)"
-          // note so the UI is never misleading.
-          const tile = (label, truthVal, attrVal, extraSub = '') => {
-            const hasTruth = truthVal > 0
-            const value = hasTruth ? truthVal : attrVal
-            const gap = hasTruth ? truthVal - attrVal : 0
-            let sub
-            if (!hasTruth) sub = attrVal > 0 ? 'attributed only · no EOD' : null
-            else if (gap > 0) sub = `${fmtN(attrVal)} attributed · ${fmtN(gap)} unattributed${extraSub}`
-            else sub = `all ${fmtN(attrVal)} attributed${extraSub}`
-            return { value: fmtN(value), sub }
+          const sub = (m, extra = '') => {
+            const gap = m.total - m.attributed
+            if (m.total === 0) return null
+            if (gap > 0)  return `${fmtN(m.attributed)} attributed · ${fmtN(gap)} unattributed${extra}`
+            return `all ${fmtN(m.attributed)} attributed${extra}`
           }
+          const click = (metric) => () => setDrill({ metric, scope: { level: 'all' } })
           return (
             <>
-              {(() => { const t = tile('Leads',  truthTotals.leads,  totals.tfLeads);  return <TotalsTile label="Leads"      value={t.value} sub={t.sub} /> })()}
-              {(() => { const t = tile('Booked', truthTotals.booked, totals.tfBooked); return <TotalsTile label="Booked"     value={t.value} sub={t.sub} /> })()}
-              {(() => { const t = tile('Live',   truthTotals.live,   totals.tfLive);   return <TotalsTile label="Live calls" value={t.value} sub={t.sub} /> })()}
-              {(() => {
-                const revStr = truthTotals.revenue > 0 ? ` · ${fmt$(truthTotals.revenue)} rev` : ''
-                const t = tile('Closes', truthTotals.closes, totals.tfCloses, revStr)
-                return <TotalsTile label="Closes" value={t.value} sub={t.sub} valueColor={(truthTotals.closes || totals.tfCloses) > 0 ? '#1f7a3a' : undefined} />
-              })()}
-            </>
-          )
-        })()}
-        {/* Cost-per metrics use the truth denominator when present, else attributed. */}
-        {(() => {
-          const denom = (truthVal, attrVal) => truthVal > 0 ? truthVal : (attrVal > 0 ? attrVal : 0)
-          const cpL = denom(truthTotals.leads,  totals.tfLeads)
-          const cpB = denom(truthTotals.booked, totals.tfBooked)
-          const cpV = denom(truthTotals.live,   totals.tfLive)
-          const cpC = denom(truthTotals.closes, totals.tfCloses)
-          return (
-            <>
-              <TotalsTile label="$ / Lead"   value={cpL > 0 ? fmt$(totals.spend / cpL) : '—'} valueColor={kpiColor(cpL > 0 ? totals.spend / cpL : null, KPI.costPerLead)} />
-              <TotalsTile label="$ / Booked" value={cpB > 0 ? fmt$(totals.spend / cpB) : '—'} valueColor={kpiColor(cpB > 0 ? totals.spend / cpB : null, KPI.costPerQualBooked)} />
-              <TotalsTile label="$ / Live"   value={cpV > 0 ? fmt$(totals.spend / cpV) : '—'} valueColor={kpiColor(cpV > 0 ? totals.spend / cpV : null, KPI.costPerLive)} />
+              <TotalsTile label="Leads"      value={fmtN(rowTotals.leads.total)}  sub={sub(rowTotals.leads)}  onClick={click('leads')} />
+              <TotalsTile label="Booked"     value={fmtN(rowTotals.booked.total)} sub={sub(rowTotals.booked)} onClick={click('booked')} />
+              <TotalsTile label="Live calls" value={fmtN(rowTotals.live.total)}   sub={sub(rowTotals.live)}   onClick={click('live')} />
               <TotalsTile
-                label="CAC"
-                value={cpC > 0 ? fmt$(totals.spend / cpC) : '—'}
-                sub={cpC > 0 ? `${fmt$(totals.spend)} ÷ ${cpC} closes` : null}
-                valueColor={kpiColor(cpC > 0 ? totals.spend / cpC : null, KPI.costPerClose)}
+                label="Closes"
+                value={fmtN(rowTotals.closes.total)}
+                sub={sub(rowTotals.closes, rowTotals.closes.revenue > 0 ? ` · ${fmt$(rowTotals.closes.revenue)} rev` : '')}
+                valueColor={rowTotals.closes.total > 0 ? '#1f7a3a' : undefined}
+                onClick={click('closed')}
               />
             </>
           )
         })()}
+        <TotalsTile label="$ / Lead"   value={rowTotals.leads.total  > 0 ? fmt$(totals.spend / rowTotals.leads.total)  : '—'} valueColor={kpiColor(rowTotals.leads.total  > 0 ? totals.spend / rowTotals.leads.total  : null, KPI.costPerLead)} />
+        <TotalsTile label="$ / Booked" value={rowTotals.booked.total > 0 ? fmt$(totals.spend / rowTotals.booked.total) : '—'} valueColor={kpiColor(rowTotals.booked.total > 0 ? totals.spend / rowTotals.booked.total : null, KPI.costPerQualBooked)} />
+        <TotalsTile label="$ / Live"   value={rowTotals.live.total   > 0 ? fmt$(totals.spend / rowTotals.live.total)   : '—'} valueColor={kpiColor(rowTotals.live.total   > 0 ? totals.spend / rowTotals.live.total   : null, KPI.costPerLive)} />
+        <TotalsTile
+          label="CAC"
+          value={rowTotals.closes.total > 0 ? fmt$(totals.spend / rowTotals.closes.total) : '—'}
+          sub={rowTotals.closes.total > 0 ? `${fmt$(totals.spend)} ÷ ${rowTotals.closes.total} closes` : null}
+          valueColor={kpiColor(rowTotals.closes.total > 0 ? totals.spend / rowTotals.closes.total : null, KPI.costPerClose)}
+        />
       </div>
 
       {/* Legend */}
@@ -1199,10 +1194,27 @@ function StatusPill({ status }) {
   )
 }
 
-function TotalsTile({ label, value, sub, valueColor }) {
+function TotalsTile({ label, value, sub, valueColor, onClick }) {
+  const clickable = typeof onClick === 'function'
   return (
-    <div>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 2 }}>{label}</div>
+    <div
+      onClick={clickable ? onClick : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+      style={{
+        cursor: clickable ? 'pointer' : 'default',
+        padding: clickable ? '2px 4px' : 0,
+        margin: clickable ? '-2px -4px' : 0,
+        borderRadius: 3,
+        transition: 'background 0.12s',
+      }}
+      onMouseEnter={clickable ? (e) => { e.currentTarget.style.background = 'rgba(244,225,74,0.10)' } : undefined}
+      onMouseLeave={clickable ? (e) => { e.currentTarget.style.background = 'transparent' } : undefined}
+    >
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 2 }}>
+        {label}{clickable && <span style={{ color: 'var(--ink-4)', marginLeft: 4 }}>↗</span>}
+      </div>
       <div style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, color: valueColor || 'var(--ink)', lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
       {sub && <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.08em', marginTop: 2 }}>{sub}</div>}
     </div>
@@ -1555,24 +1567,56 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
           return
         }
 
-        // ── LEADS / QUAL / BOOKED / LIVE ─────────────────────────
-        // Pull from BOTH sources. Same merge logic the rollup uses.
-        // 1) Typeform side — has qualified / is_booked / is_live / is_closed flags
-        // 2) GHL side — has only the contact info; we treat each row as a lead
+        // ── BOOKED ─────────────────────────────────────────────────
+        // Use lib_ghl_booked_detail (the same source the headline count
+        // is derived from). Falls back to typeform's is_booked rows for
+        // typeform-only path coverage.
+        if (drill.metric === 'booked' || drill.metric === 'qual_booked') {
+          setSource('ghl')
+          let q = supabase.from('lib_ghl_booked_detail').select('*')
+            .gte('landed_at', sinceISO).lte('landed_at', untilISO)
+            .order('landed_at', { ascending: false })
+          if (drill.scope.level === 'ad')           q = q.eq('ad_id',        drill.scope.id)
+          else if (drill.scope.level === 'adset')   q = q.eq('adset_id',     drill.scope.id)
+          else if (drill.scope.level === 'campaign')q = q.eq('utm_campaign', drill.scope.id)
+          const { data, error: e } = await q
+          if (e) throw new Error(e.message)
+          if (!cancelled) setRows((data || []).map(r => ({ kind: 'ghl', ...r })))
+          return
+        }
+
+        // ── LIVE ──────────────────────────────────────────────────
+        if (drill.metric === 'live') {
+          setSource('ghl')
+          let q = supabase.from('lib_ghl_lives_detail').select('*')
+            .gte('landed_at', sinceISO).lte('landed_at', untilISO)
+            .order('landed_at', { ascending: false })
+          if (drill.scope.level === 'ad')           q = q.eq('ad_id',        drill.scope.id)
+          else if (drill.scope.level === 'adset')   q = q.eq('adset_id',     drill.scope.id)
+          else if (drill.scope.level === 'campaign')q = q.eq('utm_campaign', drill.scope.id)
+          const { data, error: e } = await q
+          if (e) throw new Error(e.message)
+          if (!cancelled) setRows((data || []).map(r => ({ kind: 'ghl', ...r })))
+          return
+        }
+
+        // ── LEADS / QUAL ─────────────────────────────────────────
+        // Leads come from BOTH typeform and GHL contacts.
         const [tfData, ghlData] = await Promise.all([
           fetchTypeformDetail(drill, sinceISO, untilISO),
-          drill.metric === 'leads' ? fetchGhlDetail(drill, sinceISO, untilISO) : Promise.resolve([]),
+          fetchGhlDetail(drill, sinceISO, untilISO),
         ])
 
         let tf = tfData
-        // Typeform-side metric filtering
-        if (drill.metric === 'qualified')   tf = tf.filter(r => r.qualified)
-        if (drill.metric === 'booked')      tf = tf.filter(r => r.is_booked)
-        if (drill.metric === 'qual_booked') tf = tf.filter(r => r.is_booked && r.qualified)
-        if (drill.metric === 'live')        tf = tf.filter(r => r.is_live)
+        if (drill.metric === 'qualified') tf = tf.filter(r => r.qualified)
+
+        // Dedupe: a prospect who submitted typeform AND has a ghl_contact
+        // gets counted once. Email is the join key.
+        const tfEmails = new Set(tf.map(r => (r.email || '').toLowerCase()).filter(Boolean))
+        const ghlDedup = ghlData.filter(r => !r.email || !tfEmails.has(r.email.toLowerCase()))
 
         const tfTagged  = tf.map(r => ({ kind: 'tf',  ...r }))
-        const ghlTagged = ghlData.map(r => ({ kind: 'ghl', ...r }))
+        const ghlTagged = ghlDedup.map(r => ({ kind: 'ghl', ...r }))
         const merged = [...tfTagged, ...ghlTagged].sort((a, b) =>
           (b.submitted_at || b.landed_at || '').localeCompare(a.submitted_at || a.landed_at || ''))
 
@@ -1588,7 +1632,14 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
     return () => { cancelled = true }
   }, [drill.scope.level, drill.scope.id, drill.metric, dateRange?.startStr, dateRange?.endStr])
 
-  const levelLabel = drill.scope.level === 'ad' ? 'Ad' : drill.scope.level === 'adset' ? 'Ad set' : 'Campaign'
+  const levelLabel = drill.scope.level === 'ad' ? 'Ad'
+    : drill.scope.level === 'adset' ? 'Ad set'
+    : drill.scope.level === 'campaign' ? 'Campaign'
+    : 'All in window'
+  const headerTitle = drill.scope.level === 'all'
+    ? `${({ closed: 'Closes', booked: 'Bookings', live: 'Live calls', leads: 'Leads', qualified: 'Qualified leads', qual_booked: 'Qualified bookings' })[drill.metric] || drill.metric}`
+    : (drill.label || drill.metric)
+  const headerScope = drill.scope.label || (drill.scope.level === 'all' ? 'Across every campaign in the active date range' : '')
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.5)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
@@ -1599,13 +1650,13 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--rule)' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 6 }}>
-              {levelLabel} · {drill.label}
+              {levelLabel} · {headerTitle}
             </div>
             <h3 style={{ fontFamily: 'var(--serif)', fontSize: 24, fontWeight: 500, margin: 0, color: 'var(--ink)' }}>
-              {drill.label.includes('Leads') || drill.label.includes('leads') ? drill.label : drill.label}: {loading ? '…' : rows.length}
+              {headerTitle}: {loading ? '…' : rows.length}
             </h3>
-            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 6, letterSpacing: '0.06em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {drill.scope.label}
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 6, letterSpacing: '0.06em' }}>
+              {headerScope}
             </p>
           </div>
           <button onClick={onClose} aria-label="Close" style={{
