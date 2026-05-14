@@ -19,6 +19,10 @@ export const STRATEGY_CALL_CALENDARS = [
   '3mLE6t6rCKDdIuIfvP9j', // (FB) PoolConnectAI - Strategy Call
   'T5Zif5GjDwulya6novU0', // Opt Digital | Strategy Call (Calendly)
   'gohFzPCilzwBtVfaC6fu', // Opt Digital | Strategy Call - DQ (Calendly)
+  'woLoGzGKe5fPKZU1jxY7', // RestorationConnect Strategy Call (found in 2026-05-14
+                          //   audit — Ben's calendar showed 23 calls, dashboard
+                          //   showed 14; the missing 7 were all routing through
+                          //   this calendar ID which wasn't in the list)
 ]
 
 // Subset of strategy calendars that route disqualified prospects. Pending

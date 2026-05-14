@@ -56,6 +56,10 @@ const todayStr = () => {
 
 export default function EditorialDate({ value, onChange, min, max, placeholder = 'Pick a date', disabled, compact, fullWidth }) {
   const [open, setOpen] = useState(false)
+  // pickerMode: 'days' (default 7×6 grid), 'months' (12-month grid),
+  // 'years' (year decade grid). Clicking the month name → 'months';
+  // clicking the year → 'years'. Selecting jumps back to 'days'.
+  const [pickerMode, setPickerMode] = useState('days')
   const [view, setView] = useState(() => {
     const p = parse(value) || parse(todayStr())
     return { y: p.y, m: p.m }
@@ -212,6 +216,13 @@ export default function EditorialDate({ value, onChange, min, max, placeholder =
           ref={popoverRef}
           role="dialog"
           aria-label="Choose date"
+          // Defensive: stop mousedown inside the popover from ever bubbling
+          // up to the document-level click-outside handler. Even if
+          // popoverRef.current is briefly null during a React re-render
+          // (e.g. after stepMonth fires), this prevents the popover from
+          // closing on its own internal clicks — the exact symptom Ben
+          // hit ("clicks close the whole thing").
+          onMouseDown={(e) => e.stopPropagation()}
           style={{
             position: 'fixed',
             top: popover.top,
@@ -225,32 +236,134 @@ export default function EditorialDate({ value, onChange, min, max, placeholder =
             zIndex: 1000,
           }}
         >
-          {/* Header — month nav */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <button onClick={() => stepMonth(-1)} aria-label="Previous month" style={navBtn}>
+          {/* Header — month nav with clickable month + year labels.
+              Clicking the month name swaps to a 12-month picker grid;
+              clicking the year swaps to a 12-year picker grid. */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => pickerMode === 'days' ? stepMonth(-1) : pickerMode === 'months' ? setView({ ...view, y: view.y - 1 }) : setView({ ...view, y: view.y - 12 })}
+              aria-label={pickerMode === 'years' ? 'Previous decade' : pickerMode === 'months' ? 'Previous year' : 'Previous month'}
+              style={navBtn}
+            >
               <ChevronLeft size={14} />
             </button>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
-                {view.y}
-              </span>
-              <span style={{ fontFamily: 'var(--serif)', fontSize: 18, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.1 }}>
-                {MONTHS[view.m - 1]}
-              </span>
+
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              {pickerMode === 'years' ? (
+                <span style={{ fontFamily: 'var(--serif)', fontSize: 17, fontWeight: 500, color: 'var(--ink)', letterSpacing: '-0.005em' }}>
+                  {Math.floor(view.y / 12) * 12} – {Math.floor(view.y / 12) * 12 + 11}
+                </span>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setPickerMode(pickerMode === 'months' ? 'days' : 'months')}
+                    style={headerBtn}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--paper-2)'; e.currentTarget.style.borderColor = 'var(--rule)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}
+                  >
+                    {MONTHS[view.m - 1]}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPickerMode('years')}
+                    style={{ ...headerBtn, fontFamily: 'var(--mono)', fontSize: 15, letterSpacing: '0.02em' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--paper-2)'; e.currentTarget.style.borderColor = 'var(--rule)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent' }}
+                  >
+                    {view.y}
+                  </button>
+                </>
+              )}
             </div>
-            <button onClick={() => stepMonth(1)} aria-label="Next month" style={navBtn}>
+
+            <button
+              type="button"
+              onClick={() => pickerMode === 'days' ? stepMonth(1) : pickerMode === 'months' ? setView({ ...view, y: view.y + 1 }) : setView({ ...view, y: view.y + 12 })}
+              aria-label={pickerMode === 'years' ? 'Next decade' : pickerMode === 'months' ? 'Next year' : 'Next month'}
+              style={navBtn}
+            >
               <ChevronRight size={14} />
             </button>
           </div>
 
-          {/* Day-of-week header */}
+          {/* Month picker — 12 months in a 3x4 grid */}
+          {pickerMode === 'months' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, marginBottom: 8 }}>
+              {MONTHS.map((mn, i) => {
+                const isCurrent = (i + 1) === view.m
+                return (
+                  <button
+                    key={mn}
+                    type="button"
+                    onClick={() => { setView({ ...view, m: i + 1 }); setPickerMode('days') }}
+                    style={{
+                      padding: '12px 8px',
+                      fontFamily: 'var(--serif)',
+                      fontSize: 13,
+                      fontWeight: isCurrent ? 600 : 400,
+                      background: isCurrent ? 'var(--accent)' : 'transparent',
+                      color: 'var(--ink)',
+                      border: '1px solid', borderColor: isCurrent ? 'var(--accent)' : 'var(--rule)',
+                      borderRadius: 2,
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = 'var(--paper-2)' }}
+                    onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {mn.slice(0, 3)}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Year picker — 12 years in a 3x4 grid */}
+          {pickerMode === 'years' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, marginBottom: 8 }}>
+              {Array.from({ length: 12 }, (_, i) => {
+                const base = Math.floor(view.y / 12) * 12
+                const yr = base + i
+                const isCurrent = yr === view.y
+                return (
+                  <button
+                    key={yr}
+                    type="button"
+                    onClick={() => { setView({ ...view, y: yr }); setPickerMode('months') }}
+                    style={{
+                      padding: '12px 8px',
+                      fontFamily: 'var(--mono)',
+                      fontSize: 13,
+                      fontWeight: isCurrent ? 700 : 500,
+                      letterSpacing: '0.04em',
+                      background: isCurrent ? 'var(--accent)' : 'transparent',
+                      color: 'var(--ink)',
+                      border: '1px solid', borderColor: isCurrent ? 'var(--accent)' : 'var(--rule)',
+                      borderRadius: 2,
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = 'var(--paper-2)' }}
+                    onMouseLeave={(e) => { if (!isCurrent) e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {yr}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Day-of-week header (only in days mode) */}
+          {pickerMode === 'days' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, marginBottom: 4 }}>
             {DAYS.map(d => (
               <div key={d} style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', padding: '4px 0' }}>{d}</div>
             ))}
           </div>
+          )}
 
-          {/* Day cells */}
+          {/* Day cells (only in days mode) */}
+          {pickerMode === 'days' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
             {cells.map((c, i) => {
               const dStr = fmt(c.y, c.m, c.day)
@@ -297,6 +410,7 @@ export default function EditorialDate({ value, onChange, min, max, placeholder =
               )
             })}
           </div>
+          )}
 
           {/* Footer */}
           <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--rule)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
@@ -323,6 +437,22 @@ const navBtn = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
+  flexShrink: 0,
+}
+// Header buttons (month name, year) — clickable to open month/year picker modes
+const headerBtn = {
+  padding: '4px 10px',
+  background: 'transparent',
+  border: '1px solid transparent',
+  borderRadius: 2,
+  cursor: 'pointer',
+  color: 'var(--ink)',
+  fontFamily: 'var(--serif)',
+  fontSize: 17,
+  fontWeight: 500,
+  lineHeight: 1.1,
+  letterSpacing: '-0.005em',
+  transition: 'background 120ms ease, border-color 120ms ease',
 }
 const footBtnGhost = {
   padding: '5px 10px',
