@@ -488,30 +488,59 @@ export default function AdsPerformance() {
         if (!raw) return ''
         return raw.split(/\s+/).filter(Boolean).slice(0, 2).join(' ')
       }
-      const unionCount = (tfList, otherList) => {
+      // Two union flavours — must match the drilldown's dedupe strategy
+      // for each metric or the headline tile reads a different number
+      // than what the panel will list.
+      //
+      // unionCountEmail: both sources have an email column (leads, booked).
+      //   Email primary, name fallback when an individual row lacks email.
+      // unionCountName:  ONE source lacks email (live = ghl_lives_detail,
+      //   closes = lib_close_resolved). Using email on the side that has
+      //   it while the other side falls through to name produces two
+      //   different keys for the same person — that's the bug that made
+      //   the Ads tile show 3 closes when the drilldown showed 2 (George
+      //   Sidhom matched as "george@..." in typeform and "george sidhom"
+      //   in lib_close_resolved → counted twice).
+      const unionCountEmail = (tfList, otherList) => {
         const emails = new Set(), names = new Set()
         let n = 0
         for (const r of tfList) {
           const e = lc(r.email), k = nameTok(r)
-          if (e)      emails.add(e)
-          else if (k) names.add(k)
+          if (e) emails.add(e)
+          if (k) names.add(k)
           n++
         }
         for (const r of otherList) {
           const e = lc(r.email), k = nameTok(r)
           if (e && emails.has(e)) continue
           if (!e && k && names.has(k)) continue
-          if (e)      emails.add(e)
-          else if (k) names.add(k)
+          if (e) emails.add(e)
+          if (k) names.add(k)
+          n++
+        }
+        return n
+      }
+      const unionCountName = (tfList, otherList) => {
+        const names = new Set()
+        let n = 0
+        for (const r of tfList) {
+          const k = nameTok(r)
+          if (k) names.add(k)
+          n++
+        }
+        for (const r of otherList) {
+          const k = nameTok(r)
+          if (k && names.has(k)) continue
+          if (k) names.add(k)
           n++
         }
         return n
       }
       const prospects = {
-        leads:  unionCount(tfRows, ghlLeadRows),
-        booked: unionCount(tfRows.filter(r => r.is_booked), ghlBookedRows),
-        live:   unionCount(tfRows.filter(r => r.is_live),   ghlLiveRows),
-        closes: unionCount(tfRows.filter(r => r.is_closed), closeRows),
+        leads:  unionCountEmail(tfRows, ghlLeadRows),
+        booked: unionCountEmail(tfRows.filter(r => r.is_booked), ghlBookedRows),
+        live:   unionCountName(tfRows.filter(r => r.is_live),   ghlLiveRows),
+        closes: unionCountName(tfRows.filter(r => r.is_closed), closeRows),
       }
       setRowTotals({
         eod,
@@ -559,11 +588,25 @@ export default function AdsPerformance() {
 
       // Bucket builder. Sources are normalized to { key, ad, adset, campaign,
       // rev, cash } before union, so the same accumulator handles every
-      // metric. lib_close_resolved + lib_ghl_lives_detail have no email
-      // column — fall through to first+second name token for dedupe.
-      // (lc + nameTok already declared above by the top-tile prospects
-      // block; reusing them here keeps both code paths in sync.)
-      const dedupeKey = (r) => lc(r.email) || nameTok(r) || ''
+      // metric. (lc + nameTok already declared above by the top-tile
+      // prospects block; reusing them here keeps both code paths in sync.)
+      //
+      // Two dedupe strategies — pick the one that matches the source pair:
+      //
+      // • dedupeByEmail: email primary, name-token fallback. Use when BOTH
+      //   sources have an email column (leads = typeform + lib_ghl_leads,
+      //   booked = typeform + lib_ghl_booked).
+      //
+      // • dedupeByName: name-token ONLY. Use when EITHER source lacks an
+      //   email column (closes = typeform + lib_close_resolved [no email],
+      //   live = typeform + lib_ghl_lives_detail [no email]). If we let
+      //   typeform key by email and resolved-side key by name, the same
+      //   person collides on neither key → double-counted. This is the
+      //   bug that made closes count 3 when the drilldown showed 2: George
+      //   Sidhom appeared in both sources with email "george@..." in
+      //   typeform and only `clean_name` in lib_close_resolved.
+      const dedupeByEmail = (r) => lc(r.email) || nameTok(r) || ''
+      const dedupeByName  = (r) => nameTok(r) || lc(r.email) || ''
 
       const accumulate = (target, scopeKey, row) => {
         if (!scopeKey) return
@@ -603,46 +646,53 @@ export default function AdsPerformance() {
       // (its revenue/cash counts; later sources are skipped). For closes
       // we put lib_close_resolved first so HYROS-validated $/cash wins
       // over typeform self-report.
+      //
+      // Dedupe-key choice per metric (must match the drilldown for the
+      // tile count to equal the panel count):
+      //   leads / qual_leads / booked / qual_booked → email-first
+      //     (both sources have an email column).
+      //   live / closes                             → name-only
+      //     (lib_close_resolved + lib_ghl_lives_detail expose no email).
       const tfAsLead = tfRows.map(r => ({
-        _dedupe: dedupeKey(r),
+        _dedupe: dedupeByEmail(r),
         _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
       }))
       const tfQualLead = tfRows.filter(r => r.qualified).map(r => ({
-        _dedupe: dedupeKey(r),
+        _dedupe: dedupeByEmail(r),
         _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
       }))
       const tfAsBooked = tfRows.filter(r => r.is_booked).map(r => ({
-        _dedupe: dedupeKey(r),
+        _dedupe: dedupeByEmail(r),
         _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
       }))
       const tfAsQualBooked = tfRows.filter(r => r.is_booked && r.qualified).map(r => ({
-        _dedupe: dedupeKey(r),
+        _dedupe: dedupeByEmail(r),
         _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
       }))
       const tfAsLive = tfRows.filter(r => r.is_live).map(r => ({
-        _dedupe: dedupeKey(r),
+        _dedupe: dedupeByName(r),
         _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
       }))
       const tfAsClose = tfRows.filter(r => r.is_closed).map(r => ({
-        _dedupe: dedupeKey(r),
+        _dedupe: dedupeByName(r),
         _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
         _rev: parseFloat(r.revenue || 0),
         _cash: parseFloat(r.cash_collected || 0),
       }))
       const gAsLead = ghlLeadRows.map(r => ({
-        _dedupe: dedupeKey(r),
+        _dedupe: dedupeByEmail(r),
         _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
       }))
       const gAsBooked = ghlBookedRows.map(r => ({
-        _dedupe: dedupeKey(r),
+        _dedupe: dedupeByEmail(r),
         _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
       }))
       const gAsLive = ghlLiveRows.map(r => ({
-        _dedupe: dedupeKey(r),
+        _dedupe: dedupeByName(r),
         _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
       }))
       const closeAsClose = closeRows.map(r => ({
-        _dedupe: dedupeKey(r),
+        _dedupe: dedupeByName(r),
         _ad: r.resolved_ad_id, _adset: r.resolved_adset_id, _campaign: r.resolved_campaign,
         _rev: parseFloat(r.revenue || 0),
         _cash: parseFloat(r.cash_collected || 0),
