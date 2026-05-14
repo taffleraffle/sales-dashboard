@@ -1882,25 +1882,22 @@ function unionByEmail(tfRows, otherRows, otherKind) {
   const seenEmail = new Set()
   const seenName  = new Set()
   const out = []
-  const dedupeKeys = (r) => {
+  // Single check-and-add path used for BOTH sources. Prior version added
+  // tfRows unconditionally then only deduped otherRows, so a typeform
+  // submission that appeared twice (e.g. a prospect resubmitting the form)
+  // counted twice on the panel while the aggregation deduped to 1 — same
+  // row-vs-drilldown drift class Ben hit on closes.
+  const tryPush = (r, kind) => {
     const email = (r.email || '').toLowerCase()
     const name  = nameKey(r)
+    if (email && seenEmail.has(email)) return
+    if (!email && name && seenName.has(name)) return
     if (email) seenEmail.add(email)
     if (name)  seenName.add(name)
+    out.push({ kind, ...r })
   }
-  for (const r of tfRows) {
-    dedupeKeys(r)
-    out.push({ kind: 'tf', ...r })
-  }
-  for (const r of otherRows) {
-    const email = (r.email || '').toLowerCase()
-    const name  = nameKey(r)
-    if (email && seenEmail.has(email)) continue
-    if (!email && name && seenName.has(name)) continue
-    if (email) seenEmail.add(email)
-    if (name)  seenName.add(name)
-    out.push({ kind: otherKind, ...r })
-  }
+  for (const r of tfRows)    tryPush(r, 'tf')
+  for (const r of otherRows) tryPush(r, otherKind)
   return out.sort((a, b) =>
     (b.submitted_at || b.landed_at || b.created_at || '')
       .localeCompare(a.submitted_at || a.landed_at || a.created_at || ''))
@@ -1948,12 +1945,25 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
           // lib_close_resolved has no `email` column — dedupe by name-token
           // so a close that has both a resolved row and an unprocessed typeform
           // submission counts once.
-          const closeRows = (cData || []).map(r => ({ kind: 'close', ...r }))
-          const closeKeys = new Set(closeRows.map(nameKey).filter(Boolean))
+          //
+          // lib_close_resolved is keyed by closer_call_id (one row per call,
+          // not per prospect), so a prospect with multiple closer_calls of
+          // outcome='closed' (e.g. NC closed + FU closed for the same person)
+          // produces multiple rows. Without self-deduping by nameKey here,
+          // the panel would show 2 rows while the aggregation (which DOES
+          // self-dedupe) shows 1 — same row-vs-drilldown drift class.
+          const closeSeen = new Set()
+          const closeRows = []
+          for (const r of (cData || [])) {
+            const k = nameKey(r)
+            if (k && closeSeen.has(k)) continue
+            if (k) closeSeen.add(k)
+            closeRows.push({ kind: 'close', ...r })
+          }
           const tfRows = (tData || [])
             .filter(r => {
               const k = nameKey(r)
-              return !k || !closeKeys.has(k)
+              return !k || !closeSeen.has(k)
             })
             .map(r => ({ kind: 'tf', ...r }))
           if (!cancelled) setRows([...closeRows, ...tfRows].sort((a, b) =>
