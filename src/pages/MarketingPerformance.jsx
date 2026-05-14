@@ -1719,6 +1719,30 @@ export default function MarketingPerformance() {
       })
     }, 400)
   }, [])
+  // Helper: which KPIs should reflect a what-if delta? A what-if overlay
+  // on a metric is only meaningful if the user overrode something UPSTREAM
+  // of that metric in the funnel. Otherwise it's a phantom delta.
+  //
+  //   Funnel: adspend → leads → bookings → nc_booked → new_live → offers → closes → ascensions
+  //
+  // If user only overrides new_live_calls, downstream metrics (offers/
+  // closes/ascensions) get the overlay; upstream (bookings/leads/adspend)
+  // do not. The KPI render below uses these guards to pass whatIf={null}
+  // when the metric shouldn't visually change.
+  const hasOverride = (...keys) => keys.some(k => whatIfOverrides[k] != null && whatIfOverrides[k] !== '')
+  const upstream = {
+    leads:    () => hasOverride('adspend', 'leads', 'cpl'),
+    bookings: () => hasOverride('adspend', 'leads', 'qualified_bookings', 'nc_booked', 'cpb', 'lead_to_booking_pct'),
+    live:     () => hasOverride('adspend', 'leads', 'qualified_bookings', 'nc_booked', 'show_rate', 'new_live_calls', 'live_calls'),
+    offers:   () => upstream.live() || hasOverride('offer_rate', 'offers'),
+    closes:   () => upstream.live() || hasOverride('close_rate', 'closes'),
+    trial:    () => upstream.closes() || hasOverride('trial_cash', 'trial_revenue'),
+    ascend:   () => upstream.closes() || hasOverride('ascend_rate', 'ascensions', 'ascend_cash', 'ascend_revenue'),
+  }
+  // Convenience: wrap a what-if value so it returns null unless the
+  // relevant upstream override is set. Use as `gated(upstream.bookings, wf?.qualified_bookings)`.
+  const gated = (gate, val) => gate() ? val : null
+
   const whatIfStats = useMemo(() => {
     if (!whatIfActive || !Object.keys(whatIfOverrides).length) return null
     const o = whatIfOverrides
@@ -2059,14 +2083,14 @@ export default function MarketingPerformance() {
         const leadToQ30 = stats30.leads > 0 ? (bk30.qualified / stats30.leads) * 100 : 0
         return (
           <Section title="Spend & Lead Acquisition" cols={8}>
-            <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={wf?.adspend} tip="Total Meta Ads spend (converted to USD)" />
-            <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={wf?.leads} tip="New opportunities created in SCIO USA pipeline. Click to view." onClick={() => setDrilldown('leads')} />
-            <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={wf?.cpl} tip="Cost Per Lead = Adspend / Leads" />
-            <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} whatIf={wf?.qualified_bookings} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
-            <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={wf?.cpb} tip="Adspend ÷ Bookings (all)" />
-            <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} whatIf={wf?.qualified_bookings} tip={`Strategy bookings EXCLUDING the DQ Calendly calendar${bk.dq ? ` (${bk.dq} routed to DQ in this window)` : ''}. Click to view.`} onClick={() => setDrilldown('bookings')} />
-            <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} whatIf={wf?.lead_to_booking_pct} tip="Qualified Bookings ÷ Leads" />
-            <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} whatIf={wf?.cpb} tip="Adspend ÷ Qualified Bookings (excludes DQ)" />
+            <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={hasOverride('adspend') ? wf?.adspend : null} tip="Total Meta Ads spend (converted to USD)" />
+            <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={gated(upstream.leads, wf?.leads)} tip="New opportunities created in SCIO USA pipeline. Click to view." onClick={() => setDrilldown('leads')} />
+            <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={gated(upstream.leads, wf?.cpl)} tip="Cost Per Lead = Adspend / Leads" />
+            <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
+            <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={gated(upstream.bookings, wf?.cpb)} tip="Adspend ÷ Bookings (all)" />
+            <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip={`Strategy bookings EXCLUDING the DQ Calendly calendar${bk.dq ? ` (${bk.dq} routed to DQ in this window)` : ''}. Click to view.`} onClick={() => setDrilldown('bookings')} />
+            <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} whatIf={gated(upstream.bookings, wf?.lead_to_booking_pct)} tip="Qualified Bookings ÷ Leads" />
+            <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} whatIf={gated(upstream.bookings, wf?.cpb)} tip="Adspend ÷ Qualified Bookings (excludes DQ)" />
           </Section>
         )
       })()}
@@ -2090,54 +2114,54 @@ export default function MarketingPerformance() {
         const cancelRatePrev = rate(sp.cancels || 0, sp.qualified_bookings || 0)
         return (
           <Section title="Calls & Show Rates" cols={8}>
-            <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar. Click to view." onClick={() => setDrilldown('bookings')} />
-            <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={wf?.new_live_calls} tip="NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Distinct from 'Booked' (calls on the calendar). Click to view." onClick={() => setDrilldown('live')} />
-            <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
+            <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip="Total calls booked on calendar. Click to view." onClick={() => setDrilldown('bookings')} />
+            <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={gated(upstream.live, wf?.new_live_calls)} tip="NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Distinct from 'Booked' (calls on the calendar). Click to view." onClick={() => setDrilldown('live')} />
+            <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={gated(upstream.live, wf?.no_shows)} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
             <KPI label="Reschedule%" value={reschedRate} format="%" trailing={reschedRate30} prev={reschedRatePrev} tip={`Reschedules ÷ Booked. ${stats.reschedules || 0} reschedules out of ${stats.qualified_bookings || 0} bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
             <KPI label="Cancel%" value={cancelRate} format="%" trailing={cancelRate30} prev={cancelRatePrev} tip={`Cancellations ÷ Booked. ${stats.cancels || 0} cancels out of ${stats.qualified_bookings || 0} bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
-            <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Live shows ÷ ALL bookings (includes calls that later cancelled or rescheduled). The 'unfiltered' show rate — the harsh number that includes all the no-shows from people who never confirmed." />
-            <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Live shows ÷ CONFIRMED bookings (only calls that stayed on the calendar through call-time — cancels and reschedules removed from the denominator). This is the show rate among prospects who confirmed they'd show. Use this for forecasting." />
-            <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={wf?.cost_per_new_live_call} tip="Adspend ÷ Net New" />
+            <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={gated(upstream.live, wf?.gross_show_rate)} tip="Live shows ÷ ALL bookings (includes calls that later cancelled or rescheduled). The 'unfiltered' show rate — the harsh number that includes all the no-shows from people who never confirmed." />
+            <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={gated(upstream.live, wf?.net_show_rate)} tip="Live shows ÷ CONFIRMED bookings (only calls that stayed on the calendar through call-time — cancels and reschedules removed from the denominator). This is the show rate among prospects who confirmed they'd show. Use this for forecasting." />
+            <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={gated(upstream.live, wf?.cost_per_new_live_call)} tip="Adspend ÷ Net New" />
           </Section>
         )
       })()}
 
       {/* Offers & Closes */}
       <Section title="Offers & Closes" cols={6}>
-        <KPI label="Offers Made" value={stats.offers} format="n" prev={sp.offers} whatIf={wf?.offers} tip="Number of offers made on live calls" />
-        <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} prev={sp.offer_rate} whatIf={wf?.offer_rate} tip="Offers / Net Live (NC + FU)" />
-        <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" prev={sp.cost_per_offer} whatIf={wf?.cost_per_offer} tip="Adspend / Offers" />
-        <KPI label="Total Closes" value={stats.closes} format="n" prev={sp.closes} whatIf={wf?.closes} tip="Deals closed (trial sign-ups). Click to view." onClick={() => setDrilldown('closes')} />
-        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={wf?.close_rate} tip="Closes ÷ Live New Calls. Follow-ups and ascensions excluded from denominator." />
-        <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} prev={sp.cpa_trial} whatIf={wf?.cpa_trial} tip="Cost Per Acquisition = Adspend / Closes" />
+        <KPI label="Offers Made" value={stats.offers} format="n" prev={sp.offers} whatIf={gated(upstream.offers, wf?.offers)} tip="Number of offers made on live calls" />
+        <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} prev={sp.offer_rate} whatIf={gated(upstream.offers, wf?.offer_rate)} tip="Offers / Net Live (NC + FU)" />
+        <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" prev={sp.cost_per_offer} whatIf={gated(upstream.offers, wf?.cost_per_offer)} tip="Adspend / Offers" />
+        <KPI label="Total Closes" value={stats.closes} format="n" prev={sp.closes} whatIf={gated(upstream.closes, wf?.closes)} tip="Deals closed (trial sign-ups). Click to view." onClick={() => setDrilldown('closes')} />
+        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={gated(upstream.closes, wf?.close_rate)} tip="Closes ÷ Live New Calls. Follow-ups and ascensions excluded from denominator." />
+        <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} prev={sp.cpa_trial} whatIf={gated(upstream.closes, wf?.cpa_trial)} tip="Cost Per Acquisition = Adspend / Closes" />
       </Section>
 
       {/* Trial Financials */}
       <Section title="Trial Financials" cols={4}>
-        <KPI label="Trial Cash Collected" value={stats.trial_cash} format="$" prev={sp.trial_cash} whatIf={wf?.trial_cash} tip="Cash collected upfront from trial closes" />
-        <KPI label="Trial Contracted Rev" value={stats.trial_revenue} format="$" prev={sp.trial_revenue} whatIf={wf?.trial_revenue} tip="Total contracted revenue from trial closes" />
-        <KPI label="Cash Collected %" value={stats.trial_cash_pct} format="%" benchmark={bm.trial_uf_cash_pct} trailing={stats30.trial_cash_pct} prev={sp.trial_cash_pct} whatIf={wf?.trial_cash_pct} tip="Trial Cash / Trial Revenue" />
-        <KPI label="Trial FE Cash ROAS" value={stats.trial_fe_roas} format="x" benchmark={bm.trial_fe_roas} trailing={stats30.trial_fe_roas} prev={sp.trial_fe_roas} whatIf={wf?.trial_fe_roas} tip="Trial Cash / Adspend" />
+        <KPI label="Trial Cash Collected" value={stats.trial_cash} format="$" prev={sp.trial_cash} whatIf={gated(upstream.trial, wf?.trial_cash)} tip="Cash collected upfront from trial closes" />
+        <KPI label="Trial Contracted Rev" value={stats.trial_revenue} format="$" prev={sp.trial_revenue} whatIf={gated(upstream.trial, wf?.trial_revenue)} tip="Total contracted revenue from trial closes" />
+        <KPI label="Cash Collected %" value={stats.trial_cash_pct} format="%" benchmark={bm.trial_uf_cash_pct} trailing={stats30.trial_cash_pct} prev={sp.trial_cash_pct} whatIf={gated(upstream.trial, wf?.trial_cash_pct)} tip="Trial Cash / Trial Revenue" />
+        <KPI label="Trial FE Cash ROAS" value={stats.trial_fe_roas} format="x" benchmark={bm.trial_fe_roas} trailing={stats30.trial_fe_roas} prev={sp.trial_fe_roas} whatIf={gated(upstream.trial, wf?.trial_fe_roas)} tip="Trial Cash / Adspend" />
       </Section>
 
       {/* Ascension */}
       <Section title="Ascension" cols={8}>
-        <KPI label="Total Ascensions" value={stats.ascensions} format="n" prev={sp.ascensions} whatIf={wf?.ascensions} tip="Trial clients who ascended to full package. Click to view." onClick={() => setDrilldown('ascensions')} />
-        <KPI label="Ascension Rate" value={stats.ascend_rate} format="%" benchmark={bm.ascend_rate} trailing={stats30.ascend_rate} prev={sp.ascend_rate} whatIf={wf?.ascend_rate} tip="Ascensions / Trial Closes" />
-        <KPI label="CPA (Ascend)" value={stats.cpa_ascend} format="$" benchmark={bm.cpa_ascend} prev={sp.cpa_ascend} whatIf={wf?.cpa_ascend} tip="Adspend / Ascensions" />
-        <KPI label="Ascend Cash" value={stats.ascend_cash} format="$" prev={sp.ascend_cash} whatIf={wf?.ascend_cash} tip="Cash collected from ascension deals" />
-        <KPI label="Ascend Revenue" value={stats.ascend_revenue} format="$" prev={sp.ascend_revenue} whatIf={wf?.ascend_revenue} tip="Contracted revenue from ascension deals" />
-        <KPI label="% Cash Collected" value={stats.ascend_cash_pct} format="%" benchmark={bm.ascend_uf_cash_pct} trailing={stats30.ascend_cash_pct} prev={sp.ascend_cash_pct} whatIf={wf?.ascend_cash_pct} tip="Ascend Cash / Ascend Revenue" />
+        <KPI label="Total Ascensions" value={stats.ascensions} format="n" prev={sp.ascensions} whatIf={gated(upstream.ascend, wf?.ascensions)} tip="Trial clients who ascended to full package. Click to view." onClick={() => setDrilldown('ascensions')} />
+        <KPI label="Ascension Rate" value={stats.ascend_rate} format="%" benchmark={bm.ascend_rate} trailing={stats30.ascend_rate} prev={sp.ascend_rate} whatIf={gated(upstream.ascend, wf?.ascend_rate)} tip="Ascensions / Trial Closes" />
+        <KPI label="CPA (Ascend)" value={stats.cpa_ascend} format="$" benchmark={bm.cpa_ascend} prev={sp.cpa_ascend} whatIf={gated(upstream.ascend, wf?.cpa_ascend)} tip="Adspend / Ascensions" />
+        <KPI label="Ascend Cash" value={stats.ascend_cash} format="$" prev={sp.ascend_cash} whatIf={gated(upstream.ascend, wf?.ascend_cash)} tip="Cash collected from ascension deals" />
+        <KPI label="Ascend Revenue" value={stats.ascend_revenue} format="$" prev={sp.ascend_revenue} whatIf={gated(upstream.ascend, wf?.ascend_revenue)} tip="Contracted revenue from ascension deals" />
+        <KPI label="% Cash Collected" value={stats.ascend_cash_pct} format="%" benchmark={bm.ascend_uf_cash_pct} trailing={stats30.ascend_cash_pct} prev={sp.ascend_cash_pct} whatIf={gated(upstream.ascend, wf?.ascend_cash_pct)} tip="Ascend Cash / Ascend Revenue" />
         <KPI label="Finance Offers" value={stats.finance_offers} format="n" prev={sp.finance_offers} tip="Ascension clients offered finance" />
         <KPI label="Finance %" value={stats.finance_pct} format="%" prev={sp.finance_pct} tip="Finance Accepted / Ascensions" />
       </Section>
 
       {/* ROAS Overview */}
       <Section title="ROAS Overview" cols={4}>
-        <KPI label="All Cash Collected" value={stats.all_cash} format="$" prev={sp.all_cash} whatIf={wf?.all_cash} tip="Trial Cash + Ascend Cash + AR Collected" />
-        <KPI label="Net FE Cash ROAS" value={stats.net_fe_roas} format="x" benchmark={bm.net_fe_roas} trailing={stats30.net_fe_roas} prev={sp.net_fe_roas} whatIf={wf?.net_fe_roas} tip="(Trial Cash + Ascend Cash) / Adspend" />
-        <KPI label="Revenue ROAS" value={stats.revenue_roas} format="x" benchmark={bm.revenue_roas} trailing={stats30.revenue_roas} prev={sp.revenue_roas} whatIf={wf?.revenue_roas} tip="(Trial Rev + Ascend Rev) / Adspend" />
-        <KPI label="All Cash ROAS" value={stats.all_cash_roas} format="x" benchmark={bm.all_cash_roas} trailing={stats30.all_cash_roas} prev={sp.all_cash_roas} whatIf={wf?.all_cash_roas} tip="(Trial + Ascend + AR Cash) / Adspend" />
+        <KPI label="All Cash Collected" value={stats.all_cash} format="$" prev={sp.all_cash} whatIf={gated(upstream.trial, wf?.all_cash)} tip="Trial Cash + Ascend Cash + AR Collected" />
+        <KPI label="Net FE Cash ROAS" value={stats.net_fe_roas} format="x" benchmark={bm.net_fe_roas} trailing={stats30.net_fe_roas} prev={sp.net_fe_roas} whatIf={gated(upstream.trial, wf?.net_fe_roas)} tip="(Trial Cash + Ascend Cash) / Adspend" />
+        <KPI label="Revenue ROAS" value={stats.revenue_roas} format="x" benchmark={bm.revenue_roas} trailing={stats30.revenue_roas} prev={sp.revenue_roas} whatIf={gated(upstream.trial, wf?.revenue_roas)} tip="(Trial Rev + Ascend Rev) / Adspend" />
+        <KPI label="All Cash ROAS" value={stats.all_cash_roas} format="x" benchmark={bm.all_cash_roas} trailing={stats30.all_cash_roas} prev={sp.all_cash_roas} whatIf={gated(upstream.trial, wf?.all_cash_roas)} tip="(Trial + Ascend + AR Cash) / Adspend" />
       </Section>
 
       {/* AR & Refunds */}
