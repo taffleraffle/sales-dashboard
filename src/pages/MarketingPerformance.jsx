@@ -2102,7 +2102,7 @@ export default function MarketingPerformance() {
         return (
           <Section title="Calls & Show Rates" cols={9}>
             <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar. Click to view." onClick={() => setDrilldown('bookings')} />
-            <KPI label="Net New" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={wf?.new_live_calls} tip="Net new live calls — NEW calls only (no follow-ups, no ascensions). Click to view." onClick={() => setDrilldown('live')} />
+            <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={wf?.new_live_calls} tip="NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Distinct from 'Booked' (calls on the calendar). Click to view." onClick={() => setDrilldown('live')} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
             <KPI label="Resch+Cancel" value={reschPlusCancel} format="n" trailing={reschPlusCancel30} prev={reschPlusCancelPrev} tip="Reschedules + cancellations (combined). Both are excluded from the show-rate denominator. Click to view." onClick={() => setDrilldown('rc')} />
             <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Net New ÷ Booked (no exclusions). Booked is bucketed by booked_at, so daily/weekly values drift relative to when calls actually held — use Cohort Show% for short windows." />
