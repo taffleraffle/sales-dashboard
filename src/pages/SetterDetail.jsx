@@ -1,6 +1,7 @@
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import React, { useState, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
+import EditorialDate from '../components/EditorialDate'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import DataTable from '../components/DataTable'
@@ -548,17 +549,15 @@ export default function SetterDetail() {
               <h2 className="text-sm font-medium text-text-secondary">Recent Leads Contacted ({grouped.length} contacts, {recentCalls.length} calls)</h2>
               <div className="flex items-center gap-1.5 text-[10px] text-text-400">
                 <span>From</span>
-                <input type="date" value={callsFrom} onChange={e => {
-                  setCallsFrom(e.target.value)
-                  if (callsTo) setRange({ from: e.target.value, to: callsTo })
-                }}
-                  className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary" />
+                <EditorialDate value={callsFrom} onChange={(v) => {
+                  setCallsFrom(v)
+                  if (callsTo) setRange({ from: v, to: callsTo })
+                }} max={callsTo || undefined} compact />
                 <span>to</span>
-                <input type="date" value={callsTo} onChange={e => {
-                  setCallsTo(e.target.value)
-                  if (callsFrom) setRange({ from: callsFrom, to: e.target.value })
-                }}
-                  className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary" />
+                <EditorialDate value={callsTo} onChange={(v) => {
+                  setCallsTo(v)
+                  if (callsFrom) setRange({ from: callsFrom, to: v })
+                }} min={callsFrom || undefined} compact />
               </div>
             </div>
             <div className="tile tile-feedback overflow-hidden">

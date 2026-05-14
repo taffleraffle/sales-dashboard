@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Plus, X, ChevronDown, Loader, Check, Save, Download } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import EditorialDate from '../EditorialDate'
 
 const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-sm text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 const selectCls = 'select-input w-full'
@@ -169,7 +170,7 @@ export default function PaymentsTab({
               <select value={newPayment.payment_type} onChange={e => setNewPayment(p => ({ ...p, payment_type: e.target.value }))} className={selectCls}>
                 <option value="trial">Trial</option><option value="monthly">Monthly</option><option value="ascension">Ascension</option><option value="pif">PIF</option><option value="one_time">One-Time</option>
               </select></div>
-            <div><label className="text-[11px] text-text-400 uppercase tracking-wider block mb-1">Payment Date</label><input type="date" value={newPayment.payment_date} onChange={e => setNewPayment(p => ({ ...p, payment_date: e.target.value }))} className={inputCls} /></div>
+            <div><label className="text-[11px] text-text-400 uppercase tracking-wider block mb-1">Payment Date</label><EditorialDate value={newPayment.payment_date} onChange={(v) => setNewPayment(p => ({ ...p, payment_date: v }))} fullWidth /></div>
             <div><label className="text-[11px] text-text-400 uppercase tracking-wider block mb-1">Description</label><input value={newPayment.description} onChange={e => setNewPayment(p => ({ ...p, description: e.target.value }))} placeholder="Optional" className={inputCls} /></div>
           </div>
           <button onClick={handleAddPayment} disabled={savingPayment} className="px-4 py-2 text-xs font-medium bg-opt-yellow text-text-primary rounded-sm hover:brightness-110 disabled:opacity-50 transition-all duration-150 flex items-center gap-1.5">

@@ -697,13 +697,11 @@ function SetterLeadSearch({ index, onSelect, selectedLead, label = 'Set' }) {
         <span className="text-xs text-text-400">{label} {index + 1}:</span>
         <span className="text-sm font-medium">{selectedLead.lead_name}</span>
         <div className="flex items-center gap-1">
-          <Calendar size={10} className="text-text-400" />
-          <input
-            type="date"
+          <EditorialDate
             value={selectedLead.appointment_date || ''}
-            onChange={e => onSelect({ ...selectedLead, appointment_date: e.target.value })}
-            className="bg-bg-primary border border-border-default rounded px-1.5 py-0.5 text-[11px] text-text-primary w-[130px]"
+            onChange={(v) => onSelect({ ...selectedLead, appointment_date: v })}
             placeholder="Booked for..."
+            compact
           />
         </div>
         <span className={`text-[9px] px-1 py-0.5 rounded ${

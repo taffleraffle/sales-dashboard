@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition } from 'react'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { useCloserCallProspectMetrics } from '../hooks/useCloserCallProspectMetrics'
+import EditorialDate from '../components/EditorialDate'
 import DateRangeSelector from '../components/DateRangeSelector'
 import SyncStatusIndicator from '../components/SyncStatusIndicator'
 import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check } from 'lucide-react'
@@ -393,9 +394,9 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
       <div className="px-4 py-3 border-b border-border-default flex flex-wrap items-center gap-3">
         <h2 className="text-sm font-medium">Daily Tracker Data</h2>
         <div className="flex items-center gap-2 ml-auto">
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="bg-bg-primary border border-border-default rounded px-2 py-1 text-xs text-text-primary" />
+          <EditorialDate value={fromDate} onChange={setFromDate} max={toDate || undefined} placeholder="From" compact />
           <span className="text-text-400 text-xs">to</span>
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="bg-bg-primary border border-border-default rounded px-2 py-1 text-xs text-text-primary" />
+          <EditorialDate value={toDate} onChange={setToDate} min={fromDate || undefined} placeholder="To" compact />
           <button onClick={() => { setFromDate(''); setToDate('') }} className="px-3 py-1 rounded text-xs font-medium bg-opt-yellow text-text-primary">FILTER</button>
           <span className="text-xs text-text-400">{filtered.length} days</span>
         </div>
