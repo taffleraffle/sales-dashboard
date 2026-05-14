@@ -2024,9 +2024,75 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
         }
 
         // ── LIVE ──────────────────────────────────────────────────
-        // Row count = MAX(typeform is_live, GHL live). Same union pattern
-        // as booked.
+        // Source-of-truth at the "all in window" level: closer_calls
+        // (outcome IN closed/not_closed AND call_type='new_call', deduped
+        // by prospect_name). Same hook MarketingPerformance and the top
+        // tile use via useCloserCallProspectMetrics. Earlier this branch
+        // queried lib_ghl_lives_detail + typeform.is_live which gave a
+        // DIFFERENT universe (appointments vs closer-self-report) and
+        // produced the row-vs-drilldown drift Ben hit (top tile said 20,
+        // panel said 15).
+        //
+        // Per-ad / per-adset / per-campaign scope falls back to the
+        // attribution-based union because closer_calls has no ad
+        // attribution — that universe only exists in typeform + GHL.
         if (drill.metric === 'live') {
+          if (drill.scope.level === 'all') {
+            setSource('closer_calls')
+            // Date window via closer_eod_reports.report_date so we filter
+            // by EOD date, not call.created_at (which can lag if the EOD
+            // gets submitted late).
+            const sinceDate = dateRange?.startStr || '2024-01-01'
+            const untilDate = dateRange?.endStr   || '2099-12-31'
+            const { data: reports, error: rErr } = await supabase
+              .from('closer_eod_reports')
+              .select('id, report_date')
+              .gte('report_date', sinceDate).lte('report_date', untilDate)
+            if (rErr) throw new Error(rErr.message)
+            const reportIds = (reports || []).map(r => r.id)
+            if (!reportIds.length) {
+              if (!cancelled) setRows([])
+              return
+            }
+            // Page through to bypass PostgREST's 1000-row cap.
+            const allCalls = []
+            const PAGE = 1000
+            let off = 0
+            while (true) {
+              const { data, error: ccErr } = await supabase
+                .from('closer_calls')
+                .select('id, prospect_name, outcome, call_type, revenue, cash_collected, created_at, eod_report_id')
+                .in('eod_report_id', reportIds)
+                .in('outcome', ['closed', 'not_closed'])
+                .eq('call_type', 'new_call')
+                .range(off, off + PAGE - 1)
+              if (ccErr) throw new Error(ccErr.message)
+              if (!data?.length) break
+              allCalls.push(...data)
+              if (data.length < PAGE) break
+              off += PAGE
+            }
+            // Dedupe by prospect_name (matches useCloserCallProspectMetrics).
+            // Skip "Historical Close YYYY-MM-DD" backfill placeholders that
+            // aren't real prospects.
+            const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ')
+            const isPlaceholder = (s) => /^historical close\b/i.test((s || '').trim())
+            const seen = new Set()
+            const rows = []
+            for (const c of allCalls) {
+              const k = norm(c.prospect_name)
+              if (!k) continue
+              if (isPlaceholder(c.prospect_name)) continue
+              if (seen.has(k)) continue
+              seen.add(k)
+              rows.push({ kind: 'cc', ...c })
+            }
+            rows.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+            if (!cancelled) setRows(rows)
+            return
+          }
+          // Per-ad/adset/campaign scope: stays on attribution-based union
+          // because closer_calls has no ad attribution at the per-call level.
           let qG = supabase.from('lib_ghl_lives_detail').select('*')
             .gte('landed_at', sinceISO).lte('landed_at', untilISO)
             .order('landed_at', { ascending: false })
@@ -2170,7 +2236,42 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
           </table>
         )}
 
-        {!loading && rows.length > 0 && source !== 'closed' && (
+        {!loading && rows.length > 0 && source === 'closer_calls' && (
+          <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--rule)' }}>
+                <th style={drillTh}>Date</th>
+                <th style={drillTh}>Prospect</th>
+                <th style={drillTh}>Outcome</th>
+                <th style={{ ...drillTh, textAlign: 'right' }}>Revenue</th>
+                <th style={{ ...drillTh, textAlign: 'right' }}>Cash</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, idx) => (
+                <tr key={r.id || `cc-${idx}`} style={{ borderBottom: '1px solid var(--rule)' }}>
+                  <td style={drillTd}>{(r.created_at || '').slice(0, 10) || '—'}</td>
+                  <td style={drillTd}>
+                    <div style={{ fontFamily: 'var(--serif)', fontWeight: 500, color: 'var(--ink)', fontSize: 14 }}>{r.prospect_name || '—'}</div>
+                  </td>
+                  <td style={drillTd}>
+                    <span style={{
+                      padding: '2px 8px', borderRadius: 2,
+                      fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+                      background: r.outcome === 'closed' ? 'rgba(31,122,58,0.10)' : 'transparent',
+                      border: '1px solid', borderColor: r.outcome === 'closed' ? '#1f7a3a' : 'var(--rule)',
+                      color: 'var(--ink)',
+                    }}>{r.outcome || '—'}</span>
+                  </td>
+                  <td style={{ ...drillTd, textAlign: 'right' }}>{r.revenue > 0 ? fmt$(parseFloat(r.revenue)) : '—'}</td>
+                  <td style={{ ...drillTd, textAlign: 'right', color: r.cash_collected > 0 ? '#1f7a3a' : 'var(--ink-4)' }}>{r.cash_collected > 0 ? fmt$(parseFloat(r.cash_collected)) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {!loading && rows.length > 0 && source !== 'closed' && source !== 'closer_calls' && (
           <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--rule)' }}>
