@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar, ChevronDown } from 'lucide-react'
+import EditorialDate from './EditorialDate'
 
 const presets = [
   { label: 'Today', days: 1 },
@@ -176,22 +177,7 @@ export default function DateRangeSelector({ selected, onChange }) {
               >
                 From
               </label>
-              <input
-                type="date"
-                value={customFrom}
-                onChange={e => setCustomFrom(e.target.value)}
-                className="w-full"
-                style={{
-                  background: 'var(--paper)',
-                  border: '1px solid var(--rule)',
-                  borderRadius: 3,
-                  padding: '7px 10px',
-                  fontSize: 13,
-                  color: 'var(--ink)',
-                  colorScheme: 'light',
-                  outline: 'none',
-                }}
-              />
+              <EditorialDate value={customFrom} onChange={setCustomFrom} max={customTo || undefined} placeholder="Pick start" fullWidth />
             </div>
             <div>
               <label
@@ -207,22 +193,7 @@ export default function DateRangeSelector({ selected, onChange }) {
               >
                 To
               </label>
-              <input
-                type="date"
-                value={customTo}
-                onChange={e => setCustomTo(e.target.value)}
-                className="w-full"
-                style={{
-                  background: 'var(--paper)',
-                  border: '1px solid var(--rule)',
-                  borderRadius: 3,
-                  padding: '7px 10px',
-                  fontSize: 13,
-                  color: 'var(--ink)',
-                  colorScheme: 'light',
-                  outline: 'none',
-                }}
-              />
+              <EditorialDate value={customTo} onChange={setCustomTo} min={customFrom || undefined} placeholder="Pick end" fullWidth />
             </div>
           </div>
 

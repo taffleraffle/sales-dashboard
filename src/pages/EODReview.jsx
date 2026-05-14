@@ -8,6 +8,7 @@ import { fetchCloserCalendar, syncGHLAppointments } from '../services/ghlCalenda
 import { INTRO_CALENDARS } from '../utils/constants'
 import EODHistory from './EODHistory'
 import { reconcileAttribution } from '../services/attributionReconciliation'
+import EditorialDate from '../components/EditorialDate'
 
 const closingOutcomes = [
   { value: 'no_show', label: 'No Show', color: 'text-danger' },
@@ -2443,13 +2444,7 @@ export default function EODReview() {
         >
           <ChevronLeft size={16} />
         </button>
-        <input
-          type="date"
-          value={selectedDate}
-          max={today}
-          onChange={e => setSelectedDate(e.target.value)}
-          className="bg-bg-card border border-border-default rounded-sm px-3 py-1.5 text-sm text-text-primary"
-        />
+        <EditorialDate value={selectedDate} onChange={setSelectedDate} max={today} fullWidth />
         <button
           onClick={() => shiftDate(1)}
           disabled={selectedDate >= today}
@@ -3245,11 +3240,9 @@ export default function EODReview() {
             <div className="px-4 py-3 border-b border-border-default flex items-center justify-between flex-wrap gap-2">
               <h3 className="text-[11px] text-text-400 uppercase font-medium">Previous EODs</h3>
               <div className="flex items-center gap-2">
-                <input type="date" value={historyFrom} onChange={e => setHistoryFrom(e.target.value)}
-                  className="bg-bg-primary border border-border-default rounded px-2 py-1 text-[11px] text-text-primary" />
+                <EditorialDate value={historyFrom} onChange={setHistoryFrom} fullWidth />
                 <span className="text-[10px] text-text-400">to</span>
-                <input type="date" value={historyTo} onChange={e => setHistoryTo(e.target.value)}
-                  className="bg-bg-primary border border-border-default rounded px-2 py-1 text-[11px] text-text-primary" />
+                <EditorialDate value={historyTo} onChange={setHistoryTo} fullWidth />
               </div>
             </div>
             {allEodHistory.filter(e => e.report_date !== selectedDate).length === 0 ? (
@@ -3437,11 +3430,9 @@ export default function EODReview() {
             <div className="px-4 py-3 border-b border-border-default flex items-center justify-between flex-wrap gap-2">
               <h3 className="text-[11px] text-text-400 uppercase font-medium">Previous EODs</h3>
               <div className="flex items-center gap-2">
-                <input type="date" value={historyFrom} onChange={e => setHistoryFrom(e.target.value)}
-                  className="bg-bg-primary border border-border-default rounded px-2 py-1 text-[11px] text-text-primary" />
+                <EditorialDate value={historyFrom} onChange={setHistoryFrom} fullWidth />
                 <span className="text-[10px] text-text-400">to</span>
-                <input type="date" value={historyTo} onChange={e => setHistoryTo(e.target.value)}
-                  className="bg-bg-primary border border-border-default rounded px-2 py-1 text-[11px] text-text-primary" />
+                <EditorialDate value={historyTo} onChange={setHistoryTo} fullWidth />
               </div>
             </div>
             {allEodHistory.filter(e => e.report_date !== selectedDate).length === 0 ? (

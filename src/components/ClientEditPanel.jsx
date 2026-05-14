@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { X, Save, Loader } from 'lucide-react'
+import EditorialDate from './EditorialDate'
 
 const inputCls = 'w-full px-3 py-2 bg-bg-primary border border-border-default rounded-sm text-sm text-text-primary focus:border-opt-yellow/50 focus:outline-none focus:shadow-[0_0_10px_rgba(212,245,12,0.08)] transition-all duration-200 placeholder:text-text-400/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 const selectCls = 'select-input w-full'
@@ -160,11 +161,11 @@ export default function ClientEditPanel({ client, members, onSave, onClose }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelCls}>Trial Start Date</label>
-                <input type="date" value={form.trial_start_date} onChange={e => set('trial_start_date', e.target.value)} className={inputCls} />
+                <EditorialDate value={form.trial_start_date} onChange={set} fullWidth />
               </div>
               <div>
                 <label className={labelCls}>Ascension Date</label>
-                <input type="date" value={form.ascension_date} onChange={e => set('ascension_date', e.target.value)} className={inputCls} />
+                <EditorialDate value={form.ascension_date} onChange={set} fullWidth />
               </div>
               <div>
                 <label className={labelCls}>Billing Day (1-28)</label>
@@ -172,7 +173,7 @@ export default function ClientEditPanel({ client, members, onSave, onClose }) {
               </div>
               <div>
                 <label className={labelCls}>Next Billing Date</label>
-                <input type="date" value={form.next_billing_date} onChange={e => set('next_billing_date', e.target.value)} className={inputCls} />
+                <EditorialDate value={form.next_billing_date} onChange={set} fullWidth />
               </div>
               <div>
                 <label className={labelCls}>Payments Received</label>

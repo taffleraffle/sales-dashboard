@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X, Loader } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import EditorialDate from './EditorialDate'
 
 const OUTCOMES = [
   { value: '', label: 'No outcome' },
@@ -87,8 +88,7 @@ export default function AddTranscriptModal({ members = [], onClose, onSaved }) {
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-[11px] text-text-400 mb-1 block">Date</label>
-              <input type="date" value={form.meeting_date} onChange={e => set('meeting_date', e.target.value)}
-                className="w-full bg-bg-primary border border-border-default rounded-sm px-3 py-2 text-sm text-text-primary outline-none focus:border-opt-yellow/40" />
+              <EditorialDate value={form.meeting_date} onChange={set} fullWidth />
             </div>
             <div>
               <label className="text-[11px] text-text-400 mb-1 block">Duration (min)</label>

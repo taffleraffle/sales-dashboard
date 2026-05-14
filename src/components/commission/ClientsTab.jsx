@@ -5,6 +5,7 @@ import { getCountry } from '../../utils/countryUtils'
 import ClientEditPanel from '../ClientEditPanel'
 import ClientPaymentTimeline from '../ClientPaymentTimeline'
 import GHLImportModal from '../GHLImportModal'
+import EditorialDate from '../EditorialDate'
 
 const STAGE_COLORS = {
   trial: 'bg-bg-card-hover text-text-secondary border-border-default',

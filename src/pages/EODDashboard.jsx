@@ -6,6 +6,7 @@ import { todayET, toLocalDateStr } from '../lib/dateUtils'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useAuth } from '../contexts/AuthContext'
 import { ICON } from '../utils/constants'
+import EditorialDate from '../components/EditorialDate'
 
 /**
  * EOD Dashboard — the default landing at /sales/eod.
@@ -222,13 +223,7 @@ export default function EODDashboard() {
             </button>
             <div className="flex items-center gap-1.5 px-2">
               <Calendar size={ICON.sm} className="text-text-400" />
-              <input
-                type="date"
-                value={selectedDate}
-                max={todayET()}
-                onChange={e => setSelectedDate(e.target.value)}
-                className="bg-transparent text-sm text-text-primary outline-none"
-              />
+              <EditorialDate value={selectedDate} onChange={setSelectedDate} max={todayET()} fullWidth />
             </div>
             <button
               onClick={() => shiftDate(1)}

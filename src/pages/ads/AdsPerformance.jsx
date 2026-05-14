@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader, AlertCircle, ChevronRight, ChevronDown, Search, ArrowDown, ArrowUp, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import EditorialDate from '../../components/EditorialDate'
 import { dateRangeBoundsET } from '../../lib/dateUtils'
 import { useCloserCallProspectMetrics } from '../../hooks/useCloserCallProspectMetrics'
 
@@ -888,11 +889,11 @@ export default function AdsPerformance() {
             options={[{ value: '7', label: '7d' }, { value: '30', label: '30d' }, { value: '90', label: '90d' }, { value: 'all', label: 'All' }, { value: 'custom', label: 'Custom' }]} />
           {dateRange.preset === 'custom' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <input type="date" value={dateRange.startStr} max={dateRange.endStr}
-                onChange={e => setDateRange({ ...dateRange, preset: 'custom', startStr: e.target.value })} style={dateInputStyle} />
+              <EditorialDate value={dateRange.startStr} max={dateRange.endStr}
+                onChange={(v) => setDateRange({ ...dateRange, preset: 'custom', startStr: v })} compact />
               <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>→</span>
-              <input type="date" value={dateRange.endStr} min={dateRange.startStr}
-                onChange={e => setDateRange({ ...dateRange, preset: 'custom', endStr: e.target.value })} style={dateInputStyle} />
+              <EditorialDate value={dateRange.endStr} min={dateRange.startStr}
+                onChange={(v) => setDateRange({ ...dateRange, preset: 'custom', endStr: v })} compact />
             </div>
           )}
           <ChipGroup label="Status" value={statusFilter} setValue={setStatusFilter} options={STATUS_OPTIONS} />

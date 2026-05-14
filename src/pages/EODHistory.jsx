@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Loader, Check, X, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useEODHistory } from '../hooks/useEODHistory'
+import EditorialDate from '../components/EditorialDate'
 
 function toETDateStr(d) {
   return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
@@ -127,18 +128,18 @@ export default function EODHistory({ embedded = false }) {
 
       {/* Date range selector */}
       <div className="flex items-center gap-2 mb-4">
-        <input
-          type="date"
+        <EditorialDate
           value={dateRange.from}
-          onChange={e => setDateRange(prev => ({ ...prev, from: e.target.value }))}
-          className="bg-bg-card border border-border-default rounded-sm px-3 py-1.5 text-xs text-text-primary [color-scheme:light]"
+          onChange={(v) => setDateRange(prev => ({ ...prev, from: v }))}
+          max={dateRange.to || undefined}
+          placeholder="From"
         />
         <span className="text-text-400 text-xs">to</span>
-        <input
-          type="date"
+        <EditorialDate
           value={dateRange.to}
-          onChange={e => setDateRange(prev => ({ ...prev, to: e.target.value }))}
-          className="bg-bg-card border border-border-default rounded-sm px-3 py-1.5 text-xs text-text-primary [color-scheme:light]"
+          onChange={(v) => setDateRange(prev => ({ ...prev, to: v }))}
+          min={dateRange.from || undefined}
+          placeholder="To"
         />
         <span className="text-[10px] text-text-400">{dates.length} days</span>
       </div>
