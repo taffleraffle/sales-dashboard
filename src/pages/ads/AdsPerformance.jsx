@@ -1539,6 +1539,16 @@ const dateInputStyle = {
 }
 
 // ── Drill-down helpers ──────────────────────────────────────────────
+// PostgREST .or() treats `,` `(` `)` `.` and unquoted whitespace as syntax.
+// Campaign names like "SCIO -Restoration - Application - 4/22 - New Videos"
+// contain dashes, slashes, and spaces — wrap in double-quotes and escape
+// internal backslashes/quotes so the value survives both PostgREST parsing
+// and supabase-js URL encoding. encodeURIComponent here would double-encode
+// (supabase-js re-encodes the full filter string).
+function pgQuote(v) {
+  return `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
 // Generic scope filter — every drilldown query applies the same OR-pattern
 // so a campaign-scoped drill catches rows by utm_campaign string match OR
 // adset_id.in OR ad_id.in (covers Meta rename drift + attribution gaps).
@@ -1555,12 +1565,24 @@ function applyDrillScope(q, scope, cols) {
   }
   if (scope.level === 'campaign') {
     const ors = []
-    if (scope.id)                              ors.push(`${cols.campaign}.eq.${encodeURIComponent(scope.id)}`)
+    if (scope.id)                              ors.push(`${cols.campaign}.eq.${pgQuote(scope.id)}`)
     if ((scope.adsetIds || []).length)         ors.push(`${cols.adset}.in.(${scope.adsetIds.join(',')})`)
     if ((scope.adIds    || []).length)         ors.push(`${cols.ad}.in.(${scope.adIds.join(',')})`)
     if (ors.length) return q.or(ors.join(','))
   }
   return q
+}
+
+// Name-token key for cross-table dedupe (lib_close_resolved and
+// lib_ghl_lives_detail expose `clean_name` / `prospect_name` / `display_name`
+// but NOT `email` — using email here would silently dedupe nothing and
+// double-count every prospect that appears in both sources). Lowercases
+// and joins first two tokens — same heuristic the resolver views use.
+function nameKey(row) {
+  const raw = (row.clean_name || row.prospect_name || row.display_name || row.email || '').toString().toLowerCase().trim()
+  if (!raw) return ''
+  const parts = raw.split(/\s+/).filter(Boolean)
+  return parts.slice(0, 2).join(' ')
 }
 
 // Column maps per table — lets applyDrillScope work uniformly.
@@ -1588,19 +1610,31 @@ async function fetchGhlDetail(drill, sinceISO, untilISO) {
   return data || []
 }
 
-// Union + dedupe by email. typeform-side rows win ties (richer columns).
+// Union + dedupe — typeform-side rows win ties (richer columns).
+// Dedupe key: email when available on BOTH sides, else fall back to
+// first+second name tokens. lib_ghl_lives_detail has no email column,
+// so the email-only approach silently double-counted every prospect.
 function unionByEmail(tfRows, otherRows, otherKind) {
-  const seen = new Set()
+  const seenEmail = new Set()
+  const seenName  = new Set()
   const out = []
-  for (const r of tfRows) {
+  const dedupeKeys = (r) => {
     const email = (r.email || '').toLowerCase()
-    if (email) seen.add(email)
+    const name  = nameKey(r)
+    if (email) seenEmail.add(email)
+    if (name)  seenName.add(name)
+  }
+  for (const r of tfRows) {
+    dedupeKeys(r)
     out.push({ kind: 'tf', ...r })
   }
   for (const r of otherRows) {
     const email = (r.email || '').toLowerCase()
-    if (email && seen.has(email)) continue
-    if (email) seen.add(email)
+    const name  = nameKey(r)
+    if (email && seenEmail.has(email)) continue
+    if (!email && name && seenName.has(name)) continue
+    if (email) seenEmail.add(email)
+    if (name)  seenName.add(name)
     out.push({ kind: otherKind, ...r })
   }
   return out.sort((a, b) =>
@@ -1647,10 +1681,16 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
           const [{ data: cData, error: cErr }, { data: tData, error: tErr }] = await Promise.all([qC, qT])
           if (cErr) throw new Error(cErr.message)
           if (tErr) throw new Error(tErr.message)
+          // lib_close_resolved has no `email` column — dedupe by name-token
+          // so a close that has both a resolved row and an unprocessed typeform
+          // submission counts once.
           const closeRows = (cData || []).map(r => ({ kind: 'close', ...r }))
-          const closeEmails = new Set(closeRows.map(r => (r.email || '').toLowerCase()).filter(Boolean))
+          const closeKeys = new Set(closeRows.map(nameKey).filter(Boolean))
           const tfRows = (tData || [])
-            .filter(r => !r.email || !closeEmails.has(r.email.toLowerCase()))
+            .filter(r => {
+              const k = nameKey(r)
+              return !k || !closeKeys.has(k)
+            })
             .map(r => ({ kind: 'tf', ...r }))
           if (!cancelled) setRows([...closeRows, ...tfRows].sort((a, b) =>
             (b.created_at || b.submitted_at || '').localeCompare(a.created_at || a.submitted_at || '')))
@@ -1858,15 +1898,20 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => {
+              {rows.map((r, idx) => {
                 const isGhl = r.kind === 'ghl'
-                const id = r.response_id || r.ghl_contact_id
+                // lib_ghl_lives_detail rows have no response_id / ghl_contact_id —
+                // closer_call_id is the stable key. Index fallback prevents
+                // duplicate-key warnings + render glitches when nothing identifies
+                // the row.
+                const id = r.response_id || r.ghl_contact_id || r.closer_call_id || r.appointment_id || `${r.kind}-${idx}`
                 const when = (r.submitted_at || r.landed_at || '').slice(0, 10) || '—'
+                const name = r.display_name || r.clean_name || r.prospect_name || r.email || '—'
                 return (
                   <tr key={id} style={{ borderBottom: '1px solid var(--rule)' }}>
                     <td style={drillTd}>{when}</td>
                     <td style={drillTd}>
-                      <div style={{ fontFamily: 'var(--serif)', fontWeight: 500, color: 'var(--ink)', fontSize: 14 }}>{r.display_name}</div>
+                      <div style={{ fontFamily: 'var(--serif)', fontWeight: 500, color: 'var(--ink)', fontSize: 14 }}>{name}</div>
                       {r.email && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.email}</div>}
                       {r.phone && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.phone}</div>}
                     </td>
