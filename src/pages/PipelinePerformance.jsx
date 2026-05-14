@@ -277,7 +277,10 @@ export default function PipelinePerformance() {
                         <span>{tw.dials.toLocaleString()} dials</span>
                         <span>{tw.pickups} pickups</span>
                         <span>{tw.mcs} MCs</span>
-                        <span className="text-cyan-400 font-medium">{totalSets} sets</span>
+                        {/* "Sets" intentionally NOT shown here — setter_leads has
+                            no pipeline_id, so totalSets is company-wide and
+                            attributing it to this specific pipeline would
+                            mislead. Sets appear once on the top-of-page tile. */}
                         {hasZapier && <span className="text-success text-[10px]">WAVV LIVE</span>}
                         {!hasZapier && tw.dials > 0 && <span className="text-text-400 text-[10px]">GHL TAGS</span>}
                       </div>
@@ -285,6 +288,11 @@ export default function PipelinePerformance() {
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
+                          {/* Lead→Set% column removed — setter_leads.pipeline_id
+                              doesn't exist, so the prior column displayed
+                              (global_totalSets / this_stage_count) which is
+                              meaningless. Restore once we can bucket sets by
+                              pipeline (likely via GHL contact tag join). */}
                           <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
                             <th className="px-3 py-2 text-left">Stage</th>
                             <th className="px-3 py-2 text-right">Count</th>
@@ -292,14 +300,12 @@ export default function PipelinePerformance() {
                             <th className="px-3 py-2 text-right">Pickups</th>
                             <th className="px-3 py-2 text-right">MCs</th>
                             <th className="px-3 py-2 text-right">Pickup %</th>
-                            <th className="px-3 py-2 text-right">Lead→Set %</th>
                           </tr>
                         </thead>
                         <tbody>
                           {s.stageFlow.map(stage => {
                             const w = stage.wavv || { dials: 0, pickups: 0, mcs: 0 }
                             const pickupPct = fmtRate(w.pickups, w.dials)
-                            const leadToSet = fmtRate(totalSets, stage.count)
                             return (
                               <tr key={stage.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50">
                                 <td className="px-3 py-2 font-medium text-text-primary">{stage.name}</td>
@@ -308,7 +314,6 @@ export default function PipelinePerformance() {
                                 <td className="px-3 py-2 text-right text-text-400">{w.pickups}</td>
                                 <td className="px-3 py-2 text-right text-text-400">{w.mcs}</td>
                                 <td className={`px-3 py-2 text-right font-medium ${rateColor(pickupPct, 20, 10)}`}>{pickupPct !== '—' ? `${pickupPct}%` : '—'}</td>
-                                <td className={`px-3 py-2 text-right font-medium ${rateColor(leadToSet, 5, 2)}`}>{leadToSet !== '—' ? `${leadToSet}%` : '—'}</td>
                               </tr>
                             )
                           })}
@@ -321,7 +326,6 @@ export default function PipelinePerformance() {
                             <td className="px-3 py-2 text-right">{tw.pickups}</td>
                             <td className="px-3 py-2 text-right">{tw.mcs}</td>
                             <td className={`px-3 py-2 text-right ${rateColor(fmtRate(tw.pickups, tw.dials), 20, 10)}`}>{tw.dials > 0 ? `${fmtRate(tw.pickups, tw.dials)}%` : '—'}</td>
-                            <td className={`px-3 py-2 text-right ${rateColor(fmtRate(totalSets, s.total), 5, 2)}`}>{s.total > 0 ? `${fmtRate(totalSets, s.total)}%` : '—'}</td>
                           </tr>
                         </tfoot>
                       </table>

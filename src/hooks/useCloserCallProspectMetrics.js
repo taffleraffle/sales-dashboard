@@ -88,6 +88,14 @@ export function useCloserCallProspectMetrics() {
     return () => { cancelled = true }
   }, [])
 
+  // Track the actual fetched window so byRange() can warn when a caller
+  // requests data older than what's been loaded.
+  const fetchedSinceRef = useMemo(() => {
+    const since = new Date()
+    since.setDate(since.getDate() - WINDOW_DAYS)
+    return since.toISOString().split('T')[0]
+  }, [])
+
   const byRange = useMemo(() => {
     return (daysOrRange = 30) => {
       // Accept either a numeric day count (legacy) OR a { from, to } / 'mtd'
@@ -109,6 +117,11 @@ export function useCloserCallProspectMetrics() {
         cutoffStr = cutoff.toISOString().split('T')[0]
         untilStr  = '9999-12-31'
       }
+      // Out-of-window guard: the hook fetches a fixed WINDOW_DAYS slice once,
+      // so any caller asking for data older than that gets a silent 0/0/0.
+      // Log a warning and surface the gap on the return value so the page
+      // can render a banner instead of pretending the count is real.
+      const outOfWindow = cutoffStr < fetchedSinceRef
 
       // Map report → date so we can filter calls by report-date window
       const reportInRange = new Set()
@@ -146,9 +159,17 @@ export function useCloserCallProspectMetrics() {
         ? parseFloat(((closedProspects / liveProspects) * 100).toFixed(1))
         : 0
 
-      return { liveProspects, closedProspects, closeRate }
+      if (outOfWindow) {
+        console.warn(
+          `[useCloserCallProspectMetrics] Requested range starts ${cutoffStr} ` +
+          `but the hook only fetched data from ${fetchedSinceRef} onward ` +
+          `(WINDOW_DAYS=${WINDOW_DAYS}). Counts older than the fetch window are 0 ` +
+          `— widen WINDOW_DAYS or scope the consumer's range.`
+        )
+      }
+      return { liveProspects, closedProspects, closeRate, outOfWindow, fetchedSince: fetchedSinceRef }
     }
-  }, [data])
+  }, [data, fetchedSinceRef])
 
   return { byRange, loading, error }
 }

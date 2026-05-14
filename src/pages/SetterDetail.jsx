@@ -8,11 +8,11 @@ import DataTable from '../components/DataTable'
 import LeadStatusBadge from '../components/LeadStatusBadge'
 import { Loader, ChevronDown, Edit3, Clock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { pagedFetch } from '../lib/pagedFetch'
 import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { useSetterStats, useSetterEODs } from '../hooks/useSetterData'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
-import { computeShowRate } from '../utils/metricCalculations'
 import CommissionWidget from '../components/CommissionWidget'
 
 export default function SetterDetail() {
@@ -62,36 +62,43 @@ export default function SetterDetail() {
       })
   }, [id])
 
-  // Fetch this setter's leads
+  // Fetch this setter's leads — paged through PostgREST's 1000-row cap.
+  // A busy setter with > 1000 leads in the window had every lead past
+  // the 1000th silently dropped, which under-reported their close + show
+  // counts.
   useEffect(() => {
-    supabase
+    pagedFetch(() => supabase
       .from('setter_leads')
       .select('*, closer:team_members!setter_leads_closer_id_fkey(name)')
       .eq('setter_id', id)
       .gte('date_set', sinceDate(range))
-      .order('date_set', { ascending: false })
-      .then(({ data }) => setLeads((data || []).map(l => ({ ...l, closer_name: l.closer?.name || '—' }))))
+      .order('date_set', { ascending: false }))
+      .then((data) => setLeads(data.map(l => ({ ...l, closer_name: l.closer?.name || '—' }))))
+      .catch(err => console.warn('[SetterDetail] setter_leads load failed:', err.message))
   }, [id, range])
 
-  // Fetch ALL setter leads for company average comparison
+  // Fetch ALL setter leads for company average comparison — paged. With
+  // ~10 setters this query easily clears 1000 rows, and the company-average
+  // denominator quietly truncated otherwise.
   useEffect(() => {
-    supabase
+    pagedFetch(() => supabase
       .from('setter_leads')
       .select('id, setter_id, status, appointment_date')
-      .gte('date_set', sinceDate(range))
-      .then(({ data }) => setAllLeads(data || []))
+      .gte('date_set', sinceDate(range)))
+      .then(setAllLeads)
+      .catch(err => console.warn('[SetterDetail] allLeads load failed:', err.message))
   }, [range])
 
-  // Fetch closer EOD aggregates for show rate calculation
+  // Fetch closer EOD aggregates for show rate calculation — paged.
   useEffect(() => {
-    supabase
+    pagedFetch(() => supabase
       .from('closer_eod_reports')
       .select('report_date, nc_booked, nc_no_shows, live_nc_calls')
-      .gte('report_date', sinceDate(range))
-      .then(({ data }) => {
+      .gte('report_date', sinceDate(range)))
+      .then((data) => {
         // New-call only — see SetterOverview for rationale.
         const stats = {}
-        for (const e of (data || [])) {
+        for (const e of data) {
           if (!stats[e.report_date]) stats[e.report_date] = { booked: 0, noShows: 0, live: 0 }
           stats[e.report_date].booked += (e.nc_booked || 0)
           stats[e.report_date].noShows += (e.nc_no_shows || 0)
@@ -99,18 +106,21 @@ export default function SetterDetail() {
         }
         setDateStats(stats)
       })
+      .catch(err => console.warn('[SetterDetail] dateStats load failed:', err.message))
   }, [range])
 
-  // Fetch closer_calls with report dates for per-lead outcome matching
+  // Fetch closer_calls with report dates for per-lead outcome matching —
+  // paged. Single closer can clear 1000 calls in a 30-day window, which
+  // silently truncated the outcome-lookup map and dropped close detection.
   useEffect(() => {
-    supabase
+    pagedFetch(() => supabase
       .from('closer_calls')
       .select('prospect_name, outcome, showed, eod_report_id, eod:closer_eod_reports!closer_calls_eod_report_id_fkey(report_date)')
-      .gte('created_at', sinceDate(range))
-      .then(({ data }) => {
+      .gte('created_at', sinceDate(range)))
+      .then((data) => {
         // Build lookup: normalized name + report_date → outcome
         const map = {}
-        for (const c of (data || [])) {
+        for (const c of data) {
           const date = c.eod?.report_date
           if (!date) continue
           const name = (c.prospect_name || '').toLowerCase().trim()
@@ -121,6 +131,7 @@ export default function SetterDetail() {
         }
         setCloserCallMap(map)
       })
+      .catch(err => console.warn('[SetterDetail] closerCallMap load failed:', err.message))
   }, [range])
 
   // Fetch WAVV aggregates (fast)
@@ -200,7 +211,16 @@ export default function SetterDetail() {
   const totalCompanySets = Math.max(allLeads.length, companyActivity.sets)
   const companyClosedLeads = allLeads.filter(l => l.status === 'closed')
   const companyShowedLeads = allLeads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.status))
-  const { showRate: companyShowRateVal } = computeShowRate(allLeads, dateStats)
+  // Show rate now comes from setter_leads.status (same source as
+  // closeRate) so the two gauges directly above each other agree on
+  // their universe. Previously showRate used computeShowRate() with a
+  // weighted estimate against closer-EOD daily aggregates, which made
+  // it answer a subtly different question than closeRate's per-lead
+  // status filter — close-rate denominator could be 12 while show-rate
+  // denominator was 18.7 for the same window.
+  const companyShowRateVal = companyShowedLeads.length + allLeads.filter(l => l.status === 'no_show').length > 0
+    ? parseFloat(((companyShowedLeads.length / (companyShowedLeads.length + allLeads.filter(l => l.status === 'no_show').length)) * 100).toFixed(1))
+    : 0
   const companyRates = {
     leadToSet: companyActivity.leads > 0 ? parseFloat(((totalCompanySets / companyActivity.leads) * 100).toFixed(1)) : 0,
     callToSet: companyActivity.dials > 0 ? parseFloat(((totalCompanySets / companyActivity.dials) * 100).toFixed(1)) : 0,
@@ -268,10 +288,17 @@ export default function SetterDetail() {
   }
   const enrichedLeads = Array.from(dedupedMap.values()).sort((a, b) => (b.date_set || '').localeCompare(a.date_set || ''))
 
-  // Compute show/close rate from leads + closer EOD daily stats
-  const { showRate } = computeShowRate(leads, dateStats)
+  // Show + close rate now both derive from enrichedLeads.resolved_outcome
+  // — same source, same dedupe, same denominator universe so the two
+  // adjacent gauges agree on what they're measuring. Prior showRate used
+  // computeShowRate(leads, dateStats) which gave a weighted estimate vs
+  // closer-EOD aggregates and disagreed with closeRate's per-lead
+  // status filter by a few percent on every window.
   const showedLeads = enrichedLeads.filter(l => ['showed', 'closed', 'not_closed'].includes(l.resolved_outcome))
+  const noShowLeads = enrichedLeads.filter(l => l.resolved_outcome === 'no_show')
   const closedLeads = enrichedLeads.filter(l => l.resolved_outcome === 'closed')
+  const showDenom = showedLeads.length + noShowLeads.length
+  const showRate  = showDenom > 0 ? parseFloat(((showedLeads.length / showDenom) * 100).toFixed(1)) : 0
   const closeRate = showedLeads.length > 0 ? parseFloat(((closedLeads.length / showedLeads.length) * 100).toFixed(1)) : 0
   const leadToCloseRate = effectiveLeads > 0 ? parseFloat(((closedLeads.length / effectiveLeads) * 100).toFixed(1)) : 0
   const revenueAttributed = leads.reduce((sum, l) => sum + parseFloat(l.revenue_attributed || 0), 0)

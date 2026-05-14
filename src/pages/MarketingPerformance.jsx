@@ -354,8 +354,16 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
     ]},
   ]
 
-  const getCalls = e => e.qualified_bookings || e.calls_on_calendar || ((e.net_new_calls || 0) + (e.net_fu_calls || 0))
-  const getLive = e => e.live_calls || e.net_live_calls || 0
+  // Show-rate + close-rate use NC-only (matches the headline Gross/Net Show%
+  // and Close Rate tiles, which call computeMarketingStats). Prior helpers
+  // returned NC+FU which made the per-row Gross.Show% systematically lower
+  // than the headline for the same window. Fallback to qualified_bookings /
+  // live_calls only when the NC-specific columns are null (pre-migration
+  // rows). Offer-rate stays on NC+FU because computeMarketingStats does:
+  // offer_rate = offers / live_calls.
+  const getCalls    = e => e.nc_booked != null ? e.nc_booked : (e.net_new_calls || e.qualified_bookings || 0)
+  const getLive     = e => e.new_live_calls != null ? e.new_live_calls : (e.live_calls || e.net_live_calls || 0)
+  const getNetLive  = e => e.live_calls || e.net_live_calls || 0  // NC + FU, for offer-rate denominator
 
   // Color helpers for table cells
   const clrRate = (v, good, ok) => v >= good ? 'text-success' : v >= ok ? 'text-text-primary' : 'text-danger'
@@ -379,8 +387,8 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
     { k: null, label: 'R%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(e.reschedules, cal) : '-' },
       color: e => { const cal = getCalls(e); return cal > 0 && (e.reschedules || 0) > 0 ? 'text-text-secondary' : '' } },
     { k: 'offers', label: 'Offer', fmt: fN },
-    { k: null, label: 'Ofr%', calc: e => getLive(e) > 0 ? fmtP(e.offers, getLive(e)) : '-',
-      color: e => getLive(e) > 0 ? clrRate((e.offers || 0) / getLive(e) * 100, 80, 60) : '' },
+    { k: null, label: 'Ofr%', calc: e => getNetLive(e) > 0 ? fmtP(e.offers, getNetLive(e)) : '-',
+      color: e => getNetLive(e) > 0 ? clrRate((e.offers || 0) / getNetLive(e) * 100, 80, 60) : '' },
     { k: 'closes', label: 'Close', fmt: fN, color: e => (e.closes || 0) > 0 ? 'text-success font-medium' : '' },
     { k: null, label: 'Cl%', calc: e => fmtP(e.closes, getLive(e)),
       color: e => getLive(e) > 0 ? clrRate((e.closes || 0) / getLive(e) * 100, 25, 15) : '' },
