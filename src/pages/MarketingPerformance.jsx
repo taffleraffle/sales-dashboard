@@ -1671,7 +1671,21 @@ export default function MarketingPerformance() {
   // MTD = first-of-month → today (variable day count). For everything else,
   // `range` is already a day count.
   const mtdDays = useMemo(() => new Date().getDate(), [])
-  const rangeDays = typeof range === 'number' ? range : 30
+  // Custom date ranges arrive as { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }.
+  // Previously this fell through to 30 days, which meant byRange(30) was
+  // called for the prospect-metrics override on every custom window — the
+  // 30-day numerator silently replaced the actual window's closes count.
+  // Compute the real span in days for custom ranges so prospect-metrics
+  // and the displayed window agree.
+  const rangeDays = useMemo(() => {
+    if (typeof range === 'number') return range
+    if (range === 'mtd') return new Date().getDate()
+    if (range && typeof range === 'object' && range.from && range.to) {
+      const ms = new Date(range.to + 'T23:59:59Z') - new Date(range.from + 'T00:00:00Z')
+      return Math.max(1, Math.round(ms / 86400000) + 1)
+    }
+    return 30
+  }, [range])
 
   const stats = useMemo(() => applyProspectMetrics(computeMarketingStats(rangeEntries), rangeDays), [rangeEntries, rangeDays, prospectMetricsByRange])
   const stats30 = useMemo(() => applyProspectMetrics(computeMarketingStats(filterByDays(entries, 30)), 30), [entries, prospectMetricsByRange])

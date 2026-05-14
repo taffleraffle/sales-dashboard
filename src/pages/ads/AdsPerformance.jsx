@@ -224,16 +224,14 @@ export default function AdsPerformance() {
   // dashboard reads). Keeping these separate from the per-campaign rollup
   // makes the "attributed vs total" gap explicit — the headline can never
   // silently undercount because we compare it against the EOD-aggregated truth.
-  // Row-count totals. These come from the SAME row tables the drill-down
-  // modals query (lib_close_resolved, lib_ghl_booked_detail, etc.), so the
-  // headline number is guaranteed to equal what you see when you click in.
-  // Each metric has a `total` (all rows) and `attributed` (rows resolved
-  // to a Meta campaign). Gap = total - attributed.
+  // KPI totals. The "eod" object is the EOD-reported aggregate (same source
+  // as the marketing dashboard — closer-entered daily counters). The
+  // "attributed" object is how many of those we can credit to a Meta ad.
+  // Headline = eod (so the ads dashboard matches what's reported in EOD).
+  // Sub-line = attributed + gap (how much we couldn't tie to a creative).
   const [rowTotals, setRowTotals] = useState({
-    leads:    { total: 0, attributed: 0 },
-    booked:   { total: 0, attributed: 0 },
-    live:     { total: 0, attributed: 0 },
-    closes:   { total: 0, attributed: 0, revenue: 0, cash: 0 },
+    eod:        { leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 },
+    attributed: { leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 },
   })
   // Per-query failure list. Populated if any of the parallel fetches
   // throws; rendered as a banner so a broken source can't silently
@@ -394,10 +392,14 @@ export default function AdsPerformance() {
           .from('lib_ghl_lives_detail')
           .select('closer_call_id, landed_at, ad_id, adset_id, utm_campaign')
           .gte('landed_at', startTs).lte('landed_at', endTs)),
-        // marketing_tracker is the same source the marketing dashboard
-        // uses — daily aggregated EOD report totals. We pull it here so
-        // the headline KPI block can show the source-of-truth totals
-        // (vs ads-attributed sub-counts) and surface the gap explicitly.
+        // marketing_tracker = closer-entered daily EOD aggregates. Same
+        // source the marketing dashboard uses. Drives the headline KPI
+        // numbers so "Closes 18" on the ads dashboard equals "Total Closes
+        // 18" on the marketing dashboard.
+        fetchAllPaged(() => supabase
+          .from('marketing_tracker')
+          .select('date, leads, net_new_calls, new_live_calls, live_calls, closes, trial_cash, trial_revenue')
+          .gte('date', startStr).lte('date', endStr)),
       ])
 
       // Per-query degradation: log any failure but use [] so downstream
@@ -411,37 +413,47 @@ export default function AdsPerformance() {
         newIssues.push(`${label}: ${reason}`)
         return []
       }
-      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows] = [
+      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows, mtRows] = [
         unpack(0, 'Meta spend (ad_daily_stats)'),
         unpack(1, 'Typeform leads'),
         unpack(2, 'Resolved closes'),
         unpack(3, 'GHL leads'),
         unpack(4, 'GHL bookings'),
         unpack(5, 'GHL live calls'),
+        unpack(6, 'EOD totals (marketing_tracker)'),
       ]
       setDataIssues(newIssues)
 
-      // Headline totals come directly from the row tables the drill-downs
-      // query. Total = row count in window. Attributed = rows that resolve
-      // to a Meta campaign. By construction, click-to-drill always shows
-      // exactly `total` rows — no mystery numbers, no aggregate vs row
-      // discrepancy.
+      // EOD aggregates — same source the marketing dashboard uses.
+      // These are the headline numbers.
+      const eod = { leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 }
+      for (const r of mtRows) {
+        eod.leads   += parseInt(r.leads || 0)
+        eod.booked  += parseInt(r.net_new_calls || 0)
+        eod.live    += parseInt((r.new_live_calls != null ? r.new_live_calls : r.live_calls) || 0)
+        eod.closes  += parseInt(r.closes || 0)
+        eod.revenue += parseFloat(r.trial_revenue || 0)
+        eod.cash    += parseFloat(r.trial_cash || 0)
+      }
+
+      // Attributed counts (rows we can credit to a Meta creative).
       const tfLeadEmails = new Set()
       for (const r of tfRows) if (r.email) tfLeadEmails.add(r.email.toLowerCase())
-      const ghlLeadEmails = new Set()
-      for (const r of ghlLeadRows) {
-        const e = (r.email || '').toLowerCase()
-        if (e && !tfLeadEmails.has(e)) ghlLeadEmails.add(e)
-      }
-      const totalLeads = tfRows.length + ghlLeadRows.filter(r => !r.email || !tfLeadEmails.has(r.email.toLowerCase())).length
-      const attrLeads = tfRows.filter(r => r.ad_id).length + ghlLeadRows.filter(r => r.ad_id && !tfLeadEmails.has((r.email || '').toLowerCase())).length
+      const attrLeads = tfRows.filter(r => r.ad_id).length
+        + ghlLeadRows.filter(r => r.ad_id && !tfLeadEmails.has((r.email || '').toLowerCase())).length
+      const attrCloses = closeRows.filter(r => r.resolved_ad_id || r.resolved_campaign).length
       const closeRev = closeRows.reduce((s, r) => s + parseFloat(r.revenue || 0), 0)
       const closeCash = closeRows.reduce((s, r) => s + parseFloat(r.cash_collected || 0), 0)
       setRowTotals({
-        leads:  { total: totalLeads, attributed: attrLeads },
-        booked: { total: ghlBookedRows.length, attributed: ghlBookedRows.filter(r => r.ad_id).length },
-        live:   { total: ghlLiveRows.length,   attributed: ghlLiveRows.filter(r => r.ad_id).length },
-        closes: { total: closeRows.length, attributed: closeRows.filter(r => r.resolved_ad_id || r.resolved_campaign).length, revenue: closeRev, cash: closeCash },
+        eod,
+        attributed: {
+          leads:   attrLeads,
+          booked:  ghlBookedRows.filter(r => r.ad_id).length,
+          live:    ghlLiveRows.filter(r => r.ad_id).length,
+          closes:  attrCloses,
+          revenue: closeRev,
+          cash:    closeCash,
+        },
       })
 
       // 2. Stats — aggregate by ad_id
@@ -782,43 +794,54 @@ export default function AdsPerformance() {
         </div>
       )}
 
-      {/* Totals strip — every number = count of rows that the drill-down
-          would show. Clickable to open the drill. Gap (unattributed) is
-          shown when total > attributed so coverage is always visible. */}
+      {/* Totals strip — headline numbers come from marketing_tracker (EOD
+          closer-entered aggregates, same source the marketing dashboard
+          uses). Sub-line shows how many we managed to attribute to a
+          Meta ad. Clickable opens drill-down showing the attributable
+          rows. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
         <TotalsTile label="Spend" value={fmt$(totals.spend)} />
         {(() => {
-          const sub = (m, extra = '') => {
-            const gap = m.total - m.attributed
-            if (m.total === 0) return null
-            if (gap > 0)  return `${fmtN(m.attributed)} attributed · ${fmtN(gap)} unattributed${extra}`
-            return `all ${fmtN(m.attributed)} attributed${extra}`
+          const eod = rowTotals.eod, attr = rowTotals.attributed
+          const sub = (eodVal, attrVal, extra = '') => {
+            if (eodVal === 0) return attrVal > 0 ? `${fmtN(attrVal)} attributed (no EOD data)` : null
+            const gap = eodVal - attrVal
+            if (gap > 0)  return `${fmtN(attrVal)} attributed · ${fmtN(gap)} unattributed${extra}`
+            if (gap < 0)  return `${fmtN(attrVal)} attributed (EOD undercounted by ${fmtN(-gap)})${extra}`
+            return `all ${fmtN(attrVal)} attributed${extra}`
           }
           const click = (metric) => () => setDrill({ metric, scope: { level: 'all' } })
           return (
             <>
-              <TotalsTile label="Leads"      value={fmtN(rowTotals.leads.total)}  sub={sub(rowTotals.leads)}  onClick={click('leads')} />
-              <TotalsTile label="Booked"     value={fmtN(rowTotals.booked.total)} sub={sub(rowTotals.booked)} onClick={click('booked')} />
-              <TotalsTile label="Live calls" value={fmtN(rowTotals.live.total)}   sub={sub(rowTotals.live)}   onClick={click('live')} />
+              <TotalsTile label="Leads"      value={fmtN(eod.leads)}  sub={sub(eod.leads,  attr.leads)}  onClick={click('leads')} />
+              <TotalsTile label="Booked"     value={fmtN(eod.booked)} sub={sub(eod.booked, attr.booked)} onClick={click('booked')} />
+              <TotalsTile label="Live calls" value={fmtN(eod.live)}   sub={sub(eod.live,   attr.live)}   onClick={click('live')} />
               <TotalsTile
                 label="Closes"
-                value={fmtN(rowTotals.closes.total)}
-                sub={sub(rowTotals.closes, rowTotals.closes.revenue > 0 ? ` · ${fmt$(rowTotals.closes.revenue)} rev` : '')}
-                valueColor={rowTotals.closes.total > 0 ? '#1f7a3a' : undefined}
+                value={fmtN(eod.closes)}
+                sub={sub(eod.closes, attr.closes, eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : '')}
+                valueColor={eod.closes > 0 ? '#1f7a3a' : undefined}
                 onClick={click('closed')}
               />
             </>
           )
         })()}
-        <TotalsTile label="$ / Lead"   value={rowTotals.leads.total  > 0 ? fmt$(totals.spend / rowTotals.leads.total)  : '—'} valueColor={kpiColor(rowTotals.leads.total  > 0 ? totals.spend / rowTotals.leads.total  : null, KPI.costPerLead)} />
-        <TotalsTile label="$ / Booked" value={rowTotals.booked.total > 0 ? fmt$(totals.spend / rowTotals.booked.total) : '—'} valueColor={kpiColor(rowTotals.booked.total > 0 ? totals.spend / rowTotals.booked.total : null, KPI.costPerQualBooked)} />
-        <TotalsTile label="$ / Live"   value={rowTotals.live.total   > 0 ? fmt$(totals.spend / rowTotals.live.total)   : '—'} valueColor={kpiColor(rowTotals.live.total   > 0 ? totals.spend / rowTotals.live.total   : null, KPI.costPerLive)} />
-        <TotalsTile
-          label="CAC"
-          value={rowTotals.closes.total > 0 ? fmt$(totals.spend / rowTotals.closes.total) : '—'}
-          sub={rowTotals.closes.total > 0 ? `${fmt$(totals.spend)} ÷ ${rowTotals.closes.total} closes` : null}
-          valueColor={kpiColor(rowTotals.closes.total > 0 ? totals.spend / rowTotals.closes.total : null, KPI.costPerClose)}
-        />
+        {(() => {
+          const e = rowTotals.eod
+          return (
+            <>
+              <TotalsTile label="$ / Lead"   value={e.leads  > 0 ? fmt$(totals.spend / e.leads)  : '—'} valueColor={kpiColor(e.leads  > 0 ? totals.spend / e.leads  : null, KPI.costPerLead)} />
+              <TotalsTile label="$ / Booked" value={e.booked > 0 ? fmt$(totals.spend / e.booked) : '—'} valueColor={kpiColor(e.booked > 0 ? totals.spend / e.booked : null, KPI.costPerQualBooked)} />
+              <TotalsTile label="$ / Live"   value={e.live   > 0 ? fmt$(totals.spend / e.live)   : '—'} valueColor={kpiColor(e.live   > 0 ? totals.spend / e.live   : null, KPI.costPerLive)} />
+              <TotalsTile
+                label="CAC"
+                value={e.closes > 0 ? fmt$(totals.spend / e.closes) : '—'}
+                sub={e.closes > 0 ? `${fmt$(totals.spend)} ÷ ${e.closes} closes` : null}
+                valueColor={kpiColor(e.closes > 0 ? totals.spend / e.closes : null, KPI.costPerClose)}
+              />
+            </>
+          )
+        })()}
       </div>
 
       {/* Legend */}
