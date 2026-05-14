@@ -87,25 +87,37 @@ const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev,
   const isGood = benchmark != null && value !== 0 && (lowerIsBetter ? value <= benchmark : value >= benchmark)
   const isBad = benchmark != null && value !== 0 && !isGood
 
-  // Period-over-period arrow
+  // What-if delta (computed first because it overrides the prev arrow —
+  // when what-if is active, the displayed big number is the simulated value,
+  // so the inline arrow should describe Δ vs CURRENT actual, not Δ vs prev
+  // period. Otherwise the arrow describes a baseline that isn't visible
+  // anywhere on the tile, which is what burned Ben on 2026-05-14.)
+  const displayValue = whatIf != null ? whatIf : value
+  const hasWhatIfDelta = whatIf != null && Math.abs(whatIf - value) > 0.01
+
   let arrow = null
-  if (prev != null && prev !== 0 && value !== 0) {
+  if (hasWhatIfDelta && value !== 0) {
+    const pctChange = ((whatIf - value) / value) * 100
+    const improved = lowerIsBetter ? whatIf < value : whatIf > value
+    arrow = (
+      <span className={`inline-flex items-center gap-0.5 text-[9px] font-medium ${improved ? 'text-success' : 'text-danger'}`} title="What-if change vs current actual">
+        {improved ? '▲' : '▼'}{Math.abs(pctChange).toFixed(0)}%
+      </span>
+    )
+  } else if (prev != null && prev !== 0 && value !== 0) {
+    // Period-over-period arrow (only shown when no what-if is active)
     const pctChange = ((value - prev) / prev) * 100
     const improved = lowerIsBetter ? value < prev : value > prev
     const worsened = lowerIsBetter ? value > prev : value < prev
     if (Math.abs(pctChange) >= 0.5) {
       arrow = (
-        <span className={`inline-flex items-center gap-0.5 text-[9px] font-medium ${improved ? 'text-success' : worsened ? 'text-danger' : 'text-text-400'}`}>
+        <span className={`inline-flex items-center gap-0.5 text-[9px] font-medium ${improved ? 'text-success' : worsened ? 'text-danger' : 'text-text-400'}`} title="vs previous period">
           {improved ? '▲' : worsened ? '▼' : '—'}
           {Math.abs(pctChange).toFixed(0)}%
         </span>
       )
     }
   }
-
-  // What-if delta
-  const displayValue = whatIf != null ? whatIf : value
-  const hasWhatIfDelta = whatIf != null && Math.abs(whatIf - value) > 0.01
 
   const Wrapper = onClick ? 'button' : 'div'
   const interactiveCls = onClick ? 'text-left cursor-pointer hover:border-opt-yellow/40 hover:bg-bg-card-hover transition-colors w-full' : ''
@@ -136,6 +148,7 @@ const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev,
         )}
       </p>
       <div className="flex items-center gap-2 mt-0.5">
+        {hasWhatIfDelta && <span className="text-[9px] text-text-400">now: {fmt(value, format)}</span>}
         {trailing != null && <span className="text-[9px] text-text-400">30d: {fmt(trailing, format)}</span>}
         {benchmark != null && <span className="text-[9px] text-text-400">BM: {fmt(benchmark, format)}</span>}
         {onClick && <span className="text-[9px] text-text-400/60 ml-auto">click to view</span>}
@@ -1660,6 +1673,19 @@ export default function MarketingPerformance() {
     const cpa_trial = closes > 0 ? statsBundle.adspend / closes : 0
     const ascend_rate = closes > 0 ? (statsBundle.ascensions / closes) * 100 : 0
     const trial_cash_per_close = closes > 0 ? statsBundle.trial_cash / closes : 0
+    // CRITICAL: every derived field that divided by t.new_live_calls or
+    // t.closes inside computeMarketingStats is now stale because we just
+    // swapped the denominator. If we don't recompute them here, the live
+    // page shows cost_per_new_live_call against EOD-count while the What-If
+    // cascade (which reads stats.new_live_calls — the OVERRIDDEN value)
+    // computes against the deduped count. That mismatch is the 2026-05-14
+    // bug Ben hit: increasing adspend made cost/new APPEAR to drop because
+    // the baseline divisor was smaller than the cascade's divisor.
+    const denom = new_live_calls
+    const nc = statsBundle.nc_booked || 0
+    const cancels = statsBundle.cancels || 0
+    const reschedules = statsBundle.reschedules || 0
+    const netDenom = Math.max(0, nc - cancels - reschedules)
     return {
       ...statsBundle,
       new_live_calls,
@@ -1668,6 +1694,18 @@ export default function MarketingPerformance() {
       cpa_trial,
       ascend_rate,
       trial_cash_per_close,
+      // Recomputed against overridden denominators so every tile reads
+      // from the same numerator the cascade uses.
+      cost_per_new_live_call: denom > 0 ? statsBundle.adspend / denom : 0,
+      cost_per_offer: statsBundle.offers > 0 ? statsBundle.adspend / statsBundle.offers : (statsBundle.cost_per_offer || 0),
+      gross_show_rate: nc > 0 ? Math.min(100, (denom / nc) * 100) : 0,
+      net_show_rate: netDenom > 0 ? Math.min(100, (denom / netDenom) * 100) : 0,
+      show_rate: nc > 0 ? Math.min(100, (denom / nc) * 100) : 0,
+      // no_shows reported by closers wins; otherwise back-derive from the
+      // now-deduped live count.
+      no_shows: statsBundle.no_shows > 0
+        ? statsBundle.no_shows
+        : Math.max(0, nc - denom - cancels - reschedules),
       _prospect_metrics_applied: true,
     }
   }
@@ -1703,6 +1741,14 @@ export default function MarketingPerformance() {
   // it's also a comparison delta where consistency-within-method matters
   // more than absolute accuracy.
   const statsPrev = useMemo(() => computeMarketingStats(prevEntries), [prevEntries])
+  // Hoisted calendar-deduped booking totals — same numbers the live
+  // Bookings/Q.Books KPI tiles render. whatIfStats baselines from these so
+  // toggling What-If doesn't silently swap data source (EOD self-report
+  // had `stats.qualified_bookings=10` while the displayed tile read
+  // `bk.qualified=13` from the GHL calendar, making any what-if look like
+  // bookings "fell" purely from activating the panel).
+  const bk = useMemo(() => sumBookings(range), [sumBookings, range])
+  const bk30 = useMemo(() => sumBookings(30), [sumBookings])
   const bm = benchmarks
 
   // What-If state — cascading funnel forecast (debounced to avoid lag)
@@ -1748,6 +1794,16 @@ export default function MarketingPerformance() {
     const o = whatIfOverrides
     const get = (key) => (o[key] !== '' && o[key] != null) ? parseFloat(o[key]) : null
 
+    // BASELINE source-of-truth alignment — the displayed Bookings / Q.Books
+    // KPI tiles read from `bk` (calendar-deduped GHL appointments), NOT from
+    // `stats.qualified_bookings` (closer EOD self-report). If whatIfStats
+    // baselines from stats.qualified_bookings, toggling What-If swaps the
+    // numerator silently and any cascade looks like bookings "fell." We use
+    // bk as the universe and keep stats.qualified_bookings only as the
+    // EOD-derived show denominator (nc_booked logic below).
+    const baseQualifiedBookings = bk?.qualified ?? stats.qualified_bookings
+    const baseAllBookings = bk?.all ?? stats.qualified_bookings
+
     // Funnel driver is `new_live_calls` (NEW only) to match
     // computeMarketingStats: close_rate / show_rate / cost_per_new use the
     // NEW-only denominator; only offer_rate uses Net Live (NEW + FU). Net Live
@@ -1766,12 +1822,26 @@ export default function MarketingPerformance() {
     const curAvgAscCash = stats.ascensions > 0 ? stats.ascend_cash / stats.ascensions : 3000
     const curAvgAscRev = stats.ascensions > 0 ? stats.ascend_revenue / stats.ascensions : 9000
     const curFuRatio = stats.new_live_calls > 0 ? stats.live_calls / stats.new_live_calls : 1
-    const curNcToQbRatio = stats.qualified_bookings > 0 ? (stats.nc_booked || stats.qualified_bookings) / stats.qualified_bookings : 1
+    // nc_booked ↔ Q.Books ratio. Calendar-sourced baseQualifiedBookings is
+    // the universe; the closer EOD nc_booked is a subset that excludes
+    // future-dated bookings. Ratio lets us scale nc_booked if user moves
+    // qualified_bookings.
+    const curNcToQbRatio = baseQualifiedBookings > 0
+      ? (stats.nc_booked || baseQualifiedBookings) / baseQualifiedBookings
+      : 1
+    // All-bookings ↔ Q.Books ratio for cascading Bookings when only Q.Books
+    // is overridden (or vice versa).
+    const curAllToQbRatio = baseQualifiedBookings > 0 ? baseAllBookings / baseQualifiedBookings : 1
 
     // Cascade
     const adspend = get('adspend') ?? stats.adspend
     const leads = get('leads') ?? stats.leads
-    const qualified_bookings = get('qualified_bookings') ?? stats.qualified_bookings
+    const qualified_bookings = get('qualified_bookings') ?? baseQualifiedBookings
+    // All bookings (qualified + DQ) — scales with qualified_bookings unless
+    // explicitly overridden. Used by the Bookings tile + Cost/Booking.
+    const all_bookings = qualified_bookings !== baseQualifiedBookings
+      ? Math.round(qualified_bookings * curAllToQbRatio)
+      : baseAllBookings
 
     // Closer-EOD bookings (denominator for show rates). When user overrides
     // qualified_bookings, scale nc_booked proportionally so show-rate math
@@ -1841,6 +1911,10 @@ export default function MarketingPerformance() {
     const all_cash = trial_cash + ascend_cash + ar_collected
     return {
       adspend, leads, auto_bookings, qualified_bookings, nc_booked, new_live_calls, live_calls, offers, closes,
+      // Bookings ALL (qualified + DQ) — the Bookings KPI tile renders bk.all,
+      // not stats.qualified_bookings. Returning all_bookings as a dedicated
+      // field lets the tile compare like-for-like.
+      bookings_all: all_bookings,
       trial_cash, trial_revenue, ascensions, ascend_cash, ascend_revenue,
       reschedules, cancels, ar_collected, ar_defaulted,
       cancelled_dtf: stats.cancelled_dtf || 0, cancelled_by_prospect: stats.cancelled_by_prospect || 0,
@@ -1848,6 +1922,9 @@ export default function MarketingPerformance() {
       // Derived — formulas mirror computeMarketingStats so equal inputs ⇒ equal outputs
       cpl: leads > 0 ? adspend / leads : 0,
       lead_to_booking_pct: leads > 0 ? (qualified_bookings / leads) * 100 : 0,
+      // Cost/Booking divides by ALL bookings (matches the live Cost/Booking
+      // tile which uses bk.all). Cost/Q.Book divides by qualified.
+      cpb_all: all_bookings > 0 ? adspend / all_bookings : 0,
       cpb: qualified_bookings > 0 ? adspend / qualified_bookings : 0,
       cost_per_auto_booking: auto_bookings > 0 ? adspend / auto_bookings : 0,
       gross_show_rate: showDenom > 0 ? Math.min(100, (new_live_calls / showDenom) * 100) : 0,
@@ -1877,7 +1954,7 @@ export default function MarketingPerformance() {
       all_cash,
       all_cash_roas: adspend > 0 ? all_cash / adspend : 0,
     }
-  }, [whatIfActive, whatIfOverrides, stats])
+  }, [whatIfActive, whatIfOverrides, stats, bk])
   const wf = whatIfStats // shorthand
   const sp = statsPrev // shorthand for prev period
 
@@ -2007,61 +2084,80 @@ export default function MarketingPerformance() {
         </div>
       </div>
 
-      {/* ═══ What-If Input Bar ═══ */}
-      {whatIfActive && (
-        <div className="bg-bg-card border border-opt-yellow/30 rounded-sm p-3 mb-2">
-          <div className="flex items-center gap-2 mb-2">
-            <Edit3 size={14} className="text-text-primary" />
-            <span className="text-xs font-medium text-text-primary">What-If Forecast</span>
-            <span className="text-[10px] text-text-400 ml-1">Adjust any value — changes cascade through the funnel automatically</span>
-            <button onClick={() => { setWhatIfOverrides({}); setWhatIfDraft({}) }} className="ml-auto text-[10px] text-text-400 hover:text-text-secondary">Reset</button>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-2">
-            {[
-              ['adspend', 'Adspend', '$', stats.adspend],
-              ['leads', 'Leads', '#', stats.leads],
-              ['qualified_bookings', 'Q.Books', '#', stats.qualified_bookings],
-              ['new_live_calls', 'New Live', '#', stats.new_live_calls],
-              ['offers', 'Offers', '#', stats.offers],
-              ['closes', 'Closes', '#', stats.closes],
-              ['ascensions', 'Ascensions', '#', stats.ascensions],
-            ].map(([key, label, prefix, current]) => (
-              <div key={key} className="flex flex-col gap-0.5">
-                <label className="text-[8px] uppercase text-text-400">{label}</label>
-                <input
-                  type="number"
-                  placeholder={Math.round(current || 0)}
-                  value={whatIfDraft[key] ?? ''}
-                  onChange={e => updateWhatIf(key, e.target.value)}
-                  className="bg-bg-primary border border-border-default rounded-lg px-2 py-1 text-xs text-text-primary w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
+      {/* ═══ What-If Input Bar ═══
+          Each input shows the ACTUAL current value as a small "now: X" caption
+          beneath it that stays visible after typing — and a live Δ% so the
+          user can see whether their typed value is a delta UP or DOWN from
+          the current baseline. Without this, a typed adspend of "3300" reads
+          as "an increase" mentally even if the real current spend is higher,
+          which is exactly the trap Ben hit on 2026-05-14. */}
+      {(() => {
+        const renderInput = ([key, label, prefix, current]) => {
+          const draftRaw = whatIfDraft[key]
+          const draftVal = draftRaw === '' || draftRaw == null ? null : parseFloat(draftRaw)
+          const curRound = prefix === '%' ? Number((current || 0).toFixed(0)) : Math.round(current || 0)
+          const delta = draftVal != null && current > 0 ? ((draftVal - current) / current) * 100 : null
+          const sign = delta == null ? null : delta > 0.5 ? '▲' : delta < -0.5 ? '▼' : null
+          return (
+            <div key={key} className="flex flex-col gap-0.5">
+              <label className="text-[8px] uppercase text-text-400 truncate">{label}</label>
+              <input
+                type="number"
+                placeholder={curRound}
+                value={whatIfDraft[key] ?? ''}
+                onChange={e => updateWhatIf(key, e.target.value)}
+                className={`bg-bg-primary border rounded-lg px-2 py-1 text-xs text-text-primary w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${prefix === '%' ? 'border-opt-yellow/20' : 'border-border-default'}`}
+              />
+              <div className="flex items-center justify-between text-[9px] leading-tight">
+                <span className="text-text-400/70">
+                  now: {prefix === '$' ? '$' : ''}{curRound.toLocaleString()}{prefix === '%' ? '%' : ''}
+                </span>
+                {sign && (
+                  <span className={`font-medium ${sign === '▲' ? 'text-success' : 'text-danger'}`}>
+                    {sign}{Math.abs(delta).toFixed(0)}%
+                  </span>
+                )}
               </div>
-            ))}
+            </div>
+          )
+        }
+        return whatIfActive && (
+          <div className="bg-bg-card border border-opt-yellow/30 rounded-sm p-3 mb-2">
+            <div className="flex items-center gap-2 mb-2">
+              <Edit3 size={14} className="text-text-primary" />
+              <span className="text-xs font-medium text-text-primary">What-If Forecast</span>
+              <span className="text-[10px] text-text-400 ml-1">Type the absolute value you want to simulate (the "now:" caption below each input is the current actual)</span>
+              <button onClick={() => { setWhatIfOverrides({}); setWhatIfDraft({}) }} className="ml-auto text-[10px] text-text-400 hover:text-text-secondary">Reset</button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-2">
+              {[
+                ['adspend', 'Adspend', '$', stats.adspend],
+                ['leads', 'Leads', '#', stats.leads],
+                // Q.Books baseline = bk.qualified (calendar-deduped) so the
+                // "now: X" caption matches the live KPI tile. Using
+                // stats.qualified_bookings here would show 10 while the tile
+                // reads 13 — the exact mismatch that hid the bug on 2026-05-14.
+                ['qualified_bookings', 'Q.Books', '#', bk?.qualified ?? stats.qualified_bookings],
+                ['new_live_calls', 'New Live', '#', stats.new_live_calls],
+                ['offers', 'Offers', '#', stats.offers],
+                ['closes', 'Closes', '#', stats.closes],
+                ['ascensions', 'Ascensions', '#', stats.ascensions],
+              ].map(renderInput)}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+              {[
+                ['show_rate', 'Show Rate %', '%', stats.gross_show_rate],
+                ['offer_rate', 'Offer Rate %', '%', stats.offer_rate],
+                ['close_rate', 'Close Rate %', '%', stats.close_rate],
+                ['ascend_rate', 'Ascend Rate %', '%', stats.ascend_rate],
+                ['trial_cash', 'Trial Cash', '$', stats.trial_cash],
+                ['ascend_cash', 'Asc Cash', '$', stats.ascend_cash],
+                ['trial_revenue', 'Trial Rev', '$', stats.trial_revenue],
+              ].map(renderInput)}
+            </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-            {[
-              ['show_rate', 'Show Rate %', '%', stats.gross_show_rate],
-              ['offer_rate', 'Offer Rate %', '%', stats.offer_rate],
-              ['close_rate', 'Close Rate %', '%', stats.close_rate],
-              ['ascend_rate', 'Ascend Rate %', '%', stats.ascend_rate],
-              ['trial_cash', 'Trial Cash', '$', stats.trial_cash],
-              ['ascend_cash', 'Asc Cash', '$', stats.ascend_cash],
-              ['trial_revenue', 'Trial Rev', '$', stats.trial_revenue],
-            ].map(([key, label, prefix, current]) => (
-              <div key={key} className="flex flex-col gap-0.5">
-                <label className="text-[8px] uppercase text-text-400">{label} <span className="text-text-400/50">{prefix === '%' ? `(${(current || 0).toFixed(0)}%)` : ''}</span></label>
-                <input
-                  type="number"
-                  placeholder={prefix === '%' ? (current || 0).toFixed(0) : Math.round(current || 0)}
-                  value={whatIfDraft[key] ?? ''}
-                  onChange={e => updateWhatIf(key, e.target.value)}
-                  className={`bg-bg-primary border rounded-lg px-2 py-1 text-xs text-text-primary w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${prefix === '%' ? 'border-opt-yellow/20' : 'border-border-default'}`}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* ═══ KPI Sections ═══ */}
 
@@ -2073,8 +2169,10 @@ export default function MarketingPerformance() {
           computed from ghl_appointments so they stay aligned with the new
           Lead → Bookings table at the top. */}
       {(() => {
-        const bk = sumBookings(range)
-        const bk30 = sumBookings(30)
+        // bk + bk30 are hoisted to component scope so whatIfStats and these
+        // tiles read from the same source. Cost/Booking and Cost/Q.Book
+        // remain calendar-divisor; what-if exposes wf.cpb_all (matches
+        // Cost/Booking) and wf.cpb (matches Cost/Q.Book).
         const cpb = bk.all > 0 ? stats.adspend / bk.all : 0
         const cpb30 = bk30.all > 0 ? stats30.adspend / bk30.all : 0
         const cpqb = bk.qualified > 0 ? stats.adspend / bk.qualified : 0
@@ -2086,8 +2184,8 @@ export default function MarketingPerformance() {
             <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={hasOverride('adspend') ? wf?.adspend : null} tip="Total Meta Ads spend (converted to USD)" />
             <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={gated(upstream.leads, wf?.leads)} tip="New opportunities created in SCIO USA pipeline. Click to view." onClick={() => setDrilldown('leads')} />
             <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={gated(upstream.leads, wf?.cpl)} tip="Cost Per Lead = Adspend / Leads" />
-            <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
-            <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={gated(upstream.bookings, wf?.cpb)} tip="Adspend ÷ Bookings (all)" />
+            <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} whatIf={gated(upstream.bookings, wf?.bookings_all)} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
+            <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={gated(upstream.bookings, wf?.cpb_all)} tip="Adspend ÷ Bookings (all)" />
             <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip={`Strategy bookings EXCLUDING the DQ Calendly calendar${bk.dq ? ` (${bk.dq} routed to DQ in this window)` : ''}. Click to view.`} onClick={() => setDrilldown('bookings')} />
             <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} whatIf={gated(upstream.bookings, wf?.lead_to_booking_pct)} tip="Qualified Bookings ÷ Leads" />
             <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} whatIf={gated(upstream.bookings, wf?.cpb)} tip="Adspend ÷ Qualified Bookings (excludes DQ)" />
@@ -2109,13 +2207,8 @@ export default function MarketingPerformance() {
         // the "Booked" tile that displayed the EOD count separately — it's
         // already shown in the Spend section above as "Q.Books".
         //
-        // Recompute bk + bk30 locally — the previous IIFE that holds the
-        // Spend section also computes them, but its scope closes before
-        // this block executes (each IIFE is its own function). Without
-        // recomputation we hit ReferenceError at runtime in production
-        // (the bug Ben hit as "bk is not defined" after minification).
-        const bk   = sumBookings(range)
-        const bk30 = sumBookings(30)
+        // bk + bk30 are hoisted at component scope. Locally bound for
+        // brevity inside this IIFE.
         const denom    = bk.qualified || 0
         const denom30  = bk30.qualified || 0
         const denomPrev = sp.qualified_bookings || 0  // prev period stays on EOD until we have bk for it
