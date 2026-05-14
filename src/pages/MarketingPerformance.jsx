@@ -2079,36 +2079,19 @@ export default function MarketingPerformance() {
         const reschPlusCancel = (stats.reschedules || 0) + (stats.cancels || 0)
         const reschPlusCancel30 = (stats30.reschedules || 0) + (stats30.cancels || 0)
         const reschPlusCancelPrev = (sp.reschedules || 0) + (sp.cancels || 0)
-        const combinedRate = stats.qualified_bookings > 0
-          ? Math.min(100, (reschPlusCancel / stats.qualified_bookings) * 100)
-          : 0
-        // Cohort show rate: of qualified NEW calls scheduled (appointment_date)
-        // in this window, what fraction went live? Numerator and denominator
-        // both clock the day the call was due — no booked_at-vs-held drift,
-        // and future-dated rows are excluded by sumCohortBookings. Mirrors
-        // Net Show% formulation (excludes reschedules + cancels from the
-        // denominator) — a prospect who rescheduled/cancelled before their
-        // call shouldn't count against show rate.
-        const cohort = sumCohortBookings(range)
-        const cohort30 = sumCohortBookings(30)
-        const cohortNetDenom = Math.max(0, cohort.qualified - (stats.reschedules || 0) - (stats.cancels || 0))
-        const cohortNetDenom30 = Math.max(0, cohort30.qualified - (stats30.reschedules || 0) - (stats30.cancels || 0))
-        const cohortShowRate = cohortNetDenom > 0
-          ? Math.min(100, (stats.new_live_calls / cohortNetDenom) * 100)
-          : 0
-        const cohortShowRate30 = cohortNetDenom30 > 0
-          ? Math.min(100, (stats30.new_live_calls / cohortNetDenom30) * 100)
-          : 0
+        // Cohort Show% + R+C% removed 2026-05-14 per Ben's request — both
+        // metrics needed explanation every time they were viewed, which is
+        // a sign the dashboard is doing the user's job for them. Net Show%
+        // is the canonical show-rate metric; Resch+Cancel count remains as
+        // an absolute number that's easy to read at a glance.
         return (
-          <Section title="Calls & Show Rates" cols={9}>
+          <Section title="Calls & Show Rates" cols={7}>
             <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={wf?.qualified_bookings} tip="Total calls booked on calendar. Click to view." onClick={() => setDrilldown('bookings')} />
             <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={wf?.new_live_calls} tip="NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Distinct from 'Booked' (calls on the calendar). Click to view." onClick={() => setDrilldown('live')} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={wf?.no_shows} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
             <KPI label="Resch+Cancel" value={reschPlusCancel} format="n" trailing={reschPlusCancel30} prev={reschPlusCancelPrev} tip="Reschedules + cancellations (combined). Both are excluded from the show-rate denominator. Click to view." onClick={() => setDrilldown('rc')} />
-            <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Net New ÷ Booked (no exclusions). Booked is bucketed by booked_at, so daily/weekly values drift relative to when calls actually held — use Cohort Show% for short windows." />
-            <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Net New ÷ (Booked − Cancels − Reschedules). Cancels and reschedules don't count against show rate. Same booked_at drift as Gross." />
-            <KPI label="Cohort Show%" value={cohortShowRate} format="%" trailing={cohortShowRate30} tip={`Net New ÷ (qualified calls SCHEDULED in this window − reschedules − cancels). Same exclusions as Net Show%, but the denominator is bucketed by the day the call was DUE (appointment_date), not booked_at — so numerator and denominator clock the same event. Window: ${cohort.qualified} on calendar − ${stats.reschedules || 0} resch − ${stats.cancels || 0} cancel = ${cohortNetDenom}.`} />
-            <KPI label="R+C%" value={combinedRate} format="%" tip="(Reschedules + Cancellations) ÷ Booked" />
+            <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={wf?.gross_show_rate} tip="Net New ÷ Booked (no exclusions)." />
+            <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={wf?.net_show_rate} tip="Net New ÷ (Booked − Cancels − Reschedules). Cancels and reschedules don't count against show rate. THIS is the show-rate metric to use." />
             <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={wf?.cost_per_new_live_call} tip="Adspend ÷ Net New" />
           </Section>
         )
