@@ -2108,6 +2108,14 @@ export default function MarketingPerformance() {
         // Calendar is automated; closer EOD is manual self-report. Removed
         // the "Booked" tile that displayed the EOD count separately — it's
         // already shown in the Spend section above as "Q.Books".
+        //
+        // Recompute bk + bk30 locally — the previous IIFE that holds the
+        // Spend section also computes them, but its scope closes before
+        // this block executes (each IIFE is its own function). Without
+        // recomputation we hit ReferenceError at runtime in production
+        // (the bug Ben hit as "bk is not defined" after minification).
+        const bk   = sumBookings(range)
+        const bk30 = sumBookings(30)
         const denom    = bk.qualified || 0
         const denom30  = bk30.qualified || 0
         const denomPrev = sp.qualified_bookings || 0  // prev period stays on EOD until we have bk for it
