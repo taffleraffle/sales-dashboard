@@ -89,15 +89,31 @@ export function useCloserCallProspectMetrics() {
   }, [])
 
   const byRange = useMemo(() => {
-    return (days = 30) => {
-      const cutoff = new Date()
-      cutoff.setDate(cutoff.getDate() - days)
-      const cutoffStr = cutoff.toISOString().split('T')[0]
+    return (daysOrRange = 30) => {
+      // Accept either a numeric day count (legacy) OR a { from, to } / 'mtd'
+      // range object. Without this, custom date ranges like "Dec 1 → Jan 1"
+      // fell through to today-minus-N math, putting the prospect-metrics
+      // numerator on a different window than the page's data filter.
+      let cutoffStr, untilStr
+      if (daysOrRange && typeof daysOrRange === 'object' && daysOrRange.from) {
+        cutoffStr = daysOrRange.from
+        untilStr  = daysOrRange.to || '9999-12-31'
+      } else if (daysOrRange === 'mtd') {
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+        cutoffStr = today.slice(0, 7) + '-01'
+        untilStr  = today
+      } else {
+        const days = typeof daysOrRange === 'number' ? daysOrRange : 30
+        const cutoff = new Date()
+        cutoff.setDate(cutoff.getDate() - days)
+        cutoffStr = cutoff.toISOString().split('T')[0]
+        untilStr  = '9999-12-31'
+      }
 
       // Map report → date so we can filter calls by report-date window
       const reportInRange = new Set()
       for (const r of data.reports) {
-        if (r.report_date >= cutoffStr) reportInRange.add(r.id)
+        if (r.report_date >= cutoffStr && r.report_date <= untilStr) reportInRange.add(r.id)
       }
 
       const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ')

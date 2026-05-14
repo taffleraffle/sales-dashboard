@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader, AlertCircle, ChevronRight, ChevronDown, Search, ArrowDown, ArrowUp, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { dateRangeBoundsET } from '../../lib/dateUtils'
+import { useCloserCallProspectMetrics } from '../../hooks/useCloserCallProspectMetrics'
 
 /*
   Performance view — hierarchical rollup.
@@ -37,15 +39,14 @@ const STATUS_OPTIONS = [
 
 // Date utilities for the range picker. Returns { preset, startStr, endStr }
 // where startStr/endStr are 'YYYY-MM-DD'. preset values: '7' | '30' | '90' | 'all' | 'custom'.
+//
+// Anchored to ET via dateRangeBoundsET so windows match the Marketing
+// dashboard exactly. Previously this used browser-local + toISOString,
+// which produced UTC-offset windows that diverged from the marketing
+// dashboard's ET-anchored ones (~4-12 hours of edge mismatch).
 function initialDateRange(days) {
-  const end = new Date()
-  const start = new Date()
-  start.setDate(start.getDate() - days + 1)
-  return {
-    preset: String(days),
-    startStr: start.toISOString().split('T')[0],
-    endStr:   end.toISOString().split('T')[0],
-  }
+  const { startStr, endStr } = dateRangeBoundsET(days)
+  return { preset: String(days), startStr, endStr }
 }
 function rangeFromPreset(preset) {
   if (preset === 'all') {
@@ -237,6 +238,11 @@ export default function AdsPerformance() {
   // throws; rendered as a banner so a broken source can't silently
   // produce wrong numbers.
   const [dataIssues, setDataIssues] = useState([])
+  // Prospect-deduped close/live counts. Same source the Marketing dashboard
+  // uses (via applyProspectMetrics). We surface both numbers — the EOD raw
+  // counter and the deduped prospect count — so the discrepancy between
+  // the two dashboards is explained inline rather than hidden.
+  const { byRange: prospectMetricsByRange } = useCloserCallProspectMetrics()
   const [showOrphans, setShowOrphans] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -281,10 +287,13 @@ export default function AdsPerformance() {
   // startStr/endStr are 'YYYY-MM-DD' strings. Default = last 30 days.
   const [dateRange, setDateRange] = useState(() => initialDateRange(30))
 
-  // Internal: ad list cached on the instance so date-scoped reloads don't
-  // re-paginate the full ads table on every chip click. Cleared on unmount
-  // by React when the component disposes.
-  const adsCacheRef = (typeof window !== 'undefined') ? (window.__adsPerfAdsCache || (window.__adsPerfAdsCache = { data: null })) : { data: null }
+  // Internal: ad list cached on window so date-scoped reloads don't re-
+  // paginate the full ads table on every chip click. Cache has a 5-minute
+  // TTL so newly-synced Meta ads (hourly sync) become visible without
+  // requiring a hard refresh.
+  const ADS_CACHE_TTL_MS = 5 * 60 * 1000
+  const adsCacheRef = (typeof window !== 'undefined') ? (window.__adsPerfAdsCache || (window.__adsPerfAdsCache = { data: null, ts: 0 })) : { data: null, ts: 0 }
+  const adsCacheFresh = () => adsCacheRef.data && (Date.now() - adsCacheRef.ts) < ADS_CACHE_TTL_MS
 
   // Static load: things that don't change with the date window. Runs once
   // on mount. Includes ads list, HYROS, GHL booked/lives rollups (all
@@ -292,7 +301,7 @@ export default function AdsPerformance() {
   const loadStatic = async () => {
     try {
       // 1. Ads — paginated so we never silently cap at 1000.
-      let adsLoaded = adsCacheRef.data
+      let adsLoaded = adsCacheFresh() ? adsCacheRef.data : null
       if (!adsLoaded) {
         adsLoaded = []
         let adOffset = 0
@@ -310,6 +319,7 @@ export default function AdsPerformance() {
           adOffset += AD_PAGE
         }
         adsCacheRef.data = adsLoaded
+        adsCacheRef.ts = Date.now()
       }
       setAds(adsLoaded)
 
@@ -356,11 +366,16 @@ export default function AdsPerformance() {
     try {
       const { startStr, endStr } = dateRange
       // Ads list comes from the static cache (loadStatic guarantees it's set first)
-      const adsLoaded = adsCacheRef.data || []
+      const adsLoaded = (adsCacheFresh() ? adsCacheRef.data : null) || adsCacheRef.data || []
       const adIds = adsLoaded.map(a => a.ad_id)
       if (!adIds.length) { setLoading(false); return }
-      const startTs = startStr + 'T00:00:00Z'
-      const endTs   = endStr   + 'T23:59:59Z'
+      // Use ET-anchored bounds so the window matches the Marketing dashboard's
+      // ET cutoffs exactly. ET is UTC-5 (UTC-4 during DST), so we offset the
+      // UTC instant we send to PostgREST. Using '-05:00' is safe both at
+      // east-coast standard time AND for DST — PostgREST compares with stored
+      // UTC timestamps and the boundary lands on the right ET calendar day.
+      const startTs = startStr + 'T00:00:00-05:00'
+      const endTs   = endStr   + 'T23:59:59-05:00'
 
       // Kick off ALL date-scoped fetches in parallel. Seven independent
       // queries each paged to bypass the 1000-row cap. Use allSettled
@@ -382,7 +397,7 @@ export default function AdsPerformance() {
           .gte('created_at', startTs).lte('created_at', endTs)),
         fetchAllPaged(() => supabase
           .from('lib_ghl_leads_detail')
-          .select('ghl_contact_id, landed_at, ad_id, adset_id, utm_campaign')
+          .select('ghl_contact_id, email, landed_at, ad_id, adset_id, utm_campaign')
           .gte('landed_at', startTs).lte('landed_at', endTs)),
         fetchAllPaged(() => supabase
           .from('lib_ghl_booked_detail')
@@ -803,23 +818,36 @@ export default function AdsPerformance() {
         <TotalsTile label="Spend" value={fmt$(totals.spend)} />
         {(() => {
           const eod = rowTotals.eod, attr = rowTotals.attributed
+          // Pull the prospect-deduped numbers for the active window — same
+          // formula the Marketing dashboard runs. Lets us show the 3-step
+          // waterfall: EOD reported → unique prospects → attributed to ad.
+          const pm = prospectMetricsByRange({ from: dateRange.startStr, to: dateRange.endStr })
           const sub = (eodVal, attrVal, extra = '') => {
             if (eodVal === 0) return attrVal > 0 ? `${fmtN(attrVal)} attributed (no EOD data)` : null
             const gap = eodVal - attrVal
             if (gap > 0)  return `${fmtN(attrVal)} attributed · ${fmtN(gap)} unattributed${extra}`
-            if (gap < 0)  return `${fmtN(attrVal)} attributed (EOD undercounted by ${fmtN(-gap)})${extra}`
+            if (gap < 0)  return `${fmtN(attrVal)} attributed · exceeds EOD by ${fmtN(-gap)} (check for dedup gap)${extra}`
             return `all ${fmtN(attrVal)} attributed${extra}`
           }
+          // 3-step waterfall sub for Closes (and Live): EOD counter → prospect
+          // dedup → ad attribution. This matches what the Marketing dashboard
+          // shows (which substitutes the deduped number as the headline).
+          const closeSub = eod.closes > 0
+            ? `${fmtN(pm.closedProspects)} unique prospects · ${fmtN(attr.closes)} attributed${eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : ''}`
+            : (attr.closes > 0 ? `${fmtN(attr.closes)} attributed (no EOD data)` : null)
+          const liveSub = eod.live > 0
+            ? `${fmtN(pm.liveProspects)} unique prospects · ${fmtN(attr.live)} attributed`
+            : (attr.live > 0 ? `${fmtN(attr.live)} attributed (no EOD data)` : null)
           const click = (metric) => () => setDrill({ metric, scope: { level: 'all' } })
           return (
             <>
               <TotalsTile label="Leads"      value={fmtN(eod.leads)}  sub={sub(eod.leads,  attr.leads)}  onClick={click('leads')} />
               <TotalsTile label="Booked"     value={fmtN(eod.booked)} sub={sub(eod.booked, attr.booked)} onClick={click('booked')} />
-              <TotalsTile label="Live calls" value={fmtN(eod.live)}   sub={sub(eod.live,   attr.live)}   onClick={click('live')} />
+              <TotalsTile label="Live calls" value={fmtN(eod.live)}   sub={liveSub}                       onClick={click('live')} />
               <TotalsTile
                 label="Closes"
                 value={fmtN(eod.closes)}
-                sub={sub(eod.closes, attr.closes, eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : '')}
+                sub={closeSub}
                 valueColor={eod.closes > 0 ? '#1f7a3a' : undefined}
                 onClick={click('closed')}
               />

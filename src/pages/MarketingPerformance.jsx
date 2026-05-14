@@ -1642,9 +1642,12 @@ export default function MarketingPerformance() {
   // cpa_trial) so the Marketing page now reports the same numbers as the
   // Closer dashboard. Other ratios that depend on closes (ascend_rate,
   // trial cash per close, etc.) follow automatically.
-  const applyProspectMetrics = (statsBundle, days) => {
+  // Accepts either a numeric day count, 'mtd', or { from, to }. byRange now
+  // accepts the same union so custom historical ranges use the exact same
+  // window as the filterByDays() data view above.
+  const applyProspectMetrics = (statsBundle, rangeOrDays) => {
     if (!statsBundle) return statsBundle
-    const pm = prospectMetricsByRange(days)
+    const pm = prospectMetricsByRange(rangeOrDays)
     const liveProspects = pm.liveProspects
     const closedProspects = pm.closedProspects
     // Only override when we actually have call-row data; if a window had
@@ -1687,9 +1690,13 @@ export default function MarketingPerformance() {
     return 30
   }, [range])
 
-  const stats = useMemo(() => applyProspectMetrics(computeMarketingStats(rangeEntries), rangeDays), [rangeEntries, rangeDays, prospectMetricsByRange])
+  // Pass the raw `range` (number | 'mtd' | { from, to }) to applyProspectMetrics
+  // so byRange filters on the SAME window as filterByDays. Passing rangeDays
+  // (a number) for custom { from, to } ranges previously misaligned the
+  // prospect-metrics window with the displayed entries.
+  const stats = useMemo(() => applyProspectMetrics(computeMarketingStats(rangeEntries), range), [rangeEntries, range, prospectMetricsByRange])
   const stats30 = useMemo(() => applyProspectMetrics(computeMarketingStats(filterByDays(entries, 30)), 30), [entries, prospectMetricsByRange])
-  const statsMTD = useMemo(() => applyProspectMetrics(computeMarketingStats(mtdEntries), mtdDays), [mtdEntries, mtdDays, prospectMetricsByRange])
+  const statsMTD = useMemo(() => applyProspectMetrics(computeMarketingStats(mtdEntries), 'mtd'), [mtdEntries, prospectMetricsByRange])
   // Previous-period stays on legacy EOD-counter math because applying
   // call-row dedup retroactively to N-days-ago needs the same call cache;
   // it's also a comparison delta where consistency-within-method matters

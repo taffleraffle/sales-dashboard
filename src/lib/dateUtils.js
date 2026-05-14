@@ -59,6 +59,35 @@ export function todayET() {
 }
 
 /**
+ * Resolve any range value to { startStr, endStr } ET-anchored YYYY-MM-DD bounds.
+ * Single source of truth shared across MarketingPerformance + AdsPerformance.
+ *
+ *   - 7 / 30 / 90  → ET today minus N-1 days  → ET today
+ *   - 'mtd'        → first-of-this-month     → ET today
+ *   - { from, to } → from                    → to (validated)
+ *   - { from }     → from                    → ET today
+ *
+ * Without this helper, the Ads dashboard built UTC bounds (T00:00:00Z) while
+ * the Marketing dashboard used ET bounds — windows diverged by 4-12 hours at
+ * boundaries and the two dashboards reported different counts for the same
+ * selected range. This guarantees they agree.
+ */
+export function dateRangeBoundsET(range) {
+  // Custom { from, to }
+  if (range && typeof range === 'object' && range.from) {
+    return { startStr: range.from, endStr: range.to || todayET() }
+  }
+  // MTD
+  if (range === 'mtd') {
+    const today = todayET()
+    return { startStr: today.slice(0, 7) + '-01', endStr: today }
+  }
+  // Numeric days
+  const days = typeof range === 'number' ? range : (parseInt(range, 10) || 30)
+  return { startStr: etDateOffset(-Math.max(0, days - 1)), endStr: todayET() }
+}
+
+/**
  * Get an ET-anchored date offset N days from today (YYYY-MM-DD).
  * Negative for past, positive for future.
  *
