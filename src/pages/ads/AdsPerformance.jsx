@@ -1067,17 +1067,26 @@ export default function AdsPerformance() {
         </div>
       )}
 
-      {/* Totals strip — headline = unique prospects we have records for
-          (matches what the drilldown panel will show when clicked).
-          Sub-line surfaces the EOD self-report number for reconciliation
-          + attribution gap to a Meta ad. Previously the headline was the
-          EOD number while the drilldown showed prospect rows, which
-          looked like a mismatch every time the closer's self-report
-          drifted from the actual prospect rows logged. */}
+      {/* Totals strip — Live and Closes now drive from the SAME source the
+          Marketing dashboard uses: useCloserCallProspectMetrics (unique
+          prospects from closer_calls per-call truth). $/Live and CAC
+          divide spend by these so they equal MarketingPerformance's
+          cost_per_new_live_call and cpa_trial exactly. Leads and Booked
+          continue to use the attribution-based union (typeform + GHL)
+          because closer_calls has no ad attribution above the close
+          event — that's the only available source. Sub-line below each
+          tile explains the gap between closer-reported truth and
+          ad-attributed coverage. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
         <TotalsTile label="Spend" value={fmt$(totals.spend)} />
         {(() => {
           const eod = rowTotals.eod, attr = rowTotals.attributed, prosp = rowTotals.prospects
+          // Single source of truth for Live and Closes — closer_calls
+          // deduped by prospect_name. Same hook MarketingPerformance uses
+          // via applyProspectMetrics() so numbers reconcile cross-page.
+          const pm = prospectMetricsByRange({ from: dateRange.startStr, to: dateRange.endStr })
+          const liveCount   = pm.liveProspects
+          const closesCount = pm.closedProspects
           // Sub-line reconciles three numbers: EOD self-report, the unique
           // prospects we have records for (= headline + drilldown count),
           // and how many of those we attributed to a Meta ad.
@@ -1088,40 +1097,43 @@ export default function AdsPerformance() {
             else if (attrVal > 0)                   parts.push(`all attributed`)
             return parts.length ? parts.join(' · ') + extra : null
           }
-          const closeSub = sub(eod.closes, prosp.closes, attr.closes, eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : '')
+          const closeSub = sub(eod.closes, closesCount, attr.closes, eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : '')
+          const liveSub  = sub(eod.live,  liveCount,   attr.live)
           const click = (metric) => () => setDrill({ metric, scope: { level: 'all' } })
           return (
             <>
               <TotalsTile label="Leads"      value={fmtN(prosp.leads)}  sub={sub(eod.leads,  prosp.leads,  attr.leads)}  onClick={click('leads')} />
               <TotalsTile label="Booked"     value={fmtN(prosp.booked)} sub={sub(eod.booked, prosp.booked, attr.booked)} onClick={click('booked')} />
-              <TotalsTile label="Live calls" value={fmtN(prosp.live)}   sub={sub(eod.live,   prosp.live,   attr.live)}   onClick={click('live')} />
+              <TotalsTile label="Live calls" value={fmtN(liveCount)}    sub={liveSub}                                    onClick={click('live')} />
               <TotalsTile
                 label="Closes"
-                value={fmtN(prosp.closes)}
+                value={fmtN(closesCount)}
                 sub={closeSub}
-                valueColor={prosp.closes > 0 ? '#1f7a3a' : undefined}
+                valueColor={closesCount > 0 ? '#1f7a3a' : undefined}
                 onClick={click('closed')}
               />
             </>
           )
         })()}
         {(() => {
-          // Cost-per tiles divide spend by the SAME denominator the headline
-          // tiles use (unique prospects), so the dollar figure reconciles
-          // with the count above it. Previously these used EOD which made
-          // $/Booked = spend / EOD_booked while the Booked tile showed a
-          // different (drilldown-matching) count.
+          // Cost-per tiles divide spend by the SAME denominator the
+          // corresponding count tile uses, so $-figures reconcile with
+          // counts above. $/Live and CAC now match
+          // MarketingPerformance.cost_per_new_live_call / cpa_trial
+          // exactly because both pages divide by the same per-call
+          // prospect-deduped denominator.
           const p = rowTotals.prospects
+          const pm = prospectMetricsByRange({ from: dateRange.startStr, to: dateRange.endStr })
           return (
             <>
               <TotalsTile label="$ / Lead"   value={p.leads  > 0 ? fmt$(totals.spend / p.leads)  : '—'} valueColor={kpiColor(p.leads  > 0 ? totals.spend / p.leads  : null, KPI.costPerLead)} />
               <TotalsTile label="$ / Booked" value={p.booked > 0 ? fmt$(totals.spend / p.booked) : '—'} valueColor={kpiColor(p.booked > 0 ? totals.spend / p.booked : null, KPI.costPerQualBooked)} />
-              <TotalsTile label="$ / Live"   value={p.live   > 0 ? fmt$(totals.spend / p.live)   : '—'} valueColor={kpiColor(p.live   > 0 ? totals.spend / p.live   : null, KPI.costPerLive)} />
+              <TotalsTile label="$ / Live"   value={pm.liveProspects   > 0 ? fmt$(totals.spend / pm.liveProspects)   : '—'} valueColor={kpiColor(pm.liveProspects   > 0 ? totals.spend / pm.liveProspects   : null, KPI.costPerLive)} />
               <TotalsTile
                 label="CAC"
-                value={p.closes > 0 ? fmt$(totals.spend / p.closes) : '—'}
-                sub={p.closes > 0 ? `${fmt$(totals.spend)} ÷ ${p.closes} closes` : null}
-                valueColor={kpiColor(p.closes > 0 ? totals.spend / p.closes : null, KPI.costPerClose)}
+                value={pm.closedProspects > 0 ? fmt$(totals.spend / pm.closedProspects) : '—'}
+                sub={pm.closedProspects > 0 ? `${fmt$(totals.spend)} ÷ ${pm.closedProspects} closes` : null}
+                valueColor={kpiColor(pm.closedProspects > 0 ? totals.spend / pm.closedProspects : null, KPI.costPerClose)}
               />
             </>
           )
@@ -1141,7 +1153,7 @@ export default function AdsPerformance() {
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, marginBottom: 12 }}>
           <ChipGroup label="Range" value={dateRange.preset}
             setValue={(v) => setDateRange(v === 'custom' ? { ...dateRange, preset: 'custom' } : rangeFromPreset(v))}
-            options={[{ value: '7', label: '7d' }, { value: '30', label: '30d' }, { value: '90', label: '90d' }, { value: 'all', label: 'All' }, { value: 'custom', label: 'Custom' }]} />
+            options={[{ value: '7', label: '7d' }, { value: '30', label: '30d' }, { value: '90', label: '90d' }, { value: 'all', label: '2y' }, { value: 'custom', label: 'Custom' }]} />
           {dateRange.preset === 'custom' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <EditorialDate value={dateRange.startStr} max={dateRange.endStr}
