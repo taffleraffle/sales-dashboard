@@ -2101,26 +2101,40 @@ export default function MarketingPerformance() {
           denominator (live ÷ (booked − cancels − reschedules)), so combining
           the display matches the math the formula uses. */}
       {(() => {
-        // Per-bucket rates — split out so the operator can see whether
-        // bookings are dying by reschedule (intent intact, friction issue)
-        // or cancel (intent broken). Each rate uses qualified_bookings as
-        // denominator so they're comparable to show-rate math.
-        const rate = (num, denom) => denom > 0 ? Math.min(100, (num / denom) * 100) : 0
-        const reschedRate    = rate(stats.reschedules || 0, stats.qualified_bookings || 0)
-        const reschedRate30  = rate(stats30.reschedules || 0, stats30.qualified_bookings || 0)
-        const reschedRatePrev= rate(sp.reschedules || 0, sp.qualified_bookings || 0)
-        const cancelRate     = rate(stats.cancels || 0, stats.qualified_bookings || 0)
-        const cancelRate30   = rate(stats30.cancels || 0, stats30.qualified_bookings || 0)
-        const cancelRatePrev = rate(sp.cancels || 0, sp.qualified_bookings || 0)
+        // All rates now use bk.qualified (calendar source of truth, deduped
+        // by prospect) as the denominator instead of stats.qualified_bookings
+        // (closer-reported EOD count). The two used to disagree by ~3-4 in
+        // a 7-day window because closers don't reliably log every booking.
+        // Calendar is automated; closer EOD is manual self-report. Removed
+        // the "Booked" tile that displayed the EOD count separately — it's
+        // already shown in the Spend section above as "Q.Books".
+        const denom    = bk.qualified || 0
+        const denom30  = bk30.qualified || 0
+        const denomPrev = sp.qualified_bookings || 0  // prev period stays on EOD until we have bk for it
+        const rate = (num, d) => d > 0 ? Math.min(100, (num / d) * 100) : 0
+        const reschedRate    = rate(stats.reschedules || 0, denom)
+        const reschedRate30  = rate(stats30.reschedules || 0, denom30)
+        const reschedRatePrev= rate(sp.reschedules || 0, denomPrev)
+        const cancelRate     = rate(stats.cancels || 0, denom)
+        const cancelRate30   = rate(stats30.cancels || 0, denom30)
+        const cancelRatePrev = rate(sp.cancels || 0, denomPrev)
+        // Show rates recomputed with calendar denominator. Net Show% subtracts
+        // closer-reported cancels + reschedules from the calendar count — best
+        // available approximation of "confirmed bookings."
+        const grossShowRate = rate(stats.new_live_calls || 0, denom)
+        const grossShowRate30 = rate(stats30.new_live_calls || 0, denom30)
+        const netDenom    = Math.max(0, denom    - (stats.cancels || 0)   - (stats.reschedules || 0))
+        const netDenom30  = Math.max(0, denom30  - (stats30.cancels || 0) - (stats30.reschedules || 0))
+        const netShowRate   = rate(stats.new_live_calls || 0, netDenom)
+        const netShowRate30 = rate(stats30.new_live_calls || 0, netDenom30)
         return (
-          <Section title="Calls & Show Rates" cols={8}>
-            <KPI label="Booked" value={stats.qualified_bookings} format="n" prev={sp.qualified_bookings} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip="Total calls booked on calendar. Click to view." onClick={() => setDrilldown('bookings')} />
-            <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={gated(upstream.live, wf?.new_live_calls)} tip="NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Distinct from 'Booked' (calls on the calendar). Click to view." onClick={() => setDrilldown('live')} />
+          <Section title="Calls & Show Rates" cols={7}>
+            <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={gated(upstream.live, wf?.new_live_calls)} tip={`NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Denominator for show rates uses Qualified Bookings (${denom}) from the calendar, not the closer's EOD count. Click to view.`} onClick={() => setDrilldown('live')} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={gated(upstream.live, wf?.no_shows)} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
-            <KPI label="Reschedule%" value={reschedRate} format="%" trailing={reschedRate30} prev={reschedRatePrev} tip={`Reschedules ÷ Booked. ${stats.reschedules || 0} reschedules out of ${stats.qualified_bookings || 0} bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
-            <KPI label="Cancel%" value={cancelRate} format="%" trailing={cancelRate30} prev={cancelRatePrev} tip={`Cancellations ÷ Booked. ${stats.cancels || 0} cancels out of ${stats.qualified_bookings || 0} bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
-            <KPI label="Gross Show%" value={stats.gross_show_rate} format="%" trailing={stats30.gross_show_rate} prev={sp.gross_show_rate} whatIf={gated(upstream.live, wf?.gross_show_rate)} tip="Live shows ÷ ALL bookings (includes calls that later cancelled or rescheduled). The 'unfiltered' show rate — the harsh number that includes all the no-shows from people who never confirmed." />
-            <KPI label="Net Show%" value={stats.net_show_rate} format="%" benchmark={bm.show_rate_new} trailing={stats30.net_show_rate} prev={sp.net_show_rate} whatIf={gated(upstream.live, wf?.net_show_rate)} tip="Live shows ÷ CONFIRMED bookings (only calls that stayed on the calendar through call-time — cancels and reschedules removed from the denominator). This is the show rate among prospects who confirmed they'd show. Use this for forecasting." />
+            <KPI label="Reschedule%" value={reschedRate} format="%" trailing={reschedRate30} prev={reschedRatePrev} tip={`Reschedules ÷ Qualified Bookings. ${stats.reschedules || 0} reschedules out of ${denom} qualified bookings (calendar). Click to view.`} onClick={() => setDrilldown('rc')} />
+            <KPI label="Cancel%" value={cancelRate} format="%" trailing={cancelRate30} prev={cancelRatePrev} tip={`Cancellations ÷ Qualified Bookings. ${stats.cancels || 0} cancels out of ${denom} qualified bookings (calendar). Click to view.`} onClick={() => setDrilldown('rc')} />
+            <KPI label="Gross Show%" value={grossShowRate} format="%" trailing={grossShowRate30} tip={`Live shows ÷ ALL qualified bookings (includes calls that later cancelled or rescheduled). ${stats.new_live_calls || 0} live ÷ ${denom} booked. Calendar-sourced denominator.`} />
+            <KPI label="Net Show%" value={netShowRate} format="%" benchmark={bm.show_rate_new} trailing={netShowRate30} tip={`Live shows ÷ CONFIRMED bookings (Qualified Bookings minus cancels and reschedules). ${stats.new_live_calls || 0} live ÷ ${netDenom} confirmed = ${netShowRate.toFixed(1)}%. Use this for forecasting.`} />
             <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={gated(upstream.live, wf?.cost_per_new_live_call)} tip="Adspend ÷ Net New" />
           </Section>
         )
