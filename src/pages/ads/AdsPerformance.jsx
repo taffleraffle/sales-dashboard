@@ -1539,40 +1539,73 @@ const dateInputStyle = {
 }
 
 // ── Drill-down helpers ──────────────────────────────────────────────
+// Generic scope filter — every drilldown query applies the same OR-pattern
+// so a campaign-scoped drill catches rows by utm_campaign string match OR
+// adset_id.in OR ad_id.in (covers Meta rename drift + attribution gaps).
+// `cols` maps logical scope levels to the actual column names in the
+// queried table (e.g. lib_close_resolved uses `resolved_ad_id` instead of
+// `ad_id`).
+function applyDrillScope(q, scope, cols) {
+  if (!scope) return q
+  if (scope.level === 'ad') return q.eq(cols.ad, scope.id)
+  if (scope.level === 'adset') {
+    const adIds = scope.adIds || []
+    if (adIds.length > 0) return q.or(`${cols.adset}.eq.${scope.id},${cols.ad}.in.(${adIds.join(',')})`)
+    return q.eq(cols.adset, scope.id)
+  }
+  if (scope.level === 'campaign') {
+    const ors = []
+    if (scope.id)                              ors.push(`${cols.campaign}.eq.${encodeURIComponent(scope.id)}`)
+    if ((scope.adsetIds || []).length)         ors.push(`${cols.adset}.in.(${scope.adsetIds.join(',')})`)
+    if ((scope.adIds    || []).length)         ors.push(`${cols.ad}.in.(${scope.adIds.join(',')})`)
+    if (ors.length) return q.or(ors.join(','))
+  }
+  return q
+}
+
+// Column maps per table — lets applyDrillScope work uniformly.
+const SCOPE_COLS_TYPEFORM = { ad: 'ad_id',          adset: 'adset_id',          campaign: 'utm_campaign'      }
+const SCOPE_COLS_GHL      = { ad: 'ad_id',          adset: 'adset_id',          campaign: 'utm_campaign'      }
+const SCOPE_COLS_CLOSE    = { ad: 'resolved_ad_id', adset: 'resolved_adset_id', campaign: 'resolved_campaign' }
+
 async function fetchTypeformDetail(drill, sinceISO, untilISO) {
   let q = supabase.from('lib_typeform_response_detail').select('*')
     .gte('submitted_at', sinceISO).lte('submitted_at', untilISO)
     .order('submitted_at', { ascending: false })
-  if (drill.scope.level === 'ad')           q = q.eq('ad_id',        drill.scope.id)
-  else if (drill.scope.level === 'adset')   q = q.eq('adset_id',     drill.scope.id)
-  else if (drill.scope.level === 'campaign')q = q.eq('utm_campaign', drill.scope.id)
+  q = applyDrillScope(q, drill.scope, SCOPE_COLS_TYPEFORM)
   const { data, error } = await q
   if (error) throw new Error(error.message)
   return data || []
 }
 
 async function fetchGhlDetail(drill, sinceISO, untilISO) {
-  // Same OR-trick the closes drill uses: include rows that match scope by
-  // ad_id, adset_id, OR utm_campaign string. Covers data drift.
   let q = supabase.from('lib_ghl_leads_detail').select('*')
     .gte('landed_at', sinceISO).lte('landed_at', untilISO)
     .order('landed_at', { ascending: false })
-  if (drill.scope.level === 'ad') {
-    q = q.eq('ad_id', drill.scope.id)
-  } else if (drill.scope.level === 'adset') {
-    const adIds = drill.scope.adIds || []
-    if (adIds.length > 0) q = q.or(`adset_id.eq.${drill.scope.id},ad_id.in.(${adIds.join(',')})`)
-    else                  q = q.eq('adset_id', drill.scope.id)
-  } else if (drill.scope.level === 'campaign') {
-    const ors = []
-    if (drill.scope.id) ors.push(`utm_campaign.eq.${encodeURIComponent(drill.scope.id)}`)
-    if ((drill.scope.adsetIds || []).length) ors.push(`adset_id.in.(${drill.scope.adsetIds.join(',')})`)
-    if ((drill.scope.adIds    || []).length) ors.push(`ad_id.in.(${drill.scope.adIds.join(',')})`)
-    if (ors.length) q = q.or(ors.join(','))
-  }
+  q = applyDrillScope(q, drill.scope, SCOPE_COLS_GHL)
   const { data, error } = await q
   if (error) throw new Error(error.message)
   return data || []
+}
+
+// Union + dedupe by email. typeform-side rows win ties (richer columns).
+function unionByEmail(tfRows, otherRows, otherKind) {
+  const seen = new Set()
+  const out = []
+  for (const r of tfRows) {
+    const email = (r.email || '').toLowerCase()
+    if (email) seen.add(email)
+    out.push({ kind: 'tf', ...r })
+  }
+  for (const r of otherRows) {
+    const email = (r.email || '').toLowerCase()
+    if (email && seen.has(email)) continue
+    if (email) seen.add(email)
+    out.push({ kind: otherKind, ...r })
+  }
+  return out.sort((a, b) =>
+    (b.submitted_at || b.landed_at || b.created_at || '')
+      .localeCompare(a.submitted_at || a.landed_at || a.created_at || ''))
 }
 
 // ── Drill-down modal ────────────────────────────────────────────────
@@ -1595,60 +1628,94 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
         const untilISO = (dateRange?.endStr   || '2099-12-31') + 'T23:59:59Z'
 
         // ── CLOSED ─────────────────────────────────────────────────
+        // Row count = MAX(typeform is_closed count, lib_close_resolved count)
+        // per overlayClose. To match, drilldown unions BOTH sources deduped
+        // by email — a typeform is_closed=true row without a corresponding
+        // lib_close_resolved row (closer hand-marked, HYROS hasn't resolved
+        // yet) still appears so the count and the visible list reconcile.
         if (drill.metric === 'closed') {
           setSource('closed')
-          let q = supabase.from('lib_close_resolved').select('*')
+          let qC = supabase.from('lib_close_resolved').select('*')
             .gte('created_at', sinceISO).lte('created_at', untilISO)
             .order('created_at', { ascending: false })
-          if (drill.scope.level === 'ad') {
-            q = q.eq('resolved_ad_id', drill.scope.id)
-          } else if (drill.scope.level === 'adset') {
-            const adIds = drill.scope.adIds || []
-            if (adIds.length > 0) q = q.or(`resolved_adset_id.eq.${drill.scope.id},resolved_ad_id.in.(${adIds.join(',')})`)
-            else                  q = q.eq('resolved_adset_id', drill.scope.id)
-          } else if (drill.scope.level === 'campaign') {
-            const ors = []
-            if (drill.scope.id) ors.push(`resolved_campaign.eq.${encodeURIComponent(drill.scope.id)}`)
-            if ((drill.scope.adsetIds || []).length) ors.push(`resolved_adset_id.in.(${drill.scope.adsetIds.join(',')})`)
-            if ((drill.scope.adIds    || []).length) ors.push(`resolved_ad_id.in.(${drill.scope.adIds.join(',')})`)
-            if (ors.length) q = q.or(ors.join(','))
-          }
-          const { data, error: e } = await q
-          if (e) throw new Error(e.message)
-          if (!cancelled) setRows((data || []).map(r => ({ kind: 'close', ...r })))
+          qC = applyDrillScope(qC, drill.scope, SCOPE_COLS_CLOSE)
+          let qT = supabase.from('lib_typeform_response_detail').select('*')
+            .eq('is_closed', true)
+            .gte('submitted_at', sinceISO).lte('submitted_at', untilISO)
+            .order('submitted_at', { ascending: false })
+          qT = applyDrillScope(qT, drill.scope, SCOPE_COLS_TYPEFORM)
+          const [{ data: cData, error: cErr }, { data: tData, error: tErr }] = await Promise.all([qC, qT])
+          if (cErr) throw new Error(cErr.message)
+          if (tErr) throw new Error(tErr.message)
+          const closeRows = (cData || []).map(r => ({ kind: 'close', ...r }))
+          const closeEmails = new Set(closeRows.map(r => (r.email || '').toLowerCase()).filter(Boolean))
+          const tfRows = (tData || [])
+            .filter(r => !r.email || !closeEmails.has(r.email.toLowerCase()))
+            .map(r => ({ kind: 'tf', ...r }))
+          if (!cancelled) setRows([...closeRows, ...tfRows].sort((a, b) =>
+            (b.created_at || b.submitted_at || '').localeCompare(a.created_at || a.submitted_at || '')))
           return
         }
 
         // ── BOOKED ─────────────────────────────────────────────────
-        // Use lib_ghl_booked_detail (the same source the headline count
-        // is derived from). Falls back to typeform's is_booked rows for
-        // typeform-only path coverage.
-        if (drill.metric === 'booked' || drill.metric === 'qual_booked') {
-          setSource('ghl')
-          let q = supabase.from('lib_ghl_booked_detail').select('*')
+        // Row count = MAX(typeform is_booked, GHL booked) per the rollup
+        // builder. Drilldown unions both sources deduped by email so the
+        // visible list matches the count.
+        if (drill.metric === 'booked') {
+          let qG = supabase.from('lib_ghl_booked_detail').select('*')
             .gte('landed_at', sinceISO).lte('landed_at', untilISO)
             .order('landed_at', { ascending: false })
-          if (drill.scope.level === 'ad')           q = q.eq('ad_id',        drill.scope.id)
-          else if (drill.scope.level === 'adset')   q = q.eq('adset_id',     drill.scope.id)
-          else if (drill.scope.level === 'campaign')q = q.eq('utm_campaign', drill.scope.id)
+          qG = applyDrillScope(qG, drill.scope, SCOPE_COLS_GHL)
+          let qT = supabase.from('lib_typeform_response_detail').select('*')
+            .eq('is_booked', true)
+            .gte('submitted_at', sinceISO).lte('submitted_at', untilISO)
+            .order('submitted_at', { ascending: false })
+          qT = applyDrillScope(qT, drill.scope, SCOPE_COLS_TYPEFORM)
+          const [{ data: gData, error: gErr }, { data: tData, error: tErr }] = await Promise.all([qG, qT])
+          if (gErr) throw new Error(gErr.message)
+          if (tErr) throw new Error(tErr.message)
+          const merged = unionByEmail(tData || [], gData || [], 'ghl')
+          setSource((tData || []).length && (gData || []).length ? 'mixed' : ((gData || []).length ? 'ghl' : 'typeform'))
+          if (!cancelled) setRows(merged)
+          return
+        }
+
+        // ── QUALIFIED BOOKED ───────────────────────────────────────
+        // Row count comes ONLY from typeform (is_booked AND qualified) —
+        // lib_ghl_booked_detail has no qualification column so the rollup
+        // doesn't union it in. Drilldown matches that single source.
+        if (drill.metric === 'qual_booked') {
+          setSource('typeform')
+          let q = supabase.from('lib_typeform_response_detail').select('*')
+            .eq('is_booked', true).eq('qualified', true)
+            .gte('submitted_at', sinceISO).lte('submitted_at', untilISO)
+            .order('submitted_at', { ascending: false })
+          q = applyDrillScope(q, drill.scope, SCOPE_COLS_TYPEFORM)
           const { data, error: e } = await q
           if (e) throw new Error(e.message)
-          if (!cancelled) setRows((data || []).map(r => ({ kind: 'ghl', ...r })))
+          if (!cancelled) setRows((data || []).map(r => ({ kind: 'tf', ...r })))
           return
         }
 
         // ── LIVE ──────────────────────────────────────────────────
+        // Row count = MAX(typeform is_live, GHL live). Same union pattern
+        // as booked.
         if (drill.metric === 'live') {
-          setSource('ghl')
-          let q = supabase.from('lib_ghl_lives_detail').select('*')
+          let qG = supabase.from('lib_ghl_lives_detail').select('*')
             .gte('landed_at', sinceISO).lte('landed_at', untilISO)
             .order('landed_at', { ascending: false })
-          if (drill.scope.level === 'ad')           q = q.eq('ad_id',        drill.scope.id)
-          else if (drill.scope.level === 'adset')   q = q.eq('adset_id',     drill.scope.id)
-          else if (drill.scope.level === 'campaign')q = q.eq('utm_campaign', drill.scope.id)
-          const { data, error: e } = await q
-          if (e) throw new Error(e.message)
-          if (!cancelled) setRows((data || []).map(r => ({ kind: 'ghl', ...r })))
+          qG = applyDrillScope(qG, drill.scope, SCOPE_COLS_GHL)
+          let qT = supabase.from('lib_typeform_response_detail').select('*')
+            .eq('is_live', true)
+            .gte('submitted_at', sinceISO).lte('submitted_at', untilISO)
+            .order('submitted_at', { ascending: false })
+          qT = applyDrillScope(qT, drill.scope, SCOPE_COLS_TYPEFORM)
+          const [{ data: gData, error: gErr }, { data: tData, error: tErr }] = await Promise.all([qG, qT])
+          if (gErr) throw new Error(gErr.message)
+          if (tErr) throw new Error(tErr.message)
+          const merged = unionByEmail(tData || [], gData || [], 'ghl')
+          setSource((tData || []).length && (gData || []).length ? 'mixed' : ((gData || []).length ? 'ghl' : 'typeform'))
+          if (!cancelled) setRows(merged)
           return
         }
 
@@ -1662,17 +1729,10 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
         let tf = tfData
         if (drill.metric === 'qualified') tf = tf.filter(r => r.qualified)
 
-        // Dedupe: a prospect who submitted typeform AND has a ghl_contact
-        // gets counted once. Email is the join key.
-        const tfEmails = new Set(tf.map(r => (r.email || '').toLowerCase()).filter(Boolean))
-        const ghlDedup = ghlData.filter(r => !r.email || !tfEmails.has(r.email.toLowerCase()))
-
-        const tfTagged  = tf.map(r => ({ kind: 'tf',  ...r }))
-        const ghlTagged = ghlDedup.map(r => ({ kind: 'ghl', ...r }))
-        const merged = [...tfTagged, ...ghlTagged].sort((a, b) =>
-          (b.submitted_at || b.landed_at || '').localeCompare(a.submitted_at || a.landed_at || ''))
-
-        setSource(ghlTagged.length && tfTagged.length ? 'mixed' : (ghlTagged.length ? 'ghl' : 'typeform'))
+        const merged = unionByEmail(tf, ghlData, 'ghl')
+        const tfCount = tf.length
+        const ghlCount = merged.length - tfCount
+        setSource(ghlCount && tfCount ? 'mixed' : (ghlCount ? 'ghl' : 'typeform'))
         if (!cancelled) setRows(merged)
       } catch (e) {
         if (!cancelled) setError(e.message)
@@ -1750,25 +1810,36 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
-                <tr key={r.closer_call_id} style={{ borderBottom: '1px solid var(--rule)' }}>
-                  <td style={drillTd}>{(r.created_at || '').slice(0, 10)}</td>
-                  <td style={drillTd}>
-                    <div style={{ fontFamily: 'var(--serif)', fontWeight: 500, color: 'var(--ink)', fontSize: 14 }}>{r.clean_name || r.prospect_name}</div>
-                  </td>
-                  <td style={drillTd}>
-                    <span style={{
-                      padding: '2px 8px', borderRadius: 2,
-                      fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
-                      background: r.attribution_source === 'manual' ? 'var(--accent-soft)' : 'transparent',
-                      border: '1px solid', borderColor: r.attribution_source === 'manual' ? 'var(--accent)' : 'var(--rule)',
-                      color: 'var(--ink)',
-                    }}>{r.attribution_source}</span>
-                  </td>
-                  <td style={{ ...drillTd, textAlign: 'right' }}>{r.revenue > 0 ? fmt$(parseFloat(r.revenue)) : '—'}</td>
-                  <td style={{ ...drillTd, textAlign: 'right', color: r.cash_collected > 0 ? '#1f7a3a' : 'var(--ink-4)' }}>{r.cash_collected > 0 ? fmt$(parseFloat(r.cash_collected)) : '—'}</td>
-                </tr>
-              ))}
+              {rows.map((r, idx) => {
+                // Mixed-source table: close rows come from lib_close_resolved
+                // (resolved by HYROS / closer mapping), tf fallback rows come
+                // from typeform is_closed=true that has no resolved match yet.
+                const isTf = r.kind === 'tf'
+                const key = r.closer_call_id || r.response_id || `${r.kind}-${idx}`
+                const closedAt = (r.created_at || r.submitted_at || '').slice(0, 10) || '—'
+                const name = r.clean_name || r.prospect_name || r.display_name || r.email || 'Unknown'
+                const attr = isTf ? 'typeform · unresolved' : (r.attribution_source || 'attributed')
+                return (
+                  <tr key={key} style={{ borderBottom: '1px solid var(--rule)' }}>
+                    <td style={drillTd}>{closedAt}</td>
+                    <td style={drillTd}>
+                      <div style={{ fontFamily: 'var(--serif)', fontWeight: 500, color: 'var(--ink)', fontSize: 14 }}>{name}</div>
+                      {isTf && r.email && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.email}</div>}
+                    </td>
+                    <td style={drillTd}>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 2,
+                        fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: r.attribution_source === 'manual' ? 'var(--accent-soft)' : 'transparent',
+                        border: '1px solid', borderColor: isTf ? '#b88714' : (r.attribution_source === 'manual' ? 'var(--accent)' : 'var(--rule)'),
+                        color: 'var(--ink)',
+                      }}>{attr}</span>
+                    </td>
+                    <td style={{ ...drillTd, textAlign: 'right' }}>{(r.revenue || r.revenue_attributed) > 0 ? fmt$(parseFloat(r.revenue || r.revenue_attributed)) : '—'}</td>
+                    <td style={{ ...drillTd, textAlign: 'right', color: (r.cash_collected || r.cash_attributed) > 0 ? '#1f7a3a' : 'var(--ink-4)' }}>{(r.cash_collected || r.cash_attributed) > 0 ? fmt$(parseFloat(r.cash_collected || r.cash_attributed)) : '—'}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
