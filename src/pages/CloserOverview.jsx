@@ -72,10 +72,15 @@ export default function CloserOverview() {
     ? parseFloat(((companyProspects.closed / companyProspects.live) * 100).toFixed(1))
     : 0
   const companyOfferRate = companyTotals.liveCalls > 0 ? parseFloat(((companyTotals.offers / companyTotals.liveCalls) * 100).toFixed(1)) : 0
-  const companyOfferCloseRate = companyTotals.offers > 0 ? parseFloat(((companyTotals.closes / companyTotals.offers) * 100).toFixed(1)) : 0
+  // Offer-close, avg-deal, calls-per-close use the prospect-deduped close
+  // count so the rate denominator agrees with the Closes tile shown above
+  // (the Close Rate gauge has always used prospect-level — now everything
+  // downstream uses it too).
+  const closesDeduped = companyProspects.closed || 0
+  const companyOfferCloseRate = companyTotals.offers > 0 ? parseFloat(((closesDeduped / companyTotals.offers) * 100).toFixed(1)) : 0
   const companyRescheduleRate = totalBooked > 0 ? parseFloat(((companyTotals.reschedules / totalBooked) * 100).toFixed(1)) : 0
-  const avgDealSize = companyTotals.closes > 0 ? parseFloat((companyTotals.revenue / companyTotals.closes).toFixed(0)) : 0
-  const callsPerClose = companyTotals.closes > 0 ? parseFloat((companyTotals.liveCalls / companyTotals.closes).toFixed(1)) : 0
+  const avgDealSize = closesDeduped > 0 ? parseFloat((companyTotals.revenue / closesDeduped).toFixed(0)) : 0
+  const callsPerClose = closesDeduped > 0 ? parseFloat((companyTotals.liveCalls / closesDeduped).toFixed(1)) : 0
   const cashCollectionRate = companyTotals.revenue > 0 ? parseFloat(((companyTotals.cash / companyTotals.revenue) * 100).toFixed(1)) : 0
 
   // Aggregate stats per closer
@@ -99,6 +104,15 @@ export default function CloserOverview() {
       ...closer,
       ...totals,
       booked,
+      // Override the EOD-typed totals.closes and totals.liveNC with the
+      // prospect-deduped counts so the per-closer card's headline figures
+      // and its Close Rate gauge come from the same source (per-call truth).
+      // Keep the EOD aggregate accessible under *_eod for any caller that
+      // still wants the self-report number.
+      closes: b.closedProspects || 0,
+      closes_eod: totals.closes,
+      liveNC: b.liveProspects || 0,
+      liveNC_eod: totals.liveNC,
       // Show rate: new-call only (see companyShowRate note).
       showRate: totals.ncBooked ? parseFloat(((totals.liveNC / totals.ncBooked) * 100).toFixed(1)) : 0,
       // Close rate = unique closed prospects / unique live prospects.
@@ -131,10 +145,15 @@ export default function CloserOverview() {
       {/* Company-Level KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3 mb-6">
         <KPICard label="Booked" value={totalBooked} subtitle={`${companyTotals.ncBooked} NC / ${companyTotals.fuBooked} FU`} />
-        <KPICard label="Net New" value={companyTotals.liveNC} subtitle={`${companyTotals.liveFU} FU separately`} />
+        {/* Net New + Closes use the prospect-deduped per-call truth (same
+            source as the Close Rate gauge below), with the EOD self-report
+            in the subtitle for reconciliation. Without this, the Closes
+            tile and the Close Rate gauge silently disagreed on the
+            numerator/denominator. */}
+        <KPICard label="Net New" value={companyProspects.live} subtitle={`${companyTotals.liveNC} EOD-reported · ${companyTotals.liveFU} FU separately`} />
         <KPICard label="No Shows" value={totalNoShows} />
         <KPICard label="Offers" value={companyTotals.offers} />
-        <KPICard label="Closes" value={companyTotals.closes} />
+        <KPICard label="Closes" value={closesDeduped} subtitle={closesDeduped !== companyTotals.closes ? `${companyTotals.closes} EOD-reported` : null} />
         <KPICard label="Revenue" value={`$${companyTotals.revenue.toLocaleString()}`} />
         <KPICard label="Cash Collected" value={`$${companyTotals.cash.toLocaleString()}`} />
         <KPICard label="Avg Deal" value={`$${avgDealSize.toLocaleString()}`} />
@@ -213,7 +232,7 @@ export default function CloserOverview() {
                 <span className="text-sm font-semibold text-text-primary">Team Total</span>
               </div>
               <div className="flex items-baseline gap-4 sm:gap-6">
-                <StatBlock label="Closes" value={companyTotals.closes} />
+                <StatBlock label="Closes" value={closesDeduped} />
                 <StatBlock label="Revenue" value={`$${companyTotals.revenue.toLocaleString()}`} accent="success" />
                 <StatBlock label="Cash" value={`$${companyTotals.cash.toLocaleString()}`} accent="opt-yellow" />
               </div>

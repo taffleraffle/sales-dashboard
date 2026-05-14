@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Sparkles, RefreshCw, AlertCircle, Search, Mic } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { pagedFetch } from '../../lib/pagedFetch'
 import AdCard from '../../components/ads/AdCard'
 import AdAnalystPanel from '../../components/ads/AdAnalystPanel'
 import { triggerTranscribeAds } from '../../services/adAnalyst'
@@ -63,13 +64,12 @@ export default function AdsGallery() {
     setLoading(true)
     setError(null)
     try {
-      const adsRes = await supabase
+      // Paged through PostgREST's 1000-row cap. Prior .limit(500) hid
+      // every ad past the 500th from the gallery without warning.
+      const ads = await pagedFetch(() => supabase
         .from('ads')
         .select('ad_id, ad_name, status, effective_status, variant_id, variant_match_status, thumbnail_url, asset_url, asset_type, campaign_id, campaign_name, adset_id, adset_name, last_synced_at, first_seen_at')
-        .order('first_seen_at', { ascending: false })
-        .limit(500)
-      if (adsRes.error) throw new Error(adsRes.error.message)
-      const ads = adsRes.data || []
+        .order('first_seen_at', { ascending: false }))
       const adIds = ads.map(a => a.ad_id)
 
       // Stats over last 30 days, aggregated per ad.

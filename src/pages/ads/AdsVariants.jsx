@@ -5,6 +5,7 @@ import {
   LayoutGrid, Table2, X, Link2, TrendingUp, Trophy, Sparkles, Type, MessageSquare
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { pagedFetch } from '../../lib/pagedFetch'
 import { useToast } from '../../hooks/useToast'
 
 // Clip-type colour tokens — keep in sync with CLIP_TYPES in AdsClips.jsx
@@ -110,9 +111,12 @@ export default function AdsVariants() {
     const clipsPromise = supabase
       .from('lib_clips').select('clip_id, clip_type, description, creator_id, source_file_url')
       .order('clip_id').then(({ data }) => setClips(data || []))
-    const adsPromise = supabase
+    // Paged through PostgREST's 1000-row cap. The prior hardcoded
+    // .limit(500) hid every ad past the 500th from the variant matcher
+    // without warning.
+    const adsPromise = pagedFetch(() => supabase
       .from('ads').select('ad_id, ad_name, effective_status, campaign_name, thumbnail_url')
-      .order('first_seen_at', { ascending: false }).limit(500).then(({ data }) => setAds(data || []))
+      .order('first_seen_at', { ascending: false })).then((data) => setAds(data))
     try {
       const { data: variants, error: vErr } = await supabase
         .from('lib_variants_with_performance').select('*')

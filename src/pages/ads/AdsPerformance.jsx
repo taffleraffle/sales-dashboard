@@ -234,6 +234,11 @@ export default function AdsPerformance() {
   const [rowTotals, setRowTotals] = useState({
     eod:        { leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 },
     attributed: { leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 },
+    // Unique-prospect counts that match what the drilldown panel will
+    // actually display when the tile is clicked. Computed by unioning
+    // typeform + GHL + close-resolved rows, deduped by email (or
+    // name-token fallback when a source has no email column).
+    prospects:  { leads: 0, booked: 0, live: 0, closes: 0 },
   })
   // Per-query failure list. Populated if any of the parallel fetches
   // throws; rendered as a banner so a broken source can't silently
@@ -390,7 +395,13 @@ export default function AdsPerformance() {
           .gte('date', startStr).lte('date', endStr)),
         fetchAllPaged(() => supabase
           .from('lib_typeform_response_detail')
-          .select('response_id, submitted_at, ad_id, adset_id, utm_campaign, qualified, is_booked, is_live, is_closed, revenue, cash_collected')
+          // email + display_name added so the top-of-page tile counts can
+          // dedupe across typeform/GHL/closes using the same keys the
+          // drilldown panel uses (email primary, name-token fallback).
+          // Without these, the headline tiles used EOD self-reports while
+          // the drilldown showed deduped prospect rows — same class of
+          // bug Ben caught on per-campaign cells.
+          .select('response_id, email, display_name, submitted_at, ad_id, adset_id, utm_campaign, qualified, is_booked, is_live, is_closed, revenue, cash_collected')
           .gte('submitted_at', startTs).lte('submitted_at', endTs)),
         fetchAllPaged(() => supabase
           .from('lib_close_resolved')
@@ -402,11 +413,14 @@ export default function AdsPerformance() {
           .gte('landed_at', startTs).lte('landed_at', endTs)),
         fetchAllPaged(() => supabase
           .from('lib_ghl_booked_detail')
-          .select('appointment_id, landed_at, ad_id, adset_id, utm_campaign')
+          // email added for cross-source dedupe on the Booked tile.
+          .select('appointment_id, email, display_name, landed_at, ad_id, adset_id, utm_campaign')
           .gte('landed_at', startTs).lte('landed_at', endTs)),
         fetchAllPaged(() => supabase
           .from('lib_ghl_lives_detail')
-          .select('closer_call_id, landed_at, ad_id, adset_id, utm_campaign')
+          // lib_ghl_lives_detail has no email column — pull display_name
+          // (prospect_name aliased) so name-token dedupe works vs typeform.
+          .select('closer_call_id, display_name, landed_at, ad_id, adset_id, utm_campaign')
           .gte('landed_at', startTs).lte('landed_at', endTs)),
         // marketing_tracker = closer-entered daily EOD aggregates. Same
         // source the marketing dashboard uses. Drives the headline KPI
@@ -460,6 +474,45 @@ export default function AdsPerformance() {
       const attrCloses = closeRows.filter(r => r.resolved_ad_id || r.resolved_campaign).length
       const closeRev = closeRows.reduce((s, r) => s + parseFloat(r.revenue || 0), 0)
       const closeCash = closeRows.reduce((s, r) => s + parseFloat(r.cash_collected || 0), 0)
+      // Unique-prospect counts — mirror the union+dedupe logic in
+      // ProspectDrillModal so the headline tile count equals what the
+      // drilldown panel renders when clicked. Without this, top tiles
+      // showed EOD self-reports (e.g. "5 closes") while clicking opened
+      // a panel with deduped prospect rows (e.g. 3) — the same drift
+      // class fixed at the per-campaign cells. Email dedupe primary,
+      // name-token fallback for sources without email (lib_close_resolved,
+      // lib_ghl_lives_detail).
+      const lc = (s) => (s || '').toString().toLowerCase().trim()
+      const nameTok = (r) => {
+        const raw = lc(r.clean_name || r.prospect_name || r.display_name || r.email)
+        if (!raw) return ''
+        return raw.split(/\s+/).filter(Boolean).slice(0, 2).join(' ')
+      }
+      const unionCount = (tfList, otherList) => {
+        const emails = new Set(), names = new Set()
+        let n = 0
+        for (const r of tfList) {
+          const e = lc(r.email), k = nameTok(r)
+          if (e)      emails.add(e)
+          else if (k) names.add(k)
+          n++
+        }
+        for (const r of otherList) {
+          const e = lc(r.email), k = nameTok(r)
+          if (e && emails.has(e)) continue
+          if (!e && k && names.has(k)) continue
+          if (e)      emails.add(e)
+          else if (k) names.add(k)
+          n++
+        }
+        return n
+      }
+      const prospects = {
+        leads:  unionCount(tfRows, ghlLeadRows),
+        booked: unionCount(tfRows.filter(r => r.is_booked), ghlBookedRows),
+        live:   unionCount(tfRows.filter(r => r.is_live),   ghlLiveRows),
+        closes: unionCount(tfRows.filter(r => r.is_closed), closeRows),
+      }
       setRowTotals({
         eod,
         attributed: {
@@ -470,6 +523,7 @@ export default function AdsPerformance() {
           revenue: closeRev,
           cash:    closeCash,
         },
+        prospects,
       })
 
       // 2. Stats — aggregate by ad_id
@@ -810,63 +864,61 @@ export default function AdsPerformance() {
         </div>
       )}
 
-      {/* Totals strip — headline numbers come from marketing_tracker (EOD
-          closer-entered aggregates, same source the marketing dashboard
-          uses). Sub-line shows how many we managed to attribute to a
-          Meta ad. Clickable opens drill-down showing the attributable
-          rows. */}
+      {/* Totals strip — headline = unique prospects we have records for
+          (matches what the drilldown panel will show when clicked).
+          Sub-line surfaces the EOD self-report number for reconciliation
+          + attribution gap to a Meta ad. Previously the headline was the
+          EOD number while the drilldown showed prospect rows, which
+          looked like a mismatch every time the closer's self-report
+          drifted from the actual prospect rows logged. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
         <TotalsTile label="Spend" value={fmt$(totals.spend)} />
         {(() => {
-          const eod = rowTotals.eod, attr = rowTotals.attributed
-          // Pull the prospect-deduped numbers for the active window — same
-          // formula the Marketing dashboard runs. Lets us show the 3-step
-          // waterfall: EOD reported → unique prospects → attributed to ad.
-          const pm = prospectMetricsByRange({ from: dateRange.startStr, to: dateRange.endStr })
-          const sub = (eodVal, attrVal, extra = '') => {
-            if (eodVal === 0) return attrVal > 0 ? `${fmtN(attrVal)} attributed (no EOD data)` : null
-            const gap = eodVal - attrVal
-            if (gap > 0)  return `${fmtN(attrVal)} attributed · ${fmtN(gap)} unattributed${extra}`
-            if (gap < 0)  return `${fmtN(attrVal)} attributed · exceeds EOD by ${fmtN(-gap)} (check for dedup gap)${extra}`
-            return `all ${fmtN(attrVal)} attributed${extra}`
+          const eod = rowTotals.eod, attr = rowTotals.attributed, prosp = rowTotals.prospects
+          // Sub-line reconciles three numbers: EOD self-report, the unique
+          // prospects we have records for (= headline + drilldown count),
+          // and how many of those we attributed to a Meta ad.
+          const sub = (eodVal, prospVal, attrVal, extra = '') => {
+            const parts = []
+            if (eodVal > 0 && eodVal !== prospVal) parts.push(`${fmtN(eodVal)} EOD-reported`)
+            if (attrVal !== prospVal)               parts.push(`${fmtN(attrVal)} attributed`)
+            else if (attrVal > 0)                   parts.push(`all attributed`)
+            return parts.length ? parts.join(' · ') + extra : null
           }
-          // 3-step waterfall sub for Closes (and Live): EOD counter → prospect
-          // dedup → ad attribution. This matches what the Marketing dashboard
-          // shows (which substitutes the deduped number as the headline).
-          const closeSub = eod.closes > 0
-            ? `${fmtN(pm.closedProspects)} unique prospects · ${fmtN(attr.closes)} attributed${eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : ''}`
-            : (attr.closes > 0 ? `${fmtN(attr.closes)} attributed (no EOD data)` : null)
-          const liveSub = eod.live > 0
-            ? `${fmtN(pm.liveProspects)} unique prospects · ${fmtN(attr.live)} attributed`
-            : (attr.live > 0 ? `${fmtN(attr.live)} attributed (no EOD data)` : null)
+          const closeSub = sub(eod.closes, prosp.closes, attr.closes, eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : '')
           const click = (metric) => () => setDrill({ metric, scope: { level: 'all' } })
           return (
             <>
-              <TotalsTile label="Leads"      value={fmtN(eod.leads)}  sub={sub(eod.leads,  attr.leads)}  onClick={click('leads')} />
-              <TotalsTile label="Booked"     value={fmtN(eod.booked)} sub={sub(eod.booked, attr.booked)} onClick={click('booked')} />
-              <TotalsTile label="Live calls" value={fmtN(eod.live)}   sub={liveSub}                       onClick={click('live')} />
+              <TotalsTile label="Leads"      value={fmtN(prosp.leads)}  sub={sub(eod.leads,  prosp.leads,  attr.leads)}  onClick={click('leads')} />
+              <TotalsTile label="Booked"     value={fmtN(prosp.booked)} sub={sub(eod.booked, prosp.booked, attr.booked)} onClick={click('booked')} />
+              <TotalsTile label="Live calls" value={fmtN(prosp.live)}   sub={sub(eod.live,   prosp.live,   attr.live)}   onClick={click('live')} />
               <TotalsTile
                 label="Closes"
-                value={fmtN(eod.closes)}
+                value={fmtN(prosp.closes)}
                 sub={closeSub}
-                valueColor={eod.closes > 0 ? '#1f7a3a' : undefined}
+                valueColor={prosp.closes > 0 ? '#1f7a3a' : undefined}
                 onClick={click('closed')}
               />
             </>
           )
         })()}
         {(() => {
-          const e = rowTotals.eod
+          // Cost-per tiles divide spend by the SAME denominator the headline
+          // tiles use (unique prospects), so the dollar figure reconciles
+          // with the count above it. Previously these used EOD which made
+          // $/Booked = spend / EOD_booked while the Booked tile showed a
+          // different (drilldown-matching) count.
+          const p = rowTotals.prospects
           return (
             <>
-              <TotalsTile label="$ / Lead"   value={e.leads  > 0 ? fmt$(totals.spend / e.leads)  : '—'} valueColor={kpiColor(e.leads  > 0 ? totals.spend / e.leads  : null, KPI.costPerLead)} />
-              <TotalsTile label="$ / Booked" value={e.booked > 0 ? fmt$(totals.spend / e.booked) : '—'} valueColor={kpiColor(e.booked > 0 ? totals.spend / e.booked : null, KPI.costPerQualBooked)} />
-              <TotalsTile label="$ / Live"   value={e.live   > 0 ? fmt$(totals.spend / e.live)   : '—'} valueColor={kpiColor(e.live   > 0 ? totals.spend / e.live   : null, KPI.costPerLive)} />
+              <TotalsTile label="$ / Lead"   value={p.leads  > 0 ? fmt$(totals.spend / p.leads)  : '—'} valueColor={kpiColor(p.leads  > 0 ? totals.spend / p.leads  : null, KPI.costPerLead)} />
+              <TotalsTile label="$ / Booked" value={p.booked > 0 ? fmt$(totals.spend / p.booked) : '—'} valueColor={kpiColor(p.booked > 0 ? totals.spend / p.booked : null, KPI.costPerQualBooked)} />
+              <TotalsTile label="$ / Live"   value={p.live   > 0 ? fmt$(totals.spend / p.live)   : '—'} valueColor={kpiColor(p.live   > 0 ? totals.spend / p.live   : null, KPI.costPerLive)} />
               <TotalsTile
                 label="CAC"
-                value={e.closes > 0 ? fmt$(totals.spend / e.closes) : '—'}
-                sub={e.closes > 0 ? `${fmt$(totals.spend)} ÷ ${e.closes} closes` : null}
-                valueColor={kpiColor(e.closes > 0 ? totals.spend / e.closes : null, KPI.costPerClose)}
+                value={p.closes > 0 ? fmt$(totals.spend / p.closes) : '—'}
+                sub={p.closes > 0 ? `${fmt$(totals.spend)} ÷ ${p.closes} closes` : null}
+                valueColor={kpiColor(p.closes > 0 ? totals.spend / p.closes : null, KPI.costPerClose)}
               />
             </>
           )

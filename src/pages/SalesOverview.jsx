@@ -1497,11 +1497,29 @@ export default function SalesOverview() {
                     ))}
                   </tbody>
                   <tfoot>
-                    <tr className="border-t border-border-default bg-bg-primary/50 font-semibold">
-                      <td className="px-4 py-2" colSpan={3}>Total</td>
-                      <td className="px-3 py-2 text-right">${totalRevenue.toLocaleString()}</td>
-                      <td className="px-4 py-2 text-right text-success">${totalCash.toLocaleString()}</td>
-                    </tr>
+                    {(() => {
+                      // Footer totals come from the SAME closer_calls rows
+                      // shown in the table body, so the modal reconciles
+                      // top-to-bottom. Previously the footer used the EOD
+                      // aggregate (ct.revenue + ct.ascendRevenue) which
+                      // could differ from the sum of visible rows by
+                      // whatever drift the closer introduced between their
+                      // per-call entries and their summary counters.
+                      const rowRevenue = (revenueDeals || []).reduce((s, d) => s + parseFloat(d.revenue || 0), 0)
+                      const rowCash    = (revenueDeals || []).reduce((s, d) => s + parseFloat(d.cash_collected || 0), 0)
+                      const eodDiffs = []
+                      if (rowRevenue !== totalRevenue) eodDiffs.push(`EOD: $${totalRevenue.toLocaleString()} rev`)
+                      if (rowCash    !== totalCash)    eodDiffs.push(`$${totalCash.toLocaleString()} cash`)
+                      return (
+                        <tr className="border-t border-border-default bg-bg-primary/50 font-semibold">
+                          <td className="px-4 py-2" colSpan={3}>
+                            Total {eodDiffs.length > 0 && <span className="text-[10px] font-normal text-text-400 ml-2">({eodDiffs.join(' · ')})</span>}
+                          </td>
+                          <td className="px-3 py-2 text-right">${rowRevenue.toLocaleString()}</td>
+                          <td className="px-4 py-2 text-right text-success">${rowCash.toLocaleString()}</td>
+                        </tr>
+                      )
+                    })()}
                   </tfoot>
                 </table>
               )}

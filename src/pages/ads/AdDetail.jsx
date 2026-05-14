@@ -52,7 +52,12 @@ export default function AdDetail() {
           supabase.from('ads').select('*').eq('ad_id', id).single(),
           supabase.from('ad_daily_stats').select('*').eq('ad_id', id).order('date', { ascending: true }),
           supabase.from('lib_creative_transcripts').select('full_text, duration_sec, created_at, source').eq('ad_id', id).eq('source', 'whisper_api').order('created_at', { ascending: false }).limit(1),
-          supabase.from('hyros_events').select('event_type, event_date, email, first_name, last_name, is_qualified, revenue, source, campaign_name, ad_name').or(`meta_ad_id.eq.${id},source_link_ad_id.eq.${id}`).order('event_date', { ascending: false }).limit(30),
+          // No .limit() — HyrosSection counts events.filter(...).length for
+          // the calls/leads/sales summary tiles, so capping at 30 quietly
+          // undercounted any ad with > 30 events. PostgREST default 1000-row
+          // cap is plenty for a single ad's HYROS history; the display below
+          // still slices to the most recent for readability.
+          supabase.from('hyros_events').select('event_type, event_date, email, first_name, last_name, is_qualified, revenue, source, campaign_name, ad_name').or(`meta_ad_id.eq.${id},source_link_ad_id.eq.${id}`).order('event_date', { ascending: false }),
         ])
         if (aErr) throw new Error(`Load ad failed: ${aErr.message}`)
         if (sErr) throw new Error(`Load stats failed: ${sErr.message}`)

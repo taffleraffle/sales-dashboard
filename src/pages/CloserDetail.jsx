@@ -177,6 +177,12 @@ export default function CloserDetail() {
   const myCloseRate = mb.liveProspects > 0
     ? parseFloat(((mb.closedProspects / mb.liveProspects) * 100).toFixed(1))
     : 0
+  // Closes + Net New tiles use the prospect-deduped per-call truth (same
+  // source as the Close Rate gauge below). Surfaces EOD self-reported
+  // count in the subtitle for reconciliation when the closer logged a
+  // different number than the prospect rows they entered.
+  const myClosesDeduped = mb.closedProspects || 0
+  const myLiveDeduped   = mb.liveProspects   || 0
 
   const companyRates = {
     // Show rate: new-call only (denominator = nc_booked, numerator = live_nc_calls)
@@ -189,9 +195,9 @@ export default function CloserDetail() {
 
   const myShowRate = parseFloat(stats.showRate) || 0
   const myOfferRate = parseFloat(stats.offerRate) || 0
-  const myOfferCloseRate = stats.offers > 0 ? parseFloat(((stats.closes / stats.offers) * 100).toFixed(1)) : 0
+  const myOfferCloseRate = stats.offers > 0 ? parseFloat(((myClosesDeduped / stats.offers) * 100).toFixed(1)) : 0
   const myRescheduleRate = parseFloat(stats.rescheduleRate) || 0
-  const avgDealSize = stats.closes > 0 ? parseFloat((stats.revenue / stats.closes).toFixed(0)) : 0
+  const avgDealSize = myClosesDeduped > 0 ? parseFloat((stats.revenue / myClosesDeduped).toFixed(0)) : 0
   const totalCash = stats.cash + stats.ascendCash
   const totalRevenue = stats.revenue + stats.ascendRevenue
   const cashCollRate = totalRevenue > 0 ? parseFloat(((totalCash / totalRevenue) * 100).toFixed(1)) : 0
@@ -227,10 +233,10 @@ export default function CloserDetail() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
         <KPICard label="Booked" value={stats.totalBooked} subtitle={`${stats.ncBooked} NC / ${stats.fuBooked} FU`} />
-        <KPICard label="Net New" value={stats.liveNC} subtitle={`${stats.liveCalls - stats.liveNC} FU separately`} />
+        <KPICard label="Net New" value={myLiveDeduped} subtitle={`${stats.liveNC} EOD-reported · ${stats.liveCalls - stats.liveNC} FU separately`} />
         <KPICard label="No Shows" value={stats.noShows} />
         <KPICard label="Offers" value={stats.offers} />
-        <KPICard label="Closes" value={stats.closes} />
+        <KPICard label="Closes" value={myClosesDeduped} subtitle={myClosesDeduped !== stats.closes ? `${stats.closes} EOD-reported` : null} />
         <KPICard label="Trial Cash" value={`$${stats.cash.toLocaleString()}`} subtitle={`$${stats.revenue.toLocaleString()} rev`} />
         <KPICard label="Ascension Cash" value={`$${stats.ascendCash.toLocaleString()}`} subtitle={`${stats.ascensions} ascensions`} />
         <KPICard label="Total Cash" value={`$${totalCash.toLocaleString()}`} subtitle={`$${totalRevenue.toLocaleString()} total rev`} />

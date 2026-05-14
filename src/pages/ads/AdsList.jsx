@@ -4,6 +4,7 @@ import { Loader, RefreshCw, AlertTriangle, Image as ImageIcon, Film, PlayCircle,
 import DateRangeSelector from '../../components/DateRangeSelector'
 import VariantPill from '../../components/ads/VariantPill'
 import { supabase } from '../../lib/supabase'
+import { pagedFetch } from '../../lib/pagedFetch'
 import { rangeToDays } from '../../lib/dateUtils'
 import { syncMetaAdsAtAdLevel } from '../../services/metaAdsSync'
 import { runAutoSync, getLastSyncTime, subscribeSyncStatus } from '../../services/autoSync'
@@ -108,14 +109,15 @@ export default function AdsList() {
       since.setDate(since.getDate() - (typeof days === 'number' ? days : 30))
       const sinceStr = since.toISOString().split('T')[0]
 
-      const [{ data: adsData, error: adsErr }, { data: statsData, error: statsErr }] = await Promise.all([
-        supabase.from('ads').select('*').order('last_synced_at', { ascending: false }),
-        supabase.from('ad_daily_stats').select('*').gte('date', sinceStr),
+      // Paged through PostgREST's 1000-row default cap. AdsPerformance
+      // already proves the account exceeds 1000 ads — without paging here,
+      // AdsList silently truncated and "showing N of M" undercounted both.
+      const [adsData, statsData] = await Promise.all([
+        pagedFetch(() => supabase.from('ads').select('*').order('last_synced_at', { ascending: false })),
+        pagedFetch(() => supabase.from('ad_daily_stats').select('*').gte('date', sinceStr)),
       ])
-      if (adsErr) throw new Error(`Load ads failed: ${adsErr.message}`)
-      if (statsErr) throw new Error(`Load stats failed: ${statsErr.message}`)
-      setAds(adsData || [])
-      setStats(statsData || [])
+      setAds(adsData)
+      setStats(statsData)
     } catch (err) {
       setError(err.message)
     } finally {
