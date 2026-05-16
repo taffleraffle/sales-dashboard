@@ -1,19 +1,27 @@
 import { useState } from 'react'
-import { Type, Sparkles } from 'lucide-react'
+import { Type, Sparkles, FlaskConical } from 'lucide-react'
 import AdsPhrasesPanel from '../../components/ads/AdsPhrasesPanel'
 import AdsIdeationPanel from '../../components/ads/AdsIdeationPanel'
+import AdsTestingPanel from '../../components/ads/AdsTestingPanel'
 
 /*
-  Messaging page = tab router for two sub-tabs:
-    • Phrases    — empirical phrase ranking from ad copy (lib_phrase_performance)
+  Messaging page = tab router for three sub-tabs:
     • Ideation   — Jeremy Haynes Problems × Circumstances × Outcomes generator
                    per (brand × audience archetype), grounded in Daniel's
-                   prospect calls + phrase data
+                   prospect calls + phrase data. Where new angles get born.
+    • Testing    — once an angle is confirmed, give it a name + label,
+                   assign creatives, mark verdict. Tracks per-angle
+                   aggregate performance (spend, leads, booked, lives,
+                   closes, CAC, ROAS) so we can crown winners vs losers.
+    • Phrases    — empirical phrase ranking from ad copy
+                   (lib_phrase_performance).
 */
 
 const TABS = [
   { id: 'ideation', label: 'Ideation', icon: Sparkles,
     sub: 'Three messaging topics, from real calls' },
+  { id: 'testing',  label: 'Testing',  icon: FlaskConical,
+    sub: 'Name an angle, assign creatives, crown winners' },
   { id: 'phrases',  label: 'Phrases',  icon: Type,
     sub: 'What words actually win' },
 ]
@@ -88,6 +96,7 @@ export default function AdsMessaging() {
 
       {tab === 'phrases'  && <AdsPhrasesPanel />}
       {tab === 'ideation' && <AdsIdeationPanel />}
+      {tab === 'testing'  && <AdsTestingPanel />}
     </div>
   )
 }
