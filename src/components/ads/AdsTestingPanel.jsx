@@ -68,7 +68,18 @@ export default function AdsTestingPanel() {
 
   useEffect(() => { load() }, [])
 
-  // Refetch aggregate metrics whenever angles, their adIds, or the window changes.
+  // Stable signature for the metrics-fetch effect dependencies. Without
+  // this, every setAngles call (verdict toggle, name edit, etc) creates
+  // a new outer array + inner objects, refiring the heavy two-query
+  // metrics fetch even when no assignments changed. Re-fires only when
+  // an angle's ad_id list actually changes.
+  const angleSignature = useMemo(
+    () => angles.map(a => `${a.id}:${[...a.adIds].sort().join(',')}`).join('|'),
+    [angles]
+  )
+
+  // Refetch aggregate metrics whenever the assigned-ads signature or the
+  // selected window changes.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -90,15 +101,21 @@ export default function AdsTestingPanel() {
       for (const r of stats) spendByAd[r.ad_id] = (spendByAd[r.ad_id] || 0) + parseFloat(r.spend || 0)
 
       // Per-ad typeform attribution (leads, booked, lives, closes, revenue).
-      // lib_typeform_ad_attribution is already rolled per ad_id — no date
-      // window on this view (it's all-time). Acceptable for v1; we can
-      // build a date-scoped variant later if Ben wants window-specific.
-      const { data: attr } = await supabase
+      // lib_typeform_ad_attribution is rolled per ad_id with NO date filter
+      // built into the view — these are all-time figures. The UI labels
+      // every funnel metric as "all-time" so users don't confuse it with
+      // the windowed spend. A future window-scoped variant would need a
+      // SQL function (lib_typeform_ad_attribution_window(since)) since
+      // the rollup happens server-side.
+      //
+      // pagedFetch wraps the query so we don't silently truncate at the
+      // PostgREST 1000-row cap once the assigned-ad pool grows.
+      const attr = await pagedFetch(() => supabase
         .from('lib_typeform_ad_attribution')
         .select('ad_id, leads, booked_calls, live_calls, closes, revenue_attributed, cash_attributed')
-        .in('ad_id', allAdIds)
+        .in('ad_id', allAdIds))
       const attrByAd = {}
-      for (const r of attr || []) attrByAd[r.ad_id] = r
+      for (const r of attr) attrByAd[r.ad_id] = r
 
       if (cancelled) return
       const out = {}
@@ -119,7 +136,8 @@ export default function AdsTestingPanel() {
       setMetrics(out)
     })().catch(e => !cancelled && setError(e.message))
     return () => { cancelled = true }
-  }, [angles, days])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- angleSignature is the stable proxy for angles
+  }, [angleSignature, days])
 
   const loadAdsCacheIfNeeded = async () => {
     if (adsCache) return adsCache
@@ -180,7 +198,7 @@ export default function AdsTestingPanel() {
   return (
     <div>
       {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
         <button onClick={() => setCreating(c => !c)} style={btnPrimary}>
           <Plus size={13} /> {creating ? 'Cancel' : 'New angle'}
         </button>
@@ -194,6 +212,16 @@ export default function AdsTestingPanel() {
             }}>{d === 730 ? '2y' : `${d}d`}</button>
           ))}
         </div>
+      </div>
+      {/* Windowing-semantics note. Spend pulls from ad_daily_stats within
+          the selected window; the funnel metrics (leads/booked/live/closes/
+          revenue/cash) come from lib_typeform_ad_attribution which is
+          all-time per ad. That mismatch makes $/Lead and CAC drift smaller
+          on shorter windows because the numerator shrinks while the
+          denominator stays the same. Flag explicitly until we have a
+          window-scoped view. */}
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 16 }}>
+        Spend = window · Funnel metrics = all-time per ad. Use 2y for the most reconciled view.
       </div>
 
       {error && <div style={errorBanner}>{error}</div>}

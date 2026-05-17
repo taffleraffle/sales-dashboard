@@ -542,12 +542,23 @@ export default function AdsPerformance() {
         live:   unionCountName(tfRows.filter(r => r.is_live),   ghlLiveRows),
         closes: unionCountName(tfRows.filter(r => r.is_closed), closeRows),
       }
+      // Attributed = union (typeform with ad_id) ∪ (GHL row with ad_id)
+      // deduped against typeform email so a prospect doesn't double-
+      // count. Prior version only counted the GHL side for booked/live,
+      // silently undercounting the "X attributed" sub-line on the top
+      // tile by however many bookings/lives came in via typeform.
+      const tfBookedEmails = new Set(tfRows.filter(r => r.is_booked && r.email).map(r => r.email.toLowerCase()))
+      const tfLiveEmails   = new Set(tfRows.filter(r => r.is_live   && r.email).map(r => r.email.toLowerCase()))
+      const attrBooked = tfRows.filter(r => r.is_booked && r.ad_id).length
+        + ghlBookedRows.filter(r => r.ad_id && !tfBookedEmails.has((r.email || '').toLowerCase())).length
+      const attrLive = tfRows.filter(r => r.is_live && r.ad_id).length
+        + ghlLiveRows.filter(r => r.ad_id && !tfLiveEmails.has((r.email || '').toLowerCase())).length
       setRowTotals({
         eod,
         attributed: {
           leads:   attrLeads,
-          booked:  ghlBookedRows.filter(r => r.ad_id).length,
-          live:    ghlLiveRows.filter(r => r.ad_id).length,
+          booked:  attrBooked,
+          live:    attrLive,
           closes:  attrCloses,
           revenue: closeRev,
           cash:    closeCash,
@@ -925,25 +936,59 @@ export default function AdsPerformance() {
       return true
     }
 
-    // Now apply the status filter at each level
+    // Now apply the status filter at each level. CRITICAL: rebuild the
+    // adset + campaign rollups from the FILTERED ads so totals.spend
+    // (and every other top-tile metric derived from `tree`) reflects
+    // only the visible-status ads. Prior version kept the pre-filter
+    // rollup, so switching to 'PAUSED' or 'All' silently included
+    // active-ad spend in the totals — what looked like a $100k spike
+    // was actually the totals double-counting the active ads' spend
+    // while the table only showed paused ads.
     const visibleCampaigns = []
     for (const camp of campaigns.values()) {
       const visibleSets = []
+      const campVisibleRollup = emptyRollup()
       for (const set of camp.ad_sets.values()) {
         let ads = set.ads
         if (statusFilter === 'ACTIVE') ads = ads.filter(x => x.isActive)
         else if (statusFilter === 'PAUSED') ads = ads.filter(x => !x.isActive)
         if (!ads.length) continue
-        visibleSets.push({ ...set, ads })
+        // Rebuild set rollup from filtered ads.
+        const setVisibleRollup = emptyRollup()
+        for (const a of ads) addRollup(setVisibleRollup, a.rollup)
+        // Re-apply parent overlays (typeform / close / GHL) so adset +
+        // campaign cells continue to show deduped union counts that
+        // include leads/bookings attributed via utm_term / utm_campaign
+        // (not directly to an ad). Overlays overwrite — same semantics
+        // as the pre-filter build.
+        const tf = tfAdset[set.id]
+        if (tf) overlayTypeformIfHigher(setVisibleRollup, tf)
+        const cs = closeAdset[set.id]
+        if (cs) overlayClose(setVisibleRollup, cs)
+        const overlayMax = (target, val, field) => { if (val > (target[field] || 0)) target[field] = val }
+        overlayMax(setVisibleRollup, ghlLeadsAdset[set.id]  || 0, 'tfLeads')
+        overlayMax(setVisibleRollup, ghlBookedAdset[set.id] || 0, 'tfBooked')
+        overlayMax(setVisibleRollup, ghlLivesAdset[set.id]  || 0, 'tfLive')
+        addRollup(campVisibleRollup, setVisibleRollup)
+        visibleSets.push({ ...set, rollup: setVisibleRollup, ads })
       }
       if (!visibleSets.length) continue
-      // Advanced filter runs at the campaign rollup level.
-      if (!passesAdv(camp.rollup)) continue
+      // Re-apply campaign overlays on the filtered campaign rollup.
+      const tfc = tfCampaign[camp.name]
+      if (tfc) overlayTypeformIfHigher(campVisibleRollup, tfc)
+      const cc = closeCampaign[camp.name]
+      if (cc) overlayClose(campVisibleRollup, cc)
+      const overlayMax2 = (target, val, field) => { if (val > (target[field] || 0)) target[field] = val }
+      overlayMax2(campVisibleRollup, ghlLeadsCampaign[camp.name]  || 0, 'tfLeads')
+      overlayMax2(campVisibleRollup, ghlBookedCampaign[camp.name] || 0, 'tfBooked')
+      overlayMax2(campVisibleRollup, ghlLivesCampaign[camp.name]  || 0, 'tfLive')
+      // Advanced filter runs at the filtered campaign rollup.
+      if (!passesAdv(campVisibleRollup)) continue
       const compareAds = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
       for (const s of visibleSets) s.ads.sort(compareAds)
       const compareSets = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
       visibleSets.sort(compareSets)
-      visibleCampaigns.push({ ...camp, ad_sets_sorted: visibleSets })
+      visibleCampaigns.push({ ...camp, rollup: campVisibleRollup, ad_sets_sorted: visibleSets })
     }
     const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
     visibleCampaigns.sort(compareCamps)
@@ -1931,16 +1976,74 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
     async function run() {
       setLoading(true); setError(null)
       try {
-        const sinceISO = (dateRange?.startStr || '2024-01-01') + 'T00:00:00Z'
-        const untilISO = (dateRange?.endStr   || '2099-12-31') + 'T23:59:59Z'
+        // ET-anchored timestamps to match AdsPerformance.load() which
+        // queries with `-05:00` offset. Prior `'T00:00:00Z'` was UTC,
+        // which carved a different calendar boundary on the east coast
+        // — top tile counted Mar 5 ET while drilldown queried Mar 5 UTC.
+        const sinceISO = (dateRange?.startStr || '2024-01-01') + 'T00:00:00-05:00'
+        const untilISO = (dateRange?.endStr   || '2099-12-31') + 'T23:59:59-05:00'
 
         // ── CLOSED ─────────────────────────────────────────────────
-        // Row count = MAX(typeform is_closed count, lib_close_resolved count)
-        // per overlayClose. To match, drilldown unions BOTH sources deduped
-        // by email — a typeform is_closed=true row without a corresponding
-        // lib_close_resolved row (closer hand-marked, HYROS hasn't resolved
-        // yet) still appears so the count and the visible list reconcile.
+        // At scope.level === 'all', source-of-truth is closer_calls
+        // (outcome = 'closed', call_type IN ('new_call','follow_up') —
+        // both NC and FU closes count). Same source the top tile uses
+        // via useCloserCallProspectMetrics.closedSet. Prior version
+        // queried lib_close_resolved + typeform.is_closed which is a
+        // different universe and drifted from the top tile by 1-3 rows
+        // whenever HYROS hadn't ingested a close yet.
+        //
+        // Per-ad / per-adset / per-campaign scope falls back to
+        // lib_close_resolved + typeform because closer_calls has no
+        // ad attribution at the per-call level.
         if (drill.metric === 'closed') {
+          if (drill.scope.level === 'all') {
+            setSource('closer_calls')
+            const sinceDate = dateRange?.startStr || '2024-01-01'
+            const untilDate = dateRange?.endStr   || '2099-12-31'
+            const { data: reports, error: rErr } = await supabase
+              .from('closer_eod_reports')
+              .select('id, report_date')
+              .gte('report_date', sinceDate).lte('report_date', untilDate)
+            if (rErr) throw new Error(rErr.message)
+            const reportIds = (reports || []).map(r => r.id)
+            if (!reportIds.length) {
+              if (!cancelled) setRows([])
+              return
+            }
+            const allCalls = []
+            const PAGE = 1000
+            let off = 0
+            while (true) {
+              const { data, error: ccErr } = await supabase
+                .from('closer_calls')
+                .select('id, prospect_name, outcome, call_type, revenue, cash_collected, created_at, eod_report_id')
+                .in('eod_report_id', reportIds)
+                .eq('outcome', 'closed')
+                .range(off, off + PAGE - 1)
+              if (ccErr) throw new Error(ccErr.message)
+              if (!data?.length) break
+              allCalls.push(...data)
+              if (data.length < PAGE) break
+              off += PAGE
+            }
+            const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ')
+            const isPlaceholder = (s) => /^historical close\b/i.test((s || '').trim())
+            const seen = new Set()
+            const rows = []
+            for (const c of allCalls) {
+              const k = norm(c.prospect_name)
+              if (!k) continue
+              if (isPlaceholder(c.prospect_name)) continue
+              if (seen.has(k)) continue
+              seen.add(k)
+              rows.push({ kind: 'cc', ...c })
+            }
+            rows.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+            if (!cancelled) setRows(rows)
+            return
+          }
+          // Per-ad/adset/campaign scope: union lib_close_resolved +
+          // typeform.is_closed (necessary for ad attribution).
           setSource('closed')
           let qC = supabase.from('lib_close_resolved').select('*')
             .gte('created_at', sinceISO).lte('created_at', untilISO)
@@ -1954,16 +2057,9 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
           const [{ data: cData, error: cErr }, { data: tData, error: tErr }] = await Promise.all([qC, qT])
           if (cErr) throw new Error(cErr.message)
           if (tErr) throw new Error(tErr.message)
-          // lib_close_resolved has no `email` column — dedupe by name-token
-          // so a close that has both a resolved row and an unprocessed typeform
-          // submission counts once.
-          //
-          // lib_close_resolved is keyed by closer_call_id (one row per call,
-          // not per prospect), so a prospect with multiple closer_calls of
-          // outcome='closed' (e.g. NC closed + FU closed for the same person)
-          // produces multiple rows. Without self-deduping by nameKey here,
-          // the panel would show 2 rows while the aggregation (which DOES
-          // self-dedupe) shows 1 — same row-vs-drilldown drift class.
+          // lib_close_resolved is keyed by closer_call_id, so a prospect
+          // with multiple closed closer_calls produces multiple rows —
+          // self-dedupe by nameKey.
           const closeSeen = new Set()
           const closeRows = []
           for (const r of (cData || [])) {

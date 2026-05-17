@@ -32,9 +32,13 @@ import { supabase } from '../lib/supabase'
     const { liveProspects, closedProspects, closeRate } = byRange(90)
 */
 
-// Pull a 365-day window once so any consumer can ask for any sub-range
-// without re-fetching. Refreshes when the hook re-mounts.
-const WINDOW_DAYS = 365
+// Pull a 730-day window once so any consumer can ask for any sub-range
+// without re-fetching. Matches the longest preset on the Ads + Marketing
+// pages (the "2y" range button = 730 days). Prior 365-day cap silently
+// returned zero for any range past one year, which left top tiles
+// blank while drilldowns queried the same underlying tables and
+// returned real counts — classic top-tile-vs-drilldown drift.
+const WINDOW_DAYS = 730
 
 export function useCloserCallProspectMetrics() {
   const [data, setData] = useState({ reports: [], calls: [] })

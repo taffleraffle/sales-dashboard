@@ -1534,8 +1534,15 @@ export default function MarketingPerformance() {
   useEffect(() => {
     let cancelled = false
     async function loadBookings() {
+      // 730-day window matches the "2y" preset on both the Marketing
+      // and Ads pages, and matches useCloserCallProspectMetrics.
+      // Prior 90-day cap silently returned {all:0, qualified:0, dq:0}
+      // for any custom range with `from` older than 90 days — and
+      // because bk.qualified is the denominator for Gross/Net Show%,
+      // Reschedule%, and Cancel%, all four tiles collapsed to 0%
+      // without warning whenever Ben picked a long custom range.
       const since = new Date()
-      since.setDate(since.getDate() - 90)
+      since.setDate(since.getDate() - 730)
       const sinceStr = since.toISOString().split('T')[0]
       const todayStr = new Date().toISOString().split('T')[0]
       const { data, error } = await supabase
@@ -1694,26 +1701,40 @@ export default function MarketingPerformance() {
     const cancels = statsBundle.cancels || 0
     const reschedules = statsBundle.reschedules || 0
     const netDenom = Math.max(0, nc - cancels - reschedules)
+    // Also override live_calls (NC + FU combined denominator used by
+    // offer_rate). We scale the original NC+FU total by the same factor
+    // we just applied to NC, preserving the FU contribution. Without
+    // this, Offer Rate read against the un-overridden EOD live_calls
+    // while every other rate read against the deduped denominator —
+    // same drift class as the cost_per_new_live_call bug Ben hit.
+    const origNew = statsBundle.new_live_calls_original ?? statsBundle.new_live_calls ?? 0
+    const fuRatio = origNew > 0 ? (statsBundle.live_calls || 0) / origNew : 1
+    const live_calls = Math.round(new_live_calls * fuRatio)
+    // no_shows recompute precedes no_show_rate so we can reuse the value.
+    const no_shows = statsBundle.no_shows > 0
+      ? statsBundle.no_shows
+      : Math.max(0, nc - denom - cancels - reschedules)
     return {
       ...statsBundle,
       new_live_calls,
+      new_live_calls_original: origNew,  // preserved for downstream consumers
+      live_calls,
       closes,
       close_rate,
       cpa_trial,
       ascend_rate,
       trial_cash_per_close,
+      no_shows,
       // Recomputed against overridden denominators so every tile reads
       // from the same numerator the cascade uses.
       cost_per_new_live_call: denom > 0 ? statsBundle.adspend / denom : 0,
+      cost_per_live_call:     live_calls > 0 ? statsBundle.adspend / live_calls : 0,
+      offer_rate:             live_calls > 0 ? ((statsBundle.offers || 0) / live_calls) * 100 : 0,
       cost_per_offer: statsBundle.offers > 0 ? statsBundle.adspend / statsBundle.offers : (statsBundle.cost_per_offer || 0),
       gross_show_rate: nc > 0 ? Math.min(100, (denom / nc) * 100) : 0,
       net_show_rate: netDenom > 0 ? Math.min(100, (denom / netDenom) * 100) : 0,
       show_rate: nc > 0 ? Math.min(100, (denom / nc) * 100) : 0,
-      // no_shows reported by closers wins; otherwise back-derive from the
-      // now-deduped live count.
-      no_shows: statsBundle.no_shows > 0
-        ? statsBundle.no_shows
-        : Math.max(0, nc - denom - cancels - reschedules),
+      no_show_rate: nc > 0 ? (no_shows / nc) * 100 : 0,
       _prospect_metrics_applied: true,
     }
   }
