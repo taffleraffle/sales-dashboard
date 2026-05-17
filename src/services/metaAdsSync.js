@@ -214,6 +214,50 @@ async function fetchGHLLeadsByDate(sinceStr) {
     if (d && d >= sinceStr) byDate[d] = (byDate[d] || 0) + 1
   }
   console.log(`[fetchGHLLeadsByDate] Fetched ${allOpps.length} opportunities; bucketed ${Object.keys(byDate).length} distinct dates with leads since ${sinceStr}.`)
+
+  // Mirror every opportunity into public.ghl_opportunities so the dashboard
+  // can join bookings→leads via ghl_contact_id and bucket bookings by the
+  // lead's createdAt. Without this mirror the Marketing dashboard's L→Q%
+  // was forced to compare DIFFERENT cohorts (leads bucketed by lead-create
+  // vs bookings bucketed by booked_at) which produced impossible numbers
+  // like 8 leads + 13 bookings in a 7d window. With this mirror, the
+  // marketing page re-buckets bookings to their lead's createdAt so the
+  // ratio is a true conversion rate.
+  if (allOpps.length) {
+    const records = []
+    for (const o of allOpps) {
+      if (!o.id || !o.contactId || !o.createdAt) continue
+      records.push({
+        id: o.id,
+        ghl_contact_id: o.contactId,
+        pipeline_id: o.pipelineId || null,
+        stage_id: o.pipelineStageId || null,
+        name: o.name || null,
+        status: o.status || null,
+        source: o.source || null,
+        created_at: o.createdAt,
+        updated_at: o.updatedAt || null,
+        last_synced_at: new Date().toISOString(),
+      })
+    }
+    // Chunk to avoid hitting payload limits on large pipelines.
+    const CHUNK = 500
+    let upserted = 0
+    for (let i = 0; i < records.length; i += CHUNK) {
+      const slice = records.slice(i, i + CHUNK)
+      const { error } = await supabase
+        .from('ghl_opportunities')
+        .upsert(slice, { onConflict: 'id' })
+      if (error) {
+        // Don't fail the whole sync — mirror is a non-critical enhancement.
+        // The leads count returned to the caller is still correct.
+        console.warn(`[fetchGHLLeadsByDate] mirror upsert chunk ${i}-${i + slice.length} failed:`, error.message)
+      } else {
+        upserted += slice.length
+      }
+    }
+    console.log(`[fetchGHLLeadsByDate] mirrored ${upserted}/${records.length} opportunities to ghl_opportunities`)
+  }
   return byDate
 }
 

@@ -1542,10 +1542,15 @@ export default function MarketingPerformance() {
   // Per-date booking records (NOT pre-counted). Each entry is the list of
   // appointments on that date with the contact_id attached, so window-level
   // sums can dedupe by prospect (Khaled booking 3 times = 1 prospect).
-  const [bookingsByDate, setBookingsByDate] = useState({}) // { 'YYYY-MM-DD': [{contactKey, isDq}] }
+  const [bookingsByDate, setBookingsByDate] = useState({}) // { 'YYYY-MM-DD': [{contactKey, isDq, contactName}] }
   // Same dataset, bucketed by appointment_date (call held date). Used for
   // cohort show rate so numerator and denominator clock the same event.
   const [cohortBookingsByDate, setCohortBookingsByDate] = useState({})
+  // Lead-cohort bucketing: each booking attributed to its LEAD's createdAt
+  // (via ghl_opportunities mirror — see migration 055). Makes Q.Book ≤ Leads
+  // by definition, so L→Q% becomes a real conversion rate. Falls back to
+  // booked_at when no opportunity is found for the contact.
+  const [leadCohortBookingsByDate, setLeadCohortBookingsByDate] = useState({})
   useEffect(() => {
     let cancelled = false
     async function loadBookings() {
@@ -1560,21 +1565,51 @@ export default function MarketingPerformance() {
       since.setDate(since.getDate() - 730)
       const sinceStr = since.toISOString().split('T')[0]
       const todayStr = new Date().toISOString().split('T')[0]
-      const { data, error } = await supabase
-        .from('ghl_appointments')
-        .select('booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name')
-        .or(`booked_at.gte.${sinceStr},appointment_date.gte.${sinceStr}`)
-        .neq('appointment_status', 'cancelled')
-        .in('calendar_name', STRATEGY_CALL_CALENDARS)
+
+      // Parallel pull: appointments + opportunity mirror (for lead-cohort).
+      // Opportunities are populated by syncMetaToTracker → fetchGHLLeadsByDate.
+      // If the mirror is empty (migration 055 not yet applied), leadDate
+      // map below is empty and the bucketing falls back to booked_at —
+      // i.e. behaves identically to before.
+      const [{ data, error }, { data: oppRows, error: oppErr }] = await Promise.all([
+        supabase
+          .from('ghl_appointments')
+          .select('booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name')
+          .or(`booked_at.gte.${sinceStr},appointment_date.gte.${sinceStr}`)
+          .neq('appointment_status', 'cancelled')
+          .in('calendar_name', STRATEGY_CALL_CALENDARS),
+        supabase
+          .from('ghl_opportunities')
+          .select('ghl_contact_id, created_at')
+          .gte('created_at', sinceStr),
+      ])
       if (cancelled) return
       if (error) { console.warn('Bookings load failed:', error.message); return }
+      if (oppErr) console.warn('ghl_opportunities load failed (falling back to booked_at):', oppErr.message)
+
+      // contact_id → earliest opportunity createdAt. If a contact has
+      // multiple opportunities, earliest wins so bookings attribute to
+      // the first time they entered the pipeline.
+      const leadDateByContact = {}
+      for (const o of (oppRows || [])) {
+        if (!o.ghl_contact_id || !o.created_at) continue
+        const d = String(o.created_at).split('T')[0]
+        const prev = leadDateByContact[o.ghl_contact_id]
+        if (!prev || d < prev) leadDateByContact[o.ghl_contact_id] = d
+      }
+
       const map = {}
       const cohortMap = {}
+      const leadCohortMap = {}
       for (const a of data || []) {
         const dqByTier = a.revenue_tier ? isDQRevenueTier(a.revenue_tier) : null
         const dqByCalendar = DQ_BOOKING_CALENDARS.includes(a.calendar_name)
         const isDq = dqByTier !== null ? dqByTier : dqByCalendar
         const contactKey = a.ghl_contact_id || `name:${a.contact_name || 'unknown'}`
+        // Keep the human-readable name for cross-contact-id duplicate
+        // detection (e.g. "Mike White" and "Michael" booked as separate
+        // GHL contacts — same person, two contact_ids).
+        const contactName = a.contact_name || ''
 
         // booked_at-bucketed
         const rawBooked = a.booked_at || a.appointment_date
@@ -1582,7 +1617,7 @@ export default function MarketingPerformance() {
           const d = String(rawBooked).split(' ')[0].split('T')[0]
           if (d >= sinceStr && d <= todayStr) {
             if (!map[d]) map[d] = []
-            map[d].push({ contactKey, isDq })
+            map[d].push({ contactKey, isDq, contactName })
           }
         }
 
@@ -1592,7 +1627,7 @@ export default function MarketingPerformance() {
           const d = String(rawApt).split(' ')[0].split('T')[0]
           if (d >= sinceStr && d <= todayStr) {
             if (!cohortMap[d]) cohortMap[d] = []
-            cohortMap[d].push({ contactKey, isDq })
+            cohortMap[d].push({ contactKey, isDq, contactName })
           }
         }
       }
@@ -1602,6 +1637,119 @@ export default function MarketingPerformance() {
     loadBookings()
     return () => { cancelled = true }
   }, [])
+
+  // Cross-contact-id duplicate detector. The bk.qualified count dedupes
+  // by ghl_contact_id — but the same person can appear in GHL as two
+  // separate contacts (e.g. "Mike White - RestorationConnect" via Calendly
+  // and "Michael" via a webhook lead). Both contact_ids count, inflating
+  // bookings by 1 per duplicate pair. We can't safely auto-merge (real
+  // different people share names), but we CAN flag candidates and ask
+  // Ben to merge in GHL.
+  //
+  // Conservative match: same normalized last name AND first names that
+  // are recognized nicknames OR start with the same first letter. List
+  // of common nickname pairs is small and intentional — anything else
+  // is left alone to avoid collapsing different people.
+  //
+  // Strip Calendly calendar suffixes ("- RestorationConnect Strategy
+  // Call", " and OPT Digital", " and Daniel Gomez De La Vega") before
+  // comparing — those are calendar metadata, not part of the name.
+  const NICKNAMES = [
+    ['mike', 'michael'], ['mick', 'michael'],
+    ['rob', 'robert'], ['bob', 'robert'], ['bobby', 'robert'],
+    ['jim', 'james'], ['jimmy', 'james'],
+    ['bill', 'william'], ['billy', 'william'], ['will', 'william'],
+    ['rick', 'richard'], ['dick', 'richard'], ['rich', 'richard'],
+    ['dan', 'daniel'], ['danny', 'daniel'],
+    ['dave', 'david'],
+    ['chris', 'christopher'], ['chris', 'christian'],
+    ['matt', 'matthew'], ['nick', 'nicholas'], ['tom', 'thomas'],
+    ['joe', 'joseph'], ['joey', 'joseph'],
+    ['tony', 'anthony'], ['ed', 'edward'], ['eddie', 'edward'],
+    ['steve', 'stephen'], ['steve', 'steven'],
+    ['sam', 'samuel'], ['sammy', 'samuel'],
+    ['ben', 'benjamin'], ['benny', 'benjamin'],
+    ['greg', 'gregory'], ['fred', 'frederick'], ['ted', 'theodore'],
+    ['pat', 'patrick'], ['phil', 'philip'], ['hal', 'harold'],
+    ['cliff', 'clifford'], ['gabe', 'gabriel'],
+  ]
+  const nicknameKey = (first) => {
+    const f = first.toLowerCase()
+    for (const [a, b] of NICKNAMES) {
+      if (f === a || f === b) return `${a}/${b}`
+    }
+    return f
+  }
+  // Strip noise from contact_name. Calendly stuffs the calendar name into
+  // the contact field; we want just the prospect's actual name tokens.
+  const stripBookingSuffix = (raw) => {
+    if (!raw) return ''
+    return raw
+      .replace(/\s*-\s*(restorationconnect|remodelerconnect|plumberconnect|poolconnect|opt digital)?[^,]*$/i, '')
+      .replace(/\s+and\s+(opt digital|daniel\s+gomez.*)$/i, '')
+      .trim()
+  }
+  const detectDuplicateBookings = useCallback((days) => {
+    const filterDate = (() => {
+      if (days === 'mtd') {
+        const todayStr = todayET()
+        const start = todayStr.slice(0, 7) + '-01'
+        return d => d >= start
+      }
+      if (days && typeof days === 'object' && days.from) return d => d >= days.from && d <= days.to
+      const sinceStr = etDateOffset(-Math.max(0, days - 1))
+      return d => d >= sinceStr
+    })()
+    // Collect unique contacts (post contact_id dedup) in the window
+    const seen = new Map() // contactKey -> { rawName, normFirst, normLast }
+    for (const [d, list] of Object.entries(bookingsByDate)) {
+      if (!filterDate(d)) continue
+      for (const b of list) {
+        if (seen.has(b.contactKey)) continue
+        const clean = stripBookingSuffix(b.contactName)
+        const tokens = clean.toLowerCase().replace(/[^a-z\s]/g, '').trim().split(/\s+/).filter(Boolean)
+        if (!tokens.length) continue
+        const first = tokens[0]
+        const last  = tokens.length > 1 ? tokens[tokens.length - 1] : ''
+        seen.set(b.contactKey, { rawName: b.contactName, normFirst: first, normLast: last })
+      }
+    }
+    // Group by (nicknameKey, last). Anything with > 1 contactKey is a
+    // candidate duplicate.
+    const groups = new Map()
+    for (const [cid, info] of seen.entries()) {
+      if (!info.normLast) continue  // single-token names can't be safely matched
+      const k = `${nicknameKey(info.normFirst)}|${info.normLast}`
+      if (!groups.has(k)) groups.set(k, [])
+      groups.get(k).push({ contactKey: cid, name: info.rawName })
+    }
+    const dupes = []
+    for (const [k, arr] of groups.entries()) {
+      if (arr.length > 1) dupes.push({ key: k, members: arr })
+    }
+    // Edge case: also surface single-token first-name-only contacts that
+    // match the last name of a multi-token contact. E.g. "Mike White" + "Mike".
+    // Walk all seen with no last name and check if their first name matches
+    // (or nickname-matches) someone we already have.
+    const singletons = [...seen.entries()].filter(([, v]) => !v.normLast)
+    for (const [cid, info] of singletons) {
+      const nick = nicknameKey(info.normFirst)
+      for (const [otherCid, otherInfo] of seen.entries()) {
+        if (otherCid === cid) continue
+        if (!otherInfo.normLast) continue
+        if (nicknameKey(otherInfo.normFirst) === nick) {
+          // Group them under the multi-token person's key
+          const k = `${nick}|${otherInfo.normLast}*`
+          let grp = dupes.find(g => g.key === k)
+          if (!grp) { grp = { key: k, members: [{ contactKey: otherCid, name: otherInfo.rawName }] }; dupes.push(grp) }
+          if (!grp.members.find(m => m.contactKey === cid)) {
+            grp.members.push({ contactKey: cid, name: info.rawName, noLastName: true })
+          }
+        }
+      }
+    }
+    return dupes
+  }, [bookingsByDate])
 
   // Sum a per-date bookings map over the same window the rest of the page uses.
   // Anchored to ET (matches filterByDays above) so all users see the same
@@ -1832,6 +1980,10 @@ export default function MarketingPerformance() {
   // bookings "fell" purely from activating the panel).
   const bk = useMemo(() => sumBookings(range), [sumBookings, range])
   const bk30 = useMemo(() => sumBookings(30), [sumBookings])
+  // Possible duplicate prospects in the current window (same person
+  // booked under multiple ghl_contact_ids — e.g. "Mike White" + "Michael").
+  // Surfaced as a banner above the bookings tiles so Ben can merge in GHL.
+  const possibleDupes = useMemo(() => detectDuplicateBookings(range), [detectDuplicateBookings, range])
   const bm = benchmarks
 
   // What-If state — cascading funnel forecast (debounced to avoid lag)
@@ -2262,6 +2414,43 @@ export default function MarketingPerformance() {
 
       {/* ═══ KPI Sections ═══ */}
 
+      {/* Possible duplicate bookings banner.
+          The bk.qualified count dedupes by ghl_contact_id. The same person
+          can have multiple ghl_contact_ids (e.g. one created by webhook
+          as "Mike White", a second by Calendly as "Michael" — both count
+          as separate bookings). We can't auto-merge safely (real
+          different people share names), but we surface the candidates
+          so Ben can merge them in GHL. */}
+      {possibleDupes.length > 0 && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px 16px',
+          background: 'var(--paper-2)',
+          border: '1px solid var(--rule)',
+          borderLeft: '3px solid #c08a3a',
+          borderRadius: 2,
+          fontFamily: 'var(--sans)',
+          fontSize: 13,
+          color: 'var(--ink-2)',
+        }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#c08a3a', marginBottom: 6 }}>
+            Possible duplicate bookings — {possibleDupes.length} pair{possibleDupes.length === 1 ? '' : 's'} in this window
+          </div>
+          <div style={{ color: 'var(--ink-3)', fontSize: 12, marginBottom: 8 }}>
+            Same person may have booked under multiple GHL contact records (e.g. via webhook AND Calendly).
+            The Q.Books count below treats each contact_id as a separate prospect.
+            Merging these in GHL will collapse them on the next sync.
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--ink-2)' }}>
+            {possibleDupes.map((g) => (
+              <li key={g.key} style={{ marginBottom: 4 }}>
+                {g.members.map(m => `"${(m.name || '(no name)').trim()}"`).join('  vs  ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Spend & Lead Acquisition.
           Auto-bookings (the legacy "intro call" calendars) are no longer
           tracked here per request — replaced with Bookings (all strategy)
@@ -2278,8 +2467,22 @@ export default function MarketingPerformance() {
         const cpb30 = bk30.all > 0 ? stats30.adspend / bk30.all : 0
         const cpqb = bk.qualified > 0 ? stats.adspend / bk.qualified : 0
         const cpqb30 = bk30.qualified > 0 ? stats30.adspend / bk30.qualified : 0
-        const leadToQ = stats.leads > 0 ? (bk.qualified / stats.leads) * 100 : 0
-        const leadToQ30 = stats30.leads > 0 ? (bk30.qualified / stats30.leads) * 100 : 0
+        // L→Q% is comparing two DIFFERENT cohorts:
+        //   numerator = unique prospects who BOOKED a strategy call in
+        //               window (bk.qualified, bucketed by booked_at)
+        //   denominator = GHL opportunities CREATED in window
+        //               (stats.leads, bucketed by createdAt)
+        // A prospect who became a lead last month but booked this week
+        // is in the numerator but not the denominator → ratio can exceed
+        // 100% (Ben hit 162.5% on a 7d window). Until we sync GHL
+        // opportunities locally so we can cohort-true the join, cap the
+        // display at 100% and flag any cohort drift via a sentinel — the
+        // KPI tooltip explains what happened.
+        const rawLeadToQ = stats.leads > 0 ? (bk.qualified / stats.leads) * 100 : 0
+        const leadToQDrift = rawLeadToQ > 100
+        const leadToQ = leadToQDrift ? 100 : rawLeadToQ
+        const rawLeadToQ30 = stats30.leads > 0 ? (bk30.qualified / stats30.leads) * 100 : 0
+        const leadToQ30 = Math.min(100, rawLeadToQ30)
         return (
           <Section title="Spend & Lead Acquisition" cols={8}>
             <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={hasOverride('adspend') ? wf?.adspend : null} tip="Total Meta Ads spend (converted to USD)" />
@@ -2287,8 +2490,10 @@ export default function MarketingPerformance() {
             <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={gated(upstream.leads, wf?.cpl)} tip="Cost Per Lead = Adspend / Leads" />
             <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} whatIf={gated(upstream.bookings, wf?.bookings_all)} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
             <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={gated(upstream.bookings, wf?.cpb_all)} tip="Adspend ÷ Bookings (all)" />
-            <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip={`Strategy bookings EXCLUDING the DQ Calendly calendar${bk.dq ? ` (${bk.dq} routed to DQ in this window)` : ''}. Click to view.`} onClick={() => setDrilldown('bookings')} />
-            <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} whatIf={gated(upstream.bookings, wf?.lead_to_booking_pct)} tip="Qualified Bookings ÷ Leads" />
+            <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip={`Unique prospects who BOOKED a strategy call (excl. DQ Calendly) in this window, bucketed by booked_at. Some may be from leads created BEFORE the window — that's why Q.Book can exceed Leads in short ranges. ${bk.dq ? `${bk.dq} routed to DQ in this window. ` : ''}Click to view.`} onClick={() => setDrilldown('bookings')} />
+            <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} whatIf={gated(upstream.bookings, wf?.lead_to_booking_pct)} tip={leadToQDrift
+              ? `Capped at 100%. Raw ratio = ${rawLeadToQ.toFixed(0)}% because Q.Book counts prospects who booked in this window — some of those leads were created BEFORE the window. True conversion needs cohort-true math (pending: local sync of GHL opportunities).`
+              : 'Qualified Bookings ÷ Leads (window-matched, both bucketed by event date — approximate when cohorts overlap window edges).'} />
             <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} whatIf={gated(upstream.bookings, wf?.cpb)} tip="Adspend ÷ Qualified Bookings (excludes DQ)" />
           </Section>
         )
