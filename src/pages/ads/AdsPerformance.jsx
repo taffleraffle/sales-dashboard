@@ -1239,24 +1239,53 @@ export default function AdsPerformance() {
           )
         })()}
         {(() => {
-          // Cost-per tiles divide spend by the SAME denominator the
-          // corresponding count tile uses, so $-figures reconcile with
-          // counts above. $/Live and CAC now match
-          // MarketingPerformance.cost_per_new_live_call / cpa_trial
-          // exactly because both pages divide by the same per-call
-          // prospect-deduped denominator.
+          // Cost-per tiles divide spend by the ATTRIBUTED denominator —
+          // same universe the per-campaign rows use. Previously this
+          // divided by the deduped union count (typeform ∪ GHL, regardless
+          // of ad attribution), giving e.g. $4.40k / 80 = $55 per Booked
+          // at the top while the rows showed $135 / $198 / $192 because
+          // the rows only see ad-attributed bookings (~29). Ben saw $55
+          // up top and $135+ in the rows and rightly called bullshit.
+          //
+          // Now: top tile cost-per uses rowTotals.attributed, so the math
+          // reconciles end to end. The COUNT tile keeps showing the union
+          // (the truer "how many leads/bookings happened" number) but the
+          // cost number divides by the same denominator the rows divide
+          // by. Sub-text shows both so the gap is visible.
+          const a = rowTotals.attributed
           const p = rowTotals.prospects
           const pm = prospectMetricsByRange({ from: dateRange.startStr, to: dateRange.endStr })
+          const subAttr = (n, total) =>
+            n > 0 && total !== n ? `${total} total · ${n} ad-attrib` : null
           return (
             <>
-              <TotalsTile label="$ / Lead"   value={p.leads  > 0 ? fmt$(totals.spend / p.leads)  : '—'} valueColor={kpiColor(p.leads  > 0 ? totals.spend / p.leads  : null, KPI.costPerLead)} />
-              <TotalsTile label="$ / Booked" value={p.booked > 0 ? fmt$(totals.spend / p.booked) : '—'} valueColor={kpiColor(p.booked > 0 ? totals.spend / p.booked : null, KPI.costPerQualBooked)} />
-              <TotalsTile label="$ / Live"   value={pm.liveProspects   > 0 ? fmt$(totals.spend / pm.liveProspects)   : '—'} valueColor={kpiColor(pm.liveProspects   > 0 ? totals.spend / pm.liveProspects   : null, KPI.costPerLive)} />
+              <TotalsTile
+                label="$ / Lead"
+                value={a.leads > 0 ? fmt$(totals.spend / a.leads) : '—'}
+                sub={subAttr(a.leads, p.leads)}
+                valueColor={kpiColor(a.leads > 0 ? totals.spend / a.leads : null, KPI.costPerLead)}
+                tip={`Spend ÷ ad-attributed leads (${a.leads}). Per-row $/Lead uses the same denominator so the numbers reconcile.`}
+              />
+              <TotalsTile
+                label="$ / Booked"
+                value={a.booked > 0 ? fmt$(totals.spend / a.booked) : '—'}
+                sub={subAttr(a.booked, p.booked)}
+                valueColor={kpiColor(a.booked > 0 ? totals.spend / a.booked : null, KPI.costPerQualBooked)}
+                tip={`Spend ÷ ad-attributed bookings (${a.booked}). Per-row $/Book uses the same denominator so the numbers reconcile. Unattributed bookings (${p.booked - a.booked}) are counted in the BOOKED tile but excluded here.`}
+              />
+              <TotalsTile
+                label="$ / Live"
+                value={a.live > 0 ? fmt$(totals.spend / a.live) : '—'}
+                sub={subAttr(a.live, pm.liveProspects)}
+                valueColor={kpiColor(a.live > 0 ? totals.spend / a.live : null, KPI.costPerLive)}
+                tip={`Spend ÷ ad-attributed live calls (${a.live}). Per-row $/Live uses the same denominator.`}
+              />
               <TotalsTile
                 label="CAC"
-                value={pm.closedProspects > 0 ? fmt$(totals.spend / pm.closedProspects) : '—'}
-                sub={pm.closedProspects > 0 ? `${fmt$(totals.spend)} ÷ ${pm.closedProspects} closes` : null}
-                valueColor={kpiColor(pm.closedProspects > 0 ? totals.spend / pm.closedProspects : null, KPI.costPerClose)}
+                value={a.closes > 0 ? fmt$(totals.spend / a.closes) : '—'}
+                sub={a.closes > 0 ? `${fmt$(totals.spend)} ÷ ${a.closes} ad-attrib closes` : null}
+                valueColor={kpiColor(a.closes > 0 ? totals.spend / a.closes : null, KPI.costPerClose)}
+                tip={`Spend ÷ ad-attributed closes (${a.closes}). All-source closes: ${pm.closedProspects}. Difference = closes with no ad attribution.`}
               />
             </>
           )
