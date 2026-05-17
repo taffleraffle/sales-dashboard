@@ -645,31 +645,48 @@ export default function AdsPerformance() {
         bucket.revenue += row._rev || 0
         bucket.cash    += row._cash || 0
       }
-      // Ad → parent + Adset → parent lookups. When a row has ad_id, the
-      // AD's parent adset/campaign is source-of-truth — the row's own
-      // utm_term / utm_campaign may be stale (Meta rename drift) or
-      // missing. Prefer ad-parent → adset-parent → row's own scope
-      // field, in that order.
+      // Campaign / adset resolution for prospect rows.
       //
-      // Matches the drilldown's three-tier OR scope:
-      //   ad_id.in.(camp.adIds) OR adset_id.in.(camp.adsetIds) OR
-      //   utm_campaign.eq.(camp.name)
-      // Previously only ad-parent was consulted, so a typeform row
-      // whose adset_id matched the campaign but whose utm_campaign
-      // string drifted (or was null) fell into a different campaign
-      // bucket — that's the row-vs-drilldown drift Ben hit on the
-      // SCIO Restoration 5/2 campaign (row=8 leads, drilldown=10).
+      // Priority (drilldown must match exactly or counts drift):
+      //   1. utm_campaign / adset_id (lead-time truth, captured at form
+      //      submission) — but ONLY if the value matches a known
+      //      campaign/adset in adsLoaded. This handles the "Meta moved
+      //      the ad after the lead came in" case: e.g. Wendell + Vlad
+      //      submitted via the 5/2 campaign; Meta later moved their
+      //      ad_ids to the 4/30 campaign. Ad-parent says 4/30; utm
+      //      says 5/2; utm wins because that's where the conversion
+      //      came from.
+      //   2. ad-parent → adset-parent (current Meta state) — fallback
+      //      when utm is missing or points to a campaign that no
+      //      longer exists in adsLoaded (handles Meta rename: old utm
+      //      value isn't in adsLoaded anymore, so we use the current
+      //      campaign name).
+      //   3. Raw row._campaign / row._adset — fallback for completely
+      //      orphaned rows (campaign was deleted; will bucket under a
+      //      ghost name that doesn't match any visible campaign row).
+      //
+      // Without this, the campaign row showed 8 leads but the drilldown
+      // showed 10 because Wendell + Vlad's ad_id-parent moved them off
+      // 5/2 while the drilldown's utm_campaign.eq.X OR caught them.
       const adParent = {}
       const adsetParent = {}
+      const validCampaigns = new Set()
+      const validAdsets    = new Set()
       for (const a of adsLoaded) {
         adParent[a.ad_id] = { adset: a.adset_id, campaign: a.campaign_name }
         if (a.adset_id) adsetParent[a.adset_id] = { campaign: a.campaign_name }
+        if (a.campaign_name) validCampaigns.add(a.campaign_name)
+        if (a.adset_id)      validAdsets.add(a.adset_id)
       }
-      const resolveAdset    = (row) => (row._ad ? adParent[row._ad]?.adset    : null) || row._adset
       const resolveCampaign = (row) =>
-        (row._ad    ? adParent[row._ad]?.campaign       : null) ||
-        (row._adset ? adsetParent[row._adset]?.campaign : null) ||
+        (row._campaign && validCampaigns.has(row._campaign) ? row._campaign : null) ||
+        (row._ad    && adParent[row._ad]    ? adParent[row._ad].campaign       : null) ||
+        (row._adset && adsetParent[row._adset] ? adsetParent[row._adset].campaign : null) ||
         row._campaign
+      const resolveAdset = (row) =>
+        (row._adset && validAdsets.has(row._adset) ? row._adset : null) ||
+        (row._ad && adParent[row._ad] ? adParent[row._ad].adset : null) ||
+        row._adset
 
       const bucketUnion = (...sourceLists) => {
         const ad = {}, adset = {}, campaign = {}
@@ -1364,7 +1381,7 @@ export default function AdsPerformance() {
         </div>
       )}
 
-      {drill && <ProspectDrillModal drill={drill} dateRange={dateRange} onClose={() => setDrill(null)} />}
+      {drill && <ProspectDrillModal drill={drill} dateRange={dateRange} ads={ads} onClose={() => setDrill(null)} />}
       {showOrphans && <OrphanClosesModal rows={orphanCloses.rows} onClose={() => setShowOrphans(false)} />}
     </div>
   )
@@ -2027,11 +2044,48 @@ function unionByEmail(tfRows, otherRows, otherKind) {
 // cell in the rollup table. Queries multiple sources (typeform + GHL +
 // closer_calls) so every metric pulls from the source that actually has
 // the rows. Respects the active date range.
-function ProspectDrillModal({ drill, dateRange, onClose }) {
+function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
   const [rows, setRows] = useState([])
   const [source, setSource] = useState('typeform')  // 'typeform' | 'closed' | 'ghl' | 'mixed'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  // Resolution maps — must match the aggregator in AdsPerformance.load()
+  // exactly so that drilldown row count == campaign row cell. Without
+  // this post-filter, the drilldown's three-tier OR can include rows
+  // whose ad_id maps to a DIFFERENT campaign (e.g. Meta moved the ad
+  // after the lead came in). See the resolveCampaign comment block
+  // in AdsPerformance.load() for the full case analysis.
+  const resolution = useMemo(() => {
+    const adP = {}, asetP = {}
+    const validC = new Set(), validA = new Set()
+    for (const a of (ads || [])) {
+      adP[a.ad_id] = { adset: a.adset_id, campaign: a.campaign_name }
+      if (a.adset_id) asetP[a.adset_id] = { campaign: a.campaign_name }
+      if (a.campaign_name) validC.add(a.campaign_name)
+      if (a.adset_id)      validA.add(a.adset_id)
+    }
+    return { adP, asetP, validC, validA }
+  }, [ads])
+  const rowCampaign = (r) =>
+    (r.utm_campaign && resolution.validC.has(r.utm_campaign) ? r.utm_campaign : null) ||
+    (r.ad_id && resolution.adP[r.ad_id]?.campaign) ||
+    (r.adset_id && resolution.asetP[r.adset_id]?.campaign) ||
+    r.utm_campaign
+  const rowAdset = (r) =>
+    (r.adset_id && resolution.validA.has(r.adset_id) ? r.adset_id : null) ||
+    (r.ad_id && resolution.adP[r.ad_id]?.adset) ||
+    r.adset_id
+  const matchesScope = (r) => {
+    if (drill.scope.level === 'all') return true
+    if (drill.scope.level === 'ad')   return r.ad_id === drill.scope.id || r.resolved_ad_id === drill.scope.id
+    if (drill.scope.level === 'adset')    return rowAdset(r) === drill.scope.id
+    if (drill.scope.level === 'campaign') return rowCampaign(r) === drill.scope.id
+    return true
+  }
+  // closer_calls rows have no ad/adset/utm — drilldown at scope='all'
+  // already filters them properly. Skip post-filter for the cc kind.
+  const postFilter = (list) => list.filter(r => r.kind === 'cc' || r.kind === 'close' || matchesScope(r))
 
   useEffect(() => {
     let cancelled = false
@@ -2136,7 +2190,7 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
               return !k || !closeSeen.has(k)
             })
             .map(r => ({ kind: 'tf', ...r }))
-          if (!cancelled) setRows([...closeRows, ...tfRows].sort((a, b) =>
+          if (!cancelled) setRows(postFilter([...closeRows, ...tfRows]).sort((a, b) =>
             (b.created_at || b.submitted_at || '').localeCompare(a.created_at || a.submitted_at || '')))
           return
         }
@@ -2160,7 +2214,7 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
           if (tErr) throw new Error(tErr.message)
           const merged = unionByEmail(tData || [], gData || [], 'ghl')
           setSource((tData || []).length && (gData || []).length ? 'mixed' : ((gData || []).length ? 'ghl' : 'typeform'))
-          if (!cancelled) setRows(merged)
+          if (!cancelled) setRows(postFilter(merged))
           return
         }
 
@@ -2177,7 +2231,7 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
           q = applyDrillScope(q, drill.scope, SCOPE_COLS_TYPEFORM)
           const { data, error: e } = await q
           if (e) throw new Error(e.message)
-          if (!cancelled) setRows((data || []).map(r => ({ kind: 'tf', ...r })))
+          if (!cancelled) setRows(postFilter((data || []).map(r => ({ kind: 'tf', ...r }))))
           return
         }
 
@@ -2265,7 +2319,7 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
           if (tErr) throw new Error(tErr.message)
           const merged = unionByEmail(tData || [], gData || [], 'ghl')
           setSource((tData || []).length && (gData || []).length ? 'mixed' : ((gData || []).length ? 'ghl' : 'typeform'))
-          if (!cancelled) setRows(merged)
+          if (!cancelled) setRows(postFilter(merged))
           return
         }
 
@@ -2280,10 +2334,11 @@ function ProspectDrillModal({ drill, dateRange, onClose }) {
         if (drill.metric === 'qualified') tf = tf.filter(r => r.qualified)
 
         const merged = unionByEmail(tf, ghlData, 'ghl')
-        const tfCount = tf.length
-        const ghlCount = merged.length - tfCount
+        const filtered = postFilter(merged)
+        const tfCount = filtered.filter(r => r.kind === 'tf').length
+        const ghlCount = filtered.filter(r => r.kind === 'ghl').length
         setSource(ghlCount && tfCount ? 'mixed' : (ghlCount ? 'ghl' : 'typeform'))
-        if (!cancelled) setRows(merged)
+        if (!cancelled) setRows(filtered)
       } catch (e) {
         if (!cancelled) setError(e.message)
       } finally {
