@@ -1453,7 +1453,11 @@ const DRILLDOWN_CONFIG = {
     title: 'Show Rate (Gross + Net)',
     subtitle: 'Daily show rate. Gross = lives/booked. Net = lives/(booked-cancels-reschedules).',
     fetcher: fetchShowRate,
-    chart: { dateKey: 'date', mode: 'value', valueKey: 'netShow', label: 'Net Show % per day', fmtValue: v => `${v.toFixed(0)}%` },
+    // Chart Gross Show% = sum(lives) / sum(nc_booked) bucketed correctly.
+    // Net Show% needs (lives) / (nc_booked - cancels - reschedules) which
+    // can't be expressed as a single ratio of two fields; the table below
+    // still shows both per row. Using Gross here is the safer aggregate.
+    chart: { dateKey: 'date', mode: 'ratio', numeratorKey: 'lives', denominatorKey: 'nc_booked', label: 'Gross Show % (lives ÷ booked)', fmtValue: v => `${(v * 100).toFixed(0)}%` },
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
       { key: 'nc_booked', label: 'NC Booked', align: 'right', cls: 'tabular-nums' },
@@ -1470,7 +1474,7 @@ const DRILLDOWN_CONFIG = {
     title: 'Cost Per New Live Call',
     subtitle: 'Daily adspend ÷ new live calls that day',
     fetcher: fetchCpNew,
-    chart: { dateKey: 'date', mode: 'value', valueKey: 'cpn', label: 'Cost per new live per day ($)', fmtValue: v => `$${Math.round(v).toLocaleString()}` },
+    chart: { dateKey: 'date', mode: 'ratio', numeratorKey: 'adspend', denominatorKey: 'new_live_calls', label: 'Cost per new live ($)', fmtValue: v => `$${Math.round(v).toLocaleString()}` },
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
       { key: 'adspend', label: 'Spend', align: 'right', render: r => r.adspend ? `$${Math.round(r.adspend).toLocaleString()}` : '—' },
@@ -1483,7 +1487,7 @@ const DRILLDOWN_CONFIG = {
     title: 'CPA (Trial)',
     subtitle: 'Daily adspend ÷ closes that day',
     fetcher: fetchCpaTrial,
-    chart: { dateKey: 'date', mode: 'value', valueKey: 'cpa', label: 'CPA per day ($)', fmtValue: v => `$${Math.round(v).toLocaleString()}` },
+    chart: { dateKey: 'date', mode: 'ratio', numeratorKey: 'adspend', denominatorKey: 'closes', label: 'CPA ($)', fmtValue: v => `$${Math.round(v).toLocaleString()}` },
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
       { key: 'adspend', label: 'Spend', align: 'right', render: r => r.adspend ? `$${Math.round(r.adspend).toLocaleString()}` : '—' },
@@ -1741,7 +1745,7 @@ async function enrichRowsWithProspectEmails(rows) {
 // Bars colored by direction relative to window-period average: lighter
 // than avg = below, darker = above. This makes "ramping up" vs "tailing
 // off" patterns readable at a glance.
-function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = null, label, fmtValue, valueKey = null }) {
+function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = null, label, fmtValue, valueKey = null, numeratorKey = null, denominatorKey = null }) {
   const { from, to } = resolveRange(range)
   // Build day list inclusive
   const days = []
@@ -1751,27 +1755,39 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
     days.push(cursor.toISOString().slice(0, 10))
     cursor.setDate(cursor.getDate() + 1)
   }
-  // Per-day counts AND per-day value-key sums (for mode='value'). The
-  // value-key path lets Adspend / any direct-numeric drilldown plot the
-  // actual column value (e.g. row.adspend) rather than just row counts.
+  // Per-day counts + per-day value sums (for mode='value') + per-day
+  // ratio numerator/denominator sums (for mode='ratio'). Ratio mode is
+  // the correct way to chart cost-per-X / show-rate / etc. since
+  // bucketing weekly/monthly needs sum(num)/sum(denom), NOT a sum of
+  // daily ratios — summing $200/lead and $400/lead doesn't give a
+  // weekly $/lead, it gives a meaningless $600.
   const counts = Object.fromEntries(days.map(d => [d, 0]))
   const valueSum = Object.fromEntries(days.map(d => [d, 0]))
+  const numSum = Object.fromEntries(days.map(d => [d, 0]))
+  const denSum = Object.fromEntries(days.map(d => [d, 0]))
   for (const r of (rows || [])) {
     const d = String(r[dateKey] || '').slice(0, 10)
     if (counts[d] !== undefined) {
       counts[d]++
       if (valueKey) valueSum[d] += parseFloat(r[valueKey] || 0)
+      if (numeratorKey) numSum[d] += parseFloat(r[numeratorKey] || 0)
+      if (denominatorKey) denSum[d] += parseFloat(r[denominatorKey] || 0)
     }
   }
   // Build series — { day, value, count }
   const series = days.map(d => {
+    if (mode === 'ratio' && numeratorKey && denominatorKey) {
+      const n = numSum[d], dn = denSum[d]
+      const v = dn > 0 ? n / dn : (n > 0 ? null : 0)
+      return { day: d, value: v, count: counts[d], num: n, den: dn }
+    }
     if (mode === 'value' && valueKey) {
       return { day: d, value: valueSum[d], count: counts[d] }
     }
     if (mode === 'cost') {
       const spend = spendByDate?.[d] || 0
       const ct = counts[d]
-      const v = ct > 0 ? spend / ct : (spend > 0 ? null : 0) // unattributable spend → null gap
+      const v = ct > 0 ? spend / ct : (spend > 0 ? null : 0)
       return { day: d, value: v, count: ct, spend }
     }
     return { day: d, value: counts[d], count: counts[d] }
@@ -1815,18 +1831,28 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
     const buckets = new Map()
     for (const p of series) {
       const k = bucketKey(p.day)
-      if (!buckets.has(k)) buckets.set(k, { day: k, count: 0, spend: 0, valueSum: 0, valueHasData: false })
+      if (!buckets.has(k)) buckets.set(k, { day: k, count: 0, spend: 0, valueSum: 0, valueHasData: false, num: 0, den: 0 })
       const b = buckets.get(k)
       b.count += p.count || 0
       b.spend += p.spend || 0
+      b.num += p.num || 0
+      b.den += p.den || 0
       if (p.value != null) { b.valueSum += p.value; b.valueHasData = true }
     }
     return [...buckets.values()].map(b => {
+      if (mode === 'ratio') {
+        const v = b.den > 0 ? b.num / b.den : (b.num > 0 ? null : 0)
+        return { day: b.day, value: v, count: b.count, num: b.num, den: b.den }
+      }
       if (mode === 'cost') {
         const v = b.count > 0 ? b.spend / b.count : (b.spend > 0 ? null : 0)
         return { day: b.day, value: v, count: b.count, spend: b.spend }
       }
       if (mode === 'value' && valueKey) {
+        // Value mode = a raw quantity that ADDS UP across days (e.g. spend).
+        // Use SUM for the bucket since 'weekly spend = sum of daily spend'.
+        // For ratios, callers should use mode='ratio' so the bucket
+        // re-divides num/den correctly.
         return { day: b.day, value: b.valueHasData ? b.valueSum : null, count: b.count }
       }
       return { day: b.day, value: b.count, count: b.count }
