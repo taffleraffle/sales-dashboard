@@ -1795,6 +1795,7 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
 
   const fmt = fmtValue || ((v) => mode === 'cost' ? `$${Math.round(v)}` : v)
   const [hoverIdx, setHoverIdx] = useState(null)
+  const [chartType, setChartType] = useState('bar') // 'bar' | 'line'
 
   if (maxV === 0 && totalCount === 0) {
     return (
@@ -1806,14 +1807,38 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
 
   return (
     <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--rule)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 12 }}>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
           {label || (mode === 'cost' ? 'Daily cost-per' : 'Daily volume')}
         </div>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
-          {mode === 'cost'
-            ? `Avg ${fmt(avgV)} · Total spend ${'$' + Math.round(totalSpend).toLocaleString()}`
-            : `Avg ${avgV.toFixed(1)}/day · Total ${totalCount}`}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+            {mode === 'cost'
+              ? `Avg ${fmt(avgV)} · Total spend ${'$' + Math.round(totalSpend).toLocaleString()}`
+              : `Avg ${avgV.toFixed(1)}/day · Total ${totalCount}`}
+          </div>
+          {/* Bar / Line toggle */}
+          <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', borderRadius: 2, overflow: 'hidden' }}>
+            {['bar', 'line'].map(t => (
+              <button
+                key={t}
+                onClick={() => setChartType(t)}
+                style={{
+                  padding: '3px 8px',
+                  fontFamily: 'var(--mono)',
+                  fontSize: 9,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  background: chartType === t ? 'var(--ink)' : 'transparent',
+                  color: chartType === t ? 'var(--paper)' : 'var(--ink-3)',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
@@ -1831,8 +1856,8 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
             </g>
           )
         })()}
-        {/* Bars + invisible hover hit-areas (so 0-value days respond too) */}
-        {series.map((p, i) => {
+        {/* BAR view */}
+        {chartType === 'bar' && series.map((p, i) => {
           const colX = PAD_L + (i * (innerW / series.length))
           const colW = innerW / series.length
           const h = (p.value != null && p.value > 0 && maxV > 0) ? (p.value / maxV) * innerH : 0
@@ -1854,7 +1879,6 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
                   strokeWidth={isHover ? 1 : 0}
                 />
               )}
-              {/* Invisible full-column hit area so 0-value days still hover */}
               <rect
                 x={colX}
                 y={PAD_T}
@@ -1868,6 +1892,80 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
             </g>
           )
         })}
+        {/* LINE view — polyline with area fill + per-day dot + hover hit-area */}
+        {chartType === 'line' && (() => {
+          const colW = innerW / series.length
+          // Build coordinate list — skip null gaps
+          const pts = series.map((p, i) => {
+            const x = PAD_L + (i * colW) + colW / 2
+            const y = p.value != null && maxV > 0
+              ? PAD_T + innerH - (p.value / maxV) * innerH
+              : null
+            return { ...p, x, y, i }
+          })
+          // Polyline path string, breaking on nulls
+          let path = ''
+          let inSeg = false
+          for (const pt of pts) {
+            if (pt.y == null) { inSeg = false; continue }
+            path += (inSeg ? ' L ' : ' M ') + pt.x + ' ' + pt.y
+            inSeg = true
+          }
+          // Area path (close to baseline)
+          const baselineY = PAD_T + innerH
+          let area = ''
+          let segStart = null
+          let lastX = null
+          for (const pt of pts) {
+            if (pt.y == null) {
+              if (segStart != null && lastX != null) {
+                area += ` L ${lastX} ${baselineY} Z`
+              }
+              segStart = null
+              continue
+            }
+            if (segStart == null) {
+              area += ` M ${pt.x} ${baselineY} L ${pt.x} ${pt.y}`
+              segStart = pt.x
+            } else {
+              area += ` L ${pt.x} ${pt.y}`
+            }
+            lastX = pt.x
+          }
+          if (segStart != null && lastX != null) area += ` L ${lastX} ${baselineY} Z`
+
+          return (
+            <g>
+              <path d={area} fill="var(--accent)" opacity="0.18" />
+              <path d={path} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+              {pts.map(pt => pt.y != null && (
+                <circle
+                  key={pt.day}
+                  cx={pt.x}
+                  cy={pt.y}
+                  r={hoverIdx === pt.i ? 4 : 2.5}
+                  fill="var(--accent)"
+                  stroke="var(--ink)"
+                  strokeWidth={hoverIdx === pt.i ? 1 : 0}
+                />
+              ))}
+              {/* Invisible hit areas for hover */}
+              {pts.map(pt => (
+                <rect
+                  key={'h-' + pt.day}
+                  x={PAD_L + (pt.i * colW)}
+                  y={PAD_T}
+                  width={colW}
+                  height={innerH}
+                  fill="transparent"
+                  onMouseEnter={() => setHoverIdx(pt.i)}
+                  onMouseLeave={() => setHoverIdx(curr => curr === pt.i ? null : curr)}
+                  style={{ cursor: 'pointer' }}
+                />
+              ))}
+            </g>
+          )
+        })()}
         {/* Hover tooltip — positioned near hovered bar */}
         {hoverIdx != null && (() => {
           const p = series[hoverIdx]
