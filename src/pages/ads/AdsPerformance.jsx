@@ -2277,7 +2277,34 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
               return !k || !closeSeen.has(k)
             })
             .map(r => ({ kind: 'tf', ...r }))
-          if (!cancelled) setRows(postFilter([...closeRows, ...tfRows]).sort((a, b) =>
+          const merged = [...closeRows, ...tfRows]
+          // Enrich with ad name so the drilldown shows WHICH creative
+          // each close came from — even when the ad is paused and
+          // doesn't appear in the visible row tree. Batch lookup by
+          // ad_id from public.ads.
+          const adIdSet = new Set()
+          for (const r of merged) {
+            const aid = r.resolved_ad_id || r.ad_id
+            if (aid) adIdSet.add(aid)
+          }
+          if (adIdSet.size) {
+            const { data: adRows } = await supabase
+              .from('ads')
+              .select('ad_id, ad_name, adset_name, campaign_name, effective_status')
+              .in('ad_id', [...adIdSet])
+            const adById = {}
+            for (const a of (adRows || [])) adById[a.ad_id] = a
+            for (const r of merged) {
+              const aid = r.resolved_ad_id || r.ad_id
+              const meta = aid ? adById[aid] : null
+              if (meta) {
+                r._ad_name = meta.ad_name
+                r._ad_status = meta.effective_status
+                r._adset_name = meta.adset_name
+              }
+            }
+          }
+          if (!cancelled) setRows(postFilter(merged).sort((a, b) =>
             (b.created_at || b.submitted_at || '').localeCompare(a.created_at || a.submitted_at || '')))
           return
         }
@@ -2550,6 +2577,7 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
               <tr style={{ borderBottom: '1px solid var(--rule)' }}>
                 <th style={drillTh}>Closed at</th>
                 <th style={drillTh}>Prospect</th>
+                <th style={drillTh}>Creative</th>
                 <th style={drillTh}>Attribution</th>
                 <th style={{ ...drillTh, textAlign: 'right' }}>Revenue</th>
                 <th style={{ ...drillTh, textAlign: 'right' }}>Cash</th>
@@ -2557,20 +2585,37 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
             </thead>
             <tbody>
               {rows.map((r, idx) => {
-                // Mixed-source table: close rows come from lib_close_resolved
-                // (resolved by HYROS / closer mapping), tf fallback rows come
-                // from typeform is_closed=true that has no resolved match yet.
                 const isTf = r.kind === 'tf'
                 const key = r.closer_call_id || r.response_id || `${r.kind}-${idx}`
                 const closedAt = (r.created_at || r.submitted_at || '').slice(0, 10) || '—'
                 const name = r.clean_name || r.prospect_name || r.display_name || r.email || 'Unknown'
                 const attr = isTf ? 'typeform · unresolved' : (r.attribution_source || 'attributed')
+                const adName = r._ad_name
+                const adStatus = r._ad_status
+                const isPaused = adStatus && adStatus !== 'ACTIVE'
                 return (
                   <tr key={key} style={{ borderBottom: '1px solid var(--rule)' }}>
                     <td style={drillTd}>{closedAt}</td>
                     <td style={drillTd}>
                       <div style={{ fontFamily: 'var(--serif)', fontWeight: 500, color: 'var(--ink)', fontSize: 14 }}>{name}</div>
                       {isTf && r.email && <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.email}</div>}
+                    </td>
+                    <td style={drillTd}>
+                      {adName ? (
+                        <>
+                          <div style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink)' }}>{adName}</div>
+                          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', marginTop: 2 }}>
+                            {r._adset_name || '—'}
+                            {isPaused && (
+                              <span style={{ marginLeft: 6, padding: '1px 5px', background: '#fee', color: '#a44', borderRadius: 2, fontSize: 9 }}>
+                                {adStatus}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>no ad attribution</span>
+                      )}
                     </td>
                     <td style={drillTd}>
                       <span style={{
