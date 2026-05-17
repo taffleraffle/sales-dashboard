@@ -1128,8 +1128,63 @@ async function fetchReschCancel({ from, to }) {
 }
 
 async function fetchLeads({ from, to }) {
-  // Pull live from GHL — we don't cache opportunities locally. SCIO USA only.
-  // Slow first call (~3-8s for 30d) but accurate.
+  // Query the local ghl_opportunities mirror — instant (~100ms) vs the
+  // 10-15s live GHL fetch. The mirror is populated by
+  // fetchGHLLeadsByDate (auto-sync) so this stays current. The opportunity
+  // table doesn't carry contact name/email/phone — we join to ghl_contacts.
+  //
+  // Fallback: if the mirror is empty (e.g. first deploy before sync),
+  // fall through to the live GHL fetch so the drilldown still works.
+  const sinceTs = `${from}T00:00:00`
+  const untilTs = `${to}T23:59:59`
+  const opps = []
+  const PAGE = 1000
+  let offset = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('ghl_opportunities')
+      .select('id, ghl_contact_id, created_at, source, stage_id, name')
+      .gte('created_at', sinceTs).lte('created_at', untilTs)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + PAGE - 1)
+    if (error) { console.warn('local opps query failed, falling back to GHL:', error.message); break }
+    if (!data?.length) break
+    opps.push(...data)
+    if (data.length < PAGE) break
+    offset += PAGE
+  }
+
+  if (opps.length) {
+    // Join contacts in one query for speed
+    const contactIds = [...new Set(opps.map(o => o.ghl_contact_id).filter(Boolean))]
+    const byId = {}
+    const C_PAGE = 500
+    for (let i = 0; i < contactIds.length; i += C_PAGE) {
+      const slice = contactIds.slice(i, i + C_PAGE)
+      const { data } = await supabase
+        .from('ghl_contacts')
+        .select('ghl_contact_id, full_name, first_name, last_name, email, phone')
+        .in('ghl_contact_id', slice)
+      for (const c of (data || [])) byId[c.ghl_contact_id] = c
+    }
+    return opps.map(o => {
+      const c = byId[o.ghl_contact_id] || {}
+      const name = c.full_name
+        || [c.first_name, c.last_name].filter(Boolean).join(' ')
+        || o.name
+        || '—'
+      return {
+        created: (o.created_at || '').split('T')[0],
+        name,
+        email: c.email || '—',
+        phone: c.phone || '—',
+        source: o.source || '—',
+        stage: o.stage_id || '—',
+      }
+    }).sort((a, b) => (b.created || '').localeCompare(a.created || ''))
+  }
+
+  // Fallback: live GHL fetch — slow but correct when local mirror is empty.
   const SCIO_USA = 'ZN1DW9S9qS540PNAXSxa'
   const headers = {
     Authorization: `Bearer ${import.meta.env.VITE_GHL_API_KEY}`,
@@ -1163,6 +1218,24 @@ async function fetchLeads({ from, to }) {
       stage: o.pipelineStageId || '—',
     }))
     .sort((a, b) => (b.created || '').localeCompare(a.created || ''))
+}
+
+async function fetchAdspend({ from, to }) {
+  // Daily adspend from marketing_tracker — used by the Adspend drilldown.
+  const { data } = await supabase
+    .from('marketing_tracker')
+    .select('date, adspend, leads, qualified_bookings, auto_bookings')
+    .gte('date', from).lte('date', to)
+    .order('date', { ascending: false })
+  return (data || [])
+    .filter(r => (r.adspend || 0) > 0 || (r.leads || 0) > 0)
+    .map(r => ({
+      date: r.date,
+      adspend: r.adspend,
+      leads: r.leads,
+      cpl: (r.leads || 0) > 0 ? r.adspend / r.leads : null,
+      bookings: (r.qualified_bookings || 0) + (r.auto_bookings || 0),
+    }))
 }
 
 const DRILLDOWN_CONFIG = {
@@ -1284,7 +1357,20 @@ const DRILLDOWN_CONFIG = {
       { key: 'source', label: 'Source', cls: 'text-text-400 text-[10px]' },
     ],
     emptyMsg: 'No leads in this window.',
-    slowFirstLoad: true,
+  },
+  adspend: {
+    title: 'Adspend',
+    subtitle: 'Daily Meta adspend in this window',
+    fetcher: fetchAdspend,
+    chart: { dateKey: 'date', mode: 'value', valueKey: 'adspend', label: 'Adspend per day ($)', fmtValue: v => `$${Math.round(v).toLocaleString()}` },
+    columns: [
+      { key: 'date', label: 'Date', cls: 'tabular-nums' },
+      { key: 'adspend', label: 'Spend', align: 'right', render: r => r.adspend ? `$${Math.round(r.adspend).toLocaleString()}` : '—' },
+      { key: 'leads', label: 'Leads', align: 'right', cls: 'tabular-nums' },
+      { key: 'cpl', label: 'CPL', align: 'right', render: r => r.cpl ? `$${Math.round(r.cpl)}` : '—' },
+      { key: 'bookings', label: 'Bookings', align: 'right', cls: 'tabular-nums' },
+    ],
+    emptyMsg: 'No adspend in this window.',
   },
   closes: {
     title: 'Closes',
@@ -1507,7 +1593,7 @@ async function enrichRowsWithProspectEmails(rows) {
 // Bars colored by direction relative to window-period average: lighter
 // than avg = below, darker = above. This makes "ramping up" vs "tailing
 // off" patterns readable at a glance.
-function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = null, label, fmtValue }) {
+function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = null, label, fmtValue, valueKey = null }) {
   const { from, to } = resolveRange(range)
   // Build day list inclusive
   const days = []
@@ -1517,14 +1603,23 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
     days.push(cursor.toISOString().slice(0, 10))
     cursor.setDate(cursor.getDate() + 1)
   }
-  // Count rows per day
+  // Per-day counts AND per-day value-key sums (for mode='value'). The
+  // value-key path lets Adspend / any direct-numeric drilldown plot the
+  // actual column value (e.g. row.adspend) rather than just row counts.
   const counts = Object.fromEntries(days.map(d => [d, 0]))
+  const valueSum = Object.fromEntries(days.map(d => [d, 0]))
   for (const r of (rows || [])) {
     const d = String(r[dateKey] || '').slice(0, 10)
-    if (counts[d] !== undefined) counts[d]++
+    if (counts[d] !== undefined) {
+      counts[d]++
+      if (valueKey) valueSum[d] += parseFloat(r[valueKey] || 0)
+    }
   }
-  // Build series — { day, value, label }
+  // Build series — { day, value, count }
   const series = days.map(d => {
+    if (mode === 'value' && valueKey) {
+      return { day: d, value: valueSum[d], count: counts[d] }
+    }
     if (mode === 'cost') {
       const spend = spendByDate?.[d] || 0
       const ct = counts[d]
@@ -1551,6 +1646,7 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
   const barW = Math.max(2, (innerW / series.length) - 2)
 
   const fmt = fmtValue || ((v) => mode === 'cost' ? `$${Math.round(v)}` : v)
+  const [hoverIdx, setHoverIdx] = useState(null)
 
   if (maxV === 0 && totalCount === 0) {
     return (
@@ -1587,30 +1683,76 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
             </g>
           )
         })()}
-        {/* Bars */}
+        {/* Bars + invisible hover hit-areas (so 0-value days respond too) */}
         {series.map((p, i) => {
-          if (p.value == null || p.value === 0) {
-            return null
-          }
-          const h = maxV > 0 ? (p.value / maxV) * innerH : 0
-          const x = PAD_L + (i * (innerW / series.length)) + 1
-          const y = PAD_T + innerH - h
-          const aboveAvg = p.value > avgV
+          const colX = PAD_L + (i * (innerW / series.length))
+          const colW = innerW / series.length
+          const h = (p.value != null && p.value > 0 && maxV > 0) ? (p.value / maxV) * innerH : 0
+          const barX = colX + 1
+          const barY = PAD_T + innerH - h
+          const aboveAvg = p.value != null && p.value > avgV
+          const isHover = hoverIdx === i
           return (
             <g key={p.day}>
+              {h > 0 && (
+                <rect
+                  x={barX}
+                  y={barY}
+                  width={barW}
+                  height={h}
+                  fill={aboveAvg ? 'var(--accent)' : 'var(--ink-3)'}
+                  opacity={isHover ? 1 : (aboveAvg ? 0.9 : 0.55)}
+                  stroke={isHover ? 'var(--ink)' : 'none'}
+                  strokeWidth={isHover ? 1 : 0}
+                />
+              )}
+              {/* Invisible full-column hit area so 0-value days still hover */}
               <rect
-                x={x}
-                y={y}
-                width={barW}
-                height={h}
-                fill={aboveAvg ? 'var(--accent)' : 'var(--ink-3)'}
-                opacity={aboveAvg ? 0.9 : 0.55}
-              >
-                <title>{`${p.day}\n${fmt(p.value)}${mode === 'cost' ? ` (${p.count} × $${Math.round(p.spend || 0)})` : ''}`}</title>
-              </rect>
+                x={colX}
+                y={PAD_T}
+                width={colW}
+                height={innerH}
+                fill="transparent"
+                onMouseEnter={() => setHoverIdx(i)}
+                onMouseLeave={() => setHoverIdx(curr => curr === i ? null : curr)}
+                style={{ cursor: 'pointer' }}
+              />
             </g>
           )
         })}
+        {/* Hover tooltip — positioned near hovered bar */}
+        {hoverIdx != null && (() => {
+          const p = series[hoverIdx]
+          const colX = PAD_L + (hoverIdx * (innerW / series.length))
+          const colW = innerW / series.length
+          const cx = colX + colW / 2
+          // Position tooltip above bar if there's room, else inside
+          const tipW = 130
+          const tipH = mode === 'cost' || mode === 'value' ? 42 : 30
+          let tipX = cx - tipW / 2
+          if (tipX < PAD_L) tipX = PAD_L
+          if (tipX + tipW > W - PAD_R) tipX = W - PAD_R - tipW
+          const tipY = Math.max(PAD_T, PAD_T + 4)
+          return (
+            <g pointerEvents="none">
+              <rect x={tipX} y={tipY} width={tipW} height={tipH} fill="var(--paper)" stroke="var(--ink)" strokeWidth="1" rx="2" />
+              <text x={tipX + 6} y={tipY + 12} fontSize="10" fontFamily="var(--mono)" fill="var(--ink-3)">{p.day}</text>
+              <text x={tipX + 6} y={tipY + 25} fontSize="11" fontFamily="var(--mono)" fill="var(--ink)" fontWeight="600">
+                {p.value != null ? fmt(p.value) : 'no data'}
+              </text>
+              {mode === 'cost' && p.value != null && (
+                <text x={tipX + 6} y={tipY + 37} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)">
+                  {p.count} × ${Math.round(p.spend || 0).toLocaleString()}
+                </text>
+              )}
+              {mode === 'value' && (
+                <text x={tipX + 6} y={tipY + 37} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)">
+                  {p.count} {p.count === 1 ? 'entry' : 'entries'}
+                </text>
+              )}
+            </g>
+          )
+        })()}
         {/* X axis labels — first, middle, last */}
         {[0, Math.floor(series.length / 2), series.length - 1].map(i => {
           if (i < 0 || i >= series.length) return null
@@ -1669,6 +1811,7 @@ function DrilldownModal({ kind, range, onClose, spendByDate }) {
               dateKey={config.chart.dateKey}
               range={range}
               mode={config.chart.mode || 'count'}
+              valueKey={config.chart.valueKey}
               spendByDate={spendByDate}
               label={config.chart.label}
               fmtValue={config.chart.fmtValue}
@@ -3024,7 +3167,7 @@ export default function MarketingPerformance() {
         const leadToQ30 = Math.min(100, rawLeadToQ30)
         return (
           <Section title="Spend & Lead Acquisition" cols={8}>
-            <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={hasOverride('adspend') ? wf?.adspend : null} tip="Total Meta Ads spend (converted to USD)" />
+            <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={hasOverride('adspend') ? wf?.adspend : null} tip="Total Meta Ads spend (converted to USD). Click for daily breakdown." onClick={() => setDrilldown('adspend')} />
             <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={gated(upstream.leads, wf?.leads)} tip="New opportunities created in SCIO USA pipeline. Click to view." onClick={() => setDrilldown('leads')} />
             <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={gated(upstream.leads, wf?.cpl)} tip="Cost Per Lead = Adspend / Leads. Click to see daily CPL trend." onClick={() => setDrilldown('cpl')} />
             <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} whatIf={gated(upstream.bookings, wf?.bookings_all)} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
