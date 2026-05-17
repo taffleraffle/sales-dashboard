@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import EditorialDate from '../../components/EditorialDate'
 import { dateRangeBoundsET } from '../../lib/dateUtils'
 import { useCloserCallProspectMetrics } from '../../hooks/useCloserCallProspectMetrics'
+import { subscribeSyncStatus, getLastSyncTime } from '../../services/autoSync'
 
 /*
   Performance view — hierarchical rollup.
@@ -644,19 +645,31 @@ export default function AdsPerformance() {
         bucket.revenue += row._rev || 0
         bucket.cash    += row._cash || 0
       }
-      // Ad → parent lookup. When a row has ad_id, the AD's parent
-      // adset/campaign is the source-of-truth — the row's own
+      // Ad → parent + Adset → parent lookups. When a row has ad_id, the
+      // AD's parent adset/campaign is source-of-truth — the row's own
       // utm_term / utm_campaign may be stale (Meta rename drift) or
-      // missing. Prefer ad-parent lookup; fall back to the row's
-      // own scope field only when no ad_id is present.
+      // missing. Prefer ad-parent → adset-parent → row's own scope
+      // field, in that order.
       //
-      // Matches the drilldown's OR-scope fallback
-      // (`adset_id.eq.X OR ad_id.in.(child_ad_ids)`) — ad_id wins
-      // because it's the most reliable signal.
+      // Matches the drilldown's three-tier OR scope:
+      //   ad_id.in.(camp.adIds) OR adset_id.in.(camp.adsetIds) OR
+      //   utm_campaign.eq.(camp.name)
+      // Previously only ad-parent was consulted, so a typeform row
+      // whose adset_id matched the campaign but whose utm_campaign
+      // string drifted (or was null) fell into a different campaign
+      // bucket — that's the row-vs-drilldown drift Ben hit on the
+      // SCIO Restoration 5/2 campaign (row=8 leads, drilldown=10).
       const adParent = {}
-      for (const a of adsLoaded) adParent[a.ad_id] = { adset: a.adset_id, campaign: a.campaign_name }
+      const adsetParent = {}
+      for (const a of adsLoaded) {
+        adParent[a.ad_id] = { adset: a.adset_id, campaign: a.campaign_name }
+        if (a.adset_id) adsetParent[a.adset_id] = { campaign: a.campaign_name }
+      }
       const resolveAdset    = (row) => (row._ad ? adParent[row._ad]?.adset    : null) || row._adset
-      const resolveCampaign = (row) => (row._ad ? adParent[row._ad]?.campaign : null) || row._campaign
+      const resolveCampaign = (row) =>
+        (row._ad    ? adParent[row._ad]?.campaign       : null) ||
+        (row._adset ? adsetParent[row._adset]?.campaign : null) ||
+        row._campaign
 
       const bucketUnion = (...sourceLists) => {
         const ad = {}, adset = {}, campaign = {}
@@ -848,6 +861,27 @@ export default function AdsPerformance() {
     if (!adsCacheRef.data) return  // first mount path handled above
     load()
   }, [dateRange.startStr, dateRange.endStr])
+
+  // Live updates: when the background Meta status sync (15-min cadence)
+  // completes, blow away the 5-minute in-memory ads cache and re-fetch.
+  // Without this, the page kept showing "8/8 ACTIVE" for ads Ben had
+  // paused in Meta because the cached `ads` list was older than the
+  // status row in the DB. Triggers ONLY on a fresh metaAdStatus
+  // timestamp — not on every sync's notify().
+  useEffect(() => {
+    let lastSeen = getLastSyncTime('metaAdStatus') || 0
+    const unsub = subscribeSyncStatus(() => {
+      const t = getLastSyncTime('metaAdStatus') || 0
+      if (t > lastSeen) {
+        lastSeen = t
+        adsCacheRef.data = null  // force loadStatic to re-fetch from DB
+        adsCacheRef.ts = 0
+        ;(async () => { await loadStatic(); await load() })()
+      }
+    })
+    return unsub
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Build the hierarchical tree: campaign → adset → ads, with rollups.
   // Parent status is derived bottom-up: if ANY descendant ad is ACTIVE the

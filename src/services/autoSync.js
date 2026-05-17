@@ -15,6 +15,7 @@ const SYNC_INTERVALS = {
   marketingTracker: 1 * 60 * 60 * 1000, // 1 hour
   meta: 1 * 60 * 60 * 1000,          // 1 hour — Meta Ads spend + GHL pipeline leads/bookings
   metaAds: 1 * 60 * 60 * 1000,       // 1 hour — per-ad insights + creative metadata
+  metaAdStatus: 15 * 60 * 1000,      // 15 min — effective_status only (pause/active flips)
   typeform: 1 * 60 * 60 * 1000,      // 1 hour — Typeform responses (h4il4Sla + WndFLJux)
   ghlContacts: 2 * 60 * 60 * 1000,   // 2 hours — full contact + attribution refresh
   hyrosBackfill: 6 * 60 * 60 * 1000, // 6 hours — wide-window HYROS pull (slow)
@@ -28,6 +29,7 @@ const SYNC_LABELS = {
   marketingTracker: 'Marketing (EOD)',
   meta: 'Marketing (Meta + GHL)',
   metaAds: 'Meta Ads (per-ad)',
+  metaAdStatus: 'Meta ad status (active/paused)',
   typeform: 'Typeform responses',
   ghlContacts: 'GHL contacts (attribution)',
   hyrosBackfill: 'HYROS (retroactive)',
@@ -174,6 +176,27 @@ async function syncMarketingTracker(force = false) {
   } catch (e) {
     console.warn('[auto-sync] Marketing tracker failed:', e.message)
     markError('marketingTracker', e)
+  } finally { notify() }
+}
+
+// Lightweight status-only sync. Keeps ads.effective_status fresh every
+// 15 min so the "8/8 ACTIVE" badge on /sales/ads/performance reflects
+// what's actually running in Meta right now. The bigger syncMetaAdLevel
+// only refreshes status for ads that had recent spend AND haven't been
+// synced in 7 days, so paused-zero-spend ads stayed stuck on ACTIVE.
+async function syncMetaAdStatus(force = false) {
+  if (!shouldRun('metaAdStatus', force)) return
+  markRun('metaAdStatus')
+  try {
+    const { syncMetaAdStatuses } = await import('./metaAdsSync')
+    const result = await syncMetaAdStatuses()
+    console.log('[auto-sync] Meta ad status done:', result)
+    clearError('metaAdStatus')
+    clearCooldown('metaAdStatus')
+  } catch (e) {
+    console.warn('[auto-sync] Meta ad status failed:', e.message)
+    markError('metaAdStatus', e)
+    if (isRateLimitErr(e)) markCooldown('metaAdStatus')
   } finally { notify() }
 }
 
@@ -324,7 +347,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
  * steady-state cost of sequential execution is essentially zero.
  */
 export async function runAutoSync({ force = false } = {}) {
-  const tasks = [syncStripe, syncFanbasis, syncGHL, syncEmails, syncMarketingTracker, syncMeta, syncMetaAdLevel, syncTypeform, syncGhlContacts, syncHyrosBackfill]
+  // syncMetaAdStatus runs FIRST so the active/paused badge is always
+  // fresh — it's the lightest task (single Meta endpoint, no insights).
+  const tasks = [syncMetaAdStatus, syncStripe, syncFanbasis, syncGHL, syncEmails, syncMarketingTracker, syncMeta, syncMetaAdLevel, syncTypeform, syncGhlContacts, syncHyrosBackfill]
   for (const task of tasks) {
     try { await task(force) } catch (_e) { void _e }
     await sleep(500)

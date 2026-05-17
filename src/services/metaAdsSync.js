@@ -694,6 +694,82 @@ async function backfillAdContext(adIds) {
 }
 
 /**
+ * Fast status-only refresh. Pulls every ad on the account from
+ * /act_{ACCOUNT_ID}/ads?fields=id,effective_status,status and updates
+ * the `ads` table. Unlike syncMetaAdsAtAdLevel, this does NOT depend on
+ * the ad having recent insights — so paused-with-zero-spend ads still
+ * have their status refreshed. Cheap to call frequently (~1-2s total)
+ * because creative metadata is skipped.
+ *
+ * READ-ONLY against Meta.
+ */
+export async function syncMetaAdStatuses() {
+  if (!ACCOUNT_ID || !ACCESS_TOKEN) {
+    throw new Error('Meta Ads credentials missing — set VITE_META_ADS_ACCOUNT_ID and VITE_META_ADS_ACCESS_TOKEN')
+  }
+  const startedAt = Date.now()
+  // Default scope = everything except DELETED. Includes ACTIVE / PAUSED /
+  // CAMPAIGN_PAUSED / ADSET_PAUSED / PREAPPROVED / PENDING_REVIEW /
+  // DISAPPROVED / PENDING_BILLING_INFO / IN_PROCESS / WITH_ISSUES so a
+  // single endpoint hit covers every visible ad in the account.
+  const params = new URLSearchParams({
+    access_token: ACCESS_TOKEN,
+    fields: 'id,effective_status,status',
+    limit: '500',
+  })
+  let url = `${BASE_URL}/act_${ACCOUNT_ID}/ads?${params}`
+  const records = []
+  let pages = 0
+  while (url) {
+    pages++
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 20000)
+    let res
+    try { res = await fetch(url, { signal: controller.signal }) }
+    catch (e) { clearTimeout(timeout); throw new Error(`Meta status sync page ${pages} failed: ${e.message}`) }
+    clearTimeout(timeout)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(`Meta status sync ${res.status}: ${err.error?.message || res.statusText}`)
+    }
+    const json = await res.json()
+    for (const ad of (json.data || [])) {
+      if (!ad.id) continue
+      records.push({
+        ad_id: ad.id,
+        status: ad.status || null,
+        effective_status: ad.effective_status || null,
+        last_synced_at: new Date().toISOString(),
+      })
+    }
+    url = json.paging?.next || null
+  }
+
+  if (!records.length) {
+    return { adsUpdated: 0, durationMs: Date.now() - startedAt, pages }
+  }
+
+  // Chunked UPDATE-only path so we don't accidentally create rows for ads
+  // that don't yet exist in `ads` (which would NULL out ad_name, creative_id,
+  // etc.). Upsert with onConflict:'ad_id' is unsafe here because the partial
+  // record would clobber NOT NULL'd creative columns on insert.
+  let updated = 0
+  for (const r of records) {
+    const { error, count } = await supabase
+      .from('ads')
+      .update({
+        status: r.status,
+        effective_status: r.effective_status,
+        last_synced_at: r.last_synced_at,
+      }, { count: 'exact' })
+      .eq('ad_id', r.ad_id)
+    if (!error && (count || 0) > 0) updated++
+  }
+  console.log(`[meta-sync] status-only: ${updated}/${records.length} ads updated in ${((Date.now() - startedAt) / 1000).toFixed(1)}s (${pages} pages)`)
+  return { adsSeen: records.length, adsUpdated: updated, durationMs: Date.now() - startedAt, pages }
+}
+
+/**
  * Top-level: pull ad-level insights + creative metadata from Meta and persist.
  * READ-ONLY against Meta. No POST/PUT/PATCH/DELETE is ever sent.
  *
