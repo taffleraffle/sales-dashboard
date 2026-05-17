@@ -1162,6 +1162,24 @@ async function fetchShowRate({ from, to }) {
     })
 }
 
+async function fetchCpNew({ from, to }) {
+  // Daily Cost/New Live Call — spend / new_live_calls per day.
+  const { data } = await supabase
+    .from('marketing_tracker')
+    .select('date, adspend, new_live_calls, live_calls')
+    .gte('date', from).lte('date', to)
+    .order('date', { ascending: false })
+  return (data || [])
+    .filter(r => (r.adspend || 0) > 0 || (r.new_live_calls || 0) > 0)
+    .map(r => ({
+      date: r.date,
+      adspend: r.adspend,
+      new_live_calls: r.new_live_calls,
+      live_calls: r.live_calls,
+      cpn: (r.new_live_calls || 0) > 0 ? r.adspend / r.new_live_calls : null,
+    }))
+}
+
 async function fetchCpaTrial({ from, to }) {
   // Daily CPA (Trial) — spend / closes per day.
   const { data: tracker } = await supabase
@@ -1447,6 +1465,19 @@ const DRILLDOWN_CONFIG = {
       { key: 'netShow', label: 'Net %', align: 'right', render: r => `${r.netShow.toFixed(0)}%` },
     ],
     emptyMsg: 'No bookings in this window to compute show rate.',
+  },
+  cpnew: {
+    title: 'Cost Per New Live Call',
+    subtitle: 'Daily adspend ÷ new live calls that day',
+    fetcher: fetchCpNew,
+    chart: { dateKey: 'date', mode: 'value', valueKey: 'cpn', label: 'Cost per new live per day ($)', fmtValue: v => `$${Math.round(v).toLocaleString()}` },
+    columns: [
+      { key: 'date', label: 'Date', cls: 'tabular-nums' },
+      { key: 'adspend', label: 'Spend', align: 'right', render: r => r.adspend ? `$${Math.round(r.adspend).toLocaleString()}` : '—' },
+      { key: 'new_live_calls', label: 'New Live', align: 'right', cls: 'tabular-nums' },
+      { key: 'cpn', label: 'Cost/New', align: 'right', render: r => r.cpn ? `$${Math.round(r.cpn).toLocaleString()}` : '—' },
+    ],
+    emptyMsg: 'No adspend or new live calls in this window.',
   },
   cpaTrial: {
     title: 'CPA (Trial)',
@@ -3345,7 +3376,7 @@ export default function MarketingPerformance() {
             <KPI label="Cancel%" value={cancelRate} format="%" trailing={cancelRate30} prev={cancelRatePrev} tip={`Cancellations ÷ Qualified Bookings. ${stats.cancels || 0} cancels out of ${denom} qualified bookings (calendar). Click to view.`} onClick={() => setDrilldown('rc')} />
             <KPI label="Gross Show%" value={grossShowRate} format="%" trailing={grossShowRate30} tip={`Live shows ÷ ALL qualified bookings (includes calls that later cancelled or rescheduled). ${stats.new_live_calls || 0} live ÷ ${denom} booked. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
             <KPI label="Net Show%" value={netShowRate} format="%" benchmark={bm.show_rate_new} trailing={netShowRate30} tip={`Live shows ÷ CONFIRMED bookings (Qualified Bookings minus cancels and reschedules). ${stats.new_live_calls || 0} live ÷ ${netDenom} confirmed = ${netShowRate.toFixed(1)}%. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
-            <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={gated(upstream.live, wf?.cost_per_new_live_call)} tip="Adspend ÷ Net New" />
+            <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={gated(upstream.live, wf?.cost_per_new_live_call)} tip="Adspend ÷ Net New Live calls. Click for daily trend." onClick={() => setDrilldown('cpnew')} />
           </Section>
         )
       })()}
