@@ -187,7 +187,11 @@ function MTDFunnel({ stats }) {
   const steps = [
     { label: 'Leads', value: stats.leads },
     { label: 'Booked', value: stats.qualified_bookings },
-    { label: 'Net Live', value: stats.live_calls },
+    // NC-only — matches the headline "Net New Live" tile and the Ads
+    // page Live count. Prior used stats.live_calls (NC + FU) which
+    // showed a different number than the same metric label everywhere
+    // else on the page.
+    { label: 'Net Live', value: stats.new_live_calls },
     { label: 'Offers', value: stats.offers },
     { label: 'Closes', value: stats.closes },
     { label: 'Ascensions', value: stats.ascensions },
@@ -221,14 +225,23 @@ function MTDFunnel({ stats }) {
 }
 
 // ── Trailing Period Summary ────────────────────────────────────────
-function TrailingTable({ entries }) {
+// `applyProspectMetrics` is passed in so each trailing period gets the
+// same deduped numbers the top tiles use. Without this, the table
+// silently showed legacy EOD self-report counts while the rest of the
+// page used per-call truth — same drift class as everything else.
+function TrailingTable({ entries, applyProspectMetrics }) {
   const periods = [
     { label: '4 Days', days: 4 },
     { label: '7 Days', days: 7 },
     { label: '30 Days', days: 30 },
     { label: 'MTD', days: 'mtd' },
   ]
-  const rows = periods.map(p => ({ ...p, s: computeMarketingStats(filterByDays(entries, p.days)) }))
+  const rows = periods.map(p => ({
+    ...p,
+    s: applyProspectMetrics
+      ? applyProspectMetrics(computeMarketingStats(filterByDays(entries, p.days)), p.days)
+      : computeMarketingStats(filterByDays(entries, p.days)),
+  }))
 
   const cols = [
     { label: 'Spend', k: 'adspend', f: f$ },
@@ -236,7 +249,9 @@ function TrailingTable({ entries }) {
     { label: 'CPL', k: 'cpl', f: f$ },
     { label: 'Booked', k: 'qualified_bookings', f: fN },
     { label: 'L→B%', k: 'lead_to_booking_pct', f: fP },
-    { label: 'Net Live', k: 'live_calls', f: fN },
+    // Net Live uses new_live_calls (NC-only, deduped) — matches the
+    // headline "Net New Live" tile and the Ads page Live count.
+    { label: 'Net Live', k: 'new_live_calls', f: fN },
     { label: 'Show%', k: 'show_rate', f: fP },
     { label: 'Offers', k: 'offers', f: fN },
     { label: 'Closes', k: 'closes', f: fN },
@@ -2382,7 +2397,7 @@ export default function MarketingPerformance() {
 
       {/* Trailing Period Summary */}
       <div className="mb-5">
-        <TrailingTable entries={entries} />
+        <TrailingTable entries={entries} applyProspectMetrics={applyProspectMetrics} />
       </div>
 
       {/* Daily Tracker */}

@@ -1163,17 +1163,21 @@ export default function AdsPerformance() {
           const closeSub = sub(eod.closes, closesCount, attr.closes, eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : '')
           const liveSub  = sub(eod.live,  liveCount,   attr.live)
           const click = (metric) => () => setDrill({ metric, scope: { level: 'all' } })
+          const tipProspect = 'Unique prospects across all campaigns in this window, deduped by email (or name). Cross-campaign prospects count ONCE here — but they count in EACH campaign they touch in the table below, so the table-row sum may exceed this number.'
+          const tipLive   = 'Net Live = unique new-call prospects with outcome IN (closed, not_closed) per closer EOD. Same source the Marketing dashboard uses. Click to list prospects.'
+          const tipCloses = 'Unique prospects with outcome=closed per closer EOD. Same source as Marketing dashboard cpa_trial / pm.closedProspects. Click to list prospects.'
           return (
             <>
-              <TotalsTile label="Leads"      value={fmtN(prosp.leads)}  sub={sub(eod.leads,  prosp.leads,  attr.leads)}  onClick={click('leads')} />
-              <TotalsTile label="Booked"     value={fmtN(prosp.booked)} sub={sub(eod.booked, prosp.booked, attr.booked)} onClick={click('booked')} />
-              <TotalsTile label="Live calls" value={fmtN(liveCount)}    sub={liveSub}                                    onClick={click('live')} />
+              <TotalsTile label="Leads"      value={fmtN(prosp.leads)}  sub={sub(eod.leads,  prosp.leads,  attr.leads)}  onClick={click('leads')}  tip={tipProspect} />
+              <TotalsTile label="Booked"     value={fmtN(prosp.booked)} sub={sub(eod.booked, prosp.booked, attr.booked)} onClick={click('booked')} tip={tipProspect} />
+              <TotalsTile label="Live calls" value={fmtN(liveCount)}    sub={liveSub}                                    onClick={click('live')}   tip={tipLive} />
               <TotalsTile
                 label="Closes"
                 value={fmtN(closesCount)}
                 sub={closeSub}
                 valueColor={closesCount > 0 ? '#1f7a3a' : undefined}
                 onClick={click('closed')}
+                tip={tipCloses}
               />
             </>
           )
@@ -1576,7 +1580,7 @@ function StatusPill({ status }) {
   )
 }
 
-function TotalsTile({ label, value, sub, valueColor, onClick }) {
+function TotalsTile({ label, value, sub, valueColor, onClick, tip }) {
   const clickable = typeof onClick === 'function'
   return (
     <div
@@ -1584,6 +1588,7 @@ function TotalsTile({ label, value, sub, valueColor, onClick }) {
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+      title={tip || undefined}
       style={{
         cursor: clickable ? 'pointer' : 'default',
         padding: clickable ? '2px 4px' : 0,
@@ -1596,6 +1601,7 @@ function TotalsTile({ label, value, sub, valueColor, onClick }) {
     >
       <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 2 }}>
         {label}{clickable && <span style={{ color: 'var(--ink-4)', marginLeft: 4 }}>↗</span>}
+        {tip && <span style={{ color: 'var(--ink-4)', marginLeft: 4, cursor: 'help' }}>ⓘ</span>}
       </div>
       <div style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, color: valueColor || 'var(--ink)', lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
       {sub && <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.08em', marginTop: 2 }}>{sub}</div>}
@@ -1899,7 +1905,11 @@ function applyDrillScope(q, scope, cols) {
   if (scope.level === 'ad') return q.eq(cols.ad, scope.id)
   if (scope.level === 'adset') {
     const adIds = scope.adIds || []
-    if (adIds.length > 0) return q.or(`${cols.adset}.eq.${scope.id},${cols.ad}.in.(${adIds.join(',')})`)
+    // pgQuote on adset.eq is defensive — Meta adset IDs are numeric so
+    // they're safe today, but if we ever store a non-numeric adset_id
+    // (e.g., synthetic groupings) the raw interpolation would break
+    // .or() parsing. Same shape as the campaign branch below.
+    if (adIds.length > 0) return q.or(`${cols.adset}.eq.${pgQuote(scope.id)},${cols.ad}.in.(${adIds.join(',')})`)
     return q.eq(cols.adset, scope.id)
   }
   if (scope.level === 'campaign') {
