@@ -1630,9 +1630,20 @@ export default function MarketingPerformance() {
             cohortMap[d].push({ contactKey, isDq, contactName })
           }
         }
+
+        // Lead-cohort-bucketed (booking attributed to its LEAD's createdAt).
+        // Falls back to booked_at when no opportunity is known for the
+        // contact (orphan booking — e.g. Calendly direct, no pipeline op).
+        const leadDate = leadDateByContact[a.ghl_contact_id]
+        const cohortDate = leadDate || (rawBooked ? String(rawBooked).split(' ')[0].split('T')[0] : null)
+        if (cohortDate && cohortDate >= sinceStr && cohortDate <= todayStr) {
+          if (!leadCohortMap[cohortDate]) leadCohortMap[cohortDate] = []
+          leadCohortMap[cohortDate].push({ contactKey, isDq, contactName })
+        }
       }
       setBookingsByDate(map)
       setCohortBookingsByDate(cohortMap)
+      setLeadCohortBookingsByDate(leadCohortMap)
     }
     loadBookings()
     return () => { cancelled = true }
@@ -1819,6 +1830,44 @@ export default function MarketingPerformance() {
     return { all, qualified, dq }
   }, [cohortBookingsByDate])
 
+  // Lead-cohort booking sum: count unique prospects whose LEAD's createdAt
+  // fell in the window, regardless of when they booked. Pairs with stats.leads
+  // (also bucketed by lead createdAt) so L→Q% = qualified / stats.leads is a
+  // true conversion rate where Q.Book is always ≤ Leads.
+  //
+  // When migration 055 hasn't been applied yet, leadCohortBookingsByDate is
+  // empty and this returns { all:0, qualified:0, dq:0 } — the callsite then
+  // falls back to bk.qualified (booked_at-bucketed) and caps the ratio at
+  // 100%, preserving prior behavior.
+  const sumLeadCohortBookings = useCallback((days) => {
+    const filterDate = (() => {
+      if (days === 'mtd') {
+        const todayStr = todayET()
+        const start = todayStr.slice(0, 7) + '-01'
+        return d => d >= start
+      }
+      if (days && typeof days === 'object' && days.from) return d => d >= days.from && d <= days.to
+      const sinceStr = etDateOffset(-Math.max(0, days - 1))
+      return d => d >= sinceStr
+    })()
+    const seen = new Map()
+    for (const [d, list] of Object.entries(leadCohortBookingsByDate)) {
+      if (!filterDate(d)) continue
+      for (const b of list) {
+        const existing = seen.get(b.contactKey)
+        if (!existing) seen.set(b.contactKey, { isDq: b.isDq })
+        else if (existing.isDq && !b.isDq) seen.set(b.contactKey, { isDq: false })
+      }
+    }
+    let all = 0, qualified = 0, dq = 0
+    for (const v of seen.values()) {
+      all++
+      if (v.isDq) dq++
+      else qualified++
+    }
+    return { all, qualified, dq }
+  }, [leadCohortBookingsByDate])
+
   const rangeEntries = useMemo(() => filterByDays(entries, range), [entries, range])
   const mtdEntries = useMemo(() => filterByDays(entries, 'mtd'), [entries])
   const prevEntries = useMemo(() => filterPreviousPeriod(entries, range), [entries, range])
@@ -1980,6 +2029,13 @@ export default function MarketingPerformance() {
   // bookings "fell" purely from activating the panel).
   const bk = useMemo(() => sumBookings(range), [sumBookings, range])
   const bk30 = useMemo(() => sumBookings(30), [sumBookings])
+  // Lead-cohort booking counts — bookings attributed to the date their
+  // LEAD was created. Used for the L→Q% conversion tile so numerator and
+  // denominator share a cohort (leads created in window → of those, how
+  // many booked). When migration 055 hasn't been applied yet, these
+  // collapse to 0 and the L→Q% tile falls back to the booked_at numbers.
+  const bkLeadCohort = useMemo(() => sumLeadCohortBookings(range), [sumLeadCohortBookings, range])
+  const bkLeadCohort30 = useMemo(() => sumLeadCohortBookings(30), [sumLeadCohortBookings])
   // Possible duplicate prospects in the current window (same person
   // booked under multiple ghl_contact_ids — e.g. "Mike White" + "Michael").
   // Surfaced as a banner above the bookings tiles so Ben can merge in GHL.
@@ -2467,21 +2523,27 @@ export default function MarketingPerformance() {
         const cpb30 = bk30.all > 0 ? stats30.adspend / bk30.all : 0
         const cpqb = bk.qualified > 0 ? stats.adspend / bk.qualified : 0
         const cpqb30 = bk30.qualified > 0 ? stats30.adspend / bk30.qualified : 0
-        // L→Q% is comparing two DIFFERENT cohorts:
-        //   numerator = unique prospects who BOOKED a strategy call in
-        //               window (bk.qualified, bucketed by booked_at)
-        //   denominator = GHL opportunities CREATED in window
-        //               (stats.leads, bucketed by createdAt)
-        // A prospect who became a lead last month but booked this week
-        // is in the numerator but not the denominator → ratio can exceed
-        // 100% (Ben hit 162.5% on a 7d window). Until we sync GHL
-        // opportunities locally so we can cohort-true the join, cap the
-        // display at 100% and flag any cohort drift via a sentinel — the
-        // KPI tooltip explains what happened.
-        const rawLeadToQ = stats.leads > 0 ? (bk.qualified / stats.leads) * 100 : 0
-        const leadToQDrift = rawLeadToQ > 100
-        const leadToQ = leadToQDrift ? 100 : rawLeadToQ
-        const rawLeadToQ30 = stats30.leads > 0 ? (bk30.qualified / stats30.leads) * 100 : 0
+        // L→Q% — cohort-true conversion rate.
+        //
+        // Numerator + denominator both bucketed by LEAD createdAt: of the
+        // X opportunities created in the window, how many of those leads
+        // have booked a strategy call (any time after entering the
+        // pipeline). bkLeadCohort.qualified is filled by joining
+        // ghl_appointments → ghl_opportunities via ghl_contact_id (see
+        // migration 055 + fetchGHLLeadsByDate mirror).
+        //
+        // Fallback path: if migration 055 hasn't been applied yet (or
+        // the mirror hasn't synced), bkLeadCohort is empty and we fall
+        // back to the legacy booked_at-bucketed bk.qualified with a
+        // hard 100% cap. The tooltip surfaces which path is active so
+        // operators can tell when the mirror needs to sync.
+        const cohortAvailable = bkLeadCohort.qualified > 0 || bkLeadCohort.all > 0
+        const numerator = cohortAvailable ? bkLeadCohort.qualified : bk.qualified
+        const rawLeadToQ = stats.leads > 0 ? (numerator / stats.leads) * 100 : 0
+        const leadToQDrift = !cohortAvailable && rawLeadToQ > 100
+        const leadToQ = leadToQDrift ? 100 : Math.min(100, rawLeadToQ)
+        const numerator30 = bkLeadCohort30.qualified > 0 ? bkLeadCohort30.qualified : bk30.qualified
+        const rawLeadToQ30 = stats30.leads > 0 ? (numerator30 / stats30.leads) * 100 : 0
         const leadToQ30 = Math.min(100, rawLeadToQ30)
         return (
           <Section title="Spend & Lead Acquisition" cols={8}>
@@ -2490,10 +2552,14 @@ export default function MarketingPerformance() {
             <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={gated(upstream.leads, wf?.cpl)} tip="Cost Per Lead = Adspend / Leads" />
             <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} whatIf={gated(upstream.bookings, wf?.bookings_all)} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
             <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={gated(upstream.bookings, wf?.cpb_all)} tip="Adspend ÷ Bookings (all)" />
-            <KPI label="Q.Books" value={bk.qualified} format="n" trailing={bk30.qualified} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip={`Unique prospects who BOOKED a strategy call (excl. DQ Calendly) in this window, bucketed by booked_at. Some may be from leads created BEFORE the window — that's why Q.Book can exceed Leads in short ranges. ${bk.dq ? `${bk.dq} routed to DQ in this window. ` : ''}Click to view.`} onClick={() => setDrilldown('bookings')} />
-            <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} whatIf={gated(upstream.bookings, wf?.lead_to_booking_pct)} tip={leadToQDrift
-              ? `Capped at 100%. Raw ratio = ${rawLeadToQ.toFixed(0)}% because Q.Book counts prospects who booked in this window — some of those leads were created BEFORE the window. True conversion needs cohort-true math (pending: local sync of GHL opportunities).`
-              : 'Qualified Bookings ÷ Leads (window-matched, both bucketed by event date — approximate when cohorts overlap window edges).'} />
+            <KPI label="Q.Books" value={cohortAvailable ? bkLeadCohort.qualified : bk.qualified} format="n" trailing={bkLeadCohort30.qualified > 0 ? bkLeadCohort30.qualified : bk30.qualified} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip={cohortAvailable
+              ? `Of the ${stats.leads} leads created in this window, ${bkLeadCohort.qualified} have booked a qualified strategy call (cohort-true conversion). Click to view bookings activity (booked_at-bucketed: ${bk.qualified} unique prospects).`
+              : `Unique prospects who BOOKED a strategy call (excl. DQ Calendly) in this window, bucketed by booked_at. Cohort-true math will activate after ghl_opportunities mirror first syncs (migration 055). ${bk.dq ? `${bk.dq} routed to DQ in this window. ` : ''}Click to view.`} onClick={() => setDrilldown('bookings')} />
+            <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} whatIf={gated(upstream.bookings, wf?.lead_to_booking_pct)} tip={cohortAvailable
+              ? `True conversion rate: of the ${stats.leads} leads created in window, ${bkLeadCohort.qualified} booked a qualified strategy call. Cohort-aligned — denominator and numerator share the same lead-create window.`
+              : leadToQDrift
+                ? `Capped at 100%. Raw ratio = ${rawLeadToQ.toFixed(0)}% because Q.Book counts prospects who booked in this window — some of those leads were created BEFORE the window. Cohort-true math will activate once the ghl_opportunities mirror first syncs.`
+                : 'Qualified Bookings ÷ Leads (cohort-true math will activate once the ghl_opportunities mirror syncs).'} />
             <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} whatIf={gated(upstream.bookings, wf?.cpb)} tip="Adspend ÷ Qualified Bookings (excludes DQ)" />
           </Section>
         )
