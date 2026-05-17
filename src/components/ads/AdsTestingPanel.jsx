@@ -169,8 +169,20 @@ export default function AdsTestingPanel() {
     setAngles(prev => prev.map(a => a.id === id ? { ...a, ...data, adIds: a.adIds } : a))
   }
 
+  // confirmingDeleteId: which angle (if any) is in the "are you sure?"
+  // state. Inline two-click confirm — no native browser modal so we
+  // stay in the editorial theme.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState(null)
   const handleDelete = async (id) => {
-    if (!confirm('Delete this angle? Assignments will be removed too.')) return
+    if (confirmingDeleteId !== id) {
+      setConfirmingDeleteId(id)
+      // Auto-clear the confirm state after 5s if the user moves on.
+      setTimeout(() => {
+        setConfirmingDeleteId(curr => (curr === id ? null : curr))
+      }, 5000)
+      return
+    }
+    setConfirmingDeleteId(null)
     const { error } = await supabase.from('ad_angles').delete().eq('id', id)
     if (error) { setError(error.message); return }
     setAngles(prev => prev.filter(a => a.id !== id))
@@ -250,6 +262,7 @@ export default function AdsTestingPanel() {
               onToggle={() => setExpandedId(expandedId === angle.id ? null : angle.id)}
               onUpdate={(patch) => handleUpdate(angle.id, patch)}
               onDelete={() => handleDelete(angle.id)}
+              confirmingDelete={confirmingDeleteId === angle.id}
               onAssign={(adIds) => handleAssign(angle.id, adIds)}
               onUnassign={(adId) => handleUnassign(angle.id, adId)}
               loadAdsCache={loadAdsCacheIfNeeded}
@@ -299,7 +312,7 @@ function NewAngleForm({ onCreate, onCancel }) {
 }
 
 // ── Angle card (collapsed + expanded states) ────────────────────────
-function AngleCard({ angle, metrics, expanded, onToggle, onUpdate, onDelete, onAssign, onUnassign, loadAdsCache, adsCache }) {
+function AngleCard({ angle, metrics, expanded, onToggle, onUpdate, onDelete, confirmingDelete, onAssign, onUnassign, loadAdsCache, adsCache }) {
   const m = metrics || { spend: 0, leads: 0, booked: 0, live: 0, closes: 0, revenue: 0, cash: 0 }
   const cpl  = m.leads  > 0 ? m.spend / m.leads  : 0
   const cpb  = m.booked > 0 ? m.spend / m.booked : 0
@@ -352,8 +365,14 @@ function AngleCard({ angle, metrics, expanded, onToggle, onUpdate, onDelete, onA
                 background: angle.status === opt.id ? `${opt.color}11` : 'transparent',
               }}>{opt.label}</button>
             ))}
-            <button onClick={onDelete} style={{ ...btnGhost, marginLeft: 'auto', color: '#b41e1e' }}>
-              <Trash2 size={12} /> Delete
+            <button onClick={onDelete} style={{
+              ...btnGhost,
+              marginLeft: 'auto',
+              color: confirmingDelete ? '#fff' : '#b41e1e',
+              background: confirmingDelete ? '#b41e1e' : 'transparent',
+              borderColor: '#b41e1e',
+            }}>
+              <Trash2 size={12} /> {confirmingDelete ? 'Click again to confirm' : 'Delete'}
             </button>
           </div>
 

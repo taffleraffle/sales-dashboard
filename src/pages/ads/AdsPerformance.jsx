@@ -501,17 +501,23 @@ export default function AdsPerformance() {
       //   the Ads tile show 3 closes when the drilldown showed 2 (George
       //   Sidhom matched as "george@..." in typeform and "george sidhom"
       //   in lib_close_resolved → counted twice).
+      // Both helpers skip rows with NO key — they can't be distinguished
+      // from other key-less rows, so counting them inflates the universe.
       const unionCountEmail = (tfList, otherList) => {
         const emails = new Set(), names = new Set()
         let n = 0
         for (const r of tfList) {
           const e = lc(r.email), k = nameTok(r)
+          if (!e && !k) continue
+          if (e && emails.has(e)) continue
+          if (!e && k && names.has(k)) continue
           if (e) emails.add(e)
           if (k) names.add(k)
           n++
         }
         for (const r of otherList) {
           const e = lc(r.email), k = nameTok(r)
+          if (!e && !k) continue
           if (e && emails.has(e)) continue
           if (!e && k && names.has(k)) continue
           if (e) emails.add(e)
@@ -525,13 +531,16 @@ export default function AdsPerformance() {
         let n = 0
         for (const r of tfList) {
           const k = nameTok(r)
-          if (k) names.add(k)
+          if (!k) continue
+          if (names.has(k)) continue
+          names.add(k)
           n++
         }
         for (const r of otherList) {
           const k = nameTok(r)
-          if (k && names.has(k)) continue
-          if (k) names.add(k)
+          if (!k) continue
+          if (names.has(k)) continue
+          names.add(k)
           n++
         }
         return n
@@ -621,24 +630,33 @@ export default function AdsPerformance() {
 
       const accumulate = (target, scopeKey, row) => {
         if (!scopeKey) return
+        const k = row._dedupe
+        // Skip rows with NO dedupe key (no email AND no name). They can't
+        // be distinguished from each other, so counting them all inflates
+        // the universe. Prior version counted them as separate prospects,
+        // adding silent slop to every metric.
+        if (!k) return
         let bucket = target[scopeKey]
         if (!bucket) bucket = target[scopeKey] = { count: 0, revenue: 0, cash: 0, _seen: new Set() }
-        const k = row._dedupe
-        if (k && bucket._seen.has(k)) return
-        if (k) bucket._seen.add(k)
+        if (bucket._seen.has(k)) return
+        bucket._seen.add(k)
         bucket.count++
         bucket.revenue += row._rev || 0
         bucket.cash    += row._cash || 0
       }
-      // Ad → parent lookup so a row with ad_id but null adset_id/campaign
-      // still buckets into the correct parent. Matches the drilldown's
-      // OR-scope fallback (`adset_id.eq.X OR ad_id.in.(child_ad_ids)`)
-      // which catches rows that only carry ad_id. Without this fallback
-      // the parent count would silently drop those rows.
+      // Ad → parent lookup. When a row has ad_id, the AD's parent
+      // adset/campaign is the source-of-truth — the row's own
+      // utm_term / utm_campaign may be stale (Meta rename drift) or
+      // missing. Prefer ad-parent lookup; fall back to the row's
+      // own scope field only when no ad_id is present.
+      //
+      // Matches the drilldown's OR-scope fallback
+      // (`adset_id.eq.X OR ad_id.in.(child_ad_ids)`) — ad_id wins
+      // because it's the most reliable signal.
       const adParent = {}
       for (const a of adsLoaded) adParent[a.ad_id] = { adset: a.adset_id, campaign: a.campaign_name }
-      const resolveAdset    = (row) => row._adset    || (row._ad ? adParent[row._ad]?.adset    : null)
-      const resolveCampaign = (row) => row._campaign || (row._ad ? adParent[row._ad]?.campaign : null)
+      const resolveAdset    = (row) => (row._ad ? adParent[row._ad]?.adset    : null) || row._adset
+      const resolveCampaign = (row) => (row._ad ? adParent[row._ad]?.campaign : null) || row._campaign
 
       const bucketUnion = (...sourceLists) => {
         const ad = {}, adset = {}, campaign = {}

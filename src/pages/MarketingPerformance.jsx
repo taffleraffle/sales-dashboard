@@ -1762,14 +1762,53 @@ export default function MarketingPerformance() {
   // so byRange filters on the SAME window as filterByDays. Passing rangeDays
   // (a number) for custom { from, to } ranges previously misaligned the
   // prospect-metrics window with the displayed entries.
+  // Surface useCloserCallProspectMetrics.outOfWindow so a date range
+  // older than the 730-day fetch window doesn't silently zero out
+  // closer_calls-derived counts. The hook now returns this flag; we
+  // render a banner above the dashboard when it fires.
+  const prospectWindow = useMemo(() => prospectMetricsByRange(range), [range, prospectMetricsByRange])
   const stats = useMemo(() => applyProspectMetrics(computeMarketingStats(rangeEntries), range), [rangeEntries, range, prospectMetricsByRange])
   const stats30 = useMemo(() => applyProspectMetrics(computeMarketingStats(filterByDays(entries, 30)), 30), [entries, prospectMetricsByRange])
   const statsMTD = useMemo(() => applyProspectMetrics(computeMarketingStats(mtdEntries), 'mtd'), [mtdEntries, prospectMetricsByRange])
-  // Previous-period stays on legacy EOD-counter math because applying
-  // call-row dedup retroactively to N-days-ago needs the same call cache;
-  // it's also a comparison delta where consistency-within-method matters
-  // more than absolute accuracy.
-  const statsPrev = useMemo(() => computeMarketingStats(prevEntries), [prevEntries])
+  // Previous-period stats now ALSO pass through applyProspectMetrics so
+  // the per-tile ▲▼ arrows compare like-for-like (deduped current vs
+  // deduped prev). The useCloserCallProspectMetrics hook fetches a
+  // 730-day window so the prior-period sub-window is always covered.
+  // Without this, the period-over-period delta on Close Rate /
+  // Cost/New / CPA was structurally biased: current used per-call
+  // truth, prev used EOD self-report. Tiles routinely showed
+  // "+15%" or "-20%" purely from source switch, not real change.
+  // Prior-period {from,to} window matching the current range's shape.
+  // For numeric ranges (7d/30d/90d/...) the prior is the SAME length
+  // immediately before the current window. For 'mtd' the prior is the
+  // previous calendar month, capped at today's day-of-month so a
+  // mid-month comparison isn't pre-empted by future calendar dates.
+  // For explicit {from,to} we mirror the same length backwards.
+  const prevRange = useMemo(() => {
+    const toDateStr = (d) => d.toISOString().slice(0, 10)
+    if (range && typeof range === 'object' && range.from && range.to) {
+      const fromD = new Date(range.from + 'T00:00:00Z')
+      const toD   = new Date(range.to   + 'T00:00:00Z')
+      const lenMs = Math.max(0, toD - fromD)
+      const prevTo   = new Date(fromD.getTime() - 86400000)
+      const prevFrom = new Date(prevTo.getTime() - lenMs)
+      return { from: toDateStr(prevFrom), to: toDateStr(prevTo) }
+    }
+    if (range === 'mtd') {
+      const today = new Date()
+      const firstPrev   = new Date(Date.UTC(today.getFullYear(), today.getMonth() - 1, 1))
+      const sameDayPrev = new Date(Date.UTC(today.getFullYear(), today.getMonth() - 1, today.getDate()))
+      const lastDayPrev = new Date(Date.UTC(today.getFullYear(), today.getMonth(), 0))
+      const cap = Math.min(sameDayPrev.getTime(), lastDayPrev.getTime())
+      return { from: toDateStr(firstPrev), to: toDateStr(new Date(cap)) }
+    }
+    const n = typeof range === 'number' ? range : 30
+    const today = new Date()
+    const prevTo   = new Date(today.getTime() - n * 86400000)
+    const prevFrom = new Date(today.getTime() - 2 * n * 86400000 + 86400000)
+    return { from: toDateStr(prevFrom), to: toDateStr(prevTo) }
+  }, [range])
+  const statsPrev = useMemo(() => applyProspectMetrics(computeMarketingStats(prevEntries), prevRange), [prevEntries, prevRange, prospectMetricsByRange])
   // Hoisted calendar-deduped booking totals — same numbers the live
   // Bookings/Q.Books KPI tiles render. whatIfStats baselines from these so
   // toggling What-If doesn't silently swap data source (EOD self-report
@@ -2086,6 +2125,24 @@ export default function MarketingPerformance() {
           <DateRangeSelector selected={range} onChange={setRange} />
         </div>
       </div>
+
+      {/* Out-of-window banner — fires when the selected range starts
+          earlier than the closer_calls hook's 730-day fetch window.
+          Without this, Net Live / Closes / Close Rate silently show 0
+          because pm.liveProspects = 0 by definition outside the window. */}
+      {prospectWindow?.outOfWindow && (
+        <div className="mb-5 px-4 py-3 rounded-sm" style={{ background: 'rgba(180,135,20,0.08)', border: '1px solid #b88714' }}>
+          <p className="text-sm" style={{ color: 'var(--ink)', fontFamily: 'var(--serif)' }}>
+            <strong>Range extends past our closer-call window.</strong>{' '}
+            <span style={{ color: 'var(--ink-3)' }}>
+              Closer-deduped metrics (Net Live, Closes, Close Rate, Cost/New, CPA)
+              are computed from closer_calls fetched since <code style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{prospectWindow.fetchedSince}</code>.
+              Anything earlier reads as 0 — widen the fetch window in
+              useCloserCallProspectMetrics if you need to compare deeper history.
+            </span>
+          </p>
+        </div>
+      )}
 
       {/* Action bar */}
       <div className="flex flex-wrap items-center gap-3 mb-5">
