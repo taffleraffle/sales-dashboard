@@ -267,12 +267,29 @@ async function fetchGHLLeadsByDate(sinceStr) {
  * auto_bookings from Intro Call calendars, qualified_bookings from Strategy Call calendars.
  */
 export async function syncMetaToTracker(days = 30, { pullFresh = true } = {}) {
-  // Step 1: pull fresh Meta Ads data
+  // Step 1: pull fresh Meta Ads data.
+  //
+  // CRITICAL: Meta failures must NOT block the GHL leads + bookings
+  // step below. The original code threw here, so when Ben's Meta
+  // access token expired May 13, the whole sync chain died — and
+  // marketing_tracker.leads / qualified_bookings / auto_bookings
+  // stopped updating for 5 days even though GHL was fine. Result:
+  // dashboard tile showed 8 leads (stale tracker), drilldown showed
+  // 16 leads (live GHL fetch), Ben rightly called bullshit.
+  //
+  // Now: log Meta failures to console, then continue with the GHL
+  // pull. Adspend stays at whatever marketing_daily had last; leads
+  // and bookings refresh as normal.
   if (pullFresh) {
     if (!ACCOUNT_ID || !ACCESS_TOKEN) {
-      throw new Error('Meta Ads credentials missing — set VITE_META_ADS_ACCOUNT_ID and VITE_META_ADS_ACCESS_TOKEN in Render env vars')
+      console.warn('[syncMetaToTracker] Meta credentials missing — skipping ad-level pull, continuing with GHL')
+    } else {
+      try {
+        await syncMetaAds(days)
+      } catch (e) {
+        console.warn('[syncMetaToTracker] Meta ad pull failed, continuing with GHL leads/bookings:', e.message)
+      }
     }
-    await syncMetaAds(days)
   }
 
   const trackerSince = typeof days === 'number'
