@@ -1075,15 +1075,20 @@ export default function AdsPerformance() {
       for (const s of visibleSets) s.ads.sort(compareAds)
       const compareSets = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
       visibleSets.sort(compareSets)
-      // Hide rows with NO spend AND NO leads in window. These show up
-      // because a contact who became a lead from this ad MONTHS ago
-      // just booked now — the booking attributes to the old campaign
-      // and shows Booked > 0 even though spend/leads in window are 0.
-      // It's technically correct but misleading (looks like a paused
-      // campaign is still producing). Skipping them keeps the visible
-      // rollup honest. A search match still surfaces these rows so
-      // historical lookups stay possible.
-      const hasActivity = (campVisibleRollup.spend || 0) > 0 || (campVisibleRollup.tfLeads || 0) > 0
+      // Hide ONLY truly-empty campaigns (no spend, no leads, no
+      // bookings, no lives, no closes). Previously this filter was
+      // tighter (spend OR leads only) which hid campaigns whose old
+      // leads were still booking — and then the top tile said "80
+      // booked" while the visible rows summed to ~49 because 29
+      // bookings lived in hidden rows. Broaden the filter so any
+      // attributed activity keeps the row visible, and the math at
+      // the top reconciles with the rows.
+      const hasActivity =
+        (campVisibleRollup.spend     || 0) > 0 ||
+        (campVisibleRollup.tfLeads   || 0) > 0 ||
+        (campVisibleRollup.tfBooked  || 0) > 0 ||
+        (campVisibleRollup.tfLive    || 0) > 0 ||
+        (campVisibleRollup.tfCloses  || 0) > 0
       if (!hasActivity && !search.trim()) continue
       visibleCampaigns.push({ ...camp, rollup: campVisibleRollup, ad_sets_sorted: visibleSets })
     }
@@ -1242,19 +1247,43 @@ export default function AdsPerformance() {
           const closeSub = sub(eod.closes, closesCount, attr.closes, eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : '')
           const liveSub  = sub(eod.live,  liveCount,   attr.live)
           const click = (metric) => () => setDrill({ metric, scope: { level: 'all' } })
-          const tipProspect = 'Unique prospects across all campaigns in this window, deduped by email (or name). Cross-campaign prospects count ONCE here — but they count in EACH campaign they touch in the table below, so the table-row sum may exceed this number.'
-          const tipLive   = 'Net Live = unique new-call prospects with outcome IN (closed, not_closed) per closer EOD. Same source the Marketing dashboard uses. Click to list prospects.'
-          const tipCloses = 'Unique prospects with outcome=closed per closer EOD. Same source as Marketing dashboard cpa_trial / pm.closedProspects. Click to list prospects.'
+          // Headline tile values are now SUM-OF-VISIBLE-ROWS so the top
+          // tile always equals the sum of the table below. Previously
+          // the top used the global deduped union count (e.g. "80 booked")
+          // while rows summed to 49 because some bookings live on
+          // hidden/orphan rows — looks like a counting bug to the user
+          // even though both numbers are correct in isolation.
+          //
+          // Sub-line still surfaces the global universe count + EOD self-
+          // report + attributed total so the gap is visible. Drilldown
+          // still queries the global universe so clicking a top tile
+          // shows ALL prospects, not just the attributed subset.
+          const visibleLeads  = totals.tfLeads  || 0
+          const visibleBooked = totals.tfBooked || 0
+          const visibleLive   = totals.tfLive   || 0
+          const visibleCloses = totals.tfCloses || 0
+          // Show "N global unique" when the visible sum differs (cross-
+          // campaign prospects only count once globally but in each
+          // campaign here; orphan bookings are global but not in rows).
+          const subRows = (eodVal, visibleVal, globalVal, extra = '') => {
+            const parts = []
+            if (eodVal > 0)                       parts.push(`${fmtN(eodVal)} EOD-reported`)
+            if (globalVal && globalVal !== visibleVal) parts.push(`${fmtN(globalVal)} unique total`)
+            return parts.length ? parts.join(' · ') + extra : null
+          }
+          const tipProspect = 'Sum of every visible campaign-row attribution in this window. Drilldown queries the global universe so the panel may list more prospects than this count (cross-campaign dedup) — the panel header explains the math.'
+          const tipLive   = 'Sum of every visible row\'s Live count. Source: typeform is_live ∪ ghl_lives ∪ closes (a close implies a live). Compare with the closer-EOD self-reported count in the subtitle.'
+          const tipCloses = 'Sum of every visible row\'s Close count. Source: lib_close_resolved ∪ typeform is_closed. Compare with the closer-EOD count.'
           return (
             <>
-              <TotalsTile label="Leads"      value={fmtN(prosp.leads)}  sub={sub(eod.leads,  prosp.leads,  attr.leads)}  onClick={click('leads')}  tip={tipProspect} />
-              <TotalsTile label="Booked"     value={fmtN(prosp.booked)} sub={sub(eod.booked, prosp.booked, attr.booked)} onClick={click('booked')} tip={tipProspect} />
-              <TotalsTile label="Live calls" value={fmtN(liveCount)}    sub={liveSub}                                    onClick={click('live')}   tip={tipLive} />
+              <TotalsTile label="Leads"      value={fmtN(visibleLeads)}  sub={subRows(eod.leads,  visibleLeads,  prosp.leads)}  onClick={click('leads')}  tip={tipProspect} />
+              <TotalsTile label="Booked"     value={fmtN(visibleBooked)} sub={subRows(eod.booked, visibleBooked, prosp.booked)} onClick={click('booked')} tip={tipProspect} />
+              <TotalsTile label="Live calls" value={fmtN(visibleLive)}   sub={subRows(eod.live,   visibleLive,   liveCount)}    onClick={click('live')}   tip={tipLive} />
               <TotalsTile
                 label="Closes"
-                value={fmtN(closesCount)}
-                sub={closeSub}
-                valueColor={closesCount > 0 ? '#1f7a3a' : undefined}
+                value={fmtN(visibleCloses)}
+                sub={subRows(eod.closes, visibleCloses, closesCount, eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : '')}
+                valueColor={visibleCloses > 0 ? '#1f7a3a' : undefined}
                 onClick={click('closed')}
                 tip={tipCloses}
               />
@@ -1275,40 +1304,41 @@ export default function AdsPerformance() {
           // (the truer "how many leads/bookings happened" number) but the
           // cost number divides by the same denominator the rows divide
           // by. Sub-text shows both so the gap is visible.
-          const a = rowTotals.attributed
-          const p = rowTotals.prospects
-          const pm = prospectMetricsByRange({ from: dateRange.startStr, to: dateRange.endStr })
-          const subAttr = (n, total) =>
-            n > 0 && total !== n ? `${total} total · ${n} ad-attrib` : null
+          // Cost-per tiles divide by the SAME visible-sum totals the
+          // count tiles use. spend / leads / booked / live / closes all
+          // come from `totals` (= sum of visible rows). The math now
+          // reconciles end-to-end: top tile $/X exactly equals
+          // total_spend ÷ (sum of per-row X).
+          const vLeads  = totals.tfLeads  || 0
+          const vBooked = totals.tfBooked || 0
+          const vLive   = totals.tfLive   || 0
+          const vCloses = totals.tfCloses || 0
           return (
             <>
               <TotalsTile
                 label="$ / Lead"
-                value={a.leads > 0 ? fmt$(totals.spend / a.leads) : '—'}
-                sub={subAttr(a.leads, p.leads)}
-                valueColor={kpiColor(a.leads > 0 ? totals.spend / a.leads : null, KPI.costPerLead)}
-                tip={`Spend ÷ ad-attributed leads (${a.leads}). Per-row $/Lead uses the same denominator so the numbers reconcile.`}
+                value={vLeads > 0 ? fmt$(totals.spend / vLeads) : '—'}
+                valueColor={kpiColor(vLeads > 0 ? totals.spend / vLeads : null, KPI.costPerLead)}
+                tip={`${fmt$(totals.spend)} spend ÷ ${vLeads} leads = sum of visible rows' $/Lead.`}
               />
               <TotalsTile
                 label="$ / Booked"
-                value={a.booked > 0 ? fmt$(totals.spend / a.booked) : '—'}
-                sub={subAttr(a.booked, p.booked)}
-                valueColor={kpiColor(a.booked > 0 ? totals.spend / a.booked : null, KPI.costPerQualBooked)}
-                tip={`Spend ÷ ad-attributed bookings (${a.booked}). Per-row $/Book uses the same denominator so the numbers reconcile. Unattributed bookings (${p.booked - a.booked}) are counted in the BOOKED tile but excluded here.`}
+                value={vBooked > 0 ? fmt$(totals.spend / vBooked) : '—'}
+                valueColor={kpiColor(vBooked > 0 ? totals.spend / vBooked : null, KPI.costPerQualBooked)}
+                tip={`${fmt$(totals.spend)} spend ÷ ${vBooked} bookings = sum of visible rows' $/Book.`}
               />
               <TotalsTile
                 label="$ / Live"
-                value={a.live > 0 ? fmt$(totals.spend / a.live) : '—'}
-                sub={subAttr(a.live, pm.liveProspects)}
-                valueColor={kpiColor(a.live > 0 ? totals.spend / a.live : null, KPI.costPerLive)}
-                tip={`Spend ÷ ad-attributed live calls (${a.live}). Per-row $/Live uses the same denominator.`}
+                value={vLive > 0 ? fmt$(totals.spend / vLive) : '—'}
+                valueColor={kpiColor(vLive > 0 ? totals.spend / vLive : null, KPI.costPerLive)}
+                tip={`${fmt$(totals.spend)} spend ÷ ${vLive} live calls.`}
               />
               <TotalsTile
                 label="CAC"
-                value={a.closes > 0 ? fmt$(totals.spend / a.closes) : '—'}
-                sub={a.closes > 0 ? `${fmt$(totals.spend)} ÷ ${a.closes} ad-attrib closes` : null}
-                valueColor={kpiColor(a.closes > 0 ? totals.spend / a.closes : null, KPI.costPerClose)}
-                tip={`Spend ÷ ad-attributed closes (${a.closes}). All-source closes: ${pm.closedProspects}. Difference = closes with no ad attribution.`}
+                value={vCloses > 0 ? fmt$(totals.spend / vCloses) : '—'}
+                sub={vCloses > 0 ? `${fmt$(totals.spend)} ÷ ${vCloses} closes` : null}
+                valueColor={kpiColor(vCloses > 0 ? totals.spend / vCloses : null, KPI.costPerClose)}
+                tip={`${fmt$(totals.spend)} spend ÷ ${vCloses} closes.`}
               />
             </>
           )
