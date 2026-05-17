@@ -1170,6 +1170,7 @@ const DRILLDOWN_CONFIG = {
     title: 'Net New Calls',
     subtitle: 'Closer EOD reports · NEW calls only (no follow-ups, no ascensions) · outcome = not_closed or closed',
     fetcher: fetchLiveCalls,
+    chart: { dateKey: 'date', label: 'Net new calls per day' },
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
       { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
@@ -1188,6 +1189,7 @@ const DRILLDOWN_CONFIG = {
     title: 'Bookings',
     subtitle: 'Every strategy-calendar booking made in this window (by booked_at)',
     fetcher: fetchBookings,
+    chart: { dateKey: 'booked', label: 'Bookings per day' },
     columns: [
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
@@ -1198,6 +1200,61 @@ const DRILLDOWN_CONFIG = {
         : <span className="text-success text-[10px] uppercase">Qual</span> },
     ],
     emptyMsg: 'No strategy bookings in this window.',
+  },
+  qbookings: {
+    title: 'Qualified Bookings',
+    subtitle: 'Strategy bookings excluding the DQ Calendly calendar',
+    fetcher: async (range) => (await fetchBookings(range)).filter(r => !r.is_dq),
+    chart: { dateKey: 'booked', label: 'Qualified bookings per day' },
+    columns: [
+      { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
+      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'revenue_tier', label: 'Revenue', render: r => r.revenue_tier || '—' },
+      { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
+    ],
+    emptyMsg: 'No qualified bookings in this window.',
+  },
+  cpl: {
+    title: 'Cost Per Lead',
+    subtitle: 'Daily Meta adspend ÷ leads created that day',
+    fetcher: fetchLeads,
+    chart: { dateKey: 'created', mode: 'cost', label: 'CPL per day', fmtValue: v => `$${Math.round(v)}` },
+    columns: [
+      { key: 'created', label: 'Date', cls: 'tabular-nums' },
+      { key: 'name', label: 'Name', cls: 'text-text-primary' },
+      { key: 'email', label: 'Email', cls: 'text-text-400 text-[10px]' },
+      { key: 'phone', label: 'Phone', cls: 'text-text-400 text-[10px]' },
+      { key: 'source', label: 'Source', cls: 'text-text-400 text-[10px]' },
+    ],
+    emptyMsg: 'No leads in this window.',
+    slowFirstLoad: true,
+  },
+  cpb: {
+    title: 'Cost Per Booking',
+    subtitle: 'Daily Meta adspend ÷ all strategy bookings made that day',
+    fetcher: fetchBookings,
+    chart: { dateKey: 'booked', mode: 'cost', label: 'Cost per booking per day', fmtValue: v => `$${Math.round(v)}` },
+    columns: [
+      { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
+      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
+      { key: 'is_dq', label: 'Type', render: r => r.is_dq
+        ? <span className="text-orange-400 text-[10px] uppercase">DQ</span>
+        : <span className="text-success text-[10px] uppercase">Qual</span> },
+    ],
+    emptyMsg: 'No bookings in this window.',
+  },
+  cpqb: {
+    title: 'Cost Per Qualified Booking',
+    subtitle: 'Daily Meta adspend ÷ qualified bookings made that day',
+    fetcher: async (range) => (await fetchBookings(range)).filter(r => !r.is_dq),
+    chart: { dateKey: 'booked', mode: 'cost', label: 'Cost per Q.Book per day', fmtValue: v => `$${Math.round(v)}` },
+    columns: [
+      { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
+      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
+    ],
+    emptyMsg: 'No qualified bookings in this window.',
   },
   rc: {
     title: 'Reschedules + Cancellations',
@@ -1218,6 +1275,7 @@ const DRILLDOWN_CONFIG = {
     title: 'Leads',
     subtitle: 'New opportunities in SCIO USA pipeline (created in this window)',
     fetcher: fetchLeads,
+    chart: { dateKey: 'created', label: 'Leads per day' },
     columns: [
       { key: 'created', label: 'Date', cls: 'tabular-nums' },
       { key: 'name', label: 'Name', cls: 'text-text-primary' },
@@ -1232,6 +1290,7 @@ const DRILLDOWN_CONFIG = {
     title: 'Closes',
     subtitle: 'Closer EOD reports · outcome = closed · ascensions excluded',
     fetcher: fetchCloses,
+    chart: { dateKey: 'date', label: 'Closes per day' },
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
       { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
@@ -1438,7 +1497,139 @@ async function enrichRowsWithProspectEmails(rows) {
   }
 }
 
-function DrilldownModal({ kind, range, onClose }) {
+// Daily trend chart for the drilldown modals. Renders a bar chart of
+// per-day values across the selected window so Ben can see trend
+// shape, not just a row list.
+//
+//   mode = 'count'  — bars = number of rows per day (default)
+//   mode = 'cost'   — bars = totalSpendOnDay / countOnDay (cost-per-X per day)
+//
+// Bars colored by direction relative to window-period average: lighter
+// than avg = below, darker = above. This makes "ramping up" vs "tailing
+// off" patterns readable at a glance.
+function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = null, label, fmtValue }) {
+  const { from, to } = resolveRange(range)
+  // Build day list inclusive
+  const days = []
+  let cursor = new Date(from + 'T00:00:00')
+  const end = new Date(to + 'T00:00:00')
+  while (cursor <= end) {
+    days.push(cursor.toISOString().slice(0, 10))
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  // Count rows per day
+  const counts = Object.fromEntries(days.map(d => [d, 0]))
+  for (const r of (rows || [])) {
+    const d = String(r[dateKey] || '').slice(0, 10)
+    if (counts[d] !== undefined) counts[d]++
+  }
+  // Build series — { day, value, label }
+  const series = days.map(d => {
+    if (mode === 'cost') {
+      const spend = spendByDate?.[d] || 0
+      const ct = counts[d]
+      const v = ct > 0 ? spend / ct : (spend > 0 ? null : 0) // unattributable spend → null gap
+      return { day: d, value: v, count: ct, spend }
+    }
+    return { day: d, value: counts[d], count: counts[d] }
+  })
+  const validValues = series.map(s => s.value).filter(v => v != null && !isNaN(v) && v > 0)
+  const maxV = validValues.length ? Math.max(...validValues) : 0
+  const avgV = validValues.length ? validValues.reduce((s, v) => s + v, 0) / validValues.length : 0
+  const totalCount = series.reduce((s, p) => s + (p.count || 0), 0)
+  const totalSpend = series.reduce((s, p) => s + (p.spend || 0), 0)
+
+  // Layout
+  const W = 760
+  const H = 110
+  const PAD_L = 36
+  const PAD_R = 12
+  const PAD_T = 14
+  const PAD_B = 22
+  const innerW = W - PAD_L - PAD_R
+  const innerH = H - PAD_T - PAD_B
+  const barW = Math.max(2, (innerW / series.length) - 2)
+
+  const fmt = fmtValue || ((v) => mode === 'cost' ? `$${Math.round(v)}` : v)
+
+  if (maxV === 0 && totalCount === 0) {
+    return (
+      <div style={{ padding: 12, color: 'var(--ink-4)', fontSize: 11, fontStyle: 'italic', textAlign: 'center' }}>
+        No daily data in this window.
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--rule)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+          {label || (mode === 'cost' ? 'Daily cost-per' : 'Daily volume')}
+        </div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+          {mode === 'cost'
+            ? `Avg ${fmt(avgV)} · Total spend ${'$' + Math.round(totalSpend).toLocaleString()}`
+            : `Avg ${avgV.toFixed(1)}/day · Total ${totalCount}`}
+        </div>
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
+        {/* Y axis line */}
+        <line x1={PAD_L} y1={PAD_T} x2={PAD_L} y2={PAD_T + innerH} stroke="var(--rule)" strokeWidth="1" />
+        {/* X axis line */}
+        <line x1={PAD_L} y1={PAD_T + innerH} x2={W - PAD_R} y2={PAD_T + innerH} stroke="var(--rule)" strokeWidth="1" />
+        {/* Avg line */}
+        {avgV > 0 && (() => {
+          const y = PAD_T + innerH * (1 - avgV / maxV)
+          return (
+            <g>
+              <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke="var(--ink-4)" strokeWidth="1" strokeDasharray="3 3" opacity="0.5" />
+              <text x={W - PAD_R - 4} y={y - 3} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)" textAnchor="end">avg {fmt(avgV)}</text>
+            </g>
+          )
+        })()}
+        {/* Bars */}
+        {series.map((p, i) => {
+          if (p.value == null || p.value === 0) {
+            return null
+          }
+          const h = maxV > 0 ? (p.value / maxV) * innerH : 0
+          const x = PAD_L + (i * (innerW / series.length)) + 1
+          const y = PAD_T + innerH - h
+          const aboveAvg = p.value > avgV
+          return (
+            <g key={p.day}>
+              <rect
+                x={x}
+                y={y}
+                width={barW}
+                height={h}
+                fill={aboveAvg ? 'var(--accent)' : 'var(--ink-3)'}
+                opacity={aboveAvg ? 0.9 : 0.55}
+              >
+                <title>{`${p.day}\n${fmt(p.value)}${mode === 'cost' ? ` (${p.count} × $${Math.round(p.spend || 0)})` : ''}`}</title>
+              </rect>
+            </g>
+          )
+        })}
+        {/* X axis labels — first, middle, last */}
+        {[0, Math.floor(series.length / 2), series.length - 1].map(i => {
+          if (i < 0 || i >= series.length) return null
+          const x = PAD_L + (i * (innerW / series.length)) + barW / 2
+          return (
+            <text key={i} x={x} y={H - 6} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)" textAnchor="middle">
+              {series[i].day.slice(5)}
+            </text>
+          )
+        })}
+        {/* Y axis labels */}
+        <text x={PAD_L - 4} y={PAD_T + 4} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)" textAnchor="end">{fmt(maxV)}</text>
+        <text x={PAD_L - 4} y={PAD_T + innerH + 2} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)" textAnchor="end">0</text>
+      </svg>
+    </div>
+  )
+}
+
+function DrilldownModal({ kind, range, onClose, spendByDate }) {
   const config = DRILLDOWN_CONFIG[kind]
   const [rows, setRows] = useState(null)
   useEffect(() => {
@@ -1472,6 +1663,17 @@ function DrilldownModal({ kind, range, onClose }) {
         <div className="flex-1 overflow-y-auto">
           {rows == null && <div className="p-6 text-center text-text-400 text-xs">{config.slowFirstLoad ? 'Fetching from GHL — may take a few seconds…' : 'Loading…'}</div>}
           {rows != null && rows.length === 0 && <div className="p-6 text-center text-text-400 text-xs">{config.emptyMsg}</div>}
+          {rows != null && rows.length > 0 && config.chart && (
+            <DailyTrendChart
+              rows={rows}
+              dateKey={config.chart.dateKey}
+              range={range}
+              mode={config.chart.mode || 'count'}
+              spendByDate={spendByDate}
+              label={config.chart.label}
+              fmtValue={config.chart.fmtValue}
+            />
+          )}
           {rows != null && rows.length > 0 && (
             <table className="w-full text-[11px]">
               <thead className="sticky top-0 bg-bg-card border-b border-border-default text-[9px] uppercase tracking-wider text-text-400">
@@ -2824,9 +3026,9 @@ export default function MarketingPerformance() {
           <Section title="Spend & Lead Acquisition" cols={8}>
             <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={hasOverride('adspend') ? wf?.adspend : null} tip="Total Meta Ads spend (converted to USD)" />
             <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={gated(upstream.leads, wf?.leads)} tip="New opportunities created in SCIO USA pipeline. Click to view." onClick={() => setDrilldown('leads')} />
-            <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={gated(upstream.leads, wf?.cpl)} tip="Cost Per Lead = Adspend / Leads" />
+            <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={gated(upstream.leads, wf?.cpl)} tip="Cost Per Lead = Adspend / Leads. Click to see daily CPL trend." onClick={() => setDrilldown('cpl')} />
             <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} whatIf={gated(upstream.bookings, wf?.bookings_all)} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
-            <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={gated(upstream.bookings, wf?.cpb_all)} tip="Adspend ÷ Bookings (all)" />
+            <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={gated(upstream.bookings, wf?.cpb_all)} tip="Adspend ÷ Bookings (all). Click to see daily cost-per-booking trend." onClick={() => setDrilldown('cpb')} />
             <KPI label="Q.Books" value={cohortAvailable ? bkLeadCohort.qualified : bk.qualified} format="n" trailing={bkLeadCohort30.qualified > 0 ? bkLeadCohort30.qualified : bk30.qualified} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip={cohortAvailable
               ? `Of the ${stats.leads} leads created in this window, ${bkLeadCohort.qualified} have booked a qualified strategy call (cohort-true conversion). Click to view bookings activity (booked_at-bucketed: ${bk.qualified} unique prospects).`
               : `Unique prospects who BOOKED a strategy call (excl. DQ Calendly) in this window, bucketed by booked_at. Cohort-true math will activate after ghl_opportunities mirror first syncs (migration 055). ${bk.dq ? `${bk.dq} routed to DQ in this window. ` : ''}Click to view.`} onClick={() => setDrilldown('bookings')} />
@@ -2835,7 +3037,7 @@ export default function MarketingPerformance() {
               : leadToQDrift
                 ? `Capped at 100%. Raw ratio = ${rawLeadToQ.toFixed(0)}% because Q.Book counts prospects who booked in this window — some of those leads were created BEFORE the window. Cohort-true math will activate once the ghl_opportunities mirror first syncs.`
                 : 'Qualified Bookings ÷ Leads (cohort-true math will activate once the ghl_opportunities mirror syncs).'} />
-            <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} whatIf={gated(upstream.bookings, wf?.cpb)} tip="Adspend ÷ Qualified Bookings (excludes DQ)" />
+            <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} whatIf={gated(upstream.bookings, wf?.cpb)} tip="Adspend ÷ Qualified Bookings (excludes DQ). Click to see daily trend." onClick={() => setDrilldown('cpqb')} />
           </Section>
         )
       })()}
@@ -2955,7 +3157,15 @@ export default function MarketingPerformance() {
       {showAddEntry && <AddEntryModal onSave={upsertEntry} onClose={() => setShowAddEntry(false)} />}
       {showBenchmarks && <BenchmarksModal benchmarks={benchmarks} onSave={updateBenchmark} onClose={() => setShowBenchmarks(false)} />}
       {showImportModal && <CSVImportModal onImport={handleModalImport} onClose={() => setShowImportModal(false)} />}
-      {drilldown && <DrilldownModal kind={drilldown} range={range} onClose={() => setDrilldown(null)} />}
+      {drilldown && (() => {
+        // Build a date → adspend map from marketing_tracker so cost-per
+        // drilldown charts can compute CPL / Cost-per-Booking per day.
+        const spendByDate = {}
+        for (const e of (entries || [])) {
+          if (e.date) spendByDate[e.date] = parseFloat(e.adspend || 0)
+        }
+        return <DrilldownModal kind={drilldown} range={range} onClose={() => setDrilldown(null)} spendByDate={spendByDate} />
+      })()}
     </div>
   )
 }
