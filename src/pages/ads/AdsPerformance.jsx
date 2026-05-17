@@ -765,7 +765,12 @@ export default function AdsPerformance() {
       const mapsQualLead   = bucketUnion(tfQualLead)
       const mapsBooked     = bucketUnion(tfAsBooked,     gAsBooked)
       const mapsQualBooked = bucketUnion(tfAsQualBooked)
-      const mapsLive       = bucketUnion(tfAsLive,       gAsLive)
+      // Lives universe = typeform is_live ∪ ghl_lives_detail ∪ closes
+      // (closed implies live by definition). Without the closes union, a
+      // closed prospect with no recorded live event (e.g. George Sidhom)
+      // shows in Closes=1 but Lives=0 on the same row — the kind of
+      // impossible math that makes Ben yell at the dashboard.
+      const mapsLive       = bucketUnion(tfAsLive,       gAsLive,    closeAsClose, tfAsClose)
       // Closes: lib_close_resolved FIRST so its revenue wins on prospects
       // that appear in both sources. Typeform is_closed adds prospects
       // that haven't been HYROS-resolved yet.
@@ -2305,6 +2310,15 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
           }
           // Per-ad/adset/campaign scope: stays on attribution-based union
           // because closer_calls has no ad attribution at the per-call level.
+          //
+          // Closes-imply-lives: a prospect who CLOSED was alive by definition.
+          // is_live and is_closed are computed independently in the typeform
+          // view (joined via different paths), so a close can land without a
+          // matching is_live=true row — that's the George Sidhom case
+          // (closed $10k, attributed to this campaign, but missing from the
+          // Live drilldown because his typeform row had is_live=false).
+          // Add a third source: lib_close_resolved scoped to the same campaign
+          // so any closed prospect surfaces here too.
           let qG = supabase.from('lib_ghl_lives_detail').select('*')
             .gte('landed_at', sinceISO).lte('landed_at', untilISO)
             .order('landed_at', { ascending: false })
@@ -2314,10 +2328,55 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
             .gte('submitted_at', sinceISO).lte('submitted_at', untilISO)
             .order('submitted_at', { ascending: false })
           qT = applyDrillScope(qT, drill.scope, SCOPE_COLS_TYPEFORM)
-          const [{ data: gData, error: gErr }, { data: tData, error: tErr }] = await Promise.all([qG, qT])
+          // Also pull closes scoped to this campaign — any close not already
+          // covered by the typeform/GHL lives sources gets surfaced as a
+          // live (because closed implies live).
+          let qC = supabase.from('lib_close_resolved').select('*')
+            .gte('created_at', sinceISO).lte('created_at', untilISO)
+            .order('created_at', { ascending: false })
+          qC = applyDrillScope(qC, drill.scope, SCOPE_COLS_CLOSE)
+          // ALSO pull typeform is_closed=true (catches typeform closes not
+          // yet HYROS-resolved).
+          let qTC = supabase.from('lib_typeform_response_detail').select('*')
+            .eq('is_closed', true)
+            .gte('submitted_at', sinceISO).lte('submitted_at', untilISO)
+            .order('submitted_at', { ascending: false })
+          qTC = applyDrillScope(qTC, drill.scope, SCOPE_COLS_TYPEFORM)
+          const [{ data: gData, error: gErr }, { data: tData, error: tErr }, { data: cData, error: cErr }, { data: tcData, error: tcErr }] = await Promise.all([qG, qT, qC, qTC])
           if (gErr) throw new Error(gErr.message)
           if (tErr) throw new Error(tErr.message)
-          const merged = unionByEmail(tData || [], gData || [], 'ghl')
+          if (cErr) throw new Error(cErr.message)
+          if (tcErr) throw new Error(tcErr.message)
+          // Union by name-token (lib_close_resolved has no email column).
+          // Tag close rows so the UI can show they're surfacing here because
+          // they closed, not because they have a recorded live event.
+          const liveRows = unionByEmail(tData || [], gData || [], 'ghl')
+          // Add closes that aren't already covered by liveRows. Use nameKey
+          // (lib_close_resolved exposes clean_name / display_name).
+          const seenLiveNames = new Set(liveRows.map(r => nameKey(r)).filter(Boolean))
+          const seenLiveEmails = new Set(liveRows.map(r => (r.email || '').toLowerCase()).filter(Boolean))
+          const extraFromCloses = []
+          for (const r of (cData || [])) {
+            const k = nameKey(r)
+            const e = (r.email || '').toLowerCase()
+            if (k && seenLiveNames.has(k)) continue
+            if (e && seenLiveEmails.has(e)) continue
+            if (k) seenLiveNames.add(k)
+            if (e) seenLiveEmails.add(e)
+            extraFromCloses.push({ kind: 'close', _liveViaClose: true, ...r })
+          }
+          for (const r of (tcData || [])) {
+            const k = nameKey(r)
+            const e = (r.email || '').toLowerCase()
+            if (k && seenLiveNames.has(k)) continue
+            if (e && seenLiveEmails.has(e)) continue
+            if (k) seenLiveNames.add(k)
+            if (e) seenLiveEmails.add(e)
+            extraFromCloses.push({ kind: 'tf', _liveViaClose: true, ...r })
+          }
+          const merged = [...liveRows, ...extraFromCloses].sort((a, b) =>
+            (b.submitted_at || b.landed_at || b.created_at || '')
+              .localeCompare(a.submitted_at || a.landed_at || a.created_at || ''))
           setSource((tData || []).length && (gData || []).length ? 'mixed' : ((gData || []).length ? 'ghl' : 'typeform'))
           if (!cancelled) setRows(postFilter(merged))
           return
