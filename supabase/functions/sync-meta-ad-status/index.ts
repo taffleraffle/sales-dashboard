@@ -3,21 +3,8 @@
 //   POST /functions/v1/sync-meta-ad-status
 //
 // Pulls /act_{ACCOUNT_ID}/ads?fields=id,effective_status,status and
-// updates every visible ad's status + last_synced_at. Does NOT fetch
-// insights or creative metadata, so it's cheap (~1-2s) and safe to run
-// on a 15-minute cron. Browser autoSync still calls a JS twin of this
-// in metaAdsSync.js for tabs that have the dashboard open; this Edge
-// Function covers the no-tab-open case.
-//
-// Env vars required (Supabase secrets):
-//   META_ADS_ACCOUNT_ID    — Meta ad account ID (without the act_ prefix)
-//   META_ADS_ACCESS_TOKEN  — Meta Graph API access token
-//   SUPABASE_URL           — provided by Supabase runtime
-//   SUPABASE_SERVICE_ROLE_KEY — provided by Supabase runtime
-//
-// Idempotent — UPDATEs by ad_id; ads not yet in the table are skipped
-// (the heavier sync-meta-ad-level creates rows; this one just keeps
-// status current).
+// updates every ad's status. UPDATE-only (no insert), batched so 500
+// ads finish in 1-2s instead of 60+.
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -36,17 +23,14 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
-
   if (!ACCOUNT_ID || !ACCESS_TOKEN) {
     return new Response(JSON.stringify({
       success: false,
-      error: 'Meta Ads credentials missing — set META_ADS_ACCOUNT_ID and META_ADS_ACCESS_TOKEN in Supabase secrets',
+      error: 'Set META_ADS_ACCOUNT_ID and META_ADS_ACCESS_TOKEN secrets',
     }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   }
-
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
   const startedAt = Date.now()
-
   try {
     const params = new URLSearchParams({
       access_token: ACCESS_TOKEN,
@@ -56,7 +40,6 @@ serve(async (req) => {
     let url: string | null = `${BASE_URL}/act_${ACCOUNT_ID}/ads?${params}`
     const records: { ad_id: string; status: string | null; effective_status: string | null }[] = []
     let pages = 0
-
     while (url) {
       pages++
       const res = await fetch(url)
@@ -82,26 +65,49 @@ serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
-    // UPDATE-only, in chunks. Don't upsert — partial records would
-    // wipe creative columns on insert. Run row-by-row for accurate
-    // count; account-wide totals are usually < 500 ads.
-    let updated = 0
-    const now = new Date().toISOString()
-    for (const r of records) {
-      const { error, count } = await supabase
+    // Filter to ads that already exist in the table so upsert only does
+    // UPDATEs — never INSERTs an incomplete row that would NULL out
+    // ad_name / creative_id / campaign_name etc.
+    const adIds = records.map(r => r.ad_id)
+    const existing = new Set<string>()
+    // Chunk the .in() filter because PostgREST URLs cap around 1000 ids.
+    const CHUNK_LOOKUP = 500
+    for (let i = 0; i < adIds.length; i += CHUNK_LOOKUP) {
+      const slice = adIds.slice(i, i + CHUNK_LOOKUP)
+      const { data, error } = await supabase
         .from('ads')
-        .update(
-          { status: r.status, effective_status: r.effective_status, last_synced_at: now },
-          { count: 'exact' }
-        )
-        .eq('ad_id', r.ad_id)
-      if (!error && (count || 0) > 0) updated++
+        .select('ad_id')
+        .in('ad_id', slice)
+      if (error) throw new Error(`existing-ads lookup failed: ${error.message}`)
+      for (const r of data || []) existing.add(r.ad_id)
+    }
+
+    const toUpdate = records
+      .filter(r => existing.has(r.ad_id))
+      .map(r => ({
+        ad_id: r.ad_id,
+        status: r.status,
+        effective_status: r.effective_status,
+        last_synced_at: new Date().toISOString(),
+      }))
+
+    // Batched upsert — single round-trip per chunk instead of per row.
+    let updated = 0
+    const CHUNK_WRITE = 200
+    for (let i = 0; i < toUpdate.length; i += CHUNK_WRITE) {
+      const slice = toUpdate.slice(i, i + CHUNK_WRITE)
+      const { error } = await supabase
+        .from('ads')
+        .upsert(slice, { onConflict: 'ad_id' })
+      if (error) throw new Error(`batch ${i / CHUNK_WRITE} upsert failed: ${error.message}`)
+      updated += slice.length
     }
 
     return new Response(JSON.stringify({
       success: true,
       adsSeen: records.length,
       adsUpdated: updated,
+      adsSkipped: records.length - updated,
       pages,
       durationMs: Date.now() - startedAt,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
