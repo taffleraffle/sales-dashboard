@@ -1765,13 +1765,20 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
   const valueSum = Object.fromEntries(days.map(d => [d, 0]))
   const numSum = Object.fromEntries(days.map(d => [d, 0]))
   const denSum = Object.fromEntries(days.map(d => [d, 0]))
+  // Safe numeric: Postgres numeric columns come over the wire as strings
+  // (e.g. "413.66"). Number() handles both string and numeric input;
+  // falls back to 0 for null/undefined/NaN.
+  const num = (v) => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
   for (const r of (rows || [])) {
     const d = String(r[dateKey] || '').slice(0, 10)
     if (counts[d] !== undefined) {
       counts[d]++
-      if (valueKey) valueSum[d] += parseFloat(r[valueKey] || 0)
-      if (numeratorKey) numSum[d] += parseFloat(r[numeratorKey] || 0)
-      if (denominatorKey) denSum[d] += parseFloat(r[denominatorKey] || 0)
+      if (valueKey) valueSum[d] += num(r[valueKey])
+      if (numeratorKey) numSum[d] += num(r[numeratorKey])
+      if (denominatorKey) denSum[d] += num(r[denominatorKey])
     }
   }
   // Build series — { day, value, count }
@@ -2150,6 +2157,8 @@ function DrilldownModal({ kind, range, onClose, spendByDate }) {
               range={range}
               mode={config.chart.mode || 'count'}
               valueKey={config.chart.valueKey}
+              numeratorKey={config.chart.numeratorKey}
+              denominatorKey={config.chart.denominatorKey}
               spendByDate={spendByDate}
               label={config.chart.label}
               fmtValue={config.chart.fmtValue}
