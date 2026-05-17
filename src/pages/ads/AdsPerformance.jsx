@@ -468,11 +468,12 @@ export default function AdsPerformance() {
       }
 
       // Attributed counts (rows we can credit to a Meta creative).
-      const tfLeadEmails = new Set()
-      for (const r of tfRows) if (r.email) tfLeadEmails.add(r.email.toLowerCase())
-      const attrLeads = tfRows.filter(r => r.ad_id).length
-        + ghlLeadRows.filter(r => r.ad_id && !tfLeadEmails.has((r.email || '').toLowerCase())).length
-      const attrCloses = closeRows.filter(r => r.resolved_ad_id || r.resolved_campaign).length
+      // Dedup-by-prospect so a single person who books twice or has both
+      // a typeform AND a GHL row only counts once. Without this dedup
+      // the "attributed" number ROW-counts and routinely exceeds the
+      // headline union count (e.g. 93 attrBooked vs 80 union-prospects)
+      // which is mathematically impossible and makes the cost-per tiles
+      // disagree with the per-row math.
       const closeRev = closeRows.reduce((s, r) => s + parseFloat(r.revenue || 0), 0)
       const closeCash = closeRows.reduce((s, r) => s + parseFloat(r.cash_collected || 0), 0)
       // Unique-prospect counts — mirror the union+dedupe logic in
@@ -552,17 +553,29 @@ export default function AdsPerformance() {
         live:   unionCountName(tfRows.filter(r => r.is_live),   ghlLiveRows),
         closes: unionCountName(tfRows.filter(r => r.is_closed), closeRows),
       }
-      // Attributed = union (typeform with ad_id) ∪ (GHL row with ad_id)
-      // deduped against typeform email so a prospect doesn't double-
-      // count. Prior version only counted the GHL side for booked/live,
-      // silently undercounting the "X attributed" sub-line on the top
-      // tile by however many bookings/lives came in via typeform.
-      const tfBookedEmails = new Set(tfRows.filter(r => r.is_booked && r.email).map(r => r.email.toLowerCase()))
-      const tfLiveEmails   = new Set(tfRows.filter(r => r.is_live   && r.email).map(r => r.email.toLowerCase()))
-      const attrBooked = tfRows.filter(r => r.is_booked && r.ad_id).length
-        + ghlBookedRows.filter(r => r.ad_id && !tfBookedEmails.has((r.email || '').toLowerCase())).length
-      const attrLive = tfRows.filter(r => r.is_live && r.ad_id).length
-        + ghlLiveRows.filter(r => r.ad_id && !tfLiveEmails.has((r.email || '').toLowerCase())).length
+      // Attributed = union (typeform with ad_id) ∪ (GHL row with ad_id),
+      // prospect-deduped via the same email-first + name-token fallback
+      // that the headline tiles use. Same shape as unionCountEmail /
+      // unionCountName above so attributed never exceeds the headline.
+      const attrLeads = unionCountEmail(
+        tfRows.filter(r => r.ad_id),
+        ghlLeadRows.filter(r => r.ad_id)
+      )
+      const attrBooked = unionCountEmail(
+        tfRows.filter(r => r.is_booked && r.ad_id),
+        ghlBookedRows.filter(r => r.ad_id)
+      )
+      // Live/closes use name-token (lib_ghl_lives_detail + lib_close_resolved
+      // expose no email column, so an email-first dedup silently double-
+      // counts every prospect who appears in both sources).
+      const attrLive = unionCountName(
+        tfRows.filter(r => r.is_live && r.ad_id),
+        ghlLiveRows.filter(r => r.ad_id)
+      )
+      const attrCloses = unionCountName(
+        tfRows.filter(r => r.is_closed && r.ad_id),
+        closeRows.filter(r => r.resolved_ad_id || r.resolved_campaign)
+      )
       setRowTotals({
         eod,
         attributed: {
