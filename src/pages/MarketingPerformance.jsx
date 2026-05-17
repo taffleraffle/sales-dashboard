@@ -1503,6 +1503,187 @@ function DrilldownModal({ kind, range, onClose }) {
   )
 }
 
+// ── Resolve Duplicate Modal ────────────────────────────────────────
+// Click a possible-duplicate pair in the marketing dashboard banner →
+// this modal lets Ben confirm or dismiss the suggestion. Writes to
+// public.prospect_dupe_resolutions (migration 057).
+//
+// "Same person" = merge: secondary contact_id collapses into primary
+// in all sum* helpers, so Q.Books / Live / Closes counts drop by one.
+// "Different people" = not_duplicate: pair drops off the suggestion
+// list forever, but counts stay intact.
+function ResolveDupeModal({ group, onClose, onResolved }) {
+  const [members, setMembers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [primaryIdx, setPrimaryIdx] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadDetails() {
+      setLoading(true); setError(null)
+      try {
+        const ids = group.members.map(m => m.contactKey)
+        // Pull each contact's appointment history + GHL contact details
+        // so the user can eyeball them before deciding.
+        const [{ data: contacts }, { data: appts }] = await Promise.all([
+          supabase
+            .from('ghl_contacts')
+            .select('ghl_contact_id, full_name, first_name, last_name, email, phone, company_name, date_added')
+            .in('ghl_contact_id', ids),
+          supabase
+            .from('ghl_appointments')
+            .select('ghl_contact_id, contact_name, calendar_name, booked_at, appointment_date, appointment_status')
+            .in('ghl_contact_id', ids)
+            .order('booked_at', { ascending: false })
+        ])
+        if (cancelled) return
+        const byId = {}
+        for (const c of (contacts || [])) byId[c.ghl_contact_id] = c
+        const apptsBy = {}
+        for (const a of (appts || [])) {
+          if (!apptsBy[a.ghl_contact_id]) apptsBy[a.ghl_contact_id] = []
+          apptsBy[a.ghl_contact_id].push(a)
+        }
+        const rich = group.members.map(m => ({
+          contactKey: m.contactKey,
+          rawName: m.name,
+          contact: byId[m.contactKey] || null,
+          appts: apptsBy[m.contactKey] || [],
+        }))
+        setMembers(rich)
+      } catch (e) {
+        if (!cancelled) setError(e.message)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    loadDetails()
+    return () => { cancelled = true }
+  }, [group])
+
+  const saveResolution = async (action) => {
+    setSaving(true); setError(null)
+    try {
+      const ids = members.map(m => m.contactKey)
+      const primary = ids[primaryIdx]
+      // Write a resolution for every other member paired with the primary.
+      const rows = ids
+        .filter(id => id !== primary)
+        .map(secondary => {
+          const [a, b] = primary < secondary ? [primary, secondary] : [secondary, primary]
+          return {
+            primary_contact_id: a,
+            secondary_contact_id: b,
+            action,
+          }
+        })
+      if (rows.length === 0) throw new Error('Need at least 2 contacts to resolve')
+      const { error: upErr } = await supabase
+        .from('prospect_dupe_resolutions')
+        .upsert(rows, { onConflict: 'primary_contact_id,secondary_contact_id' })
+      if (upErr) throw new Error(upErr.message)
+      await onResolved()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.5)', zIndex: 200, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 60 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ width: '92%', maxWidth: 880, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, padding: '24px 28px', maxHeight: '85vh', overflowY: 'auto' }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--rule)' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>Resolve duplicate</div>
+            <h2 style={{ fontFamily: 'var(--serif)', fontSize: 22, margin: '4px 0 0', fontWeight: 500 }}>Are these the same person?</h2>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: '1px solid var(--rule)', padding: '6px 10px', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em' }}>CLOSE ✕</button>
+        </div>
+
+        {loading && <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-4)' }}>Loading prospect history...</div>}
+        {error && <div style={{ padding: 12, color: '#c44', background: '#fee', borderRadius: 3, marginBottom: 12 }}>{error}</div>}
+
+        {!loading && members.length > 0 && (
+          <>
+            <div style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 14 }}>
+              If yes, pick which contact is the canonical record (the others merge into it). The bookings / lives / closes counts collapse to one prospect on the next page load.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${members.length}, 1fr)`, gap: 12, marginBottom: 18 }}>
+              {members.map((m, idx) => (
+                <div
+                  key={m.contactKey}
+                  onClick={() => setPrimaryIdx(idx)}
+                  style={{
+                    border: idx === primaryIdx ? '2px solid var(--accent)' : '1px solid var(--rule)',
+                    padding: 14,
+                    borderRadius: 3,
+                    cursor: 'pointer',
+                    background: idx === primaryIdx ? 'var(--accent-soft)' : 'var(--paper-2)',
+                  }}
+                >
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: idx === primaryIdx ? 'var(--ink)' : 'var(--ink-4)' }}>
+                    {idx === primaryIdx ? '★ Keep as primary' : 'Click to make primary'}
+                  </div>
+                  <div style={{ fontFamily: 'var(--serif)', fontSize: 17, fontWeight: 500, margin: '4px 0 8px', color: 'var(--ink)' }}>
+                    {m.contact?.full_name || `${m.contact?.first_name || ''} ${m.contact?.last_name || ''}`.trim() || m.rawName || '(no name)'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.6 }}>
+                    <div>{m.contact?.email || <span style={{ color: 'var(--ink-4)' }}>no email</span>}</div>
+                    <div>{m.contact?.phone || <span style={{ color: 'var(--ink-4)' }}>no phone</span>}</div>
+                    {m.contact?.company_name && <div style={{ color: 'var(--ink-2)' }}>{m.contact.company_name}</div>}
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', marginTop: 6 }}>
+                      Created {m.contact?.date_added?.slice(0, 10) || '?'} · {m.appts.length} appointment{m.appts.length === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                  {m.appts.length > 0 && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dotted var(--rule)', fontSize: 11, color: 'var(--ink-3)' }}>
+                      {m.appts.slice(0, 4).map(a => (
+                        <div key={`${m.contactKey}-${a.booked_at || a.appointment_date}`} style={{ marginBottom: 2 }}>
+                          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>
+                            {(a.booked_at || a.appointment_date || '').slice(0, 10)}
+                          </span>{' '}
+                          {a.calendar_name?.slice(0, 18) || '?'} {a.appointment_status && `(${a.appointment_status})`}
+                        </div>
+                      ))}
+                      {m.appts.length > 4 && <div style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>+ {m.appts.length - 4} more</div>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 14, borderTop: '1px solid var(--rule)' }}>
+              <button
+                disabled={saving}
+                onClick={() => saveResolution('not_duplicate')}
+                style={{ padding: '10px 18px', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', color: 'var(--ink-2)' }}
+              >
+                Different people — dismiss
+              </button>
+              <button
+                disabled={saving}
+                onClick={() => saveResolution('merge')}
+                style={{ padding: '10px 18px', background: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: 3, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', color: 'var(--ink)', fontWeight: 600 }}
+              >
+                Same person — merge into primary
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────
 export default function MarketingPerformance() {
   const { entries, benchmarks, loading, upsertEntry, upsertMany, updateBenchmark, deleteEntry, reload } = useMarketingTracker()
@@ -1551,6 +1732,48 @@ export default function MarketingPerformance() {
   // by definition, so L→Q% becomes a real conversion rate. Falls back to
   // booked_at when no opportunity is found for the contact.
   const [leadCohortBookingsByDate, setLeadCohortBookingsByDate] = useState({})
+
+  // Duplicate-pair resolutions (migration 057). Ben clicks a "possible
+  // duplicate" pair and either merges them (secondary contact_id starts
+  // collapsing into the primary in all counts) or marks them "not
+  // duplicate" (pair drops off the suggestion list forever).
+  //
+  // dupeResolutions: { 'A|B': { action: 'merge'|'not_duplicate', primary, secondary } }
+  //   key is the lexicographically-ordered pair so lookup is symmetric.
+  // mergeMap: { secondaryContactId -> primaryContactId } — used by
+  //   sumBookings et al. to collapse secondary into primary at count time.
+  const [dupeResolutions, setDupeResolutions] = useState({})
+  const [resolvingDupe, setResolvingDupe] = useState(null) // pair object or null
+  const reloadDupeResolutions = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('prospect_dupe_resolutions')
+      .select('primary_contact_id, secondary_contact_id, action')
+    if (error) { console.warn('dupe resolutions load failed:', error.message); return }
+    const map = {}
+    for (const r of (data || [])) {
+      map[`${r.primary_contact_id}|${r.secondary_contact_id}`] = r
+    }
+    setDupeResolutions(map)
+  }, [])
+  useEffect(() => { reloadDupeResolutions() }, [reloadDupeResolutions])
+
+  // contact_id → primary it merges into (only for action='merge' rows).
+  // Used by all sum* helpers below to collapse the secondary into the
+  // primary so the counts truly reflect unique prospects.
+  const mergeMap = useMemo(() => {
+    const m = {}
+    for (const r of Object.values(dupeResolutions)) {
+      if (r.action === 'merge') m[r.secondary_contact_id] = r.primary_contact_id
+    }
+    return m
+  }, [dupeResolutions])
+  const canonicalKey = useCallback((contactKey) => {
+    // Resolve transitively in case A→B→C (rare but possible). Cap at 4
+    // hops as a safety net.
+    let k = contactKey
+    for (let i = 0; i < 4 && mergeMap[k]; i++) k = mergeMap[k]
+    return k
+  }, [mergeMap])
   useEffect(() => {
     let cancelled = false
     async function loadBookings() {
@@ -1759,8 +1982,26 @@ export default function MarketingPerformance() {
         }
       }
     }
-    return dupes
-  }, [bookingsByDate])
+    // Hide pairs that have already been resolved (either merged or
+    // marked "not duplicate"). For groups with >2 members we still
+    // surface the unresolved pair-combinations.
+    return dupes.filter(g => {
+      if (g.members.length === 2) {
+        const ids = g.members.map(m => m.contactKey).sort()
+        return !dupeResolutions[`${ids[0]}|${ids[1]}`]
+      }
+      // For 3+ member groups, hide only if EVERY pair has a resolution.
+      const ids = g.members.map(m => m.contactKey)
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const a = ids[i] < ids[j] ? ids[i] : ids[j]
+          const b = ids[i] < ids[j] ? ids[j] : ids[i]
+          if (!dupeResolutions[`${a}|${b}`]) return true
+        }
+      }
+      return false
+    })
+  }, [bookingsByDate, dupeResolutions])
 
   // Sum a per-date bookings map over the same window the rest of the page uses.
   // Anchored to ET (matches filterByDays above) so all users see the same
@@ -1784,9 +2025,12 @@ export default function MarketingPerformance() {
     for (const [d, list] of Object.entries(bookingsByDate)) {
       if (!filterDate(d)) continue
       for (const b of list) {
-        const existing = seen.get(b.contactKey)
-        if (!existing) seen.set(b.contactKey, { isDq: b.isDq })
-        else if (existing.isDq && !b.isDq) seen.set(b.contactKey, { isDq: false })
+        // Collapse merged secondaries into their canonical primary so
+        // resolved-duplicate pairs count as one prospect.
+        const key = canonicalKey(b.contactKey)
+        const existing = seen.get(key)
+        if (!existing) seen.set(key, { isDq: b.isDq })
+        else if (existing.isDq && !b.isDq) seen.set(key, { isDq: false })
       }
     }
     let all = 0, qualified = 0, dq = 0
@@ -1796,7 +2040,7 @@ export default function MarketingPerformance() {
       else qualified++
     }
     return { all, qualified, dq }
-  }, [bookingsByDate])
+  }, [bookingsByDate, canonicalKey])
 
   // Same dedupe rule but on appointment_date (call-held) buckets. Used for
   // cohort show rate so numerator (lives) and denominator (scheduled calls)
@@ -1816,9 +2060,12 @@ export default function MarketingPerformance() {
     for (const [d, list] of Object.entries(cohortBookingsByDate)) {
       if (!filterDate(d)) continue
       for (const b of list) {
-        const existing = seen.get(b.contactKey)
-        if (!existing) seen.set(b.contactKey, { isDq: b.isDq })
-        else if (existing.isDq && !b.isDq) seen.set(b.contactKey, { isDq: false })
+        // Collapse merged secondaries into their canonical primary so
+        // resolved-duplicate pairs count as one prospect.
+        const key = canonicalKey(b.contactKey)
+        const existing = seen.get(key)
+        if (!existing) seen.set(key, { isDq: b.isDq })
+        else if (existing.isDq && !b.isDq) seen.set(key, { isDq: false })
       }
     }
     let all = 0, qualified = 0, dq = 0
@@ -1828,7 +2075,7 @@ export default function MarketingPerformance() {
       else qualified++
     }
     return { all, qualified, dq }
-  }, [cohortBookingsByDate])
+  }, [cohortBookingsByDate, canonicalKey])
 
   // Lead-cohort booking sum: count unique prospects whose LEAD's createdAt
   // fell in the window, regardless of when they booked. Pairs with stats.leads
@@ -1854,9 +2101,12 @@ export default function MarketingPerformance() {
     for (const [d, list] of Object.entries(leadCohortBookingsByDate)) {
       if (!filterDate(d)) continue
       for (const b of list) {
-        const existing = seen.get(b.contactKey)
-        if (!existing) seen.set(b.contactKey, { isDq: b.isDq })
-        else if (existing.isDq && !b.isDq) seen.set(b.contactKey, { isDq: false })
+        // Collapse merged secondaries into their canonical primary so
+        // resolved-duplicate pairs count as one prospect.
+        const key = canonicalKey(b.contactKey)
+        const existing = seen.get(key)
+        if (!existing) seen.set(key, { isDq: b.isDq })
+        else if (existing.isDq && !b.isDq) seen.set(key, { isDq: false })
       }
     }
     let all = 0, qualified = 0, dq = 0
@@ -1866,7 +2116,7 @@ export default function MarketingPerformance() {
       else qualified++
     }
     return { all, qualified, dq }
-  }, [leadCohortBookingsByDate])
+  }, [leadCohortBookingsByDate, canonicalKey])
 
   const rangeEntries = useMemo(() => filterByDays(entries, range), [entries, range])
   const mtdEntries = useMemo(() => filterByDays(entries, 'mtd'), [entries])
@@ -2500,11 +2750,36 @@ export default function MarketingPerformance() {
           <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--ink-2)' }}>
             {possibleDupes.map((g) => (
               <li key={g.key} style={{ marginBottom: 4 }}>
-                {g.members.map(m => `"${(m.name || '(no name)').trim()}"`).join('  vs  ')}
+                <button
+                  onClick={() => setResolvingDupe(g)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    color: 'var(--ink-2)',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    textDecorationStyle: 'dotted',
+                    textUnderlineOffset: 3,
+                    fontFamily: 'inherit',
+                    fontSize: 'inherit',
+                    textAlign: 'left',
+                  }}
+                  title="Click to resolve — mark as same person or different people"
+                >
+                  {g.members.map(m => `"${(m.name || '(no name)').trim()}"`).join('  vs  ')}
+                </button>
               </li>
             ))}
           </ul>
         </div>
+      )}
+      {resolvingDupe && (
+        <ResolveDupeModal
+          group={resolvingDupe}
+          onClose={() => setResolvingDupe(null)}
+          onResolved={async () => { await reloadDupeResolutions(); setResolvingDupe(null) }}
+        />
       )}
 
       {/* Spend & Lead Acquisition.
