@@ -1796,6 +1796,47 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
   const fmt = fmtValue || ((v) => mode === 'cost' ? `$${Math.round(v)}` : v)
   const [hoverIdx, setHoverIdx] = useState(null)
   const [chartType, setChartType] = useState('bar') // 'bar' | 'line'
+  const [granularity, setGranularity] = useState('day') // 'day' | 'week' | 'month'
+
+  // Roll the daily series into weekly or monthly buckets when granularity
+  // toggle is on. For count-mode and value-mode we sum across the bucket.
+  // For cost-mode we re-divide (totalSpend / totalCount) across the bucket
+  // so the bar shows true period CPL, not a misleading average of dailies.
+  const bucketed = useMemo(() => {
+    if (granularity === 'day') return series
+    const bucketKey = (day) => {
+      if (granularity === 'month') return day.slice(0, 7) // YYYY-MM
+      // ISO week — get Monday of that week
+      const dt = new Date(day + 'T00:00:00')
+      const dow = (dt.getUTCDay() + 6) % 7 // Mon=0
+      dt.setUTCDate(dt.getUTCDate() - dow)
+      return dt.toISOString().slice(0, 10) // Monday-of-week date
+    }
+    const buckets = new Map()
+    for (const p of series) {
+      const k = bucketKey(p.day)
+      if (!buckets.has(k)) buckets.set(k, { day: k, count: 0, spend: 0, valueSum: 0, valueHasData: false })
+      const b = buckets.get(k)
+      b.count += p.count || 0
+      b.spend += p.spend || 0
+      if (p.value != null) { b.valueSum += p.value; b.valueHasData = true }
+    }
+    return [...buckets.values()].map(b => {
+      if (mode === 'cost') {
+        const v = b.count > 0 ? b.spend / b.count : (b.spend > 0 ? null : 0)
+        return { day: b.day, value: v, count: b.count, spend: b.spend }
+      }
+      if (mode === 'value' && valueKey) {
+        return { day: b.day, value: b.valueHasData ? b.valueSum : null, count: b.count }
+      }
+      return { day: b.day, value: b.count, count: b.count }
+    })
+  }, [series, granularity, mode, valueKey])
+
+  // Recompute max/avg from the bucketed view so axes scale to it.
+  const bValid = bucketed.map(s => s.value).filter(v => v != null && !isNaN(v) && v > 0)
+  const maxB = bValid.length ? Math.max(...bValid) : 0
+  const avgB = bValid.length ? bValid.reduce((s, v) => s + v, 0) / bValid.length : 0
 
   if (maxV === 0 && totalCount === 0) {
     return (
@@ -1814,8 +1855,32 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
             {mode === 'cost'
-              ? `Avg ${fmt(avgV)} · Total spend ${'$' + Math.round(totalSpend).toLocaleString()}`
-              : `Avg ${avgV.toFixed(1)}/day · Total ${totalCount}`}
+              ? `Avg ${fmt(avgB)}/${granularity} · Total spend ${'$' + Math.round(totalSpend).toLocaleString()}`
+              : `Avg ${avgB.toFixed(1)}/${granularity} · Total ${totalCount}`}
+          </div>
+          {/* Granularity toggle */}
+          <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', borderRadius: 2, overflow: 'hidden' }}>
+            {[['day','D'],['week','W'],['month','M']].map(([g, lbl]) => (
+              <button
+                key={g}
+                onClick={() => setGranularity(g)}
+                style={{
+                  padding: '3px 8px',
+                  fontFamily: 'var(--mono)',
+                  fontSize: 9,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  background: granularity === g ? 'var(--ink)' : 'transparent',
+                  color: granularity === g ? 'var(--paper)' : 'var(--ink-3)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  minWidth: 22,
+                }}
+                title={`${g} buckets`}
+              >
+                {lbl}
+              </button>
+            ))}
           </div>
           {/* Bar / Line toggle */}
           <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', borderRadius: 2, overflow: 'hidden' }}>
@@ -1847,23 +1912,23 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
         {/* X axis line */}
         <line x1={PAD_L} y1={PAD_T + innerH} x2={W - PAD_R} y2={PAD_T + innerH} stroke="var(--rule)" strokeWidth="1" />
         {/* Avg line */}
-        {avgV > 0 && (() => {
-          const y = PAD_T + innerH * (1 - avgV / maxV)
+        {avgB > 0 && (() => {
+          const y = PAD_T + innerH * (1 - avgB / maxB)
           return (
             <g>
               <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke="var(--ink-4)" strokeWidth="1" strokeDasharray="3 3" opacity="0.5" />
-              <text x={W - PAD_R - 4} y={y - 3} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)" textAnchor="end">avg {fmt(avgV)}</text>
+              <text x={W - PAD_R - 4} y={y - 3} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)" textAnchor="end">avg {fmt(avgB)}</text>
             </g>
           )
         })()}
         {/* BAR view */}
-        {chartType === 'bar' && series.map((p, i) => {
-          const colX = PAD_L + (i * (innerW / series.length))
-          const colW = innerW / series.length
-          const h = (p.value != null && p.value > 0 && maxV > 0) ? (p.value / maxV) * innerH : 0
+        {chartType === 'bar' && bucketed.map((p, i) => {
+          const colX = PAD_L + (i * (innerW / bucketed.length))
+          const colW = innerW / bucketed.length
+          const h = (p.value != null && p.value > 0 && maxB > 0) ? (p.value / maxB) * innerH : 0
           const barX = colX + 1
           const barY = PAD_T + innerH - h
-          const aboveAvg = p.value != null && p.value > avgV
+          const aboveAvg = p.value != null && p.value > avgB
           const isHover = hoverIdx === i
           return (
             <g key={p.day}>
@@ -1894,12 +1959,12 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
         })}
         {/* LINE view — polyline with area fill + per-day dot + hover hit-area */}
         {chartType === 'line' && (() => {
-          const colW = innerW / series.length
+          const colW = innerW / bucketed.length
           // Build coordinate list — skip null gaps
-          const pts = series.map((p, i) => {
+          const pts = bucketed.map((p, i) => {
             const x = PAD_L + (i * colW) + colW / 2
-            const y = p.value != null && maxV > 0
-              ? PAD_T + innerH - (p.value / maxV) * innerH
+            const y = p.value != null && maxB > 0
+              ? PAD_T + innerH - (p.value / maxB) * innerH
               : null
             return { ...p, x, y, i }
           })
@@ -1967,10 +2032,10 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
           )
         })()}
         {/* Hover tooltip — positioned near hovered bar */}
-        {hoverIdx != null && (() => {
-          const p = series[hoverIdx]
-          const colX = PAD_L + (hoverIdx * (innerW / series.length))
-          const colW = innerW / series.length
+        {hoverIdx != null && bucketed[hoverIdx] && (() => {
+          const p = bucketed[hoverIdx]
+          const colX = PAD_L + (hoverIdx * (innerW / bucketed.length))
+          const colW = innerW / bucketed.length
           const cx = colX + colW / 2
           // Position tooltip above bar if there's room, else inside
           const tipW = 130
@@ -2000,17 +2065,18 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
           )
         })()}
         {/* X axis labels — first, middle, last */}
-        {[0, Math.floor(series.length / 2), series.length - 1].map(i => {
-          if (i < 0 || i >= series.length) return null
-          const x = PAD_L + (i * (innerW / series.length)) + barW / 2
+        {[0, Math.floor(bucketed.length / 2), bucketed.length - 1].map(i => {
+          if (i < 0 || i >= bucketed.length) return null
+          const x = PAD_L + (i * (innerW / bucketed.length)) + (innerW / bucketed.length) / 2
+          const lbl = granularity === 'month' ? bucketed[i].day : bucketed[i].day.slice(5)
           return (
             <text key={i} x={x} y={H - 6} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)" textAnchor="middle">
-              {series[i].day.slice(5)}
+              {lbl}
             </text>
           )
         })}
         {/* Y axis labels */}
-        <text x={PAD_L - 4} y={PAD_T + 4} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)" textAnchor="end">{fmt(maxV)}</text>
+        <text x={PAD_L - 4} y={PAD_T + 4} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)" textAnchor="end">{fmt(maxB)}</text>
         <text x={PAD_L - 4} y={PAD_T + innerH + 2} fontSize="9" fontFamily="var(--mono)" fill="var(--ink-4)" textAnchor="end">0</text>
       </svg>
     </div>
