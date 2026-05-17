@@ -1075,6 +1075,16 @@ export default function AdsPerformance() {
       for (const s of visibleSets) s.ads.sort(compareAds)
       const compareSets = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
       visibleSets.sort(compareSets)
+      // Hide rows with NO spend AND NO leads in window. These show up
+      // because a contact who became a lead from this ad MONTHS ago
+      // just booked now — the booking attributes to the old campaign
+      // and shows Booked > 0 even though spend/leads in window are 0.
+      // It's technically correct but misleading (looks like a paused
+      // campaign is still producing). Skipping them keeps the visible
+      // rollup honest. A search match still surfaces these rows so
+      // historical lookups stay possible.
+      const hasActivity = (campVisibleRollup.spend || 0) > 0 || (campVisibleRollup.tfLeads || 0) > 0
+      if (!hasActivity && !search.trim()) continue
       visibleCampaigns.push({ ...camp, rollup: campVisibleRollup, ad_sets_sorted: visibleSets })
     }
     const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
