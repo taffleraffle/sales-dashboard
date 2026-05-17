@@ -1105,6 +1105,80 @@ async function fetchBookings({ from, to }) {
   })).sort((a, b) => (b.booked || '').localeCompare(a.booked || ''))
 }
 
+async function fetchNoShows({ from, to }) {
+  // NC no-shows only — follow-up no-shows happen on different funnel
+  // events and shouldn't pollute the "did this booking happen" metric.
+  // Matches the no_show_rate calculation in useMarketingTracker.js.
+  const { data: reports } = await supabase
+    .from('closer_eod_reports')
+    .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
+    .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
+  const reportIds = (reports || []).map(r => r.id)
+  const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
+  if (reportIds.length === 0) return []
+  const { data: callRows } = await supabase
+    .from('closer_calls')
+    .select('eod_report_id, prospect_name, call_type, outcome')
+    .in('eod_report_id', reportIds)
+    .eq('outcome', 'no_show')
+    .eq('call_type', 'new_call')
+  return (callRows || []).map(c => ({
+    date: reportMap[c.eod_report_id]?.report_date,
+    closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+    prospect: c.prospect_name || '—',
+  })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+}
+
+async function fetchShowRate({ from, to }) {
+  // Per-day show rate from marketing_tracker. One row per day with
+  // bookings, lives, no_shows, gross + net show% pre-computed.
+  const { data } = await supabase
+    .from('marketing_tracker')
+    .select('date, nc_booked, new_live_calls, no_shows, cancelled_dtf, cancelled_by_prospect, reschedules, qualified_bookings')
+    .gte('date', from).lte('date', to)
+    .order('date', { ascending: false })
+  return (data || [])
+    .filter(r => (r.nc_booked || 0) > 0)
+    .map(r => {
+      const nc = r.nc_booked || 0
+      const lives = r.new_live_calls || 0
+      const cancels = (r.cancelled_dtf || 0) + (r.cancelled_by_prospect || 0)
+      const reschedules = r.reschedules || 0
+      const noShows = r.no_shows || 0
+      const grossDenom = nc
+      const netDenom = Math.max(0, nc - cancels - reschedules)
+      const grossShow = grossDenom > 0 ? (lives / grossDenom) * 100 : 0
+      const netShow   = netDenom   > 0 ? Math.min(100, (lives / netDenom) * 100) : 0
+      return {
+        date: r.date,
+        nc_booked: nc,
+        lives,
+        no_shows: noShows,
+        cancels,
+        reschedules,
+        grossShow,
+        netShow,
+      }
+    })
+}
+
+async function fetchCpaTrial({ from, to }) {
+  // Daily CPA (Trial) — spend / closes per day.
+  const { data: tracker } = await supabase
+    .from('marketing_tracker')
+    .select('date, adspend, closes')
+    .gte('date', from).lte('date', to)
+    .order('date', { ascending: false })
+  return (tracker || [])
+    .filter(r => (r.adspend || 0) > 0 || (r.closes || 0) > 0)
+    .map(r => ({
+      date: r.date,
+      adspend: r.adspend,
+      closes: r.closes,
+      cpa: (r.closes || 0) > 0 ? r.adspend / r.closes : null,
+    }))
+}
+
 async function fetchReschCancel({ from, to }) {
   const { data: reports } = await supabase
     .from('closer_eod_reports')
@@ -1333,6 +1407,7 @@ const DRILLDOWN_CONFIG = {
     title: 'Reschedules + Cancellations',
     subtitle: 'Closer EOD reports · outcome = rescheduled or canceled',
     fetcher: fetchReschCancel,
+    chart: { dateKey: 'date', label: 'R+C events per day' },
     columns: [
       { key: 'date', label: 'Date', cls: 'tabular-nums' },
       { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
@@ -1343,6 +1418,48 @@ const DRILLDOWN_CONFIG = {
         : <span className="text-text-secondary">Rescheduled</span> },
     ],
     emptyMsg: 'No reschedules or cancellations in this window.',
+  },
+  noshows: {
+    title: 'No-shows',
+    subtitle: 'NC bookings that didn\'t show (closer EOD · call_type=new_call · outcome=no_show)',
+    fetcher: fetchNoShows,
+    chart: { dateKey: 'date', label: 'No-shows per day' },
+    columns: [
+      { key: 'date', label: 'Date', cls: 'tabular-nums' },
+      { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
+      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+    ],
+    emptyMsg: 'No no-shows logged in this window.',
+  },
+  showrate: {
+    title: 'Show Rate (Gross + Net)',
+    subtitle: 'Daily show rate. Gross = lives/booked. Net = lives/(booked-cancels-reschedules).',
+    fetcher: fetchShowRate,
+    chart: { dateKey: 'date', mode: 'value', valueKey: 'netShow', label: 'Net Show % per day', fmtValue: v => `${v.toFixed(0)}%` },
+    columns: [
+      { key: 'date', label: 'Date', cls: 'tabular-nums' },
+      { key: 'nc_booked', label: 'NC Booked', align: 'right', cls: 'tabular-nums' },
+      { key: 'lives', label: 'Lives', align: 'right', cls: 'tabular-nums' },
+      { key: 'no_shows', label: 'No Shows', align: 'right', cls: 'tabular-nums' },
+      { key: 'cancels', label: 'Cancels', align: 'right', cls: 'tabular-nums' },
+      { key: 'reschedules', label: 'Resch', align: 'right', cls: 'tabular-nums' },
+      { key: 'grossShow', label: 'Gross %', align: 'right', render: r => `${r.grossShow.toFixed(0)}%` },
+      { key: 'netShow', label: 'Net %', align: 'right', render: r => `${r.netShow.toFixed(0)}%` },
+    ],
+    emptyMsg: 'No bookings in this window to compute show rate.',
+  },
+  cpaTrial: {
+    title: 'CPA (Trial)',
+    subtitle: 'Daily adspend ÷ closes that day',
+    fetcher: fetchCpaTrial,
+    chart: { dateKey: 'date', mode: 'value', valueKey: 'cpa', label: 'CPA per day ($)', fmtValue: v => `$${Math.round(v).toLocaleString()}` },
+    columns: [
+      { key: 'date', label: 'Date', cls: 'tabular-nums' },
+      { key: 'adspend', label: 'Spend', align: 'right', render: r => r.adspend ? `$${Math.round(r.adspend).toLocaleString()}` : '—' },
+      { key: 'closes', label: 'Closes', align: 'right', cls: 'tabular-nums' },
+      { key: 'cpa', label: 'CPA', align: 'right', render: r => r.cpa ? `$${Math.round(r.cpa).toLocaleString()}` : '—' },
+    ],
+    emptyMsg: 'No adspend or closes in this window.',
   },
   leads: {
     title: 'Leads',
@@ -3223,11 +3340,11 @@ export default function MarketingPerformance() {
         return (
           <Section title="Calls & Show Rates" cols={7}>
             <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={gated(upstream.live, wf?.new_live_calls)} tip={`NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Denominator for show rates uses Qualified Bookings (${denom}) from the calendar, not the closer's EOD count. Click to view.`} onClick={() => setDrilldown('live')} />
-            <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={gated(upstream.live, wf?.no_shows)} tip="From closer EOD reports (NC + FU no-shows). Excludes cancels — those are tracked separately." />
+            <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={gated(upstream.live, wf?.no_shows)} tip="NC no-shows from closer EOD. Click for daily trend + prospects." onClick={() => setDrilldown('noshows')} />
             <KPI label="Reschedule%" value={reschedRate} format="%" trailing={reschedRate30} prev={reschedRatePrev} tip={`Reschedules ÷ Qualified Bookings. ${stats.reschedules || 0} reschedules out of ${denom} qualified bookings (calendar). Click to view.`} onClick={() => setDrilldown('rc')} />
             <KPI label="Cancel%" value={cancelRate} format="%" trailing={cancelRate30} prev={cancelRatePrev} tip={`Cancellations ÷ Qualified Bookings. ${stats.cancels || 0} cancels out of ${denom} qualified bookings (calendar). Click to view.`} onClick={() => setDrilldown('rc')} />
-            <KPI label="Gross Show%" value={grossShowRate} format="%" trailing={grossShowRate30} tip={`Live shows ÷ ALL qualified bookings (includes calls that later cancelled or rescheduled). ${stats.new_live_calls || 0} live ÷ ${denom} booked. Calendar-sourced denominator.`} />
-            <KPI label="Net Show%" value={netShowRate} format="%" benchmark={bm.show_rate_new} trailing={netShowRate30} tip={`Live shows ÷ CONFIRMED bookings (Qualified Bookings minus cancels and reschedules). ${stats.new_live_calls || 0} live ÷ ${netDenom} confirmed = ${netShowRate.toFixed(1)}%. Use this for forecasting.`} />
+            <KPI label="Gross Show%" value={grossShowRate} format="%" trailing={grossShowRate30} tip={`Live shows ÷ ALL qualified bookings (includes calls that later cancelled or rescheduled). ${stats.new_live_calls || 0} live ÷ ${denom} booked. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
+            <KPI label="Net Show%" value={netShowRate} format="%" benchmark={bm.show_rate_new} trailing={netShowRate30} tip={`Live shows ÷ CONFIRMED bookings (Qualified Bookings minus cancels and reschedules). ${stats.new_live_calls || 0} live ÷ ${netDenom} confirmed = ${netShowRate.toFixed(1)}%. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
             <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={gated(upstream.live, wf?.cost_per_new_live_call)} tip="Adspend ÷ Net New" />
           </Section>
         )
@@ -3240,7 +3357,7 @@ export default function MarketingPerformance() {
         <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" prev={sp.cost_per_offer} whatIf={gated(upstream.offers, wf?.cost_per_offer)} tip="Adspend / Offers" />
         <KPI label="Total Closes" value={stats.closes} format="n" prev={sp.closes} whatIf={gated(upstream.closes, wf?.closes)} tip="Deals closed (trial sign-ups). Click to view." onClick={() => setDrilldown('closes')} />
         <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={gated(upstream.closes, wf?.close_rate)} tip="Closes ÷ Live New Calls. Follow-ups and ascensions excluded from denominator." />
-        <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} prev={sp.cpa_trial} whatIf={gated(upstream.closes, wf?.cpa_trial)} tip="Cost Per Acquisition = Adspend / Closes" />
+        <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} prev={sp.cpa_trial} whatIf={gated(upstream.closes, wf?.cpa_trial)} tip="Cost Per Acquisition = Adspend / Closes. Click for daily CPA trend." onClick={() => setDrilldown('cpaTrial')} />
       </Section>
 
       {/* Trial Financials */}
