@@ -54,9 +54,15 @@ export function useCloserCallProspectMetrics() {
         since.setDate(since.getDate() - WINDOW_DAYS)
         const sinceStr = since.toISOString().split('T')[0]
 
+        // is_confirmed=true matches the drilldown (fetchCloses in
+        // MarketingPerformance.jsx). Without this filter, calls on
+        // unconfirmed EOD reports inflate the tile by 1+ while the
+        // drilldown panel hides them — the row-vs-drilldown drift
+        // Ben hit on Total Closes (tile=4, panel=3).
         const { data: reports, error: rErr } = await supabase
           .from('closer_eod_reports')
           .select('id, report_date, closer_id')
+          .eq('is_confirmed', true)
           .gte('report_date', sinceStr)
         if (rErr) throw new Error(rErr.message)
 

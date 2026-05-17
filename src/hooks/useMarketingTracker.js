@@ -190,7 +190,13 @@ export async function syncEODToTracker() {
     byDate[d].fu_booked += r.fu_booked || 0
     byDate[d].booked += (r.nc_booked || 0) + (r.fu_booked || 0)
     byDate[d].nc_no_shows += r.nc_no_shows || 0
-    byDate[d].no_shows += (r.nc_no_shows || 0) + (r.fu_no_shows || 0)
+    // no_shows = NC only. Including fu_no_shows here counted follow-up
+    // calls that didn't show against the "did the booking happen" rate —
+    // but a follow-up no-show is a different funnel-stage event from
+    // a booking no-show. Ben flagged this on the 30D view where 39 no-
+    // shows on 69 bookings + 95% net show rate didn't add up; the
+    // inflation came from FU no-shows polluting the NC universe.
+    byDate[d].no_shows += (r.nc_no_shows || 0)
     byDate[d].reschedules += r.reschedules || 0
     byDate[d].cancels += (r.nc_cancels || 0) + (r.fu_cancels || 0)
   }
