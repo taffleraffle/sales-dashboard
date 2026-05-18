@@ -20,8 +20,7 @@ const DIMENSIONS = [
   { id: 'message_frame',    label: 'Frame' },
   { id: 'mechanism_reveal', label: 'Mechanism' },
   { id: 'pain_angle',       label: 'Pain' },
-  { id: 'proof_character',  label: 'Proof' },
-  { id: 'funnel_stage',     label: 'Funnel' },
+  { id: 'awareness_level',  label: 'Awareness' },
 ]
 
 /*
@@ -395,7 +394,7 @@ function ScriptRow({ script, isLast, onRemove, working }) {
           {t.message_frame && <ValueChip attr="message_frame" value={t.message_frame} size="xs" />}
           {t.mechanism_reveal && <ValueChip attr="mechanism_reveal" value={t.mechanism_reveal} size="xs" />}
           {t.pain_angle && <ValueChip attr="pain_angle" value={t.pain_angle} size="xs" />}
-          {t.proof_character && t.proof_character !== 'none' && <ValueChip attr="proof_character" value={t.proof_character} size="xs" />}
+          {t.awareness_level && <ValueChip attr="awareness_level" value={t.awareness_level} size="xs" />}
         </div>
         {script.body && (
           <div style={{

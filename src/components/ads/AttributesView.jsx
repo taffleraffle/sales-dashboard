@@ -15,18 +15,13 @@ import {
   so offer-filter + date-range honor the page-level filters automatically.
 */
 
+// Trimmed 2026-05-18 to the 5 attributes that actually drive testing.
 const ALL_ATTRS = [
   { id: 'hook_type',        label: 'Hook type',         sub: 'Opening seconds — question, scene, diagnostic…' },
   { id: 'message_frame',    label: 'Message frame',     sub: 'Problem · Circumstance · Outcome' },
   { id: 'mechanism_reveal', label: 'Mechanism reveal',  sub: 'Gated · Explicit · Hidden' },
   { id: 'pain_angle',       label: 'Pain angle',        sub: 'The specific operator wound the ad presses on' },
-  { id: 'funnel_stage',     label: 'Funnel stage',      sub: 'TOF · MOF · BOF · Cross' },
   { id: 'awareness_level',  label: 'Awareness level',   sub: 'Schwartz’s 5 stages of buyer awareness' },
-  { id: 'length_bucket',    label: 'Length',            sub: '<60s / 60–75s / 75s+' },
-  { id: 'format',           label: 'Format',            sub: 'Talking head · UGC · Comparative · Voiceover' },
-  { id: 'proof_character',  label: 'Proof character',   sub: 'Named on-camera client or actor' },
-  { id: 'actor',            label: 'Actor',             sub: 'Who filmed — Ben, Austin, client, voiceover' },
-  { id: 'vertical',         label: 'Vertical',          sub: 'Restoration · Plumbing · Roofing (pilot)' },
 ]
 
 // Minimum ad sample for a value to be considered "in play" (filters noise)

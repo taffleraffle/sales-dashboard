@@ -6,16 +6,15 @@ import {
   ValueChip, attrColor, displayValue, PodiumRank, WinnerBadge,
 } from '../editorial/atoms'
 
+// Trimmed 2026-05-18 to the 5 tracked attributes + source + asset_type.
 const FILTER_GROUPS = [
   { attr: 'assignment_status', label: 'Source',  values: ['assigned', 'manual_transcript', 'auto_transcript', 'ad_copy_only', 'unassigned'] },
-  { attr: 'asset_type',       label: 'Asset',     values: ['video', 'image'] },
-  { attr: 'message_frame',    label: 'Frame',     values: ['problem', 'circumstance', 'outcome'] },
-  { attr: 'hook_type',        label: 'Hook',      values: ['question', 'scene', 'dollar_pain', 'diagnostic', 'conditional'] },
-  { attr: 'mechanism_reveal', label: 'Mechanism', values: ['gated', 'explicit', 'hidden'] },
-  { attr: 'funnel_stage',     label: 'Funnel',    values: ['tof', 'mof', 'bof', 'cross'] },
-  { attr: 'format',           label: 'Format',    values: ['talking_head', 'ugc', 'comparative', 'voiceover'] },
-  { attr: 'proof_character',  label: 'Proof',     values: ['eric', 'adam', 'belinda', 'morgan', 'karen', 'derek', 'mike', 'none'] },
-  { attr: 'pain_angle',       label: 'Pain angle', values: ['phone_not_ringing', 'agency_burn', 'tpa_referral_dep', 'capacity_mismatch', 'lead_platform', 'storm_seasonal', 'guarantee_proof', 'founder_identity', 'adjuster_relations', 'commercial_tier', 'last_objection'] },
+  { attr: 'asset_type',        label: 'Asset',     values: ['video', 'image'] },
+  { attr: 'message_frame',     label: 'Frame',     values: ['problem', 'circumstance', 'outcome'] },
+  { attr: 'hook_type',         label: 'Hook',      values: ['question', 'scene', 'dollar_pain', 'diagnostic', 'conditional'] },
+  { attr: 'mechanism_reveal',  label: 'Mechanism', values: ['gated', 'explicit', 'hidden'] },
+  { attr: 'awareness_level',   label: 'Awareness', values: ['unaware', 'problem_aware', 'solution_aware', 'product_aware', 'most_aware'] },
+  { attr: 'pain_angle',        label: 'Pain angle', values: ['phone_not_ringing', 'agency_burn', 'tpa_referral_dep', 'capacity_mismatch', 'lead_platform', 'storm_seasonal', 'guarantee_proof', 'founder_identity', 'adjuster_relations', 'commercial_tier', 'last_objection'] },
 ]
 
 // Assignment status badge — quick visual for assigned/unassigned per row.
@@ -60,9 +59,10 @@ function AssignmentChip({ status }) {
   on narrower viewports.
 */
 
-// Grid columns: rank | thumb | ad+campaign | source | hook | frame | mech | pain | proof | booked | cpb | state
-const GRID_COLS = '40px 56px minmax(200px, 1.3fr) 110px 110px 110px 110px 130px 100px 80px 80px 90px'
-const MIN_TABLE_WIDTH = 1300
+// Grid columns: rank | thumb | ad+campaign | source | hook | frame | mech | pain | booked | cpb | state
+// Dropped 'proof' column 2026-05-18 along with proof_character tracking.
+const GRID_COLS = '40px 56px minmax(220px, 1.4fr) 110px 110px 110px 110px 140px 80px 80px 90px'
+const MIN_TABLE_WIDTH = 1220
 
 const PAGE_SIZE = 30
 
@@ -301,7 +301,6 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
           <Eyebrow>Frame</Eyebrow>
           <Eyebrow>Mech</Eyebrow>
           <Eyebrow>Pain angle</Eyebrow>
-          <Eyebrow>Proof</Eyebrow>
           <Eyebrow style={{ textAlign: 'right' }}>Booked</Eyebrow>
           <Eyebrow style={{ textAlign: 'right' }}>CPB</Eyebrow>
           <Eyebrow style={{ textAlign: 'right' }}>State</Eyebrow>
@@ -501,7 +500,6 @@ function CreativeRow({ c, rank, isPodium, onClick, onToggleWinner, onToggleExclu
   const frame = c.message_frame
   const isWinner = !!c.effective_winner
   const isExcluded = !!c.exclude_from_tests
-  const proof = c.proof_character && c.proof_character !== 'none' ? c.proof_character : null
 
   return (
     <div onClick={onClick}
@@ -571,12 +569,11 @@ function CreativeRow({ c, rank, isPodium, onClick, onToggleWinner, onToggleExclu
         <AssignmentChip status={c.assignment_status} />
       </div>
 
-      {/* Explicit attribute columns */}
+      {/* Explicit attribute columns — 5 tracked dimensions */}
       <AttrCell attr="hook_type"        value={c.hook_type} />
       <AttrCell attr="message_frame"    value={c.message_frame} />
       <AttrCell attr="mechanism_reveal" value={c.mechanism_reveal} />
       <AttrCell attr="pain_angle"       value={c.pain_angle} />
-      <AttrCell attr="proof_character"  value={proof} />
 
       {/* Booked */}
       <div style={{ textAlign: 'right' }}>

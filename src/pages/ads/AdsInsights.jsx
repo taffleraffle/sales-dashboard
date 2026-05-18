@@ -29,13 +29,13 @@ import {
 
 // Attribute pivots powering the "Variables pulling ahead" leaderboard
 // and the win-rate-by-attribute small-multiples chart.
+// Trimmed 2026-05-18: dropped funnel_stage + format.
 const PIVOTS = [
   { attr: 'hook_type',        label: 'Hook type' },
   { attr: 'message_frame',    label: 'Message frame' },
   { attr: 'mechanism_reveal', label: 'Mechanism reveal' },
   { attr: 'pain_angle',       label: 'Pain angle' },
-  { attr: 'funnel_stage',     label: 'Funnel stage' },
-  { attr: 'format',           label: 'Format' },
+  { attr: 'awareness_level',  label: 'Awareness level' },
 ]
 
 export default function AdsInsights() {
@@ -419,7 +419,7 @@ function TopPerformerRow({ c, rank, cols, onClick, isLast }) {
           { a: 'message_frame', v: c.message_frame },
           { a: 'mechanism_reveal', v: c.mechanism_reveal },
           { a: 'pain_angle', v: c.pain_angle },
-          { a: 'proof_character', v: c.proof_character && c.proof_character !== 'none' ? c.proof_character : null },
+          { a: 'awareness_level', v: c.awareness_level },
         ].filter(p => p.v).slice(0, 5).map((p, i) => (
           <ValueChip key={i} attr={p.a} value={p.v} size="xs" />
         ))}

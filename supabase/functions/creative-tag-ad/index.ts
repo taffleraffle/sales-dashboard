@@ -137,7 +137,9 @@ async function loadVocab(supabase: any): Promise<Record<string, string[]>> {
 
 async function loadAdContext(supabase: any, ad_id: string) {
   const [adRes, transRes] = await Promise.all([
-    supabase.from('ads').select('ad_id, ad_name, headline, primary_text, description, asset_type, raw_payload').eq('ad_id', ad_id).maybeSingle(),
+    supabase.from('ads')
+      .select('ad_id, ad_name, headline, primary_text, description, asset_type, asset_url, thumbnail_url, raw_payload')
+      .eq('ad_id', ad_id).maybeSingle(),
     // public.lib_creative_transcripts is a forwarding view over library.creative_transcripts
     // (defined in migration 028) so the public schema is reachable via PostgREST.
     supabase
@@ -165,8 +167,44 @@ async function loadAdContext(supabase: any, ad_id: string) {
   }
 }
 
+/**
+ * Fetch the image and return base64 + media_type. Used only for image
+ * ads (and video posters) — passing Claude the actual image lets it
+ * describe what's visually in the creative, not just what the copy says.
+ *
+ * Returns null on any failure — caller falls back to text-only tagging.
+ */
+async function fetchImageAsBase64(url: string): Promise<{ data: string, media_type: string } | null> {
+  if (!url) return null
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 12000)
+    const res = await fetch(url, { signal: controller.signal })
+    clearTimeout(timeout)
+    if (!res.ok) return null
+    const ct = res.headers.get('content-type') || 'image/jpeg'
+    const media_type = ct.includes('png') ? 'image/png'
+      : ct.includes('webp') ? 'image/webp'
+      : ct.includes('gif') ? 'image/gif'
+      : 'image/jpeg'
+    const buf = new Uint8Array(await res.arrayBuffer())
+    // Cap at 5MB so the Anthropic API doesn't refuse and we don't burn budget.
+    if (buf.length === 0 || buf.length > 5 * 1024 * 1024) return null
+    // Base64 encode
+    let bin = ''
+    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i])
+    const data = btoa(bin)
+    return { data, media_type }
+  } catch (_e) {
+    return null
+  }
+}
+
 function buildToolSchema(vocab: Record<string, string[]>) {
-  // Tool input schema — Claude returns JSON matching this
+  // Trimmed 2026-05-18: dropped funnel_stage, length_bucket, format,
+  // proof_character, actor, vertical from active tagging per operator
+  // request. Columns still exist in creative_attributes (and may have
+  // historical data) but the LLM no longer extracts them.
   return {
     name: 'set_creative_attributes',
     description: 'Set the test-variable attributes for this ad. Use only values from the provided vocab.',
@@ -176,30 +214,29 @@ function buildToolSchema(vocab: Record<string, string[]>) {
         hook_type:        { type: ['string', 'null'], enum: [...(vocab.hook_type || []), null] },
         message_frame:    { type: ['string', 'null'], enum: [...(vocab.message_frame || []), null] },
         mechanism_reveal: { type: ['string', 'null'], enum: [...(vocab.mechanism_reveal || []), null] },
-        proof_character:  { type: ['string', 'null'], enum: [...(vocab.proof_character || []), null] },
         pain_angle:       { type: ['string', 'null'], enum: [...(vocab.pain_angle || []), null] },
-        funnel_stage:     { type: ['string', 'null'], enum: [...(vocab.funnel_stage || []), null] },
         awareness_level:  { type: ['string', 'null'], enum: [...(vocab.awareness_level || []), null] },
-        length_bucket:    { type: ['string', 'null'], enum: [...(vocab.length_bucket || []), null] },
-        format:           { type: ['string', 'null'], enum: [...(vocab.format || []), null] },
         confidence: {
           type: 'object',
           properties: {
             hook_type:        { type: 'number' },
             message_frame:    { type: 'number' },
             mechanism_reveal: { type: 'number' },
-            proof_character:  { type: 'number' },
             pain_angle:       { type: 'number' },
-            funnel_stage:     { type: 'number' },
             awareness_level:  { type: 'number' },
-            length_bucket:    { type: 'number' },
-            format:           { type: 'number' },
           },
-          required: ['hook_type','message_frame','mechanism_reveal','proof_character','pain_angle','funnel_stage','awareness_level','length_bucket','format'],
+          required: ['hook_type','message_frame','mechanism_reveal','pain_angle','awareness_level'],
         },
-        reasoning: { type: 'string', description: 'One short paragraph: why these classifications.' },
+        scene_description: {
+          type: ['string', 'null'],
+          description: 'For image/video ads: ONE specific sentence describing what is visually in the creative — actors, setting, props, on-screen text. NOT a re-summary of the ad copy. E.g. "Man in black raincoat standing in a flooded city street holding a large yellow sandwich-board sign that reads WATER DAMAGE PROS DOING $50K+/MTH, restoration van with logo in background." Null if no image is available.',
+        },
+        reasoning: {
+          type: 'string',
+          description: 'One short paragraph explaining the tag choices. Reference both the visual content (when present) and the copy.',
+        },
       },
-      required: ['hook_type','message_frame','mechanism_reveal','proof_character','pain_angle','funnel_stage','awareness_level','length_bucket','format','confidence','reasoning'],
+      required: ['hook_type','message_frame','mechanism_reveal','pain_angle','awareness_level','confidence','reasoning'],
     },
   }
 }
@@ -208,20 +245,45 @@ async function classifyAd(supabase: any, ad_id: string, vocab: Record<string, st
   const ctx = await loadAdContext(supabase, ad_id)
   const tool = buildToolSchema(vocab)
 
-  const userContent = [
-    `AD ID: ${ad_id}`,
-    `AD NAME: ${ctx.ad.ad_name || '(no name)'}`,
-    `HEADLINE: ${ctx.ad.headline || '(none)'}`,
-    `PRIMARY TEXT: ${ctx.ad.primary_text || '(none)'}`,
-    `DESCRIPTION: ${ctx.ad.description || '(none)'}`,
-    `ASSET TYPE: ${ctx.ad.asset_type || '(unknown)'}`,
-    `DURATION: ${ctx.duration_sec != null ? `${ctx.duration_sec}s` : '(unknown)'}`,
-    '',
-    `TRANSCRIPT (source: ${ctx.transcript_source || 'NONE'}):`,
-    ctx.transcript || '(no transcript available)',
-    '',
-    'Classify this ad. Use only vocab values. Return null for any field you genuinely cannot determine, with confidence 0.',
-  ].join('\n')
+  // Try to pull the actual image bytes for image ads (and video posters).
+  // asset_url is the Supabase Storage URL after migration 066, so it
+  // doesn't expire. Soft-fails to text-only if anything goes wrong.
+  let imageBlock: any = null
+  const imageCandidateUrl = ctx.ad?.asset_url || ctx.ad?.thumbnail_url || null
+  if (imageCandidateUrl && (ctx.ad?.asset_type === 'image' || ctx.ad?.asset_type === 'video')) {
+    const img = await fetchImageAsBase64(imageCandidateUrl)
+    if (img) {
+      imageBlock = {
+        type: 'image',
+        source: { type: 'base64', media_type: img.media_type, data: img.data },
+      }
+    }
+  }
+
+  const textBlock = {
+    type: 'text',
+    text: [
+      `AD ID: ${ad_id}`,
+      `AD NAME: ${ctx.ad.ad_name || '(no name)'}`,
+      `HEADLINE: ${ctx.ad.headline || '(none)'}`,
+      `PRIMARY TEXT: ${ctx.ad.primary_text || '(none)'}`,
+      `DESCRIPTION: ${ctx.ad.description || '(none)'}`,
+      `ASSET TYPE: ${ctx.ad.asset_type || '(unknown)'}`,
+      `DURATION: ${ctx.duration_sec != null ? `${ctx.duration_sec}s` : '(unknown)'}`,
+      imageBlock ? '' : 'NOTE: No image available; classify from copy + transcript only.',
+      '',
+      `TRANSCRIPT (source: ${ctx.transcript_source || 'NONE'}):`,
+      ctx.transcript || '(no transcript available)',
+      '',
+      imageBlock
+        ? 'For scene_description: describe what is visually in the attached image — actors, setting, props, on-screen text. Be specific. Do NOT just summarize the copy.'
+        : 'No image to describe; set scene_description to null.',
+      'Classify this ad. Use only vocab values. Return null for any field you genuinely cannot determine, with confidence 0.',
+    ].join('\n'),
+  }
+
+  // Image must come BEFORE the text block per Anthropic best-practices
+  const content = imageBlock ? [imageBlock, textBlock] : [textBlock]
 
   const upstream = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -232,9 +294,9 @@ async function classifyAd(supabase: any, ad_id: string, vocab: Record<string, st
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: 1200,
+      max_tokens: 1500,
       system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userContent }],
+      messages: [{ role: 'user', content }],
       tools: [tool],
       tool_choice: { type: 'tool', name: 'set_creative_attributes' },
     }),
@@ -251,6 +313,14 @@ async function classifyAd(supabase: any, ad_id: string, vocab: Record<string, st
 
 async function persist(supabase: any, ad_id: string, classified: { attributes: any, raw_response: any }) {
   const a = classified.attributes
+  // Notes get the scene description (when available) followed by the
+  // reasoning. The image-specific description goes FIRST so operators
+  // see the visual content immediately when reviewing.
+  const notesParts = []
+  if (a.scene_description) notesParts.push(`SCENE: ${a.scene_description}`)
+  if (a.reasoning) notesParts.push(a.reasoning)
+  const notes = notesParts.join('\n\n')
+
   const { error } = await supabase
     .from('creative_attributes')
     .upsert({
@@ -258,17 +328,17 @@ async function persist(supabase: any, ad_id: string, classified: { attributes: a
       hook_type: a.hook_type,
       message_frame: a.message_frame,
       mechanism_reveal: a.mechanism_reveal,
-      proof_character: a.proof_character,
       pain_angle: a.pain_angle,
-      funnel_stage: a.funnel_stage,
       awareness_level: a.awareness_level,
-      length_bucket: a.length_bucket,
-      format: a.format,
+      // Dropped 2026-05-18: proof_character, funnel_stage, length_bucket, format.
+      // Columns still exist on the table for historical data; we just don't
+      // overwrite them with the LLM output anymore. Operator can still set
+      // them manually via the edit drawer if needed.
       extracted_at: new Date().toISOString(),
       extracted_by_model: ANTHROPIC_MODEL,
       extraction_confidence: a.confidence,
       raw_llm_response: classified.raw_response,
-      notes: a.reasoning,
+      notes,
     }, { onConflict: 'ad_id' })
   if (error) throw new Error(`upsert creative_attributes: ${error.message}`)
 }

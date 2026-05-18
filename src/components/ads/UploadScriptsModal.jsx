@@ -246,7 +246,7 @@ function ParsedScriptRow({ script, onToggle, onTitleChange }) {
           {t.message_frame && <ValueChip attr="message_frame" value={t.message_frame} size="xs" />}
           {t.mechanism_reveal && <ValueChip attr="mechanism_reveal" value={t.mechanism_reveal} size="xs" />}
           {t.pain_angle && <ValueChip attr="pain_angle" value={t.pain_angle} size="xs" />}
-          {t.proof_character && t.proof_character !== 'none' && <ValueChip attr="proof_character" value={t.proof_character} size="xs" />}
+          {t.awareness_level && <ValueChip attr="awareness_level" value={t.awareness_level} size="xs" />}
           {!t.hook_type && !t.message_frame && !t.pain_angle && (
             <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-5)',
                           letterSpacing: '0.04em', textTransform: 'uppercase' }}>

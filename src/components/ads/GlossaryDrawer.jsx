@@ -65,18 +65,6 @@ const ATTRIBUTES = [
     ],
   },
   {
-    id: 'funnel_stage',
-    label: 'Funnel stage',
-    what: 'Where in the funnel the ad is meant to sit.',
-    why: 'Different stages need different messages. A cold prospect needs problem-awareness; a warm one needs proof.',
-    values: [
-      { v: 'tof',   desc: 'Top of funnel — cold audience, no prior touch' },
-      { v: 'mof',   desc: 'Middle of funnel — warm retargeting after engagement' },
-      { v: 'bof',   desc: 'Bottom of funnel — hot retargeting near booking decision' },
-      { v: 'cross', desc: 'Cross-funnel — works across stages' },
-    ],
-  },
-  {
     id: 'awareness_level',
     label: 'Awareness level',
     what: "Schwartz's 5 stages of buyer awareness.",
@@ -89,70 +77,10 @@ const ATTRIBUTES = [
       { v: 'most_aware',       desc: 'Ready to buy, just needs the trigger' },
     ],
   },
-  {
-    id: 'length_bucket',
-    label: 'Length',
-    what: 'Runtime bucket.',
-    why: 'Shorter = better hook retention; longer = more conviction. We test how length interacts with frame + funnel stage.',
-    values: [
-      { v: 'under_60s', desc: 'Under 60 seconds — short-form, fits Reels' },
-      { v: '60_75s',    desc: '60-75 seconds — sweet spot for most paid placements' },
-      { v: '75s_plus',  desc: '75 seconds+ — long-form, needs strong retention curve' },
-    ],
-  },
-  {
-    id: 'format',
-    label: 'Format',
-    what: 'Production style.',
-    why: 'Different formats carry different trust signals. Talking-head feels personal; UGC feels peer-validated; comparative feels analytical.',
-    values: [
-      { v: 'talking_head', desc: 'Single speaker direct-to-camera' },
-      { v: 'ugc',          desc: 'User-generated-content style (often a client speaking)' },
-      { v: 'comparative',  desc: 'Comparison-driven (us vs them, before vs after)' },
-      { v: 'voiceover',    desc: 'Voiceover over b-roll / animated text' },
-    ],
-  },
-  {
-    id: 'proof_character',
-    label: 'Proof character',
-    what: 'Which named real client appears on-camera.',
-    why: 'Different proof characters resonate with different verticals + revenue sizes. Eric is the workhorse; Adam carries scale stories; Belinda carries female-owned-business stories.',
-    values: [
-      { v: 'eric',    desc: 'Eric — workhorse case, broad appeal' },
-      { v: 'adam',    desc: 'Adam — scaled-up restoration owner' },
-      { v: 'belinda', desc: 'Belinda — female-owned operator' },
-      { v: 'morgan',  desc: 'Morgan — plumbing pilot' },
-      { v: 'karen',   desc: 'Karen — service-area expansion story' },
-      { v: 'derek',   desc: 'Derek — commercial-tier mover' },
-      { v: 'mike',    desc: 'Mike — TPA-independence story' },
-      { v: 'none',    desc: 'No on-camera client — voiceover or stock-footage only' },
-    ],
-  },
-  {
-    id: 'actor',
-    label: 'Actor',
-    what: 'Who filmed it (operator-set field).',
-    why: 'Tracks who shot which ad so we can attribute production cost + style.',
-    values: [
-      { v: 'ben',             desc: 'Ben' },
-      { v: 'austin',          desc: 'Austin' },
-      { v: 'client',          desc: 'The client themselves' },
-      { v: 'voiceover_only',  desc: 'No on-camera person' },
-      { v: 'other',           desc: 'Other / contractor' },
-    ],
-  },
-  {
-    id: 'vertical',
-    label: 'Vertical',
-    what: 'The industry the ad targets.',
-    why: 'Denormalized from offer for fast filtering.',
-    values: [
-      { v: 'restoration', desc: 'Restoration (water / fire / mold)' },
-      { v: 'plumbing',    desc: 'Plumbing' },
-      { v: 'roofing',     desc: 'Roofing (pilot)' },
-    ],
-  },
 ]
+// Trimmed 2026-05-18: dropped funnel_stage, length_bucket, format,
+// proof_character, actor, vertical. The data columns still exist for
+// historical rows; we just don't tag/test on them anymore.
 
 const STATUS_TERMS = [
   { term: 'Winner',

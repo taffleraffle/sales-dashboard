@@ -353,7 +353,7 @@ export default function AdsPerformance() {
       // proof on the rolled-up campaign row.
       const attrRows = await fetchAllPaged(() =>
         supabase.from('creative_attributes')
-          .select('ad_id, hook_type, message_frame, mechanism_reveal, pain_angle, proof_character, funnel_stage, format'))
+          .select('ad_id, hook_type, message_frame, mechanism_reveal, pain_angle, awareness_level'))
       const attrsMap = {}
       for (const a of attrRows) attrsMap[a.ad_id] = a
       setAttrsByAd(attrsMap)
@@ -998,7 +998,7 @@ export default function AdsPerformance() {
       const attrs = attrsByAd[a.ad_id]
       const booked = Number(adRollup.tfBooked) || 0
       if (attrs && booked > 0) {
-        for (const dim of ['hook_type', 'message_frame', 'mechanism_reveal', 'pain_angle', 'proof_character']) {
+        for (const dim of ['hook_type', 'message_frame', 'mechanism_reveal', 'pain_angle', 'awareness_level']) {
           const v = attrs[dim]
           if (!v || v === 'none') continue
           if (!camp.attrBookedCounts[dim]) camp.attrBookedCounts[dim] = {}
@@ -1648,7 +1648,7 @@ function CampaignBlock({ camp, open, onToggle, expandedAdSets, onToggleAdSet, on
                 ['message_frame',    camp.topAttrs.message_frame],
                 ['mechanism_reveal', camp.topAttrs.mechanism_reveal],
                 ['pain_angle',       camp.topAttrs.pain_angle],
-                ['proof_character',  camp.topAttrs.proof_character],
+                ['awareness_level',  camp.topAttrs.awareness_level],
               ].filter(([_, v]) => v).map(([attr, v]) => (
                 <ValueChip key={attr} attr={attr} value={v.value} size="xs" />
               ))}

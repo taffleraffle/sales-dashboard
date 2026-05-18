@@ -19,10 +19,10 @@ import { Icon } from '../../components/editorial/atoms'
      individually.
 */
 
-// Analysis surfaces first (where Ben spends his time), then production
-// pipeline (Clips → Variants → Ads). Tests sits right after Insights —
-// it's where you pick scope, then jump into the analysis pages with
-// that scope applied.
+// Analysis surfaces only. Clips, Variants, and Ads were archived from
+// the sub-nav 2026-05-18 — the routes still resolve (e.g. detail-page
+// links), but they don't show up here so the nav stays focused on
+// what Ben actually uses day-to-day.
 const SUBNAV = [
   { to: '/sales/ads/creative/insights',     label: 'Insights' },
   { to: '/sales/ads/creative/tests',        label: 'Tests' },
@@ -30,9 +30,6 @@ const SUBNAV = [
   { to: '/sales/ads/creative/attributes',   label: 'Attributes' },
   { to: '/sales/ads/creative/explorations', label: 'Explorations' },
   { to: '/sales/ads/creative/generate',     label: 'Generate' },
-  { to: '/sales/ads/creative/clips',        label: 'Clips' },
-  { to: '/sales/ads/creative/variants',     label: 'Variants' },
-  { to: '/sales/ads/creative/ads',          label: 'Ads' },
 ]
 
 // Pages that consume the shared lib_ad_performance fetch

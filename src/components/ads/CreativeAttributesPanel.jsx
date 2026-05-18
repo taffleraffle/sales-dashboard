@@ -21,25 +21,20 @@ import { displayValue } from '../editorial/atoms'
     - Free-text notes
 */
 
+// Trimmed 2026-05-18: dropped proof_character, funnel_stage, length_bucket,
+// format, actor, vertical. Per Ben's request to simplify the tracked set.
 const LLM_EXTRACTABLE = [
-  'hook_type', 'message_frame', 'mechanism_reveal', 'proof_character',
-  'pain_angle', 'funnel_stage', 'awareness_level', 'length_bucket', 'format',
+  'hook_type', 'message_frame', 'mechanism_reveal',
+  'pain_angle', 'awareness_level',
 ]
-const OPERATOR_ONLY = ['actor', 'vertical']
-const ALL_FIELDS = [...LLM_EXTRACTABLE, ...OPERATOR_ONLY]
+const ALL_FIELDS = [...LLM_EXTRACTABLE]
 
 const FIELD_LABELS = {
   hook_type:        'Hook type',
   message_frame:    'Message frame',
   mechanism_reveal: 'Mechanism reveal',
-  proof_character:  'Proof character',
   pain_angle:       'Pain angle',
-  funnel_stage:     'Funnel stage',
   awareness_level:  'Awareness level',
-  length_bucket:    'Length',
-  format:           'Format',
-  actor:            'Actor (operator only)',
-  vertical:         'Vertical (operator only)',
 }
 
 function ConfidencePill({ score }) {
