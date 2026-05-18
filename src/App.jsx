@@ -4,6 +4,44 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 
+/*
+  Lazy import with one-time hot-reload recovery.
+
+  Problem: when Render rebuilds, every JS chunk gets a new content hash
+  (e.g. AdsAttributesPage-BypoQopk.js → AdsAttributesPage-Xxxx.js).
+  An open browser session has the OLD index.html cached, so React.lazy()
+  tries to fetch the old chunk URL — which no longer exists, throwing
+  "Failed to fetch dynamically imported module".
+
+  Fix: on a chunk-load failure, reload the page once. The new index.html
+  loads with the new chunk hashes, and the user lands on the same route.
+  Guard with sessionStorage so we don't loop on a genuine network failure.
+*/
+const RELOAD_FLAG = 'app:chunk-reload'
+function lazyWithReload(factory) {
+  return lazy(async () => {
+    try {
+      return await factory()
+    } catch (err) {
+      const isChunkError = err?.message?.includes('Failed to fetch dynamically imported module')
+        || err?.name === 'ChunkLoadError'
+      if (isChunkError && !sessionStorage.getItem(RELOAD_FLAG)) {
+        sessionStorage.setItem(RELOAD_FLAG, String(Date.now()))
+        window.location.reload()
+        return new Promise(() => {})  // halt rendering until reload kicks in
+      }
+      // Already reloaded once OR a non-chunk error — propagate
+      throw err
+    }
+  })
+}
+// Clear the reload flag once the app has successfully booted (any
+// navigation that DOESN'T immediately fail proves we're on a fresh
+// bundle). Safe to call eagerly.
+if (typeof window !== 'undefined') {
+  setTimeout(() => sessionStorage.removeItem(RELOAD_FLAG), 5000)
+}
+
 // Eager — daily-hit pages. Keeping these in the main bundle avoids a suspense
 // flash on every app open, since 90% of sessions land on one of them.
 import SalesOverview from './pages/SalesOverview'
@@ -15,41 +53,41 @@ import CallData from './pages/CallData'
 // Lazy — rarely-visited or heavy. Each becomes its own chunk so they only
 // download when the user actually navigates to them. Biggest wins:
 // EODReview (3.3k lines) and MarketingPerformance (1.3k lines).
-const CloserDetail = lazy(() => import('./pages/CloserDetail'))
-const SetterDetail = lazy(() => import('./pages/SetterDetail'))
-const SetterKPIHistory = lazy(() => import('./pages/SetterKPIHistory'))
-const PipelinePerformance = lazy(() => import('./pages/PipelinePerformance'))
-const MarketingPerformance = lazy(() => import('./pages/MarketingPerformance'))
-const AdsLayout = lazy(() => import('./pages/ads/AdsLayout'))
-const AdsGallery = lazy(() => import('./pages/ads/AdsGallery'))
-const AdsMessaging = lazy(() => import('./pages/ads/AdsMessaging'))
-const AdsList = lazy(() => import('./pages/ads/AdsList'))
-const AdsHooks = lazy(() => import('./pages/ads/AdsHooks'))
-const AdsBodies = lazy(() => import('./pages/ads/AdsBodies'))
-const AdsScenes = lazy(() => import('./pages/ads/AdsScenes'))
-const AdsCreators = lazy(() => import('./pages/ads/AdsCreators'))
-const AdsVariants = lazy(() => import('./pages/ads/AdsVariants'))
-const AdsClips = lazy(() => import('./pages/ads/AdsClips'))
-const AdsPerformance = lazy(() => import('./pages/ads/AdsPerformance'))
-const AdsCreativeTestingLayout = lazy(() => import('./pages/ads/AdsCreativeTestingLayout'))
-const AdsInsights = lazy(() => import('./pages/ads/AdsInsights'))
-const AdsCreativesLibrary = lazy(() => import('./pages/ads/AdsCreativesLibrary'))
-const AdsAttributesPage = lazy(() => import('./pages/ads/AdsAttributesPage'))
-const AdsExplorations = lazy(() => import('./pages/ads/AdsExplorations'))
-const AdsTestScope = lazy(() => import('./pages/ads/AdsTestScope'))
-const AdsGenerator = lazy(() => import('./pages/ads/AdsGenerator'))
-const AdsOrphans = lazy(() => import('./pages/ads/AdsOrphans'))
-const AdsLegacy = lazy(() => import('./pages/ads/AdsLegacy'))
-const ComponentDetail = lazy(() => import('./pages/ads/ComponentDetail'))
-const VariantDetail = lazy(() => import('./pages/ads/VariantDetail'))
-const AdDetail = lazy(() => import('./pages/ads/AdDetail'))
-const EODReview = lazy(() => import('./pages/EODReview'))
-const SettingsPage = lazy(() => import('./pages/SettingsPage'))
-const CommissionPage = lazy(() => import('./pages/CommissionPage'))
-const CommissionDetail = lazy(() => import('./pages/CommissionDetail'))
-const SetterBot = lazy(() => import('./pages/SetterBot'))
-const EmailFlows = lazy(() => import('./pages/EmailFlows'))
-const EmailFlowDetail = lazy(() => import('./pages/EmailFlowDetail'))
+const CloserDetail = lazyWithReload(() => import('./pages/CloserDetail'))
+const SetterDetail = lazyWithReload(() => import('./pages/SetterDetail'))
+const SetterKPIHistory = lazyWithReload(() => import('./pages/SetterKPIHistory'))
+const PipelinePerformance = lazyWithReload(() => import('./pages/PipelinePerformance'))
+const MarketingPerformance = lazyWithReload(() => import('./pages/MarketingPerformance'))
+const AdsLayout = lazyWithReload(() => import('./pages/ads/AdsLayout'))
+const AdsGallery = lazyWithReload(() => import('./pages/ads/AdsGallery'))
+const AdsMessaging = lazyWithReload(() => import('./pages/ads/AdsMessaging'))
+const AdsList = lazyWithReload(() => import('./pages/ads/AdsList'))
+const AdsHooks = lazyWithReload(() => import('./pages/ads/AdsHooks'))
+const AdsBodies = lazyWithReload(() => import('./pages/ads/AdsBodies'))
+const AdsScenes = lazyWithReload(() => import('./pages/ads/AdsScenes'))
+const AdsCreators = lazyWithReload(() => import('./pages/ads/AdsCreators'))
+const AdsVariants = lazyWithReload(() => import('./pages/ads/AdsVariants'))
+const AdsClips = lazyWithReload(() => import('./pages/ads/AdsClips'))
+const AdsPerformance = lazyWithReload(() => import('./pages/ads/AdsPerformance'))
+const AdsCreativeTestingLayout = lazyWithReload(() => import('./pages/ads/AdsCreativeTestingLayout'))
+const AdsInsights = lazyWithReload(() => import('./pages/ads/AdsInsights'))
+const AdsCreativesLibrary = lazyWithReload(() => import('./pages/ads/AdsCreativesLibrary'))
+const AdsAttributesPage = lazyWithReload(() => import('./pages/ads/AdsAttributesPage'))
+const AdsExplorations = lazyWithReload(() => import('./pages/ads/AdsExplorations'))
+const AdsTestScope = lazyWithReload(() => import('./pages/ads/AdsTestScope'))
+const AdsGenerator = lazyWithReload(() => import('./pages/ads/AdsGenerator'))
+const AdsOrphans = lazyWithReload(() => import('./pages/ads/AdsOrphans'))
+const AdsLegacy = lazyWithReload(() => import('./pages/ads/AdsLegacy'))
+const ComponentDetail = lazyWithReload(() => import('./pages/ads/ComponentDetail'))
+const VariantDetail = lazyWithReload(() => import('./pages/ads/VariantDetail'))
+const AdDetail = lazyWithReload(() => import('./pages/ads/AdDetail'))
+const EODReview = lazyWithReload(() => import('./pages/EODReview'))
+const SettingsPage = lazyWithReload(() => import('./pages/SettingsPage'))
+const CommissionPage = lazyWithReload(() => import('./pages/CommissionPage'))
+const CommissionDetail = lazyWithReload(() => import('./pages/CommissionDetail'))
+const SetterBot = lazyWithReload(() => import('./pages/SetterBot'))
+const EmailFlows = lazyWithReload(() => import('./pages/EmailFlows'))
+const EmailFlowDetail = lazyWithReload(() => import('./pages/EmailFlowDetail'))
 
 import SetPasswordPage from './pages/SetPasswordPage'
 import SplashScreen from './components/SplashScreen'
