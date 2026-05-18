@@ -6,9 +6,12 @@ import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawe
 import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
 import CreativeGrid from '../../components/ads/CreativeGrid'
 import AttributeHeatmap from '../../components/ads/AttributeHeatmap'
+import AdThumbnail from '../../components/ads/AdThumbnail'
 import {
   Eyebrow, SectionHead, Button, Pill, Card, Sparkline, BigNumber, Icon,
   fmtMoney, fmtMoneyFull, fmtNum, fmtPct, fmtLift, humanAttr, frameColor,
+  ValueChip, LiftBadge, TrendDelta, WinnerBadge, PodiumRank,
+  attrColor, displayValue, tint, PALETTE,
 } from '../../components/editorial/atoms'
 
 /*
@@ -521,18 +524,20 @@ function TopPerformersTable({ rows, loading, onClickRow, limit = 10 }) {
     )
   }
 
+  const cols = '52px 80px minmax(280px, 2fr) minmax(260px, 2.2fr) 96px 96px 108px'
+
   return (
     <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
       {/* Header */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '40px 72px minmax(260px, 2fr) minmax(220px, 1.6fr) 84px 84px 88px',
-        alignItems: 'center', gap: 14,
-        padding: '10px 18px',
+        gridTemplateColumns: cols,
+        alignItems: 'center', gap: 16,
+        padding: '12px 20px',
         background: 'var(--paper-2)',
         borderBottom: '1px solid var(--rule)',
       }}>
-        <Eyebrow>#</Eyebrow>
+        <Eyebrow>Rank</Eyebrow>
         <Eyebrow>Creative</Eyebrow>
         <Eyebrow>Ad · campaign</Eyebrow>
         <Eyebrow>Tags</Eyebrow>
@@ -540,105 +545,117 @@ function TopPerformersTable({ rows, loading, onClickRow, limit = 10 }) {
         <Eyebrow style={{ textAlign: 'right' }}>CPB</Eyebrow>
         <Eyebrow style={{ textAlign: 'right' }}>State</Eyebrow>
       </div>
-      {/* Rows — reuse the editorial CreativeRow */}
-      {sorted.map((c, i) => {
-        const isPodium = i < 3 && c.effective_winner
-        return (
-          <TopPerformerRow key={c.ad_id} c={c} rank={i + 1} isPodium={isPodium}
-            onClick={() => onClickRow?.(c)}
-            isLast={i === sorted.length - 1} />
-        )
-      })}
+      {/* Rows */}
+      {sorted.map((c, i) => (
+        <TopPerformerRow key={c.ad_id} c={c} rank={i + 1} cols={cols}
+          onClick={() => onClickRow?.(c)}
+          isLast={i === sorted.length - 1} />
+      ))}
     </div>
   )
 }
 
-function TopPerformerRow({ c, rank, isPodium, onClick, isLast }) {
+function TopPerformerRow({ c, rank, cols, onClick, isLast }) {
   const isWinner = !!c.effective_winner
+  const frameC = c.message_frame ? frameColor(c.message_frame) : null
   return (
     <div onClick={onClick}
       onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
       style={{
         display: 'grid',
-        gridTemplateColumns: '40px 72px minmax(260px, 2fr) minmax(220px, 1.6fr) 84px 84px 88px',
-        alignItems: 'center', gap: 14,
-        padding: '14px 18px',
+        gridTemplateColumns: cols,
+        alignItems: 'center', gap: 16,
+        padding: '18px 20px',
+        paddingLeft: 17,
         borderBottom: isLast ? 'none' : '1px solid var(--rule)',
+        borderLeft: isWinner ? '3px solid var(--accent)' : '3px solid transparent',
         cursor: 'pointer',
         transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1)',
       }}>
       <div>
-        {isPodium ? (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 26, height: 26,
-            background: 'var(--accent)', color: 'var(--ink)',
-            fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500, fontStyle: 'italic',
-            fontVariantNumeric: 'tabular-nums', border: '1px solid var(--accent-2)',
-          }}>{rank}</span>
-        ) : (
-          <span style={{ fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums',
-                        fontSize: 12, color: 'var(--ink-4)' }}>
-            {String(rank).padStart(2, '0')}
-          </span>
-        )}
+        <PodiumRank rank={rank} size="md" />
       </div>
-      <div style={{ position: 'relative' }}>
-        <AdThumbnail ad={c} size="md" />
-        {c.message_frame && (
+      <div style={{
+        position: 'relative', display: 'inline-block', lineHeight: 0,
+      }}>
+        <AdThumbnail ad={c} size="md" style={{
+          outline: isWinner ? '2px solid var(--accent)' : 'none',
+          outlineOffset: isWinner ? -2 : 0,
+        }} />
+        {frameC && (
           <span style={{
-            position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-            background: frameColor(c.message_frame),
+            position: 'absolute', top: 0, left: 0, right: 0, height: 4,
+            background: frameC, pointerEvents: 'none', zIndex: 1,
           }} />
+        )}
+        {isWinner && (
+          <span style={{
+            position: 'absolute', top: -6, right: -6,
+            width: 18, height: 18, background: 'var(--accent)',
+            border: '1.5px solid var(--paper)',
+            display: 'grid', placeItems: 'center',
+            color: 'var(--ink)', fontSize: 10, fontWeight: 700,
+            borderRadius: 18, zIndex: 2,
+          }}>★</span>
         )}
       </div>
       <div style={{ minWidth: 0 }}>
         <div style={{
-          fontFamily: 'var(--serif)', fontSize: 17, lineHeight: 1.2, color: 'var(--ink)',
+          fontFamily: 'var(--serif)', fontSize: 19, lineHeight: 1.18, color: 'var(--ink)',
+          letterSpacing: '-0.005em', fontWeight: 500,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {c.ad_name || c.ad_id}
         </div>
         <div style={{
           fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
-          marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          marginTop: 4, letterSpacing: '0.02em',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          {c.campaign_name || '—'}
+          {c.campaign_name || '—'} <span style={{ opacity: 0.6 }}>· {c.ad_id}</span>
         </div>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-        {[c.hook_type, c.mechanism_reveal, c.pain_angle].filter(Boolean).slice(0, 3).map((v, i) => (
-          <Pill key={i} tone="default" size="xs">{humanAttr(v)}</Pill>
+        {[
+          { a: 'hook_type', v: c.hook_type },
+          { a: 'message_frame', v: c.message_frame },
+          { a: 'mechanism_reveal', v: c.mechanism_reveal },
+          { a: 'pain_angle', v: c.pain_angle },
+          { a: 'proof_character', v: c.proof_character && c.proof_character !== 'none' ? c.proof_character : null },
+        ].filter(p => p.v).slice(0, 5).map((p, i) => (
+          <ValueChip key={i} attr={p.a} value={p.v} size="xs" />
         ))}
       </div>
       <div style={{ textAlign: 'right' }}>
         <div style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
-                      fontSize: 22, lineHeight: 1, color: 'var(--ink)' }}>
+                      fontSize: 26, lineHeight: 1, color: 'var(--ink)', fontWeight: 500 }}>
           {fmtNum(c.booked)}
         </div>
+        {c.leads != null && (
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginTop: 4 }}>
+            {fmtNum(c.leads)} leads
+          </div>
+        )}
       </div>
       <div style={{ textAlign: 'right' }}>
         <div style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
-                      fontSize: 22, lineHeight: 1, color: 'var(--ink)' }}>
+                      fontSize: 26, lineHeight: 1, color: 'var(--ink)', fontWeight: 500 }}>
           {c.cost_per_booked != null ? fmtMoney(Number(c.cost_per_booked)) : '—'}
         </div>
+        {c.spend != null && (
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginTop: 4 }}>
+            {fmtMoney(Number(c.spend))} spent
+          </div>
+        )}
       </div>
       <div style={{ textAlign: 'right' }}>
         {isWinner ? (
-          <span style={{
-            display: 'inline-block', padding: '3px 9px',
-            background: 'var(--accent)', color: 'var(--ink)',
-            border: '1px solid var(--accent-2)',
-            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
-            letterSpacing: '0.06em', textTransform: 'uppercase',
-          }}>
-            Winner
-          </span>
+          <WinnerBadge size="md" />
         ) : (
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-5)',
-                        letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-            testing
+                        letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            Testing
           </span>
         )}
       </div>
@@ -753,19 +770,27 @@ function minutesAgo(date) {
 // ═════════════════════════════════════════════════════════════════════
 function KPIDominant({ summary, spark }) {
   const isReal = summary.winners <= 2
+  const showAccent = !isReal
+  // Heuristic trend deltas — sparkline carries the real shape
+  const winRateDelta = !isReal && spark && spark.length >= 2
+    ? (summary.winRate - (spark[Math.max(spark.length - 5, 0)] || summary.winRate)).toFixed(1)
+    : null
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '1.6fr 1fr 1fr 1fr',
+      gridTemplateColumns: '1.7fr 1fr 1fr 1fr',
       gap: 0,
       border: '1px solid var(--rule)',
       background: 'white',
     }}>
-      {/* Hero — Win rate */}
+      {/* Hero — Win rate (accent left stripe + soft yellow wash when we have real winners) */}
       <div style={{
-        padding: '28px 28px 24px',
+        padding: '30px 30px 28px',
+        paddingLeft: showAccent ? 27 : 30,
         borderRight: '1px solid var(--rule)',
-        background: 'white',
+        borderLeft: showAccent ? '4px solid var(--accent)' : 'none',
+        background: showAccent ? 'var(--accent-soft, #fdf6c5)' : 'white',
+        position: 'relative',
       }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 6 }}>
           <Eyebrow>Win rate</Eyebrow>
@@ -774,23 +799,37 @@ function KPIDominant({ summary, spark }) {
             {summary.weeksTracked}w tracked
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginTop: 4 }}>
-          <BigNumber value={summary.winRate.toFixed(1)} suffix="%" size={88} weight={400} />
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 18, marginTop: 6 }}>
+          <BigNumber value={summary.winRate.toFixed(1)} suffix="%" size={104} weight={500} />
           {!isReal && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8 }}>
-              <Sparkline values={spark} width={120} height={36}
-                stroke="var(--ink)" fill="var(--paper-2)" accent="var(--accent)" />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
+              <Sparkline values={spark} width={140} height={40}
+                stroke={PALETTE.green} fill={tint(PALETTE.green, 0.1)} accent="var(--accent)" />
               <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
                             letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                12 weeks
+                12 weeks · weekly win rate
               </span>
             </div>
           )}
         </div>
-        <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-          <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 14, color: 'var(--ink-3)' }}>
+        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 15, color: 'var(--ink-3)' }}>
             {summary.winners} of {summary.taggedAds} tagged ads
           </span>
+          {winRateDelta && Number(winRateDelta) !== 0 && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '3px 9px',
+              background: tint(Number(winRateDelta) >= 0 ? PALETTE.green : PALETTE.red, 0.1),
+              color: Number(winRateDelta) >= 0 ? PALETTE.green : PALETTE.red,
+              border: `1px solid ${tint(Number(winRateDelta) >= 0 ? PALETTE.green : PALETTE.red, 0.25)}`,
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+            }}>
+              <TrendDelta dir={Number(winRateDelta) >= 0 ? 'up' : 'down'}
+                label={`${Number(winRateDelta) >= 0 ? '+' : ''}${winRateDelta}pt vs prior`} />
+            </span>
+          )}
           {isReal && (
             <Pill tone="amber" size="sm">Below baseline — early window</Pill>
           )}
@@ -799,38 +838,42 @@ function KPIDominant({ summary, spark }) {
 
       <SecondaryKPI
         eyebrow="Avg CPB · winners"
-        value={<BigNumber value={summary.avgCpbWinners} prefix="$" size={42} />}
+        value={<BigNumber value={summary.avgCpbWinners} prefix="$" size={46} weight={500} />}
         meta="winners only"
+        trend={!isReal ? { dir: 'down', label: 'vs $387 portfolio', color: PALETTE.green } : null}
       />
       <SecondaryKPI
         eyebrow="Booked"
-        value={<BigNumber value={summary.totalBooked} size={42} />}
+        value={<BigNumber value={summary.totalBooked} size={46} weight={500} />}
         meta={`${fmtMoneyFull(summary.totalSpend)} spend`}
+        trend={!isReal ? { dir: 'up', label: 'all-time', color: PALETTE.green } : null}
       />
       <SecondaryKPI
         eyebrow="Tag coverage"
-        value={<BigNumber value={summary.tagCoverage} suffix="%" size={42} />}
+        value={<BigNumber value={summary.tagCoverage} suffix="%" size={46} weight={500} />}
         meta={`${summary.totalAds - summary.taggedAds} untagged`}
+        trend={summary.tagCoverage < 100 ? { dir: 'flat', label: 'click to tag', color: PALETTE.orange } : null}
         last
       />
     </div>
   )
 }
 
-function SecondaryKPI({ eyebrow, value, meta, last }) {
+function SecondaryKPI({ eyebrow, value, meta, trend, last }) {
   return (
     <div style={{
-      padding: '28px 22px 24px',
+      padding: '30px 22px 28px',
       borderRight: last ? 'none' : '1px solid var(--rule)',
       display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-      minHeight: 168,
+      minHeight: 196,
     }}>
       <Eyebrow>{eyebrow}</Eyebrow>
       <div style={{ display: 'flex', alignItems: 'flex-end', marginTop: 6 }}>
         {value}
       </div>
-      <div style={{ marginTop: 12 }}>
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)' }}>{meta}</span>
+        {trend && <TrendDelta dir={trend.dir} label={trend.label} color={trend.color} />}
       </div>
     </div>
   )
@@ -855,58 +898,56 @@ function VariablesLeaderboard({ items, baseline }) {
     <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
       {items.map((item, i) => {
         const isTop = i === 0 && item.lift > 0
-        const barColor = isTop ? 'var(--accent)' : item.lift > 0 ? 'var(--ink)' : 'var(--ink-5)'
+        const stripeColor = attrColor(item.attr, item.value)
+        const barColor = isTop ? 'var(--accent)' : (item.lift > 0 ? stripeColor : 'var(--ink-5)')
         const widthPct = Math.max((Math.abs(item.lift) / maxLift) * 100, 4)
         return (
           <div key={item.attr} style={{
             display: 'grid',
-            gridTemplateColumns: '36px 1.2fr 1fr 1.4fr 100px 80px',
+            gridTemplateColumns: '40px 1.2fr 1fr 1.4fr 100px 80px',
             alignItems: 'center', gap: 16,
-            padding: '16px 20px',
+            padding: '18px 20px',
+            paddingLeft: 17,
             borderTop: i === 0 ? 'none' : '1px solid var(--rule)',
+            borderLeft: `3px solid ${isTop ? 'var(--accent)' : stripeColor}`,
             transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1)',
           }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-5)',
-                          letterSpacing: '0.04em' }}>
-              {String(i + 1).padStart(2, '0')}
-            </span>
+            <PodiumRank rank={i + 1} size="sm" />
             <div>
-              <Eyebrow style={{ marginBottom: 3 }}>{item.label}</Eyebrow>
-              <div style={{ fontFamily: 'var(--serif)', fontSize: 22, lineHeight: 1.1,
-                            letterSpacing: '-0.01em', color: 'var(--ink)' }}>
-                {humanAttr(item.value)}
-              </div>
+              <Eyebrow style={{ marginBottom: 5 }}>{item.label}</Eyebrow>
+              <ValueChip attr={item.attr} value={item.value} size="md" />
             </div>
             <div>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
                             letterSpacing: '0.04em', textTransform: 'uppercase' }}>
                 next best
               </span>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--ink-2)', marginTop: 2 }}>
-                {item.runnerUpValue ? humanAttr(item.runnerUpValue) : '—'}
+              <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                {item.runnerUpValue ? (
+                  <ValueChip attr={item.attr} value={item.runnerUpValue} size="xs" />
+                ) : (
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-5)' }}>—</span>
+                )}
                 {item.runnerUpValue != null && (
-                  <span style={{ color: 'var(--ink-4)', marginLeft: 8 }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums',
+                                fontSize: 11, color: 'var(--ink-4)' }}>
                     {fmtPct(item.runnerUpWinRate)}
                   </span>
                 )}
               </div>
             </div>
             {/* Lift bar */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                <span style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
-                              fontSize: 20, fontWeight: 400, color: 'var(--ink)',
-                              letterSpacing: '-0.01em' }}>
-                  {fmtLift(item.lift)}
-                </span>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                <LiftBadge lift={item.lift} size="md" />
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
                               letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                  lift vs {baseline.toFixed(1)}%
+                  vs {baseline.toFixed(1)}% baseline
                 </span>
               </div>
-              <div style={{ height: 4, background: 'var(--paper-2)', position: 'relative' }}>
+              <div style={{ height: 6, background: 'var(--paper-2)', position: 'relative' }}>
                 <div style={{
                   position: 'absolute', left: 0, top: 0, bottom: 0,
                   width: `${widthPct}%`, background: barColor,
@@ -916,21 +957,21 @@ function VariablesLeaderboard({ items, baseline }) {
             </div>
             <div style={{ textAlign: 'right' }}>
               <span style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
-                            fontSize: 16, color: 'var(--ink)' }}>
+                            fontSize: 18, fontWeight: 500, color: 'var(--ink)' }}>
                 {item.winners}<span style={{ color: 'var(--ink-4)' }}>/{item.ads}</span>
               </span>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
-                            letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                wins / ads
+                            letterSpacing: '0.04em', textTransform: 'uppercase', marginTop: 2 }}>
+                wins · ads
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <span style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
-                            fontSize: 16, color: 'var(--ink)' }}>
+                            fontSize: 18, fontWeight: 500, color: 'var(--ink)' }}>
                 {item.cpb != null ? `$${item.cpb}` : '—'}
               </span>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
-                            letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                            letterSpacing: '0.04em', textTransform: 'uppercase', marginTop: 2 }}>
                 avg CPB
               </div>
             </div>

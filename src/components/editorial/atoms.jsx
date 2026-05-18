@@ -282,3 +282,276 @@ export function thumbColor(seed) {
     : (seed || 0)
   return palette[h % palette.length]
 }
+
+// ─── PALETTE — base hues (ported from design palette.jsx) ──────────────
+export const PALETTE = {
+  red: '#b53e3e', redDeep: '#8c2c2c',
+  amber: '#d97f1e', amberLight: '#e4a23c',
+  green: '#3e8a5e', greenDeep: '#2a6a45',
+  purple: '#6b4ba0', purpleDeep: '#4a2f78',
+  teal: '#0e7c86', tealDeep: '#085a62',
+  blue: '#1f4a8b', blueLight: '#3068b5',
+  orange: '#b86a0c', orangeDeep: '#8e510a',
+  gold: '#8c6f20',
+  ink: '#0a0a0a', ink3: '#5a5650', ink4: '#88847e',
+}
+
+// Per-attribute value colors — every value gets a consistent hue across pages
+export const VALUE_COLORS = {
+  message_frame: {
+    problem: PALETTE.red, circumstance: PALETTE.amber, outcome: PALETTE.green,
+    PROBLEM: PALETTE.red, CIRCUMSTANCE: PALETTE.amber, OUTCOME: PALETTE.green,
+  },
+  hook_type: {
+    question: PALETTE.teal, scene: PALETTE.purple, dollar_pain: PALETTE.orange,
+    diagnostic: PALETTE.blue, conditional: PALETTE.red,
+  },
+  mechanism_reveal: {
+    gated: PALETTE.purple, explicit: PALETTE.green, hidden: PALETTE.ink3,
+    GATED: PALETTE.purple, EXPLICIT: PALETTE.green, HIDDEN: PALETTE.ink3,
+  },
+  funnel_stage: {
+    tof: PALETTE.teal, mof: PALETTE.orange, bof: PALETTE.purple, cross: PALETTE.ink4,
+    TOF: PALETTE.teal, MOF: PALETTE.orange, BOF: PALETTE.purple, CROSS: PALETTE.ink4,
+  },
+  format: {
+    talking_head: PALETTE.ink, ugc: PALETTE.teal, comparative: PALETTE.orange,
+    voiceover: PALETTE.purple,
+  },
+  awareness_level: {
+    unaware: PALETTE.ink4, problem_aware: PALETTE.red, solution_aware: PALETTE.amber,
+    product_aware: PALETTE.teal, most_aware: PALETTE.green,
+  },
+  length_bucket: {
+    under_60s: PALETTE.teal, '60_75s': PALETTE.green, '75s_plus': PALETTE.amber,
+    'sixty_75s': PALETTE.green,
+  },
+  proof_character: {
+    eric: PALETTE.red, adam: PALETTE.teal, belinda: PALETTE.orange,
+    morgan: PALETTE.green, karen: PALETTE.purple, derek: PALETTE.gold,
+    mike: PALETTE.blue, none: PALETTE.ink4,
+  },
+  pain_angle: {
+    phone_not_ringing: PALETTE.red, agency_burn: PALETTE.orange,
+    tpa_referral_dep: PALETTE.purple, capacity_mismatch: PALETTE.teal,
+    lead_platform: PALETTE.blue, storm_seasonal: PALETTE.amber,
+    guarantee_proof: PALETTE.green, founder_identity: PALETTE.redDeep,
+    adjuster_relations: PALETTE.gold, commercial_tier: PALETTE.tealDeep,
+    last_objection: PALETTE.purpleDeep, speed_timeline: PALETTE.orangeDeep,
+    seasonal: PALETTE.amberLight,
+  },
+  actor: {
+    ben: PALETTE.ink, austin: PALETTE.teal, client: PALETTE.green,
+    voiceover_only: PALETTE.purple, other: PALETTE.ink4,
+  },
+  vertical: {
+    restoration: PALETTE.red, plumbing: PALETTE.teal, roofing: PALETTE.purple,
+  },
+}
+
+export function attrColor(attr, value) {
+  if (!attr || !value) return PALETTE.ink4
+  const a = VALUE_COLORS[attr]
+  if (!a) return PALETTE.ink4
+  return a[value] || a[String(value).toLowerCase()] || PALETTE.ink4
+}
+
+// hex → rgba helper for tinted backgrounds
+export function tint(hex, alpha = 0.12) {
+  if (!hex || !hex.startsWith('#')) return `rgba(0,0,0,${alpha})`
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
+// Display labels — title-case + custom overrides
+const CUSTOM_LABELS = {
+  tof: 'TOF', mof: 'MOF', bof: 'BOF', cross: 'Cross', ugc: 'UGC',
+  tpa_referral_dep: 'TPA Referral', phone_not_ringing: 'Phone Not Ringing',
+  agency_burn: 'Agency Burn', capacity_mismatch: 'Capacity Mismatch',
+  lead_platform: 'Lead Platform', storm_seasonal: 'Storm Season',
+  guarantee_proof: 'Guarantee Proof', founder_identity: 'Founder Identity',
+  adjuster_relations: 'Adjuster Relations', commercial_tier: 'Commercial Tier',
+  last_objection: 'Last Objection', speed_timeline: 'Speed Timeline',
+  talking_head: 'Talking Head', dollar_pain: 'Dollar Pain',
+  problem_aware: 'Problem-Aware', solution_aware: 'Solution-Aware',
+  product_aware: 'Product-Aware', most_aware: 'Most-Aware',
+  under_60s: 'Under 60s', '60_75s': '60–75s', '75s_plus': '75s+',
+  sixty_75s: '60–75s',
+  voiceover_only: 'Voiceover Only',
+}
+
+export function displayValue(value) {
+  if (!value) return '—'
+  const k = String(value)
+  if (CUSTOM_LABELS[k]) return CUSTOM_LABELS[k]
+  if (CUSTOM_LABELS[k.toLowerCase()]) return CUSTOM_LABELS[k.toLowerCase()]
+  return k.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+}
+
+// ─── ValueChip — colored attribute-value chip ─────────────────────────
+// Replaces neutral Pill for attribute values; colored dot + tinted bg
+export function ValueChip({ attr, value, size = 'sm', showAttr = false, dot = true, truncate = false, style }) {
+  if (!value) return <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-5)' }}>—</span>
+  const color = attrColor(attr, value)
+  const label = displayValue(value)
+  const sizes = {
+    xs: { padding: '1px 6px 1px 6px', fontSize: 10, dotSize: 5 },
+    sm: { padding: '2px 8px 2px 7px', fontSize: 10.5, dotSize: 6 },
+    md: { padding: '4px 10px 4px 9px', fontSize: 11.5, dotSize: 7 },
+  }
+  const s = sizes[size]
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: s.padding,
+      background: tint(color, 0.1),
+      color: color,
+      border: `1px solid ${tint(color, 0.22)}`,
+      borderRadius: 2,
+      fontFamily: 'var(--mono)',
+      fontVariantNumeric: 'tabular-nums',
+      fontSize: s.fontSize, fontWeight: 600,
+      letterSpacing: '0.02em',
+      whiteSpace: 'nowrap',
+      maxWidth: truncate ? '100%' : undefined,
+      overflow: truncate ? 'hidden' : 'visible',
+      ...style,
+    }}>
+      {dot && <span style={{
+        width: s.dotSize, height: s.dotSize, borderRadius: s.dotSize,
+        background: color, flexShrink: 0,
+      }} />}
+      {showAttr && (
+        <span style={{ opacity: 0.65, fontWeight: 500, marginRight: 2,
+                       textTransform: 'uppercase', fontSize: s.fontSize - 1 }}>
+          {String(attr).split('_')[0]}
+        </span>
+      )}
+      <span style={truncate ? { overflow: 'hidden', textOverflow: 'ellipsis' } : undefined}>{label}</span>
+    </span>
+  )
+}
+
+// ─── LiftBadge — green/red arrow + value ──────────────────────────────
+export function LiftBadge({ lift, size = 'md' }) {
+  if (lift == null || isNaN(lift)) return null
+  const positive = lift >= 0
+  const sizes = {
+    sm: { font: 13, arrow: 10 },
+    md: { font: 18, arrow: 12 },
+    lg: { font: 28, arrow: 16 },
+  }
+  const s = sizes[size]
+  const color = positive ? '#3e8a5e' : '#b53e3e'
+  return (
+    <span style={{
+      fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+      fontSize: s.font, fontWeight: 500, color,
+      letterSpacing: '-0.01em',
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+    }}>
+      <svg width={s.arrow} height={s.arrow} viewBox="0 0 16 16" fill="none"
+           style={{ transform: positive ? 'none' : 'rotate(180deg)' }}>
+        <path d="M8 3v10M4 7l4-4 4 4" stroke="currentColor" strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      {Math.abs(lift).toFixed(1)}%
+    </span>
+  )
+}
+
+// ─── TrendDelta — tiny inline trend chip (+0.6pt vs prior 30d) ────────
+export function TrendDelta({ dir = 'flat', label, color }) {
+  const fallback = dir === 'up' ? '#3e8a5e' : dir === 'down' ? '#b53e3e' : 'var(--ink-4)'
+  const c = color || fallback
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 3,
+      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+      letterSpacing: '0.04em', textTransform: 'uppercase',
+      color: c,
+    }}>
+      {dir === 'up' && (
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+          <path d="M8 13V3M4 7l4-4 4 4" stroke="currentColor" strokeWidth="2"
+                strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+      {dir === 'down' && (
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+          <path d="M8 3v10M4 9l4 4 4-4" stroke="currentColor" strokeWidth="2"
+                strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+      {label}
+    </span>
+  )
+}
+
+// ─── WinnerBadge — punchier than plain accent pill ────────────────────
+export function WinnerBadge({ size = 'md', muted = false }) {
+  const sizes = {
+    sm: { padding: '3px 8px', fontSize: 9.5, icon: 8 },
+    md: { padding: '4px 10px', fontSize: 10.5, icon: 10 },
+    lg: { padding: '5px 12px', fontSize: 12, icon: 12 },
+  }
+  const s = sizes[size]
+  if (muted) {
+    return (
+      <span style={{
+        fontFamily: 'var(--mono)', padding: s.padding,
+        fontSize: s.fontSize, fontWeight: 600,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        background: 'transparent', color: 'var(--ink)',
+        border: '1px solid var(--ink)',
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+      }}>Winner</span>
+    )
+  }
+  return (
+    <span style={{
+      fontFamily: 'var(--mono)', padding: s.padding,
+      fontSize: s.fontSize, fontWeight: 700,
+      letterSpacing: '0.08em', textTransform: 'uppercase',
+      background: 'var(--accent)', color: 'var(--ink)',
+      border: '1px solid var(--accent-2)',
+      boxShadow: '0 1px 0 rgba(10,10,10,0.06)',
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+    }}>
+      <svg width={s.icon} height={s.icon} viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8 1l1.85 4.6L14.5 6.3l-3.4 3.3.85 4.8L8 12l-3.95 2.4.85-4.8L1.5 6.3l4.65-.7L8 1z" />
+      </svg>
+      Winner
+    </span>
+  )
+}
+
+// ─── PodiumRank — gold/silver/bronze rank badge ───────────────────────
+export function PodiumRank({ rank, size = 'md' }) {
+  const sizes = { sm: 22, md: 28, lg: 36 }
+  const w = sizes[size]
+  const isPodium = rank <= 3
+  if (!isPodium) {
+    return (
+      <span style={{
+        fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums',
+        fontSize: w * 0.5, color: 'var(--ink-5)',
+        display: 'inline-block', width: w, textAlign: 'center',
+      }}>{String(rank).padStart(2, '0')}</span>
+    )
+  }
+  const color = rank === 1 ? 'var(--accent)' : rank === 2 ? '#dcd6c4' : '#e8d2a8'
+  const isFirst = rank === 1
+  return (
+    <span style={{
+      display: 'inline-grid', placeItems: 'center',
+      width: w, height: w, background: color, color: 'var(--ink)',
+      border: isFirst ? '1px solid var(--accent-2)' : '1px solid var(--rule-2)',
+      fontFamily: 'var(--serif)', fontStyle: 'italic',
+      fontSize: w * 0.5, fontWeight: 500,
+      boxShadow: isFirst ? '0 1px 0 rgba(10,10,10,0.06)' : 'none',
+    }}>{rank}</span>
+  )
+}
