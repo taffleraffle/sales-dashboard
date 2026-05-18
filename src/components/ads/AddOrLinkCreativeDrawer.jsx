@@ -47,6 +47,9 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
   const [pasteText, setPasteText] = useState('')
   const [pasteOffer, setPasteOffer] = useState('')
   const [uploadFile, setUploadFile] = useState(null)
+  // Bulk upload queue — array of { file, chosenAd, status, error, stage }
+  // When non-empty AND length > 1, drawer enters bulk mode.
+  const [uploadQueue, setUploadQueue] = useState([])
   const [working, setWorking] = useState(false)
   const [workStage, setWorkStage] = useState(null)  // 'uploading' | 'transcribing' | 'tagging' | 'linking'
 
@@ -156,18 +159,12 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
     if (!chosenAd || !uploadFile) return
     setWorking(true); setErr(null)
     try {
-      // Step 1: upload to storage (~5-15s)
       setWorkStage('uploading')
       const storagePath = await uploadAdVideoToStorage(chosenAd.ad_id, uploadFile)
-
-      // Step 2: transcribe via Whisper (~30-120s — explicit 3min timeout)
       setWorkStage('transcribing')
       await transcribeUploadedAd(chosenAd.ad_id, storagePath, { timeoutMs: 180_000 })
-
-      // Step 3: auto-tag attributes (~5-15s)
       setWorkStage('tagging')
       await tagAd(chosenAd.ad_id)
-
       onSaved?.({ kind: 'uploaded', ad_id: chosenAd.ad_id, ad_name: chosenAd.ad_name })
       onClose()
     } catch (e) {
@@ -177,10 +174,97 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
     }
   }
 
+  // Bulk: process the queue sequentially. Mutates uploadQueue in-place
+  // via setUploadQueue so each row's status renders live.
+  async function doUploadQueue() {
+    const items = uploadQueue.filter(q => q.chosenAd)
+    if (items.length === 0) return
+    setWorking(true); setErr(null)
+
+    for (let idx = 0; idx < uploadQueue.length; idx++) {
+      const q = uploadQueue[idx]
+      if (!q.chosenAd) continue  // skip unpaired
+      if (q.status === 'done') continue  // skip already-done (retry support)
+
+      const update = (patch) => setUploadQueue(prev => {
+        const next = [...prev]
+        if (next[idx]) next[idx] = { ...next[idx], ...patch }
+        return next
+      })
+
+      try {
+        update({ status: 'uploading', error: null })
+        const storagePath = await uploadAdVideoToStorage(q.chosenAd.ad_id, q.file)
+        update({ status: 'transcribing' })
+        await transcribeUploadedAd(q.chosenAd.ad_id, storagePath, { timeoutMs: 180_000 })
+        update({ status: 'tagging' })
+        await tagAd(q.chosenAd.ad_id)
+        update({ status: 'done' })
+      } catch (e) {
+        update({ status: 'error', error: e.message })
+      }
+    }
+
+    setWorking(false)
+    // Don't auto-close in bulk mode — operator wants to see the results
+    onSaved?.({ kind: 'bulk_uploaded', count: items.length })
+  }
+
+  // Fuzzy filename → ad suggestion. Strips extension, splits on
+  // dashes/underscores, searches ads.ad_name via ilike for each token.
+  async function suggestAdForFile(file) {
+    const name = file.name.replace(/\.[^.]+$/, '')  // strip extension
+    // Pull top-5 best matches
+    const tokens = name.split(/[\s_\-.]+/).filter(t => t.length > 2)
+    if (tokens.length === 0) return null
+    // Use the longest token first
+    tokens.sort((a, b) => b.length - a.length)
+    for (const tok of tokens.slice(0, 3)) {
+      const { data } = await supabase.from('ads')
+        .select('ad_id, ad_name, campaign_name, thumbnail_url, asset_url, asset_type')
+        .ilike('ad_name', `%${tok}%`)
+        .order('last_synced_at', { ascending: false, nullsFirst: false })
+        .limit(1)
+      if (data?.[0]) return data[0]
+    }
+    return null
+  }
+
+  // Called when files are dropped/picked. If exactly 1 → single-file mode.
+  // If 2+ → bulk mode: build the queue with auto-suggested ads.
+  async function handleFilesDropped(files) {
+    const list = Array.from(files).filter(f => f.type.startsWith('video/') || f.name.match(/\.(mp4|mov|webm|m4v)$/i))
+    if (list.length === 0) return
+    if (list.length === 1) {
+      setUploadFile(list[0])
+      setUploadQueue([])
+      return
+    }
+    setUploadFile(null)
+    setErr(null)
+    // Build queue with auto-suggested ads
+    const queue = list.map(f => ({ file: f, chosenAd: null, status: 'pending', error: null }))
+    setUploadQueue(queue)
+    // Fire suggestions in parallel
+    list.forEach(async (f, i) => {
+      const suggested = await suggestAdForFile(f)
+      if (suggested) {
+        setUploadQueue(prev => {
+          const next = [...prev]
+          if (next[i] && !next[i].chosenAd) next[i] = { ...next[i], chosenAd: suggested }
+          return next
+        })
+      }
+    })
+  }
+
   function handleSubmit() {
     if (tab === 'existing') return doExistingDraft()
     if (tab === 'paste')    return doPasteTranscript()
-    if (tab === 'upload')   return doUploadMp4()
+    if (tab === 'upload') {
+      if (uploadQueue.length > 0) return doUploadQueue()
+      return doUploadMp4()
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────
@@ -326,59 +410,108 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
           {/* Tab 3: Upload MP4 */}
           {tab === 'upload' && (
             <>
-              <FieldLabel>Step 1 · Pick the Meta ad this video is for</FieldLabel>
-              <AdPicker {...{ adQuery, setAdQuery, ads, searching, chosenAd, setChosenAd }} />
+              {uploadQueue.length === 0 && (
+                <>
+                  <FieldLabel>Step 1 · Pick or drop one or more MP4s</FieldLabel>
+                  <DropZone file={uploadFile} setFile={setUploadFile}
+                    onFiles={handleFilesDropped} multiple />
 
-              {chosenAd && (
-                <div style={{
-                  marginTop: 12, padding: '10px 14px', background: 'white',
-                  border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
-                  borderRadius: 2,
-                  display: 'flex', alignItems: 'center', gap: 12,
-                }}>
-                  <AdThumbnail ad={chosenAd} size="sm" />
-                  <div style={{ flex: 1, overflow: 'hidden' }}>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                                  textTransform: 'uppercase', color: 'var(--ink-4)' }}>
-                      Attaching MP4 to
-                    </div>
-                    <div style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink)',
-                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {chosenAd.ad_name || chosenAd.ad_id}
-                    </div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
-                                  letterSpacing: '0.04em',
-                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {chosenAd.campaign_name || '(no campaign)'}
-                    </div>
+                  {uploadFile && (
+                    <>
+                      <FieldLabel style={{ marginTop: 20 }}>Step 2 · Pick the Meta ad this video is for</FieldLabel>
+                      <AdPicker {...{ adQuery, setAdQuery, ads, searching, chosenAd, setChosenAd }} />
+
+                      {chosenAd && (
+                        <div style={{
+                          marginTop: 12, padding: '10px 14px', background: 'white',
+                          border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
+                          borderRadius: 2,
+                          display: 'flex', alignItems: 'center', gap: 12,
+                        }}>
+                          <AdThumbnail ad={chosenAd} size="sm" />
+                          <div style={{ flex: 1, overflow: 'hidden' }}>
+                            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+                                          textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+                              Attaching <strong style={{ color: 'var(--ink)' }}>{uploadFile.name}</strong> to
+                            </div>
+                            <div style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink)',
+                                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {chosenAd.ad_name || chosenAd.ad_id}
+                            </div>
+                            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                                          letterSpacing: '0.04em',
+                                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {chosenAd.campaign_name || '(no campaign)'}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {uploadFile.size > 25 * 1024 * 1024 && (
+                        <div style={whisperWarnStyle}>
+                          <AlertCircle size={14} style={{ flexShrink: 0 }} />
+                          <span>
+                            File is {(uploadFile.size / 1024 / 1024).toFixed(1)}MB. OpenAI Whisper has a 25MB API limit.
+                            Upload may succeed but transcription will likely fail. Compress to 720p or extract audio first.
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* Bulk mode — queue rendered */}
+              {uploadQueue.length > 0 && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <FieldLabel style={{ margin: 0 }}>
+                      Bulk upload · {uploadQueue.length} files
+                    </FieldLabel>
+                    <button onClick={() => { setUploadQueue([]); setUploadFile(null) }} disabled={working}
+                      style={{ padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                              letterSpacing: '0.1em', textTransform: 'uppercase',
+                              border: '1px solid var(--rule)', background: 'transparent',
+                              color: 'var(--ink-4)', cursor: working ? 'wait' : 'pointer',
+                              borderRadius: 2 }}>
+                      Clear queue
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {uploadQueue.map((q, i) => (
+                      <QueueRow key={i} item={q} index={i}
+                        onRemove={() => setUploadQueue(prev => prev.filter((_, j) => j !== i))}
+                        onChangeAd={(ad) => setUploadQueue(prev => {
+                          const next = [...prev]; next[i] = { ...next[i], chosenAd: ad }; return next
+                        })}
+                        disabled={working} />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* Pipeline explanation — only when nothing dropped yet */}
+              {!uploadFile && uploadQueue.length === 0 && (
+                <div style={{ marginTop: 16, padding: 14, background: 'var(--paper)',
+                              border: '1px solid var(--rule)', borderRadius: 2 }}>
+                  <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--ink-3)' }}>
+                    What happens when you click Save & tag
+                  </div>
+                  <ol style={{ margin: 0, padding: 0, listStyle: 'none', fontFamily: 'var(--sans)',
+                              fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.7 }}>
+                    <li><span style={pipelineNumStyle}>1</span> Upload to <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>ad-source-videos</code> (~5-15s per file)</li>
+                    <li><span style={pipelineNumStyle}>2</span> Whisper transcribes the audio (~30-120s per file, 25MB limit)</li>
+                    <li><span style={pipelineNumStyle}>3</span> Claude classifies attributes (hook, mechanism, pain, etc.)</li>
+                    <li><span style={pipelineNumStyle}>4</span> Ad appears in Insights with full tags + thumbnail</li>
+                  </ol>
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--rule)',
+                                fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12,
+                                color: 'var(--ink-4)' }}>
+                    Drop multiple files at once for bulk processing. We'll auto-suggest the Meta ad for each filename — you confirm each pairing before clicking Run all.
                   </div>
                 </div>
               )}
-
-              <FieldLabel style={{ marginTop: 20 }}>Step 2 · Pick or drop the MP4</FieldLabel>
-              <DropZone file={uploadFile} setFile={setUploadFile} />
-
-              {/* Pipeline explanation */}
-              <div style={{ marginTop: 16, padding: 14, background: 'var(--paper)',
-                            border: '1px solid var(--rule)', borderRadius: 2 }}>
-                <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--ink-3)' }}>
-                  What happens when you click Save & tag
-                </div>
-                <ol style={{ margin: 0, padding: 0, listStyle: 'none', fontFamily: 'var(--sans)',
-                            fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.7 }}>
-                  <li><span style={pipelineNumStyle}>1</span> Upload MP4 to <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>ad-source-videos</code> bucket (~5-15s)</li>
-                  <li><span style={pipelineNumStyle}>2</span> OpenAI Whisper transcribes the audio (~30-120s) — stored as <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>lib_creative_transcripts</code> linked to this ad</li>
-                  <li><span style={pipelineNumStyle}>3</span> Claude reads the transcript + ad copy and classifies hook type, mechanism reveal, pain angle, funnel stage, awareness level (~5-15s)</li>
-                  <li><span style={pipelineNumStyle}>4</span> The ad shows up in Insights with its tags, ready to compare against other creatives</li>
-                </ol>
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--rule)',
-                              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12,
-                              color: 'var(--ink-4)' }}>
-                  Note: we don't currently search past generated scripts for a fuzzy text match.
-                  If this video matches an existing draft, use the <strong style={{ color: 'var(--ink)' }}>Existing draft</strong> tab
-                  instead — that carries over the original target attributes exactly.
-                </div>
-              </div>
             </>
           )}
         </div>
@@ -407,15 +540,18 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
                       borderRadius: 2, opacity: working ? 0.4 : 1 }}>
               Cancel
             </button>
-            <button onClick={handleSubmit} disabled={working || !canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile })}
+            <button onClick={handleSubmit} disabled={working || !canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile, uploadQueue })}
               style={{ padding: '10px 20px', fontFamily: 'var(--mono)', fontSize: 11,
                       letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
                       border: '2px solid var(--ink)', background: 'var(--ink)',
                       color: 'var(--paper)', cursor: working ? 'wait' : 'pointer',
-                      opacity: !canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile }) ? 0.4 : 1,
+                      opacity: !canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile, uploadQueue }) ? 0.4 : 1,
                       borderRadius: 2 }}>
               <Check size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
-              {working ? 'Working…' : tab === 'existing' ? 'Link' : 'Save & tag'}
+              {working ? 'Working…'
+                : tab === 'existing' ? 'Link'
+                : (tab === 'upload' && uploadQueue.length > 0) ? `Run all (${uploadQueue.filter(q => q.chosenAd && q.status !== 'done').length})`
+                : 'Save & tag'}
             </button>
           </div>
         </div>
@@ -431,10 +567,16 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
   )
 }
 
-function canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile }) {
+function canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile, uploadQueue }) {
   if (tab === 'existing') return !!(chosenScript && chosenAd)
   if (tab === 'paste')    return !!(chosenAd && pasteText.trim().length > 50)
-  if (tab === 'upload')   return !!(chosenAd && uploadFile)
+  if (tab === 'upload') {
+    if (uploadQueue?.length > 0) {
+      // Bulk: at least one paired and at least one not already done
+      return uploadQueue.some(q => q.chosenAd && q.status !== 'done')
+    }
+    return !!(chosenAd && uploadFile)
+  }
   return false
 }
 
@@ -449,6 +591,13 @@ const pipelineNumStyle = {
   width: 18, height: 18, borderRadius: 9, fontFamily: 'var(--mono)',
   fontSize: 10, fontWeight: 700, background: 'var(--ink)', color: 'var(--accent)',
   marginRight: 8, verticalAlign: 'middle',
+}
+
+const whisperWarnStyle = {
+  marginTop: 10, padding: '8px 12px',
+  background: '#fef9e7', border: '1px solid #e0a93e', borderRadius: 2,
+  color: '#7a5c12', fontSize: 12, lineHeight: 1.4,
+  display: 'flex', alignItems: 'flex-start', gap: 8,
 }
 
 function FieldLabel({ children, style: extra = {} }) {
@@ -572,13 +721,30 @@ function StageIndicator({ stage, target }) {
   )
 }
 
-function DropZone({ file, setFile }) {
+function DropZone({ file, setFile, onFiles, multiple = false }) {
   const [dragOver, setDragOver] = useState(false)
 
   function handleDrop(e) {
     e.preventDefault(); setDragOver(false)
-    const f = e.dataTransfer.files?.[0]
-    if (f && f.type.startsWith('video/')) setFile(f)
+    const fs = e.dataTransfer.files
+    if (!fs || fs.length === 0) return
+    if (multiple && onFiles) {
+      onFiles(fs)
+    } else {
+      const f = fs[0]
+      if (f && (f.type.startsWith('video/') || f.name.match(/\.(mp4|mov|webm|m4v)$/i))) setFile(f)
+    }
+  }
+
+  function handlePick(e) {
+    const fs = e.target.files
+    if (!fs || fs.length === 0) return
+    if (multiple && onFiles && fs.length > 1) {
+      onFiles(fs)
+    } else {
+      const f = fs[0]
+      if (f) setFile(f)
+    }
   }
 
   return (
@@ -593,8 +759,8 @@ function DropZone({ file, setFile }) {
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
     >
-      <input id="upload-mp4" type="file" accept="video/*" style={{ display: 'none' }}
-        onChange={e => { const f = e.target.files?.[0]; if (f) setFile(f) }} />
+      <input id="upload-mp4" type="file" accept="video/*" multiple={multiple} style={{ display: 'none' }}
+        onChange={handlePick} />
       <Upload size={28} color="var(--ink-4)" style={{ margin: '0 auto 12px', display: 'block' }} />
       {file ? (
         <>
@@ -608,14 +774,186 @@ function DropZone({ file, setFile }) {
       ) : (
         <>
           <div style={{ fontFamily: 'var(--serif)', fontSize: 15, color: 'var(--ink)', marginBottom: 4 }}>
-            Drop an MP4 or click to pick
+            Drop one or more MP4s, or click to pick
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
                         letterSpacing: '0.06em' }}>
-            up to 100MB
+            up to 500MB · 25MB recommended for transcription
           </div>
         </>
       )}
     </label>
   )
+}
+
+/* One row in the bulk-upload queue. Renders filename + size + status pill +
+   inline ad-picker (auto-suggested via filename) + remove button. */
+function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
+  const [adQuery, setAdQuery] = useState('')
+  const [adResults, setAdResults] = useState([])
+  const [pickerOpen, setPickerOpen] = useState(false)
+
+  useEffect(() => {
+    if (!pickerOpen) return
+    const q = adQuery.trim()
+    const handle = setTimeout(() => {
+      let req = supabase.from('ads')
+        .select('ad_id, ad_name, campaign_name, thumbnail_url, asset_url, asset_type, last_synced_at')
+        .order('last_synced_at', { ascending: false, nullsFirst: false })
+        .limit(15)
+      if (q) req = req.or(`ad_name.ilike.%${q}%,campaign_name.ilike.%${q}%,ad_id.ilike.%${q}%`)
+      req.then(({ data }) => setAdResults(data || []))
+    }, 200)
+    return () => clearTimeout(handle)
+  }, [adQuery, pickerOpen])
+
+  const sizeMB = item.file.size / 1024 / 1024
+  const tooLargeForWhisper = sizeMB > 25
+  const statusBadge = STATUS_STYLES[item.status] || STATUS_STYLES.pending
+
+  return (
+    <div style={{
+      padding: '12px 14px',
+      background: item.status === 'done' ? 'var(--paper)' : 'white',
+      border: '1px solid var(--rule)',
+      borderLeft: `3px solid ${statusBadge.accent}`,
+      borderRadius: 2,
+      opacity: item.status === 'done' ? 0.7 : 1,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', minWidth: 22 }}>
+          #{String(index + 1).padStart(2, '0')}
+        </span>
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink)', fontWeight: 500,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {item.file.name}
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                        letterSpacing: '0.04em', marginTop: 2 }}>
+            {sizeMB.toFixed(1)} MB
+            {tooLargeForWhisper && (
+              <span style={{ marginLeft: 8, padding: '1px 6px', background: '#fef9e7',
+                            color: '#7a5c12', border: '1px solid #e0a93e', borderRadius: 2 }}>
+                may fail Whisper
+              </span>
+            )}
+          </div>
+        </div>
+        <span style={{
+          padding: '3px 8px', fontFamily: 'var(--mono)', fontSize: 9,
+          letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+          background: statusBadge.bg, color: statusBadge.fg,
+          border: `1px solid ${statusBadge.accent}`, borderRadius: 2,
+        }}>
+          {item.status}
+        </span>
+        {item.status === 'pending' && !disabled && (
+          <button onClick={onRemove} title="Remove" style={{
+            background: 'transparent', border: 'none', color: 'var(--ink-4)',
+            cursor: 'pointer', padding: 2,
+          }}><X size={14} /></button>
+        )}
+      </div>
+
+      {/* Ad pairing */}
+      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <ArrowRight size={14} color="var(--ink-4)" />
+        {item.chosenAd ? (
+          <button onClick={() => setPickerOpen(o => !o)} disabled={disabled}
+            style={{
+              flex: 1, textAlign: 'left',
+              padding: '6px 10px',
+              background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 2,
+              cursor: disabled ? 'wait' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+            <AdThumbnail ad={item.chosenAd} size="sm" />
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <div style={{ fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink)',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {item.chosenAd.ad_name}
+              </div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)',
+                            letterSpacing: '0.04em',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {item.chosenAd.campaign_name || '—'}
+              </div>
+            </div>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)',
+                          letterSpacing: '0.1em' }}>
+              CHANGE
+            </span>
+          </button>
+        ) : (
+          <button onClick={() => setPickerOpen(true)} disabled={disabled}
+            style={{
+              flex: 1, padding: '8px 12px',
+              background: 'transparent', border: '1px dashed var(--rule)',
+              color: 'var(--ink-3)', fontFamily: 'var(--sans)', fontSize: 12,
+              cursor: disabled ? 'wait' : 'pointer', borderRadius: 2,
+              textAlign: 'left',
+            }}>
+            Pick Meta ad…
+          </button>
+        )}
+      </div>
+
+      {/* Inline picker */}
+      {pickerOpen && (
+        <div style={{ marginTop: 8, padding: 8, background: 'var(--paper)',
+                      border: '1px solid var(--rule)', borderRadius: 2 }}>
+          <input type="text" value={adQuery} onChange={e => setAdQuery(e.target.value)}
+            placeholder="Search ads…" autoFocus
+            style={{ width: '100%', padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 12,
+                    border: '1px solid var(--rule)', background: 'white', borderRadius: 2,
+                    marginBottom: 8 }} />
+          <div style={{ maxHeight: 200, overflowY: 'auto', display: 'grid', gap: 3 }}>
+            {adResults.map(a => (
+              <button key={a.ad_id}
+                onClick={() => { onChangeAd(a); setPickerOpen(false); setAdQuery('') }}
+                style={{
+                  textAlign: 'left', padding: '6px 8px',
+                  background: 'white', border: '1px solid var(--rule)',
+                  cursor: 'pointer', borderRadius: 2,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                <AdThumbnail ad={a} size="sm" />
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <div style={{ fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 500,
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {a.ad_name}
+                  </div>
+                </div>
+              </button>
+            ))}
+            {adResults.length === 0 && (
+              <div style={{ padding: 12, textAlign: 'center', color: 'var(--ink-4)', fontSize: 11,
+                            fontStyle: 'italic', fontFamily: 'var(--serif)' }}>
+                No matches
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Error */}
+      {item.error && (
+        <div style={{ marginTop: 8, padding: '6px 10px', background: '#fef2f2',
+                      border: '1px solid #fca5a5', color: '#b53e3e', fontSize: 11,
+                      borderRadius: 2 }}>
+          {item.error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const STATUS_STYLES = {
+  pending:      { bg: 'white',     fg: 'var(--ink-4)', accent: 'var(--rule)' },
+  uploading:    { bg: 'var(--ink)', fg: 'var(--accent)', accent: 'var(--ink)' },
+  transcribing: { bg: 'var(--ink)', fg: 'var(--accent)', accent: 'var(--ink)' },
+  tagging:      { bg: 'var(--ink)', fg: 'var(--accent)', accent: 'var(--ink)' },
+  done:         { bg: 'var(--accent)', fg: 'var(--ink)', accent: 'var(--accent)' },
+  error:        { bg: '#fef2f2', fg: '#b53e3e', accent: '#fca5a5' },
 }
