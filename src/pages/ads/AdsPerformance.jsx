@@ -6,6 +6,7 @@ import EditorialDate from '../../components/EditorialDate'
 import { dateRangeBoundsET } from '../../lib/dateUtils'
 import { useCloserCallProspectMetrics } from '../../hooks/useCloserCallProspectMetrics'
 import { subscribeSyncStatus, getLastSyncTime } from '../../services/autoSync'
+import { SectionHead } from '../../components/editorial/atoms'
 
 /*
   Performance view — hierarchical rollup.
@@ -1146,19 +1147,19 @@ export default function AdsPerformance() {
       overflowX: 'auto',
     }}>
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 mb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
-        <div>
-          <span className="eyebrow eyebrow-accent">Ads · Performance</span>
-          <h2 className="h3 mt-2" style={{ fontSize: 22 }}>The <em>performance</em> view.</h2>
-          <p className="mt-2" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
-            {tree.length} campaigns · last 30 days · click rows to expand
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button onClick={expandAll} style={btnGhost}>Expand all</button>
-          <button onClick={collapseAll} style={btnGhost}>Collapse</button>
-        </div>
-      </div>
+      <SectionHead
+        level="page"
+        eyebrow="Ads · Performance"
+        title="Performance"
+        tagline={`${tree.length} campaigns · last 30 days · click rows to expand.`}
+        gap={20}
+        right={
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button onClick={expandAll} style={btnGhost}>Expand all</button>
+            <button onClick={collapseAll} style={btnGhost}>Collapse</button>
+          </div>
+        }
+      />
 
       {/* Orphan-closes banner — visible whenever the closer logged closes
           that we couldn't attribute to any ad via typeform or HYROS. Click

@@ -48,25 +48,8 @@ const secondaryTab = (isActive) => ({
 export default function AdsLayout() {
   return (
     <div className="max-w-[1600px] mx-auto">
-      {/* Header — editorial */}
-      <div className="mb-6 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
-        <span className="eyebrow eyebrow-accent">OPT Sales · Creative library</span>
-        <h1 className="h2 mt-2">The <em>creative</em> shelf.</h1>
-        <p
-          className="mt-2"
-          style={{
-            fontFamily: 'var(--mono)',
-            fontSize: 10,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--ink-3)',
-          }}
-        >
-          Meta ads · components · variants · attribution
-        </p>
-      </div>
-
-      {/* Tab bar */}
+      {/* Tab bar — the only chrome the user needs at this layer.
+          Per-page SectionHead provides the page identity. */}
       <div
         className="mb-6 sticky top-14 md:top-16 z-10"
         style={{

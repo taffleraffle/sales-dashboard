@@ -3,6 +3,7 @@ import { Type, Sparkles, FlaskConical } from 'lucide-react'
 import AdsPhrasesPanel from '../../components/ads/AdsPhrasesPanel'
 import AdsIdeationPanel from '../../components/ads/AdsIdeationPanel'
 import AdsTestingPanel from '../../components/ads/AdsTestingPanel'
+import { SectionHead } from '../../components/editorial/atoms'
 
 /*
   Messaging page = tab router for three sub-tabs:
@@ -31,13 +32,13 @@ export default function AdsMessaging() {
 
   return (
     <div>
-      {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 mb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
-        <div>
-          <span className="eyebrow eyebrow-accent">Library · Messaging</span>
-          <h2 className="h3 mt-2" style={{ fontSize: 22 }}>The <em>messaging</em> workshop.</h2>
-        </div>
-      </div>
+      <SectionHead
+        level="page"
+        eyebrow="Ads · Messaging"
+        title="Messaging"
+        tagline="Ideation, testing, and phrase performance across every angle we've run."
+        gap={20}
+      />
 
       {/* Sub-tab bar */}
       <div
