@@ -3,6 +3,7 @@ import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Z
 import { generateScripts, listGeneratedScripts, linkScriptToAd } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
+import AssignCreativeModal from '../../components/ads/AssignCreativeModal'
 import { supabase } from '../../lib/supabase'
 
 /*
@@ -40,6 +41,7 @@ export default function AdsGenerator() {
   const [err, setErr] = useState(null)
   const [offerModalOpen, setOfferModalOpen] = useState(false)
   const [offerModalExisting, setOfferModalExisting] = useState(null)
+  const [assignScript, setAssignScript] = useState(null)
 
   async function refreshOffers() {
     const o = await listOffers()
@@ -424,29 +426,52 @@ export default function AdsGenerator() {
                 <tr style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
                             textTransform: 'uppercase', color: 'var(--ink-4)',
                             borderBottom: '1px solid var(--rule)' }}>
-                  <th style={{ textAlign: 'left', padding: '12px' }}>When</th>
-                  <th style={{ textAlign: 'left' }}>Offer</th>
-                  <th style={{ textAlign: 'left' }}>Title</th>
-                  <th style={{ textAlign: 'left' }}>Frame</th>
-                  <th style={{ textAlign: 'left' }}>Status</th>
+                  <th style={{ textAlign: 'left', padding: '12px 16px' }}>When</th>
+                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Offer</th>
+                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Title</th>
+                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Frame</th>
+                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Status</th>
+                  <th style={{ textAlign: 'right', padding: '12px 16px 12px 0' }}></th>
                 </tr>
               </thead>
               <tbody>
                 {history.map(h => (
                   <tr key={h.id} style={{ borderTop: '1px solid var(--rule)' }}>
-                    <td style={{ padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
+                    <td style={{ padding: '12px 16px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
                       {new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </td>
-                    <td>{h.offer_slug?.replace('opt-', '')}</td>
-                    <td style={{ fontFamily: 'var(--serif)' }}>{h.title || '—'}</td>
-                    <td>
+                    <td style={{ padding: '12px 14px 12px 0' }}>{h.offer_slug?.replace('opt-', '')}</td>
+                    <td style={{ fontFamily: 'var(--serif)', padding: '12px 14px 12px 0' }}>{h.title || '—'}</td>
+                    <td style={{ padding: '12px 14px 12px 0' }}>
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 10,
-                                    padding: '2px 6px', background: 'var(--paper)',
-                                    border: '1px solid var(--rule)' }}>
+                                    padding: '3px 7px', background: 'var(--paper)',
+                                    border: '1px solid var(--rule)', borderRadius: 2 }}>
                         {h.frame || '—'}
                       </span>
                     </td>
-                    <td style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{h.status}</td>
+                    <td style={{ padding: '12px 14px 12px 0' }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10,
+                                    padding: '3px 7px', borderRadius: 2,
+                                    background: h.status === 'shipped' ? 'var(--accent)' : 'var(--paper)',
+                                    color: 'var(--ink-3)',
+                                    border: '1px solid var(--rule)' }}>
+                        {h.status}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '12px 16px 12px 0' }}>
+                      {h.status !== 'shipped' && (
+                        <button onClick={() => setAssignScript(h)}
+                          style={{
+                            padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                            letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
+                            border: '1px solid var(--rule)', background: 'white', color: 'var(--ink-3)',
+                            cursor: 'pointer', borderRadius: 2,
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                          }}>
+                          <Link2 size={11} /> Link to ad
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -454,6 +479,16 @@ export default function AdsGenerator() {
           </div>
         </div>
       )}
+
+      <AssignCreativeModal
+        open={!!assignScript}
+        presetScript={assignScript}
+        onClose={() => setAssignScript(null)}
+        onLinked={async () => {
+          setAssignScript(null)
+          const h = await listGeneratedScripts({ limit: 25 })
+          setHistory(h)
+        }} />
     </div>
   )
 }

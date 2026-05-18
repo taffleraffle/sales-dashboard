@@ -4,9 +4,10 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, ReferenceLine,
 } from 'recharts'
-import { Trophy, AlertCircle, RefreshCw, Sparkles, Target, Activity, TrendingUp, Zap } from 'lucide-react'
+import { Trophy, AlertCircle, RefreshCw, Sparkles, Target, Activity, TrendingUp, Zap, Link2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { tagMissing, listOffers, getAttributeCoverage } from '../../services/creativeTagger'
+import AssignCreativeModal from '../../components/ads/AssignCreativeModal'
 
 /*
   Creative Insights — focused on WIN RATE, not spend.
@@ -63,6 +64,7 @@ export default function AdsInsights() {
   const [err, setErr] = useState(null)
   const [tagging, setTagging] = useState(false)
   const [proofPie, setProofPie] = useState([])
+  const [assignOpen, setAssignOpen] = useState(false)
 
   const setPresetRange = (days) => {
     setPreset(days); setSince(daysAgoISO(days)); setUntil(todayISO())
@@ -208,20 +210,36 @@ export default function AdsInsights() {
             across 11 dimensions so winners surface their own pattern.
           </p>
         </div>
-        <button onClick={handleTagMissing} disabled={tagging || loading}
-          style={{
-            padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
-            letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600,
-            border: '2px solid var(--ink)', background: 'white',
-            color: 'var(--ink)', cursor: (tagging || loading) ? 'wait' : 'pointer',
-            opacity: (tagging || loading) ? 0.5 : 1, borderRadius: 2,
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            boxShadow: '3px 3px 0 var(--accent)',
-          }}>
-          <RefreshCw size={12} />
-          {tagging ? 'Tagging…' : 'Tag more ads'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setAssignOpen(true)}
+            style={{
+              padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
+              letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600,
+              border: '2px solid var(--ink)', background: 'var(--ink)', color: 'var(--paper)',
+              cursor: 'pointer', borderRadius: 2,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              boxShadow: '3px 3px 0 var(--accent)',
+            }}>
+            <Link2 size={12} />
+            Link creative to ad
+          </button>
+          <button onClick={handleTagMissing} disabled={tagging || loading}
+            style={{
+              padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
+              letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600,
+              border: '2px solid var(--ink)', background: 'white',
+              color: 'var(--ink)', cursor: (tagging || loading) ? 'wait' : 'pointer',
+              opacity: (tagging || loading) ? 0.5 : 1, borderRadius: 2,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}>
+            <RefreshCw size={12} />
+            {tagging ? 'Tagging…' : 'Tag more ads'}
+          </button>
+        </div>
       </div>
+
+      <AssignCreativeModal open={assignOpen} onClose={() => setAssignOpen(false)}
+        onLinked={() => { setAssignOpen(false); loadEverything() }} />
 
       {/* Headline KPI row — WIN RATE prominent, spend de-emphasized */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr', gap: 1,
@@ -299,28 +317,31 @@ export default function AdsInsights() {
             For each attribute, the value with the highest win-rate lift versus the overall
             baseline ({fmtPct(stats.winRate, 1)}). If you write more scripts, bias toward these.
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
             {variablesPullingAhead.map((v, i) => (
-              <div key={i} style={{ padding: 16, background: 'white', border: '1px solid var(--rule)',
-                                    borderLeft: '4px solid var(--accent)', borderRadius: 2 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+              <div key={i} style={{ padding: '18px 20px', background: 'white', border: '1px solid var(--rule)',
+                                    borderLeft: '4px solid var(--accent)', borderRadius: 2,
+                                    display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
                                 textTransform: 'uppercase', color: 'var(--ink-4)' }}>
                     {v.attribute_label}
                   </span>
                   <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)',
-                                background: 'var(--ink)', padding: '2px 6px', fontWeight: 700,
-                                letterSpacing: '0.08em' }}>
+                                background: 'var(--ink)', padding: '3px 8px', fontWeight: 700,
+                                letterSpacing: '0.08em', borderRadius: 2, whiteSpace: 'nowrap' }}>
                     +{fmtPct(v.win_rate_lift, 1)}
                   </span>
                 </div>
                 <div style={{ fontFamily: 'var(--serif)', fontSize: 22, color: 'var(--ink)',
-                              lineHeight: 1.1, marginBottom: 8, fontWeight: 400 }}>
+                              lineHeight: 1.15, fontWeight: 400 }}>
                   {v.value}
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between',
-                              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
-                  <span>win rate <strong style={{ color: 'var(--ink)', fontSize: 13 }}>{fmtPct(v.win_rate, 0)}</strong></span>
+                              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
+                              gap: 12, flexWrap: 'wrap', paddingTop: 8,
+                              borderTop: '1px solid var(--rule)' }}>
+                  <span>win rate <strong style={{ color: 'var(--ink)', fontSize: 13 }}>{fmtPct(v.win_rate, 1)}</strong></span>
                   <span>{v.winners}/{v.ads} ads</span>
                   {v.avg_cpb && <span>CPB <strong style={{ color: 'var(--ink)', fontSize: 13 }}>{fmt$(v.avg_cpb)}</strong></span>}
                 </div>
@@ -348,54 +369,66 @@ export default function AdsInsights() {
                 <tr style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
                             textTransform: 'uppercase', color: 'var(--ink-4)',
                             borderBottom: '1px solid var(--rule)' }}>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', width: 26 }}>#</th>
-                  <th style={{ textAlign: 'left' }}>Ad name</th>
-                  <th style={{ textAlign: 'left' }}>Attributes</th>
-                  <th style={{ textAlign: 'right' }}>Booked</th>
-                  <th style={{ textAlign: 'right' }}>CPB</th>
-                  <th style={{ textAlign: 'center', padding: '10px 14px' }}></th>
+                  <th style={{ textAlign: 'left', padding: '12px 0 12px 16px', width: 56 }}>#</th>
+                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 8px' }}>Ad name</th>
+                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Attributes</th>
+                  <th style={{ textAlign: 'right', padding: '12px 16px 12px 0' }}>Booked</th>
+                  <th style={{ textAlign: 'right', padding: '12px 16px 12px 0' }}>CPB</th>
+                  <th style={{ textAlign: 'right', padding: '12px 18px 12px 0' }}></th>
                 </tr>
               </thead>
               <tbody>
-                {topCreatives.map((r, i) => (
-                  <tr key={r.ad_id} style={{ borderTop: '1px solid var(--rule)' }}>
-                    <td style={{ padding: '10px 14px', fontFamily: 'var(--mono)', fontWeight: 700,
-                                color: i < 3 ? 'var(--accent)' : 'var(--ink-4)',
-                                background: i < 3 ? 'var(--ink)' : 'transparent' }}>
-                      {String(i + 1).padStart(2, '0')}
-                    </td>
-                    <td style={{ padding: '10px 0', maxWidth: 240, overflow: 'hidden',
-                                textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <Link to={`/sales/ads/ad/${r.ad_id}`}
-                        style={{ color: 'var(--ink)', textDecoration: 'none', fontWeight: 500 }}>
-                        {r.ad_name || r.ad_id}
-                      </Link>
-                    </td>
-                    <td style={{ padding: '10px 0' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {[r.hook_type, r.mechanism_reveal, r.pain_angle, r.proof_character]
-                          .filter(v => v && v !== 'none').map((v, j) => (
-                            <span key={j} style={{ padding: '2px 6px', background: 'var(--paper)',
-                                                  fontFamily: 'var(--mono)', fontSize: 10,
-                                                  color: 'var(--ink-3)', border: '1px solid var(--rule)',
-                                                  borderRadius: 2 }}>{v}</span>
-                          ))}
-                      </div>
-                    </td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '10px 0',
-                                fontWeight: 700, color: 'var(--ink)', fontSize: 14 }}>{fmtN(r.booked)}</td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '10px 0' }}>{fmt$(r.cost_per_booked)}</td>
-                    <td style={{ textAlign: 'center', padding: '10px 14px' }}>
-                      {r.effective_winner && (
-                        <span style={{ padding: '2px 6px', background: 'var(--accent)',
-                                      fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
-                                      letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-                          Winner
+                {topCreatives.map((r, i) => {
+                  const isPodium = i < 3
+                  return (
+                    <tr key={r.ad_id} style={{ borderTop: '1px solid var(--rule)' }}>
+                      <td style={{ padding: '14px 0 14px 16px', width: 56 }}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 32, height: 32, borderRadius: 16,
+                          fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700,
+                          background: isPodium ? 'var(--accent)' : 'var(--paper)',
+                          color: isPodium ? 'var(--ink)' : 'var(--ink-4)',
+                          border: isPodium ? '1px solid var(--ink)' : '1px solid var(--rule)',
+                        }}>
+                          {i + 1}
                         </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td style={{ padding: '14px 14px 14px 8px', maxWidth: 280, overflow: 'hidden',
+                                  textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <Link to={`/sales/ads/ad/${r.ad_id}`}
+                          style={{ color: 'var(--ink)', textDecoration: 'none', fontWeight: 500 }}>
+                          {r.ad_name || r.ad_id}
+                        </Link>
+                      </td>
+                      <td style={{ padding: '14px 14px 14px 0' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {[r.hook_type, r.mechanism_reveal, r.pain_angle, r.proof_character]
+                            .filter(v => v && v !== 'none').map((v, j) => (
+                              <span key={j} style={{ padding: '2px 7px', background: 'var(--paper)',
+                                                    fontFamily: 'var(--mono)', fontSize: 10,
+                                                    color: 'var(--ink-3)', border: '1px solid var(--rule)',
+                                                    borderRadius: 2 }}>{v}</span>
+                            ))}
+                        </div>
+                      </td>
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '14px 16px 14px 0',
+                                  fontWeight: 700, color: 'var(--ink)', fontSize: 15 }}>{fmtN(r.booked)}</td>
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '14px 16px 14px 0',
+                                  color: 'var(--ink-3)' }}>{fmt$(r.cost_per_booked)}</td>
+                      <td style={{ textAlign: 'right', padding: '14px 18px 14px 0' }}>
+                        {r.effective_winner && (
+                          <span style={{ padding: '3px 8px', background: 'var(--accent)',
+                                        fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+                                        letterSpacing: '0.12em', textTransform: 'uppercase',
+                                        borderRadius: 2 }}>
+                            Winner
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}
@@ -403,32 +436,28 @@ export default function AdsInsights() {
       </div>
 
       {/* Win rate by attribute charts */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24, marginBottom: 32 }}>
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 12, color: 'var(--ink-3)' }}>
-            Win rate by attribute
-          </div>
-          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)',
-                      fontSize: 12, margin: '0 0 12px' }}>
-            Each bar = % of ads with this attribute value that became winners. Yellow bars beat the baseline.
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 16 }}>
-            {PIVOTS.map(p => (
-              <WinRateChart key={p.attr}
-                label={p.label}
-                attr={p.attr}
-                rows={filteredPerf || []}
-                baseline={stats.winRate}
-                loading={loading} />
-            ))}
-          </div>
+      <div style={{ marginBottom: 32 }}>
+        <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--ink-3)' }}>
+          Win rate by attribute
         </div>
-
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 12, color: 'var(--ink-3)' }}>
-            Proof character distribution
-          </div>
-          <ProofPie rows={proofPie} loading={loading} />
+        <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)',
+                    fontSize: 13, margin: '0 0 16px', maxWidth: 720 }}>
+          Each bar = % of ads with this attribute value that became winners. Yellow bars beat
+          the overall baseline (dashed line).
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 16 }}>
+          {PIVOTS.map(p => (
+            <WinRateChart key={p.attr}
+              label={p.label}
+              attr={p.attr}
+              rows={filteredPerf || []}
+              baseline={stats.winRate}
+              loading={loading} />
+          ))}
+          {/* Proof character pie — appears as a peer card only when data exists */}
+          {proofPie.filter(r => r.attribute_value !== 'none' && (Number(r.booked) || 0) > 0).length > 0 && (
+            <ProofPie rows={proofPie} loading={loading} />
+          )}
         </div>
       </div>
     </div>
@@ -510,6 +539,14 @@ function WinRateChart({ label, attr, rows, baseline, loading }) {
       .slice(0, 8)
   }, [rows, attr, baseline])
 
+  // Smart Y-axis formatter — decimals when values are sub-1%
+  const maxRate = Math.max(...data.map(d => d.winRate), 0)
+  const yTickFormatter = useMemo(() => {
+    if (maxRate >= 0.1) return v => `${(v * 100).toFixed(0)}%`     // ≥10% range: whole percent
+    if (maxRate >= 0.02) return v => `${(v * 100).toFixed(1)}%`    // 2-10%: 1 decimal
+    return v => `${(v * 100).toFixed(2)}%`                          // <2%: 2 decimals
+  }, [maxRate])
+
   const tooltip = ({ active, payload, label: tipLabel }) => {
     if (!active || !payload?.length) return null
     const d = payload[0].payload
@@ -547,9 +584,9 @@ function WinRateChart({ label, attr, rows, baseline, loading }) {
           <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
             <XAxis dataKey="value" tick={{ fontSize: 10, fill: 'var(--ink-3)', fontFamily: 'var(--mono)' }}
                   axisLine={false} tickLine={false} interval={0} angle={-15} textAnchor="end" height={50} />
-            <YAxis tickFormatter={v => `${(v * 100).toFixed(0)}%`}
+            <YAxis tickFormatter={yTickFormatter}
                    tick={{ fontSize: 9, fill: 'var(--ink-4)', fontFamily: 'var(--mono)' }}
-                   axisLine={false} tickLine={false} width={38} />
+                   axisLine={false} tickLine={false} width={44} allowDecimals={true} />
             <Tooltip content={tooltip} cursor={{ fill: 'var(--paper)' }} />
             <ReferenceLine y={baseline} stroke="var(--ink-4)" strokeDasharray="3 3" />
             <Bar dataKey="winRate" radius={[2, 2, 0, 0]}>
@@ -586,19 +623,25 @@ function ProofPie({ rows, loading }) {
     )
   }
 
-  if (loading) return <div style={{ height: 280, background: 'white', border: '1px solid var(--rule)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>Loading…</div>
-  if (data.length === 0) return <div style={{ height: 280, background: 'white', border: '1px solid var(--rule)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>No proof data yet.</div>
+  if (loading || data.length === 0) return null  // pie hidden entirely when no data — parent gates rendering
 
   return (
     <div style={{ padding: 14, background: 'white', border: '1px solid var(--rule)', borderRadius: 2 }}>
-      <ResponsiveContainer width="100%" height={280}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.14em',
+                      textTransform: 'uppercase', color: 'var(--ink)' }}>Proof character</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>
+          by booked
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={180}>
         <PieChart>
-          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="45%"
-               innerRadius={42} outerRadius={80} paddingAngle={2}>
+          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%"
+               innerRadius={36} outerRadius={68} paddingAngle={2}>
             {data.map((_, i) => <Cell key={i} fill={PIE_PALETTE[i % PIE_PALETTE.length]} />)}
           </Pie>
           <Tooltip content={tooltip} />
-          <Legend wrapperStyle={{ fontFamily: 'var(--mono)', fontSize: 10,
+          <Legend wrapperStyle={{ fontFamily: 'var(--mono)', fontSize: 9,
                                   letterSpacing: '0.06em', color: 'var(--ink-3)' }} />
         </PieChart>
       </ResponsiveContainer>
