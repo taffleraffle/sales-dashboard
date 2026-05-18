@@ -402,6 +402,7 @@ export default function AdsInsights() {
             filteredPerf={filteredPerf}
             baseline={summary.winRate}
             loading={loading}
+            onClickCreative={r => setEditingAd(r)}
           />
         </div>
       )}

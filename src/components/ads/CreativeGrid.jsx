@@ -2,9 +2,19 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AdThumbnail from './AdThumbnail'
 import {
-  Eyebrow, Pill, Icon, fmtMoney, fmtNum, humanAttr, frameColor, frameTone,
+  Eyebrow, Pill, Icon, fmtMoney, fmtMoneyFull, fmtNum, humanAttr, frameColor, frameTone,
   ValueChip, attrColor, displayValue, PodiumRank, WinnerBadge,
 } from '../editorial/atoms'
+
+const FILTER_GROUPS = [
+  { attr: 'message_frame',    label: 'Frame',     values: ['problem', 'circumstance', 'outcome'] },
+  { attr: 'hook_type',        label: 'Hook',      values: ['question', 'scene', 'dollar_pain', 'diagnostic', 'conditional'] },
+  { attr: 'mechanism_reveal', label: 'Mechanism', values: ['gated', 'explicit', 'hidden'] },
+  { attr: 'funnel_stage',     label: 'Funnel',    values: ['tof', 'mof', 'bof', 'cross'] },
+  { attr: 'format',           label: 'Format',    values: ['talking_head', 'ugc', 'comparative', 'voiceover'] },
+  { attr: 'proof_character',  label: 'Proof',     values: ['eric', 'adam', 'belinda', 'morgan', 'karen', 'derek', 'mike', 'none'] },
+  { attr: 'pain_angle',       label: 'Pain angle', values: ['phone_not_ringing', 'agency_burn', 'tpa_referral_dep', 'capacity_mismatch', 'lead_platform', 'storm_seasonal', 'guarantee_proof', 'founder_identity', 'adjuster_relations', 'commercial_tier', 'last_objection'] },
+]
 
 /*
   All-creatives spreadsheet — explicit attribute columns (Hook · Frame · Mech ·
@@ -39,6 +49,22 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState('booked_desc')
   const [pageSize, setPageSize] = useState(PAGE_SIZE)
+  // Attribute-rail filters: { attr: Set<value> }
+  const [attrFilters, setAttrFilters] = useState({})
+
+  const toggleAttrFilter = (attr, value) => {
+    setAttrFilters(prev => {
+      const next = { ...prev }
+      const set = new Set(next[attr] || [])
+      if (set.has(value)) set.delete(value)
+      else set.add(value)
+      if (set.size === 0) delete next[attr]
+      else next[attr] = set
+      return next
+    })
+  }
+  const clearAllAttrFilters = () => { setAttrFilters({}); setFilter('all'); setSearch('') }
+  const attrFilterCount = Object.values(attrFilters).reduce((s, v) => s + v.size, 0)
 
   const processed = useMemo(() => {
     let list = [...(rows || [])]
@@ -53,6 +79,12 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
         (r.campaign_name || '').toLowerCase().includes(q) ||
         (r.ad_id || '').toLowerCase().includes(q)
       )
+    }
+    // Apply attribute-rail filters (AND across attrs, OR within an attr)
+    for (const attr in attrFilters) {
+      const vals = attrFilters[attr]
+      if (!vals || vals.size === 0) continue
+      list = list.filter(r => vals.has(r[attr]))
     }
     list.sort((a, b) => {
       const bn = (x) => Number(x) || 0
@@ -70,48 +102,48 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
       }
     })
     return list
-  }, [rows, search, filter, sort])
+  }, [rows, search, filter, sort, attrFilters])
 
-  const filterActive = filter !== 'all' || search.trim().length > 0
+  // Counter strip stats from the filtered list
+  const stats = useMemo(() => {
+    const winners = processed.filter(r => r.effective_winner).length
+    const totalSpend = processed.reduce((s, r) => s + (Number(r.spend) || 0), 0)
+    const totalBooked = processed.reduce((s, r) => s + (Number(r.booked) || 0), 0)
+    const avgCpb = totalBooked > 0 ? Math.round(totalSpend / totalBooked) : 0
+    return { count: processed.length, winners, totalSpend, totalBooked, avgCpb }
+  }, [processed])
+
+  const filterActive = filter !== 'all' || search.trim().length > 0 || attrFilterCount > 0
   const visible = processed.slice(0, pageSize)
   const hasMore = processed.length > pageSize
 
   return (
     <div>
-      {/* Filter + sort bar */}
+      {/* Toolbar: search + counters + sort */}
       <div style={{
         display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14,
-        padding: '12px 16px', background: 'var(--paper-2)',
-        border: '1px solid var(--rule)', borderBottom: 'none',
+        padding: '12px 16px', background: 'white',
+        border: '1px solid var(--rule)',
       }}>
-        <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 240 }}>
+        <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 240, maxWidth: 320 }}>
           <span style={{ position: 'absolute', left: 10, top: 8, color: 'var(--ink-4)' }}>
             {Icon.filter(13)}
           </span>
           <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search ad name, campaign, or ID…"
+            placeholder="Search ads, campaigns, ad_id…"
             style={{
-              width: '100%', padding: '6px 10px 6px 32px',
+              width: '100%', padding: '7px 10px 7px 32px',
               fontFamily: 'var(--sans)', fontSize: 13,
-              border: '1px solid var(--rule-2)', background: 'white',
+              border: '1px solid var(--rule-2)', background: 'var(--paper)',
+              outline: 'none',
             }} />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {FILTER_CHIPS.map(c => (
-            <button key={c.key} onClick={() => setFilter(c.key)}
-              style={{
-                padding: '5px 10px',
-                fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em',
-                textTransform: 'uppercase', fontWeight: 500,
-                border: `1px solid ${filter === c.key ? 'var(--ink)' : 'var(--rule-2)'}`,
-                background: filter === c.key ? 'var(--ink)' : 'transparent',
-                color: filter === c.key ? 'var(--paper)' : 'var(--ink-3)',
-                cursor: 'pointer',
-              }}>
-              {c.label}
-            </button>
-          ))}
-        </div>
+        <Counter v={fmtNum(stats.count)} l="creatives" />
+        <Counter v={fmtNum(stats.winners)} l="winners" />
+        <Counter v={fmtNum(stats.totalBooked)} l="booked" />
+        <Counter v={fmtMoney(stats.totalSpend)} l="spend" />
+        <Counter v={stats.avgCpb > 0 ? `$${stats.avgCpb}` : '—'} l="avg CPB" />
+        <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Eyebrow>Sort</Eyebrow>
           {SORT_OPTIONS.map(o => (
@@ -129,15 +161,52 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
             </button>
           ))}
         </div>
-        <div style={{ flex: 1 }} />
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
-                      letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-          {processed.length} of {(rows || []).length}
-        </span>
       </div>
 
+      {/* Quick-filter chip row */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8,
+        padding: '10px 16px', background: 'var(--paper-2)',
+        borderLeft: '1px solid var(--rule)', borderRight: '1px solid var(--rule)',
+        borderBottom: '1px solid var(--rule)',
+      }}>
+        <Eyebrow>Quick filter</Eyebrow>
+        {FILTER_CHIPS.map(c => (
+          <button key={c.key} onClick={() => setFilter(c.key)}
+            style={{
+              padding: '4px 10px',
+              fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em',
+              textTransform: 'uppercase', fontWeight: 500,
+              border: `1px solid ${filter === c.key ? 'var(--ink)' : 'var(--rule-2)'}`,
+              background: filter === c.key ? 'var(--ink)' : 'transparent',
+              color: filter === c.key ? 'var(--paper)' : 'var(--ink-3)',
+              cursor: 'pointer',
+            }}>
+            {c.label}
+          </button>
+        ))}
+        {(attrFilterCount > 0 || filter !== 'all' || search.trim()) && (
+          <button onClick={clearAllAttrFilters}
+            style={{
+              marginLeft: 'auto', padding: '4px 10px',
+              fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em',
+              textTransform: 'uppercase', fontWeight: 500,
+              background: 'transparent', color: '#b53e3e',
+              border: '1px solid rgba(181,62,62,0.4)', cursor: 'pointer',
+            }}>
+            Clear {attrFilterCount > 0 ? `${attrFilterCount} filter${attrFilterCount === 1 ? '' : 's'}` : 'all'}
+          </button>
+        )}
+      </div>
+
+      {/* Two-column: left filter rail + table */}
+      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 0 }}>
+        <FilterRail rows={rows || []} filters={attrFilters}
+          onToggle={toggleAttrFilter} onClear={clearAllAttrFilters} filterCount={attrFilterCount} />
+
       {/* Table — horizontally scrollable; min-width keeps columns from collapsing */}
-      <div style={{ background: 'white', border: '1px solid var(--rule)', overflowX: 'auto' }}>
+      <div style={{ background: 'white', border: '1px solid var(--rule)',
+                    borderLeft: 'none', overflowX: 'auto' }}>
         <div style={{ minWidth: MIN_TABLE_WIDTH }}>
         {/* Header */}
         <div style={{
@@ -185,6 +254,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
         })}
         </div>
       </div>
+      </div>{/* /two-column grid */}
 
       {/* Load more */}
       {hasMore && (
@@ -202,6 +272,144 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
               ({pageSize} of {processed.length})
             </span>
           </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Counter — tiny serif+mono pair for the toolbar strip ─────────────
+function Counter({ v, l }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+      <span style={{
+        fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+        fontSize: 17, color: 'var(--ink)',
+      }}>{v}</span>
+      <span style={{
+        fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+        letterSpacing: '0.04em', textTransform: 'uppercase',
+      }}>{l}</span>
+    </div>
+  )
+}
+
+// ─── FilterRail — collapsible attribute groups with value counts ──────
+function FilterRail({ rows, filters, onToggle, onClear, filterCount }) {
+  // Compute counts per (attr, value) from the unfiltered rows
+  const counts = useMemo(() => {
+    const out = {}
+    for (const g of FILTER_GROUPS) {
+      out[g.attr] = {}
+      g.values.forEach(v => { out[g.attr][v] = 0 })
+      rows.forEach(r => {
+        if (out[g.attr][r[g.attr]] != null) out[g.attr][r[g.attr]]++
+      })
+    }
+    return out
+  }, [rows])
+
+  return (
+    <div>
+      <div style={{
+        padding: '10px 14px', background: 'white',
+        border: '1px solid var(--rule)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <Eyebrow>Filter</Eyebrow>
+        {filterCount > 0 && (
+          <button onClick={onClear} style={{
+            background: 'transparent', border: 'none',
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+            letterSpacing: '0.04em', textTransform: 'uppercase', cursor: 'pointer',
+            padding: 0,
+          }}>clear all</button>
+        )}
+      </div>
+      <div style={{
+        background: 'white',
+        borderLeft: '1px solid var(--rule)',
+        borderRight: '1px solid var(--rule)',
+        borderBottom: '1px solid var(--rule)',
+      }}>
+        {FILTER_GROUPS.map((g, gi) => (
+          <FilterGroup key={g.attr} group={g} counts={counts[g.attr] || {}}
+                       active={filters[g.attr] || new Set()}
+                       toggle={(v) => onToggle(g.attr, v)} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function FilterGroup({ group, counts, active, toggle }) {
+  const [open, setOpen] = useState(true)
+  return (
+    <div style={{ borderTop: '1px solid var(--rule)' }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: '100%', textAlign: 'left',
+        padding: '10px 14px',
+        background: 'transparent', border: 'none',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        cursor: 'pointer',
+      }}>
+        <span style={{ fontFamily: 'var(--serif)', fontSize: 14 }}>{group.label}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {active.size > 0 && (
+            <span style={{
+              padding: '1px 6px', background: 'var(--ink)', color: 'var(--paper)',
+              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+            }}>{active.size}</span>
+          )}
+          <span style={{
+            color: 'var(--ink-4)', fontSize: 12,
+            transform: open ? 'rotate(90deg)' : 'rotate(0)',
+            transition: 'transform 0.15s cubic-bezier(0.2,0.7,0.2,1)',
+            display: 'inline-block',
+          }}>›</span>
+        </div>
+      </button>
+      {open && (
+        <div style={{ padding: '0 12px 12px' }}>
+          {group.values.map(v => {
+            const isActive = active.has(v)
+            const count = counts[v] || 0
+            const valColor = attrColor(group.attr, v)
+            return (
+              <button key={v} onClick={() => toggle(v)} disabled={count === 0}
+                style={{
+                  width: '100%', textAlign: 'left',
+                  padding: '5px 8px',
+                  background: isActive ? 'var(--paper-2)' : 'transparent',
+                  color: count === 0 ? 'var(--ink-5)' : 'var(--ink-2)',
+                  border: 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  cursor: count === 0 ? 'default' : 'pointer',
+                  opacity: count === 0 ? 0.5 : 1,
+                }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <span style={{
+                    width: 12, height: 12,
+                    background: isActive ? 'var(--ink)' : 'transparent',
+                    border: `1px solid ${isActive ? 'var(--ink)' : 'var(--rule-2)'}`,
+                    display: 'inline-grid', placeItems: 'center',
+                    color: 'var(--accent)', fontSize: 9, flexShrink: 0,
+                  }}>{isActive ? '✓' : ''}</span>
+                  <span style={{
+                    width: 7, height: 7, borderRadius: 7, background: valColor, flexShrink: 0,
+                  }} />
+                  <span style={{
+                    fontSize: 12.5,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{displayValue(v)}</span>
+                </span>
+                <span style={{
+                  fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums',
+                  fontSize: 10.5, color: 'var(--ink-4)', flexShrink: 0, marginLeft: 4,
+                }}>{count}</span>
+              </button>
+            )
+          })}
         </div>
       )}
     </div>

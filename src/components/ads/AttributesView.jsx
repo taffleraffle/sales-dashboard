@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
+import AdThumbnail from './AdThumbnail'
 import {
   Eyebrow, SectionHead, Sparkline, BigNumber,
-  fmtMoney, fmtMoneyFull, fmtNum, fmtPct, fmtLift,
+  fmtMoney, fmtMoneyFull, fmtNum, fmtPct, fmtLift, frameColor,
   ValueChip, LiftBadge, WinnerBadge, PodiumRank,
   attrColor, displayValue, tint, PALETTE,
 } from '../editorial/atoms'
@@ -31,8 +32,9 @@ const ALL_ATTRS = [
 // Minimum ad sample for a value to be considered "in play" (filters noise)
 const MIN_SAMPLE = 5
 
-export default function AttributesView({ filteredPerf, baseline, loading }) {
+export default function AttributesView({ filteredPerf, baseline, loading, onClickCreative }) {
   const [active, setActive] = useState('pain_angle')
+  const [comboAttr, setComboAttr] = useState('message_frame')
 
   // Build per-attribute summaries
   const attrSummaries = useMemo(() => {
@@ -109,7 +111,15 @@ export default function AttributesView({ filteredPerf, baseline, loading }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 24, marginTop: 8 }}>
       <AttributeRail summaries={attrSummaries} active={active} setActive={setActive} baseline={baseline} />
-      <AttributeDetail summary={activeSummary} baseline={baseline} />
+      <AttributeDetail
+        summary={activeSummary}
+        baseline={baseline}
+        filteredPerf={filteredPerf}
+        attrSummaries={attrSummaries}
+        comboAttr={comboAttr}
+        setComboAttr={setComboAttr}
+        onClickCreative={onClickCreative}
+      />
     </div>
   )
 }
@@ -209,8 +219,8 @@ function AttributeRail({ summaries, active, setActive, baseline }) {
   )
 }
 
-// ─── Right pane — hero + value breakdown ──────────────────────────────
-function AttributeDetail({ summary, baseline }) {
+// ─── Right pane — hero + value breakdown + combo matrix + top creatives ────
+function AttributeDetail({ summary, baseline, filteredPerf, attrSummaries, comboAttr, setComboAttr, onClickCreative }) {
   const leader = summary.leader
   const color = attrColor(summary.id, leader.value)
   const isLeading = summary.lift > 0
@@ -270,6 +280,23 @@ function AttributeDetail({ summary, baseline }) {
 
       {/* All values bar chart */}
       <ValueBreakdown summary={summary} baseline={baseline} />
+
+      {/* Cross-tab combination matrix */}
+      <CombinationMatrix
+        summary={summary}
+        attrSummaries={attrSummaries}
+        comboAttr={comboAttr}
+        setComboAttr={setComboAttr}
+        filteredPerf={filteredPerf}
+        baseline={baseline}
+      />
+
+      {/* Top creatives within the leader value */}
+      <TopInValue
+        summary={summary}
+        filteredPerf={filteredPerf}
+        onClickCreative={onClickCreative}
+      />
     </div>
   )
 }
@@ -390,6 +417,290 @@ function ValueBreakdown({ summary, baseline }) {
               <span style={{ textAlign: 'right' }}>
                 <LiftBadge lift={r.winRate - baseline} size="sm" />
               </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─── Combination matrix — cross-tab of active attr × picked attr ──────
+function CombinationMatrix({ summary, attrSummaries, comboAttr, setComboAttr, filteredPerf, baseline }) {
+  const rowAttr = summary.id
+  const rowValues = summary.all.map(v => v.value)
+
+  // Available cross attrs: anything with data, that isn't the active attr
+  const availableCombos = attrSummaries.filter(a => a.id !== rowAttr && a.leader)
+  const effectiveCombo = (availableCombos.find(a => a.id === comboAttr)?.id) || availableCombos[0]?.id
+
+  const colValues = useMemo(() => {
+    if (!effectiveCombo) return []
+    const c = attrSummaries.find(a => a.id === effectiveCombo)
+    return c ? c.all.map(v => v.value) : []
+  }, [effectiveCombo, attrSummaries])
+
+  // Build 2D matrix from filteredPerf
+  const { matrix, maxWR } = useMemo(() => {
+    if (!effectiveCombo) return { matrix: {}, maxWR: 0 }
+    const out = {}
+    for (const r of rowValues) out[r] = {}
+    for (const ad of (filteredPerf || [])) {
+      const r = ad[rowAttr]
+      const c = ad[effectiveCombo]
+      if (!r || !c || !out[r]) continue
+      if (!out[r][c]) out[r][c] = { ads: 0, winners: 0, spend: 0, booked: 0 }
+      out[r][c].ads++
+      out[r][c].spend += Number(ad.spend) || 0
+      out[r][c].booked += Number(ad.booked) || 0
+      if (ad.effective_winner) out[r][c].winners++
+    }
+    let max = 0
+    for (const r in out) for (const c in out[r]) {
+      const cell = out[r][c]
+      if (cell.ads < 5) continue
+      const wr = (cell.winners / cell.ads) * 100
+      if (wr > max) max = wr
+    }
+    return { matrix: out, maxWR: max }
+  }, [rowValues, effectiveCombo, filteredPerf, rowAttr])
+
+  if (!effectiveCombo || colValues.length === 0) return null
+
+  return (
+    <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+      <div style={{
+        padding: '14px 22px', borderBottom: '1px solid var(--rule)',
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        gap: 16, flexWrap: 'wrap',
+      }}>
+        <div>
+          <Eyebrow>Cross-tab</Eyebrow>
+          <div style={{ marginTop: 4, fontFamily: 'var(--serif)', fontSize: 18 }}>
+            {summary.label} <em>×</em>{' '}
+            {attrSummaries.find(a => a.id === effectiveCombo)?.label || effectiveCombo}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+          }}>crosses with</span>
+          <select value={effectiveCombo} onChange={e => setComboAttr(e.target.value)} style={{
+            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+            padding: '5px 10px',
+            background: 'white', color: 'var(--ink)',
+            border: '1px solid var(--ink-3)', outline: 'none',
+          }}>
+            {availableCombos.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ padding: '14px 22px 18px', overflowX: 'auto' }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: `160px repeat(${colValues.length}, minmax(92px, 1fr))`,
+          gap: 6,
+        }}>
+          {/* Header row: empty corner + col labels */}
+          <div />
+          {colValues.map(c => (
+            <div key={c} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              padding: '6px 4px', borderBottom: '1px solid var(--rule)',
+            }}>
+              <span style={{
+                width: 7, height: 7, borderRadius: 7,
+                background: attrColor(effectiveCombo, c),
+              }} />
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 10,
+                color: 'var(--ink-2)', letterSpacing: '0.02em', fontWeight: 500,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>{displayValue(c)}</span>
+            </div>
+          ))}
+          {/* Body rows */}
+          {rowValues.map(r => (
+            <Row key={r} r={r} rowAttr={rowAttr} colValues={colValues} matrix={matrix}
+                 baseline={baseline} maxWR={maxWR} />
+          ))}
+        </div>
+        <div style={{
+          marginTop: 14, fontFamily: 'var(--serif)', fontSize: 13,
+          fontStyle: 'italic', color: 'var(--ink-3)',
+        }}>
+          Cells need at least 5 ads to qualify for highlight. Darker shading = higher win rate.
+          Yellow = peak combo across the matrix.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Row({ r, rowAttr, colValues, matrix, baseline, maxWR }) {
+  return (
+    <>
+      <div style={{
+        padding: '8px 8px 8px 0',
+        display: 'flex', alignItems: 'center', gap: 8,
+      }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: 8,
+          background: attrColor(rowAttr, r), flexShrink: 0,
+        }} />
+        <span style={{ fontFamily: 'var(--serif)', fontSize: 13.5, color: 'var(--ink-2)' }}>
+          {displayValue(r)}
+        </span>
+      </div>
+      {colValues.map(c => {
+        const cell = matrix[r] && matrix[r][c]
+        if (!cell || cell.ads === 0) {
+          return (
+            <div key={c} style={{
+              background: 'var(--paper-2)', padding: '8px 6px',
+              textAlign: 'center', color: 'var(--ink-5)',
+              fontFamily: 'var(--mono)', fontSize: 10,
+            }}>—</div>
+          )
+        }
+        const wr = (cell.winners / cell.ads) * 100
+        const beats = wr > baseline
+        const isMax = wr === maxWR && cell.ads >= 5 && maxWR > 0
+        const baseColor = attrColor(rowAttr, r)
+        const intensity = Math.min(wr / Math.max(maxWR, 4), 1)
+        const bg = isMax
+          ? 'var(--accent)'
+          : beats
+            ? tint(baseColor, 0.08 + intensity * 0.28)
+            : 'var(--paper-2)'
+        return (
+          <div key={c} style={{
+            background: bg, padding: '10px 6px', textAlign: 'center',
+            border: isMax ? '1.5px solid var(--accent-2)' : '1px solid transparent',
+            position: 'relative',
+          }}>
+            {isMax && (
+              <span style={{
+                position: 'absolute', top: 2, right: 4, fontSize: 9, color: 'var(--ink)',
+              }}>★</span>
+            )}
+            <div style={{
+              fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+              fontSize: 16, lineHeight: 1,
+              color: beats ? 'var(--ink)' : 'var(--ink-3)',
+              fontWeight: beats ? 500 : 400,
+            }}>
+              {fmtPct(wr)}
+            </div>
+            <div style={{
+              fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums',
+              fontSize: 9.5, color: beats ? 'var(--ink-3)' : 'var(--ink-4)', marginTop: 3,
+            }}>
+              {cell.winners}/{cell.ads}
+            </div>
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+// ─── Top creatives within the leader value ────────────────────────────
+function TopInValue({ summary, filteredPerf, onClickCreative }) {
+  const leaderValue = summary.leader.value
+  const rowAttr = summary.id
+  const subset = useMemo(() => {
+    return (filteredPerf || [])
+      .filter(c => c[rowAttr] === leaderValue && (Number(c.booked) || 0) > 0)
+      .sort((a, b) => (Number(b.booked) || 0) - (Number(a.booked) || 0))
+      .slice(0, 4)
+  }, [filteredPerf, rowAttr, leaderValue])
+
+  if (subset.length === 0) return null
+
+  const leaderColor = attrColor(rowAttr, leaderValue)
+  return (
+    <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+      <div style={{
+        padding: '16px 22px', borderBottom: '1px solid var(--rule)',
+        display: 'flex', alignItems: 'baseline', gap: 12,
+      }}>
+        <div>
+          <Eyebrow>Top creatives</Eyebrow>
+          <div style={{ marginTop: 4, fontFamily: 'var(--serif)', fontSize: 20, fontWeight: 500 }}>
+            Within <span style={{ color: leaderColor }}>{displayValue(leaderValue)}</span>
+          </div>
+        </div>
+      </div>
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 1,
+        background: 'var(--rule)',
+      }}>
+        {subset.map(c => {
+          const isWinner = !!c.effective_winner
+          const frame = c.message_frame ? frameColor(c.message_frame) : null
+          return (
+            <div key={c.ad_id}
+              onClick={() => onClickCreative?.(c)}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'white'}
+              style={{
+                background: 'white', padding: '16px 18px',
+                cursor: onClickCreative ? 'pointer' : 'default',
+                display: 'grid', gridTemplateColumns: '52px 1fr auto', gap: 14, alignItems: 'flex-start',
+                transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1)',
+              }}>
+              <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
+                <AdThumbnail ad={c} size="sm" style={{
+                  outline: isWinner ? '2px solid var(--accent)' : 'none',
+                  outlineOffset: isWinner ? -2 : 0,
+                }} />
+                {frame && (
+                  <span style={{
+                    position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+                    background: frame, pointerEvents: 'none',
+                  }} />
+                )}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  fontFamily: 'var(--serif)', fontSize: 15, lineHeight: 1.2, fontWeight: 500,
+                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>{c.ad_name || c.ad_id}</div>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', marginTop: 4,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{c.campaign_name || '—'}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                  {c.hook_type && <ValueChip attr="hook_type" value={c.hook_type} size="xs" />}
+                  {c.mechanism_reveal && <ValueChip attr="mechanism_reveal" value={c.mechanism_reveal} size="xs" />}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginTop: 10 }}>
+                  <span>
+                    <span style={{
+                      fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+                      fontSize: 18, fontWeight: 500,
+                    }}>{c.booked}</span>
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginLeft: 4,
+                    }}>booked</span>
+                  </span>
+                  <span>
+                    <span style={{
+                      fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+                      fontSize: 18, fontWeight: 500,
+                    }}>{c.cost_per_booked != null ? fmtMoney(Number(c.cost_per_booked)) : '—'}</span>
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginLeft: 4,
+                    }}>CPB</span>
+                  </span>
+                </div>
+              </div>
+              {isWinner && <WinnerBadge size="sm" />}
             </div>
           )
         })}
