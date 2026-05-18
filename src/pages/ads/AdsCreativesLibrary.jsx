@@ -14,7 +14,10 @@ import { useToast } from '../../hooks/useToast'
 */
 
 export default function AdsCreativesLibrary() {
-  const { perf, loading, refresh } = useOutletContext()
+  // Library uses perfRaw so excluded ads are still visible — otherwise Ben
+  // couldn't see what's excluded to un-exclude it. The "Excluded" chip in
+  // CreativeGrid lets him narrow to just those when he wants.
+  const { perfRaw, perf, loading, refresh, activeOffers, activeCampaigns, hideInactive } = useOutletContext()
   const toast = useToast()
   const [editingAd, setEditingAd] = useState(null)
   const [addDrawerOpen, setAddDrawerOpen] = useState(false)
@@ -32,16 +35,37 @@ export default function AdsCreativesLibrary() {
     }
   }
 
-  // Respect offer filter from localStorage (set by Insights' filter bar)
-  const activeOffers = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('insights.activeOffers') || '[]') } catch { return [] }
-  }, [])
+  // Exclude this ad from the testing analysis (win-rate, variables, charts).
+  // Operator uses this for evergreen creatives that shouldn't pollute the
+  // baseline. Excluded ads still appear in the Library when "Excluded" filter
+  // chip is active.
+  async function handleToggleExclude(ad, nextExcluded) {
+    try {
+      await updateAdAttributes(ad.ad_id, { exclude_from_tests: nextExcluded })
+      toast?.success?.(nextExcluded
+        ? `Excluded "${ad.ad_name}" from testing analytics`
+        : `Re-included "${ad.ad_name}" in testing`)
+      refresh && refresh()
+    } catch (e) {
+      toast?.error?.(`Exclude toggle failed: ${e.message}`)
+    }
+  }
 
+  // Apply the same offer / campaign / hide-inactive filters the toolbar
+  // owns, but pull from perfRaw so excluded ads are still in scope.
   const filteredPerf = useMemo(() => {
-    const rows = perf || []
-    if (!activeOffers.length) return rows
-    return rows.filter(r => activeOffers.includes(r.offer_slug))
-  }, [perf, activeOffers])
+    let rows = perfRaw || perf || []
+    if (activeOffers?.length) rows = rows.filter(r => activeOffers.includes(r.offer_slug))
+    if (activeCampaigns?.length) rows = rows.filter(r => activeCampaigns.includes(r.campaign_name))
+    if (hideInactive) {
+      rows = rows.filter(r =>
+        (Number(r.spend)  || 0) > 0 ||
+        (Number(r.leads)  || 0) > 0 ||
+        (Number(r.booked) || 0) > 0
+      )
+    }
+    return rows
+  }, [perfRaw, perf, activeOffers, activeCampaigns, hideInactive])
 
   return (
     <div>
@@ -66,6 +90,7 @@ export default function AdsCreativesLibrary() {
         loading={loading}
         onClickRow={r => setEditingAd(r)}
         onToggleWinner={handleToggleWinner}
+        onToggleExclude={handleToggleExclude}
         pinnedTopN={3}
       />
 

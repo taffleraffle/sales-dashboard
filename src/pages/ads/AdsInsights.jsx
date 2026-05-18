@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useOutletContext } from 'react-router-dom'
+import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import { tagMissing, getAttributeCoverage } from '../../services/creativeTagger'
 import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
 import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
@@ -227,44 +227,28 @@ export default function AdsInsights() {
         </div>
       )}
 
-      {/* KPI grid */}
+      {/* Win rate hero — single number, no other KPIs. Ben said the other
+          tiles (Booked / Avg CPB / Tag coverage) were noise on this surface. */}
       <div style={{ marginTop: 26, marginBottom: 32 }}>
-        <KPIDominant summary={summary} spark={winnerSpark} />
+        <WinRateHero summary={summary} spark={winnerSpark} />
       </div>
 
-      {/* Variables pulling ahead */}
+      {/* Variables pulling ahead — click any row to drill into that
+          attribute=value on the Creatives library. */}
       <div style={{ marginBottom: 32 }}>
         <SectionHead
           title="Variables pulling ahead"
-          tagline="For each attribute, the value beating baseline win rate by the largest margin."
+          tagline="For each attribute, the value beating baseline win rate by the largest margin. Click any row to see the creatives behind it."
         />
         <VariablesLeaderboard items={variablesAhead} baseline={summary.winRate} />
       </div>
 
-      {/* Top performers — links to Creatives page */}
-      <div style={{ marginBottom: 32 }}>
-        <SectionHead
-          title="Top performing creatives"
-          tagline={`${summary.winners} winners across the current window. Click any row to edit attributes.`}
-          right={
-            <Link to="/sales/ads/creative/creatives" style={{
-              fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
-              color: 'var(--ink-2)', textDecoration: 'none',
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-            }}>
-              See all {summary.taggedAds} →
-            </Link>
-          }
-        />
-        <TopPerformersTable rows={filteredPerf || []} loading={loading}
-          onClickRow={r => setEditingAd(r)} limit={10} />
-      </div>
-
-      {/* Win rate by attribute — small multiples; links to Attributes page */}
+      {/* Win rate by attribute — small multiples; bars are clickable
+          and navigate to the Creatives library filtered to that value. */}
       <div style={{ marginBottom: 32 }}>
         <SectionHead
           title="Win rate by attribute"
-          tagline="Bars above the dashed baseline are pulling weight. Per-attribute leader is colored; underperformers are dimmed."
+          tagline="Bars above the dashed baseline are pulling weight. Click a bar to see those creatives. Deep dive in the Attributes tab."
           right={
             <Link to="/sales/ads/creative/attributes" style={{
               fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
@@ -277,17 +261,6 @@ export default function AdsInsights() {
         />
         <SmallMultiples stats={attrStats} baseline={summary.winRate} />
       </div>
-
-      {/* Proof donut */}
-      {proofPie.some(r => r.attribute_value !== 'none' && Number(r.booked) > 0) && (
-        <div style={{ marginBottom: 32 }}>
-          <SectionHead
-            title="Proof character mix"
-            tagline="Bookings by on-camera character. Booked counts and ad volume by named proof."
-          />
-          <ProofDonut data={proofPie} />
-        </div>
-      )}
 
       {/* 9. Footer */}
       <div style={{
@@ -492,96 +465,52 @@ function TopPerformerRow({ c, rank, cols, onClick, isLast }) {
 // across all four analytics pages instead of duplicating per page.
 
 // ═════════════════════════════════════════════════════════════════════
-// KPIDominant — hero win-rate + 3 secondary tiles
-// ═════════════════════════════════════════════════════════════════════
-// KPI grid — sans-serif tabular tone-down per dj282R9iMtYwNPnoqDHDRw design.
-// Hero number is 44px sans (not 104px serif), supporting tiles are 28px sans.
-function KPIDominant({ summary, spark }) {
+// WinRateHero — single big number. Ben asked to drop Avg CPB, Booked,
+// and Tag coverage from this surface — they were noise on the overview.
+function WinRateHero({ summary, spark }) {
   const isReal = summary.winners <= 2
   const showAccent = !isReal
   return (
     <div style={{
-      display: 'grid',
-      gridTemplateColumns: '1.4fr 1fr 1fr 1fr',
-      gap: 0,
-      border: '1px solid var(--rule)',
+      padding: '20px 24px',
+      borderLeft: showAccent ? '3px solid var(--accent)' : '1px solid var(--rule)',
+      borderTop: '1px solid var(--rule)',
+      borderRight: '1px solid var(--rule)',
+      borderBottom: '1px solid var(--rule)',
+      paddingLeft: showAccent ? 21 : 24,
       background: 'white',
     }}>
-      {/* Hero — Win rate */}
-      <div style={{
-        padding: '18px 22px',
-        borderRight: '1px solid var(--rule)',
-        borderLeft: showAccent ? '3px solid var(--accent)' : 'none',
-        paddingLeft: showAccent ? 19 : 22,
-        position: 'relative',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-          <Eyebrow>Win rate · {summary.weeksTracked}w</Eyebrow>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
-                        letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-            {summary.weeksTracked}w
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 4 }}>
-          <span style={{
-            fontFamily: 'var(--sans)', fontVariantNumeric: 'tabular-nums',
-            fontSize: 44, fontWeight: 600, lineHeight: 1,
-            letterSpacing: '-0.02em', color: 'var(--ink)',
-          }}>
-            {summary.winRate.toFixed(1)}
-            <span style={{ fontSize: 22, color: 'var(--ink-3)', marginLeft: 2 }}>%</span>
-          </span>
-          {!isReal && (
-            <Sparkline values={spark} width={92} height={30}
-              stroke={PALETTE.green}
-              fill={tint(PALETTE.green, 0.08)}
-              accent={showAccent ? 'var(--accent)' : PALETTE.green} />
-          )}
-        </div>
-        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
-            <span style={{ color: 'var(--ink)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-              {summary.winners}
-            </span>{' '}of <span style={{ fontVariantNumeric: 'tabular-nums' }}>{summary.taggedAds}</span> ads
-          </span>
-          {isReal && <Pill tone="amber" size="sm">Below baseline — early window</Pill>}
-        </div>
+      <Eyebrow>Win rate · {summary.weeksTracked}w</Eyebrow>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 6 }}>
+        <span style={{
+          fontFamily: 'var(--sans)', fontVariantNumeric: 'tabular-nums',
+          fontSize: 56, fontWeight: 600, lineHeight: 1,
+          letterSpacing: '-0.02em', color: 'var(--ink)',
+        }}>
+          {summary.winRate.toFixed(1)}
+          <span style={{ fontSize: 28, color: 'var(--ink-3)', marginLeft: 2 }}>%</span>
+        </span>
+        {!isReal && (
+          <Sparkline values={spark} width={120} height={36}
+            stroke={PALETTE.green}
+            fill={tint(PALETTE.green, 0.08)}
+            accent={showAccent ? 'var(--accent)' : PALETTE.green} />
+        )}
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
+          marginLeft: 'auto', alignSelf: 'flex-end',
+        }}>
+          <span style={{ color: 'var(--ink)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+            {summary.winners}
+          </span>{' '}winner{summary.winners === 1 ? '' : 's'} of{' '}
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{summary.taggedAds}</span> tagged ads
+        </span>
       </div>
-
-      <SecondaryKPI eyebrow="Avg CPB · winners"
-        valueText={`$${summary.avgCpbWinners}`}
-        meta="winners only" />
-      <SecondaryKPI eyebrow="Booked"
-        valueText={fmtNum(summary.totalBooked)}
-        meta={`${fmtMoneyFull(summary.totalSpend)} spend`} />
-      <SecondaryKPI eyebrow="Tag coverage"
-        valueText={`${summary.tagCoverage}%`}
-        meta={`${summary.totalAds - summary.taggedAds} untagged`}
-        trend={summary.tagCoverage < 100 ? { dir: 'flat', label: 'click to tag', color: PALETTE.orange } : null}
-        last />
-    </div>
-  )
-}
-
-function SecondaryKPI({ eyebrow, valueText, meta, trend, last }) {
-  return (
-    <div style={{
-      padding: '18px 20px',
-      borderRight: last ? 'none' : '1px solid var(--rule)',
-      display: 'flex', flexDirection: 'column', gap: 8,
-    }}>
-      <Eyebrow>{eyebrow}</Eyebrow>
-      <span style={{
-        fontFamily: 'var(--sans)', fontVariantNumeric: 'tabular-nums',
-        fontSize: 28, fontWeight: 600, lineHeight: 1,
-        letterSpacing: '-0.015em', color: 'var(--ink)',
-      }}>
-        {valueText}
-      </span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)' }}>{meta}</span>
-        {trend && <TrendDelta dir={trend.dir} label={trend.label} color={trend.color} />}
-      </div>
+      {isReal && (
+        <div style={{ marginTop: 12 }}>
+          <Pill tone="amber" size="sm">Below baseline — early window</Pill>
+        </div>
+      )}
     </div>
   )
 }
@@ -590,6 +519,7 @@ function SecondaryKPI({ eyebrow, valueText, meta, trend, last }) {
 // VariablesLeaderboard — ranked list with lift bars
 // ═════════════════════════════════════════════════════════════════════
 function VariablesLeaderboard({ items, baseline }) {
+  const navigate = useNavigate()
   if (items.length === 0) {
     return (
       <div style={{ padding: 32, background: 'white', border: '1px solid var(--rule)',
@@ -609,16 +539,20 @@ function VariablesLeaderboard({ items, baseline }) {
         const barColor = isTop ? 'var(--accent)' : (item.lift > 0 ? stripeColor : 'var(--ink-5)')
         const widthPct = Math.max((Math.abs(item.lift) / maxLift) * 100, 4)
         return (
-          <div key={item.attr} style={{
-            display: 'grid',
-            gridTemplateColumns: '40px 1.2fr 1fr 1.4fr 100px 80px',
-            alignItems: 'center', gap: 16,
-            padding: '18px 20px',
-            paddingLeft: 17,
-            borderTop: i === 0 ? 'none' : '1px solid var(--rule)',
-            borderLeft: `3px solid ${isTop ? 'var(--accent)' : stripeColor}`,
-            transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1)',
-          }}
+          <div key={item.attr}
+            onClick={() => navigate(`/sales/ads/creative/creatives?${item.attr}=${encodeURIComponent(item.value)}`)}
+            title={`Click to see the ${item.ads} creatives tagged ${item.attr}=${item.value}`}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '40px 1.2fr 1fr 1.4fr 100px 80px',
+              alignItems: 'center', gap: 16,
+              padding: '18px 20px',
+              paddingLeft: 17,
+              borderTop: i === 0 ? 'none' : '1px solid var(--rule)',
+              borderLeft: `3px solid ${isTop ? 'var(--accent)' : stripeColor}`,
+              cursor: 'pointer',
+              transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1)',
+            }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
             <PodiumRank rank={i + 1} size="sm" />
@@ -708,6 +642,7 @@ function SmallMultiples({ stats, baseline }) {
 }
 
 function MiniBarChart({ attr, label, values, baseline }) {
+  const navigate = useNavigate()
   const rows = values
     .map(v => ({ ...v, winRate: v.ads > 0 ? (v.winners / v.ads) * 100 : 0 }))
     .sort((a, b) => b.winRate - a.winRate)
@@ -741,10 +676,17 @@ function MiniBarChart({ attr, label, values, baseline }) {
           const beats = r.winRate > baseline
           const color = beats && i === 0 ? 'var(--accent)' : beats ? 'var(--ink)' : 'var(--ink-5)'
           return (
-            <div key={r.value} style={{
-              display: 'grid', gridTemplateColumns: '110px 1fr 56px',
-              alignItems: 'center', gap: 10, padding: '5px 0',
-            }}>
+            <div key={r.value}
+              onClick={() => navigate(`/sales/ads/creative/creatives?${attr}=${encodeURIComponent(r.value)}`)}
+              title={`Click to see the ${r.ads} creatives tagged ${attr}=${r.value}`}
+              style={{
+                display: 'grid', gridTemplateColumns: '110px 1fr 56px',
+                alignItems: 'center', gap: 10, padding: '5px 4px',
+                margin: '0 -4px', cursor: 'pointer',
+                transition: 'background 0.12s ease',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 11,
                             color: beats ? 'var(--ink-2)' : 'var(--ink-4)',
                             textAlign: 'right',

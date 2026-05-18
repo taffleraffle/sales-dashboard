@@ -83,9 +83,10 @@ const FILTER_CHIPS = [
   { key: 'unassigned',   label: 'Unassigned' },
   { key: 'fully_tagged', label: 'Fully tagged' },
   { key: 'missing_tags', label: 'Missing tags' },
+  { key: 'excluded',     label: 'Excluded' },
 ]
 
-export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3, onToggleWinner }) {
+export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3, onToggleWinner, onToggleExclude }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState('booked_desc')
@@ -146,6 +147,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
     else if (filter === 'unassigned')   list = list.filter(r => !r.assignment_status || r.assignment_status === 'unassigned' || r.assignment_status === 'ad_copy_only' || r.assignment_status === 'auto_transcript')
     else if (filter === 'fully_tagged') list = list.filter(r => r.attributes_complete)
     else if (filter === 'missing_tags') list = list.filter(r => !r.attributes_complete)
+    else if (filter === 'excluded')     list = list.filter(r => r.exclude_from_tests === true)
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(r =>
@@ -327,6 +329,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
             <CreativeRow key={c.ad_id} c={c} rank={rank} isPodium={isPodium}
               onClick={() => onClickRow?.(c)}
               onToggleWinner={onToggleWinner}
+              onToggleExclude={onToggleExclude}
               isLast={i === visible.length - 1} />
           )
         })}
@@ -494,9 +497,10 @@ function FilterGroup({ group, counts, active, toggle }) {
   )
 }
 
-function CreativeRow({ c, rank, isPodium, onClick, onToggleWinner, isLast }) {
+function CreativeRow({ c, rank, isPodium, onClick, onToggleWinner, onToggleExclude, isLast }) {
   const frame = c.message_frame
   const isWinner = !!c.effective_winner
+  const isExcluded = !!c.exclude_from_tests
   const proof = c.proof_character && c.proof_character !== 'none' ? c.proof_character : null
 
   return (
@@ -509,6 +513,7 @@ function CreativeRow({ c, rank, isPodium, onClick, onToggleWinner, isLast }) {
         alignItems: 'center', gap: 12,
         padding: '14px 18px',
         paddingLeft: isWinner ? 15 : 18,
+        opacity: isExcluded ? 0.55 : 1,
         borderBottom: isLast ? 'none' : '1px solid var(--rule)',
         borderLeft: isWinner ? '3px solid var(--accent)' : '3px solid transparent',
         cursor: 'pointer',
@@ -595,9 +600,9 @@ function CreativeRow({ c, rank, isPodium, onClick, onToggleWinner, isLast }) {
         </div>
       </div>
 
-      {/* State — click to toggle manual winner override (event stopped so
-          the row's open-drawer click doesn't fire on the same gesture) */}
-      <div style={{ textAlign: 'right' }}>
+      {/* State — winner toggle stacked over an "exclude from tests" toggle.
+          Both event-stopped so they don't open the edit drawer. */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
         {onToggleWinner ? (
           <button
             onClick={(e) => { e.stopPropagation(); onToggleWinner(c, !isWinner) }}
@@ -628,6 +633,22 @@ function CreativeRow({ c, rank, isPodium, onClick, onToggleWinner, isLast }) {
               Testing
             </span>
           )
+        )}
+        {onToggleExclude && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleExclude(c, !isExcluded) }}
+            title={isExcluded
+              ? 'Excluded from testing analytics — click to include'
+              : 'Click to exclude this ad from win-rate + variables analysis'}
+            style={{
+              border: 'none', cursor: 'pointer', padding: '2px 6px', background: 'transparent',
+              fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 500,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              color: isExcluded ? '#b53e3e' : 'var(--ink-5)',
+              borderRadius: 2,
+            }}>
+            {isExcluded ? '✗ Excluded' : 'Exclude'}
+          </button>
         )}
       </div>
     </div>

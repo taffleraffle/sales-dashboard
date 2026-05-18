@@ -167,13 +167,18 @@ export default function AdsCreativeTestingLayout() {
     if (valid.length !== activeOffers.length) setActiveOffers(valid)
   }, [offers]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Filter perf by activeOffers + activeCampaigns + hideInactive ONCE here
-  // so every consumer sees the same filtered dataset.
+  // Filter perf by activeOffers + activeCampaigns + hideInactive + the
+  // exclude_from_tests flag (per-ad opt-out). Every analytics page reads
+  // the same filtered dataset from context.
   const filteredPerf = useMemo(() => {
     if (!perf) return null
     let rows = perf
     if (activeOffers.length) rows = rows.filter(r => activeOffers.includes(r.offer_slug))
     if (activeCampaigns.length) rows = rows.filter(r => activeCampaigns.includes(r.campaign_name))
+    // Ads marked exclude_from_tests are always hidden from the analytics
+    // surfaces — they show up only on the Library page when the operator
+    // unticks the "Hide excluded" filter there.
+    rows = rows.filter(r => !r.exclude_from_tests)
     if (hideInactive) {
       rows = rows.filter(r =>
         (Number(r.spend)  || 0) > 0 ||
