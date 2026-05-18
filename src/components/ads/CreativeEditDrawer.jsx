@@ -1,47 +1,36 @@
 import { useEffect, useState } from 'react'
-import { X, ExternalLink, FileVideo, Image as ImageIcon } from 'lucide-react'
+import { ExternalLink, FileVideo, Image as ImageIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import AdThumbnail from './AdThumbnail'
 import CreativeAttributesPanel from './CreativeAttributesPanel'
+import Modal from '../editorial/Modal'
 import { supabase } from '../../lib/supabase'
 import { pickThumbnail } from '../../utils/adThumbnail'
 
 /*
-  Right-side drawer for editing one ad's creative attributes from
-  Insights. Wraps CreativeAttributesPanel inside a sticky-header
-  drawer scaffold matching ClientEditPanel's convention.
+  Centered modal for editing one ad's creative attributes. Previously a
+  right-side slide drawer (CreativeEditDrawer) — Ben asked 2026-05-18 to
+  convert to a bulk centered modal instead. Export name kept for
+  compatibility; the contents are the same edit panel inside a different
+  scaffold.
 
   Props:
-    open — boolean
-    ad   — full row object from lib_ad_performance (used for header
-           thumbnail + ad_name + ad_id display)
+    open  — boolean
+    ad    — full row object from lib_ad_performance (header thumbnail +
+            ad_name + ad_id display)
     onClose — callback
 */
 
 export default function CreativeEditDrawer({ open, ad, onClose }) {
   const [sourceVideoUrl, setSourceVideoUrl] = useState(null)
   const [videoChecked, setVideoChecked] = useState(false)
-  // Tracks <video> playback failure (e.g. Meta-hosted asset_url expired)
-  // so we can fall back to the thumbnail without leaving a broken-media icon.
   const [videoError, setVideoError] = useState(false)
 
-  // Escape-key close
-  useEffect(() => {
-    if (!open) return
-    const handler = e => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [open, onClose])
-
-  // Try to load operator-uploaded source video from ad-source-videos bucket.
-  // Falls back to ad.asset_url (Meta-hosted, signed, ~7-day TTL).
   useEffect(() => {
     if (!open || !ad?.ad_id) return
     let cancelled = false
     setVideoChecked(false); setSourceVideoUrl(null); setVideoError(false)
     ;(async () => {
-      // Try all common extensions in parallel — far faster than sequential
-      // 5 round-trips when the file doesn't exist (common case).
       const exts = ['mp4', 'mov', 'webm', 'm4v', 'm4a']
       const results = await Promise.all(
         exts.map(ext =>
@@ -59,99 +48,79 @@ export default function CreativeEditDrawer({ open, ad, onClose }) {
     return () => { cancelled = true }
   }, [open, ad?.ad_id])
 
-  if (!open || !ad) return null
+  if (!ad) return null
 
-  return (
-    <>
-      {/* Backdrop */}
-      <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.45)',
-        backdropFilter: 'blur(2px)', zIndex: 99,
-      }} />
-
-      {/* Drawer */}
-      <div onClick={e => e.stopPropagation()} style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0,
-        width: '100%', maxWidth: 560, height: '100vh',
-        background: 'var(--paper)',
-        borderLeft: '3px solid var(--accent)',
-        boxShadow: '-12px 0 32px rgba(10,10,10,0.15)',
-        zIndex: 100,
-        display: 'flex', flexDirection: 'column',
-        animation: 'slideInRight 240ms cubic-bezier(0.16, 1, 0.3, 1)',
-      }}>
-        {/* Header — sticky */}
+  const headerLeft = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+      <AdThumbnail ad={ad} size="md" />
+      <div style={{ minWidth: 0 }}>
         <div style={{
-          padding: '16px 20px',
-          borderBottom: '1px solid var(--rule)',
-          background: 'white',
-          display: 'flex', alignItems: 'center', gap: 12,
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+          letterSpacing: '0.14em', textTransform: 'uppercase',
+          color: 'var(--ink-3)', marginBottom: 4,
         }}>
-          <AdThumbnail ad={ad} size="md" />
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            <div className="eyebrow eyebrow-accent" style={{ marginBottom: 2 }}>
-              Editing <em>creative</em>
-            </div>
-            <div style={{
-              fontFamily: 'var(--serif)', fontSize: 16, color: 'var(--ink)',
-              lineHeight: 1.2, fontWeight: 400,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }} title={ad.ad_name}>
-              {ad.ad_name || ad.ad_id}
-            </div>
-            <div style={{
-              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
-              letterSpacing: '0.06em', marginTop: 2,
-            }}>
-              {ad.ad_id}
-            </div>
-          </div>
-          <Link to={`/sales/ads/ad/${ad.ad_id}`} title="Open full detail page"
-            style={{
-              padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10,
-              letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
-              border: '1px solid var(--rule)', background: 'white', color: 'var(--ink-3)',
-              borderRadius: 2, textDecoration: 'none',
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-            }}>
-            <ExternalLink size={11} />
-            Full
-          </Link>
-          <button onClick={onClose} style={{
-            background: 'transparent', border: 'none', color: 'var(--ink-3)',
-            cursor: 'pointer', padding: 4, marginLeft: 4,
-          }}>
-            <X size={18} />
-          </button>
+          Editing creative
         </div>
-
-        {/* Body — scrollable. CreativeAttributesPanel has its own padding/borders. */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px' }}>
-          <CreativePreview ad={ad} sourceVideoUrl={sourceVideoUrl}
-            videoChecked={videoChecked} videoError={videoError}
-            onVideoError={() => setVideoError(true)} />
-          <CreativeAttributesPanel ad_id={ad.ad_id} />
+        <div style={{
+          fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500,
+          color: 'var(--ink)', lineHeight: 1.15, letterSpacing: '-0.01em',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          maxWidth: 540,
+        }} title={ad.ad_name}>
+          {ad.ad_name || ad.ad_id}
+        </div>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+          letterSpacing: '0.06em', marginTop: 4,
+        }}>
+          {ad.ad_id}
         </div>
       </div>
+    </div>
+  )
 
-      {/* Slide animation keyframes injected once */}
-      <style>{`
-        @keyframes slideInRight {
-          from { transform: translateX(100%); opacity: 0.4; }
-          to   { transform: translateX(0);    opacity: 1; }
-        }
-      `}</style>
-    </>
+  const headerRight = (
+    <Link to={`/sales/ads/ad/${ad.ad_id}`} title="Open full detail page"
+      style={{
+        padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10.5,
+        letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
+        border: '1px solid var(--rule-2)', background: 'white', color: 'var(--ink-2)',
+        borderRadius: 2, textDecoration: 'none',
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+      }}>
+      <ExternalLink size={11} />
+      Full page
+    </Link>
+  )
+
+  return (
+    <Modal open={open} onClose={onClose} size="lg"
+      title={null}
+      right={headerRight}>
+      {/* Custom-styled header — bigger than the default so the thumb fits */}
+      <div style={{
+        padding: '20px 28px',
+        background: 'var(--paper)',
+        borderBottom: '1px solid var(--rule)',
+        position: 'sticky', top: 0, zIndex: 1,
+        marginTop: -1,  // close the gap with the Modal's own border-bottom
+      }}>
+        {headerLeft}
+      </div>
+
+      <div style={{ padding: '0 28px 28px' }}>
+        <CreativePreview ad={ad} sourceVideoUrl={sourceVideoUrl}
+          videoChecked={videoChecked} videoError={videoError}
+          onVideoError={() => setVideoError(true)} />
+        <CreativeAttributesPanel ad_id={ad.ad_id} />
+      </div>
+    </Modal>
   )
 }
 
-/* Inline preview: plays video if we have one, otherwise shows the full-size
-   thumbnail. Operator can review the creative before fixing attributes. */
+/* Inline preview — same as before. Plays an uploaded source video if we
+   have one, falls back to Meta's signed asset_url, then to the thumbnail. */
 function CreativePreview({ ad, sourceVideoUrl, videoChecked, videoError, onVideoError }) {
-  // Decide what to render:
-  //  1. If we have an uploaded source video → <video src> (our copy, never expires before signed URL TTL)
-  //  2. Else if ad.asset_type === 'video' && ad.asset_url → <video src> (Meta-hosted, may have expired)
-  //  3. Else → big thumbnail
   const metaVideoUrl = ad?.asset_type === 'video' ? ad?.asset_url : null
   const videoUrl = sourceVideoUrl || metaVideoUrl
   const thumb = pickThumbnail(ad)
@@ -160,14 +129,13 @@ function CreativePreview({ ad, sourceVideoUrl, videoChecked, videoError, onVideo
     return (
       <div style={{ marginTop: 20, marginBottom: 16, aspectRatio: '16 / 9',
                     background: 'var(--paper)', border: '1px solid var(--rule)',
-                    borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)' }}>
         Loading preview…
       </div>
     )
   }
 
-  // Skip the <video> entirely if a prior load errored; fall through to thumb
   if (videoUrl && !videoError) {
     return (
       <div style={{ marginTop: 20, marginBottom: 16 }}>
@@ -176,10 +144,8 @@ function CreativePreview({ ad, sourceVideoUrl, videoChecked, videoError, onVideo
           src={videoUrl}
           onError={onVideoError}
           style={{
-            width: '100%', borderRadius: 2,
-            border: '1px solid var(--rule)',
-            background: 'var(--paper)',
-            display: 'block',
+            width: '100%', border: '1px solid var(--rule)',
+            background: 'var(--paper)', display: 'block', maxHeight: 480,
           }}
         />
         {sourceVideoUrl && (
@@ -200,17 +166,17 @@ function CreativePreview({ ad, sourceVideoUrl, videoChecked, videoError, onVideo
     )
   }
 
-  // Fallback: big thumbnail when nothing playable
   if (thumb) {
     return (
       <div style={{ marginTop: 20, marginBottom: 16, position: 'relative' }}>
         <img src={thumb} alt={ad?.ad_name || 'creative'}
-          style={{ width: '100%', borderRadius: 2, border: '1px solid var(--rule)', display: 'block' }} />
+          style={{ width: '100%', border: '1px solid var(--rule)', display: 'block',
+                   maxHeight: 480, objectFit: 'contain', background: 'var(--paper-2)' }} />
         {ad?.asset_type === 'image' && (
           <div style={{ position: 'absolute', top: 8, right: 8,
                         padding: '2px 6px', background: 'rgba(10,10,10,0.7)', color: 'white',
                         fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
-                        textTransform: 'uppercase', borderRadius: 2 }}>
+                        textTransform: 'uppercase' }}>
             <ImageIcon size={9} style={{ display: 'inline', marginRight: 3, verticalAlign: 'middle' }} />
             Image
           </div>

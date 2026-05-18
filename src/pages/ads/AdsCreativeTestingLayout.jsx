@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { listOffers } from '../../services/creativeTagger'
 import GlossaryDrawer from '../../components/ads/GlossaryDrawer'
+import CampaignPickerModal from '../../components/ads/CampaignPickerModal'
 import { Icon } from '../../components/editorial/atoms'
 
 /*
@@ -55,6 +56,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000
 export default function AdsCreativeTestingLayout() {
   const location = useLocation()
   const [glossaryOpen, setGlossaryOpen] = useState(false)
+  const [campaignPickerOpen, setCampaignPickerOpen] = useState(false)
 
   // Date window — shared across analytics pages, defaults to 90d.
   // Stored in localStorage so it survives navigation.
@@ -283,12 +285,21 @@ export default function AdsCreativeTestingLayout() {
           totalAds={(perf || []).length}
           visibleAds={(filteredPerf || []).length}
           onRefresh={() => loadPerf({ force: true })}
+          onOpenCampaignPicker={() => setCampaignPickerOpen(true)}
         />
       )}
 
       <Outlet context={ctx} />
 
       <GlossaryDrawer open={glossaryOpen} onClose={() => setGlossaryOpen(false)} />
+      <CampaignPickerModal
+        open={campaignPickerOpen}
+        onClose={() => setCampaignPickerOpen(false)}
+        perfRaw={perf}
+        activeCampaigns={activeCampaigns}
+        toggleCampaign={toggleCampaign}
+        clearCampaigns={clearCampaigns}
+      />
     </div>
   )
 }
@@ -318,8 +329,8 @@ function AnalyticsToolbar({
   campaigns = [], activeCampaigns = [], toggleCampaign = () => {}, clearCampaigns = () => {},
   hideInactive, setHideInactive,
   loading, lastSyncedAt, totalAds, visibleAds, onRefresh,
+  onOpenCampaignPicker,
 }) {
-  const [campaignPickerOpen, setCampaignPickerOpen] = useState(false)
   // Match the current window to a preset for active-state styling
   const activePreset = useMemo(() => {
     if (!since || !until) return null
@@ -429,112 +440,33 @@ function AnalyticsToolbar({
         })}
       </div>
 
-      {/* Campaigns picker — narrows every analytics page to N CBOs */}
-      <div style={{ position: 'relative' }}>
-        <button onClick={() => setCampaignPickerOpen(o => !o)}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
-            letterSpacing: '0.04em', textTransform: 'uppercase',
-            color: activeCampaigns.length ? 'var(--ink)' : 'var(--ink-3)',
-            padding: '4px 10px',
-            background: activeCampaigns.length ? 'white' : 'transparent',
-            border: `1px solid ${activeCampaigns.length ? 'var(--ink)' : 'var(--rule-2)'}`,
-            cursor: 'pointer',
-          }}>
-          Campaigns
+      {/* Big, bold campaign picker — opens a centered modal instead of
+          a cramped dropdown. Per Ben 2026-05-18. */}
+      <button onClick={onOpenCampaignPicker}
+        title="Pick which campaigns the analytics pages scope to"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600,
+          letterSpacing: '-0.005em',
+          color: activeCampaigns.length ? 'var(--ink)' : 'var(--ink-2)',
+          padding: '7px 14px',
+          background: activeCampaigns.length ? 'var(--accent-soft, #fdf6c5)' : 'white',
+          border: `1px solid ${activeCampaigns.length ? 'var(--accent-2, #ead84a)' : 'var(--ink-3)'}`,
+          cursor: 'pointer',
+        }}>
           <span style={{
-            fontFamily: 'var(--mono)', fontSize: 9.5, color: activeCampaigns.length ? 'var(--ink-2)' : 'var(--ink-4)',
-            letterSpacing: '0.04em',
-          }}>
-            {activeCampaigns.length ? `(${activeCampaigns.length})` : `(all ${campaigns.length})`}
-          </span>
-          <span style={{ fontSize: 9, color: 'var(--ink-4)' }}>▾</span>
-        </button>
-        {campaignPickerOpen && (
-          <>
-            <div onClick={() => setCampaignPickerOpen(false)}
-              style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
-            <div style={{
-              position: 'absolute', top: 'calc(100% + 6px)', left: 0,
-              minWidth: 320, maxWidth: 480,
-              maxHeight: 420, overflowY: 'auto',
-              background: 'white', border: '1px solid var(--rule)',
-              boxShadow: '0 12px 32px rgba(10,10,10,0.12)',
-              zIndex: 51,
-            }}>
-              <div style={{
-                padding: '10px 12px', borderBottom: '1px solid var(--rule)',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                background: 'var(--paper-2)', position: 'sticky', top: 0,
-              }}>
-                <span style={{
-                  fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
-                  letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)',
-                }}>
-                  {activeCampaigns.length === 0
-                    ? `All ${campaigns.length} campaigns`
-                    : `${activeCampaigns.length} of ${campaigns.length} selected`}
-                </span>
-                {activeCampaigns.length > 0 && (
-                  <button onClick={clearCampaigns} style={{
-                    background: 'transparent', border: 'none',
-                    fontFamily: 'var(--mono)', fontSize: 10, color: '#b53e3e',
-                    letterSpacing: '0.04em', textTransform: 'uppercase',
-                    cursor: 'pointer', padding: 0,
-                  }}>Clear</button>
-                )}
-              </div>
-              {campaigns.length === 0 && (
-                <div style={{
-                  padding: 24, textAlign: 'center', color: 'var(--ink-4)',
-                  fontFamily: 'var(--sans)', fontSize: 12, fontStyle: 'italic',
-                }}>
-                  No campaigns in the current window.
-                </div>
-              )}
-              {campaigns.map(c => {
-                const on = activeCampaigns.includes(c.name)
-                return (
-                  <button key={c.name} onClick={() => toggleCampaign(c.name)} style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-                    width: '100%', textAlign: 'left',
-                    padding: '8px 12px',
-                    background: on ? 'var(--paper-2)' : 'transparent',
-                    border: 'none', borderTop: '1px solid var(--rule)',
-                    cursor: 'pointer',
-                  }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                      <span style={{
-                        width: 12, height: 12,
-                        background: on ? 'var(--ink)' : 'transparent',
-                        border: `1px solid ${on ? 'var(--ink)' : 'var(--rule-2)'}`,
-                        display: 'inline-grid', placeItems: 'center',
-                        color: 'var(--accent)', fontSize: 9, flexShrink: 0,
-                      }}>{on ? '✓' : ''}</span>
-                      {c.anyLive && (
-                        <span title="At least one ACTIVE ad in this campaign" style={{
-                          width: 6, height: 6, borderRadius: 6,
-                          background: '#3e8a5e', flexShrink: 0,
-                        }} />
-                      )}
-                      <span style={{
-                        fontFamily: 'var(--sans)', fontSize: 12.5,
-                        color: 'var(--ink)', fontWeight: on ? 600 : 400,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>{c.name}</span>
-                    </span>
-                    <span style={{
-                      fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
-                      flexShrink: 0,
-                    }}>{c.count}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </>
-        )}
-      </div>
+            width: 8, height: 8, borderRadius: 8, flexShrink: 0,
+            background: activeCampaigns.length ? '#3e8a5e' : 'var(--ink-4)',
+          }} />
+        Campaigns
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+          color: activeCampaigns.length ? 'var(--ink-2)' : 'var(--ink-4)',
+          letterSpacing: '0.04em',
+        }}>
+          {activeCampaigns.length ? `${activeCampaigns.length} of ${campaigns.length}` : `all ${campaigns.length}`}
+        </span>
+      </button>
 
       {/* Hide-inactive toggle */}
       <label title="Hide ads with zero spend, zero leads, and zero booked calls in the selected window."

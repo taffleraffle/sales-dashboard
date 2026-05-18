@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { Eyebrow, ValueChip, Icon, attrColor, displayValue } from '../editorial/atoms'
+import { Eyebrow, ValueChip, attrColor, displayValue } from '../editorial/atoms'
+import Modal from '../editorial/Modal'
 
 /*
   Right-side slide drawer documenting every attribute name + value so the
@@ -172,67 +172,12 @@ const STATUS_TERMS = [
 ]
 
 export default function GlossaryDrawer({ open, onClose }) {
-  // Close on ESC
-  useEffect(() => {
-    if (!open) return
-    const h = (e) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [open, onClose])
-
-  if (!open) return null
-
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'fixed', inset: 0,
-          background: 'rgba(10,10,10,0.32)',
-          backdropFilter: 'blur(2px)',
-          zIndex: 99,
-          animation: 'fadeIn 0.18s cubic-bezier(0.2,0.7,0.2,1)',
-        }} />
-
-      {/* Drawer */}
-      <aside style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0,
-        width: 560, maxWidth: '92vw',
-        background: 'var(--paper)',
-        borderLeft: '3px solid var(--accent)',
-        borderTop: '1px solid var(--rule)',
-        borderBottom: '1px solid var(--rule)',
-        boxShadow: '-12px 0 32px rgba(10,10,10,0.15)',
-        zIndex: 100,
-        overflowY: 'auto',
-        animation: 'slideIn 0.22s cubic-bezier(0.2,0.7,0.2,1)',
-      }}>
-        {/* Header */}
-        <div style={{
-          position: 'sticky', top: 0, zIndex: 1,
-          padding: '20px 24px',
-          background: 'var(--paper)',
-          borderBottom: '1px solid var(--rule)',
-          display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16,
-        }}>
-          <div>
-            <Eyebrow>Reference</Eyebrow>
-            <h2 style={{
-              margin: '6px 0 0', fontFamily: 'var(--serif)', fontWeight: 500,
-              fontSize: 26, lineHeight: 1.1, letterSpacing: '-0.015em',
-            }}>
-              Glossary <em style={{ color: 'var(--ink-3)' }}>· what every tag means</em>
-            </h2>
-          </div>
-          <button onClick={onClose} aria-label="Close glossary" style={{
-            background: 'transparent', border: 'none', cursor: 'pointer',
-            color: 'var(--ink-3)', padding: 4,
-          }}>{Icon.x(18)}</button>
-        </div>
-
-        {/* Body */}
-        <div style={{ padding: '20px 24px 80px' }}>
+    <Modal open={open} onClose={onClose} size="lg"
+      eyebrow="Reference"
+      title="Glossary — what every tag means"
+    >
+        <div style={{ padding: '24px 28px 32px' }}>
           {/* Intro */}
           <p style={{
             fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-3)',
@@ -326,13 +271,6 @@ export default function GlossaryDrawer({ open, onClose }) {
             drawer stay aligned.
           </div>
         </div>
-      </aside>
-
-      {/* keyframes — scoped inline so we don't depend on global CSS */}
-      <style>{`
-        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes slideIn { from { transform: translateX(20px); opacity: 0.6 } to { transform: translateX(0); opacity: 1 } }
-      `}</style>
-    </>
+    </Modal>
   )
 }

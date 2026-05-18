@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, Search, Link2, FileText, Upload, Check, AlertCircle, Sparkles, ArrowRight } from 'lucide-react'
+import { Search, Link2, FileText, Upload, Check, AlertCircle, Sparkles, ArrowRight } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { listGeneratedScripts, linkScriptToAd } from '../../services/scriptGenerator'
 import { tagAd, listOffers } from '../../services/creativeTagger'
@@ -7,6 +7,7 @@ import { uploadAdVideoToStorage, transcribeUploadedAd } from '../../services/adA
 import { extractAudioFromVideo, shouldExtractAudio } from '../../services/audioExtract'
 import { extractTextFromFile, isSupportedDocFile, getSupportedExtensionsLabel } from '../../services/docExtract'
 import AdThumbnail from './AdThumbnail'
+import Modal from '../editorial/Modal'
 
 /*
   Unified drawer for adding a creative to the system OR linking an existing
@@ -285,44 +286,50 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
   }
 
   // ── Render ────────────────────────────────────────────────────────
+  const headerTitle = tab === 'existing' ? 'Link a draft to a Meta ad'
+    : tab === 'paste' ? 'Paste a transcript'
+    : 'Upload a video'
+
   return (
-    <>
-      <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.45)',
-        backdropFilter: 'blur(2px)', zIndex: 99,
-      }} />
-
-      <div onClick={e => e.stopPropagation()} style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0,
-        width: '100%', maxWidth: 640, height: '100vh',
-        background: 'var(--paper)',
-        borderLeft: '3px solid var(--accent)',
-        boxShadow: '-12px 0 32px rgba(10,10,10,0.15)',
-        zIndex: 100,
-        display: 'flex', flexDirection: 'column',
-        animation: 'slideInRight 240ms cubic-bezier(0.16, 1, 0.3, 1)',
-      }}>
-        {/* Header */}
-        <div style={{
-          padding: '16px 20px', borderBottom: '1px solid var(--rule)',
-          background: 'white',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-        }}>
-          <div>
-            <div className="eyebrow eyebrow-accent">Add or link <em>creative</em></div>
-            <h2 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 400, margin: '4px 0 0' }}>
-              {tab === 'existing' && 'Link a draft to a Meta ad'}
-              {tab === 'paste'    && 'Paste a transcript'}
-              {tab === 'upload'   && 'Upload a video'}
-            </h2>
+    <Modal open={open} onClose={working ? () => {} : onClose} size="lg"
+      eyebrow="Add or link creative"
+      title={headerTitle}
+      footer={
+        <>
+          <div style={{ fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--ink-3)',
+                        flex: 1, overflow: 'hidden', minWidth: 0,
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {workStage && (
+              <StageIndicator stage={workStage} target={chosenAd?.ad_name || chosenAd?.ad_id} />
+            )}
+            {!workStage && tab === 'existing' && chosenScript && chosenAd && <>Will link <strong>{chosenScript.title}</strong> → <strong>{chosenAd.ad_name || chosenAd.ad_id}</strong></>}
+            {!workStage && tab === 'paste' && chosenAd && pasteText && <>Will paste {pasteText.trim().split(/\s+/).filter(Boolean).length} words → <strong>{chosenAd.ad_name || chosenAd.ad_id}</strong></>}
+            {!workStage && tab === 'upload' && chosenAd && uploadFile && <>Will upload {(uploadFile.size / 1024 / 1024).toFixed(1)}MB → <strong>{chosenAd.ad_name || chosenAd.ad_id}</strong></>}
           </div>
-          <button onClick={onClose} disabled={working}
-            style={{ background: 'transparent', border: 'none', color: 'var(--ink-3)',
-                    cursor: working ? 'wait' : 'pointer', padding: 4, opacity: working ? 0.4 : 1 }}>
-            <X size={18} />
-          </button>
-        </div>
-
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={onClose} disabled={working}
+              style={{ padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                      border: '1px solid var(--rule-2)', background: 'transparent',
+                      color: 'var(--ink-3)', cursor: working ? 'wait' : 'pointer',
+                      opacity: working ? 0.4 : 1 }}>
+              Cancel
+            </button>
+            <button onClick={handleSubmit} disabled={working || !canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile, uploadQueue })}
+              style={{ padding: '8px 18px', fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600,
+                      border: '1px solid var(--ink)', background: 'var(--ink)',
+                      color: 'var(--paper)', cursor: working ? 'wait' : 'pointer',
+                      opacity: !canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile, uploadQueue }) ? 0.4 : 1,
+                      display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Check size={13} />
+              {working ? 'Working…'
+                : tab === 'existing' ? 'Link'
+                : (tab === 'upload' && uploadQueue.length > 0) ? `Run all (${uploadQueue.filter(q => q.chosenAd && q.status !== 'done').length})`
+                : 'Save & tag'}
+            </button>
+          </div>
+        </>
+      }>
         {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)', background: 'var(--paper)' }}>
           {TABS.map(t => {
@@ -355,8 +362,8 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
           </div>
         )}
 
-        {/* Body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+        {/* Body — Modal owns scrolling; we just pad. */}
+        <div style={{ padding: 24 }}>
           <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
                       fontSize: 13, margin: '0 0 16px' }}>
             {TABS.find(t => t.key === tab).desc}
@@ -541,54 +548,7 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
           )}
         </div>
 
-        {/* Footer */}
-        <div style={{
-          padding: '14px 20px', borderTop: '1px solid var(--rule)',
-          background: 'white',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-        }}>
-          <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12, color: 'var(--ink-4)',
-                        flex: 1, overflow: 'hidden' }}>
-            {workStage && (
-              <StageIndicator stage={workStage} target={chosenAd?.ad_name || chosenAd?.ad_id} />
-            )}
-            {!workStage && tab === 'existing' && chosenScript && chosenAd && <>Will link <strong>{chosenScript.title}</strong> → <strong>{chosenAd.ad_name || chosenAd.ad_id}</strong></>}
-            {!workStage && tab === 'paste' && chosenAd && pasteText && <>Will paste {pasteText.trim().split(/\s+/).filter(Boolean).length} words → <strong>{chosenAd.ad_name || chosenAd.ad_id}</strong></>}
-            {!workStage && tab === 'upload' && chosenAd && uploadFile && <>Will upload {(uploadFile.size / 1024 / 1024).toFixed(1)}MB → <strong>{chosenAd.ad_name || chosenAd.ad_id}</strong></>}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={onClose} disabled={working}
-              style={{ padding: '10px 16px', fontFamily: 'var(--mono)', fontSize: 11,
-                      letterSpacing: '0.12em', textTransform: 'uppercase',
-                      border: '1px solid var(--rule)', background: 'transparent',
-                      color: 'var(--ink-3)', cursor: working ? 'wait' : 'pointer',
-                      borderRadius: 2, opacity: working ? 0.4 : 1 }}>
-              Cancel
-            </button>
-            <button onClick={handleSubmit} disabled={working || !canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile, uploadQueue })}
-              style={{ padding: '10px 20px', fontFamily: 'var(--mono)', fontSize: 11,
-                      letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
-                      border: '2px solid var(--ink)', background: 'var(--ink)',
-                      color: 'var(--paper)', cursor: working ? 'wait' : 'pointer',
-                      opacity: !canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile, uploadQueue }) ? 0.4 : 1,
-                      borderRadius: 2 }}>
-              <Check size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
-              {working ? 'Working…'
-                : tab === 'existing' ? 'Link'
-                : (tab === 'upload' && uploadQueue.length > 0) ? `Run all (${uploadQueue.filter(q => q.chosenAd && q.status !== 'done').length})`
-                : 'Save & tag'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <style>{`
-        @keyframes slideInRight {
-          from { transform: translateX(100%); opacity: 0.4; }
-          to   { transform: translateX(0);    opacity: 1; }
-        }
-      `}</style>
-    </>
+    </Modal>
   )
 }
 
