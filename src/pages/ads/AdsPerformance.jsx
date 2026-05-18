@@ -6,7 +6,7 @@ import EditorialDate from '../../components/EditorialDate'
 import { dateRangeBoundsET } from '../../lib/dateUtils'
 import { useCloserCallProspectMetrics } from '../../hooks/useCloserCallProspectMetrics'
 import { subscribeSyncStatus, getLastSyncTime } from '../../services/autoSync'
-import { SectionHead } from '../../components/editorial/atoms'
+import { SectionHead, ValueChip } from '../../components/editorial/atoms'
 
 /*
   Performance view — hierarchical rollup.
@@ -201,6 +201,10 @@ export default function AdsPerformance() {
   const [ads, setAds] = useState([])
   const [stats, setStats] = useState({})       // ad_id → {spend, impressions, clicks, results}
   const [hyros, setHyros] = useState({})       // ad_id → {calls_attributed, calls_qualified, revenue_attributed}
+  // ad_id → { hook_type, message_frame, mechanism_reveal, pain_angle, proof_character, … }
+  // Used to compute per-campaign winning attributes ("what's the leading
+  // hook in this CBO") on the rolled-up campaign row.
+  const [attrsByAd, setAttrsByAd] = useState({})
   const [tfAd, setTfAd] = useState({})         // ad_id → Typeform-attributed counts
   const [tfAdset, setTfAdset] = useState({})   // adset_id → Typeform-attributed counts
   const [tfCampaign, setTfCampaign] = useState({}) // utm_campaign (string) → Typeform counts
@@ -343,6 +347,16 @@ export default function AdsPerformance() {
       const hyMap = {}
       for (const h of hRows || []) hyMap[h.ad_id] = h
       setHyros(hyMap)
+
+      // Creative attributes — paginate through (one row per tagged ad).
+      // Used to compute per-campaign winning hook / pain / mechanism /
+      // proof on the rolled-up campaign row.
+      const attrRows = await fetchAllPaged(() =>
+        supabase.from('creative_attributes')
+          .select('ad_id, hook_type, message_frame, mechanism_reveal, pain_angle, proof_character, funnel_stage, format'))
+      const attrsMap = {}
+      for (const a of attrRows) attrsMap[a.ad_id] = a
+      setAttrsByAd(attrsMap)
 
       // NOTE: booked + live counts used to be fetched from the
       // all-time aggregate views here. Removed in favour of date-scoped
@@ -941,7 +955,15 @@ export default function AdsPerformance() {
       const cid = a.campaign_id || 'no-campaign'
       const cname = a.campaign_name || 'Untitled campaign'
       if (!campaigns.has(cid)) {
-        campaigns.set(cid, { id: cid, name: cname, ad_sets: new Map(), rollup: emptyRollup(), activeAdCount: 0, totalAdCount: 0 })
+        campaigns.set(cid, {
+          id: cid, name: cname,
+          ad_sets: new Map(),
+          rollup: emptyRollup(),
+          activeAdCount: 0, totalAdCount: 0,
+          // attrBookedCounts[attr][value] = sum(booked) of ads in this campaign with that value.
+          // Used to compute the leading value per attribute on the campaign row.
+          attrBookedCounts: {},
+        })
       }
       const camp = campaigns.get(cid)
 
@@ -966,6 +988,41 @@ export default function AdsPerformance() {
       // utm_term or only utm_campaign also surface at the parent level.
       addRollup(adset.rollup, adRollup)
       addRollup(camp.rollup, adRollup)
+
+      // Attribute roll-up: for each tagged ad, attribute booked-count to
+      // each of its attribute values. After the loop the campaign's
+      // attrBookedCounts maps attr → { value: booked_total }; we then
+      // pick the value with max booked as the campaign's leader for that
+      // dimension. Booked is the right denominator (CPB matters; raw
+      // count is noise once an ad never books).
+      const attrs = attrsByAd[a.ad_id]
+      const booked = Number(adRollup.tfBooked) || 0
+      if (attrs && booked > 0) {
+        for (const dim of ['hook_type', 'message_frame', 'mechanism_reveal', 'pain_angle', 'proof_character']) {
+          const v = attrs[dim]
+          if (!v || v === 'none') continue
+          if (!camp.attrBookedCounts[dim]) camp.attrBookedCounts[dim] = {}
+          camp.attrBookedCounts[dim][v] = (camp.attrBookedCounts[dim][v] || 0) + booked
+        }
+      }
+    }
+
+    // For every campaign, reduce attrBookedCounts into a `topAttrs`
+    // object: { hook_type: 'diagnostic', pain_angle: 'tpa_referral_dep', … }
+    // The CampaignBlock renders these as ValueChips inline.
+    for (const camp of campaigns.values()) {
+      const top = {}
+      for (const dim in camp.attrBookedCounts) {
+        let bestValue = null; let bestBooked = 0
+        for (const value in camp.attrBookedCounts[dim]) {
+          if (camp.attrBookedCounts[dim][value] > bestBooked) {
+            bestBooked = camp.attrBookedCounts[dim][value]
+            bestValue = value
+          }
+        }
+        if (bestValue) top[dim] = { value: bestValue, booked: bestBooked }
+      }
+      camp.topAttrs = top
     }
 
     // Overlay ad-set + campaign-level Typeform numbers (catches leads
@@ -1096,7 +1153,7 @@ export default function AdsPerformance() {
     const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
     visibleCampaigns.sort(compareCamps)
     return visibleCampaigns
-  }, [ads, stats, hyros, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, ghlBookedAd, ghlBookedAdset, ghlBookedCampaign, ghlLivesAd, ghlLivesAdset, ghlLivesCampaign, statusFilter, search, sortKey, sortDir, advFilter])
+  }, [ads, stats, hyros, attrsByAd, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, ghlBookedAd, ghlBookedAdset, ghlBookedCampaign, ghlLivesAd, ghlLivesAdset, ghlLivesCampaign, statusFilter, search, sortKey, sortDir, advFilter])
 
   // When filter or data changes and the user hasn't manually toggled
   // anything, auto-expand the visible campaigns. This way Ben lands on a
@@ -1573,6 +1630,30 @@ function CampaignBlock({ camp, open, onToggle, expandedAdSets, onToggleAdSet, on
               {camp.activeAdCount}/{camp.totalAdCount} ACTIVE · {camp.ad_sets_sorted.length} AD SET{camp.ad_sets_sorted.length === 1 ? '' : 'S'}
             </span>
           </div>
+          {/* Per-campaign winning attribute chips — the leading value for
+              each dimension by booked-call volume within this CBO. Only
+              shows when there are tagged ads producing booked calls. */}
+          {camp.topAttrs && Object.keys(camp.topAttrs).length > 0 && (
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', gap: 4,
+              marginTop: 6, marginLeft: 30,
+            }}>
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)',
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                alignSelf: 'center', marginRight: 4,
+              }}>Winning</span>
+              {[
+                ['hook_type',        camp.topAttrs.hook_type],
+                ['message_frame',    camp.topAttrs.message_frame],
+                ['mechanism_reveal', camp.topAttrs.mechanism_reveal],
+                ['pain_angle',       camp.topAttrs.pain_angle],
+                ['proof_character',  camp.topAttrs.proof_character],
+              ].filter(([_, v]) => v).map(([attr, v]) => (
+                <ValueChip key={attr} attr={attr} value={v.value} size="xs" />
+              ))}
+            </div>
+          )}
         </Td>
         <RollupCells rollup={camp.rollup} bold scope={scope} onDrill={onDrill} />
         <Td />
