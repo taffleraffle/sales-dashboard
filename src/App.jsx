@@ -32,6 +32,8 @@ const AdsVariants = lazy(() => import('./pages/ads/AdsVariants'))
 const AdsClips = lazy(() => import('./pages/ads/AdsClips'))
 const AdsPerformance = lazy(() => import('./pages/ads/AdsPerformance'))
 const AdsCreativeTestingLayout = lazy(() => import('./pages/ads/AdsCreativeTestingLayout'))
+const AdsInsights = lazy(() => import('./pages/ads/AdsInsights'))
+const AdsGenerator = lazy(() => import('./pages/ads/AdsGenerator'))
 const AdsOrphans = lazy(() => import('./pages/ads/AdsOrphans'))
 const AdsLegacy = lazy(() => import('./pages/ads/AdsLegacy'))
 const ComponentDetail = lazy(() => import('./pages/ads/ComponentDetail'))
@@ -139,6 +141,8 @@ export default function App() {
                   <Route path="clips" element={<Suspense fallback={<PageSkeleton />}><AdsClips /></Suspense>} />
                   <Route path="variants" element={<Suspense fallback={<PageSkeleton />}><AdsVariants /></Suspense>} />
                   <Route path="ads" element={<Suspense fallback={<PageSkeleton />}><AdsList /></Suspense>} />
+                  <Route path="insights" element={<Suspense fallback={<PageSkeleton />}><AdsInsights /></Suspense>} />
+                  <Route path="generate" element={<Suspense fallback={<PageSkeleton />}><AdsGenerator /></Suspense>} />
                 </Route>
 
                 {/* Back-compat redirects for old direct URLs */}

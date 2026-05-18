@@ -4,6 +4,7 @@ import { Loader, ChevronLeft, AlertTriangle, ExternalLink, Tag } from 'lucide-re
 import { supabase } from '../../lib/supabase'
 import VariantPill from '../../components/ads/VariantPill'
 import TagVariantModal from '../../components/ads/TagVariantModal'
+import CreativeAttributesPanel from '../../components/ads/CreativeAttributesPanel'
 
 const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
 
@@ -307,6 +308,8 @@ export default function AdDetail() {
         </table>
         {!stats.length && <p className="text-xs text-text-400 text-center py-4">No daily insights synced for this ad yet.</p>}
       </div>
+
+      <CreativeAttributesPanel ad_id={ad.ad_id} />
 
       <TagVariantModal
         open={tagOpen}

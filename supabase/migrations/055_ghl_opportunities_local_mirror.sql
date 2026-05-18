@@ -37,11 +37,13 @@ DROP POLICY IF EXISTS "ghl_opportunities_read"  ON public.ghl_opportunities;
 DROP POLICY IF EXISTS "ghl_opportunities_write" ON public.ghl_opportunities;
 
 -- Read for any authenticated user (matches the rest of the sales dashboard).
+DROP POLICY IF EXISTS "ghl_opportunities_read" ON public.ghl_opportunities;
 CREATE POLICY "ghl_opportunities_read" ON public.ghl_opportunities
   FOR SELECT TO authenticated USING (true);
 
 -- Anon read so the browser-side autoSync can upsert via service_role and the
 -- dashboard can read via anon. Matches existing GHL table pattern.
+DROP POLICY IF EXISTS "ghl_opportunities_anon_read" ON public.ghl_opportunities;
 CREATE POLICY "ghl_opportunities_anon_read" ON public.ghl_opportunities
   FOR SELECT TO anon USING (true);
 

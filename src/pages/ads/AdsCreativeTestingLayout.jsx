@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Scissors, GitBranch, Megaphone } from 'lucide-react'
+import { Scissors, GitBranch, Megaphone, BarChart3, Sparkles } from 'lucide-react'
 
 /*
   Creative testing wrapper. Hosts the three production-related views as
@@ -12,9 +12,11 @@ import { Scissors, GitBranch, Megaphone } from 'lucide-react'
 */
 
 const SUBNAV = [
-  { to: '/sales/ads/creative/clips',    label: 'Clips',    icon: Scissors,  sub: 'Atomic clip files + production stages' },
-  { to: '/sales/ads/creative/variants', label: 'Variants', icon: GitBranch, sub: 'Spliced combinations + matrix splicer' },
-  { to: '/sales/ads/creative/ads',      label: 'Ads',      icon: Megaphone, sub: 'Live Meta ads + variant linkage' },
+  { to: '/sales/ads/creative/clips',    label: 'Clips',    icon: Scissors,   sub: 'Atomic clip files + production stages' },
+  { to: '/sales/ads/creative/variants', label: 'Variants', icon: GitBranch,  sub: 'Spliced combinations + matrix splicer' },
+  { to: '/sales/ads/creative/ads',      label: 'Ads',      icon: Megaphone,  sub: 'Live Meta ads + variant linkage' },
+  { to: '/sales/ads/creative/insights', label: 'Insights', icon: BarChart3,  sub: 'Performance pivots by test variable' },
+  { to: '/sales/ads/creative/generate', label: 'Generate', icon: Sparkles,   sub: 'LLM-generated scripts for any offer' },
 ]
 
 export default function AdsCreativeTestingLayout() {
