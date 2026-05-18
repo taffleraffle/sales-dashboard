@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { tagMissing, getAttributeCoverage } from '../../services/creativeTagger'
 import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
@@ -27,13 +27,8 @@ import {
     9. Footer
 */
 
-const DATE_PRESETS = [
-  { id: '7d',  label: '7d',  days: 7 },
-  { id: '30d', label: '30d', days: 30 },
-  { id: '60d', label: '60d', days: 60 },
-  { id: '90d', label: '90d', days: 90 },
-]
-
+// Attribute pivots powering the "Variables pulling ahead" leaderboard
+// and the win-rate-by-attribute small-multiples chart.
 const PIVOTS = [
   { attr: 'hook_type',        label: 'Hook type' },
   { attr: 'message_frame',    label: 'Message frame' },
@@ -43,39 +38,17 @@ const PIVOTS = [
   { attr: 'format',           label: 'Format' },
 ]
 
-// Offer chip colors (visual identification — restoration red, plumbing teal, roofing purple, etc.)
-const OFFER_COLORS = {
-  'opt-restoration': 'var(--frame-problem)',
-  'opt-plumbing': 'var(--teal)',
-  'opt-roofing-stub': '#5b3a8f',
-  'opt-electrical-stub': '#b86a0c',
-  'opt-hvac-stub': '#0e7c86',
-  'opt-whitelabel-template': 'var(--ink-3)',
-}
-function offerColor(slug) {
-  return OFFER_COLORS[slug] || 'var(--ink-3)'
-}
-
-const todayISO = () => new Date().toISOString().slice(0, 10)
-const daysAgoISO = (n) => new Date(Date.now() - n * 86400 * 1000).toISOString().slice(0, 10)
-
 export default function AdsInsights() {
-  // Perf + offers come from AdsCreativeTestingLayout's shared fetch.
-  // We only own date-window state + the coverage/tagging side-fetches.
+  // Perf comes from AdsCreativeTestingLayout context — already filtered by
+  // active offers + hide-inactive toggle (those controls now live in the
+  // layout's AnalyticsToolbar). We only own the coverage side-fetch and the
+  // local UI state (drawers, errors, tagging spinner).
   const layoutCtx = useOutletContext() || {}
   const {
-    perf, offers, loading: ctxLoading, err: ctxErr,
-    lastSyncedAt, since, until, setSince, setUntil, refresh,
+    perf: filteredPerf, offers, loading: ctxLoading, err: ctxErr,
+    since, until, refresh,
   } = layoutCtx
 
-  const [preset, setPreset] = useState(() => {
-    // Best-guess preset from the current since/until window
-    const days = since && until ? Math.round((new Date(until) - new Date(since)) / 86400000) : 30
-    return days <= 7 ? '7d' : days <= 30 ? '30d' : days <= 60 ? '60d' : '90d'
-  })
-  const [activeOffers, setActiveOffers] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('insights.activeOffers') || '[]') } catch { return [] }
-  })
   const [coverage, setCoverage] = useState([])
   const [tagging, setTagging] = useState(false)
   const [addOrLinkOpen, setAddOrLinkOpen] = useState(false)
@@ -85,12 +58,6 @@ export default function AdsInsights() {
   const loading = ctxLoading
   const err = ctxErr || localErr
 
-  function setPresetRange(p) {
-    setPreset(p.id)
-    setSince(daysAgoISO(p.days))
-    setUntil(todayISO())
-  }
-
   // Coverage is the only RPC Insights still owns — fast aggregate, only this page uses it
   useEffect(() => {
     let alive = true
@@ -99,25 +66,6 @@ export default function AdsInsights() {
       .catch(e => { if (alive) setLocalErr(e.message) })
     return () => { alive = false }
   }, [])
-
-  // Persist offer filter
-  useEffect(() => {
-    try { localStorage.setItem('insights.activeOffers', JSON.stringify(activeOffers)) } catch {}
-  }, [activeOffers])
-
-  // Validate stale offer slugs against loaded list
-  useEffect(() => {
-    if (!offers.length || activeOffers.length === 0) return
-    const valid = activeOffers.filter(slug => offers.find(o => o.slug === slug))
-    if (valid.length !== activeOffers.length) setActiveOffers(valid)
-  }, [offers]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Filter perf to active offers (empty = all)
-  const filteredPerf = useMemo(() => {
-    if (!perf) return null
-    if (!activeOffers.length) return perf
-    return perf.filter(r => activeOffers.includes(r.offer_slug))
-  }, [perf, activeOffers])
 
   // Top-level summary stats
   const summary = useMemo(() => {
@@ -249,13 +197,9 @@ export default function AdsInsights() {
     finally { setTagging(false) }
   }
 
-  function toggleOffer(slug) {
-    setActiveOffers(prev => prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug])
-  }
-
   return (
     <div>
-      {/* Page header — sans-serif tone-down per dj282R9iMtYwNPnoqDHDRw design */}
+      {/* Page header — toolbar (date + offers + hide-inactive) lives in layout */}
       <SectionHead
         level="page"
         eyebrow="Creative · Insights"
@@ -274,13 +218,6 @@ export default function AdsInsights() {
             </Button>
           </div>
         }
-      />
-
-      {/* Filter bar */}
-      <FilterBar
-        date={preset} dateOptions={DATE_PRESETS} onSetDate={setPresetRange}
-        offers={offers} activeOffers={activeOffers} onToggleOffer={toggleOffer}
-        lastSyncedAt={lastSyncedAt}
       />
 
       {err && (
@@ -550,107 +487,9 @@ function TopPerformerRow({ c, rank, cols, onClick, isLast }) {
   )
 }
 
-// ═════════════════════════════════════════════════════════════════════
-// FilterBar — date presets + offer chip toggles + last-synced ticker
-// ═════════════════════════════════════════════════════════════════════
-function FilterBar({ date, dateOptions, onSetDate, offers, activeOffers, onToggleOffer, lastSyncedAt }) {
-  const offerCounts = useMemo(() => {
-    // We don't compute counts here without access to perf — leave blank
-    return {}
-  }, [])
-
-  const liveOffers = offers.filter(o => !o.slug.includes('template'))
-
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 16,
-      padding: '12px 16px', background: 'var(--paper-2)',
-      border: '1px solid var(--rule)', flexWrap: 'wrap',
-    }}>
-      {/* Date segmented control */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Eyebrow>Window</Eyebrow>
-        <div style={{
-          display: 'inline-flex',
-          border: '1px solid var(--ink-3)',
-          background: 'white',
-          borderRadius: 2,
-        }}>
-          {dateOptions.map((opt, i) => {
-            const active = date === opt.id
-            return (
-              <button key={opt.id} onClick={() => onSetDate(opt)}
-                style={{
-                  fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
-                  letterSpacing: '0.04em', textTransform: 'uppercase',
-                  padding: '6px 12px',
-                  background: active ? 'var(--ink)' : 'transparent',
-                  color: active ? 'var(--paper)' : 'var(--ink-2)',
-                  border: 'none',
-                  borderRight: i < dateOptions.length - 1 ? '1px solid var(--rule-2)' : 'none',
-                  cursor: 'pointer',
-                }}>
-                {opt.label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      <div style={{ width: 1, height: 24, background: 'var(--rule-2)' }} />
-
-      {/* Offer chip toggles */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <Eyebrow>Offers</Eyebrow>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {liveOffers.map(o => {
-            const active = activeOffers.includes(o.slug)
-            return (
-              <button key={o.slug} onClick={() => onToggleOffer(o.slug)} style={{
-                fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em',
-                textTransform: 'uppercase', fontWeight: 500,
-                padding: '4px 10px',
-                background: active ? 'var(--ink)' : 'transparent',
-                color: active ? 'var(--paper)' : 'var(--ink-2)',
-                border: `1px solid ${active ? 'var(--ink)' : 'var(--rule-2)'}`,
-                borderRadius: 2, cursor: 'pointer',
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                transition: 'all 0.12s cubic-bezier(0.2,0.7,0.2,1)',
-              }}>
-                <span style={{
-                  width: 6, height: 6, borderRadius: 6, flexShrink: 0,
-                  background: active ? 'var(--accent)' : offerColor(o.slug),
-                }} />
-                {o.name.replace('OPT ', '').replace(' (Direct Call Engine)', '').replace(' (placeholder)', '')}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      <div style={{ flex: 1 }} />
-
-      {/* Last-synced ticker */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--ink-4)' }}>
-        <span style={{
-          width: 6, height: 6, borderRadius: 6, background: 'var(--up, #3e8a5e)',
-          boxShadow: '0 0 0 3px rgba(62,138,94,0.18)',
-        }} />
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em',
-                      textTransform: 'uppercase' }}>
-          {lastSyncedAt ? `Synced ${minutesAgo(lastSyncedAt)} ago` : 'Loading…'}
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function minutesAgo(date) {
-  const min = Math.max(0, Math.floor((Date.now() - date) / 60000))
-  if (min < 1) return 'just now'
-  if (min === 1) return '1 min'
-  return `${min} min`
-}
+// FilterBar + minutesAgo + DATE_PRESETS + offerColor were moved to
+// AdsCreativeTestingLayout.jsx as the AnalyticsToolbar — one toolbar
+// across all four analytics pages instead of duplicating per page.
 
 // ═════════════════════════════════════════════════════════════════════
 // KPIDominant — hero win-rate + 3 secondary tiles

@@ -18,15 +18,17 @@ import { Icon } from '../../components/editorial/atoms'
      individually.
 */
 
+// Analysis surfaces first (where Ben spends his time), then production
+// pipeline (Clips → Variants → Ads). Order requested 2026-05-18.
 const SUBNAV = [
-  { to: '/sales/ads/creative/clips',        label: 'Clips' },
-  { to: '/sales/ads/creative/variants',     label: 'Variants' },
-  { to: '/sales/ads/creative/ads',          label: 'Ads' },
   { to: '/sales/ads/creative/insights',     label: 'Insights' },
   { to: '/sales/ads/creative/creatives',    label: 'Creatives' },
   { to: '/sales/ads/creative/attributes',   label: 'Attributes' },
   { to: '/sales/ads/creative/explorations', label: 'Explorations' },
   { to: '/sales/ads/creative/generate',     label: 'Generate' },
+  { to: '/sales/ads/creative/clips',        label: 'Clips' },
+  { to: '/sales/ads/creative/variants',     label: 'Variants' },
+  { to: '/sales/ads/creative/ads',          label: 'Ads' },
 ]
 
 // Pages that consume the shared lib_ad_performance fetch
@@ -65,6 +67,14 @@ export default function AdsCreativeTestingLayout() {
   const [err, setErr] = useState(null)
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
 
+  // Shared offer filter + "hide inactive" toggle — apply to every analytics page
+  const [activeOffers, setActiveOffers] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('insights.activeOffers') || '[]') } catch { return [] }
+  })
+  const [hideInactive, setHideInactive] = useState(() => {
+    try { return localStorage.getItem('insights.hideInactive') !== 'false' } catch { return true }
+  })
+
   // Only fetch when on an analytics page — Clips/Variants/Ads/Generate use their own data
   const needsPerf = ANALYTICS_PATHS.has(location.pathname)
 
@@ -86,6 +96,11 @@ export default function AdsCreativeTestingLayout() {
       const fresh = perfRes.data || []
       setPerf(fresh); setOffers(offersData); setLastSyncedAt(new Date())
       PERF_CACHE.set(cacheKey, { perf: fresh, offers: offersData, t: Date.now() })
+      // Cap cache size — drop oldest if we exceed 20 windows
+      if (PERF_CACHE.size > 20) {
+        const oldest = [...PERF_CACHE.entries()].sort((a, b) => a[1].t - b[1].t)[0]
+        if (oldest) PERF_CACHE.delete(oldest[0])
+      }
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -93,28 +108,56 @@ export default function AdsCreativeTestingLayout() {
     }
   }, [cacheKey, since, until])
 
+  // Fire on navigation into an analytics page AND on date-window change.
+  // loadPerf itself does the cache check + TTL — no need to duplicate here.
   useEffect(() => {
-    if (needsPerf && (!perf || perf.length === 0)) {
-      const cached = PERF_CACHE.get(cacheKey)
-      if (cached && Date.now() - cached.t < CACHE_TTL_MS) {
-        setPerf(cached.perf); setOffers(cached.offers); setLastSyncedAt(new Date(cached.t))
-      } else {
-        loadPerf()
-      }
-    }
-  }, [needsPerf, cacheKey, loadPerf, perf])
+    if (needsPerf) loadPerf()
+  }, [needsPerf, loadPerf])
 
-  // Persist window
+  // Persist window + filter prefs
   useEffect(() => { try { localStorage.setItem('insights.since', since) } catch {} }, [since])
   useEffect(() => { try { localStorage.setItem('insights.until', until) } catch {} }, [until])
+  useEffect(() => { try { localStorage.setItem('insights.activeOffers', JSON.stringify(activeOffers)) } catch {} }, [activeOffers])
+  useEffect(() => { try { localStorage.setItem('insights.hideInactive', String(hideInactive)) } catch {} }, [hideInactive])
+
+  // Drop stale offer slugs once offers list loads
+  useEffect(() => {
+    if (!offers.length || activeOffers.length === 0) return
+    const valid = activeOffers.filter(slug => offers.find(o => o.slug === slug))
+    if (valid.length !== activeOffers.length) setActiveOffers(valid)
+  }, [offers]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Filter perf by activeOffers + hideInactive ONCE here so every consumer
+  // sees the same filtered dataset. Pages can still re-derive if needed.
+  const filteredPerf = useMemo(() => {
+    if (!perf) return null
+    let rows = perf
+    if (activeOffers.length) rows = rows.filter(r => activeOffers.includes(r.offer_slug))
+    if (hideInactive) {
+      rows = rows.filter(r =>
+        (Number(r.spend)  || 0) > 0 ||
+        (Number(r.leads)  || 0) > 0 ||
+        (Number(r.booked) || 0) > 0
+      )
+    }
+    return rows
+  }, [perf, activeOffers, hideInactive])
+
+  function toggleOffer(slug) {
+    setActiveOffers(prev => prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug])
+  }
 
   // Context exposed to nested routes via <Outlet context>
   const ctx = useMemo(() => ({
-    perf, offers, loading, err, lastSyncedAt,
+    perf: filteredPerf, perfRaw: perf, offers, loading, err, lastSyncedAt,
     since, until, setSince, setUntil,
+    activeOffers, toggleOffer, hideInactive, setHideInactive,
     refresh: () => loadPerf({ force: true }),
     openGlossary: () => setGlossaryOpen(true),
-  }), [perf, offers, loading, err, lastSyncedAt, since, until, loadPerf])
+  }), [filteredPerf, perf, offers, loading, err, lastSyncedAt,
+       since, until, activeOffers, hideInactive, loadPerf])
+
+  const showToolbar = needsPerf
 
   return (
     <div>
@@ -173,9 +216,213 @@ export default function AdsCreativeTestingLayout() {
         </button>
       </div>
 
+      {showToolbar && (
+        <AnalyticsToolbar
+          since={since} until={until} setSince={setSince} setUntil={setUntil}
+          offers={offers} activeOffers={activeOffers} toggleOffer={toggleOffer}
+          hideInactive={hideInactive} setHideInactive={setHideInactive}
+          loading={loading} lastSyncedAt={lastSyncedAt}
+          totalAds={(perf || []).length}
+          visibleAds={(filteredPerf || []).length}
+          onRefresh={() => loadPerf({ force: true })}
+        />
+      )}
+
       <Outlet context={ctx} />
 
       <GlossaryDrawer open={glossaryOpen} onClose={() => setGlossaryOpen(false)} />
     </div>
   )
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// AnalyticsToolbar — date range + offer chips + hide-inactive toggle.
+// Lives in the layout so all four analytics pages share one control bar.
+// ───────────────────────────────────────────────────────────────────────
+const DATE_PRESETS = [
+  { id: '7d',  label: '7d',  days: 7 },
+  { id: '30d', label: '30d', days: 30 },
+  { id: '60d', label: '60d', days: 60 },
+  { id: '90d', label: '90d', days: 90 },
+  { id: 'mtd', label: 'MTD' },   // month-to-date
+  { id: 'qtd', label: 'QTD' },   // quarter-to-date
+  { id: 'all', label: 'All',  days: 365 * 3 },
+]
+const OFFER_DOT = {
+  'opt-restoration':  '#b53e3e',
+  'opt-plumbing':     '#0e7c86',
+  'opt-roofing-stub': '#5b3a8f',
+}
+
+function AnalyticsToolbar({
+  since, until, setSince, setUntil,
+  offers, activeOffers, toggleOffer,
+  hideInactive, setHideInactive,
+  loading, lastSyncedAt, totalAds, visibleAds, onRefresh,
+}) {
+  // Match the current window to a preset for active-state styling
+  const activePreset = useMemo(() => {
+    if (!since || !until) return null
+    if (until !== todayISO()) return 'custom'
+    const days = Math.round((new Date(until) - new Date(since)) / 86400000)
+    const match = DATE_PRESETS.find(p => p.days === days)
+    return match?.id || 'custom'
+  }, [since, until])
+
+  function applyPreset(p) {
+    if (p.id === 'mtd') {
+      const d = new Date(); d.setDate(1)
+      setSince(d.toISOString().slice(0, 10)); setUntil(todayISO())
+    } else if (p.id === 'qtd') {
+      const d = new Date()
+      const q = Math.floor(d.getMonth() / 3) * 3
+      d.setMonth(q, 1)
+      setSince(d.toISOString().slice(0, 10)); setUntil(todayISO())
+    } else if (p.days) {
+      setSince(daysAgoISO(p.days)); setUntil(todayISO())
+    }
+  }
+
+  const liveOffers = (offers || []).filter(o => !o.slug.includes('template') && !o.slug.includes('stub'))
+
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: 'auto auto 1fr auto auto', gap: 16,
+      alignItems: 'center',
+      padding: '10px 14px', marginBottom: 24,
+      background: 'var(--paper-2)',
+      border: '1px solid var(--rule)',
+    }}>
+      {/* Date presets */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
+          letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)',
+        }}>Window</span>
+        <div style={{ display: 'inline-flex', border: '1px solid var(--ink-3)', background: 'white' }}>
+          {DATE_PRESETS.map((p, i) => {
+            const on = activePreset === p.id
+            return (
+              <button key={p.id} onClick={() => applyPreset(p)} style={{
+                fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+                letterSpacing: '0.04em', textTransform: 'uppercase',
+                padding: '5px 10px',
+                background: on ? 'var(--ink)' : 'transparent',
+                color: on ? 'var(--paper)' : 'var(--ink-2)',
+                border: 'none',
+                borderRight: i < DATE_PRESETS.length - 1 ? '1px solid var(--rule-2)' : 'none',
+                cursor: 'pointer',
+              }}>{p.label}</button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Custom date range — always editable */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input type="date" value={since} max={until}
+          onChange={e => setSince(e.target.value)}
+          style={{
+            fontFamily: 'var(--mono)', fontSize: 11.5,
+            padding: '4px 6px', border: '1px solid var(--rule-2)',
+            background: 'white', color: 'var(--ink)', borderRadius: 2,
+          }} />
+        <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>→</span>
+        <input type="date" value={until} min={since} max={todayISO()}
+          onChange={e => setUntil(e.target.value)}
+          style={{
+            fontFamily: 'var(--mono)', fontSize: 11.5,
+            padding: '4px 6px', border: '1px solid var(--rule-2)',
+            background: 'white', color: 'var(--ink)', borderRadius: 2,
+          }} />
+      </div>
+
+      {/* Offer chips */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
+          letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)',
+        }}>Offers</span>
+        {liveOffers.length === 0 && (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)' }}>—</span>
+        )}
+        {liveOffers.map(o => {
+          const on = activeOffers.includes(o.slug)
+          return (
+            <button key={o.slug} onClick={() => toggleOffer(o.slug)} style={{
+              fontFamily: 'var(--mono)', fontSize: 10.5,
+              letterSpacing: '0.04em', textTransform: 'uppercase', fontWeight: 500,
+              padding: '4px 10px',
+              background: on ? 'var(--ink)' : 'transparent',
+              color: on ? 'var(--paper)' : 'var(--ink-2)',
+              border: `1px solid ${on ? 'var(--ink)' : 'var(--rule-2)'}`,
+              cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: 6, flexShrink: 0,
+                background: on ? 'var(--accent)' : (OFFER_DOT[o.slug] || 'var(--ink-3)'),
+              }} />
+              {o.name.replace('OPT ', '').replace(' (Direct Call Engine)', '').replace(' (placeholder)', '')}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Hide-inactive toggle */}
+      <label title="Hide ads with zero spend, zero leads, and zero booked calls in the selected window."
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+          letterSpacing: '0.04em', textTransform: 'uppercase',
+          color: hideInactive ? 'var(--ink)' : 'var(--ink-3)',
+          padding: '4px 10px',
+          background: hideInactive ? 'var(--accent-soft, #fdf6c5)' : 'transparent',
+          border: `1px solid ${hideInactive ? 'var(--accent-2, #ead84a)' : 'var(--rule-2)'}`,
+          cursor: 'pointer',
+        }}>
+        <input type="checkbox" checked={hideInactive}
+          onChange={e => setHideInactive(e.target.checked)}
+          style={{ accentColor: 'var(--ink)' }} />
+        Hide inactive
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
+          letterSpacing: '0.04em', marginLeft: 2,
+        }}>
+          {hideInactive ? `(${visibleAds}/${totalAds})` : `(${totalAds})`}
+        </span>
+      </label>
+
+      {/* Last synced + refresh */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+          letterSpacing: '0.04em', textTransform: 'uppercase',
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: 6,
+            background: loading ? '#e0a93e' : '#3e8a5e',
+            boxShadow: `0 0 0 3px ${loading ? 'rgba(224,169,62,0.18)' : 'rgba(62,138,94,0.18)'}`,
+          }} />
+          {loading ? 'Syncing…' : (lastSyncedAt ? minutesAgo(lastSyncedAt) + ' ago' : 'idle')}
+        </span>
+        <button onClick={onRefresh} title="Refresh data"
+          style={{
+            background: 'transparent', border: '1px solid var(--rule-2)',
+            padding: '4px 8px', cursor: 'pointer',
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            color: 'var(--ink-3)',
+          }}>↻</button>
+      </div>
+    </div>
+  )
+}
+
+function minutesAgo(date) {
+  const min = Math.max(0, Math.floor((Date.now() - date) / 60000))
+  if (min < 1) return 'just now'
+  if (min === 1) return '1 min'
+  return `${min} min`
 }
