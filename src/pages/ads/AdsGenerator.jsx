@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Link2 } from 'lucide-react'
 import { generateScripts, listGeneratedScripts, linkScriptToAd } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
+import { listTestBatches, addScriptsToBatch } from '../../services/testBatches'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
 import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
 import { supabase } from '../../lib/supabase'
@@ -35,6 +36,10 @@ export default function AdsGenerator() {
   const [mode, setMode] = useState('diverse')
   const [targets, setTargets] = useState({})
   const [saveAsDrafts, setSaveAsDrafts] = useState(true)
+  // Optional: save the freshly-generated scripts into a draft test batch.
+  // null = loose drafts (no batch); else a batch.id from listTestBatches().
+  const [saveToBatchId, setSaveToBatchId] = useState(null)
+  const [draftBatches, setDraftBatches] = useState([])
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [result, setResult] = useState(null)
@@ -58,6 +63,10 @@ export default function AdsGenerator() {
         if (live) setOfferSlug(live.slug)
       })
       .catch(e => setErr(e.message))
+    // Pull just the draft batches for the save-to-batch dropdown
+    listTestBatches({ launched: false })
+      .then(setDraftBatches)
+      .catch(() => setDraftBatches([]))
   }, [])
 
   function openNewOffer() {
@@ -101,6 +110,13 @@ export default function AdsGenerator() {
       const res = await generateScripts(payload)
       setResult(res)
       if (res.save_error) setErr(`Generated but save-as-drafts failed: ${res.save_error}`)
+      // If a test batch was picked, attach the freshly-saved scripts to it.
+      // The Edge Function returns saved_variant_ids when save_as_drafts is true.
+      const newIds = res?.saved_variant_ids || res?.saved_ids
+      if (saveToBatchId && saveAsDrafts && Array.isArray(newIds) && newIds.length) {
+        try { await addScriptsToBatch(saveToBatchId, newIds) }
+        catch (e) { setErr(`Generated but attaching to batch failed: ${e.message}`) }
+      }
       const h = await listGeneratedScripts({ limit: 25 })
       setHistory(h)
     } catch (e) {
@@ -380,6 +396,28 @@ export default function AdsGenerator() {
             <input type="checkbox" checked={saveAsDrafts} onChange={e => setSaveAsDrafts(e.target.checked)} />
             Save to drafts
           </label>
+          {saveAsDrafts && draftBatches.length > 0 && (
+            <label style={{
+              fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-3)',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}>
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+                letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)',
+              }}>Into batch</span>
+              <select value={saveToBatchId || ''} onChange={e => setSaveToBatchId(e.target.value || null)}
+                style={{
+                  padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 13,
+                  border: '1px solid var(--rule-2)', background: 'white',
+                  color: 'var(--ink)', outline: 'none',
+                }}>
+                <option value="">— Loose drafts —</option>
+                {draftBatches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name} ({b.script_count})</option>
+                ))}
+              </select>
+            </label>
+          )}
           {selectedOffer?.has_dual_guarantee && (
             <span style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
                           color: 'var(--ink-4)' }}>

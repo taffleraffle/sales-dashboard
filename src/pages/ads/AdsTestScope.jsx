@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
+import { Plus, Send } from 'lucide-react'
 import {
   SectionHead, Eyebrow, ValueChip, attrColor, displayValue, tint, PALETTE,
 } from '../../components/editorial/atoms'
+import { listTestBatches } from '../../services/testBatches'
+import CreateTestBatchModal from '../../components/ads/CreateTestBatchModal'
+import TestBatchDetailModal from '../../components/ads/TestBatchDetailModal'
 
 /*
   Tests — the surface that owns "what am I looking at right now".
@@ -38,6 +42,24 @@ export default function AdsTestScope() {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState('spend')   // spend | ads | tagged | name
   const [statusFilter, setStatusFilter] = useState('all')  // all | live | needs_setup
+
+  // Test batches (drafts + launched-with-history). Loaded once on mount.
+  const [batches, setBatches] = useState([])
+  const [batchesLoading, setBatchesLoading] = useState(true)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [openBatchId, setOpenBatchId] = useState(null)
+
+  const loadBatches = () => {
+    setBatchesLoading(true)
+    listTestBatches()
+      .then(setBatches)
+      .catch(() => setBatches([]))
+      .finally(() => setBatchesLoading(false))
+  }
+  useEffect(() => { loadBatches() }, [])
+
+  const drafts   = useMemo(() => batches.filter(b => !b.launched_at), [batches])
+  const launched = useMemo(() => batches.filter(b =>  b.launched_at && !b.closed_at), [batches])
 
   // Per-campaign rollup: ads, tagged, winners, excluded, spend, booked,
   // any-live, top hook + pain (so each row shows what it's testing).
@@ -131,9 +153,24 @@ export default function AdsTestScope() {
         level="page"
         eyebrow="Creative · Tests"
         title="Tests"
-        tagline="Pick the campaigns you're actively testing. Whatever you select here filters Insights, Attributes, Explorations, and the Library in lockstep. Skip campaigns that aren't set up yet."
+        tagline="Set up the next test you'll run, see density before you commit to film, then launch by linking the scripts to a campaign. Or scope the analytics pages to the campaigns of an already-launched test below."
         gap={28}
+        right={
+          <button onClick={() => setCreateOpen(true)} style={btnPrimary}>
+            <Plus size={13} /> New test draft
+          </button>
+        }
       />
+
+      {/* Test drafts — bundles of scripts waiting to be filmed + launched */}
+      <DraftsSection drafts={drafts} loading={batchesLoading}
+        onOpen={id => setOpenBatchId(id)} />
+
+      {/* Launched tests — historical batches with their campaign assignments.
+          Click one to scope the analytics pages to those campaigns. */}
+      {launched.length > 0 && (
+        <LaunchedSection launched={launched} onOpen={id => setOpenBatchId(id)} />
+      )}
 
       {/* Active scope summary — sticky-ish banner that always tells you
           what window the analytics pages are showing. */}
@@ -382,6 +419,260 @@ export default function AdsTestScope() {
         Campaigns flagged <em>Not set up</em> have zero tagged ads — those are the ones polluting your
         win-rate view if left in scope.
       </p>
+
+      <CreateTestBatchModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(batch) => { loadBatches(); setOpenBatchId(batch.id) }}
+      />
+      <TestBatchDetailModal
+        open={!!openBatchId}
+        batchId={openBatchId}
+        onClose={() => setOpenBatchId(null)}
+        onChanged={loadBatches}
+      />
     </div>
   )
+}
+
+// ─── Drafts section ─────────────────────────────────────────────────
+function DraftsSection({ drafts, loading, onOpen }) {
+  return (
+    <div style={{ marginBottom: 32 }}>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        marginBottom: 12, gap: 12, flexWrap: 'wrap',
+      }}>
+        <div>
+          <Eyebrow>Drafts</Eyebrow>
+          <h2 style={{
+            margin: '4px 0 0', fontSize: 18, fontWeight: 600, color: 'var(--ink)',
+            fontFamily: 'var(--sans)',
+          }}>
+            Tests in setup — {drafts.length}
+          </h2>
+        </div>
+      </div>
+      {loading && drafts.length === 0 ? (
+        <EmptyBox>Loading drafts…</EmptyBox>
+      ) : drafts.length === 0 ? (
+        <EmptyBox>
+          No drafts yet. Click <strong>New test draft</strong> above to set up your next test, then attach scripts from the Generate page.
+        </EmptyBox>
+      ) : (
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 16,
+        }}>
+          {drafts.map(b => (
+            <DraftCard key={b.id} batch={b} onClick={() => onOpen(b.id)} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DraftCard({ batch, onClick }) {
+  const topHook  = topValue(batch.density?.hook_type)
+  const topFrame = topValue(batch.density?.message_frame)
+  const topPain  = topValue(batch.density?.pain_angle)
+  return (
+    <button onClick={onClick}
+      style={{
+        background: 'white', border: '1px solid var(--rule)',
+        borderLeft: '3px solid var(--accent)',
+        padding: 18, textAlign: 'left', cursor: 'pointer',
+        fontFamily: 'inherit',
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = 'var(--paper)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
+        <span style={{
+          padding: '2px 7px',
+          background: tint(PALETTE.orange, 0.1),
+          color: PALETTE.orange,
+          border: `1px solid ${tint(PALETTE.orange, 0.3)}`,
+          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+        }}>Draft</span>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+          letterSpacing: '0.04em', textTransform: 'uppercase',
+        }}>
+          {fmtAgo(batch.created_at)}
+        </span>
+      </div>
+      <div style={{
+        fontFamily: 'var(--serif)', fontSize: 19, fontWeight: 500, color: 'var(--ink)',
+        lineHeight: 1.2, marginBottom: 8,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>{batch.name}</div>
+      {batch.hypothesis && (
+        <p style={{
+          margin: '0 0 12px', fontFamily: 'var(--sans)', fontSize: 12.5,
+          color: 'var(--ink-3)', lineHeight: 1.5,
+          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+        }}>{batch.hypothesis}</p>
+      )}
+
+      {/* Tiny density stack */}
+      {batch.script_count > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <DensityStack counts={batch.density?.hook_type || {}} attr="hook_type" total={batch.script_count} />
+        </div>
+      )}
+
+      {/* Stats row */}
+      <div style={{
+        display: 'flex', gap: 14, flexWrap: 'wrap',
+        fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
+        marginBottom: batch.script_count > 0 ? 10 : 0,
+      }}>
+        <span>
+          <span style={{ color: 'var(--ink)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+            {batch.script_count}
+          </span>{' '}script{batch.script_count === 1 ? '' : 's'}
+        </span>
+        {batch.linked_count > 0 && (
+          <span>
+            <span style={{ color: 'var(--ink)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {batch.linked_count}
+            </span>{' '}filmed
+          </span>
+        )}
+      </div>
+
+      {/* Top winning chips */}
+      {(topHook || topFrame || topPain) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {topHook  && <ValueChip attr="hook_type"     value={topHook}  size="xs" />}
+          {topFrame && <ValueChip attr="message_frame" value={topFrame} size="xs" />}
+          {topPain  && <ValueChip attr="pain_angle"    value={topPain}  size="xs" />}
+        </div>
+      )}
+    </button>
+  )
+}
+
+// ─── Launched section ───────────────────────────────────────────────
+function LaunchedSection({ launched, onOpen }) {
+  return (
+    <div style={{ marginBottom: 32 }}>
+      <div style={{ marginBottom: 12 }}>
+        <Eyebrow>Launched tests</Eyebrow>
+        <h2 style={{
+          margin: '4px 0 0', fontSize: 18, fontWeight: 600, color: 'var(--ink)',
+          fontFamily: 'var(--sans)',
+        }}>
+          In market — {launched.length}
+        </h2>
+      </div>
+      <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+        {launched.map((b, i) => (
+          <button key={b.id} onClick={() => onOpen(b.id)}
+            style={{
+              display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 14,
+              alignItems: 'center',
+              width: '100%', textAlign: 'left',
+              padding: '14px 18px',
+              background: 'transparent', border: 'none',
+              borderTop: i === 0 ? 'none' : '1px solid var(--rule)',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                fontFamily: 'var(--serif)', fontSize: 16, fontWeight: 500, color: 'var(--ink)',
+                lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{b.name}</div>
+              {b.campaign_names?.length > 0 && (
+                <div style={{
+                  marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
+                  letterSpacing: '0.02em',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {b.campaign_names.join(' · ')}
+                </div>
+              )}
+            </div>
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
+              fontVariantNumeric: 'tabular-nums',
+            }}>{b.script_count} scripts</span>
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+            }}>Launched {fmtAgo(b.launched_at)}</span>
+            <span style={{
+              padding: '2px 7px',
+              background: tint(PALETTE.green, 0.1),
+              color: PALETTE.green,
+              border: `1px solid ${tint(PALETTE.green, 0.3)}`,
+              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+            }}>Live</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── helpers ────────────────────────────────────────────────────────
+function topValue(counts) {
+  if (!counts) return null
+  let best = null, n = 0
+  for (const k in counts) if (counts[k] > n) { best = k; n = counts[k] }
+  return best
+}
+
+function DensityStack({ counts, attr, total }) {
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  if (entries.length === 0 || !total) return null
+  return (
+    <div style={{
+      display: 'flex', height: 8, background: 'var(--paper-2)',
+      border: '1px solid var(--rule)', overflow: 'hidden',
+    }}>
+      {entries.map(([v, n]) => (
+        <div key={v} title={`${displayValue(v)}: ${n}/${total}`}
+          style={{
+            width: `${(n / total) * 100}%`,
+            background: attrColor(attr, v),
+          }} />
+      ))}
+    </div>
+  )
+}
+
+function fmtAgo(dateStr) {
+  if (!dateStr) return '—'
+  const t = new Date(dateStr).getTime()
+  if (isNaN(t)) return '—'
+  const days = Math.floor((Date.now() - t) / 86400000)
+  if (days < 1) return 'today'
+  if (days < 7) return `${days}d ago`
+  if (days < 60) return `${Math.floor(days / 7)}w ago`
+  return new Date(t).toISOString().slice(0, 10)
+}
+
+function EmptyBox({ children }) {
+  return (
+    <div style={{
+      padding: '24px 20px',
+      background: 'white', border: '1px dashed var(--rule-2)',
+      textAlign: 'center',
+      fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-3)',
+      lineHeight: 1.5,
+    }}>{children}</div>
+  )
+}
+
+const btnPrimary = {
+  padding: '8px 16px',
+  fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600,
+  background: 'var(--ink)', color: 'var(--paper)',
+  border: '1px solid var(--ink)', cursor: 'pointer',
+  display: 'inline-flex', alignItems: 'center', gap: 6,
 }
