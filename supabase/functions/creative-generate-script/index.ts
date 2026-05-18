@@ -195,11 +195,20 @@ serve(async (req) => {
   try { body = await req.json() } catch { return json({ error: 'invalid JSON' }, 400) }
 
   const offer_slug = body?.offer_slug
-  const n_concepts = Math.max(1, Math.min(10, body?.n_concepts || 3))
-  const target_attributes = body?.target_attributes || {}
+  const n_concepts = Math.max(1, Math.min(30, body?.n_concepts || 5))
+  const target_attributes_raw = body?.target_attributes || {}
   const save_as_drafts = !!body?.save_as_drafts
 
   if (!offer_slug) return json({ error: 'offer_slug required' }, 400)
+
+  // Normalize target_attributes — accept either string or string[] per key.
+  // Arrays mean "include any of these values". Empty means "any/varied".
+  const target_attributes: Record<string, string[]> = {}
+  for (const [k, v] of Object.entries(target_attributes_raw)) {
+    if (Array.isArray(v) && v.length) target_attributes[k] = v as string[]
+    else if (typeof v === 'string' && v) target_attributes[k] = [v]
+  }
+  const has_any_filter = Object.keys(target_attributes).length > 0
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
 
@@ -220,11 +229,15 @@ serve(async (req) => {
       ).join('\n')}\nBias toward these patterns unless the user's target_attributes override.`
     : '\nNO WINNING-ATTRIBUTE DATA YET for this offer. Apply locked principles fresh.'
 
-  const targetContext = Object.keys(target_attributes).length
-    ? `\nUSER-REQUESTED TARGET ATTRIBUTES (bias hard toward these):\n${
-        Object.entries(target_attributes).map(([k, v]) => `- ${k} = ${v}`).join('\n')
-      }`
-    : '\nNo specific target attributes requested. Generate a diverse mix across attributes.'
+  const targetContext = has_any_filter
+    ? `\nUSER-REQUESTED TARGET ATTRIBUTES (the scripts MUST distribute across these values — NOT all on one value, varied across them):\n${
+        Object.entries(target_attributes).map(([k, v]) =>
+          v.length === 1
+            ? `- ${k}: must be "${v[0]}"`
+            : `- ${k}: vary across [${v.join(', ')}] across the ${n_concepts} scripts`
+        ).join('\n')
+      }\nWithin those constraints, vary ALL OTHER attributes maximally so we get a wide testing matrix.`
+    : `\nNO USER-REQUESTED TARGETS — DIVERSE BATCH MODE. Vary EVERY attribute maximally across the ${n_concepts} scripts:\n- hook_type: mix question / scene / dollar_pain / diagnostic / conditional\n- message_frame: balance PROBLEM / CIRCUMSTANCE / OUTCOME\n- mechanism_reveal: mix gated / explicit / hidden\n- pain_angle: rotate across the pod concepts (phone_not_ringing, agency_burn, tpa_referral_dep, capacity_mismatch, lead_platform, storm_seasonal, scaling_growth, speed_timeline, guarantee_proof, founder_identity, commercial_tier, adjuster_relations, competitor_takeover, last_objection)\n- funnel_stage: mix tof / mof / bof\n- proof_character: rotate across the available proof characters; only use 'none' if absolutely required\n- length_bucket: mix under_60s / sixty_75s / over_75s\nThe goal: produce a testing matrix where every script has a different combination of attributes. Maximize variance.`
 
   const userMsg = [
     `OFFER: ${offer.name} (slug: ${offer.slug})`,
