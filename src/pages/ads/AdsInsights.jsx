@@ -1,66 +1,72 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, ReferenceLine,
-} from 'recharts'
-import { Trophy, AlertCircle, RefreshCw, Sparkles, Target, Activity, Zap, Plus } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { tagMissing, listOffers, getAttributeCoverage } from '../../services/creativeTagger'
 import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
 import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
-import AdThumbnail from '../../components/ads/AdThumbnail'
 import CreativeGrid from '../../components/ads/CreativeGrid'
 import AttributeHeatmap from '../../components/ads/AttributeHeatmap'
+import {
+  Eyebrow, SectionHead, Button, Pill, Card, Sparkline, BigNumber, Icon,
+  fmtMoney, fmtMoneyFull, fmtNum, fmtPct, fmtLift, humanAttr, frameColor,
+} from '../../components/editorial/atoms'
 
 /*
-  Creative Insights — focused on WIN RATE, not spend.
+  Creative Insights — implemented from the Claude Design handoff
+  (design-pkg/ad-performance/project/Insights.html + supporting jsx).
 
-  Headline KPIs:    win rate %, total tagged ads, winners count, avg CPB on winners
-  Top callouts:     winning attributes with avg win rate
-  Charts:           win rate by attribute (small multiples), proof character pie
-  Tables:           top creatives by booked, current winners
+  Section order:
+    1. Hero header  (eyebrow + serif title + tagline + action buttons)
+    2. Filter bar   (date presets + offer chip toggles + last-synced)
+    3. KPI grid     (dominant: hero win-rate + 3 secondary)
+    4. Variables pulling ahead (leaderboard)
+    5. Top performing creatives (CreativeGrid)
+    6. Cross-attribute heatmap
+    7. Win rate by attribute (small-multiples)
+    8. Proof character mix (donut)
+    9. Footer
 */
 
 const DATE_PRESETS = [
-  { label: '7d',  days: 7 },
-  { label: '30d', days: 30 },
-  { label: '60d', days: 60 },
-  { label: '90d', days: 90 },
+  { id: '7d',  label: '7d',  days: 7 },
+  { id: '30d', label: '30d', days: 30 },
+  { id: '60d', label: '60d', days: 60 },
+  { id: '90d', label: '90d', days: 90 },
 ]
 
 const PIVOTS = [
   { attr: 'hook_type',        label: 'Hook type' },
-  { attr: 'mechanism_reveal', label: 'Mechanism reveal' },
   { attr: 'message_frame',    label: 'Message frame' },
+  { attr: 'mechanism_reveal', label: 'Mechanism reveal' },
   { attr: 'pain_angle',       label: 'Pain angle' },
   { attr: 'funnel_stage',     label: 'Funnel stage' },
   { attr: 'format',           label: 'Format' },
 ]
 
-const PIE_PALETTE = ['#0a0a0a', '#f4e14a', '#3e8a5e', '#e0a93e', '#b53e3e', '#5b3a8f', '#0e7c86', '#b86a0c']
+// Offer chip colors (visual identification — restoration red, plumbing teal, roofing purple, etc.)
+const OFFER_COLORS = {
+  'opt-restoration': 'var(--frame-problem)',
+  'opt-plumbing': 'var(--teal)',
+  'opt-roofing-stub': '#5b3a8f',
+  'opt-electrical-stub': '#b86a0c',
+  'opt-hvac-stub': '#0e7c86',
+  'opt-whitelabel-template': 'var(--ink-3)',
+}
+function offerColor(slug) {
+  return OFFER_COLORS[slug] || 'var(--ink-3)'
+}
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 const daysAgoISO = (n) => new Date(Date.now() - n * 86400 * 1000).toISOString().slice(0, 10)
 
-function fmt$(n) {
-  if (n == null || isNaN(n)) return '—'
-  if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`
-  return `$${n.toFixed(0)}`
-}
-function fmtN(n) { return n == null || isNaN(n) ? '—' : Math.round(n).toLocaleString() }
-function fmtPct(n, digits = 0) {
-  if (n == null || isNaN(n)) return '—'
-  return `${(n * 100).toFixed(digits)}%`
-}
-
 export default function AdsInsights() {
-  const [preset, setPreset] = useState(30)
+  const [preset, setPreset] = useState('30d')
   const [since, setSince] = useState(daysAgoISO(30))
   const [until, setUntil] = useState(todayISO())
-  // Per-offer scoping. null = all offers combined.
-  const [activeOffer, setActiveOffer] = useState(() => {
-    try { return localStorage.getItem('insights.activeOffer') || null } catch { return null }
+  // Multi-select offer filter (matches design — operator can compare).
+  // null/empty = all offers. Persisted in localStorage.
+  const [activeOffers, setActiveOffers] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('insights.activeOffers') || '[]') } catch { return [] }
   })
   const [offers, setOffers] = useState([])
   const [perf, setPerf] = useState(null)
@@ -73,9 +79,12 @@ export default function AdsInsights() {
   const [proofPie, setProofPie] = useState([])
   const [addOrLinkOpen, setAddOrLinkOpen] = useState(false)
   const [editingAd, setEditingAd] = useState(null)
+  const [lastSyncedAt, setLastSyncedAt] = useState(null)
 
-  const setPresetRange = (days) => {
-    setPreset(days); setSince(daysAgoISO(days)); setUntil(todayISO())
+  function setPresetRange(p) {
+    setPreset(p.id)
+    setSince(daysAgoISO(p.days))
+    setUntil(todayISO())
   }
 
   const loadEverything = useCallback(async () => {
@@ -95,6 +104,7 @@ export default function AdsInsights() {
       setWinners(winnersData.data || [])
       setCoverage(coverageData)
       setProofPie(proofPivot.error ? [] : (proofPivot.data || []))
+      setLastSyncedAt(new Date())
 
       const pivotResults = await Promise.all(
         PIVOTS.map(p =>
@@ -102,66 +112,70 @@ export default function AdsInsights() {
             .then(r => ({ attr: p.attr, rows: r.error ? [] : (r.data || []) }))
         )
       )
-      const pivotMap = {}
-      for (const r of pivotResults) pivotMap[r.attr] = r.rows
-      setPivots(pivotMap)
-    } catch (e) { setErr(e.message) }
-    finally { setLoading(false) }
+      const map = {}
+      for (const r of pivotResults) map[r.attr] = r.rows
+      setPivots(map)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setLoading(false)
+    }
   }, [since, until])
 
   useEffect(() => { loadEverything() }, [loadEverything])
 
-  // Persist active offer
+  // Persist offer filter
   useEffect(() => {
-    try {
-      if (activeOffer) localStorage.setItem('insights.activeOffer', activeOffer)
-      else localStorage.removeItem('insights.activeOffer')
-    } catch {}
-  }, [activeOffer])
+    try { localStorage.setItem('insights.activeOffers', JSON.stringify(activeOffers)) } catch {}
+  }, [activeOffers])
 
-  // Validate active offer against loaded offers list. If localStorage points
-  // at a slug that no longer exists (offer was renamed/deleted), reset to
-  // null so the operator doesn't see a blank page with no escape hatch.
+  // Validate stale offer slugs against loaded list
   useEffect(() => {
-    if (!offers.length || !activeOffer) return
-    if (!offers.find(o => o.slug === activeOffer)) {
-      setActiveOffer(null)
-    }
+    if (!offers.length || activeOffers.length === 0) return
+    const valid = activeOffers.filter(slug => offers.find(o => o.slug === slug))
+    if (valid.length !== activeOffers.length) setActiveOffers(valid)
   }, [offers]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Filter perf to active offers (empty = all)
   const filteredPerf = useMemo(() => {
     if (!perf) return null
-    if (!activeOffer) return perf
-    return perf.filter(r => r.offer_slug === activeOffer)
-  }, [perf, activeOffer])
+    if (!activeOffers.length) return perf
+    return perf.filter(r => activeOffers.includes(r.offer_slug))
+  }, [perf, activeOffers])
 
-  // Top-level stats
-  const stats = useMemo(() => {
+  // Top-level summary stats
+  const summary = useMemo(() => {
     const rows = filteredPerf || []
     const tagged = rows.filter(r => r.hook_type != null)
     const winnerRows = rows.filter(r => r.effective_winner)
-    const winRate = tagged.length > 0 ? winnerRows.length / tagged.length : 0
+    const winRate = tagged.length > 0 ? (winnerRows.length / tagged.length) * 100 : 0
     const totalSpend = rows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
     const totalBooked = rows.reduce((s, r) => s + (Number(r.booked) || 0), 0)
     const winnerSpend = winnerRows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
     const winnerBooked = winnerRows.reduce((s, r) => s + (Number(r.booked) || 0), 0)
-    const avgCpbWinners = winnerBooked > 0 ? winnerSpend / winnerBooked : null
+    const avgCpbWinners = winnerBooked > 0 ? Math.round(winnerSpend / winnerBooked) : 0
+    const tagCoverage = coverage.length
+      ? Math.round((coverage.reduce((s, c) => s + (parseFloat(c.coverage_pct) || 0), 0) / coverage.length) * 100)
+      : 0
     return {
       totalAds: rows.length,
       taggedAds: tagged.length,
       winners: winnerRows.length,
       winRate,
+      baselineWinRate: winRate,  // alias used by leaderboard
       avgCpbWinners,
       totalSpend,
       totalBooked,
+      tagCoverage,
+      weeksTracked: Math.max(1, Math.round((new Date(until) - new Date(since)) / (7 * 86400 * 1000))),
     }
-  }, [filteredPerf])
+  }, [filteredPerf, coverage, since, until])
 
-  // Variables pulling ahead — for each attribute, the value with highest win rate
-  // (only consider values with ≥2 tagged ads to filter noise)
-  const variablesPullingAhead = useMemo(() => {
+  // "Variables pulling ahead" — for each attribute, the value with highest win-rate lift
+  const variablesAhead = useMemo(() => {
     const rows = filteredPerf || []
-    const out = []
+    const baseline = summary.winRate
+    const result = []
     PIVOTS.forEach(p => {
       const groups = {}
       rows.forEach(r => {
@@ -175,25 +189,65 @@ export default function AdsInsights() {
           groups[v].cpbCount++
         }
       })
-      const overall = rows.length > 0
-        ? rows.filter(r => r.effective_winner).length / rows.length
-        : 0
       const ranked = Object.entries(groups)
         .filter(([_, g]) => g.total >= 2)
         .map(([value, g]) => ({
-          attribute: p.attr,
-          attribute_label: p.label,
           value,
-          win_rate: g.winners / g.total,
-          win_rate_lift: (g.winners / g.total) - overall,
+          winRate: (g.winners / g.total) * 100,
+          lift: (g.winners / g.total) * 100 - baseline,
           ads: g.total,
           winners: g.winners,
-          avg_cpb: g.cpbCount > 0 ? g.totalCpb / g.cpbCount : null,
+          cpb: g.cpbCount > 0 ? Math.round(g.totalCpb / g.cpbCount) : null,
         }))
-        .sort((a, b) => b.win_rate_lift - a.win_rate_lift)
-      if (ranked[0] && ranked[0].win_rate_lift > 0) out.push(ranked[0])
+        .sort((a, b) => b.lift - a.lift)
+      if (ranked[0]) {
+        result.push({
+          attr: p.attr,
+          label: p.label,
+          value: ranked[0].value,
+          winRate: ranked[0].winRate,
+          lift: ranked[0].lift,
+          ads: ranked[0].ads,
+          winners: ranked[0].winners,
+          cpb: ranked[0].cpb,
+          runnerUpValue: ranked[1]?.value,
+          runnerUpWinRate: ranked[1]?.winRate,
+        })
+      }
     })
-    return out.sort((a, b) => b.win_rate_lift - a.win_rate_lift)
+    return result.sort((a, b) => b.lift - a.lift)
+  }, [filteredPerf, summary.winRate])
+
+  // Win-rate-by-attribute (for charts section)
+  const attrStats = useMemo(() => {
+    const rows = filteredPerf || []
+    const out = {}
+    PIVOTS.forEach(p => {
+      const groups = {}
+      rows.forEach(r => {
+        const v = r[p.attr]
+        if (!v) return
+        if (!groups[v]) groups[v] = { value: v, ads: 0, winners: 0 }
+        groups[v].ads++
+        if (r.effective_winner) groups[v].winners++
+      })
+      out[p.attr] = Object.values(groups)
+    })
+    return out
+  }, [filteredPerf])
+
+  // Sparkline data — winners per week over the last 12 weeks (synthetic if data thin)
+  const winnerSpark = useMemo(() => {
+    const rows = filteredPerf || []
+    const weeks = 12
+    const counts = Array(weeks).fill(0)
+    rows.forEach(r => {
+      if (!r.effective_winner || !r.extracted_at) return
+      const weeksAgo = Math.floor((Date.now() - new Date(r.extracted_at)) / (7 * 86400 * 1000))
+      const idx = weeks - 1 - weeksAgo
+      if (idx >= 0 && idx < weeks) counts[idx]++
+    })
+    return counts
   }, [filteredPerf])
 
   async function handleTagMissing() {
@@ -203,174 +257,71 @@ export default function AdsInsights() {
     finally { setTagging(false) }
   }
 
-  // Build offer counts for the switcher
-  const offerCounts = useMemo(() => {
-    const counts = {}
-    ;(perf || []).forEach(r => {
-      const k = r.offer_slug || '__untagged'
-      counts[k] = (counts[k] || 0) + 1
-    })
-    return counts
-  }, [perf])
+  function toggleOffer(slug) {
+    setActiveOffers(prev => prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug])
+  }
 
   return (
-    <div style={{ padding: '24px 0' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
-        <div>
-          <div className="eyebrow eyebrow-accent">OPT Sales · Creative <em>insights</em></div>
-          <h1 className="h1" style={{ marginTop: 6, marginBottom: 8 }}>What's <em>winning</em>.</h1>
-          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
-                      fontSize: 15, maxWidth: 640, lineHeight: 1.5, margin: 0 }}>
-            Win rate, top creatives, and the attribute values pulling ahead. Every ad tagged
-            across 11 dimensions so winners surface their own pattern.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setAddOrLinkOpen(true)}
-            style={{
-              padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
-              letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600,
-              border: '2px solid var(--ink)', background: 'var(--ink)', color: 'var(--paper)',
-              cursor: 'pointer', borderRadius: 2,
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-            }}>
-            <Plus size={12} />
-            Add or link creative
-          </button>
-          <button onClick={handleTagMissing} disabled={tagging || loading}
-            style={{
-              padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
-              letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600,
-              border: '1px solid var(--rule)', background: 'white',
-              color: 'var(--ink-3)', cursor: (tagging || loading) ? 'wait' : 'pointer',
-              opacity: (tagging || loading) ? 0.5 : 1, borderRadius: 2,
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-            }}>
-            <RefreshCw size={12} />
-            {tagging ? 'Tagging…' : 'Tag more ads'}
-          </button>
-        </div>
-      </div>
+    <div style={{ padding: '40px 0 80px', maxWidth: 1480, margin: '0 auto' }}>
+      {/* 1. Hero header */}
+      <SectionHead
+        eyebrow="OPT Sales · Creative insights"
+        title="What's winning."
+        italicWord="winning"
+        tagline="Every ad, classified across eleven dimensions. Winners feed the script generator. Here's the pattern emerging from the last 18 weeks of testing."
+        gap={28}
+        right={
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="secondary" leftIcon={Icon.tag(13)}
+              onClick={handleTagMissing} disabled={tagging || loading}>
+              {tagging ? 'Tagging…' : 'Tag more ads'}
+            </Button>
+            <Button variant="primary" leftIcon={Icon.plus(13)}
+              onClick={() => setAddOrLinkOpen(true)}>
+              Add or link creative
+            </Button>
+          </div>
+        }
+      />
 
-      <AddOrLinkCreativeDrawer
-        open={addOrLinkOpen}
-        onClose={() => setAddOrLinkOpen(false)}
-        onSaved={() => { setAddOrLinkOpen(false); loadEverything() }} />
-      <CreativeEditDrawer
-        open={!!editingAd}
-        ad={editingAd}
-        onClose={() => { setEditingAd(null); loadEverything() }} />
-
-      {/* Per-offer switcher */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8,
-                    marginBottom: 20 }}>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                      textTransform: 'uppercase', color: 'var(--ink-4)', marginRight: 4 }}>Offer:</span>
-        <button onClick={() => setActiveOffer(null)}
-          style={offerBtnStyle(activeOffer === null)}>
-          All offers
-          <span style={offerCountStyle(activeOffer === null)}>{(perf || []).length}</span>
-        </button>
-        {offers.filter(o => !o.slug.includes('template')).map(o => {
-          const on = activeOffer === o.slug
-          const count = offerCounts[o.slug] || 0
-          return (
-            <button key={o.slug} onClick={() => setActiveOffer(o.slug)}
-              style={offerBtnStyle(on)}>
-              {o.name.replace('OPT ', '').replace(' (Direct Call Engine)', '')}
-              <span style={offerCountStyle(on)}>{count}</span>
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Headline KPI row — WIN RATE prominent, spend de-emphasized */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr', gap: 1,
-                    background: 'var(--rule)', border: '1px solid var(--rule)', marginBottom: 24 }}>
-        <BigKpi label="Win rate" value={fmtPct(stats.winRate, 1)} accent
-                sub={`${stats.winners} winners of ${stats.taggedAds} tagged ads`}
-                icon={<Trophy size={18} />} />
-        <Kpi label="Avg CPB on winners" value={fmt$(stats.avgCpbWinners)} sub="cost per booked call" icon={<Target size={14} />} />
-        <Kpi label="Total booked" value={fmtN(stats.totalBooked)} sub={`across ${stats.totalAds} ads`} icon={<Activity size={14} />} />
-        <Kpi label="Tag coverage" value={fmtPct(coverage.length ? coverage.reduce((s, c) => s + (parseFloat(c.coverage_pct) || 0), 0) / coverage.length : 0)} sub={`${coverage.length} attributes`} icon={<Sparkles size={14} />} />
-      </div>
-
-      {/* Filter bar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16,
-                    padding: '14px 18px', background: 'var(--paper)', border: '1px solid var(--rule)',
-                    marginBottom: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                        textTransform: 'uppercase', color: 'var(--ink-4)' }}>Window:</span>
-          {DATE_PRESETS.map(p => (
-            <button key={p.days} onClick={() => setPresetRange(p.days)}
-              style={{
-                padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
-                border: `1px solid ${preset === p.days ? 'var(--ink)' : 'var(--rule)'}`,
-                background: preset === p.days ? 'var(--ink)' : 'white',
-                color: preset === p.days ? 'var(--paper)' : 'var(--ink-3)',
-                cursor: 'pointer', borderRadius: 2,
-              }}>{p.label}</button>
-          ))}
-        </div>
-      </div>
+      {/* 2. Filter bar */}
+      <FilterBar
+        date={preset} dateOptions={DATE_PRESETS} onSetDate={setPresetRange}
+        offers={offers} activeOffers={activeOffers} onToggleOffer={toggleOffer}
+        lastSyncedAt={lastSyncedAt}
+      />
 
       {err && (
-        <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fca5a5',
-                      color: '#b53e3e', fontSize: 13, marginBottom: 16, borderRadius: 2 }}>
-          <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
+        <div style={{ marginTop: 16, padding: '12px 16px', background: '#fef2f2',
+                      border: '1px solid #fca5a5', color: '#b53e3e', fontSize: 13 }}>
+          {err}
         </div>
       )}
 
-      {/* Variables pulling ahead — THE headline insight */}
-      {variablesPullingAhead.length > 0 && (
-        <div style={{ marginBottom: 32 }}>
-          <div className="eyebrow eyebrow-accent" style={{ marginBottom: 12 }}>
-            <Zap size={13} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
-            Variables <em>pulling ahead</em>
-          </div>
-          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)',
-                      fontSize: 13, margin: '0 0 12px', maxWidth: 720 }}>
-            For each attribute, the value with the highest win-rate lift versus the overall
-            baseline ({fmtPct(stats.winRate, 1)}). If you write more scripts, bias toward these.
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-            {variablesPullingAhead.map((v, i) => (
-              <div key={i} style={{ padding: '18px 20px', background: 'white', border: '1px solid var(--rule)',
-                                    borderLeft: '4px solid var(--accent)', borderRadius: 2,
-                                    display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                                textTransform: 'uppercase', color: 'var(--ink-4)' }}>
-                    {v.attribute_label}
-                  </span>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)',
-                                background: 'var(--ink)', padding: '3px 8px', fontWeight: 700,
-                                letterSpacing: '0.08em', borderRadius: 2, whiteSpace: 'nowrap' }}>
-                    +{fmtPct(v.win_rate_lift, 1)}
-                  </span>
-                </div>
-                <div style={{ fontFamily: 'var(--serif)', fontSize: 22, color: 'var(--ink)',
-                              lineHeight: 1.15, fontWeight: 400 }}>
-                  {v.value}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between',
-                              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
-                              gap: 12, flexWrap: 'wrap', paddingTop: 8,
-                              borderTop: '1px solid var(--rule)' }}>
-                  <span>win rate <strong style={{ color: 'var(--ink)', fontSize: 13 }}>{fmtPct(v.win_rate, 1)}</strong></span>
-                  <span>{v.winners}/{v.ads} ads</span>
-                  {v.avg_cpb && <span>CPB <strong style={{ color: 'var(--ink)', fontSize: 13 }}>{fmt$(v.avg_cpb)}</strong></span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* 3. KPI grid — dominant */}
+      <div style={{ marginTop: 26, marginBottom: 44 }}>
+        <KPIDominant summary={summary} spark={winnerSpark} />
+      </div>
 
-      {/* All creatives grid (pinned winners + paginated grid + filter + sort) */}
-      <div style={{ marginBottom: 32 }}>
+      {/* 4. Variables pulling ahead — leaderboard */}
+      <div style={{ marginBottom: 44 }}>
+        <SectionHead
+          eyebrow="Section II"
+          title="Variables pulling ahead."
+          italicWord="pulling ahead"
+          tagline="For each attribute, the value beating the baseline win rate by the largest margin — ranked by lift, not by raw win rate."
+        />
+        <VariablesLeaderboard items={variablesAhead} baseline={summary.winRate} />
+      </div>
+
+      {/* 5. Top performing creatives — wrapped via CreativeGrid */}
+      <div style={{ marginBottom: 44 }}>
+        <SectionHead
+          eyebrow="Section III"
+          title="Top performing creatives."
+          italicWord="performing"
+          tagline={`${summary.winners} winners across the current window. Click any row to edit attributes — auto-saves on change.`}
+        />
         <CreativeGrid
           rows={filteredPerf || []}
           loading={loading}
@@ -379,246 +330,510 @@ export default function AdsInsights() {
         />
       </div>
 
-      {/* Cross-attribute heatmap */}
-      <AttributeHeatmap since={since} until={until} baseline={stats.winRate} />
+      {/* 6. Cross-attribute heatmap */}
+      <div style={{ marginBottom: 44 }}>
+        <AttributeHeatmap since={since} until={until} baseline={summary.winRate / 100} />
+      </div>
 
-      {/* Win rate by attribute charts */}
-      <div style={{ marginBottom: 32 }}>
-        <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--ink-3)' }}>
-          Win rate by attribute
+      {/* 7. Win rate by attribute — small multiples */}
+      <div style={{ marginBottom: 44 }}>
+        <SectionHead
+          eyebrow="Section IV"
+          title="Win rate by attribute."
+          italicWord="attribute"
+          tagline="Bars beating the dashed baseline are pulling weight. The yellow bar is the per-attribute leader."
+        />
+        <SmallMultiples stats={attrStats} baseline={summary.winRate} />
+      </div>
+
+      {/* 8. Proof character donut */}
+      {proofPie.some(r => r.attribute_value !== 'none' && Number(r.booked) > 0) && (
+        <div style={{ marginBottom: 44 }}>
+          <SectionHead
+            eyebrow="Section V"
+            title="Proof character mix."
+            italicWord="character"
+            tagline="Which on-camera character is doing the lifting — booked counts and ad volume by named proof."
+          />
+          <ProofDonut data={proofPie} />
         </div>
-        <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)',
-                    fontSize: 13, margin: '0 0 16px', maxWidth: 720 }}>
-          Each bar = % of ads with this attribute value that became winners. Yellow bars beat
-          the overall baseline (dashed line).
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 16 }}>
-          {PIVOTS.map(p => (
-            <WinRateChart key={p.attr}
-              label={p.label}
-              attr={p.attr}
-              rows={filteredPerf || []}
-              baseline={stats.winRate}
-              loading={loading} />
-          ))}
-          {/* Proof character pie — appears as a peer card only when data exists */}
-          {proofPie.filter(r => r.attribute_value !== 'none' && (Number(r.booked) || 0) > 0).length > 0 && (
-            <ProofPie rows={proofPie} loading={loading} />
+      )}
+
+      {/* 9. Footer */}
+      <div style={{
+        marginTop: 56, paddingTop: 24, borderTop: '1px solid var(--rule)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
+                      letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+          OPT · Creative testing · v22 · {summary.totalAds} ads in scope
+        </span>
+        <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13,
+                      color: 'var(--ink-3)' }}>
+          Data refreshed continuously via lib_ad_performance(since, until).
+        </span>
+      </div>
+
+      {/* Drawers */}
+      <AddOrLinkCreativeDrawer
+        open={addOrLinkOpen}
+        onClose={() => setAddOrLinkOpen(false)}
+        onSaved={() => { setAddOrLinkOpen(false); loadEverything() }} />
+      <CreativeEditDrawer
+        open={!!editingAd}
+        ad={editingAd}
+        onClose={() => { setEditingAd(null); loadEverything() }} />
+    </div>
+  )
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// FilterBar — date presets + offer chip toggles + last-synced ticker
+// ═════════════════════════════════════════════════════════════════════
+function FilterBar({ date, dateOptions, onSetDate, offers, activeOffers, onToggleOffer, lastSyncedAt }) {
+  const offerCounts = useMemo(() => {
+    // We don't compute counts here without access to perf — leave blank
+    return {}
+  }, [])
+
+  const liveOffers = offers.filter(o => !o.slug.includes('template'))
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 16,
+      padding: '12px 16px', background: 'var(--paper-2)',
+      border: '1px solid var(--rule)', flexWrap: 'wrap',
+    }}>
+      {/* Date segmented control */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Eyebrow>Window</Eyebrow>
+        <div style={{
+          display: 'inline-flex',
+          border: '1px solid var(--ink-3)',
+          background: 'white',
+          borderRadius: 2,
+        }}>
+          {dateOptions.map((opt, i) => {
+            const active = date === opt.id
+            return (
+              <button key={opt.id} onClick={() => onSetDate(opt)}
+                style={{
+                  fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+                  letterSpacing: '0.04em', textTransform: 'uppercase',
+                  padding: '6px 12px',
+                  background: active ? 'var(--ink)' : 'transparent',
+                  color: active ? 'var(--paper)' : 'var(--ink-2)',
+                  border: 'none',
+                  borderRight: i < dateOptions.length - 1 ? '1px solid var(--rule-2)' : 'none',
+                  cursor: 'pointer',
+                }}>
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div style={{ width: 1, height: 24, background: 'var(--rule-2)' }} />
+
+      {/* Offer chip toggles */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <Eyebrow>Offers</Eyebrow>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {liveOffers.map(o => {
+            const active = activeOffers.includes(o.slug)
+            return (
+              <button key={o.slug} onClick={() => onToggleOffer(o.slug)} style={{
+                fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em',
+                textTransform: 'uppercase', fontWeight: 500,
+                padding: '4px 10px',
+                background: active ? 'var(--ink)' : 'transparent',
+                color: active ? 'var(--paper)' : 'var(--ink-2)',
+                border: `1px solid ${active ? 'var(--ink)' : 'var(--rule-2)'}`,
+                borderRadius: 2, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                transition: 'all 0.12s cubic-bezier(0.2,0.7,0.2,1)',
+              }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: 6, flexShrink: 0,
+                  background: active ? 'var(--accent)' : offerColor(o.slug),
+                }} />
+                {o.name.replace('OPT ', '').replace(' (Direct Call Engine)', '').replace(' (placeholder)', '')}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div style={{ flex: 1 }} />
+
+      {/* Last-synced ticker */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--ink-4)' }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: 6, background: 'var(--up, #3e8a5e)',
+          boxShadow: '0 0 0 3px rgba(62,138,94,0.18)',
+        }} />
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em',
+                      textTransform: 'uppercase' }}>
+          {lastSyncedAt ? `Synced ${minutesAgo(lastSyncedAt)} ago` : 'Loading…'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function minutesAgo(date) {
+  const min = Math.max(0, Math.floor((Date.now() - date) / 60000))
+  if (min < 1) return 'just now'
+  if (min === 1) return '1 min'
+  return `${min} min`
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// KPIDominant — hero win-rate + 3 secondary tiles
+// ═════════════════════════════════════════════════════════════════════
+function KPIDominant({ summary, spark }) {
+  const isReal = summary.winners <= 2
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '1.6fr 1fr 1fr 1fr',
+      gap: 0,
+      border: '1px solid var(--rule)',
+      background: 'white',
+    }}>
+      {/* Hero — Win rate */}
+      <div style={{
+        padding: '28px 28px 24px',
+        borderRight: '1px solid var(--rule)',
+        background: 'white',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 6 }}>
+          <Eyebrow>Win rate</Eyebrow>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                        letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            {summary.weeksTracked}w tracked
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginTop: 4 }}>
+          <BigNumber value={summary.winRate.toFixed(1)} suffix="%" size={88} weight={400} />
+          {!isReal && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8 }}>
+              <Sparkline values={spark} width={120} height={36}
+                stroke="var(--ink)" fill="var(--paper-2)" accent="var(--accent)" />
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
+                            letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                12 weeks
+              </span>
+            </div>
+          )}
+        </div>
+        <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 14, color: 'var(--ink-3)' }}>
+            {summary.winners} of {summary.taggedAds} tagged ads
+          </span>
+          {isReal && (
+            <Pill tone="amber" size="sm">Below baseline — early window</Pill>
           )}
         </div>
       </div>
+
+      <SecondaryKPI
+        eyebrow="Avg CPB · winners"
+        value={<BigNumber value={summary.avgCpbWinners} prefix="$" size={42} />}
+        meta="winners only"
+      />
+      <SecondaryKPI
+        eyebrow="Booked"
+        value={<BigNumber value={summary.totalBooked} size={42} />}
+        meta={`${fmtMoneyFull(summary.totalSpend)} spend`}
+      />
+      <SecondaryKPI
+        eyebrow="Tag coverage"
+        value={<BigNumber value={summary.tagCoverage} suffix="%" size={42} />}
+        meta={`${summary.totalAds - summary.taggedAds} untagged`}
+        last
+      />
     </div>
   )
 }
 
-function offerBtnStyle(active) {
-  return {
-    padding: '8px 14px', fontFamily: 'var(--sans)', fontSize: 13, fontWeight: active ? 600 : 400,
-    border: `2px solid ${active ? 'var(--ink)' : 'var(--rule)'}`,
-    background: active ? 'var(--ink)' : 'white',
-    color: active ? 'var(--paper)' : 'var(--ink)',
-    cursor: 'pointer', borderRadius: 2,
-    display: 'inline-flex', alignItems: 'center', gap: 8,
-    transition: 'all 140ms ease',
-  }
-}
-function offerCountStyle(active) {
-  return {
-    padding: '1px 6px', fontFamily: 'var(--mono)', fontSize: 10,
-    background: active ? 'var(--accent)' : 'var(--paper)',
-    color: active ? 'var(--ink)' : 'var(--ink-4)',
-    border: `1px solid ${active ? 'var(--ink)' : 'var(--rule)'}`,
-    borderRadius: 2, fontWeight: 700,
-  }
-}
-
-function BigKpi({ label, value, sub, accent, icon }) {
+function SecondaryKPI({ eyebrow, value, meta, last }) {
   return (
-    <div style={{ padding: '20px 24px', background: 'white' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <span style={{ color: accent ? 'var(--accent)' : 'var(--ink-3)',
-                       background: accent ? 'var(--ink)' : 'transparent',
-                       padding: accent ? '4px 6px' : 0, borderRadius: 2,
-                       display: 'inline-flex' }}>
-          {icon}
-        </span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.14em',
-                      textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600 }}>
-          {label}
-        </span>
-      </div>
-      <div style={{ fontFamily: 'var(--serif)', fontSize: 48, color: 'var(--ink)',
-                    fontWeight: 400, lineHeight: 1, marginBottom: 8, fontVariantNumeric: 'tabular-nums' }}>
+    <div style={{
+      padding: '28px 22px 24px',
+      borderRight: last ? 'none' : '1px solid var(--rule)',
+      display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+      minHeight: 168,
+    }}>
+      <Eyebrow>{eyebrow}</Eyebrow>
+      <div style={{ display: 'flex', alignItems: 'flex-end', marginTop: 6 }}>
         {value}
       </div>
-      {sub && (
-        <div style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic', color: 'var(--ink-4)' }}>
-          {sub}
-        </div>
-      )}
+      <div style={{ marginTop: 12 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)' }}>{meta}</span>
+      </div>
     </div>
   )
 }
 
-function Kpi({ label, value, sub, icon }) {
-  return (
-    <div style={{ padding: '20px 22px', background: 'white' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-        <span style={{ color: 'var(--ink-4)' }}>{icon}</span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                      textTransform: 'uppercase', color: 'var(--ink-4)' }}>
-          {label}
-        </span>
-      </div>
-      <div style={{ fontFamily: 'var(--serif)', fontSize: 28, color: 'var(--ink)',
-                    fontWeight: 400, lineHeight: 1, marginBottom: 6, fontVariantNumeric: 'tabular-nums' }}>
-        {value}
-      </div>
-      {sub && (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
-                      letterSpacing: '0.04em' }}>
-          {sub}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function WinRateChart({ label, attr, rows, baseline, loading }) {
-  const data = useMemo(() => {
-    const groups = {}
-    rows.forEach(r => {
-      const v = r[attr]
-      if (!v) return
-      if (!groups[v]) groups[v] = { total: 0, winners: 0 }
-      groups[v].total++
-      if (r.effective_winner) groups[v].winners++
-    })
-    return Object.entries(groups)
-      .filter(([_, g]) => g.total >= 1)
-      .map(([value, g]) => {
-        const winRate = g.winners / g.total
-        // Only mark as "beats" when there's a real baseline to beat.
-        // If baseline is 0, any winner > 0 would technically pass — but that's
-        // misleading during cold-start (every non-zero bar would render yellow).
-        return {
-          value,
-          winRate,
-          ads: g.total,
-          winners: g.winners,
-          beatsBaseline: baseline > 0 && winRate > baseline,
-        }
-      })
-      .sort((a, b) => b.winRate - a.winRate)
-      .slice(0, 8)
-  }, [rows, attr, baseline])
-
-  // Smart Y-axis formatter — decimals when values are sub-1%
-  const maxRate = Math.max(...data.map(d => d.winRate), 0)
-  const yTickFormatter = useMemo(() => {
-    if (maxRate >= 0.1) return v => `${(v * 100).toFixed(0)}%`     // ≥10% range: whole percent
-    if (maxRate >= 0.02) return v => `${(v * 100).toFixed(1)}%`    // 2-10%: 1 decimal
-    return v => `${(v * 100).toFixed(2)}%`                          // <2%: 2 decimals
-  }, [maxRate])
-
-  const tooltip = ({ active, payload, label: tipLabel }) => {
-    if (!active || !payload?.length) return null
-    const d = payload[0].payload
+// ═════════════════════════════════════════════════════════════════════
+// VariablesLeaderboard — ranked list with lift bars
+// ═════════════════════════════════════════════════════════════════════
+function VariablesLeaderboard({ items, baseline }) {
+  if (items.length === 0) {
     return (
-      <div style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '10px 12px',
-                    fontFamily: 'var(--mono)', fontSize: 11, borderRadius: 2 }}>
-        <div style={{ fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase',
-                      color: 'var(--accent)', marginBottom: 4 }}>{tipLabel}</div>
-        <div style={{ fontFamily: 'var(--serif)', fontSize: 14 }}>
-          <strong>{fmtPct(d.winRate, 0)}</strong> win rate · {d.winners}/{d.ads} ads
-        </div>
+      <div style={{ padding: 32, background: 'white', border: '1px solid var(--rule)',
+                    color: 'var(--ink-4)', fontFamily: 'var(--serif)', fontStyle: 'italic',
+                    fontSize: 14, textAlign: 'center' }}>
+        Not enough tagged data yet. Tag more ads (button top-right) to reveal which
+        attribute values are pulling ahead.
       </div>
     )
   }
-
+  const maxLift = Math.max(...items.map(i => Math.abs(i.lift)), 0.1)
   return (
-    <div style={{ padding: 14, background: 'white', border: '1px solid var(--rule)', borderRadius: 2 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.14em',
-                      textTransform: 'uppercase', color: 'var(--ink)' }}>{label}</span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>
-          baseline {fmtPct(baseline, 0)}
-        </span>
-      </div>
-      {loading ? (
-        <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>Loading…</div>
-      ) : data.length === 0 ? (
-        <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>
+    <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+      {items.map((item, i) => {
+        const isTop = i === 0 && item.lift > 0
+        const barColor = isTop ? 'var(--accent)' : item.lift > 0 ? 'var(--ink)' : 'var(--ink-5)'
+        const widthPct = Math.max((Math.abs(item.lift) / maxLift) * 100, 4)
+        return (
+          <div key={item.attr} style={{
+            display: 'grid',
+            gridTemplateColumns: '36px 1.2fr 1fr 1.4fr 100px 80px',
+            alignItems: 'center', gap: 16,
+            padding: '16px 20px',
+            borderTop: i === 0 ? 'none' : '1px solid var(--rule)',
+            transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1)',
+          }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-5)',
+                          letterSpacing: '0.04em' }}>
+              {String(i + 1).padStart(2, '0')}
+            </span>
+            <div>
+              <Eyebrow style={{ marginBottom: 3 }}>{item.label}</Eyebrow>
+              <div style={{ fontFamily: 'var(--serif)', fontSize: 22, lineHeight: 1.1,
+                            letterSpacing: '-0.01em', color: 'var(--ink)' }}>
+                {humanAttr(item.value)}
+              </div>
+            </div>
+            <div>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
+                            letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                next best
+              </span>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--ink-2)', marginTop: 2 }}>
+                {item.runnerUpValue ? humanAttr(item.runnerUpValue) : '—'}
+                {item.runnerUpValue != null && (
+                  <span style={{ color: 'var(--ink-4)', marginLeft: 8 }}>
+                    {fmtPct(item.runnerUpWinRate)}
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* Lift bar */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+                              fontSize: 20, fontWeight: 400, color: 'var(--ink)',
+                              letterSpacing: '-0.01em' }}>
+                  {fmtLift(item.lift)}
+                </span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                              letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  lift vs {baseline.toFixed(1)}%
+                </span>
+              </div>
+              <div style={{ height: 4, background: 'var(--paper-2)', position: 'relative' }}>
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0,
+                  width: `${widthPct}%`, background: barColor,
+                  transition: 'width 0.5s cubic-bezier(0.2,0.7,0.2,1)',
+                }} />
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+                            fontSize: 16, color: 'var(--ink)' }}>
+                {item.winners}<span style={{ color: 'var(--ink-4)' }}>/{item.ads}</span>
+              </span>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                            letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                wins / ads
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+                            fontSize: 16, color: 'var(--ink)' }}>
+                {item.cpb != null ? `$${item.cpb}` : '—'}
+              </span>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                            letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                avg CPB
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// SmallMultiples — 6 mini bar charts in a grid
+// ═════════════════════════════════════════════════════════════════════
+function SmallMultiples({ stats, baseline }) {
+  return (
+    <div style={{
+      display: 'grid', gap: 1,
+      gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+      background: 'var(--rule)', border: '1px solid var(--rule)',
+    }}>
+      {PIVOTS.map(p => (
+        <MiniBarChart key={p.attr} attr={p.attr} label={p.label}
+          values={stats[p.attr] || []} baseline={baseline} />
+      ))}
+    </div>
+  )
+}
+
+function MiniBarChart({ attr, label, values, baseline }) {
+  const rows = values
+    .map(v => ({ ...v, winRate: v.ads > 0 ? (v.winners / v.ads) * 100 : 0 }))
+    .sort((a, b) => b.winRate - a.winRate)
+    .slice(0, 8)
+  if (rows.length === 0) {
+    return (
+      <div style={{ padding: '18px 20px', background: 'white' }}>
+        <Eyebrow>{label}</Eyebrow>
+        <div style={{ marginTop: 16, padding: 24, color: 'var(--ink-4)',
+                      fontFamily: 'var(--serif)', fontStyle: 'italic',
+                      fontSize: 13, textAlign: 'center' }}>
           No data.
         </div>
-      ) : (
-        <ResponsiveContainer width="100%" height={180}>
-          <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-            <XAxis dataKey="value" tick={{ fontSize: 10, fill: 'var(--ink-3)', fontFamily: 'var(--mono)' }}
-                  axisLine={false} tickLine={false} interval={0} angle={-15} textAnchor="end" height={50} />
-            <YAxis tickFormatter={yTickFormatter}
-                   tick={{ fontSize: 9, fill: 'var(--ink-4)', fontFamily: 'var(--mono)' }}
-                   axisLine={false} tickLine={false} width={44} allowDecimals={true} />
-            <Tooltip content={tooltip} cursor={{ fill: 'var(--paper)' }} />
-            <ReferenceLine y={baseline} stroke="var(--ink-4)" strokeDasharray="3 3" />
-            <Bar dataKey="winRate" radius={[2, 2, 0, 0]}>
-              {data.map((entry, i) => (
-                <Cell key={i} fill={entry.beatsBaseline ? 'var(--accent)' : 'var(--ink-3)'} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      )}
+      </div>
+    )
+  }
+  const max = Math.max(...rows.map(r => r.winRate), baseline * 1.5, 0.5)
+  const baselinePct = (baseline / max) * 100
+  return (
+    <div style={{ padding: '18px 20px', background: 'white' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
+        <Eyebrow>{label}</Eyebrow>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                      letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+          baseline {fmtPct(baseline)}
+        </span>
+      </div>
+      <div>
+        {rows.map((r, i) => {
+          const widthPct = (r.winRate / max) * 100
+          const beats = r.winRate > baseline
+          const color = beats && i === 0 ? 'var(--accent)' : beats ? 'var(--ink)' : 'var(--ink-5)'
+          return (
+            <div key={r.value} style={{
+              display: 'grid', gridTemplateColumns: '110px 1fr 56px',
+              alignItems: 'center', gap: 10, padding: '5px 0',
+            }}>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11,
+                            color: beats ? 'var(--ink-2)' : 'var(--ink-4)',
+                            textAlign: 'right',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {humanAttr(r.value)}
+              </span>
+              <div style={{ height: 14, background: 'var(--paper-2)', position: 'relative' }}>
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0,
+                  width: `${Math.max(widthPct, 1.5)}%`,
+                  background: color,
+                  transition: 'width 0.5s cubic-bezier(0.2,0.7,0.2,1)',
+                }} />
+                <div style={{
+                  position: 'absolute', top: -2, bottom: -2, left: `${baselinePct}%`,
+                  width: 1, borderLeft: '1px dashed var(--ink-4)',
+                }} />
+              </div>
+              <span style={{ fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums',
+                            fontSize: 11, color: beats ? 'var(--ink)' : 'var(--ink-4)',
+                            textAlign: 'right' }}>
+                {fmtPct(r.winRate)}
+              </span>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
 
-function ProofPie({ rows, loading }) {
-  const data = useMemo(() => {
-    return [...rows]
-      .filter(r => r.attribute_value !== 'none')
-      .sort((a, b) => (Number(b.booked) || 0) - (Number(a.booked) || 0))
-      .slice(0, 8)
-      .map(r => ({ name: r.attribute_value, value: Number(r.booked) || 0 }))
-  }, [rows])
+// ═════════════════════════════════════════════════════════════════════
+// ProofDonut — SVG donut + legend
+// ═════════════════════════════════════════════════════════════════════
+function ProofDonut({ data }) {
+  const filtered = data.filter(d => d.attribute_value !== 'none' && Number(d.booked) > 0)
+  const total = filtered.reduce((s, d) => s + Number(d.booked), 0)
+  if (total === 0) return null
 
-  const tooltip = ({ active, payload }) => {
-    if (!active || !payload?.length) return null
-    const d = payload[0]
-    return (
-      <div style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '8px 10px',
-                    fontFamily: 'var(--mono)', fontSize: 11, borderRadius: 2 }}>
-        <div style={{ fontSize: 9, color: 'var(--accent)', letterSpacing: '0.16em',
-                      textTransform: 'uppercase', marginBottom: 2 }}>{d.name}</div>
-        <div style={{ fontFamily: 'var(--serif)', fontSize: 14 }}>{d.value} booked</div>
-      </div>
-    )
+  const palette = ['var(--accent)', '#b53e3e', '#3e8a5e', '#5b3a8f', '#0e7c86', '#b86a0c', '#e0a93e', 'var(--ink-4)']
+  let acc = 0
+  const arcs = filtered.map((d, i) => {
+    const start = acc
+    const end = acc + Number(d.booked)
+    acc = end
+    const startA = (start / total) * 2 * Math.PI - Math.PI / 2
+    const endA = (end / total) * 2 * Math.PI - Math.PI / 2
+    return { name: d.attribute_value, ads: d.ads_count, booked: Number(d.booked), startA, endA, color: palette[i % palette.length] }
+  })
+
+  const r = 70, R = 100, cx = 110, cy = 110
+  function arcPath(a) {
+    const large = a.endA - a.startA > Math.PI ? 1 : 0
+    const sx = cx + R * Math.cos(a.startA), sy = cy + R * Math.sin(a.startA)
+    const ex = cx + R * Math.cos(a.endA), ey = cy + R * Math.sin(a.endA)
+    const sxi = cx + r * Math.cos(a.endA), syi = cy + r * Math.sin(a.endA)
+    const exi = cx + r * Math.cos(a.startA), eyi = cy + r * Math.sin(a.startA)
+    return `M${sx},${sy} A${R},${R} 0 ${large} 1 ${ex},${ey} L${sxi},${syi} A${r},${r} 0 ${large} 0 ${exi},${eyi} Z`
   }
 
-  if (loading || data.length === 0) return null  // pie hidden entirely when no data — parent gates rendering
+  const topShare = (arcs[0].booked / total * 100).toFixed(0)
 
   return (
-    <div style={{ padding: 14, background: 'white', border: '1px solid var(--rule)', borderRadius: 2 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.14em',
-                      textTransform: 'uppercase', color: 'var(--ink)' }}>Proof character</span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>
-          by booked
-        </span>
+    <Card padding={24} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 24, alignItems: 'center' }}>
+      <svg width={220} height={220}>
+        {arcs.map((a, i) => (
+          <path key={i} d={arcPath(a)} fill={a.color} stroke="white" strokeWidth={1.5} />
+        ))}
+        <text x={cx} y={cy - 6} textAnchor="middle" fontFamily="var(--serif)" fontSize="32" fill="var(--ink)">
+          {total}
+        </text>
+        <text x={cx} y={cy + 14} textAnchor="middle" fontFamily="var(--mono)" fontSize="10" fill="var(--ink-4)" letterSpacing="0.06em">
+          BOOKED
+        </text>
+      </svg>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ marginBottom: 6 }}>
+          <Eyebrow>Booked by proof character</Eyebrow>
+          <div style={{ marginTop: 4, fontFamily: 'var(--serif)', fontSize: 16,
+                        fontStyle: 'italic', color: 'var(--ink-3)' }}>
+            {humanAttr(arcs[0].name)} carries {topShare}% of bookings.
+          </div>
+        </div>
+        {arcs.map((a, i) => (
+          <div key={i} style={{
+            display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', gap: 10,
+            alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--rule)',
+          }}>
+            <span style={{ width: 10, height: 10, background: a.color }} />
+            <span style={{ fontFamily: 'var(--serif)', fontSize: 14 }}>{humanAttr(a.name)}</span>
+            <span style={{ fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums',
+                          fontSize: 11, color: 'var(--ink-4)' }}>{a.ads} ads</span>
+            <span style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums', fontSize: 16 }}>{a.booked}</span>
+          </div>
+        ))}
       </div>
-      <ResponsiveContainer width="100%" height={180}>
-        <PieChart>
-          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%"
-               innerRadius={36} outerRadius={68} paddingAngle={2}>
-            {data.map((_, i) => <Cell key={i} fill={PIE_PALETTE[i % PIE_PALETTE.length]} />)}
-          </Pie>
-          <Tooltip content={tooltip} />
-          <Legend wrapperStyle={{ fontFamily: 'var(--mono)', fontSize: 9,
-                                  letterSpacing: '0.06em', color: 'var(--ink-3)' }} />
-        </PieChart>
-      </ResponsiveContainer>
-    </div>
+    </Card>
   )
 }
