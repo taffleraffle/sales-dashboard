@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Grid3x3, AlertCircle } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import {
+  Eyebrow, fmtMoney, fmtPct as fmtPctEd,
+  ValueChip, attrColor, displayValue, tint, PALETTE,
+} from '../editorial/atoms'
 
 /*
-  Cross-attribute heatmap. Operator picks two attributes; the page calls
-  the lib_perf_heatmap(attr_a, attr_b, since, until) RPC and renders a
-  2D matrix of win rate per cell.
+  Cross-attribute heatmap — spreadsheet-style matrix.
 
-  Cells are color-encoded by win rate:
-   - Yellow (accent) when the cell beats the overall baseline
-   - Grey scale below baseline
-   - Empty (low opacity) when ads_count is 0 or 1 (too noisy)
+  Operator picks two attributes; we call lib_perf_heatmap(attr_a, attr_b, since, until)
+  and render a 2D grid. Rows = values of attr_a, cols = values of attr_b. Each cell
+  shows win rate + n/N + (on hover) avg CPB.
 
-  Reveals interactions like "diagnostic hook + capacity_mismatch pain
-  is doing 4x better than either alone."
+  Color logic:
+   - No data         → light paper, em-dash
+   - Low N (<2 ads)  → grey, very faded
+   - Below baseline  → light grey background, value in muted ink
+   - Beats baseline  → tinted yellow scaled to intensity (rate / maxRate)
 */
 
 const PIVOT_ATTRS = [
@@ -27,11 +30,6 @@ const PIVOT_ATTRS = [
   { key: 'format',           label: 'Format' },
 ]
 
-function fmt$(n) {
-  if (n == null || isNaN(n)) return '—'
-  if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`
-  return `$${n.toFixed(0)}`
-}
 function fmtPct(n) {
   if (n == null || isNaN(n)) return '—'
   return `${(n * 100).toFixed(1)}%`
@@ -46,168 +44,234 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
 
   useEffect(() => {
     if (attrA === attrB) return
-    // Cancellation guard — if operator changes dropdowns rapidly, only the
-    // latest dispatched request writes to state. Previous (stale) RPCs that
-    // happen to resolve later are ignored.
-    let current = true
+    let alive = true
     setLoading(true); setErr(null)
     supabase.rpc('lib_perf_heatmap', { attr_a: attrA, attr_b: attrB, since, until })
       .then(({ data, error }) => {
-        if (!current) return
+        if (!alive) return
         if (error) setErr(error.message)
         else setRows(data || [])
       })
-      .finally(() => { if (current) setLoading(false) })
-    return () => { current = false }
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
   }, [attrA, attrB, since, until])
 
-  // Build 2D structure: { [value_a]: { [value_b]: row } }
-  const { valuesA, valuesB, grid, maxWinRate } = useMemo(() => {
-    const aSet = new Set()
-    const bSet = new Set()
+  // Build 2D structure. Sort values by total ads (most-tested first).
+  const { valuesA, valuesB, grid, maxWinRate, totalsA, totalsB } = useMemo(() => {
+    const aTotals = {}, bTotals = {}
     const grid = {}
     let maxRate = 0
     rows.forEach(r => {
-      aSet.add(r.value_a); bSet.add(r.value_b)
+      const aN = Number(r.ads_count) || 0
+      aTotals[r.value_a] = (aTotals[r.value_a] || 0) + aN
+      bTotals[r.value_b] = (bTotals[r.value_b] || 0) + aN
       if (!grid[r.value_a]) grid[r.value_a] = {}
-      const rate = r.ads_count > 0 ? r.winners / r.ads_count : 0
-      grid[r.value_a][r.value_b] = { ...r, win_rate: rate }
+      const rate = aN > 0 ? (Number(r.winners) || 0) / aN : 0
+      grid[r.value_a][r.value_b] = { ...r, win_rate: rate, ads_count: aN }
       if (rate > maxRate) maxRate = rate
     })
-    return {
-      valuesA: Array.from(aSet).sort(),
-      valuesB: Array.from(bSet).sort(),
-      grid, maxWinRate: maxRate,
-    }
+    const valuesA = Object.keys(aTotals).sort((a, b) => aTotals[b] - aTotals[a])
+    const valuesB = Object.keys(bTotals).sort((a, b) => bTotals[b] - bTotals[a])
+    return { valuesA, valuesB, grid, maxWinRate: maxRate, totalsA: aTotals, totalsB: bTotals }
   }, [rows])
 
-  function cellColor(rate, adsCount) {
-    if (!adsCount || adsCount < 2) return { background: 'var(--paper)', color: 'var(--ink-4)', opacity: 0.4 }
-    if (rate <= 0) return { background: 'var(--paper)', color: 'var(--ink-4)' }
-    if (baseline > 0 && rate > baseline) {
-      // Yellow scale by intensity vs max
-      const intensity = maxWinRate > 0 ? rate / maxWinRate : 0
-      const opacity = 0.3 + intensity * 0.7  // 0.3 to 1.0
-      return { background: `rgba(244, 225, 74, ${opacity})`, color: 'var(--ink)', fontWeight: 600 }
+  function cellStyle(cell) {
+    const empty = !cell || cell.ads_count === 0
+    if (empty) return { background: 'var(--paper-2)', color: 'var(--ink-5)' }
+    const lowN = cell.ads_count < 2
+    if (lowN) return { background: 'var(--paper)', color: 'var(--ink-4)', opacity: 0.55 }
+    const beats = baseline > 0 && cell.win_rate > baseline
+    if (beats) {
+      const intensity = maxWinRate > 0 ? cell.win_rate / maxWinRate : 0
+      const alpha = 0.25 + intensity * 0.7
+      return {
+        background: `rgba(244, 225, 74, ${alpha.toFixed(2)})`,
+        color: 'var(--ink)',
+        fontWeight: 600,
+      }
     }
-    return { background: 'var(--paper)', color: 'var(--ink-3)' }
+    return { background: 'white', color: 'var(--ink-2)' }
   }
 
   return (
-    <div style={{ marginBottom: 32 }}>
-      <div className="eyebrow eyebrow-accent" style={{ marginBottom: 8 }}>
-        <Grid3x3 size={13} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
-        Cross-attribute <em>heatmap</em>
-      </div>
-      <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)',
-                  fontSize: 13, margin: '0 0 16px', maxWidth: 720 }}>
-        Find interactions. Pick two attributes — each cell shows the win rate of ads with that
-        combo. Yellow cells beat the overall baseline ({fmtPct(baseline)}). Faded cells have
-        fewer than 2 ads (too noisy to trust).
-      </p>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16,
-                    padding: '14px 18px', background: 'var(--paper)',
-                    border: '1px solid var(--rule)', marginBottom: 16 }}>
+    <div>
+      {/* Attribute pickers */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16,
+        padding: '14px 18px', background: 'var(--paper-2)',
+        border: '1px solid var(--rule)', marginBottom: 16,
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                        textTransform: 'uppercase', color: 'var(--ink-4)' }}>Rows:</span>
+          <Eyebrow>Rows</Eyebrow>
           <select value={attrA} onChange={e => setAttrA(e.target.value)}
-            style={{ padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 13,
-                    border: '1px solid var(--rule)', background: 'white', borderRadius: 2 }}>
+            style={{
+              padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 13,
+              border: '1px solid var(--rule-2)', background: 'white', borderRadius: 2,
+            }}>
             {PIVOT_ATTRS.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
           </select>
         </div>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)' }}>×</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                        textTransform: 'uppercase', color: 'var(--ink-4)' }}>Columns:</span>
+          <Eyebrow>Columns</Eyebrow>
           <select value={attrB} onChange={e => setAttrB(e.target.value)}
-            style={{ padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 13,
-                    border: '1px solid var(--rule)', background: 'white', borderRadius: 2 }}>
-            {PIVOT_ATTRS.filter(a => a.key !== attrA).map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
+            style={{
+              padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 13,
+              border: '1px solid var(--rule-2)', background: 'white', borderRadius: 2,
+            }}>
+            {PIVOT_ATTRS.filter(a => a.key !== attrA).map(a => (
+              <option key={a.key} value={a.key}>{a.label}</option>
+            ))}
           </select>
         </div>
+        <div style={{ flex: 1 }} />
+        <Legend baseline={baseline} />
       </div>
 
       {err && (
-        <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fca5a5',
-                      color: '#b53e3e', fontSize: 13, borderRadius: 2, marginBottom: 12 }}>
-          <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
-        </div>
+        <div style={{
+          padding: 12, background: tint(PALETTE.red, 0.08),
+          border: `1px solid ${tint(PALETTE.red, 0.3)}`,
+          color: PALETTE.red, fontSize: 13, marginBottom: 12,
+        }}>{err}</div>
       )}
 
       {loading ? (
-        <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-4)',
-                      fontStyle: 'italic', fontFamily: 'var(--serif)' }}>
+        <div style={{
+          padding: 64, textAlign: 'center', color: 'var(--ink-4)',
+          fontFamily: 'var(--serif)', fontStyle: 'italic',
+          background: 'white', border: '1px solid var(--rule)',
+        }}>
           Loading heatmap…
         </div>
       ) : valuesA.length === 0 || valuesB.length === 0 ? (
-        <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-4)',
-                      fontStyle: 'italic', fontFamily: 'var(--serif)',
-                      border: '1px dashed var(--rule)', borderRadius: 2 }}>
+        <div style={{
+          padding: 64, textAlign: 'center', color: 'var(--ink-4)',
+          fontFamily: 'var(--serif)', fontStyle: 'italic',
+          background: 'white', border: '1px dashed var(--rule)',
+        }}>
           No data for this attribute combo in the selected window.
         </div>
       ) : (
-        <div style={{ overflowX: 'auto', background: 'white', border: '1px solid var(--rule)',
-                      borderRadius: 2, padding: 8 }}>
-          <table style={{ borderCollapse: 'separate', borderSpacing: 2, fontSize: 11,
-                          fontFamily: 'var(--mono)' }}>
+        <div style={{ overflowX: 'auto', background: 'white', border: '1px solid var(--rule)' }}>
+          <table style={{
+            borderCollapse: 'collapse',
+            fontFamily: 'var(--sans)',
+            width: '100%',
+          }}>
             <thead>
               <tr>
-                <th style={{ padding: '6px 8px', textAlign: 'left', minWidth: 120,
-                            color: 'var(--ink-4)', fontWeight: 500, letterSpacing: '0.06em' }}>
-                  {/* Empty corner */}
+                <th style={{
+                  padding: '12px 14px',
+                  background: 'var(--paper-2)',
+                  borderBottom: '1px solid var(--rule)',
+                  borderRight: '1px solid var(--rule)',
+                  textAlign: 'left', position: 'sticky', left: 0, zIndex: 2,
+                  minWidth: 180,
+                }}>
+                  <Eyebrow>
+                    {PIVOT_ATTRS.find(a => a.key === attrA)?.label || attrA}
+                    <span style={{ color: 'var(--ink-4)' }}> × </span>
+                    {PIVOT_ATTRS.find(a => a.key === attrB)?.label || attrB}
+                  </Eyebrow>
                 </th>
                 {valuesB.map(b => (
                   <th key={b} style={{
-                    padding: '6px 8px', textAlign: 'center',
-                    fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
-                    letterSpacing: '0.06em', color: 'var(--ink-3)',
-                    writingMode: 'vertical-rl', transform: 'rotate(180deg)',
-                    minWidth: 50, height: 80,
-                    borderBottom: '2px solid var(--ink)',
-                  }}>{b}</th>
+                    padding: '10px 8px',
+                    background: 'var(--paper-2)',
+                    borderBottom: '1px solid var(--rule)',
+                    borderRight: '1px solid var(--rule)',
+                    minWidth: 110, verticalAlign: 'bottom', textAlign: 'center',
+                  }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <span style={{
+                        width: 8, height: 8, borderRadius: 8,
+                        background: attrColor(attrB, b),
+                      }} />
+                      <span style={{
+                        fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                        color: 'var(--ink-2)', letterSpacing: '0.02em',
+                        whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {displayValue(b)}
+                      </span>
+                      <span style={{
+                        fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
+                        letterSpacing: '0.04em', textTransform: 'uppercase',
+                      }}>
+                        n={totalsB[b]}
+                      </span>
+                    </div>
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {valuesA.map(a => (
+              {valuesA.map((a, rowIdx) => (
                 <tr key={a}>
-                  <td style={{ padding: '6px 8px', fontFamily: 'var(--mono)',
-                              fontWeight: 600, color: 'var(--ink-3)', letterSpacing: '0.04em',
-                              textAlign: 'right', borderRight: '2px solid var(--ink)' }}>
-                    {a}
-                  </td>
-                  {valuesB.map(b => {
+                  <th scope="row" style={{
+                    padding: '12px 14px',
+                    borderBottom: rowIdx < valuesA.length - 1 ? '1px solid var(--rule)' : 'none',
+                    borderRight: '1px solid var(--rule)',
+                    background: 'var(--paper-2)',
+                    textAlign: 'left', position: 'sticky', left: 0, zIndex: 1,
+                    verticalAlign: 'middle',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{
+                        width: 8, height: 8, borderRadius: 8,
+                        background: attrColor(attrA, a),
+                      }} />
+                      <span style={{
+                        fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink)',
+                        fontWeight: 500,
+                      }}>{displayValue(a)}</span>
+                      <span style={{
+                        fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
+                        letterSpacing: '0.04em', marginLeft: 'auto',
+                      }}>n={totalsA[a]}</span>
+                    </div>
+                  </th>
+                  {valuesB.map((b, colIdx) => {
                     const cell = grid[a]?.[b]
-                    const winRate = cell?.win_rate || 0
                     const ads = cell?.ads_count || 0
-                    const style = cellColor(winRate, ads)
+                    const winners = Number(cell?.winners || 0)
+                    const rate = cell?.win_rate || 0
+                    const cs = cellStyle(cell)
+                    const title = cell && ads > 0
+                      ? `${displayValue(a)} × ${displayValue(b)}\n${winners}/${ads} wins (${fmtPct(rate)})${cell.cost_per_booked ? ` · CPB ${fmtMoney(Number(cell.cost_per_booked))}` : ''}`
+                      : `${displayValue(a)} × ${displayValue(b)}: no data`
                     return (
-                      <td key={b}
-                        title={cell
-                          ? `${a} × ${b}: ${cell.winners}/${cell.ads_count} wins (${fmtPct(winRate)}) · avg CPB ${fmt$(cell.cost_per_booked)}`
-                          : 'no data'}
-                        style={{
-                          ...style,
-                          padding: '8px 6px', textAlign: 'center',
-                          minWidth: 60, height: 50,
-                          borderRadius: 2, cursor: 'help',
-                          fontFamily: 'var(--mono)', fontSize: 11,
-                          transition: 'transform 120ms ease',
-                        }}>
-                        {cell && ads >= 1 ? (
+                      <td key={b} title={title} style={{
+                        ...cs,
+                        padding: '10px 8px', textAlign: 'center',
+                        borderBottom: rowIdx < valuesA.length - 1 ? '1px solid var(--rule)' : 'none',
+                        borderRight: colIdx < valuesB.length - 1 ? '1px solid var(--rule)' : 'none',
+                        minWidth: 110, height: 64,
+                      }}>
+                        {ads === 0 ? (
+                          <span style={{ color: 'var(--ink-5)', fontSize: 12 }}>—</span>
+                        ) : (
                           <>
-                            <div style={{ fontWeight: style.fontWeight || 500, fontSize: 12 }}>
-                              {fmtPct(winRate)}
+                            <div style={{
+                              fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+                              fontSize: 18, fontWeight: cs.fontWeight || 500, lineHeight: 1,
+                            }}>
+                              {fmtPct(rate)}
                             </div>
-                            <div style={{ fontSize: 9, opacity: 0.7, marginTop: 2 }}>
-                              {cell.winners}/{ads}
+                            <div style={{
+                              fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums',
+                              fontSize: 10, color: 'var(--ink-4)', marginTop: 4,
+                              letterSpacing: '0.02em',
+                            }}>
+                              {winners}/{ads}
+                              {cell.cost_per_booked && (
+                                <span style={{ marginLeft: 6, color: 'var(--ink-4)' }}>
+                                  · ${Math.round(Number(cell.cost_per_booked))}
+                                </span>
+                              )}
                             </div>
                           </>
-                        ) : (
-                          <span style={{ opacity: 0.3 }}>·</span>
                         )}
                       </td>
                     )
@@ -218,6 +282,35 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
           </table>
         </div>
       )}
+    </div>
+  )
+}
+
+function Legend({ baseline }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14,
+      fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+      letterSpacing: '0.04em', textTransform: 'uppercase',
+    }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 14, height: 14, background: 'rgba(244,225,74,0.85)',
+                       border: '1px solid var(--rule)' }} />
+        Beats baseline
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 14, height: 14, background: 'white',
+                       border: '1px solid var(--rule)' }} />
+        Below baseline
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 14, height: 14, background: 'var(--paper-2)',
+                       border: '1px solid var(--rule)' }} />
+        Low sample
+      </span>
+      <span style={{ color: 'var(--ink-3)' }}>
+        baseline: {fmtPct(baseline)}
+      </span>
     </div>
   )
 }

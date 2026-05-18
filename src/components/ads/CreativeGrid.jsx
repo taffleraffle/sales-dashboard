@@ -3,19 +3,18 @@ import { Link } from 'react-router-dom'
 import AdThumbnail from './AdThumbnail'
 import {
   Eyebrow, Pill, Icon, fmtMoney, fmtNum, humanAttr, frameColor, frameTone,
+  ValueChip, attrColor, displayValue, PodiumRank, WinnerBadge,
 } from '../editorial/atoms'
 
 /*
-  All-creatives editorial table — implements the design from
-  design-pkg/ad-performance/project/creatives.jsx.
-
-  Replaces the previous card grid. Shows: rank · thumb (with frame stripe) ·
-  ad+campaign · attribute pills · booked · CPB · winner state.
-
-  Rank cells 1-3 (winners only) render as serif italic numbers in an accent
-  box — the editorial podium treatment.
-  Filter + sort + search controls in the header bar. Pagination 30/page.
+  All-creatives spreadsheet — explicit attribute columns (Hook · Frame · Mech ·
+  Pain · Proof) instead of pill tags. Wide table (~1280px), horizontal scroll
+  on narrower viewports.
 */
+
+// Grid columns: rank | thumb | ad+campaign | hook | frame | mech | pain | proof | booked | cpb | state
+const GRID_COLS = '40px 56px minmax(200px, 1.3fr) 110px 110px 110px 130px 100px 80px 80px 90px'
+const MIN_TABLE_WIDTH = 1180
 
 const PAGE_SIZE = 30
 
@@ -137,21 +136,26 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
         </span>
       </div>
 
-      {/* Table */}
-      <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+      {/* Table — horizontally scrollable; min-width keeps columns from collapsing */}
+      <div style={{ background: 'white', border: '1px solid var(--rule)', overflowX: 'auto' }}>
+        <div style={{ minWidth: MIN_TABLE_WIDTH }}>
         {/* Header */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '40px 72px minmax(260px, 2fr) minmax(280px, 2.4fr) 84px 84px 88px',
-          alignItems: 'center', gap: 14,
-          padding: '10px 18px',
+          gridTemplateColumns: GRID_COLS,
+          alignItems: 'end', gap: 12,
+          padding: '12px 18px',
           background: 'var(--paper-2)',
           borderBottom: '1px solid var(--rule)',
         }}>
           <Eyebrow>#</Eyebrow>
           <Eyebrow>Creative</Eyebrow>
           <Eyebrow>Ad · campaign</Eyebrow>
-          <Eyebrow>Tags</Eyebrow>
+          <Eyebrow>Hook</Eyebrow>
+          <Eyebrow>Frame</Eyebrow>
+          <Eyebrow>Mech</Eyebrow>
+          <Eyebrow>Pain angle</Eyebrow>
+          <Eyebrow>Proof</Eyebrow>
           <Eyebrow style={{ textAlign: 'right' }}>Booked</Eyebrow>
           <Eyebrow style={{ textAlign: 'right' }}>CPB</Eyebrow>
           <Eyebrow style={{ textAlign: 'right' }}>State</Eyebrow>
@@ -179,6 +183,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
               isLast={i === visible.length - 1} />
           )
         })}
+        </div>
       </div>
 
       {/* Load more */}
@@ -206,6 +211,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
 function CreativeRow({ c, rank, isPodium, onClick, isLast }) {
   const frame = c.message_frame
   const isWinner = !!c.effective_winner
+  const proof = c.proof_character && c.proof_character !== 'none' ? c.proof_character : null
 
   return (
     <div onClick={onClick}
@@ -213,63 +219,55 @@ function CreativeRow({ c, rank, isPodium, onClick, isLast }) {
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
       style={{
         display: 'grid',
-        gridTemplateColumns: '40px 72px minmax(260px, 2fr) minmax(280px, 2.4fr) 84px 84px 88px',
-        alignItems: 'center', gap: 14,
+        gridTemplateColumns: GRID_COLS,
+        alignItems: 'center', gap: 12,
         padding: '14px 18px',
+        paddingLeft: isWinner ? 15 : 18,
         borderBottom: isLast ? 'none' : '1px solid var(--rule)',
+        borderLeft: isWinner ? '3px solid var(--accent)' : '3px solid transparent',
         cursor: 'pointer',
         transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1)',
       }}>
       {/* Rank */}
       <div>
-        {isPodium ? (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 26, height: 26,
-            background: 'var(--accent)', color: 'var(--ink)',
-            fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500, fontStyle: 'italic',
-            fontVariantNumeric: 'tabular-nums',
-            border: '1px solid var(--accent-2)',
-          }}>
-            {rank}
-          </span>
-        ) : (
-          <span style={{ fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums',
-                        fontSize: 12, color: 'var(--ink-4)' }}>
-            {String(rank).padStart(2, '0')}
-          </span>
-        )}
+        <PodiumRank rank={rank} size="sm" />
       </div>
 
-      {/* Thumbnail with frame-color top stripe */}
-      <div style={{ position: 'relative' }}>
-        <AdThumbnail ad={c} size="md" />
+      {/* Thumbnail with frame-color top stripe + winner star */}
+      <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
+        <AdThumbnail ad={c} size="md" style={{
+          outline: isWinner ? '2px solid var(--accent)' : 'none',
+          outlineOffset: isWinner ? -2 : 0,
+        }} />
         {frame && (
           <span style={{
-            position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-            background: frameColor(frame),
+            position: 'absolute', top: 0, left: 0, right: 0, height: 4,
+            background: frameColor(frame), pointerEvents: 'none', zIndex: 1,
           }} />
         )}
         {isWinner && (
           <span style={{
-            position: 'absolute', inset: 0,
-            outline: '2px solid var(--accent)', outlineOffset: -2,
-            pointerEvents: 'none',
-          }} />
+            position: 'absolute', top: -6, right: -6,
+            width: 18, height: 18, background: 'var(--accent)',
+            border: '1.5px solid var(--paper)',
+            display: 'grid', placeItems: 'center',
+            color: 'var(--ink)', fontSize: 10, fontWeight: 700,
+            borderRadius: 18, zIndex: 2,
+          }}>★</span>
         )}
       </div>
 
       {/* Ad name + campaign */}
       <div style={{ minWidth: 0 }}>
         <div style={{
-          fontFamily: 'var(--serif)', fontSize: 17, lineHeight: 1.2,
-          color: 'var(--ink)',
+          fontFamily: 'var(--serif)', fontSize: 16, lineHeight: 1.2,
+          color: 'var(--ink)', fontWeight: 500,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {c.ad_name || c.ad_id}
         </div>
         <div style={{
-          fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
           marginTop: 3, letterSpacing: '0.02em',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
@@ -277,35 +275,20 @@ function CreativeRow({ c, rank, isPodium, onClick, isLast }) {
         </div>
       </div>
 
-      {/* Attribute pills */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-        {[
-          c.hook_type && { k: 'hook', v: c.hook_type },
-          c.message_frame && { k: 'frame', v: c.message_frame, tone: frameTone(c.message_frame) },
-          c.mechanism_reveal && { k: 'mech', v: c.mechanism_reveal },
-          c.pain_angle && { k: 'pain', v: c.pain_angle },
-          c.proof_character && c.proof_character !== 'none' && { k: 'proof', v: c.proof_character },
-        ].filter(Boolean).slice(0, 5).map((p, i) => (
-          <Pill key={i} tone={p.tone || 'default'} size="xs">
-            <span style={{ color: 'var(--ink-4)', marginRight: 4 }}>{p.k}</span>
-            {humanAttr(p.v)}
-          </Pill>
-        ))}
-        {!c.hook_type && !c.message_frame && !c.pain_angle && (
-          <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
-                        fontSize: 11, color: 'var(--ink-4)' }}>
-            click to tag →
-          </span>
-        )}
-      </div>
+      {/* Explicit attribute columns */}
+      <AttrCell attr="hook_type"        value={c.hook_type} />
+      <AttrCell attr="message_frame"    value={c.message_frame} />
+      <AttrCell attr="mechanism_reveal" value={c.mechanism_reveal} />
+      <AttrCell attr="pain_angle"       value={c.pain_angle} />
+      <AttrCell attr="proof_character"  value={proof} />
 
       {/* Booked */}
       <div style={{ textAlign: 'right' }}>
         <div style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
-                      fontSize: 22, lineHeight: 1, color: 'var(--ink)' }}>
+                      fontSize: 20, lineHeight: 1, color: 'var(--ink)', fontWeight: 500 }}>
           {fmtNum(c.booked)}
         </div>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginTop: 2 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginTop: 3 }}>
           {c.leads ? `${c.leads} leads` : ''}
         </div>
       </div>
@@ -313,10 +296,10 @@ function CreativeRow({ c, rank, isPodium, onClick, isLast }) {
       {/* CPB */}
       <div style={{ textAlign: 'right' }}>
         <div style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
-                      fontSize: 22, lineHeight: 1, color: 'var(--ink)' }}>
+                      fontSize: 20, lineHeight: 1, color: 'var(--ink)', fontWeight: 500 }}>
           {c.cost_per_booked != null ? fmtMoney(Number(c.cost_per_booked)) : '—'}
         </div>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginTop: 2 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginTop: 3 }}>
           {c.spend ? `${fmtMoney(Number(c.spend))} spent` : ''}
         </div>
       </div>
@@ -324,22 +307,31 @@ function CreativeRow({ c, rank, isPodium, onClick, isLast }) {
       {/* State */}
       <div style={{ textAlign: 'right' }}>
         {isWinner ? (
-          <span style={{
-            display: 'inline-block', padding: '3px 9px',
-            background: 'var(--accent)', color: 'var(--ink)',
-            border: '1px solid var(--accent-2)',
-            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
-            letterSpacing: '0.06em', textTransform: 'uppercase',
-          }}>
-            Winner
-          </span>
+          <WinnerBadge size="sm" />
         ) : (
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-5)',
-                        letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-            testing
+                        letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            Testing
           </span>
         )}
       </div>
+    </div>
+  )
+}
+
+// Single attribute cell — colored ValueChip if tagged, em-dash if not
+function AttrCell({ attr, value }) {
+  if (!value) {
+    return (
+      <span style={{
+        fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-5)',
+        textAlign: 'left',
+      }}>—</span>
+    )
+  }
+  return (
+    <div style={{ overflow: 'hidden' }}>
+      <ValueChip attr={attr} value={value} size="xs" />
     </div>
   )
 }

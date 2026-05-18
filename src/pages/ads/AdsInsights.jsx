@@ -6,6 +6,7 @@ import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawe
 import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
 import CreativeGrid from '../../components/ads/CreativeGrid'
 import AttributeHeatmap from '../../components/ads/AttributeHeatmap'
+import AttributesView from '../../components/ads/AttributesView'
 import AdThumbnail from '../../components/ads/AdThumbnail'
 import {
   Eyebrow, SectionHead, Button, Pill, Card, Sparkline, BigNumber, Icon,
@@ -392,12 +393,16 @@ export default function AdsInsights() {
       {activeTab === 'attributes' && (
         <div style={{ marginBottom: 44, marginTop: 8 }}>
           <SectionHead
-            eyebrow="Attributes"
-            title="Win rate by attribute."
-            italicWord="attribute"
-            tagline="Bars beating the dashed baseline are pulling weight. The yellow bar is the per-attribute leader. Each chart drills one dimension."
+            eyebrow="OPT Sales · Attribute review"
+            title="Pull any dimension apart."
+            italicWord="any"
+            tagline="Eleven attributes. For each, the values with statistical sample, ranked by what they’re producing. Pick an attribute on the left to drill in."
           />
-          <SmallMultiples stats={attrStats} baseline={summary.winRate} />
+          <AttributesView
+            filteredPerf={filteredPerf}
+            baseline={summary.winRate}
+            loading={loading}
+          />
         </div>
       )}
 
