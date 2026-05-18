@@ -25,14 +25,21 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const ALLOWED_ORIGINS = [
-  'https://sales-dashboard-ftct.onrender.com',
-  'http://localhost:5173',
-  'http://localhost:4173',
-]
+// Origin matcher — accept the prod Render URL, any *.onrender.com (for
+// preview deploys), and any localhost port (any dev server). Anything else
+// echoes the prod URL so the browser blocks the request cleanly.
+const PROD_ORIGIN = 'https://sales-dashboard-ftct.onrender.com'
+function isAllowedOrigin(origin: string): boolean {
+  if (!origin) return false
+  if (origin === PROD_ORIGIN) return true
+  if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/i.test(origin)) return true
+  if (/^http:\/\/localhost(:\d+)?$/i.test(origin)) return true
+  if (/^http:\/\/127\.0\.0\.1(:\d+)?$/i.test(origin)) return true
+  return false
+}
 function getCorsHeaders(req?: Request): Record<string, string> {
   const origin = req?.headers?.get('origin') || ''
-  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  const allowed = isAllowedOrigin(origin) ? origin : PROD_ORIGIN
   return {
     'Access-Control-Allow-Origin': allowed,
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -135,6 +142,7 @@ DO NOT:
 Return through the extract_scripts tool.`
 
 serve(async (req: Request) => {
+ try {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: getCorsHeaders(req) })
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: getCorsHeaders(req) })
   if (!ANTHROPIC_KEY) return new Response(JSON.stringify({ error: 'ANTHROPIC_API_KEY not set' }), { status: 500, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } })
@@ -206,4 +214,14 @@ serve(async (req: Request) => {
     model: ANTHROPIC_MODEL,
     usage: data.usage || null,
   }), { headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } })
+ } catch (err) {
+  // Catches loadVocab DB failures, Anthropic network errors, JSON parse
+  // failures on upstream response, anything else uncaught. Without this
+  // the function returns a Deno default 500 with no body, surfacing as
+  // an unhelpful "non-2xx" on the client.
+  const msg = err instanceof Error ? err.message : String(err)
+  console.error('creative-parse-doc unhandled:', msg)
+  return new Response(JSON.stringify({ error: `parse function crashed: ${msg.slice(0, 300)}` }),
+    { status: 500, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } })
+ }
 })

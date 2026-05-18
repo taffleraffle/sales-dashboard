@@ -30,14 +30,19 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 // ── CORS ──────────────────────────────────────────────────────────────
-const ALLOWED_ORIGINS = [
-  'https://sales-dashboard-ftct.onrender.com',
-  'http://localhost:5173',
-  'http://localhost:4173',
-]
+// Origin matcher — see creative-parse-doc/index.ts for the rationale.
+const PROD_ORIGIN = 'https://sales-dashboard-ftct.onrender.com'
+function isAllowedOrigin(origin: string): boolean {
+  if (!origin) return false
+  if (origin === PROD_ORIGIN) return true
+  if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/i.test(origin)) return true
+  if (/^http:\/\/localhost(:\d+)?$/i.test(origin)) return true
+  if (/^http:\/\/127\.0\.0\.1(:\d+)?$/i.test(origin)) return true
+  return false
+}
 function getCorsHeaders(req?: Request): Record<string, string> {
   const origin = req?.headers?.get('origin') || ''
-  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  const allowed = isAllowedOrigin(origin) ? origin : PROD_ORIGIN
   return {
     'Access-Control-Allow-Origin': allowed,
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -191,11 +196,12 @@ function buildToolSchema(vocab: Record<string, string[]>, n_concepts: number, of
 
 // ── Server ────────────────────────────────────────────────────────────
 serve(async (req) => {
-  const cors = handleCors(req)
-  if (cors) return cors
   const corsHeaders = getCorsHeaders(req)
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+ try {
+  const cors = handleCors(req)
+  if (cors) return cors
 
   if (!ANTHROPIC_KEY) return json({ error: 'ANTHROPIC_API_KEY not set' }, 500)
 
@@ -328,4 +334,9 @@ serve(async (req) => {
     save_error,
     model: ANTHROPIC_MODEL,
   })
+ } catch (err) {
+  const msg = err instanceof Error ? err.message : String(err)
+  console.error('creative-generate-script unhandled:', msg)
+  return json({ error: `generator crashed: ${msg.slice(0, 300)}` }, 500)
+ }
 })
