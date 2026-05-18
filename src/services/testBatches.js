@@ -156,6 +156,70 @@ export async function closeTestBatch(id) {
   return updateTestBatch(id, { closed_at: new Date().toISOString() })
 }
 
+/**
+ * Parse a free-form doc into N ad scripts via Claude. Client side: the
+ * operator has already extracted text (we accept text only; the upload
+ * modal handles file extraction via docExtract.js). Returns the parsed
+ * scripts BEFORE they're saved so the operator can review + edit.
+ */
+export async function parseScriptsFromDoc({ text, offer_slug = null }) {
+  if (!text?.trim()) throw new Error('text required')
+  const { data, error } = await supabase.functions.invoke('creative-parse-doc', {
+    body: { text, offer_slug },
+  })
+  if (error) throw new Error(error.message || 'creative-parse-doc failed')
+  if (data?.error) throw new Error(data.error)
+  return data?.scripts || []
+}
+
+/**
+ * Bulk-insert pre-parsed scripts into generated_scripts and attach them
+ * to a batch. Used by UploadScriptsModal after the operator approves the
+ * parsed output.
+ */
+export async function bulkSaveScriptsToBatch({ batchId, offer_slug, scripts }) {
+  if (!batchId) throw new Error('batchId required')
+  if (!scripts?.length) return { inserted: 0 }
+  const rows = scripts.map(s => ({
+    title: s.title || null,
+    body: s.body || '',
+    target_attributes: s.target_attributes || {},
+    status: 'draft',
+    offer_slug: offer_slug || null,
+    notes: s.reasoning || null,
+    test_batch_id: batchId,
+    generated_by_model: 'parsed-from-doc',
+  }))
+  const { data, error } = await supabase
+    .from('generated_scripts')
+    .insert(rows)
+    .select('id')
+  if (error) throw new Error(error.message)
+  return { inserted: data?.length || 0 }
+}
+
+/** Search existing scripts to attach to a batch. */
+export async function searchScriptsForAttach({ query = '', offer_slug = null, excludeBatchId = null, limit = 100 } = {}) {
+  let q = supabase
+    .from('generated_scripts')
+    .select('id, title, body, target_attributes, status, ad_id, test_batch_id, offer_slug, created_at')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (offer_slug) q = q.eq('offer_slug', offer_slug)
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  let rows = data || []
+  if (excludeBatchId) rows = rows.filter(r => r.test_batch_id !== excludeBatchId)
+  if (query.trim()) {
+    const Q = query.toLowerCase()
+    rows = rows.filter(r =>
+      (r.title || '').toLowerCase().includes(Q) ||
+      (r.body  || '').toLowerCase().includes(Q)
+    )
+  }
+  return rows
+}
+
 // ─── density helper ──────────────────────────────────────────────────
 const DIMENSIONS = ['hook_type', 'message_frame', 'mechanism_reveal', 'pain_angle', 'proof_character', 'funnel_stage']
 

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { ExternalLink, Trash2, Send, FileText, Plus } from 'lucide-react'
+import { ExternalLink, Trash2, Send, FileText, Plus, Upload, FilePlus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import Modal from '../editorial/Modal'
+import UploadScriptsModal from './UploadScriptsModal'
+import AddExistingScriptsModal from './AddExistingScriptsModal'
 import {
   Eyebrow, ValueChip, attrColor, displayValue, tint, PALETTE,
 } from '../editorial/atoms'
@@ -34,6 +36,8 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState(null)
   const [working, setWorking] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   useEffect(() => {
     if (!open || !batchId) return
@@ -201,27 +205,31 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
 
             {/* Scripts list */}
             <div style={{
-              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-              marginBottom: 12, gap: 12,
+              display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+              marginBottom: 12, gap: 12, flexWrap: 'wrap',
             }}>
               <div>
                 <Eyebrow>Scripts in this batch</Eyebrow>
                 <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-3)', marginTop: 2 }}>
-                  {batch.script_count === 0 && 'Empty. Generate scripts on the Generate page and save them into this batch.'}
+                  {batch.script_count === 0
+                    ? 'Empty. Add scripts using one of the three methods on the right.'
+                    : `${batch.script_count} script${batch.script_count === 1 ? '' : 's'} attached.`}
                 </div>
               </div>
-              <Link to="/sales/ads/creative/generate"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '6px 12px',
-                  fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
-                  letterSpacing: '0.06em', textTransform: 'uppercase',
-                  background: 'transparent', color: 'var(--ink-2)',
-                  border: '1px solid var(--rule-2)', textDecoration: 'none',
-                }}>
-                <Plus size={11} />
-                Generate scripts
-              </Link>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button onClick={() => setPickerOpen(true)}
+                  style={btnGhostInline} title="Attach scripts you already have">
+                  <FilePlus size={12} /> Pick existing
+                </button>
+                <button onClick={() => setUploadOpen(true)}
+                  style={btnGhostInline} title="Upload a doc — Claude splits it into scripts">
+                  <Upload size={12} /> Upload doc
+                </button>
+                <Link to="/sales/ads/creative/generate"
+                  style={{ ...btnGhostInline, textDecoration: 'none', color: 'var(--ink-2)' }}>
+                  <Plus size={12} /> Generate
+                </Link>
+              </div>
             </div>
             {batch.scripts.length > 0 && (
               <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
@@ -266,8 +274,30 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
           </>
         )}
       </div>
+
+      <UploadScriptsModal
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        batch={batch}
+        onSaved={() => { refresh(); onChanged?.() }}
+      />
+      <AddExistingScriptsModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        batch={batch}
+        onSaved={() => { refresh(); onChanged?.() }}
+      />
     </Modal>
   )
+}
+
+const btnGhostInline = {
+  display: 'inline-flex', alignItems: 'center', gap: 5,
+  padding: '6px 12px',
+  fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+  letterSpacing: '0.06em', textTransform: 'uppercase',
+  background: 'transparent', color: 'var(--ink-2)',
+  border: '1px solid var(--rule-2)', cursor: 'pointer',
 }
 
 function Stat({ label, value }) {
