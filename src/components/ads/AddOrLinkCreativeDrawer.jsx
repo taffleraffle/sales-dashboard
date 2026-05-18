@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { listGeneratedScripts, linkScriptToAd } from '../../services/scriptGenerator'
 import { tagAd, listOffers } from '../../services/creativeTagger'
 import { uploadAdVideoToStorage, transcribeUploadedAd } from '../../services/adAnalyst'
+import { extractAudioFromVideo, shouldExtractAudio } from '../../services/audioExtract'
 import AdThumbnail from './AdThumbnail'
 
 /*
@@ -159,8 +160,17 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
     if (!chosenAd || !uploadFile) return
     setWorking(true); setErr(null)
     try {
+      // Step 0: if the video is >20MB, extract audio in browser first
+      // so we stay under Whisper's 25MB API limit
+      let toUpload = uploadFile
+      if (shouldExtractAudio(uploadFile)) {
+        setWorkStage('extracting')
+        const { blob, suggestedName } = await extractAudioFromVideo(uploadFile)
+        toUpload = new File([blob], suggestedName, { type: 'audio/mp4' })
+      }
+
       setWorkStage('uploading')
-      const storagePath = await uploadAdVideoToStorage(chosenAd.ad_id, uploadFile)
+      const storagePath = await uploadAdVideoToStorage(chosenAd.ad_id, toUpload)
       setWorkStage('transcribing')
       await transcribeUploadedAd(chosenAd.ad_id, storagePath, { timeoutMs: 180_000 })
       setWorkStage('tagging')
@@ -193,8 +203,14 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
       })
 
       try {
+        let toUpload = q.file
+        if (shouldExtractAudio(q.file)) {
+          update({ status: 'extracting', error: null })
+          const { blob, suggestedName } = await extractAudioFromVideo(q.file)
+          toUpload = new File([blob], suggestedName, { type: 'audio/mp4' })
+        }
         update({ status: 'uploading', error: null })
-        const storagePath = await uploadAdVideoToStorage(q.chosenAd.ad_id, q.file)
+        const storagePath = await uploadAdVideoToStorage(q.chosenAd.ad_id, toUpload)
         update({ status: 'transcribing' })
         await transcribeUploadedAd(q.chosenAd.ad_id, storagePath, { timeoutMs: 180_000 })
         update({ status: 'tagging' })
@@ -447,12 +463,13 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
                         </div>
                       )}
 
-                      {uploadFile.size > 25 * 1024 * 1024 && (
-                        <div style={whisperWarnStyle}>
-                          <AlertCircle size={14} style={{ flexShrink: 0 }} />
+                      {shouldExtractAudio(uploadFile) && (
+                        <div style={extractHintStyle}>
+                          <Sparkles size={14} style={{ flexShrink: 0, color: 'var(--accent)' }} />
                           <span>
-                            File is {(uploadFile.size / 1024 / 1024).toFixed(1)}MB. OpenAI Whisper has a 25MB API limit.
-                            Upload may succeed but transcription will likely fail. Compress to 720p or extract audio first.
+                            File is {(uploadFile.size / 1024 / 1024).toFixed(1)}MB — over the 20MB threshold.
+                            We'll extract the audio track in your browser (~10-30s) before uploading,
+                            so Whisper can transcribe it cleanly.
                           </span>
                         </div>
                       )}
@@ -600,6 +617,13 @@ const whisperWarnStyle = {
   display: 'flex', alignItems: 'flex-start', gap: 8,
 }
 
+const extractHintStyle = {
+  marginTop: 10, padding: '8px 12px',
+  background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 2,
+  color: 'var(--ink-3)', fontSize: 12, lineHeight: 1.4,
+  display: 'flex', alignItems: 'flex-start', gap: 8,
+}
+
 function FieldLabel({ children, style: extra = {} }) {
   return (
     <div style={{
@@ -677,8 +701,9 @@ function AdPicker({ adQuery, setAdQuery, ads, searching, chosenAd, setChosenAd }
    instead of "Working…" forever. Stages: uploading → transcribing → tagging.
    For non-upload tabs we still get saving → tagging or just linking. */
 function StageIndicator({ stage, target }) {
-  // For the upload pipeline, show 3-step progress
-  const uploadStages = ['uploading', 'transcribing', 'tagging']
+  // For the upload pipeline, show progress through the stages.
+  // 'extracting' only appears when source file is >20MB.
+  const uploadStages = ['extracting', 'uploading', 'transcribing', 'tagging']
   if (uploadStages.includes(stage)) {
     const stageIdx = uploadStages.indexOf(stage)
     return (
@@ -808,7 +833,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
   }, [adQuery, pickerOpen])
 
   const sizeMB = item.file.size / 1024 / 1024
-  const tooLargeForWhisper = sizeMB > 25
+  const willExtract = sizeMB > 20
   const statusBadge = STATUS_STYLES[item.status] || STATUS_STYLES.pending
 
   return (
@@ -832,10 +857,10 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
                         letterSpacing: '0.04em', marginTop: 2 }}>
             {sizeMB.toFixed(1)} MB
-            {tooLargeForWhisper && (
-              <span style={{ marginLeft: 8, padding: '1px 6px', background: '#fef9e7',
-                            color: '#7a5c12', border: '1px solid #e0a93e', borderRadius: 2 }}>
-                may fail Whisper
+            {willExtract && (
+              <span style={{ marginLeft: 8, padding: '1px 6px', background: 'var(--paper)',
+                            color: 'var(--ink-3)', border: '1px solid var(--rule)', borderRadius: 2 }}>
+                will auto-extract audio
               </span>
             )}
           </div>
@@ -951,6 +976,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
 
 const STATUS_STYLES = {
   pending:      { bg: 'white',     fg: 'var(--ink-4)', accent: 'var(--rule)' },
+  extracting:   { bg: 'var(--ink)', fg: 'var(--accent)', accent: 'var(--ink)' },
   uploading:    { bg: 'var(--ink)', fg: 'var(--accent)', accent: 'var(--ink)' },
   transcribing: { bg: 'var(--ink)', fg: 'var(--accent)', accent: 'var(--ink)' },
   tagging:      { bg: 'var(--ink)', fg: 'var(--accent)', accent: 'var(--ink)' },
