@@ -503,6 +503,57 @@ function extractImageUrl(creative) {
   )
 }
 
+/**
+ * Download a Meta CDN thumbnail and store it in Supabase Storage so it
+ * stays accessible after Meta's signed URL expires (often within hours).
+ * Returns the permanent public URL, or null on any failure (caller falls
+ * back to the ephemeral Meta URL — it's still better than no thumbnail).
+ */
+async function persistThumbnailToStorage(adId, metaUrl) {
+  if (!adId || !metaUrl) return null
+  try {
+    // 1. Fetch the image bytes from Meta
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 12000)
+    let res
+    try { res = await fetch(metaUrl, { signal: controller.signal }) }
+    catch (e) { clearTimeout(timeout); console.warn('[thumb] fetch failed', adId, e.message); return null }
+    clearTimeout(timeout)
+    if (!res.ok) {
+      console.warn('[thumb] meta GET non-2xx', adId, res.status)
+      return null
+    }
+    const contentType = res.headers.get('content-type') || 'image/jpeg'
+    const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    if (bytes.length === 0 || bytes.length > 5 * 1024 * 1024) {
+      console.warn('[thumb] bad size', adId, bytes.length)
+      return null
+    }
+
+    // 2. Upload to ad-thumbnails bucket (upsert — replace if already there)
+    const path = `${adId}.${ext}`
+    const { error: upErr } = await supabase.storage
+      .from('ad-thumbnails')
+      .upload(path, bytes, {
+        contentType,
+        upsert: true,
+        cacheControl: '604800',  // 7 days — Meta art doesn't change once shipped
+      })
+    if (upErr) {
+      console.warn('[thumb] supabase upload failed', adId, upErr.message)
+      return null
+    }
+
+    // 3. Return our permanent public URL
+    const { data: pub } = supabase.storage.from('ad-thumbnails').getPublicUrl(path)
+    return pub?.publicUrl || null
+  } catch (e) {
+    console.warn('[thumb] unexpected', adId, e.message)
+    return null
+  }
+}
+
 function extractCreativeMeta(creative, raw) {
   if (!creative) return {}
   const linkData = creative.object_story_spec?.link_data
@@ -666,11 +717,14 @@ async function fetchAdCreatives(adIds) {
       const meta = extractCreativeMeta(creative, json)
       const asset_type = detectAssetType(creative)
       // Robust extraction across video, image, photo_data, carousel, and link ads.
-      // The legacy creative.thumbnail_url is hard-capped at 64×64 via the
-      // `stp=...p64x64` signed param, so we treat it as the last fallback only.
       const bestImage = extractImageUrl(creative)
-      const thumbnail_url = bestImage || creative?.thumbnail_url || null
-      const asset_url = bestImage
+
+      // Mirror the thumbnail to Supabase Storage. Meta's CDN URLs expire
+      // within hours; the stored URL keeps the <img> resolvable long-term.
+      // Falls back to the Meta URL if storage upload fails for any reason.
+      const persistedUrl = bestImage ? await persistThumbnailToStorage(ad_id, bestImage) : null
+      const finalAssetUrl = persistedUrl || bestImage || null
+      const finalThumbnailUrl = persistedUrl || bestImage || creative?.thumbnail_url || null
       const archived = ['DELETED', 'ARCHIVED'].includes(json.effective_status || json.status)
 
       return {
@@ -682,8 +736,8 @@ async function fetchAdCreatives(adIds) {
           effective_status: json.effective_status || null,
           creative_id: creative?.id || json.creative_id || null,
           asset_type,
-          asset_url,
-          thumbnail_url,
+          asset_url: finalAssetUrl,
+          thumbnail_url: finalThumbnailUrl,
           ...meta,
           raw_payload: json,
           last_synced_at: new Date().toISOString(),
