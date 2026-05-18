@@ -21,6 +21,9 @@ import { pickThumbnail } from '../../utils/adThumbnail'
 export default function CreativeEditDrawer({ open, ad, onClose }) {
   const [sourceVideoUrl, setSourceVideoUrl] = useState(null)
   const [videoChecked, setVideoChecked] = useState(false)
+  // Tracks <video> playback failure (e.g. Meta-hosted asset_url expired)
+  // so we can fall back to the thumbnail without leaving a broken-media icon.
+  const [videoError, setVideoError] = useState(false)
 
   // Escape-key close
   useEffect(() => {
@@ -35,23 +38,23 @@ export default function CreativeEditDrawer({ open, ad, onClose }) {
   useEffect(() => {
     if (!open || !ad?.ad_id) return
     let cancelled = false
-    setVideoChecked(false); setSourceVideoUrl(null)
+    setVideoChecked(false); setSourceVideoUrl(null); setVideoError(false)
     ;(async () => {
-      // Try common extensions in priority order. m4a (extracted audio) is
-      // last since it's audio-only, but still playable.
+      // Try all common extensions in parallel — far faster than sequential
+      // 5 round-trips when the file doesn't exist (common case).
       const exts = ['mp4', 'mov', 'webm', 'm4v', 'm4a']
-      for (const ext of exts) {
-        const path = `${ad.ad_id}.${ext}`
-        const { data } = await supabase.storage
-          .from('ad-source-videos')
-          .createSignedUrl(path, 60 * 60)  // 1-hour signed URL
-        if (cancelled) return
-        if (data?.signedUrl) {
-          setSourceVideoUrl(data.signedUrl)
-          break
-        }
-      }
-      if (!cancelled) setVideoChecked(true)
+      const results = await Promise.all(
+        exts.map(ext =>
+          supabase.storage.from('ad-source-videos')
+            .createSignedUrl(`${ad.ad_id}.${ext}`, 60 * 60)
+            .then(({ data }) => data?.signedUrl || null)
+            .catch(() => null)
+        )
+      )
+      if (cancelled) return
+      const found = results.find(Boolean)
+      setSourceVideoUrl(found || null)
+      setVideoChecked(true)
     })()
     return () => { cancelled = true }
   }, [open, ad?.ad_id])
@@ -124,7 +127,9 @@ export default function CreativeEditDrawer({ open, ad, onClose }) {
 
         {/* Body — scrollable. CreativeAttributesPanel has its own padding/borders. */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px' }}>
-          <CreativePreview ad={ad} sourceVideoUrl={sourceVideoUrl} videoChecked={videoChecked} />
+          <CreativePreview ad={ad} sourceVideoUrl={sourceVideoUrl}
+            videoChecked={videoChecked} videoError={videoError}
+            onVideoError={() => setVideoError(true)} />
           <CreativeAttributesPanel ad_id={ad.ad_id} />
         </div>
       </div>
@@ -142,7 +147,7 @@ export default function CreativeEditDrawer({ open, ad, onClose }) {
 
 /* Inline preview: plays video if we have one, otherwise shows the full-size
    thumbnail. Operator can review the creative before fixing attributes. */
-function CreativePreview({ ad, sourceVideoUrl, videoChecked }) {
+function CreativePreview({ ad, sourceVideoUrl, videoChecked, videoError, onVideoError }) {
   // Decide what to render:
   //  1. If we have an uploaded source video → <video src> (our copy, never expires before signed URL TTL)
   //  2. Else if ad.asset_type === 'video' && ad.asset_url → <video src> (Meta-hosted, may have expired)
@@ -162,12 +167,14 @@ function CreativePreview({ ad, sourceVideoUrl, videoChecked }) {
     )
   }
 
-  if (videoUrl) {
+  // Skip the <video> entirely if a prior load errored; fall through to thumb
+  if (videoUrl && !videoError) {
     return (
       <div style={{ marginTop: 20, marginBottom: 16 }}>
         <video controls preload="metadata"
           poster={thumb || undefined}
           src={videoUrl}
+          onError={onVideoError}
           style={{
             width: '100%', borderRadius: 2,
             border: '1px solid var(--rule)',

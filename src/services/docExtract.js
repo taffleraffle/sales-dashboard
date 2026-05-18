@@ -12,6 +12,7 @@
 */
 
 const SUPPORTED_EXTS = ['txt', 'md', 'markdown', 'pdf', 'docx']
+const MAX_DOC_SIZE_MB = 50  // 50MB — protects against accidental video drops crashing the tab
 
 export function isSupportedDocFile(file) {
   if (!file) return false
@@ -33,6 +34,13 @@ export function getSupportedExtensionsLabel() {
  */
 export async function extractTextFromFile(file, { onProgress } = {}) {
   if (!file) throw new Error('extractTextFromFile: file required')
+  if (file.size > MAX_DOC_SIZE_MB * 1024 * 1024) {
+    throw new Error(
+      `File is ${(file.size / 1024 / 1024).toFixed(0)}MB. Documents over ${MAX_DOC_SIZE_MB}MB ` +
+      `cannot be processed in the browser without crashing. Paste the transcript manually instead, ` +
+      `or split the document into smaller files.`
+    )
+  }
   const ext = (file.name.split('.').pop() || '').toLowerCase()
 
   let text = ''
@@ -78,7 +86,18 @@ async function extractFromPdf(file, onProgress) {
 
   onProgress?.('Parsing PDF…')
   const arrayBuffer = await file.arrayBuffer()
-  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise
+  let pdf
+  try {
+    pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise
+  } catch (e) {
+    if (e?.name === 'PasswordException') {
+      throw new Error('This PDF is password-protected. Remove the password before uploading, or paste the transcript manually.')
+    }
+    if (e?.name === 'InvalidPDFException') {
+      throw new Error('This file is not a valid PDF (or is corrupted). Try a different export.')
+    }
+    throw e
+  }
   const pages = []
   for (let i = 1; i <= pdf.numPages; i++) {
     onProgress?.(`Extracting page ${i} of ${pdf.numPages}…`)

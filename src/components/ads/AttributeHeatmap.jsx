@@ -46,13 +46,19 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
 
   useEffect(() => {
     if (attrA === attrB) return
+    // Cancellation guard — if operator changes dropdowns rapidly, only the
+    // latest dispatched request writes to state. Previous (stale) RPCs that
+    // happen to resolve later are ignored.
+    let current = true
     setLoading(true); setErr(null)
     supabase.rpc('lib_perf_heatmap', { attr_a: attrA, attr_b: attrB, since, until })
       .then(({ data, error }) => {
+        if (!current) return
         if (error) setErr(error.message)
         else setRows(data || [])
       })
-      .finally(() => setLoading(false))
+      .finally(() => { if (current) setLoading(false) })
+    return () => { current = false }
   }, [attrA, attrB, since, until])
 
   // Build 2D structure: { [value_a]: { [value_b]: row } }

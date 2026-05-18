@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, ReferenceLine,
 } from 'recharts'
-import { Trophy, AlertCircle, RefreshCw, Sparkles, Target, Activity, TrendingUp, Zap, Plus } from 'lucide-react'
+import { Trophy, AlertCircle, RefreshCw, Sparkles, Target, Activity, Zap, Plus } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { tagMissing, listOffers, getAttributeCoverage } from '../../services/creativeTagger'
 import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
@@ -119,6 +119,16 @@ export default function AdsInsights() {
     } catch {}
   }, [activeOffer])
 
+  // Validate active offer against loaded offers list. If localStorage points
+  // at a slug that no longer exists (offer was renamed/deleted), reset to
+  // null so the operator doesn't see a blank page with no escape hatch.
+  useEffect(() => {
+    if (!offers.length || !activeOffer) return
+    if (!offers.find(o => o.slug === activeOffer)) {
+      setActiveOffer(null)
+    }
+  }, [offers]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const filteredPerf = useMemo(() => {
     if (!perf) return null
     if (!activeOffer) return perf
@@ -145,22 +155,6 @@ export default function AdsInsights() {
       totalSpend,
       totalBooked,
     }
-  }, [filteredPerf])
-
-  // Top performing creatives — sorted by booked, then CPB
-  const topCreatives = useMemo(() => {
-    const rows = filteredPerf || []
-    return [...rows]
-      .filter(r => (Number(r.booked) || 0) > 0)
-      .sort((a, b) => {
-        const ba = Number(a.booked) || 0
-        const bb = Number(b.booked) || 0
-        if (bb !== ba) return bb - ba
-        const ca = Number(a.cost_per_booked) || Infinity
-        const cb = Number(b.cost_per_booked) || Infinity
-        return ca - cb
-      })
-      .slice(0, 10)
   }, [filteredPerf])
 
   // Variables pulling ahead — for each attribute, the value with highest win rate
@@ -383,111 +377,6 @@ export default function AdsInsights() {
           onClickRow={r => setEditingAd(r)}
           pinnedTopN={3}
         />
-      </div>
-
-      {/* (legacy top-creatives table now replaced by CreativeGrid above) */}
-      <div style={{ display: 'none' }}>
-        <div className="eyebrow eyebrow-accent" style={{ marginBottom: 12 }}>
-          <TrendingUp size={13} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
-          Top <em>performing</em> creatives
-        </div>
-        <div style={{ background: 'white', border: '1px solid var(--rule)', borderRadius: 2 }}>
-          {topCreatives.length === 0 ? (
-            <div style={{ padding: 36, color: 'var(--ink-4)', fontStyle: 'italic',
-                         fontFamily: 'var(--serif)', textAlign: 'center', fontSize: 14 }}>
-              No booked calls attributed to any ads in this window yet.
-            </div>
-          ) : (
-            <table style={{ width: '100%', fontSize: 12, fontFamily: 'var(--sans)' }}>
-              <thead>
-                <tr style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                            textTransform: 'uppercase', color: 'var(--ink-4)',
-                            borderBottom: '1px solid var(--rule)' }}>
-                  <th style={{ textAlign: 'left', padding: '12px 0 12px 16px', width: 56 }}>#</th>
-                  <th style={{ textAlign: 'left', padding: '12px 0', width: 72 }}></th>
-                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 12px' }}>Ad name</th>
-                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Attributes</th>
-                  <th style={{ textAlign: 'right', padding: '12px 16px 12px 0' }}>Booked</th>
-                  <th style={{ textAlign: 'right', padding: '12px 16px 12px 0' }}>CPB</th>
-                  <th style={{ textAlign: 'right', padding: '12px 18px 12px 0' }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {topCreatives.map((r, i) => {
-                  const isPodium = i < 3
-                  return (
-                    <tr key={r.ad_id}
-                      onClick={() => setEditingAd(r)}
-                      style={{
-                        borderTop: '1px solid var(--rule)',
-                        cursor: 'pointer',
-                        transition: 'background 120ms ease',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--paper)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                      <td style={{ padding: '12px 0 12px 16px', width: 56 }}>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          width: 32, height: 32, borderRadius: 16,
-                          fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700,
-                          background: isPodium ? 'var(--accent)' : 'var(--paper)',
-                          color: isPodium ? 'var(--ink)' : 'var(--ink-4)',
-                          border: isPodium ? '1px solid var(--ink)' : '1px solid var(--rule)',
-                        }}>
-                          {i + 1}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 0', width: 72 }}>
-                        <AdThumbnail ad={r} size="md" />
-                      </td>
-                      <td style={{ padding: '12px 14px 12px 12px', maxWidth: 280, overflow: 'hidden',
-                                  textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <div style={{ color: 'var(--ink)', fontWeight: 500, marginBottom: 2 }}>
-                          {r.ad_name || r.ad_id}
-                        </div>
-                        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
-                                      letterSpacing: '0.04em' }}>
-                          {r.campaign_name || '—'}
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px 14px 12px 0' }}>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {[r.hook_type, r.mechanism_reveal, r.pain_angle, r.proof_character]
-                            .filter(v => v && v !== 'none').map((v, j) => (
-                              <span key={j} style={{ padding: '2px 7px', background: 'var(--paper)',
-                                                    fontFamily: 'var(--mono)', fontSize: 10,
-                                                    color: 'var(--ink-3)', border: '1px solid var(--rule)',
-                                                    borderRadius: 2 }}>{v}</span>
-                            ))}
-                          {!r.hook_type && !r.mechanism_reveal && !r.pain_angle && (
-                            <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
-                                          fontSize: 11, color: 'var(--ink-4)' }}>
-                              click to tag →
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '12px 16px 12px 0',
-                                  fontWeight: 700, color: 'var(--ink)', fontSize: 15 }}>{fmtN(r.booked)}</td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '12px 16px 12px 0',
-                                  color: 'var(--ink-3)' }}>{fmt$(r.cost_per_booked)}</td>
-                      <td style={{ textAlign: 'right', padding: '12px 18px 12px 0' }}>
-                        {r.effective_winner && (
-                          <span style={{ padding: '3px 8px', background: 'var(--accent)',
-                                        fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
-                                        letterSpacing: '0.12em', textTransform: 'uppercase',
-                                        borderRadius: 2 }}>
-                            Winner
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
       </div>
 
       {/* Cross-attribute heatmap */}

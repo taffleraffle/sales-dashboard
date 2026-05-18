@@ -83,9 +83,17 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
     return list
   }, [rows, search, filter, sort])
 
-  const pinned = processed.slice(0, pinnedTopN)
-  const remainder = processed.slice(pinnedTopN, pageSize)
-  const hasMore = processed.length > pageSize
+  // Pinned strip behavior:
+  //  - When no filter/search is active: pinned = top N from processed list (intuitive default)
+  //  - When filter/search active: hide the pinned strip entirely. "Top performers"
+  //    is a global concept; showing 2 winners as "top" when there are 0 results below
+  //    is more confusing than helpful.
+  const filterActive = filter !== 'all' || search.trim().length > 0
+  const pinned = filterActive ? [] : processed.slice(0, pinnedTopN)
+  const remainderStart = filterActive ? 0 : pinnedTopN
+  const remainder = processed.slice(remainderStart, remainderStart + pageSize)
+  const totalAfterPinned = processed.length - remainderStart
+  const hasMore = totalAfterPinned > pageSize
 
   return (
     <div>
@@ -187,7 +195,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
       )}
 
       {/* Load more */}
-      {hasMore && pageSize < processed.length && (
+      {hasMore && (
         <div style={{ marginTop: 20, textAlign: 'center' }}>
           <button onClick={() => setPageSize(p => p + PAGE_SIZE)}
             style={{
@@ -196,9 +204,9 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
               border: '1px solid var(--ink)', background: 'white', color: 'var(--ink)',
               cursor: 'pointer', borderRadius: 2,
             }}>
-            Load {Math.min(PAGE_SIZE, processed.length - pageSize)} more
+            Load {Math.min(PAGE_SIZE, totalAfterPinned - pageSize)} more
             <span style={{ marginLeft: 6, color: 'var(--ink-4)' }}>
-              ({pageSize} of {processed.length})
+              ({pageSize} of {totalAfterPinned})
             </span>
           </button>
         </div>
