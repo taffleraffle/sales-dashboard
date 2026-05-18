@@ -528,13 +528,19 @@ function WinRateChart({ label, attr, rows, baseline, loading }) {
     })
     return Object.entries(groups)
       .filter(([_, g]) => g.total >= 1)
-      .map(([value, g]) => ({
-        value,
-        winRate: g.winners / g.total,
-        ads: g.total,
-        winners: g.winners,
-        beatsBaseline: (g.winners / g.total) > baseline,
-      }))
+      .map(([value, g]) => {
+        const winRate = g.winners / g.total
+        // Only mark as "beats" when there's a real baseline to beat.
+        // If baseline is 0, any winner > 0 would technically pass — but that's
+        // misleading during cold-start (every non-zero bar would render yellow).
+        return {
+          value,
+          winRate,
+          ads: g.total,
+          winners: g.winners,
+          beatsBaseline: baseline > 0 && winRate > baseline,
+        }
+      })
       .sort((a, b) => b.winRate - a.winRate)
       .slice(0, 8)
   }, [rows, attr, baseline])

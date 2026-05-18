@@ -8,17 +8,17 @@
 // Inputs (POST JSON):
 //   {
 //     offer_slug: string,                     // FK to offers.slug
-//     n_concepts: number,                     // 1-10
+//     n_concepts: number,                     // 1-30
 //     target_attributes?: {                   // all optional — used to bias generation
-//       hook_type?: string,
-//       message_frame?: string,
-//       mechanism_reveal?: string,
-//       pain_angle?: string,
-//       funnel_stage?: string,
-//       awareness_level?: string,
-//       length_bucket?: string,
+//       hook_type?: string | string[],        // single value = constrain; array = distribute across
+//       message_frame?: string | string[],
+//       mechanism_reveal?: string | string[],
+//       pain_angle?: string | string[],
+//       funnel_stage?: string | string[],
+//       awareness_level?: string | string[],
+//       length_bucket?: string | string[],
 //     },
-//     save_as_drafts?: boolean,              // if true, insert as library.variants(status=planned)
+//     save_as_drafts?: boolean,              // if true, insert into generated_scripts
 //   }
 //
 // Response:
@@ -145,7 +145,15 @@ async function loadWinnerPatterns(supabase: any, offer_slug: string) {
   return (data || []).slice(0, 10)
 }
 
-function buildToolSchema(vocab: Record<string, string[]>, n_concepts: number) {
+function buildToolSchema(vocab: Record<string, string[]>, n_concepts: number, offerProofChars: string[] = []) {
+  // proof_character enum: union of global vocab + offer's default_proof_characters
+  // (real client names like "Eric", "Adam" may not be in the global vocab table)
+  const proofEnum = Array.from(new Set([
+    ...(vocab.proof_character || []),
+    ...offerProofChars.map(c => c.toLowerCase()),
+    ...offerProofChars,  // also include original casing in case operator uses 'Eric' not 'eric'
+  ]))
+
   const scriptItem = {
     type: 'object',
     properties: {
@@ -156,7 +164,7 @@ function buildToolSchema(vocab: Record<string, string[]>, n_concepts: number) {
       hook_type:        { type: 'string', enum: vocab.hook_type || [] },
       mechanism_reveal: { type: 'string', enum: vocab.mechanism_reveal || [] },
       pain_angle:       { type: 'string', enum: vocab.pain_angle || [] },
-      proof_character:  { type: 'string', enum: vocab.proof_character || [] },
+      proof_character:  { type: 'string', enum: proofEnum },
       awareness_level:  { type: 'string', enum: vocab.awareness_level || [] },
       funnel_stage:     { type: 'string', enum: vocab.funnel_stage || [] },
       body:             { type: 'string', description: 'Full script text. Use paragraph breaks for sentence groups. No markdown.' },
@@ -252,7 +260,7 @@ serve(async (req) => {
     `\nGenerate exactly ${n_concepts} script concepts. Return via the generate_scripts tool.`,
   ].filter(Boolean).join('\n')
 
-  const tool = buildToolSchema(vocab, n_concepts)
+  const tool = buildToolSchema(vocab, n_concepts, offer.default_proof_characters || [])
 
   const upstream = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',

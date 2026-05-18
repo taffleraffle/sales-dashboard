@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Check, AlertCircle, Search, Link2, FileText } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { listGeneratedScripts, linkScriptToAd } from '../../services/scriptGenerator'
@@ -17,35 +17,34 @@ import { listGeneratedScripts, linkScriptToAd } from '../../services/scriptGener
 */
 
 export default function AssignCreativeModal({ open, onClose, onLinked, presetScript }) {
-  const [step, setStep] = useState(1)  // 1=pick script, 2=pick ad
+  const [step, setStep] = useState(1)
   const [scripts, setScripts] = useState([])
   const [chosenScript, setChosenScript] = useState(null)
   const [adQuery, setAdQuery] = useState('')
   const [ads, setAds] = useState([])
   const [chosenAd, setChosenAd] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [searching, setSearching] = useState(false)
   const [linking, setLinking] = useState(false)
   const [err, setErr] = useState(null)
 
+  // Track presetScript identity by id to avoid object-reference re-init
+  const presetScriptId = presetScript?.id || null
+
   useEffect(() => {
     if (!open) return
-    setStep(presetScript ? 2 : 1)
+    setStep(presetScriptId ? 2 : 1)
     setErr(null)
-    if (presetScript) {
-      setChosenScript(presetScript)
-    } else {
-      setChosenScript(null)
-    }
+    setChosenScript(presetScript || null)
     setChosenAd(null); setAdQuery('')
-    // Load both lists in parallel
     setLoading(true)
     Promise.all([
       listGeneratedScripts({ limit: 50 }),
-      // Recent ads, prefer non-linked
+      // Initial ad list — 30 most recent. Search query refines via server-side ilike.
       supabase.from('ads')
         .select('ad_id, ad_name, campaign_name, last_synced_at')
         .order('last_synced_at', { ascending: false, nullsFirst: false })
-        .limit(100),
+        .limit(30),
     ])
       .then(([s, a]) => {
         setScripts(s.filter(x => x.status !== 'shipped'))
@@ -53,17 +52,41 @@ export default function AssignCreativeModal({ open, onClose, onLinked, presetScr
       })
       .catch(e => setErr(e.message))
       .finally(() => setLoading(false))
-  }, [open, presetScript])
+  }, [open, presetScriptId])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filteredAds = useMemo(() => {
-    const q = adQuery.trim().toLowerCase()
-    if (!q) return ads.slice(0, 30)
-    return ads.filter(a =>
-      (a.ad_name || '').toLowerCase().includes(q) ||
-      (a.campaign_name || '').toLowerCase().includes(q) ||
-      (a.ad_id || '').toLowerCase().includes(q)
-    ).slice(0, 30)
-  }, [ads, adQuery])
+  // Debounced server-side ad search
+  useEffect(() => {
+    if (!open || step !== 2) return
+    const q = adQuery.trim()
+    if (!q) {
+      // Empty query → re-load recent ads
+      setSearching(true)
+      supabase.from('ads')
+        .select('ad_id, ad_name, campaign_name, last_synced_at')
+        .order('last_synced_at', { ascending: false, nullsFirst: false })
+        .limit(30)
+        .then(({ data }) => setAds(data || []))
+        .finally(() => setSearching(false))
+      return
+    }
+    const handle = setTimeout(() => {
+      setSearching(true)
+      // ilike server-side — searches the full ads table, not just the 30 loaded
+      supabase.from('ads')
+        .select('ad_id, ad_name, campaign_name, last_synced_at')
+        .or(`ad_name.ilike.%${q}%,campaign_name.ilike.%${q}%,ad_id.ilike.%${q}%`)
+        .order('last_synced_at', { ascending: false, nullsFirst: false })
+        .limit(30)
+        .then(({ data, error }) => {
+          if (error) setErr(error.message)
+          else setAds(data || [])
+        })
+        .finally(() => setSearching(false))
+    }, 250)
+    return () => clearTimeout(handle)
+  }, [adQuery, open, step])
+
+  const filteredAds = ads  // already server-filtered; render directly
 
   if (!open) return null
 
@@ -185,13 +208,20 @@ export default function AssignCreativeModal({ open, onClose, onLinked, presetScr
                     borderRadius: 2,
                   }} />
               </div>
-              {loading ? (
+              {loading || searching ? (
                 <div style={{ padding: 32, textAlign: 'center', color: 'var(--ink-4)',
-                              fontStyle: 'italic', fontFamily: 'var(--serif)' }}>Loading ads…</div>
+                              fontStyle: 'italic', fontFamily: 'var(--serif)' }}>
+                  {searching ? `Searching for "${adQuery}"…` : 'Loading ads…'}
+                </div>
               ) : filteredAds.length === 0 ? (
                 <div style={{ padding: 32, textAlign: 'center', color: 'var(--ink-4)',
                               fontStyle: 'italic', fontFamily: 'var(--serif)' }}>
                   No ads match {adQuery ? `"${adQuery}"` : 'this filter'}.
+                  {adQuery && (
+                    <div style={{ marginTop: 8, fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.06em' }}>
+                      Try a different keyword or paste the ad_id directly.
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div style={{ display: 'grid', gap: 4 }}>
