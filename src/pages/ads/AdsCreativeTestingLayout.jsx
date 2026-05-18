@@ -19,9 +19,12 @@ import { Icon } from '../../components/editorial/atoms'
 */
 
 // Analysis surfaces first (where Ben spends his time), then production
-// pipeline (Clips → Variants → Ads). Order requested 2026-05-18.
+// pipeline (Clips → Variants → Ads). Tests sits right after Insights —
+// it's where you pick scope, then jump into the analysis pages with
+// that scope applied.
 const SUBNAV = [
   { to: '/sales/ads/creative/insights',     label: 'Insights' },
+  { to: '/sales/ads/creative/tests',        label: 'Tests' },
   { to: '/sales/ads/creative/creatives',    label: 'Creatives' },
   { to: '/sales/ads/creative/attributes',   label: 'Attributes' },
   { to: '/sales/ads/creative/explorations', label: 'Explorations' },
@@ -34,6 +37,7 @@ const SUBNAV = [
 // Pages that consume the shared lib_ad_performance fetch
 const ANALYTICS_PATHS = new Set([
   '/sales/ads/creative/insights',
+  '/sales/ads/creative/tests',
   '/sales/ads/creative/creatives',
   '/sales/ads/creative/attributes',
   '/sales/ads/creative/explorations',

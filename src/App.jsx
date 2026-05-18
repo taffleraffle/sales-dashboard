@@ -36,6 +36,7 @@ const AdsInsights = lazy(() => import('./pages/ads/AdsInsights'))
 const AdsCreativesLibrary = lazy(() => import('./pages/ads/AdsCreativesLibrary'))
 const AdsAttributesPage = lazy(() => import('./pages/ads/AdsAttributesPage'))
 const AdsExplorations = lazy(() => import('./pages/ads/AdsExplorations'))
+const AdsTestScope = lazy(() => import('./pages/ads/AdsTestScope'))
 const AdsGenerator = lazy(() => import('./pages/ads/AdsGenerator'))
 const AdsOrphans = lazy(() => import('./pages/ads/AdsOrphans'))
 const AdsLegacy = lazy(() => import('./pages/ads/AdsLegacy'))
@@ -148,6 +149,7 @@ export default function App() {
                   <Route path="creatives" element={<Suspense fallback={<PageSkeleton />}><AdsCreativesLibrary /></Suspense>} />
                   <Route path="attributes" element={<Suspense fallback={<PageSkeleton />}><AdsAttributesPage /></Suspense>} />
                   <Route path="explorations" element={<Suspense fallback={<PageSkeleton />}><AdsExplorations /></Suspense>} />
+                  <Route path="tests" element={<Suspense fallback={<PageSkeleton />}><AdsTestScope /></Suspense>} />
                   <Route path="generate" element={<Suspense fallback={<PageSkeleton />}><AdsGenerator /></Suspense>} />
                 </Route>
 
