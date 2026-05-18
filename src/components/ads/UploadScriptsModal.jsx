@@ -43,8 +43,16 @@ export default function UploadScriptsModal({ open, onClose, batch, onSaved }) {
     }
     setErr(null); setFilename(file.name)
     try {
-      const t = await extractTextFromFile(file)
-      setText(t)
+      // extractTextFromFile returns { text, sourceFormat, wordCount } — we
+      // only want the string. The render below calls .trim() and .length
+      // on whatever's in `text`, so a non-string crashes the page.
+      const result = await extractTextFromFile(file)
+      const extracted = typeof result === 'string' ? result : (result?.text || '')
+      if (!extracted.trim()) {
+        setErr('No text could be extracted from that file. Try pasting the content instead.')
+        return
+      }
+      setText(extracted)
     } catch (e) {
       setErr(`Could not read file: ${e.message}`)
     }
