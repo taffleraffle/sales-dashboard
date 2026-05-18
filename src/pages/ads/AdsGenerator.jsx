@@ -5,6 +5,7 @@ import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
 import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
 import { supabase } from '../../lib/supabase'
+import { SectionHead, Eyebrow } from '../../components/editorial/atoms'
 
 /*
   Script generator — rebuilt UX:
@@ -112,20 +113,14 @@ export default function AdsGenerator() {
   const selectedOffer = offers.find(o => o.slug === offerSlug)
 
   return (
-    <div style={{ padding: '24px 0' }}>
-      {/* Editorial header */}
-      <div style={{ marginBottom: 32, position: 'relative' }}>
-        <div className="eyebrow eyebrow-accent">OPT Sales · Script <em>generator</em></div>
-        <h1 className="h1" style={{ marginTop: 6, marginBottom: 8 }}>
-          Generate a <em>fresh</em> batch.
-        </h1>
-        <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
-                    fontSize: 16, marginTop: 4, maxWidth: 720, lineHeight: 1.5 }}>
-          Pick an offer, choose how many concepts, and either let the system maximize
-          variance across all attributes — or use targeted mode to constrain specific
-          variables for an A/B test.
-        </p>
-      </div>
+    <div>
+      <SectionHead
+        level="page"
+        eyebrow="Creative · Generate"
+        title="Generate"
+        tagline="Pick an offer, choose a batch size, and either let the system maximize variance across attributes or target specific variables for an A/B test."
+        gap={28}
+      />
 
       {err && (
         <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fca5a5',
@@ -397,13 +392,23 @@ export default function AdsGenerator() {
       {/* Result panel */}
       {result?.scripts?.length > 0 && (
         <div style={{ marginTop: 40, marginBottom: 32 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 16 }}>
-            <div className="eyebrow eyebrow-accent">
-              <Sparkles size={13} style={{ display: 'inline', marginRight: 6 }} />
-              {result.scripts.length} <em>generated</em>
+          <div style={{
+            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+            gap: 16, marginBottom: 14,
+          }}>
+            <div>
+              <Eyebrow style={{ marginBottom: 4 }}>Output</Eyebrow>
+              <h2 style={{
+                margin: 0, fontSize: 18, lineHeight: 1.2, color: 'var(--ink)',
+                letterSpacing: '-0.005em', fontFamily: 'var(--sans)', fontWeight: 600,
+              }}>
+                {result.scripts.length} scripts generated
+              </h2>
             </div>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)',
-                          letterSpacing: '0.06em' }}>
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+            }}>
               {result.model}
             </span>
           </div>
@@ -416,10 +421,13 @@ export default function AdsGenerator() {
       {/* History */}
       {history.length > 0 && (
         <div style={{ marginTop: 48 }}>
-          <div className="eyebrow" style={{ marginBottom: 12, color: 'var(--ink-3)' }}>
-            <FileText size={13} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
+          <Eyebrow style={{ marginBottom: 4 }}>History</Eyebrow>
+          <h2 style={{
+            margin: '0 0 14px', fontSize: 18, lineHeight: 1.2, color: 'var(--ink)',
+            letterSpacing: '-0.005em', fontFamily: 'var(--sans)', fontWeight: 600,
+          }}>
             Recent drafts
-          </div>
+          </h2>
           <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
             <table style={{ width: '100%', fontSize: 13, fontFamily: 'var(--sans)' }}>
               <thead>
@@ -493,20 +501,20 @@ export default function AdsGenerator() {
   )
 }
 
+// Numbered step section — matches the SectionHead level="section" pattern
+// (sans 18px h2 + mono eyebrow) but with the step number rendered as part
+// of the eyebrow so the 4-step flow stays legible.
 function Section({ label, title, children }) {
   return (
-    <div style={{ marginBottom: 32 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 14 }}>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700,
-                      letterSpacing: '0.12em', color: 'var(--accent)',
-                      background: 'var(--ink)', padding: '4px 8px' }}>
-          {label}
-        </span>
-        <h2 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 400,
-                    margin: 0, color: 'var(--ink)' }}>
-          {title}
-        </h2>
-      </div>
+    <div style={{ marginBottom: 28 }}>
+      <Eyebrow style={{ marginBottom: 6 }}>Step {label}</Eyebrow>
+      <h2 style={{
+        margin: 0, fontSize: 18, lineHeight: 1.2, color: 'var(--ink)',
+        letterSpacing: '-0.005em', fontFamily: 'var(--sans)', fontWeight: 600,
+        marginBottom: 14,
+      }}>
+        {title}
+      </h2>
       {children}
     </div>
   )
@@ -517,16 +525,19 @@ function ModeCard({ selected, onClick, icon, title, desc }) {
     <button onClick={onClick}
       style={{
         flex: '1 1 280px', maxWidth: 400, padding: 20,
-        border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
-        background: selected ? 'var(--paper)' : 'white',
-        cursor: 'pointer', textAlign: 'left', borderRadius: 2,
-        transition: 'all 140ms ease',
+        paddingTop: selected ? 17 : 20,
+        border: '1px solid var(--rule)',
+        borderTop: selected ? '4px solid var(--accent)' : '1px solid var(--rule)',
+        background: 'white',
+        cursor: 'pointer', textAlign: 'left',
+        transition: 'border-color 140ms ease, background 140ms ease',
         position: 'relative',
-        boxShadow: selected ? '4px 4px 0 var(--accent)' : 'none',
       }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
         <span style={{ color: selected ? 'var(--ink)' : 'var(--ink-4)' }}>{icon}</span>
-        <span style={{ fontFamily: 'var(--serif)', fontSize: 18, color: 'var(--ink)' }}>
+        <span style={{
+          fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 600, color: 'var(--ink)',
+        }}>
           {title}
         </span>
         {selected && <Check size={16} color="var(--ink)" style={{ marginLeft: 'auto' }} />}
