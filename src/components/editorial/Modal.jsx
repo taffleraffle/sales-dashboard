@@ -1,5 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Icon } from './atoms'
+
+// Module-level depth counter so nested modals stack correctly.
+// When TestBatchDetailModal opens UploadScriptsModal, the inner one
+// needs a higher z-index than the outer; otherwise the outer's
+// backdrop bleeds over the inner content (see 2026-05-19 screenshot).
+let MODAL_DEPTH = 0
+const Z_BASE = 100  // backdrop = Z_BASE + depth*10, dialog = +1
 
 /*
   Centered modal primitive. Replaces the right-side slide drawers per
@@ -29,13 +36,29 @@ export default function Modal({
   size = 'md',
   children,
 }) {
-  // Esc to close
+  // Reserve a stack slot for this modal so nested modals sit above us.
+  // Top-most modal owns Esc (others ignore the key while not on top).
+  const [depth, setDepth] = useState(null)
   useEffect(() => {
     if (!open) return
-    const h = (e) => { if (e.key === 'Escape') onClose?.() }
+    MODAL_DEPTH += 1
+    const myDepth = MODAL_DEPTH
+    setDepth(myDepth)
+    return () => {
+      MODAL_DEPTH = Math.max(0, MODAL_DEPTH - 1)
+      setDepth(null)
+    }
+  }, [open])
+
+  // Esc to close — only when we're the top-most modal
+  useEffect(() => {
+    if (!open || depth == null) return
+    const h = (e) => {
+      if (e.key === 'Escape' && depth === MODAL_DEPTH) onClose?.()
+    }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [open, onClose])
+  }, [open, onClose, depth])
 
   // Lock body scroll while open
   useEffect(() => {
@@ -45,9 +68,11 @@ export default function Modal({
     return () => { document.body.style.overflow = prev }
   }, [open])
 
-  if (!open) return null
+  if (!open || depth == null) return null
 
   const maxW = SIZES[size] || SIZES.md
+  const zBackdrop = Z_BASE + (depth - 1) * 10
+  const zDialog = zBackdrop + 1
 
   return (
     <>
@@ -55,9 +80,10 @@ export default function Modal({
         onClick={onClose}
         style={{
           position: 'fixed', inset: 0,
-          background: 'rgba(10,10,10,0.32)',
+          // Stronger fill for nested modals so the outer modal doesn't bleed through
+          background: depth > 1 ? 'rgba(10,10,10,0.55)' : 'rgba(10,10,10,0.32)',
           backdropFilter: 'blur(2px)',
-          zIndex: 99,
+          zIndex: zBackdrop,
           animation: 'modalFadeIn 0.18s cubic-bezier(0.2,0.7,0.2,1)',
         }} />
 
@@ -76,7 +102,7 @@ export default function Modal({
           borderRight: '1px solid var(--rule)',
           borderBottom: '1px solid var(--rule)',
           boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
-          zIndex: 100,
+          zIndex: zDialog,
           display: 'flex', flexDirection: 'column',
           animation: 'modalSlideIn 0.22s cubic-bezier(0.2,0.7,0.2,1)',
         }}>

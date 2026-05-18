@@ -41,7 +41,10 @@ function getCorsHeaders(req?: Request): Record<string, string> {
 }
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY')
-const ANTHROPIC_MODEL = Deno.env.get('ANTHROPIC_MODEL') || 'claude-sonnet-4-20250514'
+// Haiku 4.5 — structured extraction is a perfect fit and ~5x faster than
+// Sonnet (Ben flagged 2026-05-19 doc parse was taking 30s+). Sonnet kept as
+// the env-var override for cases where Haiku struggles with malformed docs.
+const ANTHROPIC_MODEL = Deno.env.get('CREATIVE_PARSE_MODEL') || 'claude-haiku-4-5-20251001'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
@@ -165,7 +168,7 @@ serve(async (req: Request) => {
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: 8000,
+      max_tokens: 4096,
       system: SYSTEM,
       messages: [{ role: 'user', content: userContent }],
       tools: [tool],
