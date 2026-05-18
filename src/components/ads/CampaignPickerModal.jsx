@@ -23,7 +23,8 @@ function fmtMoney(n) {
 }
 function fmtDate(d) {
   if (!d) return '—'
-  const date = typeof d === 'string' ? new Date(d) : d
+  // Accept ms timestamps (from Date.getTime()), Date objects, or ISO strings.
+  const date = d instanceof Date ? d : new Date(d)
   if (isNaN(date.getTime())) return '—'
   const now = Date.now()
   const days = Math.floor((now - date.getTime()) / 86400000)
