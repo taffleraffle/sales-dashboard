@@ -93,24 +93,64 @@ export async function triggerTranscribeAds(maxRun = 25) {
  * Returns the function response with transcript_preview, duration, etc.
  */
 export async function uploadAndTranscribeAdVideo(adId, file) {
+  const path = await uploadAdVideoToStorage(adId, file)
+  return transcribeUploadedAd(adId, path)
+}
+
+/**
+ * Step 1 of the upload-creative flow. Uploads the MP4 to the
+ * ad-source-videos bucket. Returns the storage path. Fast (~5-15s).
+ */
+export async function uploadAdVideoToStorage(adId, file) {
   if (!adId) throw new Error('ad_id required')
   if (!file) throw new Error('file required')
-
-  // Use ad_id as the storage path so re-uploads overwrite cleanly.
   const ext = (file.name.split('.').pop() || 'mp4').toLowerCase()
   const path = `${adId}.${ext}`
-
-  // 1. Upload to Storage (upsert = true so re-tries replace the file)
   const upRes = await supabase.storage
     .from('ad-source-videos')
     .upload(path, file, { upsert: true, contentType: file.type || 'video/mp4' })
   if (upRes.error) throw new Error(`upload failed: ${upRes.error.message}`)
+  return path
+}
 
-  // 2. Invoke the Edge Function
-  const { data, error } = await supabase.functions.invoke('transcribe-uploaded-ad', {
-    body: { ad_id: adId, storage_path: path },
-  })
-  if (error) throw new Error(error.message || 'transcribe-uploaded-ad failed')
-  if (data?.error) throw new Error(data.error)
-  return data
+/**
+ * Step 2 of the upload-creative flow. Invokes the transcribe-uploaded-ad
+ * Edge Function. Whisper transcription is slow (~30-120s for typical ads).
+ *
+ * Uses a manual fetch with explicit timeout because supabase-js's
+ * functions.invoke default fetch can fail spuriously on slow Edge
+ * Functions.
+ */
+export async function transcribeUploadedAd(adId, storagePath, { timeoutMs = 180_000 } = {}) {
+  if (!adId) throw new Error('ad_id required')
+  if (!storagePath) throw new Error('storage_path required')
+
+  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/transcribe-uploaded-ad`
+  const controller = new AbortController()
+  const t = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ ad_id: adId, storage_path: storagePath }),
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText)
+      throw new Error(`transcribe ${res.status}: ${text.slice(0, 300)}`)
+    }
+    const data = await res.json()
+    if (data?.error) throw new Error(data.error)
+    return data
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error(`Transcription timed out after ${timeoutMs / 1000}s. The file may be too long — try a shorter clip or contact support.`)
+    }
+    throw e
+  } finally {
+    clearTimeout(t)
+  }
 }

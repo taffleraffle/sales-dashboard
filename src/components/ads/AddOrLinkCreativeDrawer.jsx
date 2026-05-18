@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { X, Search, Link2, FileText, Upload, Check, AlertCircle, Sparkles } from 'lucide-react'
+import { X, Search, Link2, FileText, Upload, Check, AlertCircle, Sparkles, ArrowRight } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { listGeneratedScripts, linkScriptToAd } from '../../services/scriptGenerator'
 import { tagAd, listOffers } from '../../services/creativeTagger'
-import { uploadAndTranscribeAdVideo } from '../../services/adAnalyst'
+import { uploadAdVideoToStorage, transcribeUploadedAd } from '../../services/adAnalyst'
 import AdThumbnail from './AdThumbnail'
 
 /*
@@ -156,11 +156,15 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
     if (!chosenAd || !uploadFile) return
     setWorking(true); setErr(null)
     try {
+      // Step 1: upload to storage (~5-15s)
       setWorkStage('uploading')
-      // 1. Upload + transcribe via existing service
-      await uploadAndTranscribeAdVideo(chosenAd.ad_id, uploadFile)
+      const storagePath = await uploadAdVideoToStorage(chosenAd.ad_id, uploadFile)
 
-      // 2. Auto-tag
+      // Step 2: transcribe via Whisper (~30-120s — explicit 3min timeout)
+      setWorkStage('transcribing')
+      await transcribeUploadedAd(chosenAd.ad_id, storagePath, { timeoutMs: 180_000 })
+
+      // Step 3: auto-tag attributes (~5-15s)
       setWorkStage('tagging')
       await tagAd(chosenAd.ad_id)
 
@@ -325,12 +329,55 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
               <FieldLabel>Step 1 · Pick the Meta ad this video is for</FieldLabel>
               <AdPicker {...{ adQuery, setAdQuery, ads, searching, chosenAd, setChosenAd }} />
 
+              {chosenAd && (
+                <div style={{
+                  marginTop: 12, padding: '10px 14px', background: 'white',
+                  border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
+                  borderRadius: 2,
+                  display: 'flex', alignItems: 'center', gap: 12,
+                }}>
+                  <AdThumbnail ad={chosenAd} size="sm" />
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+                                  textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+                      Attaching MP4 to
+                    </div>
+                    <div style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink)',
+                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {chosenAd.ad_name || chosenAd.ad_id}
+                    </div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                                  letterSpacing: '0.04em',
+                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {chosenAd.campaign_name || '(no campaign)'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <FieldLabel style={{ marginTop: 20 }}>Step 2 · Pick or drop the MP4</FieldLabel>
               <DropZone file={uploadFile} setFile={setUploadFile} />
-              <div style={{ marginTop: 8, fontFamily: 'var(--serif)', fontStyle: 'italic',
-                            fontSize: 12, color: 'var(--ink-4)' }}>
-                We'll upload to <code style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>ad-source-videos</code>,
-                run Whisper transcription, then auto-tag. Takes ~30-60s for a 30s video.
+
+              {/* Pipeline explanation */}
+              <div style={{ marginTop: 16, padding: 14, background: 'var(--paper)',
+                            border: '1px solid var(--rule)', borderRadius: 2 }}>
+                <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--ink-3)' }}>
+                  What happens when you click Save & tag
+                </div>
+                <ol style={{ margin: 0, padding: 0, listStyle: 'none', fontFamily: 'var(--sans)',
+                            fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.7 }}>
+                  <li><span style={pipelineNumStyle}>1</span> Upload MP4 to <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>ad-source-videos</code> bucket (~5-15s)</li>
+                  <li><span style={pipelineNumStyle}>2</span> OpenAI Whisper transcribes the audio (~30-120s) — stored as <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>lib_creative_transcripts</code> linked to this ad</li>
+                  <li><span style={pipelineNumStyle}>3</span> Claude reads the transcript + ad copy and classifies hook type, mechanism reveal, pain angle, funnel stage, awareness level (~5-15s)</li>
+                  <li><span style={pipelineNumStyle}>4</span> The ad shows up in Insights with its tags, ready to compare against other creatives</li>
+                </ol>
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--rule)',
+                              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12,
+                              color: 'var(--ink-4)' }}>
+                  Note: we don't currently search past generated scripts for a fuzzy text match.
+                  If this video matches an existing draft, use the <strong style={{ color: 'var(--ink)' }}>Existing draft</strong> tab
+                  instead — that carries over the original target attributes exactly.
+                </div>
               </div>
             </>
           )}
@@ -342,8 +389,11 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
           background: 'white',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
         }}>
-          <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12, color: 'var(--ink-4)' }}>
-            {workStage && <><Sparkles size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />{workStage.charAt(0).toUpperCase() + workStage.slice(1)}…</>}
+          <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12, color: 'var(--ink-4)',
+                        flex: 1, overflow: 'hidden' }}>
+            {workStage && (
+              <StageIndicator stage={workStage} target={chosenAd?.ad_name || chosenAd?.ad_id} />
+            )}
             {!workStage && tab === 'existing' && chosenScript && chosenAd && <>Will link <strong>{chosenScript.title}</strong> → <strong>{chosenAd.ad_name || chosenAd.ad_id}</strong></>}
             {!workStage && tab === 'paste' && chosenAd && pasteText && <>Will paste {pasteText.trim().split(/\s+/).filter(Boolean).length} words → <strong>{chosenAd.ad_name || chosenAd.ad_id}</strong></>}
             {!workStage && tab === 'upload' && chosenAd && uploadFile && <>Will upload {(uploadFile.size / 1024 / 1024).toFixed(1)}MB → <strong>{chosenAd.ad_name || chosenAd.ad_id}</strong></>}
@@ -392,6 +442,13 @@ const inputStyle = {
   width: '100%', padding: '10px 12px', fontFamily: 'var(--sans)', fontSize: 13,
   border: '1px solid var(--rule)', background: 'white', borderRadius: 2,
   color: 'var(--ink)',
+}
+
+const pipelineNumStyle = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  width: 18, height: 18, borderRadius: 9, fontFamily: 'var(--mono)',
+  fontSize: 10, fontWeight: 700, background: 'var(--ink)', color: 'var(--accent)',
+  marginRight: 8, verticalAlign: 'middle',
 }
 
 function FieldLabel({ children, style: extra = {} }) {
@@ -464,6 +521,54 @@ function AdPicker({ adQuery, setAdQuery, ads, searching, chosenAd, setChosenAd }
         ))}
       </div>
     </>
+  )
+}
+
+/* Multi-step pill that lights up by stage so the user sees real progress
+   instead of "Working…" forever. Stages: uploading → transcribing → tagging.
+   For non-upload tabs we still get saving → tagging or just linking. */
+function StageIndicator({ stage, target }) {
+  // For the upload pipeline, show 3-step progress
+  const uploadStages = ['uploading', 'transcribing', 'tagging']
+  if (uploadStages.includes(stage)) {
+    const stageIdx = uploadStages.indexOf(stage)
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontStyle: 'normal' }}>
+        {uploadStages.map((s, i) => {
+          const done = i < stageIdx, active = i === stageIdx
+          return (
+            <span key={s} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px',
+              fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
+              textTransform: 'uppercase', fontWeight: 600,
+              background: active ? 'var(--ink)' : done ? 'var(--accent)' : 'var(--paper)',
+              color: active ? 'var(--accent)' : done ? 'var(--ink)' : 'var(--ink-4)',
+              border: '1px solid ' + (active ? 'var(--ink)' : done ? 'var(--accent)' : 'var(--rule)'),
+              borderRadius: 2,
+            }}>
+              {done && <Check size={10} />}
+              {active && <Sparkles size={10} className="pulse" />}
+              {s}
+            </span>
+          )
+        })}
+        {target && <span style={{ color: 'var(--ink-4)', fontSize: 11, marginLeft: 4 }}>→ {target}</span>}
+        <style>{`@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } } .pulse { animation: pulse 1.2s ease-in-out infinite; }`}</style>
+      </div>
+    )
+  }
+  // Simpler stages (saving / linking)
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <Sparkles size={11} className="pulse" style={{ color: 'var(--accent)' }} />
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+                    textTransform: 'uppercase', color: 'var(--ink)', fontWeight: 600 }}>
+        {stage}…
+      </span>
+      {target && <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>→ {target}</span>}
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } } .pulse { animation: pulse 1.2s ease-in-out infinite; }`}</style>
+    </div>
   )
 }
 
