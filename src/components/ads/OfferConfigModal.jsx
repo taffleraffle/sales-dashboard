@@ -107,8 +107,11 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
       <div onClick={e => e.stopPropagation()}
         style={{
           background: 'var(--paper)', maxWidth: 720, width: '100%', maxHeight: '90vh',
-          overflow: 'auto', border: '2px solid var(--ink)', borderRadius: 2,
-          boxShadow: '8px 8px 0 var(--accent)',
+          overflow: 'auto',
+          border: '1px solid var(--rule)',
+          borderTop: '3px solid var(--accent)',
+          borderRadius: 2,
+          boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
         }}>
         {/* Header */}
         <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--rule)',

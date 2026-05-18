@@ -4,10 +4,12 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, ReferenceLine,
 } from 'recharts'
-import { Trophy, AlertCircle, RefreshCw, Sparkles, Target, Activity, TrendingUp, Zap, Link2 } from 'lucide-react'
+import { Trophy, AlertCircle, RefreshCw, Sparkles, Target, Activity, TrendingUp, Zap, Plus } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { tagMissing, listOffers, getAttributeCoverage } from '../../services/creativeTagger'
-import AssignCreativeModal from '../../components/ads/AssignCreativeModal'
+import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
+import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
+import AdThumbnail from '../../components/ads/AdThumbnail'
 
 /*
   Creative Insights — focused on WIN RATE, not spend.
@@ -64,7 +66,8 @@ export default function AdsInsights() {
   const [err, setErr] = useState(null)
   const [tagging, setTagging] = useState(false)
   const [proofPie, setProofPie] = useState([])
-  const [assignOpen, setAssignOpen] = useState(false)
+  const [addOrLinkOpen, setAddOrLinkOpen] = useState(false)
+  const [editingAd, setEditingAd] = useState(null)
 
   const setPresetRange = (days) => {
     setPreset(days); setSince(daysAgoISO(days)); setUntil(todayISO())
@@ -211,24 +214,23 @@ export default function AdsInsights() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setAssignOpen(true)}
+          <button onClick={() => setAddOrLinkOpen(true)}
             style={{
               padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
               letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600,
               border: '2px solid var(--ink)', background: 'var(--ink)', color: 'var(--paper)',
               cursor: 'pointer', borderRadius: 2,
               display: 'inline-flex', alignItems: 'center', gap: 6,
-              boxShadow: '3px 3px 0 var(--accent)',
             }}>
-            <Link2 size={12} />
-            Link creative to ad
+            <Plus size={12} />
+            Add or link creative
           </button>
           <button onClick={handleTagMissing} disabled={tagging || loading}
             style={{
               padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
               letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600,
-              border: '2px solid var(--ink)', background: 'white',
-              color: 'var(--ink)', cursor: (tagging || loading) ? 'wait' : 'pointer',
+              border: '1px solid var(--rule)', background: 'white',
+              color: 'var(--ink-3)', cursor: (tagging || loading) ? 'wait' : 'pointer',
               opacity: (tagging || loading) ? 0.5 : 1, borderRadius: 2,
               display: 'inline-flex', alignItems: 'center', gap: 6,
             }}>
@@ -238,8 +240,14 @@ export default function AdsInsights() {
         </div>
       </div>
 
-      <AssignCreativeModal open={assignOpen} onClose={() => setAssignOpen(false)}
-        onLinked={() => { setAssignOpen(false); loadEverything() }} />
+      <AddOrLinkCreativeDrawer
+        open={addOrLinkOpen}
+        onClose={() => setAddOrLinkOpen(false)}
+        onSaved={() => { setAddOrLinkOpen(false); loadEverything() }} />
+      <CreativeEditDrawer
+        open={!!editingAd}
+        ad={editingAd}
+        onClose={() => { setEditingAd(null); loadEverything() }} />
 
       {/* Headline KPI row — WIN RATE prominent, spend de-emphasized */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr', gap: 1,
@@ -370,7 +378,8 @@ export default function AdsInsights() {
                             textTransform: 'uppercase', color: 'var(--ink-4)',
                             borderBottom: '1px solid var(--rule)' }}>
                   <th style={{ textAlign: 'left', padding: '12px 0 12px 16px', width: 56 }}>#</th>
-                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 8px' }}>Ad name</th>
+                  <th style={{ textAlign: 'left', padding: '12px 0', width: 72 }}></th>
+                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 12px' }}>Ad name</th>
                   <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Attributes</th>
                   <th style={{ textAlign: 'right', padding: '12px 16px 12px 0' }}>Booked</th>
                   <th style={{ textAlign: 'right', padding: '12px 16px 12px 0' }}>CPB</th>
@@ -381,8 +390,16 @@ export default function AdsInsights() {
                 {topCreatives.map((r, i) => {
                   const isPodium = i < 3
                   return (
-                    <tr key={r.ad_id} style={{ borderTop: '1px solid var(--rule)' }}>
-                      <td style={{ padding: '14px 0 14px 16px', width: 56 }}>
+                    <tr key={r.ad_id}
+                      onClick={() => setEditingAd(r)}
+                      style={{
+                        borderTop: '1px solid var(--rule)',
+                        cursor: 'pointer',
+                        transition: 'background 120ms ease',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--paper)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <td style={{ padding: '12px 0 12px 16px', width: 56 }}>
                         <span style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                           width: 32, height: 32, borderRadius: 16,
@@ -394,14 +411,20 @@ export default function AdsInsights() {
                           {i + 1}
                         </span>
                       </td>
-                      <td style={{ padding: '14px 14px 14px 8px', maxWidth: 280, overflow: 'hidden',
-                                  textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <Link to={`/sales/ads/ad/${r.ad_id}`}
-                          style={{ color: 'var(--ink)', textDecoration: 'none', fontWeight: 500 }}>
-                          {r.ad_name || r.ad_id}
-                        </Link>
+                      <td style={{ padding: '12px 0', width: 72 }}>
+                        <AdThumbnail ad={r} size="md" />
                       </td>
-                      <td style={{ padding: '14px 14px 14px 0' }}>
+                      <td style={{ padding: '12px 14px 12px 12px', maxWidth: 280, overflow: 'hidden',
+                                  textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ color: 'var(--ink)', fontWeight: 500, marginBottom: 2 }}>
+                          {r.ad_name || r.ad_id}
+                        </div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                                      letterSpacing: '0.04em' }}>
+                          {r.campaign_name || '—'}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 14px 12px 0' }}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                           {[r.hook_type, r.mechanism_reveal, r.pain_angle, r.proof_character]
                             .filter(v => v && v !== 'none').map((v, j) => (
@@ -410,13 +433,19 @@ export default function AdsInsights() {
                                                     color: 'var(--ink-3)', border: '1px solid var(--rule)',
                                                     borderRadius: 2 }}>{v}</span>
                             ))}
+                          {!r.hook_type && !r.mechanism_reveal && !r.pain_angle && (
+                            <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
+                                          fontSize: 11, color: 'var(--ink-4)' }}>
+                              click to tag →
+                            </span>
+                          )}
                         </div>
                       </td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '14px 16px 14px 0',
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '12px 16px 12px 0',
                                   fontWeight: 700, color: 'var(--ink)', fontSize: 15 }}>{fmtN(r.booked)}</td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '14px 16px 14px 0',
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '12px 16px 12px 0',
                                   color: 'var(--ink-3)' }}>{fmt$(r.cost_per_booked)}</td>
-                      <td style={{ textAlign: 'right', padding: '14px 18px 14px 0' }}>
+                      <td style={{ textAlign: 'right', padding: '12px 18px 12px 0' }}>
                         {r.effective_winner && (
                           <span style={{ padding: '3px 8px', background: 'var(--accent)',
                                         fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,

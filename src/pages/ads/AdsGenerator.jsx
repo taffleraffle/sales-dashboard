@@ -3,7 +3,7 @@ import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Z
 import { generateScripts, listGeneratedScripts, linkScriptToAd } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
-import AssignCreativeModal from '../../components/ads/AssignCreativeModal'
+import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
 import { supabase } from '../../lib/supabase'
 
 /*
@@ -480,11 +480,11 @@ export default function AdsGenerator() {
         </div>
       )}
 
-      <AssignCreativeModal
+      <AddOrLinkCreativeDrawer
         open={!!assignScript}
         presetScript={assignScript}
         onClose={() => setAssignScript(null)}
-        onLinked={async () => {
+        onSaved={async () => {
           setAssignScript(null)
           const h = await listGeneratedScripts({ limit: 25 })
           setHistory(h)
