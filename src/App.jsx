@@ -96,11 +96,26 @@ import { Loader } from 'lucide-react'
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null } }
   static getDerivedStateFromError(error) { return { error } }
+  hardReload = () => {
+    // Bypass cache via a cache-busting query param. Cheaper than asking
+    // the user to remember Ctrl+Shift+R.
+    const u = new URL(window.location.href)
+    u.searchParams.set('_r', Date.now())
+    window.location.replace(u.toString())
+  }
   render() {
     if (this.state.error) return (
-      <div style={{ padding: 40, color: '#ff6b6b', fontFamily: 'monospace' }}>
-        <h2>Runtime Error</h2>
-        <pre style={{ whiteSpace: 'pre-wrap' }}>{this.state.error.message}</pre>
+      <div style={{ padding: 40, fontFamily: 'monospace', maxWidth: 920, margin: '0 auto' }}>
+        <h2 style={{ color: '#b53e3e' }}>Runtime Error</h2>
+        <p style={{ fontFamily: 'system-ui, sans-serif', color: '#333', lineHeight: 1.5 }}>
+          Often this is a stale browser cache after a deploy. Try a hard reload first.
+        </p>
+        <button onClick={this.hardReload} style={{
+          marginTop: 8, marginBottom: 24, padding: '10px 18px',
+          fontFamily: 'system-ui, sans-serif', fontSize: 13, fontWeight: 600,
+          background: '#0a0a0a', color: '#fff', border: 'none', cursor: 'pointer',
+        }}>Hard reload</button>
+        <pre style={{ whiteSpace: 'pre-wrap', color: '#b53e3e' }}>{this.state.error.message}</pre>
         <pre style={{ whiteSpace: 'pre-wrap', color: '#999', fontSize: 12 }}>{this.state.error.stack}</pre>
       </div>
     )
