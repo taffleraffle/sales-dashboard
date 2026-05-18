@@ -1,7 +1,9 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers } from 'lucide-react'
-import { generateScripts, listGeneratedScripts } from '../../services/scriptGenerator'
+import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Link2 } from 'lucide-react'
+import { generateScripts, listGeneratedScripts, linkScriptToAd } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
+import OfferConfigModal from '../../components/ads/OfferConfigModal'
+import { supabase } from '../../lib/supabase'
 
 /*
   Script generator — rebuilt UX:
@@ -28,8 +30,7 @@ export default function AdsGenerator() {
   const [vocab, setVocab] = useState(null)
   const [offerSlug, setOfferSlug] = useState('')
   const [nConcepts, setNConcepts] = useState(10)
-  const [mode, setMode] = useState('diverse')  // 'diverse' | 'targeted'
-  // targets: { hook_type: ['question', 'scene'], ... } — array per attribute
+  const [mode, setMode] = useState('diverse')
   const [targets, setTargets] = useState({})
   const [saveAsDrafts, setSaveAsDrafts] = useState(true)
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -37,6 +38,14 @@ export default function AdsGenerator() {
   const [result, setResult] = useState(null)
   const [history, setHistory] = useState([])
   const [err, setErr] = useState(null)
+  const [offerModalOpen, setOfferModalOpen] = useState(false)
+  const [offerModalExisting, setOfferModalExisting] = useState(null)
+
+  async function refreshOffers() {
+    const o = await listOffers()
+    setOffers(o)
+    return o
+  }
 
   useEffect(() => {
     Promise.all([listOffers(), getAttributeVocab(), listGeneratedScripts({ limit: 25 })])
@@ -47,6 +56,22 @@ export default function AdsGenerator() {
       })
       .catch(e => setErr(e.message))
   }, [])
+
+  function openNewOffer() {
+    setOfferModalExisting(null)
+    setOfferModalOpen(true)
+  }
+
+  function openConfigureOffer(o) {
+    setOfferModalExisting(o)
+    setOfferModalOpen(true)
+  }
+
+  async function handleOfferSaved(saved) {
+    setOfferModalOpen(false)
+    await refreshOffers()
+    if (saved?.slug) setOfferSlug(saved.slug)
+  }
 
   function toggleTarget(field, value) {
     setTargets(prev => {
@@ -109,35 +134,99 @@ export default function AdsGenerator() {
 
       {/* Step 1: pick offer */}
       <Section label="01" title="Pick an offer">
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           {offers.map(o => {
             const selected = o.slug === offerSlug
             const isStub = o.slug.includes('stub') || o.slug.includes('template')
+            const incomplete = !o.mechanism_name || !o.primary_audience
             return (
-              <button
-                key={o.slug}
-                onClick={() => setOfferSlug(o.slug)}
-                style={{
-                  padding: '10px 16px',
-                  border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
-                  background: selected ? 'var(--ink)' : 'white',
-                  color: selected ? 'var(--paper)' : isStub ? 'var(--ink-4)' : 'var(--ink)',
-                  fontFamily: 'var(--sans)', fontSize: 14, fontWeight: selected ? 600 : 400,
-                  cursor: 'pointer', borderRadius: 2,
-                  display: 'inline-flex', alignItems: 'center', gap: 8,
-                  transition: 'all 140ms ease',
-                }}>
-                {selected && <Check size={14} />}
-                <span>{o.name}</span>
-                {isStub && (
-                  <span style={{ fontSize: 10, fontFamily: 'var(--mono)', letterSpacing: '0.1em',
-                                opacity: 0.6, textTransform: 'uppercase' }}>placeholder</span>
-                )}
-              </button>
+              <div key={o.slug} style={{ display: 'inline-flex', alignItems: 'stretch' }}>
+                <button
+                  onClick={() => setOfferSlug(o.slug)}
+                  style={{
+                    padding: '10px 14px',
+                    border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
+                    borderRight: selected ? '2px solid var(--ink)' : 'none',
+                    background: selected ? 'var(--ink)' : 'white',
+                    color: selected ? 'var(--paper)' : isStub ? 'var(--ink-4)' : 'var(--ink)',
+                    fontFamily: 'var(--sans)', fontSize: 14, fontWeight: selected ? 600 : 400,
+                    cursor: 'pointer', borderRadius: '2px 0 0 2px',
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    transition: 'all 140ms ease',
+                  }}>
+                  {selected && <Check size={14} />}
+                  <span>{o.name}</span>
+                  {incomplete && (
+                    <span style={{ fontSize: 9, fontFamily: 'var(--mono)', letterSpacing: '0.1em',
+                                  background: '#e0a93e', color: '#3b2a04', padding: '2px 5px',
+                                  borderRadius: 2, textTransform: 'uppercase' }}>
+                      needs config
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => openConfigureOffer(o)}
+                  title="Configure offer"
+                  style={{
+                    padding: '10px 8px',
+                    border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
+                    borderLeft: '1px solid var(--rule)',
+                    background: selected ? 'var(--ink)' : 'white',
+                    color: selected ? 'var(--paper)' : 'var(--ink-3)',
+                    cursor: 'pointer', borderRadius: '0 2px 2px 0',
+                    display: 'inline-flex', alignItems: 'center',
+                  }}>
+                  <Settings size={14} />
+                </button>
+              </div>
             )
           })}
+          <button onClick={openNewOffer}
+            style={{
+              padding: '10px 16px',
+              border: '2px dashed var(--rule)', background: 'transparent',
+              color: 'var(--ink-3)',
+              fontFamily: 'var(--sans)', fontSize: 14,
+              cursor: 'pointer', borderRadius: 2,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              transition: 'all 140ms ease',
+            }}>
+            <Plus size={14} />
+            New offer
+          </button>
         </div>
+        {(() => {
+          const cur = offers.find(o => o.slug === offerSlug)
+          if (!cur) return null
+          if (!cur.mechanism_name || !cur.primary_audience) {
+            return (
+              <div style={{ marginTop: 12, padding: '10px 14px', background: '#fef9e7',
+                            border: '1px solid #e0a93e', fontSize: 13, borderRadius: 2,
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: '#7a5c12' }}>
+                  This offer is missing {[!cur.mechanism_name && 'mechanism', !cur.primary_audience && 'audience'].filter(Boolean).join(' + ')}.
+                  Generated scripts will be generic without it.
+                </span>
+                <button onClick={() => openConfigureOffer(cur)}
+                  style={{ padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 11,
+                          letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+                          border: '1px solid #7a5c12', background: '#7a5c12', color: '#fef9e7',
+                          cursor: 'pointer', borderRadius: 2 }}>
+                  Configure now
+                </button>
+              </div>
+            )
+          }
+          return null
+        })()}
       </Section>
+
+      <OfferConfigModal
+        open={offerModalOpen}
+        existing={offerModalExisting}
+        onClose={() => setOfferModalOpen(false)}
+        onSaved={handleOfferSaved}
+      />
 
       {/* Step 2: how many concepts */}
       <Section label="02" title="How many concepts">

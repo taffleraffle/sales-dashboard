@@ -2,20 +2,19 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell, Legend, ReferenceLine,
 } from 'recharts'
-import { Trophy, AlertCircle, RefreshCw, Sparkles, DollarSign, Target, Activity } from 'lucide-react'
+import { Trophy, AlertCircle, RefreshCw, Sparkles, Target, Activity, TrendingUp, Zap } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { tagMissing, listOffers, getAttributeCoverage } from '../../services/creativeTagger'
 
 /*
-  Creative Insights — editorial chart dashboard.
+  Creative Insights — focused on WIN RATE, not spend.
 
-  Top:      KPI tiles (spend, winners, avg CPB, attribute coverage)
-  Mid:      Date range + offer chip filters
-  Highlight: Winning attribute callout cards (yellow accent)
-  Charts:   Recharts bar grid (6 attributes) + pie chart for proof distribution
-  Bottom:   Winners table with rich attribute pills
+  Headline KPIs:    win rate %, total tagged ads, winners count, avg CPB on winners
+  Top callouts:     winning attributes with avg win rate
+  Charts:           win rate by attribute (small multiples), proof character pie
+  Tables:           top creatives by booked, current winners
 */
 
 const DATE_PRESETS = [
@@ -27,23 +26,14 @@ const DATE_PRESETS = [
 
 const PIVOTS = [
   { attr: 'hook_type',        label: 'Hook type' },
-  { attr: 'message_frame',    label: 'Message frame' },
   { attr: 'mechanism_reveal', label: 'Mechanism reveal' },
+  { attr: 'message_frame',    label: 'Message frame' },
   { attr: 'pain_angle',       label: 'Pain angle' },
   { attr: 'funnel_stage',     label: 'Funnel stage' },
   { attr: 'format',           label: 'Format' },
 ]
 
-const PIE_PALETTE = [
-  '#0a0a0a',  // ink
-  '#f4e14a',  // accent
-  '#3e8a5e',  // green
-  '#e0a93e',  // amber
-  '#b53e3e',  // red
-  '#5b3a8f',  // purple
-  '#0e7c86',  // teal
-  '#b86a0c',  // orange
-]
+const PIE_PALETTE = ['#0a0a0a', '#f4e14a', '#3e8a5e', '#e0a93e', '#b53e3e', '#5b3a8f', '#0e7c86', '#b86a0c']
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 const daysAgoISO = (n) => new Date(Date.now() - n * 86400 * 1000).toISOString().slice(0, 10)
@@ -53,13 +43,10 @@ function fmt$(n) {
   if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`
   return `$${n.toFixed(0)}`
 }
-function fmtN(n) {
+function fmtN(n) { return n == null || isNaN(n) ? '—' : Math.round(n).toLocaleString() }
+function fmtPct(n, digits = 0) {
   if (n == null || isNaN(n)) return '—'
-  return Math.round(n).toLocaleString()
-}
-function fmtPct(n) {
-  if (n == null || isNaN(n)) return '—'
-  return `${(n * 100).toFixed(0)}%`
+  return `${(n * 100).toFixed(digits)}%`
 }
 
 export default function AdsInsights() {
@@ -78,9 +65,7 @@ export default function AdsInsights() {
   const [proofPie, setProofPie] = useState([])
 
   const setPresetRange = (days) => {
-    setPreset(days)
-    setSince(daysAgoISO(days))
-    setUntil(todayISO())
+    setPreset(days); setSince(daysAgoISO(days)); setUntil(todayISO())
   }
 
   const loadEverything = useCallback(async () => {
@@ -110,11 +95,8 @@ export default function AdsInsights() {
       const pivotMap = {}
       for (const r of pivotResults) pivotMap[r.attr] = r.rows
       setPivots(pivotMap)
-    } catch (e) {
-      setErr(e.message)
-    } finally {
-      setLoading(false)
-    }
+    } catch (e) { setErr(e.message) }
+    finally { setLoading(false) }
   }, [since, until])
 
   useEffect(() => { loadEverything() }, [loadEverything])
@@ -125,19 +107,82 @@ export default function AdsInsights() {
     return perf.filter(r => offerFilter.includes(r.offer_slug))
   }, [perf, offerFilter])
 
-  // KPI tiles
-  const kpi = useMemo(() => {
+  // Top-level stats
+  const stats = useMemo(() => {
     const rows = filteredPerf || []
+    const tagged = rows.filter(r => r.hook_type != null)
+    const winnerRows = rows.filter(r => r.effective_winner)
+    const winRate = tagged.length > 0 ? winnerRows.length / tagged.length : 0
     const totalSpend = rows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
     const totalBooked = rows.reduce((s, r) => s + (Number(r.booked) || 0), 0)
-    const totalClosed = rows.reduce((s, r) => s + (Number(r.closes) || 0), 0)
-    const winnersCount = rows.filter(r => r.effective_winner).length
-    const avgCpb = totalBooked > 0 ? totalSpend / totalBooked : null
-    const coverageAvg = coverage.length
-      ? coverage.reduce((s, c) => s + (parseFloat(c.coverage_pct) || 0), 0) / coverage.length
-      : 0
-    return { totalSpend, totalBooked, totalClosed, winnersCount, avgCpb, coverageAvg }
-  }, [filteredPerf, coverage])
+    const winnerSpend = winnerRows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
+    const winnerBooked = winnerRows.reduce((s, r) => s + (Number(r.booked) || 0), 0)
+    const avgCpbWinners = winnerBooked > 0 ? winnerSpend / winnerBooked : null
+    return {
+      totalAds: rows.length,
+      taggedAds: tagged.length,
+      winners: winnerRows.length,
+      winRate,
+      avgCpbWinners,
+      totalSpend,
+      totalBooked,
+    }
+  }, [filteredPerf])
+
+  // Top performing creatives — sorted by booked, then CPB
+  const topCreatives = useMemo(() => {
+    const rows = filteredPerf || []
+    return [...rows]
+      .filter(r => (Number(r.booked) || 0) > 0)
+      .sort((a, b) => {
+        const ba = Number(a.booked) || 0
+        const bb = Number(b.booked) || 0
+        if (bb !== ba) return bb - ba
+        const ca = Number(a.cost_per_booked) || Infinity
+        const cb = Number(b.cost_per_booked) || Infinity
+        return ca - cb
+      })
+      .slice(0, 10)
+  }, [filteredPerf])
+
+  // Variables pulling ahead — for each attribute, the value with highest win rate
+  // (only consider values with ≥2 tagged ads to filter noise)
+  const variablesPullingAhead = useMemo(() => {
+    const rows = filteredPerf || []
+    const out = []
+    PIVOTS.forEach(p => {
+      const groups = {}
+      rows.forEach(r => {
+        const v = r[p.attr]
+        if (!v) return
+        if (!groups[v]) groups[v] = { total: 0, winners: 0, totalCpb: 0, cpbCount: 0 }
+        groups[v].total++
+        if (r.effective_winner) groups[v].winners++
+        if (r.cost_per_booked != null) {
+          groups[v].totalCpb += Number(r.cost_per_booked)
+          groups[v].cpbCount++
+        }
+      })
+      const overall = rows.length > 0
+        ? rows.filter(r => r.effective_winner).length / rows.length
+        : 0
+      const ranked = Object.entries(groups)
+        .filter(([_, g]) => g.total >= 2)
+        .map(([value, g]) => ({
+          attribute: p.attr,
+          attribute_label: p.label,
+          value,
+          win_rate: g.winners / g.total,
+          win_rate_lift: (g.winners / g.total) - overall,
+          ads: g.total,
+          winners: g.winners,
+          avg_cpb: g.cpbCount > 0 ? g.totalCpb / g.cpbCount : null,
+        }))
+        .sort((a, b) => b.win_rate_lift - a.win_rate_lift)
+      if (ranked[0] && ranked[0].win_rate_lift > 0) out.push(ranked[0])
+    })
+    return out.sort((a, b) => b.win_rate_lift - a.win_rate_lift)
+  }, [filteredPerf])
 
   async function handleTagMissing() {
     setTagging(true)
@@ -156,14 +201,11 @@ export default function AdsInsights() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
           <div className="eyebrow eyebrow-accent">OPT Sales · Creative <em>insights</em></div>
-          <h1 className="h1" style={{ marginTop: 6, marginBottom: 8 }}>
-            What's <em>winning</em>, by attribute.
-          </h1>
+          <h1 className="h1" style={{ marginTop: 6, marginBottom: 8 }}>What's <em>winning</em>.</h1>
           <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
                       fontSize: 15, maxWidth: 640, lineHeight: 1.5, margin: 0 }}>
-            Every ad tagged across 11 dimensions. Pivot by hook, frame, mechanism, proof,
-            pain angle, or format. The "winning attributes" callout names the values that
-            consistently appear in winners.
+            Win rate, top creatives, and the attribute values pulling ahead. Every ad tagged
+            across 11 dimensions so winners surface their own pattern.
           </p>
         </div>
         <button onClick={handleTagMissing} disabled={tagging || loading}
@@ -177,23 +219,24 @@ export default function AdsInsights() {
             boxShadow: '3px 3px 0 var(--accent)',
           }}>
           <RefreshCw size={12} />
-          {tagging ? 'Tagging…' : 'Tag missing ads'}
+          {tagging ? 'Tagging…' : 'Tag more ads'}
         </button>
       </div>
 
-      {/* KPI tiles */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                    gap: 1, background: 'var(--rule)', border: '1px solid var(--rule)',
-                    marginBottom: 24 }}>
-        <KpiTile icon={<DollarSign size={14} />} label="Spend" value={fmt$(kpi.totalSpend)} sub={`${preset}d window`} />
-        <KpiTile icon={<Target size={14} />} label="Booked calls" value={fmtN(kpi.totalBooked)} sub={`avg CPB ${fmt$(kpi.avgCpb)}`} />
-        <KpiTile icon={<Trophy size={14} />} label="Winners" value={fmtN(kpi.winnersCount)} sub="spend≥$1k · ≥2 booked · CPB≤$300" accent />
-        <KpiTile icon={<Activity size={14} />} label="Tag coverage" value={fmtPct(kpi.coverageAvg)} sub={`across ${coverage.length} attributes`} />
+      {/* Headline KPI row — WIN RATE prominent, spend de-emphasized */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr', gap: 1,
+                    background: 'var(--rule)', border: '1px solid var(--rule)', marginBottom: 24 }}>
+        <BigKpi label="Win rate" value={fmtPct(stats.winRate, 1)} accent
+                sub={`${stats.winners} winners of ${stats.taggedAds} tagged ads`}
+                icon={<Trophy size={18} />} />
+        <Kpi label="Avg CPB on winners" value={fmt$(stats.avgCpbWinners)} sub="cost per booked call" icon={<Target size={14} />} />
+        <Kpi label="Total booked" value={fmtN(stats.totalBooked)} sub={`across ${stats.totalAds} ads`} icon={<Activity size={14} />} />
+        <Kpi label="Tag coverage" value={fmtPct(coverage.length ? coverage.reduce((s, c) => s + (parseFloat(c.coverage_pct) || 0), 0) / coverage.length : 0)} sub={`${coverage.length} attributes`} icon={<Sparkles size={14} />} />
       </div>
 
       {/* Filter bar */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16,
-                    padding: '16px 20px', background: 'var(--paper)', border: '1px solid var(--rule)',
+                    padding: '14px 18px', background: 'var(--paper)', border: '1px solid var(--rule)',
                     marginBottom: 28 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
@@ -209,16 +252,12 @@ export default function AdsInsights() {
               }}>{p.label}</button>
           ))}
         </div>
-
         <span style={{ width: 1, height: 24, background: 'var(--rule)' }} />
-
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
                         textTransform: 'uppercase', color: 'var(--ink-4)' }}>Offer:</span>
-          {offers.map(o => {
+          {offers.filter(o => !o.slug.includes('template')).map(o => {
             const on = offerFilter.includes(o.slug)
-            const isStub = o.slug.includes('stub') || o.slug.includes('template')
-            if (isStub) return null  // hide stubs from filter — they have no data
             return (
               <button key={o.slug} onClick={() => toggleOffer(o.slug)}
                 style={{
@@ -248,34 +287,42 @@ export default function AdsInsights() {
         </div>
       )}
 
-      {/* Winning attributes callout */}
-      {winners.length > 0 && (
+      {/* Variables pulling ahead — THE headline insight */}
+      {variablesPullingAhead.length > 0 && (
         <div style={{ marginBottom: 32 }}>
           <div className="eyebrow eyebrow-accent" style={{ marginBottom: 12 }}>
-            <Trophy size={13} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
-            Most <em>consistent</em> winning attributes
+            <Zap size={13} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
+            Variables <em>pulling ahead</em>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-                        gap: 12 }}>
-            {winners.slice(0, 9).map((w, i) => (
+          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)',
+                      fontSize: 13, margin: '0 0 12px', maxWidth: 720 }}>
+            For each attribute, the value with the highest win-rate lift versus the overall
+            baseline ({fmtPct(stats.winRate, 1)}). If you write more scripts, bias toward these.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+            {variablesPullingAhead.map((v, i) => (
               <div key={i} style={{ padding: 16, background: 'white', border: '1px solid var(--rule)',
                                     borderLeft: '4px solid var(--accent)', borderRadius: 2 }}>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                              textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
-                  {w.attribute_name.replace(/_/g, ' ')}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+                                textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+                    {v.attribute_label}
+                  </span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)',
+                                background: 'var(--ink)', padding: '2px 6px', fontWeight: 700,
+                                letterSpacing: '0.08em' }}>
+                    +{fmtPct(v.win_rate_lift, 1)}
+                  </span>
                 </div>
                 <div style={{ fontFamily: 'var(--serif)', fontSize: 22, color: 'var(--ink)',
-                              lineHeight: 1.1, marginBottom: 10, fontWeight: 400 }}>
-                  {w.attribute_value}
+                              lineHeight: 1.1, marginBottom: 8, fontWeight: 400 }}>
+                  {v.value}
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between',
-                              fontFamily: 'var(--mono)', fontSize: 11 }}>
-                  <span style={{ color: 'var(--ink-3)' }}>
-                    <strong style={{ color: 'var(--ink)', fontSize: 14 }}>{w.winners}</strong> winners
-                  </span>
-                  <span style={{ color: 'var(--ink-3)' }}>
-                    avg CPB <strong style={{ color: 'var(--ink)', fontSize: 14 }}>{fmt$(w.avg_cost_per_booked)}</strong>
-                  </span>
+                              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
+                  <span>win rate <strong style={{ color: 'var(--ink)', fontSize: 13 }}>{fmtPct(v.win_rate, 0)}</strong></span>
+                  <span>{v.winners}/{v.ads} ads</span>
+                  {v.avg_cpb && <span>CPB <strong style={{ color: 'var(--ink)', fontSize: 13 }}>{fmt$(v.avg_cpb)}</strong></span>}
                 </div>
               </div>
             ))}
@@ -283,47 +330,150 @@ export default function AdsInsights() {
         </div>
       )}
 
-      {/* Charts grid + proof pie */}
+      {/* Top performing creatives */}
+      <div style={{ marginBottom: 32 }}>
+        <div className="eyebrow eyebrow-accent" style={{ marginBottom: 12 }}>
+          <TrendingUp size={13} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
+          Top <em>performing</em> creatives
+        </div>
+        <div style={{ background: 'white', border: '1px solid var(--rule)', borderRadius: 2 }}>
+          {topCreatives.length === 0 ? (
+            <div style={{ padding: 36, color: 'var(--ink-4)', fontStyle: 'italic',
+                         fontFamily: 'var(--serif)', textAlign: 'center', fontSize: 14 }}>
+              No booked calls attributed to any ads in this window yet.
+            </div>
+          ) : (
+            <table style={{ width: '100%', fontSize: 12, fontFamily: 'var(--sans)' }}>
+              <thead>
+                <tr style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+                            textTransform: 'uppercase', color: 'var(--ink-4)',
+                            borderBottom: '1px solid var(--rule)' }}>
+                  <th style={{ textAlign: 'left', padding: '10px 14px', width: 26 }}>#</th>
+                  <th style={{ textAlign: 'left' }}>Ad name</th>
+                  <th style={{ textAlign: 'left' }}>Attributes</th>
+                  <th style={{ textAlign: 'right' }}>Booked</th>
+                  <th style={{ textAlign: 'right' }}>CPB</th>
+                  <th style={{ textAlign: 'center', padding: '10px 14px' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {topCreatives.map((r, i) => (
+                  <tr key={r.ad_id} style={{ borderTop: '1px solid var(--rule)' }}>
+                    <td style={{ padding: '10px 14px', fontFamily: 'var(--mono)', fontWeight: 700,
+                                color: i < 3 ? 'var(--accent)' : 'var(--ink-4)',
+                                background: i < 3 ? 'var(--ink)' : 'transparent' }}>
+                      {String(i + 1).padStart(2, '0')}
+                    </td>
+                    <td style={{ padding: '10px 0', maxWidth: 240, overflow: 'hidden',
+                                textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <Link to={`/sales/ads/ad/${r.ad_id}`}
+                        style={{ color: 'var(--ink)', textDecoration: 'none', fontWeight: 500 }}>
+                        {r.ad_name || r.ad_id}
+                      </Link>
+                    </td>
+                    <td style={{ padding: '10px 0' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {[r.hook_type, r.mechanism_reveal, r.pain_angle, r.proof_character]
+                          .filter(v => v && v !== 'none').map((v, j) => (
+                            <span key={j} style={{ padding: '2px 6px', background: 'var(--paper)',
+                                                  fontFamily: 'var(--mono)', fontSize: 10,
+                                                  color: 'var(--ink-3)', border: '1px solid var(--rule)',
+                                                  borderRadius: 2 }}>{v}</span>
+                          ))}
+                      </div>
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '10px 0',
+                                fontWeight: 700, color: 'var(--ink)', fontSize: 14 }}>{fmtN(r.booked)}</td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '10px 0' }}>{fmt$(r.cost_per_booked)}</td>
+                    <td style={{ textAlign: 'center', padding: '10px 14px' }}>
+                      {r.effective_winner && (
+                        <span style={{ padding: '2px 6px', background: 'var(--accent)',
+                                      fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+                                      letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                          Winner
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* Win rate by attribute charts */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24, marginBottom: 32 }}>
-        {/* Bar charts grid */}
         <div>
-          <div className="eyebrow" style={{ marginBottom: 12, color: 'var(--ink-3)' }}>Performance by attribute</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 12, color: 'var(--ink-3)' }}>
+            Win rate by attribute
+          </div>
+          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)',
+                      fontSize: 12, margin: '0 0 12px' }}>
+            Each bar = % of ads with this attribute value that became winners. Yellow bars beat the baseline.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 16 }}>
             {PIVOTS.map(p => (
-              <PivotChart key={p.attr} label={p.label} rows={pivots[p.attr] || []} loading={loading} />
+              <WinRateChart key={p.attr}
+                label={p.label}
+                attr={p.attr}
+                rows={filteredPerf || []}
+                baseline={stats.winRate}
+                loading={loading} />
             ))}
           </div>
         </div>
 
-        {/* Proof character pie */}
         <div>
-          <div className="eyebrow" style={{ marginBottom: 12, color: 'var(--ink-3)' }}>Proof character distribution</div>
+          <div className="eyebrow" style={{ marginBottom: 12, color: 'var(--ink-3)' }}>
+            Proof character distribution
+          </div>
           <ProofPie rows={proofPie} loading={loading} />
         </div>
       </div>
-
-      {/* Winners table */}
-      <WinnersTable rows={(filteredPerf || []).filter(r => r.effective_winner)} />
     </div>
   )
 }
 
-function KpiTile({ icon, label, value, sub, accent }) {
+function BigKpi({ label, value, sub, accent, icon }) {
   return (
-    <div style={{ padding: '16px 20px', background: 'white' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-        <span style={{ color: accent ? 'var(--accent)' : 'var(--ink-4)',
+    <div style={{ padding: '20px 24px', background: 'white' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ color: accent ? 'var(--accent)' : 'var(--ink-3)',
                        background: accent ? 'var(--ink)' : 'transparent',
-                       padding: accent ? '3px 4px' : 0, borderRadius: 2,
+                       padding: accent ? '4px 6px' : 0, borderRadius: 2,
                        display: 'inline-flex' }}>
           {icon}
         </span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.14em',
+                      textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600 }}>
+          {label}
+        </span>
+      </div>
+      <div style={{ fontFamily: 'var(--serif)', fontSize: 48, color: 'var(--ink)',
+                    fontWeight: 400, lineHeight: 1, marginBottom: 8, fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </div>
+      {sub && (
+        <div style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic', color: 'var(--ink-4)' }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Kpi({ label, value, sub, icon }) {
+  return (
+    <div style={{ padding: '20px 22px', background: 'white' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span style={{ color: 'var(--ink-4)' }}>{icon}</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
                       textTransform: 'uppercase', color: 'var(--ink-4)' }}>
           {label}
         </span>
       </div>
-      <div style={{ fontFamily: 'var(--serif)', fontSize: 30, color: 'var(--ink)',
+      <div style={{ fontFamily: 'var(--serif)', fontSize: 28, color: 'var(--ink)',
                     fontWeight: 400, lineHeight: 1, marginBottom: 6, fontVariantNumeric: 'tabular-nums' }}>
         {value}
       </div>
@@ -337,74 +487,74 @@ function KpiTile({ icon, label, value, sub, accent }) {
   )
 }
 
-function PivotChart({ label, rows, loading }) {
+function WinRateChart({ label, attr, rows, baseline, loading }) {
   const data = useMemo(() => {
-    return [...rows]
-      .sort((a, b) => (Number(b.booked) || 0) - (Number(a.booked) || 0))
-      .slice(0, 8)
-      .map(r => ({
-        value: r.attribute_value,
-        booked: Number(r.booked) || 0,
-        spend: Number(r.spend) || 0,
-        cpb: r.cost_per_booked == null ? null : Number(r.cost_per_booked),
-        winners: Number(r.winners) || 0,
+    const groups = {}
+    rows.forEach(r => {
+      const v = r[attr]
+      if (!v) return
+      if (!groups[v]) groups[v] = { total: 0, winners: 0 }
+      groups[v].total++
+      if (r.effective_winner) groups[v].winners++
+    })
+    return Object.entries(groups)
+      .filter(([_, g]) => g.total >= 1)
+      .map(([value, g]) => ({
+        value,
+        winRate: g.winners / g.total,
+        ads: g.total,
+        winners: g.winners,
+        beatsBaseline: (g.winners / g.total) > baseline,
       }))
-  }, [rows])
+      .sort((a, b) => b.winRate - a.winRate)
+      .slice(0, 8)
+  }, [rows, attr, baseline])
 
   const tooltip = ({ active, payload, label: tipLabel }) => {
     if (!active || !payload?.length) return null
     const d = payload[0].payload
     return (
       <div style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '10px 12px',
-                    fontFamily: 'var(--mono)', fontSize: 11, borderRadius: 2,
-                    boxShadow: '0 8px 24px rgba(10,10,10,0.16)' }}>
+                    fontFamily: 'var(--mono)', fontSize: 11, borderRadius: 2 }}>
         <div style={{ fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase',
                       color: 'var(--accent)', marginBottom: 4 }}>{tipLabel}</div>
         <div style={{ fontFamily: 'var(--serif)', fontSize: 14 }}>
-          <strong>{d.booked}</strong> booked · {fmt$(d.spend)} spend · CPB {fmt$(d.cpb)}
+          <strong>{fmtPct(d.winRate, 0)}</strong> win rate · {d.winners}/{d.ads} ads
         </div>
-        {d.winners > 0 && (
-          <div style={{ marginTop: 4, fontSize: 10, color: 'var(--accent)' }}>
-            🏆 {d.winners} winner{d.winners > 1 ? 's' : ''}
-          </div>
-        )}
       </div>
     )
   }
 
   return (
     <div style={{ padding: 14, background: 'white', border: '1px solid var(--rule)', borderRadius: 2 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-                    marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.14em',
-                      textTransform: 'uppercase', color: 'var(--ink)' }}>
-          {label}
-        </span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>
-          {data.length} values
+                      textTransform: 'uppercase', color: 'var(--ink)' }}>{label}</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>
+          baseline {fmtPct(baseline, 0)}
         </span>
       </div>
       {loading ? (
-        <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>
-          Loading…
-        </div>
+        <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>Loading…</div>
       ) : data.length === 0 ? (
-        <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center',
                       color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>
-          No tagged data in this window.
+          No data.
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={200}>
+        <ResponsiveContainer width="100%" height={180}>
           <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
             <XAxis dataKey="value" tick={{ fontSize: 10, fill: 'var(--ink-3)', fontFamily: 'var(--mono)' }}
-                  axisLine={false} tickLine={false} interval={0} angle={-12} textAnchor="end" height={50} />
-            <YAxis tick={{ fontSize: 10, fill: 'var(--ink-4)', fontFamily: 'var(--mono)' }}
-                   axisLine={false} tickLine={false} width={30} />
+                  axisLine={false} tickLine={false} interval={0} angle={-15} textAnchor="end" height={50} />
+            <YAxis tickFormatter={v => `${(v * 100).toFixed(0)}%`}
+                   tick={{ fontSize: 9, fill: 'var(--ink-4)', fontFamily: 'var(--mono)' }}
+                   axisLine={false} tickLine={false} width={38} />
             <Tooltip content={tooltip} cursor={{ fill: 'var(--paper)' }} />
-            <Bar dataKey="booked" radius={[2, 2, 0, 0]}>
+            <ReferenceLine y={baseline} stroke="var(--ink-4)" strokeDasharray="3 3" />
+            <Bar dataKey="winRate" radius={[2, 2, 0, 0]}>
               {data.map((entry, i) => (
-                <Cell key={i} fill={entry.winners > 0 ? 'var(--accent)' : 'var(--ink)'} />
+                <Cell key={i} fill={entry.beatsBaseline ? 'var(--accent)' : 'var(--ink-3)'} />
               ))}
             </Bar>
           </BarChart>
@@ -420,7 +570,7 @@ function ProofPie({ rows, loading }) {
       .filter(r => r.attribute_value !== 'none')
       .sort((a, b) => (Number(b.booked) || 0) - (Number(a.booked) || 0))
       .slice(0, 8)
-      .map(r => ({ name: r.attribute_value, value: Number(r.booked) || 0, spend: Number(r.spend) || 0 }))
+      .map(r => ({ name: r.attribute_value, value: Number(r.booked) || 0 }))
   }, [rows])
 
   const tooltip = ({ active, payload }) => {
@@ -431,39 +581,20 @@ function ProofPie({ rows, loading }) {
                     fontFamily: 'var(--mono)', fontSize: 11, borderRadius: 2 }}>
         <div style={{ fontSize: 9, color: 'var(--accent)', letterSpacing: '0.16em',
                       textTransform: 'uppercase', marginBottom: 2 }}>{d.name}</div>
-        <div style={{ fontFamily: 'var(--serif)', fontSize: 14 }}>
-          {d.value} booked · {fmt$(d.payload.spend)}
-        </div>
+        <div style={{ fontFamily: 'var(--serif)', fontSize: 14 }}>{d.value} booked</div>
       </div>
     )
   }
 
-  if (loading) {
-    return (
-      <div style={{ height: 300, background: 'white', border: '1px solid var(--rule)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>
-        Loading…
-      </div>
-    )
-  }
-  if (data.length === 0) {
-    return (
-      <div style={{ height: 300, background: 'white', border: '1px solid var(--rule)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
-                    color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>
-        <Sparkles size={20} style={{ marginBottom: 8 }} />
-        No proof-character data yet.
-      </div>
-    )
-  }
+  if (loading) return <div style={{ height: 280, background: 'white', border: '1px solid var(--rule)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>Loading…</div>
+  if (data.length === 0) return <div style={{ height: 280, background: 'white', border: '1px solid var(--rule)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>No proof data yet.</div>
 
   return (
     <div style={{ padding: 14, background: 'white', border: '1px solid var(--rule)', borderRadius: 2 }}>
-      <ResponsiveContainer width="100%" height={300}>
+      <ResponsiveContainer width="100%" height={280}>
         <PieChart>
           <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="45%"
-               innerRadius={45} outerRadius={90} paddingAngle={2}>
+               innerRadius={42} outerRadius={80} paddingAngle={2}>
             {data.map((_, i) => <Cell key={i} fill={PIE_PALETTE[i % PIE_PALETTE.length]} />)}
           </Pie>
           <Tooltip content={tooltip} />
@@ -471,72 +602,6 @@ function ProofPie({ rows, loading }) {
                                   letterSpacing: '0.06em', color: 'var(--ink-3)' }} />
         </PieChart>
       </ResponsiveContainer>
-    </div>
-  )
-}
-
-function WinnersTable({ rows }) {
-  return (
-    <div>
-      <div className="eyebrow eyebrow-accent" style={{ marginBottom: 12 }}>
-        <Trophy size={13} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
-        Current <em>winners</em> ({rows.length})
-      </div>
-      <div style={{ background: 'white', border: '1px solid var(--rule)', borderRadius: 2 }}>
-        {rows.length === 0 ? (
-          <div style={{ padding: 36, color: 'var(--ink-4)', fontStyle: 'italic',
-                       fontFamily: 'var(--serif)', textAlign: 'center', fontSize: 14 }}>
-            No ads meet the winner threshold yet (spend ≥ $1k AND ≥2 booked AND CPB ≤ $300).
-            <br />
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontStyle: 'normal',
-                          color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
-              Tag more ads via the button above, or extend the date window.
-            </span>
-          </div>
-        ) : (
-          <table style={{ width: '100%', fontSize: 12, fontFamily: 'var(--sans)' }}>
-            <thead>
-              <tr style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                          textTransform: 'uppercase', color: 'var(--ink-4)',
-                          borderBottom: '1px solid var(--rule)' }}>
-                <th style={{ textAlign: 'left', padding: '10px 14px' }}>Ad name</th>
-                <th style={{ textAlign: 'left' }}>Attributes</th>
-                <th style={{ textAlign: 'right' }}>Spend</th>
-                <th style={{ textAlign: 'right' }}>Booked</th>
-                <th style={{ textAlign: 'right' }}>CPB</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.ad_id} style={{ borderTop: '1px solid var(--rule)' }}>
-                  <td style={{ padding: '10px 14px', maxWidth: 280, overflow: 'hidden',
-                              textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <Link to={`/sales/ads/ad/${r.ad_id}`}
-                      style={{ color: 'var(--ink)', textDecoration: 'none', fontWeight: 500 }}>
-                      {r.ad_name || r.ad_id}
-                    </Link>
-                  </td>
-                  <td style={{ padding: '10px 0' }}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                      {[r.hook_type, r.message_frame, r.pain_angle, r.proof_character]
-                        .filter(v => v && v !== 'none').map((v, i) => (
-                          <span key={i} style={{ padding: '2px 6px', background: 'var(--paper)',
-                                                fontFamily: 'var(--mono)', fontSize: 10,
-                                                color: 'var(--ink-3)', border: '1px solid var(--rule)',
-                                                borderRadius: 2 }}>{v}</span>
-                        ))}
-                    </div>
-                  </td>
-                  <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '10px 0' }}>{fmt$(r.spend)}</td>
-                  <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '10px 0' }}>{fmtN(r.booked)}</td>
-                  <td style={{ textAlign: 'right', fontFamily: 'var(--mono)', padding: '10px 14px',
-                              fontWeight: 600, color: 'var(--ink)' }}>{fmt$(r.cost_per_booked)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
     </div>
   )
 }
