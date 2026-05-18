@@ -5,6 +5,7 @@ import { listGeneratedScripts, linkScriptToAd } from '../../services/scriptGener
 import { tagAd, listOffers } from '../../services/creativeTagger'
 import { uploadAdVideoToStorage, transcribeUploadedAd } from '../../services/adAnalyst'
 import { extractAudioFromVideo, shouldExtractAudio } from '../../services/audioExtract'
+import { extractTextFromFile, isSupportedDocFile, getSupportedExtensionsLabel } from '../../services/docExtract'
 import AdThumbnail from './AdThumbnail'
 
 /*
@@ -411,11 +412,18 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
                 ))}
               </select>
 
-              <FieldLabel style={{ marginTop: 20 }}>Step 3 · Paste the full transcript</FieldLabel>
+              <FieldLabel style={{ marginTop: 20 }}>Step 3 · Paste the transcript or drop a script file</FieldLabel>
+              <DocDropZone
+                onText={(text, meta) => {
+                  setPasteText(text)
+                  setErr(null)
+                }}
+                onError={(msg) => setErr(msg)} />
               <textarea value={pasteText} onChange={e => setPasteText(e.target.value)}
                 rows={10}
-                placeholder="Paste the script body here. It'll be saved as the manual transcript and auto-tagged for hook type, mechanism reveal, pain angle, etc."
-                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--sans)', lineHeight: 1.5 }} />
+                placeholder="Paste the script body here, or drop a .pdf/.docx/.txt/.md file above to extract the text. It'll be saved as the manual transcript and auto-tagged for hook type, mechanism reveal, pain angle, etc."
+                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--sans)', lineHeight: 1.5,
+                        marginTop: 8 }} />
               <div style={{ marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10,
                             color: 'var(--ink-4)', letterSpacing: '0.06em' }}>
                 {pasteText.trim().split(/\s+/).filter(Boolean).length} words
@@ -971,6 +979,101 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
         </div>
       )}
     </div>
+  )
+}
+
+/* Compact drop zone for script docs (pdf/docx/txt/md). On successful
+   extraction, calls onText with the cleaned plain-text body so the
+   parent Paste-transcript textarea can populate. */
+function DocDropZone({ onText, onError }) {
+  const [dragOver, setDragOver] = useState(false)
+  const [extracting, setExtracting] = useState(false)
+  const [stage, setStage] = useState(null)
+  const [lastMeta, setLastMeta] = useState(null)
+
+  async function handleFile(file) {
+    if (!file) return
+    if (!isSupportedDocFile(file)) {
+      onError?.(`Unsupported file. Try ${getSupportedExtensionsLabel()}.`)
+      return
+    }
+    setExtracting(true); setStage(null)
+    try {
+      const { text, sourceFormat, wordCount } = await extractTextFromFile(file, {
+        onProgress: s => setStage(s),
+      })
+      if (!text.trim()) {
+        onError?.('No text could be extracted from this file. If the PDF is scanned (image-only), it needs OCR first.')
+        return
+      }
+      onText?.(text, { sourceFormat, wordCount, fileName: file.name })
+      setLastMeta({ fileName: file.name, sourceFormat, wordCount })
+    } catch (e) {
+      onError?.(e.message)
+    } finally {
+      setExtracting(false); setStage(null)
+    }
+  }
+
+  function onDrop(e) {
+    e.preventDefault(); setDragOver(false)
+    const f = e.dataTransfer.files?.[0]
+    if (f) handleFile(f)
+  }
+  function onPick(e) {
+    const f = e.target.files?.[0]
+    if (f) handleFile(f)
+  }
+
+  return (
+    <label htmlFor="upload-doc"
+      onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+      style={{
+        display: 'block', padding: '14px 16px',
+        border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--rule)'}`,
+        background: dragOver ? 'var(--paper)' : 'white',
+        borderRadius: 2, cursor: extracting ? 'wait' : 'pointer',
+        transition: 'all 120ms ease',
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}>
+      <input id="upload-doc" type="file" accept=".pdf,.docx,.txt,.md,.markdown" style={{ display: 'none' }}
+        onChange={onPick} disabled={extracting} />
+      <FileText size={18} color={dragOver ? 'var(--ink)' : 'var(--ink-4)'} />
+      <div style={{ flex: 1 }}>
+        {extracting ? (
+          <>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)',
+                          letterSpacing: '0.06em' }}>
+              <Sparkles size={11} className="pulse" style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle', color: 'var(--accent)' }} />
+              {stage || 'Extracting…'}
+            </div>
+          </>
+        ) : lastMeta ? (
+          <>
+            <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink)' }}>
+              <strong>{lastMeta.fileName}</strong> · {lastMeta.wordCount} words extracted
+            </div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                          letterSpacing: '0.06em', marginTop: 2 }}>
+              Drop another file to replace
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink)' }}>
+              Drop a script file or click to pick
+            </div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                          letterSpacing: '0.06em', marginTop: 2 }}>
+              {getSupportedExtensionsLabel()} · text extracted in browser
+            </div>
+          </>
+        )}
+      </div>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } } .pulse { animation: pulse 1.2s ease-in-out infinite; }`}</style>
+    </label>
   )
 }
 

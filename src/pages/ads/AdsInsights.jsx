@@ -11,6 +11,7 @@ import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawe
 import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
 import AdThumbnail from '../../components/ads/AdThumbnail'
 import CreativeGrid from '../../components/ads/CreativeGrid'
+import AttributeHeatmap from '../../components/ads/AttributeHeatmap'
 
 /*
   Creative Insights — focused on WIN RATE, not spend.
@@ -488,6 +489,9 @@ export default function AdsInsights() {
           )}
         </div>
       </div>
+
+      {/* Cross-attribute heatmap */}
+      <AttributeHeatmap since={since} until={until} baseline={stats.winRate} />
 
       {/* Win rate by attribute charts */}
       <div style={{ marginBottom: 32 }}>
