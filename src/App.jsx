@@ -33,6 +33,9 @@ const AdsClips = lazy(() => import('./pages/ads/AdsClips'))
 const AdsPerformance = lazy(() => import('./pages/ads/AdsPerformance'))
 const AdsCreativeTestingLayout = lazy(() => import('./pages/ads/AdsCreativeTestingLayout'))
 const AdsInsights = lazy(() => import('./pages/ads/AdsInsights'))
+const AdsCreativesLibrary = lazy(() => import('./pages/ads/AdsCreativesLibrary'))
+const AdsAttributesPage = lazy(() => import('./pages/ads/AdsAttributesPage'))
+const AdsExplorations = lazy(() => import('./pages/ads/AdsExplorations'))
 const AdsGenerator = lazy(() => import('./pages/ads/AdsGenerator'))
 const AdsOrphans = lazy(() => import('./pages/ads/AdsOrphans'))
 const AdsLegacy = lazy(() => import('./pages/ads/AdsLegacy'))
@@ -137,11 +140,14 @@ export default function App() {
 
                 {/* Creative testing — wrapper with sub-nav for Clips · Variants · Ads */}
                 <Route path="creative" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeTestingLayout /></Suspense>}>
-                  <Route index element={<Navigate to="/sales/ads/creative/clips" replace />} />
+                  <Route index element={<Navigate to="/sales/ads/creative/insights" replace />} />
                   <Route path="clips" element={<Suspense fallback={<PageSkeleton />}><AdsClips /></Suspense>} />
                   <Route path="variants" element={<Suspense fallback={<PageSkeleton />}><AdsVariants /></Suspense>} />
                   <Route path="ads" element={<Suspense fallback={<PageSkeleton />}><AdsList /></Suspense>} />
                   <Route path="insights" element={<Suspense fallback={<PageSkeleton />}><AdsInsights /></Suspense>} />
+                  <Route path="creatives" element={<Suspense fallback={<PageSkeleton />}><AdsCreativesLibrary /></Suspense>} />
+                  <Route path="attributes" element={<Suspense fallback={<PageSkeleton />}><AdsAttributesPage /></Suspense>} />
+                  <Route path="explorations" element={<Suspense fallback={<PageSkeleton />}><AdsExplorations /></Suspense>} />
                   <Route path="generate" element={<Suspense fallback={<PageSkeleton />}><AdsGenerator /></Suspense>} />
                 </Route>
 

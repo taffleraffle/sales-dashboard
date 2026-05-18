@@ -9,7 +9,9 @@
 
 export function pickThumbnail(ad) {
   if (!ad) return null
-  if (ad.asset_type === 'image' && ad.asset_url) return ad.asset_url
-  if (ad.asset_type === 'video' && ad.asset_url) return ad.asset_url
-  return ad.thumbnail_url || null
+  // asset_url is the highest-fidelity image we extracted (image_url, photo_data,
+  // video poster, link picture, or first carousel card). It works for every
+  // asset_type — don't gate on asset_type since 'carousel' and 'unknown' rows
+  // still have valid asset_urls now (see metaAdsSync.extractImageUrl).
+  return ad.asset_url || ad.thumbnail_url || null
 }

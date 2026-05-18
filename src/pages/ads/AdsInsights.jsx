@@ -4,9 +4,6 @@ import { supabase } from '../../lib/supabase'
 import { tagMissing, listOffers, getAttributeCoverage } from '../../services/creativeTagger'
 import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
 import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
-import CreativeGrid from '../../components/ads/CreativeGrid'
-import AttributeHeatmap from '../../components/ads/AttributeHeatmap'
-import AttributesView from '../../components/ads/AttributesView'
 import AdThumbnail from '../../components/ads/AdThumbnail'
 import {
   Eyebrow, SectionHead, Button, Pill, Card, Sparkline, BigNumber, Icon,
@@ -67,9 +64,6 @@ export default function AdsInsights() {
   const [preset, setPreset] = useState('30d')
   const [since, setSince] = useState(daysAgoISO(30))
   const [until, setUntil] = useState(todayISO())
-  const [activeTab, setActiveTab] = useState(() => {
-    try { return localStorage.getItem('insights.activeTab') || 'overview' } catch { return 'overview' }
-  })
   // Multi-select offer filter (matches design — operator can compare).
   // null/empty = all offers. Persisted in localStorage.
   const [activeOffers, setActiveOffers] = useState(() => {
@@ -135,11 +129,6 @@ export default function AdsInsights() {
   useEffect(() => {
     try { localStorage.setItem('insights.activeOffers', JSON.stringify(activeOffers)) } catch {}
   }, [activeOffers])
-
-  // Persist active sub-tab
-  useEffect(() => {
-    try { localStorage.setItem('insights.activeTab', activeTab) } catch {}
-  }, [activeTab])
 
   // Validate stale offer slugs against loaded list
   useEffect(() => {
@@ -274,14 +263,14 @@ export default function AdsInsights() {
   }
 
   return (
-    <div style={{ padding: '40px 0 80px', maxWidth: 1480, margin: '0 auto' }}>
-      {/* 1. Hero header */}
+    <div>
+      {/* Page header — sans-serif tone-down per dj282R9iMtYwNPnoqDHDRw design */}
       <SectionHead
-        eyebrow="OPT Sales · Creative insights"
-        title="What's winning."
-        italicWord="winning"
-        tagline="Every ad, classified across eleven dimensions. Winners feed the script generator. Here's the pattern emerging from the last 18 weeks of testing."
-        gap={28}
+        level="page"
+        eyebrow="Creative · Insights"
+        title="Insights"
+        tagline={`Win-rate signal across every Meta ad we've shipped. ${summary.winners} winners of ${summary.taggedAds} tagged ads.`}
+        gap={20}
         right={
           <div style={{ display: 'flex', gap: 8 }}>
             <Button variant="secondary" leftIcon={Icon.tag(13)}
@@ -296,7 +285,7 @@ export default function AdsInsights() {
         }
       />
 
-      {/* 2. Filter bar */}
+      {/* Filter bar */}
       <FilterBar
         date={preset} dateOptions={DATE_PRESETS} onSetDate={setPresetRange}
         offers={offers} activeOffers={activeOffers} onToggleOffer={toggleOffer}
@@ -310,113 +299,65 @@ export default function AdsInsights() {
         </div>
       )}
 
-      {/* Sub-tab nav */}
-      <SubTabNav active={activeTab} onChange={setActiveTab} counts={{
-        overview: null,
-        library: (filteredPerf || []).length,
-        attributes: 11,
-        explorations: null,
-      }} />
+      {/* KPI grid */}
+      <div style={{ marginTop: 26, marginBottom: 32 }}>
+        <KPIDominant summary={summary} spark={winnerSpark} />
+      </div>
 
-      {/* ─── OVERVIEW TAB ───────────────────────────────────────────── */}
-      {activeTab === 'overview' && (
-        <>
-          {/* KPI grid */}
-          <div style={{ marginBottom: 44 }}>
-            <KPIDominant summary={summary} spark={winnerSpark} />
-          </div>
+      {/* Variables pulling ahead */}
+      <div style={{ marginBottom: 32 }}>
+        <SectionHead
+          title="Variables pulling ahead"
+          tagline="For each attribute, the value beating baseline win rate by the largest margin."
+        />
+        <VariablesLeaderboard items={variablesAhead} baseline={summary.winRate} />
+      </div>
 
-          {/* Variables pulling ahead — leaderboard */}
-          <div style={{ marginBottom: 44 }}>
-            <SectionHead
-              eyebrow="Section II"
-              title="Variables pulling ahead."
-              italicWord="pulling ahead"
-              tagline="For each attribute, the value beating the baseline win rate by the largest margin — ranked by lift, not by raw win rate."
-            />
-            <VariablesLeaderboard items={variablesAhead} baseline={summary.winRate} />
-          </div>
+      {/* Top performers — links to Creatives page */}
+      <div style={{ marginBottom: 32 }}>
+        <SectionHead
+          title="Top performing creatives"
+          tagline={`${summary.winners} winners across the current window. Click any row to edit attributes.`}
+          right={
+            <Link to="/sales/ads/creative/creatives" style={{
+              fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
+              color: 'var(--ink-2)', textDecoration: 'none',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}>
+              See all {summary.taggedAds} →
+            </Link>
+          }
+        />
+        <TopPerformersTable rows={filteredPerf || []} loading={loading}
+          onClickRow={r => setEditingAd(r)} limit={10} />
+      </div>
 
-          {/* Top 10 performers preview — links to Library tab */}
-          <div style={{ marginBottom: 44 }}>
-            <SectionHead
-              eyebrow="Section III"
-              title="Top performers."
-              italicWord="performers"
-              tagline={`${summary.winners} winners across the current window. Click any row to edit attributes.`}
-              right={
-                <Button variant="ghost" size="sm"
-                  onClick={() => setActiveTab('library')}
-                  rightIcon={Icon.arrow(11)}>
-                  See all {summary.taggedAds}
-                </Button>
-              }
-            />
-            <TopPerformersTable rows={filteredPerf || []} loading={loading}
-              onClickRow={r => setEditingAd(r)} limit={10} />
-          </div>
+      {/* Win rate by attribute — small multiples; links to Attributes page */}
+      <div style={{ marginBottom: 32 }}>
+        <SectionHead
+          title="Win rate by attribute"
+          tagline="Bars above the dashed baseline are pulling weight. Per-attribute leader is colored; underperformers are dimmed."
+          right={
+            <Link to="/sales/ads/creative/attributes" style={{
+              fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
+              color: 'var(--ink-2)', textDecoration: 'none',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}>
+              Deep dive →
+            </Link>
+          }
+        />
+        <SmallMultiples stats={attrStats} baseline={summary.winRate} />
+      </div>
 
-          {/* Proof donut on overview when data exists */}
-          {proofPie.some(r => r.attribute_value !== 'none' && Number(r.booked) > 0) && (
-            <div style={{ marginBottom: 44 }}>
-              <SectionHead
-                eyebrow="Section IV"
-                title="Proof character mix."
-                italicWord="character"
-                tagline="Which on-camera character is doing the lifting — booked counts and ad volume by named proof."
-              />
-              <ProofDonut data={proofPie} />
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ─── LIBRARY TAB ────────────────────────────────────────────── */}
-      {activeTab === 'library' && (
-        <div style={{ marginBottom: 44, marginTop: 8 }}>
+      {/* Proof donut */}
+      {proofPie.some(r => r.attribute_value !== 'none' && Number(r.booked) > 0) && (
+        <div style={{ marginBottom: 32 }}>
           <SectionHead
-            eyebrow="Library"
-            title="All tagged creatives."
-            italicWord="creatives"
-            tagline={`${(filteredPerf || []).length} creatives in the current window. Search, filter, sort. Click any row to edit attributes — auto-saves on change.`}
+            title="Proof character mix"
+            tagline="Bookings by on-camera character. Booked counts and ad volume by named proof."
           />
-          <CreativeGrid
-            rows={filteredPerf || []}
-            loading={loading}
-            onClickRow={r => setEditingAd(r)}
-            pinnedTopN={3}
-          />
-        </div>
-      )}
-
-      {/* ─── ATTRIBUTES TAB ─────────────────────────────────────────── */}
-      {activeTab === 'attributes' && (
-        <div style={{ marginBottom: 44, marginTop: 8 }}>
-          <SectionHead
-            eyebrow="OPT Sales · Attribute review"
-            title="Pull any dimension apart."
-            italicWord="any"
-            tagline="Eleven attributes. For each, the values with statistical sample, ranked by what they’re producing. Pick an attribute on the left to drill in."
-          />
-          <AttributesView
-            filteredPerf={filteredPerf}
-            baseline={summary.winRate}
-            loading={loading}
-            onClickCreative={r => setEditingAd(r)}
-          />
-        </div>
-      )}
-
-      {/* ─── EXPLORATIONS TAB ───────────────────────────────────────── */}
-      {activeTab === 'explorations' && (
-        <div style={{ marginBottom: 44, marginTop: 8 }}>
-          <SectionHead
-            eyebrow="Explorations"
-            title="Cross-attribute interactions."
-            italicWord="interactions"
-            tagline="Pick two attributes — the heatmap surfaces where combinations beat the baseline. Yellow = wins above baseline, scaled by intensity. Faded cells have <2 ads."
-          />
-          <AttributeHeatmap since={since} until={until} baseline={summary.winRate / 100} />
+          <ProofDonut data={proofPie} />
         </div>
       )}
 
@@ -444,57 +385,6 @@ export default function AdsInsights() {
         open={!!editingAd}
         ad={editingAd}
         onClose={() => { setEditingAd(null); loadEverything() }} />
-    </div>
-  )
-}
-
-// ═════════════════════════════════════════════════════════════════════
-// SubTabNav — Overview · Library · Attributes · Explorations
-// ═════════════════════════════════════════════════════════════════════
-const SUB_TABS = [
-  { id: 'overview',     label: 'Overview' },
-  { id: 'library',      label: 'Library' },
-  { id: 'attributes',   label: 'Attributes' },
-  { id: 'explorations', label: 'Explorations' },
-]
-
-function SubTabNav({ active, onChange, counts = {} }) {
-  return (
-    <div style={{
-      display: 'flex', gap: 0, marginTop: 26, marginBottom: 32,
-      borderBottom: '1px solid var(--rule)',
-    }}>
-      {SUB_TABS.map((t, i) => {
-        const on = active === t.id
-        const count = counts[t.id]
-        return (
-          <button key={t.id} onClick={() => onChange(t.id)}
-            style={{
-              padding: '12px 18px',
-              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
-              letterSpacing: '0.06em', textTransform: 'uppercase',
-              color: on ? 'var(--ink)' : 'var(--ink-4)',
-              background: 'transparent', border: 'none',
-              borderBottom: on ? '2px solid var(--accent)' : '2px solid transparent',
-              marginBottom: -1, cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              transition: 'color 0.12s cubic-bezier(0.2,0.7,0.2,1)',
-            }}>
-            <span style={{ opacity: 0.45, fontVariantNumeric: 'tabular-nums' }}>
-              {String(i + 1).padStart(2, '0')}
-            </span>
-            <span>{t.label}</span>
-            {count != null && (
-              <span style={{
-                opacity: 0.55, fontSize: 9.5,
-                fontVariantNumeric: 'tabular-nums',
-              }}>
-                {count}
-              </span>
-            )}
-          </button>
-        )
-      })}
     </div>
   )
 }
@@ -774,110 +664,91 @@ function minutesAgo(date) {
 // ═════════════════════════════════════════════════════════════════════
 // KPIDominant — hero win-rate + 3 secondary tiles
 // ═════════════════════════════════════════════════════════════════════
+// KPI grid — sans-serif tabular tone-down per dj282R9iMtYwNPnoqDHDRw design.
+// Hero number is 44px sans (not 104px serif), supporting tiles are 28px sans.
 function KPIDominant({ summary, spark }) {
   const isReal = summary.winners <= 2
   const showAccent = !isReal
-  // Heuristic trend deltas — sparkline carries the real shape
-  const winRateDelta = !isReal && spark && spark.length >= 2
-    ? (summary.winRate - (spark[Math.max(spark.length - 5, 0)] || summary.winRate)).toFixed(1)
-    : null
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: '1.7fr 1fr 1fr 1fr',
+      gridTemplateColumns: '1.4fr 1fr 1fr 1fr',
       gap: 0,
       border: '1px solid var(--rule)',
       background: 'white',
     }}>
-      {/* Hero — Win rate (accent left stripe + soft yellow wash when we have real winners) */}
+      {/* Hero — Win rate */}
       <div style={{
-        padding: '30px 30px 28px',
-        paddingLeft: showAccent ? 27 : 30,
+        padding: '18px 22px',
         borderRight: '1px solid var(--rule)',
-        borderLeft: showAccent ? '4px solid var(--accent)' : 'none',
-        background: showAccent ? 'var(--accent-soft, #fdf6c5)' : 'white',
+        borderLeft: showAccent ? '3px solid var(--accent)' : 'none',
+        paddingLeft: showAccent ? 19 : 22,
         position: 'relative',
       }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 6 }}>
-          <Eyebrow>Win rate</Eyebrow>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <Eyebrow>Win rate · {summary.weeksTracked}w</Eyebrow>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
                         letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-            {summary.weeksTracked}w tracked
+            {summary.weeksTracked}w
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 18, marginTop: 6 }}>
-          <BigNumber value={summary.winRate.toFixed(1)} suffix="%" size={104} weight={500} />
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 4 }}>
+          <span style={{
+            fontFamily: 'var(--sans)', fontVariantNumeric: 'tabular-nums',
+            fontSize: 44, fontWeight: 600, lineHeight: 1,
+            letterSpacing: '-0.02em', color: 'var(--ink)',
+          }}>
+            {summary.winRate.toFixed(1)}
+            <span style={{ fontSize: 22, color: 'var(--ink-3)', marginLeft: 2 }}>%</span>
+          </span>
           {!isReal && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
-              <Sparkline values={spark} width={140} height={40}
-                stroke={PALETTE.green} fill={tint(PALETTE.green, 0.1)} accent="var(--accent)" />
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
-                            letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                12 weeks · weekly win rate
-              </span>
-            </div>
+            <Sparkline values={spark} width={92} height={30}
+              stroke={PALETTE.green}
+              fill={tint(PALETTE.green, 0.08)}
+              accent={showAccent ? 'var(--accent)' : PALETTE.green} />
           )}
         </div>
-        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-          <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 15, color: 'var(--ink-3)' }}>
-            {summary.winners} of {summary.taggedAds} tagged ads
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
+            <span style={{ color: 'var(--ink)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {summary.winners}
+            </span>{' '}of <span style={{ fontVariantNumeric: 'tabular-nums' }}>{summary.taggedAds}</span> ads
           </span>
-          {winRateDelta && Number(winRateDelta) !== 0 && (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '3px 9px',
-              background: tint(Number(winRateDelta) >= 0 ? PALETTE.green : PALETTE.red, 0.1),
-              color: Number(winRateDelta) >= 0 ? PALETTE.green : PALETTE.red,
-              border: `1px solid ${tint(Number(winRateDelta) >= 0 ? PALETTE.green : PALETTE.red, 0.25)}`,
-              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-              letterSpacing: '0.04em', textTransform: 'uppercase',
-            }}>
-              <TrendDelta dir={Number(winRateDelta) >= 0 ? 'up' : 'down'}
-                label={`${Number(winRateDelta) >= 0 ? '+' : ''}${winRateDelta}pt vs prior`} />
-            </span>
-          )}
-          {isReal && (
-            <Pill tone="amber" size="sm">Below baseline — early window</Pill>
-          )}
+          {isReal && <Pill tone="amber" size="sm">Below baseline — early window</Pill>}
         </div>
       </div>
 
-      <SecondaryKPI
-        eyebrow="Avg CPB · winners"
-        value={<BigNumber value={summary.avgCpbWinners} prefix="$" size={46} weight={500} />}
-        meta="winners only"
-        trend={!isReal ? { dir: 'down', label: 'vs $387 portfolio', color: PALETTE.green } : null}
-      />
-      <SecondaryKPI
-        eyebrow="Booked"
-        value={<BigNumber value={summary.totalBooked} size={46} weight={500} />}
-        meta={`${fmtMoneyFull(summary.totalSpend)} spend`}
-        trend={!isReal ? { dir: 'up', label: 'all-time', color: PALETTE.green } : null}
-      />
-      <SecondaryKPI
-        eyebrow="Tag coverage"
-        value={<BigNumber value={summary.tagCoverage} suffix="%" size={46} weight={500} />}
+      <SecondaryKPI eyebrow="Avg CPB · winners"
+        valueText={`$${summary.avgCpbWinners}`}
+        meta="winners only" />
+      <SecondaryKPI eyebrow="Booked"
+        valueText={fmtNum(summary.totalBooked)}
+        meta={`${fmtMoneyFull(summary.totalSpend)} spend`} />
+      <SecondaryKPI eyebrow="Tag coverage"
+        valueText={`${summary.tagCoverage}%`}
         meta={`${summary.totalAds - summary.taggedAds} untagged`}
         trend={summary.tagCoverage < 100 ? { dir: 'flat', label: 'click to tag', color: PALETTE.orange } : null}
-        last
-      />
+        last />
     </div>
   )
 }
 
-function SecondaryKPI({ eyebrow, value, meta, trend, last }) {
+function SecondaryKPI({ eyebrow, valueText, meta, trend, last }) {
   return (
     <div style={{
-      padding: '30px 22px 28px',
+      padding: '18px 20px',
       borderRight: last ? 'none' : '1px solid var(--rule)',
-      display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-      minHeight: 196,
+      display: 'flex', flexDirection: 'column', gap: 8,
     }}>
       <Eyebrow>{eyebrow}</Eyebrow>
-      <div style={{ display: 'flex', alignItems: 'flex-end', marginTop: 6 }}>
-        {value}
-      </div>
-      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{
+        fontFamily: 'var(--sans)', fontVariantNumeric: 'tabular-nums',
+        fontSize: 28, fontWeight: 600, lineHeight: 1,
+        letterSpacing: '-0.015em', color: 'var(--ink)',
+      }}>
+        {valueText}
+      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)' }}>{meta}</span>
         {trend && <TrendDelta dir={trend.dir} label={trend.label} color={trend.color} />}
       </div>

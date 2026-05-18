@@ -477,9 +477,30 @@ const META_FIELDS_CREATIVE = [
 function detectAssetType(creative) {
   if (!creative) return 'unknown'
   if (creative.video_id || creative.object_type === 'VIDEO') return 'video'
-  if (creative.image_url) return 'image'
-  if (creative.object_type === 'SHARE' && creative.object_story_spec?.link_data?.child_attachments) return 'carousel'
+  // Inspect object_story_spec for embedded video_data / photo_data
+  const oss = creative.object_story_spec
+  if (oss?.video_data?.video_id) return 'video'
+  if (creative.image_url || creative.image_hash) return 'image'
+  if (oss?.photo_data?.image_url || oss?.photo_data?.url) return 'image'
+  if (oss?.link_data?.picture || oss?.link_data?.image_url) return 'image'
+  if (creative.object_type === 'SHARE' && oss?.link_data?.child_attachments) return 'carousel'
   return 'unknown'
+}
+
+// Pull the best static image URL across the various creative shapes Meta returns.
+function extractImageUrl(creative) {
+  if (!creative) return null
+  const oss = creative.object_story_spec
+  return (
+    creative.image_url ||
+    oss?.video_data?.image_url ||                                  // video poster
+    oss?.photo_data?.image_url || oss?.photo_data?.url ||          // photo ad
+    oss?.link_data?.picture || oss?.link_data?.image_url ||        // link ad
+    oss?.link_data?.child_attachments?.[0]?.picture ||             // carousel first card
+    oss?.link_data?.child_attachments?.[0]?.image_url ||
+    creative.thumbnail_url ||                                       // last resort (low-res)
+    null
+  )
 }
 
 function extractCreativeMeta(creative, raw) {
@@ -644,13 +665,12 @@ async function fetchAdCreatives(adIds) {
       const creative = json.creative || null
       const meta = extractCreativeMeta(creative, json)
       const asset_type = detectAssetType(creative)
-      // Prefer the full-res `facebook.com/ads/image/?d=...` poster from
-      // object_story_spec.video_data.image_url for videos. The legacy
-      // creative.thumbnail_url is hard-capped at 64×64 via the `stp=...p64x64`
-      // signed param, which can't be safely stripped without breaking the URL.
-      const ossVideoImage = creative?.object_story_spec?.video_data?.image_url || null
-      const thumbnail_url = ossVideoImage || creative?.image_url || creative?.thumbnail_url || null
-      const asset_url = ossVideoImage || creative?.image_url || null
+      // Robust extraction across video, image, photo_data, carousel, and link ads.
+      // The legacy creative.thumbnail_url is hard-capped at 64×64 via the
+      // `stp=...p64x64` signed param, so we treat it as the last fallback only.
+      const bestImage = extractImageUrl(creative)
+      const thumbnail_url = bestImage || creative?.thumbnail_url || null
+      const asset_url = bestImage
       const archived = ['DELETED', 'ARCHIVED'].includes(json.effective_status || json.status)
 
       return {

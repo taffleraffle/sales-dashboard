@@ -33,25 +33,38 @@ export function SerifWithItalic({ text, italicWord }) {
   )
 }
 
-export function SectionHead({ eyebrow, title, italicWord, tagline, right, gap = 16 }) {
+// level: 'page' = serif h1 (36px) for top-of-page; 'section' = sans h2 (18px) for sections inside.
+export function SectionHead({ eyebrow, title, italicWord, tagline, right, gap = 16, level = 'section' }) {
+  const isPage = level === 'page'
   return (
     <div style={{
       display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
       gap: 24, marginBottom: gap,
     }}>
       <div style={{ minWidth: 0 }}>
-        {eyebrow && <Eyebrow style={{ marginBottom: 8 }}>{eyebrow}</Eyebrow>}
-        <h2 style={{
-          margin: 0, fontSize: 34, lineHeight: 1.05, color: 'var(--ink)',
-          letterSpacing: '-0.015em', fontFamily: 'var(--serif)', fontWeight: 400,
-        }}>
-          <SerifWithItalic text={title} italicWord={italicWord} />
-        </h2>
+        {eyebrow && <Eyebrow style={{ marginBottom: isPage ? 8 : 6 }}>{eyebrow}</Eyebrow>}
+        {isPage ? (
+          <h1 style={{
+            margin: 0, fontSize: 36, lineHeight: 1.05, color: 'var(--ink)',
+            letterSpacing: '-0.015em', fontFamily: 'var(--serif)', fontWeight: 500,
+          }}>
+            <SerifWithItalic text={title} italicWord={italicWord} />
+          </h1>
+        ) : (
+          <h2 style={{
+            margin: 0, fontSize: 18, lineHeight: 1.2, color: 'var(--ink)',
+            letterSpacing: '-0.005em', fontFamily: 'var(--sans)', fontWeight: 600,
+          }}>
+            {title}
+          </h2>
+        )}
         {tagline && (
           <p style={{
-            margin: '8px 0 0', fontStyle: 'italic', color: 'var(--ink-3)',
-            fontSize: 16, maxWidth: 640, lineHeight: 1.45,
-            fontFamily: 'var(--serif)',
+            margin: isPage ? '8px 0 0' : '4px 0 0',
+            color: 'var(--ink-3)',
+            fontSize: isPage ? 15 : 13,
+            maxWidth: 720, lineHeight: 1.5,
+            fontFamily: 'var(--sans)',
           }}>{tagline}</p>
         )}
       </div>

@@ -7,6 +7,8 @@ import {
 } from '../editorial/atoms'
 
 const FILTER_GROUPS = [
+  { attr: 'assignment_status', label: 'Source',  values: ['assigned', 'manual_transcript', 'auto_transcript', 'ad_copy_only', 'unassigned'] },
+  { attr: 'asset_type',       label: 'Asset',     values: ['video', 'image'] },
   { attr: 'message_frame',    label: 'Frame',     values: ['problem', 'circumstance', 'outcome'] },
   { attr: 'hook_type',        label: 'Hook',      values: ['question', 'scene', 'dollar_pain', 'diagnostic', 'conditional'] },
   { attr: 'mechanism_reveal', label: 'Mechanism', values: ['gated', 'explicit', 'hidden'] },
@@ -16,15 +18,51 @@ const FILTER_GROUPS = [
   { attr: 'pain_angle',       label: 'Pain angle', values: ['phone_not_ringing', 'agency_burn', 'tpa_referral_dep', 'capacity_mismatch', 'lead_platform', 'storm_seasonal', 'guarantee_proof', 'founder_identity', 'adjuster_relations', 'commercial_tier', 'last_objection'] },
 ]
 
+// Assignment status badge — quick visual for assigned/unassigned per row.
+// Falls back gracefully if migration 065 hasn't been applied (assignment_status undefined → 'unknown').
+const ASSIGNMENT_LABELS = {
+  assigned:          { label: 'Assigned',   color: '#3e8a5e', desc: 'Linked to a generated script' },
+  manual_transcript: { label: 'Manual',     color: '#1f4a8b', desc: 'Operator added transcript' },
+  auto_transcript:   { label: 'Auto',       color: '#5a5650', desc: 'Whisper or Meta captions' },
+  ad_copy_only:      { label: 'Copy only',  color: '#88847e', desc: 'Only Meta ad copy as transcript' },
+  unassigned:        { label: 'Unassigned', color: '#b53e3e', desc: 'No transcript, no script link' },
+  unknown:           { label: '—',          color: '#b8b3a8', desc: 'Status unknown (migration 065 pending)' },
+}
+function tintRgba(hex, a) {
+  if (!hex || !hex.startsWith('#')) return `rgba(0,0,0,${a})`
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r},${g},${b},${a})`
+}
+function AssignmentChip({ status }) {
+  const cfg = ASSIGNMENT_LABELS[status] || ASSIGNMENT_LABELS.unknown
+  return (
+    <span title={cfg.desc} style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '2px 7px',
+      background: tintRgba(cfg.color, 0.1),
+      color: cfg.color,
+      border: `1px solid ${tintRgba(cfg.color, 0.25)}`,
+      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+      letterSpacing: '0.04em', textTransform: 'uppercase',
+      whiteSpace: 'nowrap',
+    }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: 6, background: cfg.color, flexShrink: 0,
+      }} />
+      {cfg.label}
+    </span>
+  )
+}
+
 /*
   All-creatives spreadsheet — explicit attribute columns (Hook · Frame · Mech ·
   Pain · Proof) instead of pill tags. Wide table (~1280px), horizontal scroll
   on narrower viewports.
 */
 
-// Grid columns: rank | thumb | ad+campaign | hook | frame | mech | pain | proof | booked | cpb | state
-const GRID_COLS = '40px 56px minmax(200px, 1.3fr) 110px 110px 110px 130px 100px 80px 80px 90px'
-const MIN_TABLE_WIDTH = 1180
+// Grid columns: rank | thumb | ad+campaign | source | hook | frame | mech | pain | proof | booked | cpb | state
+const GRID_COLS = '40px 56px minmax(200px, 1.3fr) 110px 110px 110px 110px 130px 100px 80px 80px 90px'
+const MIN_TABLE_WIDTH = 1300
 
 const PAGE_SIZE = 30
 
@@ -40,6 +78,7 @@ const FILTER_CHIPS = [
   { key: 'all',          label: 'All' },
   { key: 'winners',      label: 'Winners' },
   { key: 'has_booked',   label: 'Has booked' },
+  { key: 'unassigned',   label: 'Unassigned' },
   { key: 'fully_tagged', label: 'Fully tagged' },
   { key: 'missing_tags', label: 'Missing tags' },
 ]
@@ -70,6 +109,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
     let list = [...(rows || [])]
     if (filter === 'winners')        list = list.filter(r => r.effective_winner)
     else if (filter === 'has_booked')   list = list.filter(r => (Number(r.booked) || 0) > 0)
+    else if (filter === 'unassigned')   list = list.filter(r => !r.assignment_status || r.assignment_status === 'unassigned' || r.assignment_status === 'ad_copy_only' || r.assignment_status === 'auto_transcript')
     else if (filter === 'fully_tagged') list = list.filter(r => r.attributes_complete)
     else if (filter === 'missing_tags') list = list.filter(r => !r.attributes_complete)
     if (search.trim()) {
@@ -220,6 +260,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
           <Eyebrow>#</Eyebrow>
           <Eyebrow>Creative</Eyebrow>
           <Eyebrow>Ad · campaign</Eyebrow>
+          <Eyebrow>Source</Eyebrow>
           <Eyebrow>Hook</Eyebrow>
           <Eyebrow>Frame</Eyebrow>
           <Eyebrow>Mech</Eyebrow>
@@ -481,6 +522,11 @@ function CreativeRow({ c, rank, isPodium, onClick, isLast }) {
         }}>
           {c.campaign_name || '—'} <span style={{ opacity: 0.6 }}>· {c.ad_id}</span>
         </div>
+      </div>
+
+      {/* Source / assignment chip */}
+      <div style={{ overflow: 'hidden' }}>
+        <AssignmentChip status={c.assignment_status} />
       </div>
 
       {/* Explicit attribute columns */}
