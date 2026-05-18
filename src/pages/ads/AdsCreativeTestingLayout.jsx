@@ -71,9 +71,15 @@ export default function AdsCreativeTestingLayout() {
   const [err, setErr] = useState(null)
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
 
-  // Shared offer filter + "hide inactive" toggle — apply to every analytics page
+  // Shared offer filter + campaign filter + "hide inactive" toggle —
+  // every analytics page reads filteredPerf via the context, so toggling
+  // these here narrows Insights / Library / Attributes / Explorations
+  // in lockstep.
   const [activeOffers, setActiveOffers] = useState(() => {
     try { return JSON.parse(localStorage.getItem('insights.activeOffers') || '[]') } catch { return [] }
+  })
+  const [activeCampaigns, setActiveCampaigns] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('insights.activeCampaigns') || '[]') } catch { return [] }
   })
   const [hideInactive, setHideInactive] = useState(() => {
     try { return localStorage.getItem('insights.hideInactive') !== 'false' } catch { return true }
@@ -127,7 +133,32 @@ export default function AdsCreativeTestingLayout() {
   useEffect(() => { try { localStorage.setItem('insights.since', since) } catch {} }, [since])
   useEffect(() => { try { localStorage.setItem('insights.until', until) } catch {} }, [until])
   useEffect(() => { try { localStorage.setItem('insights.activeOffers', JSON.stringify(activeOffers)) } catch {} }, [activeOffers])
+  useEffect(() => { try { localStorage.setItem('insights.activeCampaigns', JSON.stringify(activeCampaigns)) } catch {} }, [activeCampaigns])
   useEffect(() => { try { localStorage.setItem('insights.hideInactive', String(hideInactive)) } catch {} }, [hideInactive])
+
+  // Distinct campaigns available in the current perf set — drives the
+  // campaign dropdown in the toolbar.
+  const availableCampaigns = useMemo(() => {
+    const seen = new Map()  // name → { count, anyLive }
+    for (const r of (perf || [])) {
+      const name = r.campaign_name
+      if (!name) continue
+      const entry = seen.get(name) || { count: 0, anyLive: false }
+      entry.count++
+      if (r.is_live || r.effective_status === 'ACTIVE') entry.anyLive = true
+      seen.set(name, entry)
+    }
+    return [...seen.entries()]
+      .map(([name, m]) => ({ name, count: m.count, anyLive: m.anyLive }))
+      .sort((a, b) => Number(b.anyLive) - Number(a.anyLive) || b.count - a.count)
+  }, [perf])
+
+  // Drop stale campaign filters when perf set changes
+  useEffect(() => {
+    if (!availableCampaigns.length || activeCampaigns.length === 0) return
+    const valid = activeCampaigns.filter(n => availableCampaigns.find(c => c.name === n))
+    if (valid.length !== activeCampaigns.length) setActiveCampaigns(valid)
+  }, [availableCampaigns]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop stale offer slugs once offers list loads
   useEffect(() => {
@@ -136,12 +167,13 @@ export default function AdsCreativeTestingLayout() {
     if (valid.length !== activeOffers.length) setActiveOffers(valid)
   }, [offers]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Filter perf by activeOffers + hideInactive ONCE here so every consumer
-  // sees the same filtered dataset. Pages can still re-derive if needed.
+  // Filter perf by activeOffers + activeCampaigns + hideInactive ONCE here
+  // so every consumer sees the same filtered dataset.
   const filteredPerf = useMemo(() => {
     if (!perf) return null
     let rows = perf
     if (activeOffers.length) rows = rows.filter(r => activeOffers.includes(r.offer_slug))
+    if (activeCampaigns.length) rows = rows.filter(r => activeCampaigns.includes(r.campaign_name))
     if (hideInactive) {
       rows = rows.filter(r =>
         (Number(r.spend)  || 0) > 0 ||
@@ -150,11 +182,15 @@ export default function AdsCreativeTestingLayout() {
       )
     }
     return rows
-  }, [perf, activeOffers, hideInactive])
+  }, [perf, activeOffers, activeCampaigns, hideInactive])
 
   function toggleOffer(slug) {
     setActiveOffers(prev => prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug])
   }
+  function toggleCampaign(name) {
+    setActiveCampaigns(prev => prev.includes(name) ? prev.filter(s => s !== name) : [...prev, name])
+  }
+  const clearCampaigns = () => setActiveCampaigns([])
 
   // Context exposed to nested routes via <Outlet context>
   const ctx = useMemo(() => ({
@@ -162,10 +198,11 @@ export default function AdsCreativeTestingLayout() {
     loading, refetching, err, lastSyncedAt,
     since, until, setSince, setUntil,
     activeOffers, toggleOffer, hideInactive, setHideInactive,
+    activeCampaigns, toggleCampaign, clearCampaigns, availableCampaigns,
     refresh: () => loadPerf({ force: true }),
     openGlossary: () => setGlossaryOpen(true),
   }), [filteredPerf, perf, offers, loading, refetching, err, lastSyncedAt,
-       since, until, activeOffers, hideInactive, loadPerf])
+       since, until, activeOffers, hideInactive, activeCampaigns, availableCampaigns, loadPerf])
 
   const showToolbar = needsPerf
 
@@ -230,6 +267,8 @@ export default function AdsCreativeTestingLayout() {
         <AnalyticsToolbar
           since={since} until={until} setSince={setSince} setUntil={setUntil}
           offers={offers} activeOffers={activeOffers} toggleOffer={toggleOffer}
+          campaigns={availableCampaigns} activeCampaigns={activeCampaigns}
+          toggleCampaign={toggleCampaign} clearCampaigns={clearCampaigns}
           hideInactive={hideInactive} setHideInactive={setHideInactive}
           loading={loading || refetching} lastSyncedAt={lastSyncedAt}
           totalAds={(perf || []).length}
@@ -267,9 +306,11 @@ const OFFER_DOT = {
 function AnalyticsToolbar({
   since, until, setSince, setUntil,
   offers, activeOffers, toggleOffer,
+  campaigns = [], activeCampaigns = [], toggleCampaign = () => {}, clearCampaigns = () => {},
   hideInactive, setHideInactive,
   loading, lastSyncedAt, totalAds, visibleAds, onRefresh,
 }) {
+  const [campaignPickerOpen, setCampaignPickerOpen] = useState(false)
   // Match the current window to a preset for active-state styling
   const activePreset = useMemo(() => {
     if (!since || !until) return null
@@ -297,11 +338,11 @@ function AnalyticsToolbar({
 
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: 'auto auto 1fr auto auto', gap: 16,
-      alignItems: 'center',
+      display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
       padding: '10px 14px', marginBottom: 24,
       background: 'var(--paper-2)',
       border: '1px solid var(--rule)',
+      position: 'relative',
     }}>
       {/* Date presets */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -377,6 +418,113 @@ function AnalyticsToolbar({
             </button>
           )
         })}
+      </div>
+
+      {/* Campaigns picker — narrows every analytics page to N CBOs */}
+      <div style={{ position: 'relative' }}>
+        <button onClick={() => setCampaignPickerOpen(o => !o)}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+            color: activeCampaigns.length ? 'var(--ink)' : 'var(--ink-3)',
+            padding: '4px 10px',
+            background: activeCampaigns.length ? 'white' : 'transparent',
+            border: `1px solid ${activeCampaigns.length ? 'var(--ink)' : 'var(--rule-2)'}`,
+            cursor: 'pointer',
+          }}>
+          Campaigns
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 9.5, color: activeCampaigns.length ? 'var(--ink-2)' : 'var(--ink-4)',
+            letterSpacing: '0.04em',
+          }}>
+            {activeCampaigns.length ? `(${activeCampaigns.length})` : `(all ${campaigns.length})`}
+          </span>
+          <span style={{ fontSize: 9, color: 'var(--ink-4)' }}>▾</span>
+        </button>
+        {campaignPickerOpen && (
+          <>
+            <div onClick={() => setCampaignPickerOpen(false)}
+              style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 6px)', left: 0,
+              minWidth: 320, maxWidth: 480,
+              maxHeight: 420, overflowY: 'auto',
+              background: 'white', border: '1px solid var(--rule)',
+              boxShadow: '0 12px 32px rgba(10,10,10,0.12)',
+              zIndex: 51,
+            }}>
+              <div style={{
+                padding: '10px 12px', borderBottom: '1px solid var(--rule)',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: 'var(--paper-2)', position: 'sticky', top: 0,
+              }}>
+                <span style={{
+                  fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
+                  letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)',
+                }}>
+                  {activeCampaigns.length === 0
+                    ? `All ${campaigns.length} campaigns`
+                    : `${activeCampaigns.length} of ${campaigns.length} selected`}
+                </span>
+                {activeCampaigns.length > 0 && (
+                  <button onClick={clearCampaigns} style={{
+                    background: 'transparent', border: 'none',
+                    fontFamily: 'var(--mono)', fontSize: 10, color: '#b53e3e',
+                    letterSpacing: '0.04em', textTransform: 'uppercase',
+                    cursor: 'pointer', padding: 0,
+                  }}>Clear</button>
+                )}
+              </div>
+              {campaigns.length === 0 && (
+                <div style={{
+                  padding: 24, textAlign: 'center', color: 'var(--ink-4)',
+                  fontFamily: 'var(--sans)', fontSize: 12, fontStyle: 'italic',
+                }}>
+                  No campaigns in the current window.
+                </div>
+              )}
+              {campaigns.map(c => {
+                const on = activeCampaigns.includes(c.name)
+                return (
+                  <button key={c.name} onClick={() => toggleCampaign(c.name)} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                    width: '100%', textAlign: 'left',
+                    padding: '8px 12px',
+                    background: on ? 'var(--paper-2)' : 'transparent',
+                    border: 'none', borderTop: '1px solid var(--rule)',
+                    cursor: 'pointer',
+                  }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <span style={{
+                        width: 12, height: 12,
+                        background: on ? 'var(--ink)' : 'transparent',
+                        border: `1px solid ${on ? 'var(--ink)' : 'var(--rule-2)'}`,
+                        display: 'inline-grid', placeItems: 'center',
+                        color: 'var(--accent)', fontSize: 9, flexShrink: 0,
+                      }}>{on ? '✓' : ''}</span>
+                      {c.anyLive && (
+                        <span title="At least one ACTIVE ad in this campaign" style={{
+                          width: 6, height: 6, borderRadius: 6,
+                          background: '#3e8a5e', flexShrink: 0,
+                        }} />
+                      )}
+                      <span style={{
+                        fontFamily: 'var(--sans)', fontSize: 12.5,
+                        color: 'var(--ink)', fontWeight: on ? 600 : 400,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>{c.name}</span>
+                    </span>
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                      flexShrink: 0,
+                    }}>{c.count}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Hide-inactive toggle */}

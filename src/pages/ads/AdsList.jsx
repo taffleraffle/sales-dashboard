@@ -8,6 +8,7 @@ import { pagedFetch } from '../../lib/pagedFetch'
 import { rangeToDays } from '../../lib/dateUtils'
 import { syncMetaAdsAtAdLevel } from '../../services/metaAdsSync'
 import { runAutoSync, getLastSyncTime, subscribeSyncStatus } from '../../services/autoSync'
+import { SectionHead } from '../../components/editorial/atoms'
 
 const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
 
@@ -252,27 +253,26 @@ export default function AdsList() {
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-        <p className="text-xs text-text-400">
-          {filtered.length} of {ads.length} ads · {fmt$(totals.spend)} spend in window
-          {lastAdSync && (
-            <span className="ml-1.5 text-text-400/70">
-              · auto-synced {formatAge(Date.now() - lastAdSync)} ago
-            </span>
-          )}
-        </p>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs border border-border-default rounded-sm text-text-secondary hover:bg-bg-card-hover disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
-            {syncing ? 'Syncing…' : 'Refresh now'}
-          </button>
-          <DateRangeSelector selected={range} onChange={setRange} />
-        </div>
-      </div>
+      <SectionHead
+        level="page"
+        eyebrow="Creative · Ads"
+        title="Ads"
+        tagline={`${filtered.length} of ${ads.length} ads · ${fmt$(totals.spend)} spend in window${lastAdSync ? ` · auto-synced ${formatAge(Date.now() - lastAdSync)} ago` : ''}.`}
+        gap={20}
+        right={
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs border border-border-default rounded-sm text-text-secondary hover:bg-bg-card-hover disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+              {syncing ? 'Syncing…' : 'Refresh now'}
+            </button>
+            <DateRangeSelector selected={range} onChange={setRange} />
+          </div>
+        }
+      />
 
       {error && (
         <div className="mb-3 flex items-center gap-2 bg-danger/10 border border-danger/30 text-danger text-xs rounded-sm px-3 py-2">

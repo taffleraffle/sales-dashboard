@@ -4,6 +4,8 @@ import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawe
 import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
 import CreativeGrid from '../../components/ads/CreativeGrid'
 import { SectionHead, Button, Icon } from '../../components/editorial/atoms'
+import { updateAdAttributes } from '../../services/creativeTagger'
+import { useToast } from '../../hooks/useToast'
 
 /*
   Creatives library — full ad spreadsheet.
@@ -13,8 +15,22 @@ import { SectionHead, Button, Icon } from '../../components/editorial/atoms'
 
 export default function AdsCreativesLibrary() {
   const { perf, loading, refresh } = useOutletContext()
+  const toast = useToast()
   const [editingAd, setEditingAd] = useState(null)
   const [addDrawerOpen, setAddDrawerOpen] = useState(false)
+
+  // Inline winner toggle — flips manual_winner_override directly on the
+  // ad without opening the edit drawer. After-the-fact refresh re-pulls
+  // perf so the row repaints with the new state.
+  async function handleToggleWinner(ad, nextWinner) {
+    try {
+      await updateAdAttributes(ad.ad_id, { manual_winner_override: nextWinner })
+      toast?.success?.(nextWinner ? `Marked "${ad.ad_name}" as winner` : `Unmarked "${ad.ad_name}"`)
+      refresh && refresh()
+    } catch (e) {
+      toast?.error?.(`Winner toggle failed: ${e.message}`)
+    }
+  }
 
   // Respect offer filter from localStorage (set by Insights' filter bar)
   const activeOffers = useMemo(() => {
@@ -49,6 +65,7 @@ export default function AdsCreativesLibrary() {
         rows={filteredPerf}
         loading={loading}
         onClickRow={r => setEditingAd(r)}
+        onToggleWinner={handleToggleWinner}
         pinnedTopN={3}
       />
 

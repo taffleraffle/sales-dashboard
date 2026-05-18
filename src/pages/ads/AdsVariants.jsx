@@ -7,6 +7,7 @@ import {
 import { supabase } from '../../lib/supabase'
 import { pagedFetch } from '../../lib/pagedFetch'
 import { useToast } from '../../hooks/useToast'
+import { SectionHead } from '../../components/editorial/atoms'
 
 // Clip-type colour tokens — keep in sync with CLIP_TYPES in AdsClips.jsx
 // so the type chips read the same across both pages.
@@ -303,39 +304,38 @@ export default function AdsVariants() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 mb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
-        <div>
-          <span className="eyebrow eyebrow-accent">Production · Spliced variants</span>
-          <h2 className="h3 mt-2" style={{ fontSize: 22 }}>The <em>variant</em> board.</h2>
-          <p className="mt-2" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
-            {rows.length} variants · {hooks.length} hooks × {bodies.length} bodies = {summary.totalCombos} combos · {summary.testedCombos} tested
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <ViewToggle view={view} setView={setView} />
-          <span style={{ width: 1, height: 22, background: 'var(--rule)' }} />
-          <button onClick={() => setShowAddClip('hook')} style={btnGhost} title="Add a new hook idea — no MP4 required">
-            <Sparkles size={12} /> + Hook
-          </button>
-          <button onClick={() => setShowAddClip('body')} style={btnGhost} title="Add a new body idea">
-            <MessageSquare size={12} /> + Body
-          </button>
-          <button onClick={() => setShowAddClip('full_video')} style={btnGhost} title="Add a new full-video clip">
-            <Type size={12} /> + Frame
-          </button>
-          <span style={{ width: 1, height: 22, background: 'var(--rule)' }} />
-          <button onClick={() => setShowMatrix(true)} style={btnPrimary}>
-            <Grid3x3 size={13} /> Splice
-          </button>
-          {rows.length === 0 && (
-            <button onClick={seedSampleData} disabled={seeding} style={btnGhost}>
-              {seeding ? <Loader size={13} className="animate-spin" /> : <FlaskConical size={13} />}
-              {seeding ? 'Seeding…' : 'Seed demo'}
+      <SectionHead
+        level="page"
+        eyebrow="Creative · Variants"
+        title="Variants"
+        tagline={`${rows.length} variants · ${hooks.length} hooks × ${bodies.length} bodies = ${summary.totalCombos} combos · ${summary.testedCombos} tested.`}
+        gap={20}
+        right={
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <ViewToggle view={view} setView={setView} />
+            <span style={{ width: 1, height: 22, background: 'var(--rule)' }} />
+            <button onClick={() => setShowAddClip('hook')} style={btnGhost} title="Add a new hook idea — no MP4 required">
+              <Sparkles size={12} /> + Hook
             </button>
-          )}
-        </div>
-      </div>
+            <button onClick={() => setShowAddClip('body')} style={btnGhost} title="Add a new body idea">
+              <MessageSquare size={12} /> + Body
+            </button>
+            <button onClick={() => setShowAddClip('full_video')} style={btnGhost} title="Add a new full-video clip">
+              <Type size={12} /> + Frame
+            </button>
+            <span style={{ width: 1, height: 22, background: 'var(--rule)' }} />
+            <button onClick={() => setShowMatrix(true)} style={btnPrimary}>
+              <Grid3x3 size={13} /> Splice
+            </button>
+            {rows.length === 0 && (
+              <button onClick={seedSampleData} disabled={seeding} style={btnGhost}>
+                {seeding ? <Loader size={13} className="animate-spin" /> : <FlaskConical size={13} />}
+                {seeding ? 'Seeding…' : 'Seed demo'}
+              </button>
+            )}
+          </div>
+        }
+      />
 
       {/* "How this works" callout — only shown on first visits (when no
           variants exist yet) so it doesn't clutter for power users */}

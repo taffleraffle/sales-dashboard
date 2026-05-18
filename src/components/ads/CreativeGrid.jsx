@@ -85,7 +85,7 @@ const FILTER_CHIPS = [
   { key: 'missing_tags', label: 'Missing tags' },
 ]
 
-export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3 }) {
+export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3, onToggleWinner }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState('booked_desc')
@@ -326,6 +326,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
           return (
             <CreativeRow key={c.ad_id} c={c} rank={rank} isPodium={isPodium}
               onClick={() => onClickRow?.(c)}
+              onToggleWinner={onToggleWinner}
               isLast={i === visible.length - 1} />
           )
         })}
@@ -493,7 +494,7 @@ function FilterGroup({ group, counts, active, toggle }) {
   )
 }
 
-function CreativeRow({ c, rank, isPodium, onClick, isLast }) {
+function CreativeRow({ c, rank, isPodium, onClick, onToggleWinner, isLast }) {
   const frame = c.message_frame
   const isWinner = !!c.effective_winner
   const proof = c.proof_character && c.proof_character !== 'none' ? c.proof_character : null
@@ -594,15 +595,39 @@ function CreativeRow({ c, rank, isPodium, onClick, isLast }) {
         </div>
       </div>
 
-      {/* State */}
+      {/* State — click to toggle manual winner override (event stopped so
+          the row's open-drawer click doesn't fire on the same gesture) */}
       <div style={{ textAlign: 'right' }}>
-        {isWinner ? (
-          <WinnerBadge size="sm" />
+        {onToggleWinner ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleWinner(c, !isWinner) }}
+            title={isWinner
+              ? 'Marked as winner — click to unmark'
+              : 'Click to manually mark as winner'}
+            style={{
+              border: 'none', cursor: 'pointer', padding: 0, background: 'transparent',
+            }}>
+            {isWinner
+              ? <WinnerBadge size="sm" />
+              : (
+                <span style={{
+                  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  padding: '3px 8px',
+                  border: '1px dashed var(--rule-2)',
+                  display: 'inline-block',
+                }}>
+                  Mark winner
+                </span>
+              )}
+          </button>
         ) : (
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-5)',
-                        letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-            Testing
-          </span>
+          isWinner ? <WinnerBadge size="sm" /> : (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-5)',
+                          letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              Testing
+            </span>
+          )
         )}
       </div>
     </div>

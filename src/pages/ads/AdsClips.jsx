@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { useUploads } from '../../hooks/useUploads'
 import { useToast } from '../../hooks/useToast'
 import { extractVideoPoster } from '../../lib/videoPoster'
+import { SectionHead } from '../../components/editorial/atoms'
 
 /*
   Clips page — card-grid view with thumbnails, drawer-style editing, and
@@ -438,26 +439,25 @@ export default function AdsClips() {
       onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDragOver={onDragOver} onDrop={onDrop}
       style={{ position: 'relative' }}
     >
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 mb-4" style={{ borderBottom: '1px solid var(--rule)' }}>
-        <div>
-          <span className="eyebrow eyebrow-accent">Creative · Clips</span>
-          <h2 className="h3 mt-2" style={{ fontSize: 22 }}>The <em>clip</em> library.</h2>
-          <p className="mt-2" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
-            {filtered.length} of {clips.length} clips · drop a .mp4 anywhere on this page to upload
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button onClick={() => fileInputRef.current?.click()} style={btnSolid}>
-            <Upload size={13} /> Upload
-          </button>
-          <button onClick={addBlankClip} style={btnGhost}>
-            <Plus size={13} /> New clip
-          </button>
-          <input ref={fileInputRef} type="file" accept=".mp4,.mov,.webm" multiple style={{ display: 'none' }}
-            onChange={(e) => e.target.files && handleFiles(e.target.files)} />
-        </div>
-      </div>
+      <SectionHead
+        level="page"
+        eyebrow="Creative · Clips"
+        title="Clips"
+        tagline={`${filtered.length} of ${clips.length} clips · drop a .mp4 anywhere on this page to upload.`}
+        gap={20}
+        right={
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button onClick={() => fileInputRef.current?.click()} style={btnSolid}>
+              <Upload size={13} /> Upload
+            </button>
+            <button onClick={addBlankClip} style={btnGhost}>
+              <Plus size={13} /> New clip
+            </button>
+            <input ref={fileInputRef} type="file" accept=".mp4,.mov,.webm" multiple style={{ display: 'none' }}
+              onChange={(e) => e.target.files && handleFiles(e.target.files)} />
+          </div>
+        }
+      />
 
       {/* Filter bar */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 16, alignItems: 'center' }}>
