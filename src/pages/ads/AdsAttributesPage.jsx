@@ -1,46 +1,28 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
-import { supabase } from '../../lib/supabase'
+import { useMemo, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import AttributesView from '../../components/ads/AttributesView'
 import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
-import { SectionHead, Button, Icon } from '../../components/editorial/atoms'
+import { SectionHead } from '../../components/editorial/atoms'
 
 /*
-  Attributes drill-down — left rail of all 11 attributes, right pane with
-  hero + value breakdown + combination matrix + top creatives. Mirrors
-  the design-package Attributes.html.
+  Attributes drill-down — shares perf data with sibling pages via the
+  AdsCreativeTestingLayout Outlet context. No own RPC fetch.
 */
 
-const todayISO = () => new Date().toISOString().slice(0, 10)
-const daysAgoISO = (d) => {
-  const x = new Date(); x.setDate(x.getDate() - d); return x.toISOString().slice(0, 10)
-}
-
 export default function AdsAttributesPage() {
-  const [perf, setPerf] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { perf, loading, refresh } = useOutletContext()
   const [editingAd, setEditingAd] = useState(null)
-  const [since] = useState(daysAgoISO(90))
-  const [until] = useState(todayISO())
-  const [activeOffers] = useState(() => {
+
+  const activeOffers = useMemo(() => {
     try { return JSON.parse(localStorage.getItem('insights.activeOffers') || '[]') } catch { return [] }
-  })
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await supabase.rpc('lib_ad_performance', { since, until })
-      setPerf(res.data || [])
-    } finally { setLoading(false) }
-  }, [since, until])
-
-  useEffect(() => { load() }, [load])
+  }, [])
 
   const filteredPerf = useMemo(() => {
-    if (!activeOffers.length) return perf
-    return perf.filter(r => activeOffers.includes(r.offer_slug))
+    const rows = perf || []
+    if (!activeOffers.length) return rows
+    return rows.filter(r => activeOffers.includes(r.offer_slug))
   }, [perf, activeOffers])
 
-  // Baseline win rate = winners / tagged_ads across the visible set
   const baseline = useMemo(() => {
     const tagged = filteredPerf.filter(r => r.hook_type != null)
     if (!tagged.length) return 0
@@ -70,7 +52,7 @@ export default function AdsAttributesPage() {
         ad={editingAd}
         open={!!editingAd}
         onClose={() => setEditingAd(null)}
-        onUpdated={() => load()}
+        onUpdated={refresh}
       />
     </div>
   )

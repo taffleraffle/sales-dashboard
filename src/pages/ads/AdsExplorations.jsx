@@ -1,35 +1,22 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
-import { supabase } from '../../lib/supabase'
+import { useMemo } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import AttributeHeatmap from '../../components/ads/AttributeHeatmap'
 import { SectionHead } from '../../components/editorial/atoms'
 
-const todayISO = () => new Date().toISOString().slice(0, 10)
-const daysAgoISO = (d) => {
-  const x = new Date(); x.setDate(x.getDate() - d); return x.toISOString().slice(0, 10)
-}
+/*
+  Cross-attribute explorations — reads since/until window from the shared
+  Outlet context. AttributeHeatmap still calls its own dedicated RPC
+  (lib_perf_heatmap) because it's a different aggregation than perf rows.
+*/
 
 export default function AdsExplorations() {
-  const [perf, setPerf] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [since] = useState(daysAgoISO(90))
-  const [until] = useState(todayISO())
-  const [activeOffers] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('insights.activeOffers') || '[]') } catch { return [] }
-  })
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await supabase.rpc('lib_ad_performance', { since, until })
-      setPerf(res.data || [])
-    } finally { setLoading(false) }
-  }, [since, until])
-  useEffect(() => { load() }, [load])
+  const { perf, since, until } = useOutletContext()
 
   const baseline = useMemo(() => {
-    const tagged = perf.filter(r => r.hook_type != null)
+    const rows = perf || []
+    const tagged = rows.filter(r => r.hook_type != null)
     if (!tagged.length) return 0
-    const winners = perf.filter(r => r.effective_winner).length
+    const winners = rows.filter(r => r.effective_winner).length
     return winners / tagged.length
   }, [perf])
 

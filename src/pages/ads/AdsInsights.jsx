@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
-import { supabase } from '../../lib/supabase'
-import { tagMissing, listOffers, getAttributeCoverage } from '../../services/creativeTagger'
+import { Link, useOutletContext } from 'react-router-dom'
+import { tagMissing, getAttributeCoverage } from '../../services/creativeTagger'
 import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
 import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
 import AdThumbnail from '../../components/ads/AdThumbnail'
@@ -61,26 +60,30 @@ const todayISO = () => new Date().toISOString().slice(0, 10)
 const daysAgoISO = (n) => new Date(Date.now() - n * 86400 * 1000).toISOString().slice(0, 10)
 
 export default function AdsInsights() {
-  const [preset, setPreset] = useState('30d')
-  const [since, setSince] = useState(daysAgoISO(30))
-  const [until, setUntil] = useState(todayISO())
-  // Multi-select offer filter (matches design — operator can compare).
-  // null/empty = all offers. Persisted in localStorage.
+  // Perf + offers come from AdsCreativeTestingLayout's shared fetch.
+  // We only own date-window state + the coverage/tagging side-fetches.
+  const layoutCtx = useOutletContext() || {}
+  const {
+    perf, offers, loading: ctxLoading, err: ctxErr,
+    lastSyncedAt, since, until, setSince, setUntil, refresh,
+  } = layoutCtx
+
+  const [preset, setPreset] = useState(() => {
+    // Best-guess preset from the current since/until window
+    const days = since && until ? Math.round((new Date(until) - new Date(since)) / 86400000) : 30
+    return days <= 7 ? '7d' : days <= 30 ? '30d' : days <= 60 ? '60d' : '90d'
+  })
   const [activeOffers, setActiveOffers] = useState(() => {
     try { return JSON.parse(localStorage.getItem('insights.activeOffers') || '[]') } catch { return [] }
   })
-  const [offers, setOffers] = useState([])
-  const [perf, setPerf] = useState(null)
-  const [pivots, setPivots] = useState({})
-  const [winners, setWinners] = useState([])
   const [coverage, setCoverage] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState(null)
   const [tagging, setTagging] = useState(false)
-  const [proofPie, setProofPie] = useState([])
   const [addOrLinkOpen, setAddOrLinkOpen] = useState(false)
   const [editingAd, setEditingAd] = useState(null)
-  const [lastSyncedAt, setLastSyncedAt] = useState(null)
+  const [localErr, setLocalErr] = useState(null)
+
+  const loading = ctxLoading
+  const err = ctxErr || localErr
 
   function setPresetRange(p) {
     setPreset(p.id)
@@ -88,42 +91,14 @@ export default function AdsInsights() {
     setUntil(todayISO())
   }
 
-  const loadEverything = useCallback(async () => {
-    setLoading(true); setErr(null)
-    try {
-      const [offersData, perfData, winnersData, coverageData, proofPivot] = await Promise.all([
-        listOffers(),
-        supabase.rpc('lib_ad_performance', { since, until }),
-        supabase.rpc('lib_winning_attributes', { since, until }),
-        getAttributeCoverage(),
-        supabase.rpc('lib_perf_by_attribute', { attr: 'proof_character', since, until }),
-      ])
-      if (perfData.error) throw new Error(`perf: ${perfData.error.message}`)
-      if (winnersData.error) throw new Error(`winners: ${winnersData.error.message}`)
-      setOffers(offersData)
-      setPerf(perfData.data || [])
-      setWinners(winnersData.data || [])
-      setCoverage(coverageData)
-      setProofPie(proofPivot.error ? [] : (proofPivot.data || []))
-      setLastSyncedAt(new Date())
-
-      const pivotResults = await Promise.all(
-        PIVOTS.map(p =>
-          supabase.rpc('lib_perf_by_attribute', { attr: p.attr, since, until })
-            .then(r => ({ attr: p.attr, rows: r.error ? [] : (r.data || []) }))
-        )
-      )
-      const map = {}
-      for (const r of pivotResults) map[r.attr] = r.rows
-      setPivots(map)
-    } catch (e) {
-      setErr(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [since, until])
-
-  useEffect(() => { loadEverything() }, [loadEverything])
+  // Coverage is the only RPC Insights still owns — fast aggregate, only this page uses it
+  useEffect(() => {
+    let alive = true
+    getAttributeCoverage()
+      .then(d => { if (alive) setCoverage(d) })
+      .catch(e => { if (alive) setLocalErr(e.message) })
+    return () => { alive = false }
+  }, [])
 
   // Persist offer filter
   useEffect(() => {
@@ -237,7 +212,7 @@ export default function AdsInsights() {
     return out
   }, [filteredPerf])
 
-  // Sparkline data — winners per week over the last 12 weeks (synthetic if data thin)
+  // Sparkline data — winners per week over the last 12 weeks
   const winnerSpark = useMemo(() => {
     const rows = filteredPerf || []
     const weeks = 12
@@ -251,10 +226,26 @@ export default function AdsInsights() {
     return counts
   }, [filteredPerf])
 
+  // Proof donut — booked + ad counts per proof character, computed
+  // client-side from the same perf rows the layout fetched once.
+  const proofPie = useMemo(() => {
+    const rows = filteredPerf || []
+    const groups = {}
+    rows.forEach(r => {
+      const v = r.proof_character || 'none'
+      if (!groups[v]) groups[v] = { attribute_value: v, ads: 0, booked: 0, spend: 0, winners: 0 }
+      groups[v].ads++
+      groups[v].booked += Number(r.booked) || 0
+      groups[v].spend += Number(r.spend) || 0
+      if (r.effective_winner) groups[v].winners++
+    })
+    return Object.values(groups).sort((a, b) => b.booked - a.booked)
+  }, [filteredPerf])
+
   async function handleTagMissing() {
     setTagging(true)
-    try { await tagMissing(50); await loadEverything() }
-    catch (e) { setErr(e.message) }
+    try { await tagMissing(50); refresh && refresh() }
+    catch (e) { setLocalErr(e.message) }
     finally { setTagging(false) }
   }
 
@@ -380,11 +371,11 @@ export default function AdsInsights() {
       <AddOrLinkCreativeDrawer
         open={addOrLinkOpen}
         onClose={() => setAddOrLinkOpen(false)}
-        onSaved={() => { setAddOrLinkOpen(false); loadEverything() }} />
+        onSaved={() => { setAddOrLinkOpen(false); refresh && refresh() }} />
       <CreativeEditDrawer
         open={!!editingAd}
         ad={editingAd}
-        onClose={() => { setEditingAd(null); loadEverything() }} />
+        onClose={() => { setEditingAd(null); refresh && refresh() }} />
     </div>
   )
 }
