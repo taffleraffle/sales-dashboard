@@ -167,7 +167,18 @@ export async function parseScriptsFromDoc({ text, offer_slug = null }) {
   const { data, error } = await supabase.functions.invoke('creative-parse-doc', {
     body: { text, offer_slug },
   })
-  if (error) throw new Error(error.message || 'creative-parse-doc failed')
+  // supabase-js wraps non-2xx in a FunctionsHttpError whose default .message
+  // is "Edge Function returned a non-2xx status code" — useless. The real
+  // error body is on `error.context` (a Response). Read it so the operator
+  // sees what actually failed (e.g. "Document too long — Claude ran out…").
+  if (error) {
+    let detail = error.message || 'creative-parse-doc failed'
+    try {
+      const body = await error.context?.json?.()
+      if (body?.error) detail = body.error
+    } catch { /* fall back to generic */ }
+    throw new Error(detail)
+  }
   if (data?.error) throw new Error(data.error)
   return data?.scripts || []
 }

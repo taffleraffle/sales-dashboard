@@ -41,10 +41,12 @@ function getCorsHeaders(req?: Request): Record<string, string> {
 }
 
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY')
-// Haiku 4.5 — structured extraction is a perfect fit and ~5x faster than
-// Sonnet (Ben flagged 2026-05-19 doc parse was taking 30s+). Sonnet kept as
-// the env-var override for cases where Haiku struggles with malformed docs.
-const ANTHROPIC_MODEL = Deno.env.get('CREATIVE_PARSE_MODEL') || 'claude-haiku-4-5-20251001'
+// Sonnet 4.6 — Haiku 4.5 was tried first but collapsed multi-script docs
+// into single scripts (10 distinct scripts → 1 returned). Sonnet 4.6 is the
+// current Sonnet, smarter than the old claude-sonnet-4-20250514 and
+// substantially faster too. Costs more than Haiku but doc parse is a one-
+// time operator action, not a hot loop.
+const ANTHROPIC_MODEL = Deno.env.get('CREATIVE_PARSE_MODEL') || 'claude-sonnet-4-6'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
@@ -168,7 +170,7 @@ serve(async (req: Request) => {
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: SYSTEM,
       messages: [{ role: 'user', content: userContent }],
       tools: [tool],
@@ -184,7 +186,17 @@ serve(async (req: Request) => {
   const data = await upstream.json()
   const toolUse = data.content?.find((c: any) => c.type === 'tool_use')
   if (!toolUse?.input?.scripts) {
-    return new Response(JSON.stringify({ error: 'no tool_use in response', raw: data }),
+    // Common causes: stop_reason = 'max_tokens' (Claude truncated mid-tool-call)
+    // or stop_reason = 'end_turn' with a text refusal. Surface both clearly so
+    // the operator can paste a shorter doc or rephrase.
+    const stopReason = data.stop_reason || 'unknown'
+    const textBlock = data.content?.find((c: any) => c.type === 'text')?.text || ''
+    const hint = stopReason === 'max_tokens'
+      ? 'Document too long — Claude ran out of tokens mid-extraction. Try splitting it.'
+      : textBlock
+        ? `Claude returned text instead of tool_use: "${textBlock.slice(0, 200)}"`
+        : `Claude stop_reason=${stopReason}, no tool_use emitted.`
+    return new Response(JSON.stringify({ error: hint, stop_reason: stopReason }),
       { status: 502, headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } })
   }
 
