@@ -63,7 +63,11 @@ export default function AdsCreativeTestingLayout() {
 
   const [perf, setPerf] = useState(null)
   const [offers, setOffers] = useState([])
+  // `loading` = true ONLY on first load (no perf at all). Re-fetches while
+  // a window/preset change is in flight set `refetching` instead — pages
+  // keep showing the stale data so the UI doesn't flash to "Loading…".
   const [loading, setLoading] = useState(false)
+  const [refetching, setRefetching] = useState(false)
   const [err, setErr] = useState(null)
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
 
@@ -86,7 +90,12 @@ export default function AdsCreativeTestingLayout() {
       setPerf(cached.perf); setOffers(cached.offers); setLastSyncedAt(new Date(cached.t))
       return
     }
-    setLoading(true); setErr(null)
+    // Only show first-load skeleton if there's literally nothing to show.
+    // Otherwise show the existing rows with a subtle "refetching" pulse.
+    const hasExisting = perf && perf.length > 0
+    if (hasExisting) setRefetching(true)
+    else setLoading(true)
+    setErr(null)
     try {
       const [offersData, perfRes] = await Promise.all([
         listOffers(),
@@ -104,9 +113,9 @@ export default function AdsCreativeTestingLayout() {
     } catch (e) {
       setErr(e.message)
     } finally {
-      setLoading(false)
+      setLoading(false); setRefetching(false)
     }
-  }, [cacheKey, since, until])
+  }, [cacheKey, since, until, perf])
 
   // Fire on navigation into an analytics page AND on date-window change.
   // loadPerf itself does the cache check + TTL — no need to duplicate here.
@@ -149,12 +158,13 @@ export default function AdsCreativeTestingLayout() {
 
   // Context exposed to nested routes via <Outlet context>
   const ctx = useMemo(() => ({
-    perf: filteredPerf, perfRaw: perf, offers, loading, err, lastSyncedAt,
+    perf: filteredPerf, perfRaw: perf, offers,
+    loading, refetching, err, lastSyncedAt,
     since, until, setSince, setUntil,
     activeOffers, toggleOffer, hideInactive, setHideInactive,
     refresh: () => loadPerf({ force: true }),
     openGlossary: () => setGlossaryOpen(true),
-  }), [filteredPerf, perf, offers, loading, err, lastSyncedAt,
+  }), [filteredPerf, perf, offers, loading, refetching, err, lastSyncedAt,
        since, until, activeOffers, hideInactive, loadPerf])
 
   const showToolbar = needsPerf
@@ -221,7 +231,7 @@ export default function AdsCreativeTestingLayout() {
           since={since} until={until} setSince={setSince} setUntil={setUntil}
           offers={offers} activeOffers={activeOffers} toggleOffer={toggleOffer}
           hideInactive={hideInactive} setHideInactive={setHideInactive}
-          loading={loading} lastSyncedAt={lastSyncedAt}
+          loading={loading || refetching} lastSyncedAt={lastSyncedAt}
           totalAds={(perf || []).length}
           visibleAds={(filteredPerf || []).length}
           onRefresh={() => loadPerf({ force: true })}

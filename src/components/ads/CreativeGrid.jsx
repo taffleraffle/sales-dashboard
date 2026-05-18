@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import AdThumbnail from './AdThumbnail'
 import {
   Eyebrow, Pill, Icon, fmtMoney, fmtMoneyFull, fmtNum, humanAttr, frameColor, frameTone,
@@ -76,6 +76,8 @@ const SORT_OPTIONS = [
 
 const FILTER_CHIPS = [
   { key: 'all',          label: 'All' },
+  { key: 'live',         label: 'Live only' },
+  { key: 'paused',       label: 'Paused' },
   { key: 'winners',      label: 'Winners' },
   { key: 'has_booked',   label: 'Has booked' },
   { key: 'unassigned',   label: 'Unassigned' },
@@ -89,7 +91,30 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
   const [sort, setSort] = useState('booked_desc')
   const [pageSize, setPageSize] = useState(PAGE_SIZE)
   // Attribute-rail filters: { attr: Set<value> }
-  const [attrFilters, setAttrFilters] = useState({})
+  // Attribute-rail filters — seeded from URL params so an external link like
+  // `/creatives?hook_type=diagnostic&pain_angle=tpa_referral_dep` auto-applies
+  // them on mount. (Used by the "View all in Creatives" link on Attributes.)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [attrFilters, setAttrFilters] = useState(() => {
+    const out = {}
+    for (const [attr, value] of searchParams.entries()) {
+      if (!FILTER_GROUPS.find(g => g.attr === attr)) continue
+      const vals = value.split(',').filter(Boolean)
+      if (vals.length) out[attr] = new Set(vals)
+    }
+    return out
+  })
+
+  // Re-seed on URL change (browser back/forward navigation)
+  useEffect(() => {
+    const next = {}
+    for (const [attr, value] of searchParams.entries()) {
+      if (!FILTER_GROUPS.find(g => g.attr === attr)) continue
+      const vals = value.split(',').filter(Boolean)
+      if (vals.length) next[attr] = new Set(vals)
+    }
+    setAttrFilters(next)
+  }, [searchParams])
 
   const toggleAttrFilter = (attr, value) => {
     setAttrFilters(prev => {
@@ -99,15 +124,24 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
       else set.add(value)
       if (set.size === 0) delete next[attr]
       else next[attr] = set
+      // Write back to URL — keeps the filter state shareable + browser-back works
+      const params = new URLSearchParams()
+      for (const k in next) params.set(k, [...next[k]].join(','))
+      setSearchParams(params, { replace: true })
       return next
     })
   }
-  const clearAllAttrFilters = () => { setAttrFilters({}); setFilter('all'); setSearch('') }
+  const clearAllAttrFilters = () => {
+    setAttrFilters({}); setFilter('all'); setSearch('')
+    setSearchParams(new URLSearchParams(), { replace: true })
+  }
   const attrFilterCount = Object.values(attrFilters).reduce((s, v) => s + v.size, 0)
 
   const processed = useMemo(() => {
     let list = [...(rows || [])]
-    if (filter === 'winners')        list = list.filter(r => r.effective_winner)
+    if (filter === 'live')           list = list.filter(r => r.is_live === true || r.effective_status === 'ACTIVE')
+    else if (filter === 'paused')       list = list.filter(r => r.effective_status && r.effective_status !== 'ACTIVE' && r.effective_status !== 'DELETED' && r.effective_status !== 'ARCHIVED')
+    else if (filter === 'winners')      list = list.filter(r => r.effective_winner)
     else if (filter === 'has_booked')   list = list.filter(r => (Number(r.booked) || 0) > 0)
     else if (filter === 'unassigned')   list = list.filter(r => !r.assignment_status || r.assignment_status === 'unassigned' || r.assignment_status === 'ad_copy_only' || r.assignment_status === 'auto_transcript')
     else if (filter === 'fully_tagged') list = list.filter(r => r.attributes_complete)
@@ -271,8 +305,10 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
           <Eyebrow style={{ textAlign: 'right' }}>State</Eyebrow>
         </div>
 
-        {/* Rows */}
-        {loading ? (
+        {/* Rows — only show "Loading…" on first load (no rows yet). When
+            refetching with existing rows we keep them visible to avoid the
+            flash-to-empty that happens on date-window changes. */}
+        {loading && visible.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-4)',
                         fontFamily: 'var(--serif)', fontStyle: 'italic' }}>
             Loading creatives…

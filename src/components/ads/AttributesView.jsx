@@ -35,6 +35,10 @@ const MIN_SAMPLE = 5
 export default function AttributesView({ filteredPerf, baseline, loading, onClickCreative }) {
   const [active, setActive] = useState('pain_angle')
   const [comboAttr, setComboAttr] = useState('message_frame')
+  // Selected value within the active attribute. Null = show the leader (default).
+  // Click a row in the value breakdown to pin a different value into the
+  // TopInValue + "View all in Creatives" link.
+  const [selectedValue, setSelectedValue] = useState(null)
 
   // Build per-attribute summaries
   const attrSummaries = useMemo(() => {
@@ -88,7 +92,13 @@ export default function AttributesView({ filteredPerf, baseline, loading, onClic
   const withData = attrSummaries.filter(s => s.leader)
   const activeSummary = withData.find(s => s.id === active) || withData[0]
 
-  if (loading) {
+  // Setter that also clears the value drill-down (clicking a different
+  // attribute should drop back to the leader, not stay on a now-invalid value)
+  const setActiveAttr = (id) => { setActive(id); setSelectedValue(null) }
+
+  // Only show the loading skeleton on first load (no attribute summaries yet).
+  // Refetches keep the existing rail+detail visible to avoid the date-change flash.
+  if (loading && withData.length === 0) {
     return (
       <div style={{ padding: 64, textAlign: 'center', color: 'var(--ink-4)',
                     fontFamily: 'var(--serif)', fontStyle: 'italic',
@@ -110,7 +120,7 @@ export default function AttributesView({ filteredPerf, baseline, loading, onClic
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 24, marginTop: 8 }}>
-      <AttributeRail summaries={attrSummaries} active={active} setActive={setActive} baseline={baseline} />
+      <AttributeRail summaries={attrSummaries} active={active} setActive={setActiveAttr} baseline={baseline} />
       <AttributeDetail
         summary={activeSummary}
         baseline={baseline}
@@ -119,6 +129,8 @@ export default function AttributesView({ filteredPerf, baseline, loading, onClic
         comboAttr={comboAttr}
         setComboAttr={setComboAttr}
         onClickCreative={onClickCreative}
+        selectedValue={selectedValue}
+        setSelectedValue={setSelectedValue}
       />
     </div>
   )
@@ -220,10 +232,13 @@ function AttributeRail({ summaries, active, setActive, baseline }) {
 }
 
 // ─── Right pane — hero + value breakdown + combo matrix + top creatives ────
-function AttributeDetail({ summary, baseline, filteredPerf, attrSummaries, comboAttr, setComboAttr, onClickCreative }) {
+function AttributeDetail({ summary, baseline, filteredPerf, attrSummaries, comboAttr, setComboAttr, onClickCreative, selectedValue, setSelectedValue }) {
   const leader = summary.leader
   const color = attrColor(summary.id, leader.value)
   const isLeading = summary.lift > 0
+  // The value driving TopInValue + the "View all" link. Defaults to the leader.
+  const focusValue = selectedValue || leader.value
+  const focusRow = summary.all.find(v => v.value === focusValue) || leader
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, minWidth: 0 }}>
       {/* Hero */}
@@ -278,8 +293,13 @@ function AttributeDetail({ summary, baseline, filteredPerf, attrSummaries, combo
         </div>
       </div>
 
-      {/* All values bar chart */}
-      <ValueBreakdown summary={summary} baseline={baseline} />
+      {/* All values bar chart — rows clickable to drill into TopInValue */}
+      <ValueBreakdown
+        summary={summary}
+        baseline={baseline}
+        selectedValue={selectedValue}
+        onSelectValue={(v) => setSelectedValue(v === selectedValue ? null : v)}
+      />
 
       {/* Cross-tab combination matrix */}
       <CombinationMatrix
@@ -291,9 +311,11 @@ function AttributeDetail({ summary, baseline, filteredPerf, attrSummaries, combo
         baseline={baseline}
       />
 
-      {/* Top creatives within the leader value */}
+      {/* Top creatives within the focused value (defaults to leader if not pinned) */}
       <TopInValue
         summary={summary}
+        focusValue={focusValue}
+        focusRow={focusRow}
         filteredPerf={filteredPerf}
         onClickCreative={onClickCreative}
       />
@@ -318,7 +340,7 @@ function HeroStat({ label, value, sub }) {
 }
 
 // ─── All values ranked — bar chart with dashed baseline ──────────────
-function ValueBreakdown({ summary, baseline }) {
+function ValueBreakdown({ summary, baseline, selectedValue, onSelectValue }) {
   const rows = summary.all
   const max = Math.max(...rows.map(r => r.winRate), baseline * 1.5, 0.5)
   const baselinePct = (baseline / max) * 100
@@ -366,13 +388,25 @@ function ValueBreakdown({ summary, baseline }) {
           const beats = r.winRate > baseline
           const valColor = attrColor(summary.id, r.value)
           const barColor = beats ? valColor : tint(valColor, 0.35)
+          const isSelected = selectedValue === r.value
           return (
-            <div key={r.value} style={{
-              display: 'grid', gridTemplateColumns: GRID,
-              alignItems: 'center', gap: 14,
-              padding: '12px 0',
-              borderBottom: i < rows.length - 1 ? '1px solid var(--rule)' : 'none',
-            }}>
+            <div key={r.value}
+              onClick={() => onSelectValue && onSelectValue(r.value)}
+              title={`Click to see top ads with ${displayValue(r.value)}`}
+              style={{
+                display: 'grid', gridTemplateColumns: GRID,
+                alignItems: 'center', gap: 14,
+                padding: '12px 8px',
+                margin: '0 -8px',
+                borderBottom: i < rows.length - 1 ? '1px solid var(--rule)' : 'none',
+                cursor: onSelectValue ? 'pointer' : 'default',
+                background: isSelected ? tint(valColor, 0.08) : 'transparent',
+                borderLeft: isSelected ? `3px solid ${valColor}` : '3px solid transparent',
+                transition: 'background 0.12s ease, border-color 0.12s ease',
+              }}
+              onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--paper-2)' }}
+              onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{
                   width: 9, height: 9, borderRadius: 9, background: valColor, flexShrink: 0,
@@ -608,32 +642,54 @@ function Row({ r, rowAttr, colValues, matrix, baseline, maxWR }) {
   )
 }
 
-// ─── Top creatives within the leader value ────────────────────────────
-function TopInValue({ summary, filteredPerf, onClickCreative }) {
-  const leaderValue = summary.leader.value
+// ─── Top creatives within a focused value (defaults to leader) ────────
+function TopInValue({ summary, focusValue, focusRow, filteredPerf, onClickCreative }) {
   const rowAttr = summary.id
-  const subset = useMemo(() => {
+  const value = focusValue || summary.leader.value
+  // Pull every ad with this attribute=value (not just booked-only — when the
+  // operator drills into a low-performer they want to see ALL ads to debug)
+  const allMatching = useMemo(() => {
     return (filteredPerf || [])
-      .filter(c => c[rowAttr] === leaderValue && (Number(c.booked) || 0) > 0)
+      .filter(c => c[rowAttr] === value)
       .sort((a, b) => (Number(b.booked) || 0) - (Number(a.booked) || 0))
-      .slice(0, 4)
-  }, [filteredPerf, rowAttr, leaderValue])
+  }, [filteredPerf, rowAttr, value])
 
+  const subset = allMatching.slice(0, 4)
   if (subset.length === 0) return null
 
-  const leaderColor = attrColor(rowAttr, leaderValue)
+  const valueColor = attrColor(rowAttr, value)
+  const totalCount = allMatching.length
+  const creativesLink = `/sales/ads/creative/creatives?${rowAttr}=${encodeURIComponent(value)}`
   return (
     <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
       <div style={{
         padding: '16px 22px', borderBottom: '1px solid var(--rule)',
-        display: 'flex', alignItems: 'baseline', gap: 12,
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12,
       }}>
         <div>
-          <Eyebrow>Top creatives</Eyebrow>
+          <Eyebrow>{focusValue ? 'Top creatives · drilled' : 'Top creatives'}</Eyebrow>
           <div style={{ marginTop: 4, fontFamily: 'var(--serif)', fontSize: 20, fontWeight: 500 }}>
-            Within <span style={{ color: leaderColor }}>{displayValue(leaderValue)}</span>
+            Within <span style={{ color: valueColor }}>{displayValue(value)}</span>
+            {focusRow && (
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)',
+                marginLeft: 10, fontWeight: 400, letterSpacing: '0.04em',
+              }}>
+                {focusRow.winners}/{focusRow.ads} ads · {(focusRow.winRate || 0).toFixed(1)}% win rate
+              </span>
+            )}
           </div>
         </div>
+        <a href={creativesLink} style={{
+          fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
+          color: 'var(--ink-2)', textDecoration: 'none',
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          padding: '6px 12px',
+          border: '1px solid var(--rule-2)',
+          background: 'white',
+        }}>
+          View all {totalCount} in Creatives →
+        </a>
       </div>
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 1,
