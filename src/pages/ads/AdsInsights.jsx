@@ -10,6 +10,7 @@ import { tagMissing, listOffers, getAttributeCoverage } from '../../services/cre
 import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
 import CreativeEditDrawer from '../../components/ads/CreativeEditDrawer'
 import AdThumbnail from '../../components/ads/AdThumbnail'
+import CreativeGrid from '../../components/ads/CreativeGrid'
 
 /*
   Creative Insights — focused on WIN RATE, not spend.
@@ -56,7 +57,10 @@ export default function AdsInsights() {
   const [preset, setPreset] = useState(30)
   const [since, setSince] = useState(daysAgoISO(30))
   const [until, setUntil] = useState(todayISO())
-  const [offerFilter, setOfferFilter] = useState([])
+  // Per-offer scoping. null = all offers combined.
+  const [activeOffer, setActiveOffer] = useState(() => {
+    try { return localStorage.getItem('insights.activeOffer') || null } catch { return null }
+  })
   const [offers, setOffers] = useState([])
   const [perf, setPerf] = useState(null)
   const [pivots, setPivots] = useState({})
@@ -106,11 +110,19 @@ export default function AdsInsights() {
 
   useEffect(() => { loadEverything() }, [loadEverything])
 
+  // Persist active offer
+  useEffect(() => {
+    try {
+      if (activeOffer) localStorage.setItem('insights.activeOffer', activeOffer)
+      else localStorage.removeItem('insights.activeOffer')
+    } catch {}
+  }, [activeOffer])
+
   const filteredPerf = useMemo(() => {
     if (!perf) return null
-    if (!offerFilter.length) return perf
-    return perf.filter(r => offerFilter.includes(r.offer_slug))
-  }, [perf, offerFilter])
+    if (!activeOffer) return perf
+    return perf.filter(r => r.offer_slug === activeOffer)
+  }, [perf, activeOffer])
 
   // Top-level stats
   const stats = useMemo(() => {
@@ -196,9 +208,15 @@ export default function AdsInsights() {
     finally { setTagging(false) }
   }
 
-  const toggleOffer = (slug) => {
-    setOfferFilter(prev => prev.includes(slug) ? prev.filter(s => s !== slug) : [...prev, slug])
-  }
+  // Build offer counts for the switcher
+  const offerCounts = useMemo(() => {
+    const counts = {}
+    ;(perf || []).forEach(r => {
+      const k = r.offer_slug || '__untagged'
+      counts[k] = (counts[k] || 0) + 1
+    })
+    return counts
+  }, [perf])
 
   return (
     <div style={{ padding: '24px 0' }}>
@@ -249,6 +267,29 @@ export default function AdsInsights() {
         ad={editingAd}
         onClose={() => { setEditingAd(null); loadEverything() }} />
 
+      {/* Per-offer switcher */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8,
+                    marginBottom: 20 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+                      textTransform: 'uppercase', color: 'var(--ink-4)', marginRight: 4 }}>Offer:</span>
+        <button onClick={() => setActiveOffer(null)}
+          style={offerBtnStyle(activeOffer === null)}>
+          All offers
+          <span style={offerCountStyle(activeOffer === null)}>{(perf || []).length}</span>
+        </button>
+        {offers.filter(o => !o.slug.includes('template')).map(o => {
+          const on = activeOffer === o.slug
+          const count = offerCounts[o.slug] || 0
+          return (
+            <button key={o.slug} onClick={() => setActiveOffer(o.slug)}
+              style={offerBtnStyle(on)}>
+              {o.name.replace('OPT ', '').replace(' (Direct Call Engine)', '')}
+              <span style={offerCountStyle(on)}>{count}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {/* Headline KPI row — WIN RATE prominent, spend de-emphasized */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr', gap: 1,
                     background: 'var(--rule)', border: '1px solid var(--rule)', marginBottom: 24 }}>
@@ -277,32 +318,6 @@ export default function AdsInsights() {
                 cursor: 'pointer', borderRadius: 2,
               }}>{p.label}</button>
           ))}
-        </div>
-        <span style={{ width: 1, height: 24, background: 'var(--rule)' }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                        textTransform: 'uppercase', color: 'var(--ink-4)' }}>Offer:</span>
-          {offers.filter(o => !o.slug.includes('template')).map(o => {
-            const on = offerFilter.includes(o.slug)
-            return (
-              <button key={o.slug} onClick={() => toggleOffer(o.slug)}
-                style={{
-                  padding: '4px 10px', fontFamily: 'var(--sans)', fontSize: 12,
-                  border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                  background: on ? 'var(--ink)' : 'white',
-                  color: on ? 'var(--paper)' : 'var(--ink-3)',
-                  cursor: 'pointer', borderRadius: 2,
-                }}>
-                {o.name.replace('OPT ', '').replace(' (Direct Call Engine)', '')}
-              </button>
-            )
-          })}
-          {offerFilter.length > 0 && (
-            <button onClick={() => setOfferFilter([])}
-              style={{ padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10,
-                      color: 'var(--ink-4)', background: 'transparent', border: 'none',
-                      cursor: 'pointer', textDecoration: 'underline' }}>clear</button>
-          )}
         </div>
       </div>
 
@@ -359,8 +374,18 @@ export default function AdsInsights() {
         </div>
       )}
 
-      {/* Top performing creatives */}
+      {/* All creatives grid (pinned winners + paginated grid + filter + sort) */}
       <div style={{ marginBottom: 32 }}>
+        <CreativeGrid
+          rows={filteredPerf || []}
+          loading={loading}
+          onClickRow={r => setEditingAd(r)}
+          pinnedTopN={3}
+        />
+      </div>
+
+      {/* (legacy top-creatives table now replaced by CreativeGrid above) */}
+      <div style={{ display: 'none' }}>
         <div className="eyebrow eyebrow-accent" style={{ marginBottom: 12 }}>
           <TrendingUp size={13} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
           Top <em>performing</em> creatives
@@ -491,6 +516,27 @@ export default function AdsInsights() {
       </div>
     </div>
   )
+}
+
+function offerBtnStyle(active) {
+  return {
+    padding: '8px 14px', fontFamily: 'var(--sans)', fontSize: 13, fontWeight: active ? 600 : 400,
+    border: `2px solid ${active ? 'var(--ink)' : 'var(--rule)'}`,
+    background: active ? 'var(--ink)' : 'white',
+    color: active ? 'var(--paper)' : 'var(--ink)',
+    cursor: 'pointer', borderRadius: 2,
+    display: 'inline-flex', alignItems: 'center', gap: 8,
+    transition: 'all 140ms ease',
+  }
+}
+function offerCountStyle(active) {
+  return {
+    padding: '1px 6px', fontFamily: 'var(--mono)', fontSize: 10,
+    background: active ? 'var(--accent)' : 'var(--paper)',
+    color: active ? 'var(--ink)' : 'var(--ink-4)',
+    border: `1px solid ${active ? 'var(--ink)' : 'var(--rule)'}`,
+    borderRadius: 2, fontWeight: 700,
+  }
 }
 
 function BigKpi({ label, value, sub, accent, icon }) {
