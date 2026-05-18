@@ -63,6 +63,9 @@ export default function AdsInsights() {
   const [preset, setPreset] = useState('30d')
   const [since, setSince] = useState(daysAgoISO(30))
   const [until, setUntil] = useState(todayISO())
+  const [activeTab, setActiveTab] = useState(() => {
+    try { return localStorage.getItem('insights.activeTab') || 'overview' } catch { return 'overview' }
+  })
   // Multi-select offer filter (matches design — operator can compare).
   // null/empty = all offers. Persisted in localStorage.
   const [activeOffers, setActiveOffers] = useState(() => {
@@ -128,6 +131,11 @@ export default function AdsInsights() {
   useEffect(() => {
     try { localStorage.setItem('insights.activeOffers', JSON.stringify(activeOffers)) } catch {}
   }, [activeOffers])
+
+  // Persist active sub-tab
+  useEffect(() => {
+    try { localStorage.setItem('insights.activeTab', activeTab) } catch {}
+  }, [activeTab])
 
   // Validate stale offer slugs against loaded list
   useEffect(() => {
@@ -298,64 +306,108 @@ export default function AdsInsights() {
         </div>
       )}
 
-      {/* 3. KPI grid — dominant */}
-      <div style={{ marginTop: 26, marginBottom: 44 }}>
-        <KPIDominant summary={summary} spark={winnerSpark} />
-      </div>
+      {/* Sub-tab nav */}
+      <SubTabNav active={activeTab} onChange={setActiveTab} counts={{
+        overview: null,
+        library: (filteredPerf || []).length,
+        attributes: 11,
+        explorations: null,
+      }} />
 
-      {/* 4. Variables pulling ahead — leaderboard */}
-      <div style={{ marginBottom: 44 }}>
-        <SectionHead
-          eyebrow="Section II"
-          title="Variables pulling ahead."
-          italicWord="pulling ahead"
-          tagline="For each attribute, the value beating the baseline win rate by the largest margin — ranked by lift, not by raw win rate."
-        />
-        <VariablesLeaderboard items={variablesAhead} baseline={summary.winRate} />
-      </div>
+      {/* ─── OVERVIEW TAB ───────────────────────────────────────────── */}
+      {activeTab === 'overview' && (
+        <>
+          {/* KPI grid */}
+          <div style={{ marginBottom: 44 }}>
+            <KPIDominant summary={summary} spark={winnerSpark} />
+          </div>
 
-      {/* 5. Top performing creatives — wrapped via CreativeGrid */}
-      <div style={{ marginBottom: 44 }}>
-        <SectionHead
-          eyebrow="Section III"
-          title="Top performing creatives."
-          italicWord="performing"
-          tagline={`${summary.winners} winners across the current window. Click any row to edit attributes — auto-saves on change.`}
-        />
-        <CreativeGrid
-          rows={filteredPerf || []}
-          loading={loading}
-          onClickRow={r => setEditingAd(r)}
-          pinnedTopN={3}
-        />
-      </div>
+          {/* Variables pulling ahead — leaderboard */}
+          <div style={{ marginBottom: 44 }}>
+            <SectionHead
+              eyebrow="Section II"
+              title="Variables pulling ahead."
+              italicWord="pulling ahead"
+              tagline="For each attribute, the value beating the baseline win rate by the largest margin — ranked by lift, not by raw win rate."
+            />
+            <VariablesLeaderboard items={variablesAhead} baseline={summary.winRate} />
+          </div>
 
-      {/* 6. Cross-attribute heatmap */}
-      <div style={{ marginBottom: 44 }}>
-        <AttributeHeatmap since={since} until={until} baseline={summary.winRate / 100} />
-      </div>
+          {/* Top 10 performers preview — links to Library tab */}
+          <div style={{ marginBottom: 44 }}>
+            <SectionHead
+              eyebrow="Section III"
+              title="Top performers."
+              italicWord="performers"
+              tagline={`${summary.winners} winners across the current window. Click any row to edit attributes.`}
+              right={
+                <Button variant="ghost" size="sm"
+                  onClick={() => setActiveTab('library')}
+                  rightIcon={Icon.arrow(11)}>
+                  See all {summary.taggedAds}
+                </Button>
+              }
+            />
+            <TopPerformersTable rows={filteredPerf || []} loading={loading}
+              onClickRow={r => setEditingAd(r)} limit={10} />
+          </div>
 
-      {/* 7. Win rate by attribute — small multiples */}
-      <div style={{ marginBottom: 44 }}>
-        <SectionHead
-          eyebrow="Section IV"
-          title="Win rate by attribute."
-          italicWord="attribute"
-          tagline="Bars beating the dashed baseline are pulling weight. The yellow bar is the per-attribute leader."
-        />
-        <SmallMultiples stats={attrStats} baseline={summary.winRate} />
-      </div>
+          {/* Proof donut on overview when data exists */}
+          {proofPie.some(r => r.attribute_value !== 'none' && Number(r.booked) > 0) && (
+            <div style={{ marginBottom: 44 }}>
+              <SectionHead
+                eyebrow="Section IV"
+                title="Proof character mix."
+                italicWord="character"
+                tagline="Which on-camera character is doing the lifting — booked counts and ad volume by named proof."
+              />
+              <ProofDonut data={proofPie} />
+            </div>
+          )}
+        </>
+      )}
 
-      {/* 8. Proof character donut */}
-      {proofPie.some(r => r.attribute_value !== 'none' && Number(r.booked) > 0) && (
-        <div style={{ marginBottom: 44 }}>
+      {/* ─── LIBRARY TAB ────────────────────────────────────────────── */}
+      {activeTab === 'library' && (
+        <div style={{ marginBottom: 44, marginTop: 8 }}>
           <SectionHead
-            eyebrow="Section V"
-            title="Proof character mix."
-            italicWord="character"
-            tagline="Which on-camera character is doing the lifting — booked counts and ad volume by named proof."
+            eyebrow="Library"
+            title="All tagged creatives."
+            italicWord="creatives"
+            tagline={`${(filteredPerf || []).length} creatives in the current window. Search, filter, sort. Click any row to edit attributes — auto-saves on change.`}
           />
-          <ProofDonut data={proofPie} />
+          <CreativeGrid
+            rows={filteredPerf || []}
+            loading={loading}
+            onClickRow={r => setEditingAd(r)}
+            pinnedTopN={3}
+          />
+        </div>
+      )}
+
+      {/* ─── ATTRIBUTES TAB ─────────────────────────────────────────── */}
+      {activeTab === 'attributes' && (
+        <div style={{ marginBottom: 44, marginTop: 8 }}>
+          <SectionHead
+            eyebrow="Attributes"
+            title="Win rate by attribute."
+            italicWord="attribute"
+            tagline="Bars beating the dashed baseline are pulling weight. The yellow bar is the per-attribute leader. Each chart drills one dimension."
+          />
+          <SmallMultiples stats={attrStats} baseline={summary.winRate} />
+        </div>
+      )}
+
+      {/* ─── EXPLORATIONS TAB ───────────────────────────────────────── */}
+      {activeTab === 'explorations' && (
+        <div style={{ marginBottom: 44, marginTop: 8 }}>
+          <SectionHead
+            eyebrow="Explorations"
+            title="Cross-attribute interactions."
+            italicWord="interactions"
+            tagline="Pick two attributes — the heatmap surfaces where combinations beat the baseline. Yellow = wins above baseline, scaled by intensity. Faded cells have <2 ads."
+          />
+          <AttributeHeatmap since={since} until={until} baseline={summary.winRate / 100} />
         </div>
       )}
 
@@ -383,6 +435,213 @@ export default function AdsInsights() {
         open={!!editingAd}
         ad={editingAd}
         onClose={() => { setEditingAd(null); loadEverything() }} />
+    </div>
+  )
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// SubTabNav — Overview · Library · Attributes · Explorations
+// ═════════════════════════════════════════════════════════════════════
+const SUB_TABS = [
+  { id: 'overview',     label: 'Overview' },
+  { id: 'library',      label: 'Library' },
+  { id: 'attributes',   label: 'Attributes' },
+  { id: 'explorations', label: 'Explorations' },
+]
+
+function SubTabNav({ active, onChange, counts = {} }) {
+  return (
+    <div style={{
+      display: 'flex', gap: 0, marginTop: 26, marginBottom: 32,
+      borderBottom: '1px solid var(--rule)',
+    }}>
+      {SUB_TABS.map((t, i) => {
+        const on = active === t.id
+        const count = counts[t.id]
+        return (
+          <button key={t.id} onClick={() => onChange(t.id)}
+            style={{
+              padding: '12px 18px',
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              color: on ? 'var(--ink)' : 'var(--ink-4)',
+              background: 'transparent', border: 'none',
+              borderBottom: on ? '2px solid var(--accent)' : '2px solid transparent',
+              marginBottom: -1, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              transition: 'color 0.12s cubic-bezier(0.2,0.7,0.2,1)',
+            }}>
+            <span style={{ opacity: 0.45, fontVariantNumeric: 'tabular-nums' }}>
+              {String(i + 1).padStart(2, '0')}
+            </span>
+            <span>{t.label}</span>
+            {count != null && (
+              <span style={{
+                opacity: 0.55, fontSize: 9.5,
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {count}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// TopPerformersTable — compact 10-row preview for the Overview tab
+// (links to the full Library tab for everything else)
+// ═════════════════════════════════════════════════════════════════════
+function TopPerformersTable({ rows, loading, onClickRow, limit = 10 }) {
+  const sorted = useMemo(() => {
+    return [...(rows || [])]
+      .filter(r => (Number(r.booked) || 0) > 0)
+      .sort((a, b) => (Number(b.booked) || 0) - (Number(a.booked) || 0))
+      .slice(0, limit)
+  }, [rows, limit])
+
+  if (loading) {
+    return (
+      <div style={{ padding: 48, background: 'white', border: '1px solid var(--rule)',
+                    textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic',
+                    color: 'var(--ink-4)' }}>
+        Loading top performers…
+      </div>
+    )
+  }
+  if (sorted.length === 0) {
+    return (
+      <div style={{ padding: 48, background: 'white', border: '1px solid var(--rule)',
+                    textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic',
+                    color: 'var(--ink-4)' }}>
+        No booked-call activity in this window yet.
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+      {/* Header */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '40px 72px minmax(260px, 2fr) minmax(220px, 1.6fr) 84px 84px 88px',
+        alignItems: 'center', gap: 14,
+        padding: '10px 18px',
+        background: 'var(--paper-2)',
+        borderBottom: '1px solid var(--rule)',
+      }}>
+        <Eyebrow>#</Eyebrow>
+        <Eyebrow>Creative</Eyebrow>
+        <Eyebrow>Ad · campaign</Eyebrow>
+        <Eyebrow>Tags</Eyebrow>
+        <Eyebrow style={{ textAlign: 'right' }}>Booked</Eyebrow>
+        <Eyebrow style={{ textAlign: 'right' }}>CPB</Eyebrow>
+        <Eyebrow style={{ textAlign: 'right' }}>State</Eyebrow>
+      </div>
+      {/* Rows — reuse the editorial CreativeRow */}
+      {sorted.map((c, i) => {
+        const isPodium = i < 3 && c.effective_winner
+        return (
+          <TopPerformerRow key={c.ad_id} c={c} rank={i + 1} isPodium={isPodium}
+            onClick={() => onClickRow?.(c)}
+            isLast={i === sorted.length - 1} />
+        )
+      })}
+    </div>
+  )
+}
+
+function TopPerformerRow({ c, rank, isPodium, onClick, isLast }) {
+  const isWinner = !!c.effective_winner
+  return (
+    <div onClick={onClick}
+      onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '40px 72px minmax(260px, 2fr) minmax(220px, 1.6fr) 84px 84px 88px',
+        alignItems: 'center', gap: 14,
+        padding: '14px 18px',
+        borderBottom: isLast ? 'none' : '1px solid var(--rule)',
+        cursor: 'pointer',
+        transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1)',
+      }}>
+      <div>
+        {isPodium ? (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 26, height: 26,
+            background: 'var(--accent)', color: 'var(--ink)',
+            fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500, fontStyle: 'italic',
+            fontVariantNumeric: 'tabular-nums', border: '1px solid var(--accent-2)',
+          }}>{rank}</span>
+        ) : (
+          <span style={{ fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums',
+                        fontSize: 12, color: 'var(--ink-4)' }}>
+            {String(rank).padStart(2, '0')}
+          </span>
+        )}
+      </div>
+      <div style={{ position: 'relative' }}>
+        <AdThumbnail ad={c} size="md" />
+        {c.message_frame && (
+          <span style={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+            background: frameColor(c.message_frame),
+          }} />
+        )}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{
+          fontFamily: 'var(--serif)', fontSize: 17, lineHeight: 1.2, color: 'var(--ink)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {c.ad_name || c.ad_id}
+        </div>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
+          marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {c.campaign_name || '—'}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        {[c.hook_type, c.mechanism_reveal, c.pain_angle].filter(Boolean).slice(0, 3).map((v, i) => (
+          <Pill key={i} tone="default" size="xs">{humanAttr(v)}</Pill>
+        ))}
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <div style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+                      fontSize: 22, lineHeight: 1, color: 'var(--ink)' }}>
+          {fmtNum(c.booked)}
+        </div>
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <div style={{ fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+                      fontSize: 22, lineHeight: 1, color: 'var(--ink)' }}>
+          {c.cost_per_booked != null ? fmtMoney(Number(c.cost_per_booked)) : '—'}
+        </div>
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        {isWinner ? (
+          <span style={{
+            display: 'inline-block', padding: '3px 9px',
+            background: 'var(--accent)', color: 'var(--ink)',
+            border: '1px solid var(--accent-2)',
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+          }}>
+            Winner
+          </span>
+        ) : (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-5)',
+                        letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            testing
+          </span>
+        )}
+      </div>
     </div>
   )
 }
