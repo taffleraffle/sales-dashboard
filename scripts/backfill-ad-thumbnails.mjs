@@ -25,7 +25,10 @@ const env = readFileSync('.env', 'utf-8').split('\n').reduce((m, line) => {
   return m
 }, {})
 
-const supabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY)
+// Prefer service-role for Storage upload + table upsert (bypasses RLS).
+// Falls back to anon key for dry-run if not set.
+const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.VITE_SUPABASE_ANON_KEY
+const supabase = createClient(env.VITE_SUPABASE_URL, KEY)
 const ACCESS_TOKEN = env.VITE_META_ADS_ACCESS_TOKEN
 const BASE_URL = 'https://graph.facebook.com/v21.0'
 
@@ -41,7 +44,12 @@ if (!ACCESS_TOKEN) {
 }
 
 // ─── helpers ports of metaAdsSync.js ─────────────────────────────────────
-const FIELDS = ['name','status','effective_status','creative_id',
+// Note: `creative_id` is NOT requested as a top-level field — Meta returns
+// (#100) "Tried accessing nonexisting field" for ads that were boosted from
+// posts or auto-placed (the cohort we're trying to backfill). We get the
+// same id via `creative{id}` and the response just omits `creative` if the
+// ad doesn't have one.
+const FIELDS = ['name','status','effective_status',
   'creative{id,image_url,video_id,thumbnail_url,body,title,object_type,call_to_action_type,object_story_spec}',
 ].join(',')
 
@@ -155,22 +163,32 @@ if (!RUN) {
 async function processBatch(rows, label) {
   console.log(`\n=== ${label} — ${rows.length} ads ===`)
   let okThumb = 0, okMeta = 0, errs = 0
+  const sampleErrs = []
   const concurrency = 6
   for (let i = 0; i < rows.length; i += concurrency) {
     const slice = rows.slice(i, i + concurrency)
     const results = await Promise.all(slice.map(r => fetchOne(r.ad_id)))
-    for (const r of results) {
-      if (r.error) { errs++; continue }
+    for (let idx = 0; idx < results.length; idx++) {
+      const r = results[idx]
+      if (r.error) {
+        errs++
+        if (sampleErrs.length < 3) sampleErrs.push(`${slice[idx].ad_id}: ${r.error}`)
+        continue
+      }
       okMeta++
       if (r.persisted) okThumb++
       const { error } = await supabase.from('ads').upsert(r.record, { onConflict: 'ad_id' })
-      if (error) { console.warn(`  upsert ${r.record.ad_id} failed: ${error.message}`); errs++ }
+      if (error) {
+        if (sampleErrs.length < 3) sampleErrs.push(`upsert ${r.record.ad_id}: ${error.message}`)
+        errs++
+      }
     }
     if ((i + slice.length) % 30 < concurrency || i + slice.length === rows.length) {
       console.log(`  progress: ${i + slice.length}/${rows.length}  meta=${okMeta}  thumb=${okThumb}  err=${errs}`)
     }
   }
   console.log(`Done ${label}: meta=${okMeta}/${rows.length}  thumb=${okThumb}  errors=${errs}`)
+  if (sampleErrs.length) console.log(`  sample errors:\n    ${sampleErrs.join('\n    ')}`)
 }
 
 const cohortALimit = Math.min(nullCount || 0, LIMIT)

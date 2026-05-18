@@ -469,8 +469,13 @@ const META_FIELDS_INSIGHTS = [
   'video_avg_time_watched_actions',
 ].join(',')
 
+// `creative_id` is NOT requested as a top-level field — Meta returns
+// (#100) "Tried accessing nonexisting field" for ads boosted from posts
+// or auto-placed. We get the same id via `creative{id}` and the response
+// just omits `creative` if the ad doesn't have one. Confirmed by backfill
+// 2026-05-18 — 959/959 ads succeeded with this field list.
 const META_FIELDS_CREATIVE = [
-  'name', 'status', 'effective_status', 'creative_id',
+  'name', 'status', 'effective_status',
   'creative{id,image_url,video_id,thumbnail_url,body,title,object_type,call_to_action_type,object_story_spec}',
 ].join(',')
 
