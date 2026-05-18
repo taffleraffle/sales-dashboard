@@ -7,6 +7,8 @@ import {
   updateAdAttributes,
   listOffers,
 } from '../../services/creativeTagger'
+import ColoredSelect from '../editorial/ColoredSelect'
+import { displayValue } from '../editorial/atoms'
 
 /*
   Test-variable tagging panel for AdDetail.jsx.
@@ -227,18 +229,18 @@ export default function CreativeAttributesPanel({ ad_id }) {
                 <span>{FIELD_LABELS[field]}</span>
                 <span>{conf != null && <ConfidencePill score={conf} />}</span>
               </label>
-              <select
-                value={attrs?.[field] || ''}
-                onChange={e => handleChange(field, e.target.value || null)}
-                style={{
-                  width: '100%', padding: '8px 10px', fontFamily: 'var(--sans)', fontSize: 13,
-                  border: '1px solid var(--rule)', background: 'white', color: 'var(--ink)',
-                }}>
-                <option value="">—</option>
-                {opts.map(o => (
-                  <option key={o.value} value={o.value} title={o.description}>{o.label}</option>
-                ))}
-              </select>
+              <ColoredSelect
+                attr={field}
+                value={attrs?.[field] || null}
+                onChange={v => handleChange(field, v)}
+                options={opts.map(o => ({
+                  value: o.value,
+                  // Normalize label casing through displayValue so we don't have
+                  // "EXPLICIT" next to "Diagnostic" next to "Capacity mismatch".
+                  label: displayValue(o.value),
+                  description: o.description,
+                }))}
+              />
             </div>
           )
         })}
