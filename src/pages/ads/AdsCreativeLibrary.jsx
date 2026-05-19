@@ -147,7 +147,6 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [err, setErr] = useState(null)
   const [q, setQ] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
   const [offerFilter, setOfferFilter] = useState('')   // '' | offer_slug | '__none__'
   const [runFilter, setRunFilter] = useState('')       // '' | 'yes' | 'no'
   const [stageFilter, setStageFilter] = useState('')   // '' | 'unedited' | 'edited_seg' | 'merged'
@@ -156,12 +155,6 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // the same key again toggles direction.
   const [sortKey, setSortKey] = useState('')
   const [sortDir, setSortDir] = useState('asc')   // 'asc' | 'desc'
-  const [rawEditedFilter, setRawEditedFilter] = useState(() => {
-    try { return localStorage.getItem('lib.rawEdited') || 'edited' } catch { return 'edited' }
-  })
-  useEffect(() => {
-    try { localStorage.setItem('lib.rawEdited', rawEditedFilter) } catch {}
-  }, [rawEditedFilter])
   const [drawerRow, setDrawerRow] = useState(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [view, setView] = useState(() => {
@@ -257,18 +250,12 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   const filtered = useMemo(() => {
     let list = rows
-    // Raw/Edited top-level toggle — bypassed in Matrix view (one row per
-    // creative, stage columns handle the raw-vs-delivered distinction)
-    const rawEdited = view === 'matrix' ? 'all' : rawEditedFilter
-    if (rawEdited === 'raw')         list = list.filter(r => r.status === 'raw')
-    else if (rawEdited === 'edited') list = list.filter(r => r.status !== 'raw')
     const search = q.trim().toLowerCase()
     if (search) list = list.filter(r => {
       const blob = `${r.name} ${r.canonical_name || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
       return blob.includes(search)
     })
     if (typeFilter)   list = list.filter(r => r.type === typeFilter)
-    if (statusFilter) list = list.filter(r => r.status === statusFilter)
     if (offerFilter === '__none__') list = list.filter(r => !r.offer_slug)
     else if (offerFilter)           list = list.filter(r => r.offer_slug === offerFilter)
     if (runFilter === 'yes')        list = list.filter(r => r.has_been_run)
@@ -301,7 +288,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       })
     }
     return list
-  }, [rows, q, typeFilter, statusFilter, rawEditedFilter, offerFilter, runFilter, stageFilter, sortKey, sortDir])
+  }, [rows, q, typeFilter, offerFilter, runFilter, stageFilter, sortKey, sortDir])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -314,20 +301,10 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     }
   }, [sortKey, sortDir])
 
-  // Counts for the Raw/Edited toggle (always over ALL rows)
-  const rawCount = useMemo(() => rows.filter(r => r.status === 'raw').length, [rows])
-  const editedCount = useMemo(() => rows.filter(r => r.status !== 'raw').length, [rows])
-
   // Per-type counts for the chip badges (over ALL rows, ignoring current type filter)
   const typeCounts = useMemo(() => {
     const m = {}
     for (const r of rows) m[r.type] = (m[r.type] || 0) + 1
-    return m
-  }, [rows])
-
-  const statusCounts = useMemo(() => {
-    const m = {}
-    for (const r of rows) m[r.status] = (m[r.status] || 0) + 1
     return m
   }, [rows])
 
@@ -364,39 +341,18 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   return (
     <>
-      {/* Big Raw vs Edited toggle — hidden in Matrix view because Matrix
-          shows raw + delivered side-by-side in stage columns on the same
-          row, so a top-level raw/edited split doesn't make sense there. */}
-      {view !== 'matrix' && (
-        <div style={{
-          display: 'flex', gap: 0, marginBottom: 14,
-          border: '1px solid var(--rule)',
-        }}>
-          <BigToggle active={rawEditedFilter === 'edited'} onClick={() => setRawEditedFilter('edited')}
-            label="Edited" count={editedCount}
-            subtitle="Finished UGC, hooks, bodies, full ads — ready to use" />
-          <BigToggle active={rawEditedFilter === 'raw'} onClick={() => setRawEditedFilter('raw')}
-            label="Raw footage" count={rawCount}
-            subtitle="Camera files + unedited clips — sources for editing" />
-          <BigToggle active={rawEditedFilter === 'all'} onClick={() => setRawEditedFilter('all')}
-            label="All" count={rows.length}
-            subtitle="Everything in the library" />
-        </div>
-      )}
-
-      {/* Toolbar */}
+      {/* Toolbar — compact, single block. No more 5-row chip stack. */}
       <div style={{
-        display: 'grid', gap: 10,
-        padding: '14px 16px', background: 'var(--paper-2)',
+        padding: '10px 14px', background: 'var(--paper-2)',
         border: '1px solid var(--rule)', marginBottom: 14,
       }}>
-        {/* Row 1: search + view toggle + upload */}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Top row: search + view toggle + upload */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
           <input type="text" value={q} onChange={e => setQ(e.target.value)}
-            placeholder="Search name, transcript, script…"
+            placeholder="Search name, description, transcript, notes…"
             style={{
               flex: '1 1 280px', maxWidth: 420,
-              padding: '8px 12px', fontFamily: 'var(--sans)', fontSize: 13,
+              padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 12.5,
               background: 'white', border: '1px solid var(--rule)', outline: 'none',
             }} />
           <span style={{ flex: 1 }} />
@@ -415,89 +371,45 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           )}
         </div>
 
-        {/* Row 1.5: Pipeline stage — workflow buckets that combine type+status
-            so Ben can see at a glance what's unedited vs merged final. */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={chipLabelStyle}>Stage</span>
-          <FilterChip active={!stageFilter} onClick={() => setStageFilter('')} count={rows.length}>All</FilterChip>
-          <FilterChip active={stageFilter === 'unedited'}
-            onClick={() => setStageFilter('unedited')}
-            count={stageCounts.unedited}
-            color="var(--ink-4)">Unedited</FilterChip>
-          <FilterChip active={stageFilter === 'edited_seg'}
-            onClick={() => setStageFilter('edited_seg')}
-            count={stageCounts.edited_seg}
-            color="#3e8a5e">Edited segment</FilterChip>
-          <FilterChip active={stageFilter === 'merged'}
-            onClick={() => setStageFilter('merged')}
-            count={stageCounts.merged}
-            color="#b86a0c">Merged final</FilterChip>
-        </div>
-
-        {/* Row 2: type filter chips */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={chipLabelStyle}>Type</span>
-          <FilterChip active={!typeFilter} onClick={() => setTypeFilter('')} count={rows.length}>All</FilterChip>
-          {TYPES.map(t => (
-            <FilterChip key={t} active={typeFilter === t} onClick={() => setTypeFilter(t)} count={typeCounts[t] || 0}>
-              {t}
-            </FilterChip>
-          ))}
-        </div>
-
-        {/* Row 3: status filter chips */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={chipLabelStyle}>Status</span>
-          <FilterChip active={!statusFilter} onClick={() => setStatusFilter('')} count={rows.length}>All</FilterChip>
-          {STATUSES.map(s => (
-            <FilterChip key={s} active={statusFilter === s} onClick={() => setStatusFilter(s)}
-              count={statusCounts[s] || 0}
-              color={STATUS_COLOR[s]}>
-              {STATUS_LABEL[s]}
-            </FilterChip>
-          ))}
-        </div>
-
-        {/* Row 4: offer / niche filter chips */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={chipLabelStyle}>Offer</span>
-          <FilterChip active={!offerFilter} onClick={() => setOfferFilter('')} count={rows.length}>All</FilterChip>
-          {offers.map(o => {
-            const oc = offerColor(o.slug)
-            const short = o.slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '')
-            return (
-              <FilterChip key={o.slug}
-                active={offerFilter === o.slug}
-                onClick={() => setOfferFilter(o.slug)}
-                count={offerCounts[o.slug] || 0}
-                color={oc.ink}>
-                {short}
-              </FilterChip>
-            )
-          })}
-          {offerCounts.__none__ > 0 && (
-            <FilterChip active={offerFilter === '__none__'}
-              onClick={() => setOfferFilter('__none__')}
-              count={offerCounts.__none__}
-              color="var(--ink-4)">
-              No offer
-            </FilterChip>
-          )}
-        </div>
-
-        {/* Row 5: run? filter chips */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={chipLabelStyle}>Run?</span>
-          <FilterChip active={!runFilter} onClick={() => setRunFilter('')} count={rows.length}>All</FilterChip>
-          <FilterChip active={runFilter === 'yes'}
-            onClick={() => setRunFilter('yes')}
-            count={runCount}
-            color="#3e8a5e">Run before</FilterChip>
-          <FilterChip active={runFilter === 'no'}
-            onClick={() => setRunFilter('no')}
-            count={notRunCount}
-            color="var(--ink-4)">Not yet</FilterChip>
-        </div>
+        {/* Editorial inline filter strip — 4 groups, each on its own line,
+            text-style instead of buttoned chips. Click the label/"All" to
+            clear that group. Click any value to filter by it. Active value
+            is bold + accent-underlined. Counts in muted grey. */}
+        <FilterStrip label="Stage"
+          active={stageFilter} onClear={() => setStageFilter('')}
+          totalCount={rows.length}
+          options={[
+            { value: 'unedited',   label: 'Unedited',       count: stageCounts.unedited,   dot: 'var(--ink-4)' },
+            { value: 'edited_seg', label: 'Edited segment', count: stageCounts.edited_seg, dot: '#3e8a5e' },
+            { value: 'merged',     label: 'Merged final',   count: stageCounts.merged,     dot: '#b86a0c' },
+          ]}
+          onPick={setStageFilter} />
+        <FilterStrip label="Type"
+          active={typeFilter} onClear={() => setTypeFilter('')}
+          totalCount={rows.length}
+          options={TYPES.map(t => ({ value: t, label: t, count: typeCounts[t] || 0, dot: typeColor(t).ink }))}
+          onPick={setTypeFilter} />
+        <FilterStrip label="Offer"
+          active={offerFilter} onClear={() => setOfferFilter('')}
+          totalCount={rows.length}
+          options={[
+            ...offers.map(o => ({
+              value: o.slug,
+              label: o.slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, ''),
+              count: offerCounts[o.slug] || 0,
+              dot: offerColor(o.slug).ink,
+            })),
+            ...(offerCounts.__none__ > 0 ? [{ value: '__none__', label: 'No offer', count: offerCounts.__none__, dot: 'var(--ink-4)' }] : []),
+          ]}
+          onPick={setOfferFilter} />
+        <FilterStrip label="Run?"
+          active={runFilter} onClear={() => setRunFilter('')}
+          totalCount={rows.length}
+          options={[
+            { value: 'yes', label: 'Run before', count: runCount,    dot: '#3e8a5e' },
+            { value: 'no',  label: 'Not yet',   count: notRunCount, dot: 'var(--ink-4)' },
+          ]}
+          onPick={setRunFilter} />
       </div>
 
       {err && <ErrorBanner msg={err} />}
@@ -1498,6 +1410,64 @@ const chipLabelStyle = {
   fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
   letterSpacing: '0.12em', textTransform: 'uppercase',
   color: 'var(--ink-3)', marginRight: 6,
+}
+
+/* Editorial-style inline filter strip — replaces the chunky button-chip
+   rows. Label on left (60px column), 'All N' as the clear-affordance,
+   then dot · label · count for each option. Active value bolds + ink
+   color; inactive stays muted grey. Compact: one line per filter. */
+function FilterStrip({ label, active, options, onPick, onClear, totalCount }) {
+  const sep = (
+    <span style={{ color: 'var(--ink-4)', opacity: 0.5, padding: '0 8px' }}>·</span>
+  )
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'baseline', flexWrap: 'wrap',
+      padding: '4px 0',
+      fontFamily: 'var(--mono)', fontSize: 11,
+    }}>
+      <div style={{
+        width: 56, flexShrink: 0,
+        fontSize: 9.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase',
+        color: 'var(--ink-3)',
+      }}>{label}</div>
+      <button onClick={onClear} type="button"
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+          fontFamily: 'var(--mono)', fontSize: 11,
+          color: !active ? 'var(--ink)' : 'var(--ink-3)',
+          fontWeight: !active ? 600 : 400,
+          borderBottom: !active ? '2px solid var(--accent)' : '2px solid transparent',
+          lineHeight: 1.5,
+        }}>
+        All <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>{totalCount}</span>
+      </button>
+      {options.map(opt => {
+        const isOn = active === opt.value
+        return (
+          <span key={opt.value} style={{ display: 'inline-flex', alignItems: 'baseline' }}>
+            {sep}
+            <button onClick={() => onPick(opt.value)} type="button"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                fontFamily: 'var(--mono)', fontSize: 11,
+                color: isOn ? 'var(--ink)' : 'var(--ink-3)',
+                fontWeight: isOn ? 600 : 400,
+                borderBottom: isOn ? '2px solid var(--accent)' : '2px solid transparent',
+                lineHeight: 1.5,
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+              }}>
+              {opt.dot && (
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: opt.dot, display: 'inline-block' }} />
+              )}
+              <span>{opt.label}</span>
+              <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>{opt.count}</span>
+            </button>
+          </span>
+        )
+      })}
+    </div>
+  )
 }
 
 function CreativeCard({ row, onClick, selected = false, selectionMode = false, onToggleSelect = null }) {
