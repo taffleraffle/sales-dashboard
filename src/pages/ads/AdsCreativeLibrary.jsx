@@ -151,6 +151,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [offerFilter, setOfferFilter] = useState('')   // '' | offer_slug | '__none__'
   const [runFilter, setRunFilter] = useState('')       // '' | 'yes' | 'no'
   const [stageFilter, setStageFilter] = useState('')   // '' | 'unedited' | 'edited_seg' | 'merged'
+  // Column sort for the Matrix view. sortKey = '' means default order
+  // (insertion / added_at desc). Clicking a header sets the key; clicking
+  // the same key again toggles direction.
+  const [sortKey, setSortKey] = useState('')
+  const [sortDir, setSortDir] = useState('asc')   // 'asc' | 'desc'
   const [rawEditedFilter, setRawEditedFilter] = useState(() => {
     try { return localStorage.getItem('lib.rawEdited') || 'edited' } catch { return 'edited' }
   })
@@ -272,8 +277,42 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     if (stageFilter === 'unedited')   list = list.filter(r => r.status === 'raw')
     else if (stageFilter === 'edited_seg') list = list.filter(r => r.status === 'edited' && r.type !== 'Joined')
     else if (stageFilter === 'merged')list = list.filter(r => r.type === 'Joined' && r.status === 'edited')
+    // Column sort (Matrix view) — applied last so it works on the filtered list
+    if (sortKey) {
+      const dir = sortDir === 'desc' ? -1 : 1
+      const valueOf = (r) => {
+        switch (sortKey) {
+          case 'id':       return (r.canonical_name || r.name || '').toLowerCase()
+          case 'desc':     return (r.description || r.name || '').toLowerCase()
+          case 'type':     return (r.type || '').toLowerCase()
+          case 'creator':  return (r.creator || '').toLowerCase()
+          case 'editor':   return (r.assigned_editor_name || '').toLowerCase()
+          case 'offer':    return (r.offer_slug || '').toLowerCase()
+          case 'run':      return r.has_been_run ? 1 : 0
+          case 'status':   return (r.status || '').toLowerCase()
+          default:         return 0
+        }
+      }
+      list = [...list].sort((a, b) => {
+        const va = valueOf(a), vb = valueOf(b)
+        if (va < vb) return -1 * dir
+        if (va > vb) return 1 * dir
+        return 0
+      })
+    }
     return list
-  }, [rows, q, typeFilter, statusFilter, rawEditedFilter, offerFilter, runFilter, stageFilter])
+  }, [rows, q, typeFilter, statusFilter, rawEditedFilter, offerFilter, runFilter, stageFilter, sortKey, sortDir])
+
+  // Header click handler — passed down to the Matrix header row.
+  // First click on a column: asc. Second click: desc. Third click: clear.
+  const handleSort = useCallback((key) => {
+    if (sortKey === key) {
+      if (sortDir === 'asc') setSortDir('desc')
+      else { setSortKey(''); setSortDir('asc') }   // third click clears
+    } else {
+      setSortKey(key); setSortDir('asc')
+    }
+  }, [sortKey, sortDir])
 
   // Counts for the Raw/Edited toggle (always over ALL rows)
   const rawCount = useMemo(() => rows.filter(r => r.status === 'raw').length, [rows])
@@ -552,6 +591,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                   selected={selected}
                   selectionMode={selected.size > 0}
                   onToggleSelect={scope.canEditCreative ? toggleSelect : null}
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onSort={handleSort}
                 />
               )}
             </section>
@@ -857,7 +899,29 @@ function ListRow({ row: r, isLast, gridCols, onClick, onDelete }) {
 const MATRIX_COLS_BASE = '38px minmax(110px, 0.85fr) minmax(180px, 1.8fr) 86px 70px 120px 120px 56px 76px 62px'
 const MATRIX_COLS_SEL  = `26px ${MATRIX_COLS_BASE}`
 
-function CreativeMatrixView({ rows, editors, offers, onRowClick, onPatch, selected, selectionMode, onToggleSelect }) {
+// Header cell with clickable sort + arrow indicator. Used in CreativeMatrixView.
+function SortableHeader({ label, k, sortKey, sortDir, onSort }) {
+  const isActive = sortKey === k
+  return (
+    <div onClick={() => onSort?.(k)}
+      title={`Sort by ${label}`}
+      style={{
+        cursor: onSort ? 'pointer' : 'default',
+        userSelect: 'none',
+        color: isActive ? 'var(--ink)' : 'var(--ink-3)',
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+      }}>
+      <span>{label}</span>
+      {isActive ? (
+        <span style={{ fontSize: 9 }}>{sortDir === 'asc' ? '▲' : '▼'}</span>
+      ) : (
+        <span style={{ fontSize: 9, color: 'var(--ink-4)', opacity: 0.4 }}>↕</span>
+      )}
+    </div>
+  )
+}
+
+function CreativeMatrixView({ rows, editors, offers, onRowClick, onPatch, selected, selectionMode, onToggleSelect, sortKey, sortDir, onSort }) {
   const selectable = !!onToggleSelect
   const cols = selectable ? MATRIX_COLS_SEL : MATRIX_COLS_BASE
   const allVisible = rows.every(r => selected?.has(r.id))
@@ -898,14 +962,14 @@ function CreativeMatrixView({ rows, editors, offers, onRowClick, onPatch, select
           </div>
         )}
         <div></div>
-        <div>ID</div>
-        <div>Description</div>
-        <div>Type</div>
-        <div>Creator</div>
-        <div>Editor</div>
-        <div>Offer</div>
-        <div>Run?</div>
-        <div>Status</div>
+        <SortableHeader label="ID"          k="id"      sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+        <SortableHeader label="Description" k="desc"    sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+        <SortableHeader label="Type"        k="type"    sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+        <SortableHeader label="Creator"     k="creator" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+        <SortableHeader label="Editor"      k="editor"  sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+        <SortableHeader label="Offer"       k="offer"   sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+        <SortableHeader label="Run?"        k="run"     sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+        <SortableHeader label="Status"      k="status"  sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
         <div>Raw</div>
       </div>
       {rows.map((r, i) => (
