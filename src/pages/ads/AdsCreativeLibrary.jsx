@@ -2639,9 +2639,17 @@ function AddEditorModal({ onClose, onSaved }) {
 }
 
 function AddTaskModal({ editors, onClose, onSaved }) {
+  const [mode, setMode] = useState('pick')   // 'pick' or 'upload'
   const [creatives, setCreatives] = useState([])
   const [search, setSearch] = useState('')
   const [creativeId, setCreativeId] = useState('')
+  // Upload-mode state
+  const [uploadFile, setUploadFile] = useState(null)
+  const [uploadName, setUploadName] = useState('')
+  const [uploadType, setUploadType] = useState('Full Video')
+  const [uploadProgress, setUploadProgress] = useState(null)
+  const uploadInputRef = useRef(null)
+  // Common state
   const [editorId, setEditorId] = useState('')
   const [taskType, setTaskType] = useState('rough_cut')
   const [priority, setPriority] = useState('P2 - Medium')
@@ -2667,65 +2675,201 @@ function AddTaskModal({ editors, onClose, onSaved }) {
     ).slice(0, 50)
   }, [creatives, search])
 
-  const submit = async () => {
-    if (!creativeId || !editorId) return
-    setBusy(true); setErr(null)
-    const { error } = await supabase.from('lib_editing_tasks').insert({
-      creative_id: creativeId, editor_id: editorId,
-      task_type: taskType, priority, due_date: due || null,
-      status: 'queued',
-    })
-    setBusy(false)
-    if (error) setErr(error.message)
-    else onSaved?.()
+  const onFilePick = (file) => {
+    if (!file) return
+    setUploadFile(file)
+    // Auto-fill name from filename (strip extension)
+    if (!uploadName) setUploadName(file.name.replace(/\.[^.]+$/, ''))
   }
+
+  const submit = async () => {
+    setBusy(true); setErr(null)
+    try {
+      let cid = creativeId
+      // Upload mode: upload file → insert lib_creative_library row → use its id
+      if (mode === 'upload') {
+        if (!uploadFile || !uploadName.trim()) {
+          setErr('Pick a file and give it a name'); setBusy(false); return
+        }
+        setUploadProgress(10)
+        const sanitized = uploadFile.name.replace(/[^A-Za-z0-9._-]+/g, '_')
+        const storagePath = `edited/${Date.now()}_${sanitized}`
+        const { error: upErr } = await supabase.storage
+          .from('creative-uploads')
+          .upload(storagePath, uploadFile, { upsert: false })
+        if (upErr) throw upErr
+        setUploadProgress(60)
+        const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+        const { data: newRow, error: insErr } = await supabase.from('lib_creative_library')
+          .insert({
+            name: uploadName.trim() + (uploadFile.name.match(/\.[^.]+$/) || [''])[0],
+            type: uploadType,
+            size_mb: Math.round(uploadFile.size / 1024 / 1024 * 10) / 10,
+            status: 'review',
+            source_bucket: 'Editor upload (via Add task)',
+            preview_url: publicUrl,
+            drive_url: publicUrl,
+            notes: `Uploaded ${new Date().toISOString().slice(0,10)} alongside a new task. Pending review + assignment.`,
+          })
+          .select()
+          .single()
+        if (insErr) throw insErr
+        cid = newRow.id
+        setUploadProgress(85)
+      }
+      if (!cid) { setErr('Pick a creative or upload a new file'); setBusy(false); return }
+
+      // Insert the task (editor optional — admin assigns later if blank)
+      const { error: taskErr } = await supabase.from('lib_editing_tasks').insert({
+        creative_id: cid,
+        editor_id: editorId || null,
+        task_type: taskType, priority, due_date: due || null,
+        status: editorId ? 'queued' : 'review',  // unassigned uploads land in review
+      })
+      if (taskErr) throw taskErr
+      setUploadProgress(100)
+      onSaved?.()
+    } catch (e) {
+      setErr(e.message || 'failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const canSubmit = mode === 'pick'
+    ? !!creativeId
+    : !!uploadFile && !!uploadName.trim()
 
   return (
     <Modal open={true} onClose={busy ? () => {} : onClose} size="lg"
       eyebrow="New task"
-      title="Assign creative to an editor"
+      title="Add a task"
+      subtitle="Either pick an existing creative to assign, or upload your finished output and we'll create a new library row for it."
       footer={
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
-          <button onClick={submit} disabled={!creativeId || !editorId || busy} style={primaryBtn}>
-            {busy ? 'Adding…' : 'Add task'}
+          <button onClick={submit} disabled={!canSubmit || busy} style={primaryBtn}>
+            {busy
+              ? (mode === 'upload' ? `Uploading… ${uploadProgress || 0}%` : 'Adding…')
+              : (mode === 'upload' ? 'Upload + add task' : 'Add task')}
           </button>
         </>
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
-        <Field label="Creative">
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search by name…" style={{ ...inputStyle, marginBottom: 8 }} />
-          <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--rule)' }}>
-            {filtered.length === 0 && (
-              <div style={{ padding: 12, fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12 }}>
-                No matches.
-              </div>
-            )}
-            {filtered.map(c => (
-              <div key={c.id}
-                onClick={() => setCreativeId(c.id)}
+        {/* Mode tabs */}
+        <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+          <button onClick={() => setMode('pick')} style={{
+            padding: '8px 18px', flex: 1,
+            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            background: mode === 'pick' ? 'var(--ink)' : 'transparent',
+            color: mode === 'pick' ? 'var(--paper)' : 'var(--ink-3)',
+            border: 'none', cursor: 'pointer',
+          }}>Pick existing</button>
+          <button onClick={() => setMode('upload')} style={{
+            padding: '8px 18px', flex: 1,
+            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            background: mode === 'upload' ? 'var(--ink)' : 'transparent',
+            color: mode === 'upload' ? 'var(--paper)' : 'var(--ink-3)',
+            border: 'none', cursor: 'pointer',
+          }}>↗ Upload new file</button>
+        </div>
+
+        {mode === 'pick' ? (
+          <Field label="Creative">
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search by name…" style={{ ...inputStyle, marginBottom: 8 }} />
+            <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--rule)' }}>
+              {filtered.length === 0 && (
+                <div style={{ padding: 12, fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12 }}>
+                  No matches.
+                </div>
+              )}
+              {filtered.map(c => (
+                <div key={c.id}
+                  onClick={() => setCreativeId(c.id)}
+                  style={{
+                    padding: '8px 12px', cursor: 'pointer',
+                    background: creativeId === c.id ? 'var(--accent-soft, rgba(244,225,74,0.18))' : 'transparent',
+                    borderBottom: '1px solid var(--rule)',
+                    fontFamily: 'var(--mono)', fontSize: 11.5,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                  }}>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {c.canonical_name || c.name}
+                  </span>
+                  <span style={{ color: 'var(--ink-4)', fontSize: 10 }}>{c.type}</span>
+                </div>
+              ))}
+            </div>
+          </Field>
+        ) : (
+          <>
+            <Field label="Upload your finished file">
+              <div
+                onClick={() => !busy && uploadInputRef.current?.click()}
+                onDrop={e => { e.preventDefault(); onFilePick(e.dataTransfer.files?.[0]) }}
+                onDragOver={e => e.preventDefault()}
                 style={{
-                  padding: '8px 12px', cursor: 'pointer',
-                  background: creativeId === c.id ? 'var(--accent-soft, rgba(244,225,74,0.18))' : 'transparent',
-                  borderBottom: '1px solid var(--rule)',
-                  fontFamily: 'var(--mono)', fontSize: 11.5,
-                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: 24, textAlign: 'center', cursor: busy ? 'not-allowed' : 'pointer',
+                  border: '2px dashed var(--rule)',
+                  background: uploadFile ? 'white' : 'var(--paper-2)',
                 }}>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {c.canonical_name || c.name}
-                </span>
-                <span style={{ color: 'var(--ink-4)', fontSize: 10 }}>{c.type}</span>
+                <input ref={uploadInputRef} type="file" accept="video/*"
+                  style={{ display: 'none' }}
+                  onChange={e => onFilePick(e.target.files?.[0])} />
+                {uploadFile ? (
+                  <>
+                    <div style={{ fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 500 }}>{uploadFile.name}</div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
+                      {(uploadFile.size / 1024 / 1024).toFixed(1)} MB · click to change
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)' }}>
+                      Drop your finished file here
+                    </div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 4 }}>
+                      or click to select
+                    </div>
+                  </>
+                )}
               </div>
-            ))}
-          </div>
-        </Field>
+              {uploadProgress != null && (
+                <div style={{ marginTop: 8, height: 4, background: 'var(--rule)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${uploadProgress}%`, height: '100%',
+                    background: uploadProgress === 100 ? '#3e8a5e' : 'var(--accent)',
+                    transition: 'width 0.2s',
+                  }} />
+                </div>
+              )}
+            </Field>
+            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '2fr 1fr' }}>
+              <Field label="Name this creative">
+                <input type="text" value={uploadName} onChange={e => setUploadName(e.target.value)}
+                  placeholder="e.g. 'Eric direct call breakthrough — final cut'"
+                  style={inputStyle} />
+              </Field>
+              <Field label="Type">
+                <select value={uploadType} onChange={e => setUploadType(e.target.value)} style={selectStyle}>
+                  <option>Hook</option>
+                  <option>Body</option>
+                  <option>Full Video</option>
+                  <option>Testimony</option>
+                </select>
+              </Field>
+            </div>
+          </>
+        )}
 
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
-          <Field label="Editor">
+          <Field label="Editor (optional)">
             <select value={editorId} onChange={e => setEditorId(e.target.value)} style={selectStyle}>
-              <option value="">Pick…</option>
+              <option value="">— Unassigned</option>
               {editors.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
           </Field>
