@@ -168,6 +168,10 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [selected, setSelected] = useState(() => new Set())
   const [bulkEditOpen, setBulkEditOpen] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
+  // Editors + offers for inline dropdowns in the Matrix view. Loaded once
+  // alongside the main rows fetch — not chained, so we don't add latency.
+  const [editors, setEditors] = useState([])
+  const [offers, setOffers] = useState([])
 
   const toggleSelect = useCallback((id) => {
     setSelected(prev => {
@@ -181,21 +185,49 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
-    const { data, error } = await supabase
-      .from('lib_creative_library')
-      .select('*, assigned_editor:assigned_editor_id (id, name)')
-      .eq('exclude_from_library', false)
-      .order('added_at', { ascending: false })
-    if (error) setErr(error.message)
+    const [rowsRes, edRes, ofRes] = await Promise.all([
+      supabase.from('lib_creative_library')
+        .select('*, assigned_editor:assigned_editor_id (id, name)')
+        .eq('exclude_from_library', false)
+        .order('added_at', { ascending: false }),
+      supabase.from('lib_creative_editors').select('*').eq('active', true).order('name'),
+      supabase.from('offers').select('slug,name').eq('retired', false).order('slug'),
+    ])
+    if (rowsRes.error) setErr(rowsRes.error.message)
     else {
-      // Flatten the joined editor name for table consumption
-      setRows((data || []).map(r => ({
+      setRows((rowsRes.data || []).map(r => ({
         ...r,
         assigned_editor_name: r.assigned_editor?.name || null,
       })))
     }
+    setEditors(edRes.data || [])
+    setOffers(ofRes.data || [])
     setLoading(false)
   }, [])
+
+  // Inline patch — used by the Matrix view when an inline dropdown changes.
+  // Optimistic: patch local state immediately, fire the DB write, roll back
+  // on error. No full reload, so the matrix doesn't flicker between edits.
+  const patchRow = useCallback(async (id, patch) => {
+    const prev = rows.find(r => r.id === id)
+    if (!prev) return
+    // Optimistic update — merge the joined-editor name if we changed editor
+    setRows(curr => curr.map(r => {
+      if (r.id !== id) return r
+      const next = { ...r, ...patch }
+      if ('assigned_editor_id' in patch) {
+        const ed = editors.find(e => e.id === patch.assigned_editor_id)
+        next.assigned_editor_name = ed?.name || null
+      }
+      return next
+    }))
+    const { error } = await supabase.from('lib_creative_library').update(patch).eq('id', id)
+    if (error) {
+      // Roll back
+      setRows(curr => curr.map(r => (r.id === id ? prev : r)))
+      setErr(error.message)
+    }
+  }, [rows, editors])
 
   useEffect(() => { load() }, [load])
 
@@ -405,7 +437,10 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
               ) : (
                 <CreativeMatrixView
                   rows={group.rows}
+                  editors={editors}
+                  offers={offers}
                   onClick={setDrawerRow}
+                  onPatch={scope.canEditCreative ? patchRow : null}
                 />
               )}
             </section>
@@ -700,98 +735,245 @@ function ListRow({ row: r, isLast, gridCols, onClick, onDelete }) {
    Per-stage pills (Raw / Rough Cut / Final Cut / Approved / Delivered)
    with editable values, type color coding, hover-to-preview thumbnail.
    Click any row to open the detail modal. */
-function CreativeMatrixView({ rows, onClick }) {
+/* Matrix view — edge-to-edge dense table modeled on the Component Edits
+   spreadsheet but trimmed of the 4 per-stage columns Ben said he didn't
+   need. Every cell that can be edited (description, type, creator, editor,
+   offer, run?, status) is inline-editable via onPatch — no modal click
+   needed. Static thumbnail only (no hover-to-play) to keep scrolling fast
+   when 100+ rows are visible. */
+const MATRIX_COLS = '46px minmax(120px, 0.9fr) minmax(180px, 1.8fr) 96px 76px 130px 130px 64px 84px 70px'
+
+function CreativeMatrixView({ rows, editors, offers, onClick, onPatch }) {
   return (
-    <div style={{ overflowX: 'auto', background: 'var(--paper)', border: '1px solid var(--rule)' }}>
-      <div style={{ minWidth: 1500 }}>
-        {/* Header — stage columns ARE the file links now (no separate File column) */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '140px 60px 100px minmax(220px, 1.4fr) 90px 110px 90px 80px 80px 80px 80px 80px 90px',
-          gap: 10, padding: '10px 14px',
-          background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
-          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
-          letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
-        }}>
-          <div>ID</div>
-          <div>Thumb</div>
-          <div>Type</div>
-          <div>Description</div>
-          <div>Creator</div>
-          <div>Editor</div>
-          <div>Priority</div>
-          <div style={{ textAlign: 'center' }}>Raw</div>
-          <div style={{ textAlign: 'center' }}>Rough cut</div>
-          <div style={{ textAlign: 'center' }}>Final cut</div>
-          <div style={{ textAlign: 'center' }}>Approved</div>
-          <div style={{ textAlign: 'center' }}>Delivered</div>
-          <div>Status</div>
-        </div>
-        {rows.map((r, i) => (
-          <MatrixRow key={r.id} row={r} isLast={i === rows.length - 1} onClick={() => onClick(r)} />
-        ))}
+    <div style={{ width: '100%', background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+      <div style={{
+        display: 'grid', gridTemplateColumns: MATRIX_COLS,
+        gap: 6, padding: '8px 10px',
+        background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
+        fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
+        letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
+      }}>
+        <div></div>
+        <div>ID</div>
+        <div>Description</div>
+        <div>Type</div>
+        <div>Creator</div>
+        <div>Editor</div>
+        <div>Offer</div>
+        <div>Run?</div>
+        <div>Status</div>
+        <div>Raw</div>
       </div>
+      {rows.map((r, i) => (
+        <MatrixRow key={r.id} row={r}
+          editors={editors} offers={offers}
+          isLast={i === rows.length - 1}
+          onClick={() => onClick(r)}
+          onPatch={onPatch} />
+      ))}
     </div>
   )
 }
 
-function MatrixRow({ row: r, isLast, onClick }) {
+/* Native <select>/<input> styled to look flat in the cell. Clicking opens
+   the native picker (which is fast and avoids hand-rolling popovers).
+   stopPropagation so the click doesn't fall through to the row's onClick
+   (which opens the full detail modal). */
+const cellSelectStyle = {
+  width: '100%', padding: '3px 18px 3px 6px',
+  background: 'transparent', border: '1px solid transparent',
+  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
+  cursor: 'pointer', appearance: 'auto',
+  outline: 'none',
+}
+const cellInputStyle = {
+  width: '100%', padding: '3px 6px',
+  background: 'transparent', border: '1px solid transparent',
+  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink)',
+  outline: 'none',
+}
+
+function MatrixRow({ row: r, editors, offers, isLast, onClick, onPatch }) {
   const [hover, setHover] = useState(false)
   const tc = typeColor(r.type)
-  // Raw is "done" if there's a drive_url (the source file)
-  const rawStage = r.drive_url ? 'done' : null
+  const oc = offerColor(r.offer_slug)
+  const editable = !!onPatch
+  // Local state mirrors the row so inline edits feel snappy. The parent's
+  // optimistic update in patchRow will sync the canonical state on next
+  // render — so we re-init from row when it changes.
+  const [desc, setDesc] = useState(r.description || r.name || '')
+  const [creator, setCreator] = useState(r.creator || '')
+  useEffect(() => { setDesc(r.description || r.name || '') }, [r.description, r.name])
+  useEffect(() => { setCreator(r.creator || '') }, [r.creator])
+  const stop = e => e.stopPropagation()
   return (
     <div
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        display: 'grid',
-        gridTemplateColumns: '140px 60px 100px minmax(220px, 1.4fr) 90px 110px 90px 80px 80px 80px 80px 80px 90px',
-        gap: 10, padding: '8px 14px', alignItems: 'center',
+        display: 'grid', gridTemplateColumns: MATRIX_COLS,
+        gap: 6, padding: '6px 10px', alignItems: 'center',
         borderBottom: isLast ? 'none' : '1px solid var(--rule)',
         background: hover ? 'var(--paper-2)' : 'transparent',
-        cursor: 'pointer', transition: 'background 0.12s',
+        cursor: 'pointer', transition: 'background 0.08s',
         fontFamily: 'var(--mono)', fontSize: 10.5,
       }}>
-      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-        title={r.canonical_name || r.name}>{r.canonical_name || r.name}</div>
-      <div style={{ width: 50, height: 30, overflow: 'hidden', background: '#000', border: '1px solid var(--rule)' }}>
-        {r.thumbnail_url && !(hover && r.preview_url) && (
+      {/* Thumbnail — static, no hover-to-play (was slowing the page) */}
+      <div style={{ width: 42, height: 28, overflow: 'hidden', background: '#000', border: '1px solid var(--rule)' }}>
+        {r.thumbnail_url && (
           <img src={r.thumbnail_url} alt="" loading="lazy"
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
         )}
-        {hover && r.preview_url && (
-          <video src={r.preview_url} autoPlay muted loop playsInline
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-        )}
       </div>
-      <div>
-        <span style={{
-          padding: '2px 6px',
-          background: tc.soft, color: tc.ink, border: '1px solid ' + tc.border,
-          fontWeight: 600, fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'uppercase',
-        }}>{r.type}</span>
-      </div>
+      {/* ID (canonical_name, small mono) */}
       <div style={{
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        fontFamily: 'var(--sans)', fontSize: 11.5,
-      }} title={r.description || r.name}>{r.description || r.name}</div>
-      <div style={{ color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.creator || '—'}</div>
-      <div style={{ color: r.assigned_editor_id ? 'var(--ink)' : 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {r.assigned_editor_name || '—'}
+        fontSize: 10, color: 'var(--ink-3)',
+      }} title={r.canonical_name || r.name}>{r.canonical_name || r.name}</div>
+      {/* Description — inline-editable text */}
+      <div onClick={stop} style={{ minWidth: 0 }}>
+        {editable ? (
+          <input type="text" value={desc}
+            onChange={e => setDesc(e.target.value)}
+            onBlur={() => { if (desc !== (r.description || r.name)) onPatch(r.id, { description: desc }) }}
+            placeholder={r.name}
+            style={{ ...cellInputStyle, fontFamily: 'var(--sans)', fontSize: 11.5 }} />
+        ) : (
+          <span style={{ fontFamily: 'var(--sans)', fontSize: 11.5 }}>{r.description || r.name}</span>
+        )}
       </div>
-      <div style={{ color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {r.priority?.replace(' - ', ' ') || '—'}
+      {/* Type — inline select, rendered as colored pill */}
+      <div onClick={stop} style={{ position: 'relative' }}>
+        {editable ? (
+          <select value={r.type || ''}
+            onChange={e => onPatch(r.id, { type: e.target.value })}
+            style={{
+              ...cellSelectStyle,
+              background: tc.soft, color: tc.ink,
+              border: '1px solid ' + tc.border, borderRadius: 2,
+              fontWeight: 600, fontSize: 9.5, textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+            }}>
+            {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        ) : (
+          <span style={{
+            padding: '2px 6px',
+            background: tc.soft, color: tc.ink, border: '1px solid ' + tc.border,
+            fontWeight: 600, fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'uppercase',
+          }}>{r.type}</span>
+        )}
       </div>
-      {/* Each stage cell: clickable link to the file IF a URL is set,
-          falls back to status indicator otherwise. */}
-      <StageLinkCell value={rawStage}              url={r.drive_url}     label="Open raw" />
-      <StageLinkCell value={r.stage_rough_cut}     url={r.rough_cut_url} label="Open rough cut" />
-      <StageLinkCell value={r.stage_final_cut}     url={r.final_cut_url} label="Open final cut" />
-      <StageLinkCell value={r.stage_approved}      url={r.approved_url}  label="Open approved" />
-      <StageLinkCell value={r.stage_delivered}     url={r.delivered_url} label="Open delivered" />
-      <div><StatusBadge status={r.status} /></div>
+      {/* Creator — inline text */}
+      <div onClick={stop}>
+        {editable ? (
+          <input type="text" value={creator}
+            onChange={e => setCreator(e.target.value)}
+            onBlur={() => { if (creator !== r.creator) onPatch(r.id, { creator: creator || null }) }}
+            placeholder="—"
+            style={cellInputStyle} />
+        ) : (
+          <span style={{ color: 'var(--ink-3)' }}>{r.creator || '—'}</span>
+        )}
+      </div>
+      {/* Editor — inline select */}
+      <div onClick={stop}>
+        {editable ? (
+          <select value={r.assigned_editor_id || ''}
+            onChange={e => onPatch(r.id, { assigned_editor_id: e.target.value || null })}
+            style={{ ...cellSelectStyle, color: r.assigned_editor_id ? 'var(--ink)' : 'var(--ink-4)' }}>
+            <option value="">—</option>
+            {editors.filter(e => e.active).map(e => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
+        ) : (
+          <span style={{ color: r.assigned_editor_id ? 'var(--ink)' : 'var(--ink-4)' }}>
+            {r.assigned_editor_name || '—'}
+          </span>
+        )}
+      </div>
+      {/* Offer — inline select with color */}
+      <div onClick={stop}>
+        {editable ? (
+          <select value={r.offer_slug || ''}
+            onChange={e => onPatch(r.id, { offer_slug: e.target.value || null })}
+            style={{
+              ...cellSelectStyle,
+              background: r.offer_slug ? oc.soft : 'transparent',
+              color: r.offer_slug ? oc.ink : 'var(--ink-4)',
+              border: r.offer_slug ? '1px solid ' + oc.border : '1px solid transparent',
+              borderRadius: 2,
+              fontWeight: r.offer_slug ? 600 : 400,
+              fontSize: 9.5, textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+            }}>
+            <option value="">—</option>
+            {offers.map(o => <option key={o.slug} value={o.slug}>{o.slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '')}</option>)}
+          </select>
+        ) : (
+          <span style={{ color: 'var(--ink-3)' }}>{r.offer_slug || '—'}</span>
+        )}
+      </div>
+      {/* Run? — toggle button */}
+      <div onClick={stop} style={{ display: 'flex', justifyContent: 'center' }}>
+        {editable ? (
+          <button type="button"
+            onClick={() => onPatch(r.id, { has_been_run: !r.has_been_run })}
+            title={r.has_been_run ? 'Has been run' : 'Not yet run'}
+            style={{
+              padding: '3px 7px',
+              background: r.has_been_run ? 'rgba(62,138,94,0.15)' : 'transparent',
+              border: r.has_been_run ? '1px solid rgba(62,138,94,0.4)' : '1px solid var(--rule)',
+              borderRadius: 2, cursor: 'pointer',
+              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+              color: r.has_been_run ? '#3e8a5e' : 'var(--ink-4)',
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+            }}>
+            {r.has_been_run ? 'Yes' : '—'}
+          </button>
+        ) : (
+          <span style={{ color: r.has_been_run ? '#3e8a5e' : 'var(--ink-4)' }}>
+            {r.has_been_run ? 'Yes' : '—'}
+          </span>
+        )}
+      </div>
+      {/* Status — inline select */}
+      <div onClick={stop}>
+        {editable ? (
+          <select value={r.status || 'raw'}
+            onChange={e => onPatch(r.id, { status: e.target.value })}
+            style={{
+              ...cellSelectStyle,
+              color: STATUS_COLOR[r.status] || 'var(--ink-3)',
+              fontWeight: 600, fontSize: 9.5, textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+            }}>
+            {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
+          </select>
+        ) : (
+          <span style={{ color: STATUS_COLOR[r.status] || 'var(--ink-3)' }}>{STATUS_LABEL[r.status] || r.status}</span>
+        )}
+      </div>
+      {/* Raw — open the source file */}
+      <div onClick={stop} style={{ display: 'flex', justifyContent: 'center' }}>
+        {r.drive_url ? (
+          <a href={r.drive_url} target="_blank" rel="noreferrer"
+            onClick={stop}
+            style={{
+              padding: '3px 8px',
+              background: 'rgba(62,138,94,0.12)',
+              border: '1px solid rgba(62,138,94,0.4)',
+              color: '#3e8a5e', textDecoration: 'none',
+              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              borderRadius: 2,
+            }}>Open</a>
+        ) : (
+          <span style={{ color: 'var(--ink-4)' }}>—</span>
+        )}
+      </div>
     </div>
   )
 }
@@ -1790,16 +1972,24 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     return tasks.filter(t => selectedEditors.has(t.editor_id) || (t.editor_id == null && selectedEditors.has('unassigned')))
   }, [tasks, selectedEditors])
 
-  // Group by editor (on filtered tasks)
+  // Group by editor (on filtered tasks). We also seed an entry for every
+  // active editor — even if they have zero tasks — so they appear as a
+  // drop target. Otherwise you couldn't drag a task TO an editor who
+  // currently has no work.
   const byEditor = useMemo(() => {
     const m = new Map()
+    // Always include "Unassigned" as a drop target
+    m.set('unassigned', { editor_id: null, editor_name: 'Unassigned', tasks: [] })
+    for (const e of editors.filter(e => e.active)) {
+      m.set(e.slug || e.id, { editor_id: e.id, editor_name: e.name, tasks: [] })
+    }
     for (const t of filteredTasks) {
       const key = t.editor_slug || 'unassigned'
-      if (!m.has(key)) m.set(key, { editor_name: t.editor_name || 'Unassigned', tasks: [] })
+      if (!m.has(key)) m.set(key, { editor_id: t.editor_id || null, editor_name: t.editor_name || 'Unassigned', tasks: [] })
       m.get(key).tasks.push(t)
     }
     return Array.from(m.entries()).map(([slug, v]) => ({ slug, ...v }))
-  }, [filteredTasks])
+  }, [filteredTasks, editors])
 
   const overdue = filteredTasks.filter(t => t.is_overdue).length
   const inProg  = filteredTasks.filter(t => t.status === 'in_progress').length
@@ -1830,6 +2020,33 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       setErr(error.message)
     }
   }, [])
+
+  // Move a task to a new editor (Editor Lanes drag-and-drop). nextEditorId
+  // may be null to un-assign. Optimistic + rollback pattern.
+  const moveTaskToEditor = useCallback(async (task, nextEditorId) => {
+    if (!task) return
+    if ((task.editor_id || null) === (nextEditorId || null)) return
+    const prevEditorId = task.editor_id || null
+    const prevEditorName = task.editor_name
+    const prevEditorSlug = task.editor_slug
+    const nextEditor = editors.find(e => e.id === nextEditorId)
+    setTasks(prev => prev.map(t => t.task_id === task.task_id ? {
+      ...t,
+      editor_id: nextEditorId || null,
+      editor_name: nextEditor?.name || (nextEditorId ? '…' : 'Unassigned'),
+      editor_slug: nextEditor?.slug || null,
+    } : t))
+    const { error } = await supabase
+      .from('lib_editing_tasks')
+      .update({ editor_id: nextEditorId || null })
+      .eq('id', task.task_id)
+    if (error) {
+      setTasks(prev => prev.map(t => t.task_id === task.task_id ? {
+        ...t, editor_id: prevEditorId, editor_name: prevEditorName, editor_slug: prevEditorSlug,
+      } : t))
+      setErr(error.message)
+    }
+  }, [editors])
 
   if (loading) return <LoadingState />
   if (err) return <ErrorBanner msg={err} />
@@ -1907,8 +2124,13 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         <QueueListView tasks={filteredTasks} editors={editors} onEdit={setEditingTask} />
       ) : view === 'lanes' ? (
         <div style={{ display: 'grid', gap: 18 }}>
-          {byEditor.map(({ slug, editor_name, tasks: t }) => (
-            <EditorLane key={slug} editor={editor_name} tasks={t} onEdit={setEditingTask} />
+          {byEditor.map(({ slug, editor_id, editor_name, tasks: t }) => (
+            <EditorLane key={slug}
+              editor={editor_name}
+              editorId={editor_id}
+              tasks={t}
+              onEdit={setEditingTask}
+              onMoveEditor={moveTaskToEditor} />
           ))}
         </div>
       ) : view === 'timeline' ? (
@@ -2271,6 +2493,41 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         </>
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
+        {/* Source file — editor needs to grab the original to start editing.
+            Yellow accent so it's the first thing they see when the modal opens. */}
+        {task.drive_url && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '10px 14px',
+            background: 'var(--paper-2)',
+            border: '1px solid var(--rule)',
+            borderLeft: '3px solid var(--accent)',
+          }}>
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
+            }}>Source file</span>
+            <span style={{ flex: 1 }} />
+            <a href={task.drive_url} target="_blank" rel="noreferrer"
+              style={{
+                padding: '6px 12px',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: 'var(--accent)', color: 'var(--ink)',
+                border: 'none', cursor: 'pointer', textDecoration: 'none',
+              }}>Open in Drive</a>
+            <a href={task.drive_url} target="_blank" rel="noreferrer"
+              download
+              style={{
+                padding: '6px 12px',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: 'white', color: 'var(--ink)',
+                border: '1px solid var(--ink)', cursor: 'pointer', textDecoration: 'none',
+              }}>Download original</a>
+          </div>
+        )}
+
         {/* Quick-action status row */}
         <div>
           <div style={chipLabelStyle}>Status</div>
@@ -3596,9 +3853,52 @@ function KanbanView({ tasks, onEdit, onMove }) {
   )
 }
 
-function EditorLane({ editor, tasks, onEdit }) {
+function EditorLane({ editor, editorId, tasks, onEdit, onMoveEditor }) {
+  const [dragOver, setDragOver] = useState(false)
+  const eColor = editorId ? editorColor(editor?.toLowerCase().replace(/\s+/g, '-') || '') : '#999'
+
+  // Cache the task lookup once per render via a tasks-map on the parent
+  // would be cleaner, but parsing the drag payload here is fine — it's
+  // just an id roundtrip. We use a custom payload prefix so we don't
+  // accidentally accept drops from the Kanban view.
+  const handleDragStart = (e, task) => {
+    e.dataTransfer.setData('text/plain', `lane:${task.task_id}`)
+    e.dataTransfer.setData('application/x-task-id', task.task_id)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (!dragOver) setDragOver(true)
+  }
+  const handleDragLeave = (e) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return
+    if (dragOver) setDragOver(false)
+  }
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setDragOver(false)
+    const raw = e.dataTransfer.getData('application/x-task-id') || e.dataTransfer.getData('text/plain')
+    if (!raw) return
+    const taskId = raw.startsWith('lane:') ? raw.slice(5) : raw
+    // Find the task across ALL lanes by searching props.tasks first; if
+    // not in this lane, parent's onMoveEditor will still work because we
+    // pass a task-shaped object with editor_id for diff.
+    const task = tasks.find(t => t.task_id === taskId)
+      || { task_id: taskId, editor_id: null }  // shallow stub — parent has full state
+    onMoveEditor?.(task, editorId)
+  }
+
   return (
-    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+    <div
+      onDragOver={onMoveEditor ? handleDragOver : undefined}
+      onDragLeave={onMoveEditor ? handleDragLeave : undefined}
+      onDrop={onMoveEditor ? handleDrop : undefined}
+      style={{
+        background: 'var(--paper)',
+        border: dragOver ? `2px dashed ${eColor}` : '1px solid var(--rule)',
+        transition: 'border-color 0.1s',
+      }}>
       <div style={{
         padding: '12px 16px', borderBottom: '1px solid var(--rule)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -3616,9 +3916,25 @@ function EditorLane({ editor, tasks, onEdit }) {
       </div>
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-        gap: 10, padding: 12,
+        gap: 10, padding: 12, minHeight: 80,
       }}>
-        {tasks.map(t => <QueueCard key={t.task_id} task={t} onClick={() => onEdit?.(t)} />)}
+        {tasks.map(t => (
+          <QueueCard key={t.task_id} task={t}
+            onClick={() => onEdit?.(t)}
+            draggable={!!onMoveEditor}
+            onDragStart={e => handleDragStart(e, t)} />
+        ))}
+        {tasks.length === 0 && (
+          <div style={{
+            gridColumn: '1 / -1',
+            padding: '12px', textAlign: 'center',
+            fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            fontStyle: 'italic',
+          }}>
+            {dragOver ? 'Drop to assign' : 'No tasks · drag a card here to assign'}
+          </div>
+        )}
       </div>
     </div>
   )
