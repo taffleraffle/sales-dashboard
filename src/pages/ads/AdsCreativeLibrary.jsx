@@ -3716,17 +3716,28 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
   })
   useEffect(() => { try { localStorage.setItem('queue.timelineRange', range) } catch {} }, [range])
   const [offsetDays, setOffsetDays] = useState(0)
-  // Drag/drop state — which editor lane is currently a hover-drop target.
-  // Tracked by editor.id (or 'unassigned' for the unassigned row).
+  // Drag/drop state — which editor lane is currently a hover-drop target,
+  // and the id of the task being dragged (so we can show a banner +
+  // highlight every drop target while drag is in flight).
   const [dropOnId, setDropOnId] = useState(null)
+  const [draggingTaskId, setDraggingTaskId] = useState(null)
   const tasksById = useMemo(() => Object.fromEntries(tasks.map(t => [t.task_id, t])), [tasks])
+  const draggingTask = draggingTaskId ? tasksById[draggingTaskId] : null
 
   const handleTaskDragStart = (e, task) => {
     e.dataTransfer.setData('application/x-task-id', task.task_id)
     e.dataTransfer.setData('text/plain', task.task_id)
     e.dataTransfer.effectAllowed = 'move'
-    // Stop the click from firing onEdit when the drag actually starts
-    e.stopPropagation()
+    setDraggingTaskId(task.task_id)
+  }
+  const handleTaskDragEnd = () => {
+    setDraggingTaskId(null)
+    setDropOnId(null)
+  }
+  const handleLaneDragEnter = (e, editorId) => {
+    if (!onMoveEditor) return
+    e.preventDefault()
+    if (dropOnId !== editorId) setDropOnId(editorId)
   }
   const handleLaneDragOver = (e, editorId) => {
     if (!onMoveEditor) return
@@ -3735,6 +3746,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
     if (dropOnId !== editorId) setDropOnId(editorId)
   }
   const handleLaneDragLeave = (e, editorId) => {
+    // Only clear if leaving the row entirely (not entering a child)
     if (e.currentTarget.contains(e.relatedTarget)) return
     if (dropOnId === editorId) setDropOnId(null)
   }
@@ -3742,11 +3754,11 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
     if (!onMoveEditor) return
     e.preventDefault()
     setDropOnId(null)
+    setDraggingTaskId(null)
     const taskId = e.dataTransfer.getData('application/x-task-id') || e.dataTransfer.getData('text/plain')
     if (!taskId) return
     const task = tasksById[taskId]
     if (!task) return
-    // 'unassigned' sentinel maps to null editor_id
     const targetEditorId = editorId === 'unassigned' ? null : editorId
     if ((task.editor_id || null) === (targetEditorId || null)) return
     onMoveEditor(task, targetEditorId)
@@ -3816,7 +3828,28 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
   }
 
   return (
-    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)', position: 'relative' }}>
+      {/* Drag-in-flight banner — sticky across the top so Ben can confirm
+          the drag is actually active and see what's being moved. */}
+      {draggingTask && (
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 50,
+          padding: '8px 14px',
+          background: 'var(--ink)', color: 'var(--paper)',
+          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+          letterSpacing: '0.06em', textTransform: 'uppercase',
+          display: 'flex', alignItems: 'center', gap: 10,
+          boxShadow: '0 4px 10px rgba(0,0,0,0.25)',
+        }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)' }} />
+          <span>Dragging:</span>
+          <span style={{ color: 'var(--accent)' }}>{draggingTask.creative_name}</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ color: 'rgba(255,255,255,0.6)' }}>
+            Drop on any highlighted editor row to reassign
+          </span>
+        </div>
+      )}
       {/* Range controls */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
@@ -3874,8 +3907,14 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
           const PADDING = 10
           const laneHeight = Math.max(72, PADDING * 2 + rowCount * (BAR_HEIGHT + ROW_GAP) - ROW_GAP)
           const isDropTarget = dropOnId === editor.id
+          // Every row gets a visible "drop target" indicator while a drag
+          // is in flight — even ones not currently hovered — so Ben can
+          // tell at a glance which rows will accept the drop.
+          const isPotentialTarget = !!draggingTaskId && !!onMoveEditor &&
+            (draggingTask?.editor_id || null) !== (editor.id === 'unassigned' ? null : editor.id)
           return (
             <div key={editor.id}
+              onDragEnter={onMoveEditor ? (e) => handleLaneDragEnter(e, editor.id) : undefined}
               onDragOver={onMoveEditor ? (e) => handleLaneDragOver(e, editor.id) : undefined}
               onDragLeave={onMoveEditor ? (e) => handleLaneDragLeave(e, editor.id) : undefined}
               onDrop={onMoveEditor ? (e) => handleLaneDrop(e, editor.id) : undefined}
@@ -3883,7 +3922,11 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                 display: 'flex',
                 borderBottom: '1px solid var(--rule)',
                 minHeight: laneHeight,
-                background: isDropTarget ? 'rgba(244,225,74,0.10)' : 'transparent',
+                background: isDropTarget ? 'rgba(244,225,74,0.18)'
+                          : isPotentialTarget ? 'rgba(244,225,74,0.04)'
+                          : 'transparent',
+                outline: isDropTarget ? '2px solid var(--accent)' : 'none',
+                outlineOffset: '-2px',
                 transition: 'background 0.1s',
               }}>
               <div style={{ width: 200, padding: '12px 14px',
@@ -3932,14 +3975,10 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                 {Array.from({ length: totalDays }, (_, i) => {
                   const d = dayLabel(i); const dow = d.getDay()
                   const dueISO = d.toISOString().slice(0, 10)
-                  const canAdd = !!onAddTask && editor.id !== 'unassigned'
+                  const canAdd = !!onAddTask && editor.id !== 'unassigned' && !draggingTaskId
                   return (
                     <div key={i}
                       onClick={canAdd ? (e) => {
-                        // Don't open AddTask if the click hit a task bar
-                        // (bars are absolute-positioned siblings, but the
-                        // grid line has z-index 0 / no zIndex). The bar's
-                        // zIndex:1 means clicks on bars hit them first.
                         onAddTask({ editorId: editor.id, due: dueISO })
                       } : undefined}
                       title={canAdd ? `Add a task for ${editor.name} due ${dueISO}` : undefined}
@@ -3948,6 +3987,11 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                         width: dayWidth, borderRight: '1px solid var(--rule)',
                         background: dow === 0 || dow === 6 ? 'var(--paper-2)' : 'transparent',
                         cursor: canAdd ? 'cell' : 'default',
+                        // During a drag, disable pointer events on grid cells
+                        // so drag events bubble straight to the row's drop
+                        // handlers without being absorbed by cell hover/click
+                        // logic.
+                        pointerEvents: draggingTaskId ? 'none' : 'auto',
                       }}
                       onMouseEnter={canAdd ? (e) => { e.currentTarget.style.background = 'rgba(244,225,74,0.15)' } : undefined}
                       onMouseLeave={canAdd ? (e) => { e.currentTarget.style.background = dow === 0 || dow === 6 ? 'var(--paper-2)' : 'transparent' } : undefined}
@@ -3972,6 +4016,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                       onClick={() => onEdit?.(t)}
                       draggable={!!onMoveEditor}
                       onDragStart={(e) => handleTaskDragStart(e, t)}
+                      onDragEnd={handleTaskDragEnd}
                       title={`${t.creative_name} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}${onMoveEditor ? ' · drag to a different editor row to reassign' : ''}`}
                       style={{
                         position: 'absolute', left: x + 2, top: y,
