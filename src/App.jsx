@@ -73,6 +73,7 @@ const AdsCreativeTestingLayout = lazyWithReload(() => import('./pages/ads/AdsCre
 const AdsInsights = lazyWithReload(() => import('./pages/ads/AdsInsights'))
 const AdsCreativesLibrary = lazyWithReload(() => import('./pages/ads/AdsCreativesLibrary'))
 const AdsCreativeLibrary = lazyWithReload(() => import('./pages/ads/AdsCreativeLibrary'))
+const EditorView = lazyWithReload(() => import('./pages/ads/EditorView'))
 const AdsAttributesPage = lazyWithReload(() => import('./pages/ads/AdsAttributesPage'))
 const AdsExplorations = lazyWithReload(() => import('./pages/ads/AdsExplorations'))
 const AdsTestScope = lazyWithReload(() => import('./pages/ads/AdsTestScope'))
@@ -178,6 +179,9 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            {/* Public editor-view: no login required, token in the URL grants
+                scoped access to /sales/ads/creative/library only. */}
+            <Route path="/editor-view/:token" element={<Suspense fallback={<PageSkeleton />}><EditorView /></Suspense>} />
             <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route path="/" element={<Navigate to="/sales" replace />} />
               <Route path="/sales" element={<SalesOverview />} />

@@ -51,17 +51,38 @@ function editorColor(slug) {
   return EDITOR_COLORS[Math.abs(h) % EDITOR_COLORS.length]
 }
 
-export default function AdsCreativeLibrary() {
+// Default scope = full admin permissions (when used inside the regular dashboard).
+// EditorView passes a restricted scope for the public /editor-view/:token surface.
+const ADMIN_SCOPE = {
+  isEditorView: false,
+  editorId: null,
+  editorName: null,
+  canDelete: true,
+  canUpload: true,
+  canEditCreative: true,
+  canEditTask: true,
+  canAssignSelf: true,
+  canDeleteTask: true,
+  canManageEditors: true,
+}
+
+export default function AdsCreativeLibrary({ editorScope }) {
+  const scope = editorScope || ADMIN_SCOPE
+  // In editor-view mode, default to the Editing Queue tab since that's why
+  // they came (to see their assignments). Admins land on Library.
   const [tab, setTab] = useState(() => {
-    try { return localStorage.getItem('lib.tab') || 'library' } catch { return 'library' }
+    try {
+      const saved = localStorage.getItem('lib.tab')
+      return saved || (scope.isEditorView ? 'queue' : 'library')
+    } catch { return scope.isEditorView ? 'queue' : 'library' }
   })
   useEffect(() => { try { localStorage.setItem('lib.tab', tab) } catch {} }, [tab])
 
   return (
     <div style={{ padding: '24px 0 60px' }}>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
-        <SectionHead level="page" eyebrow="Library">
-          Creative library
+        <SectionHead level="page" eyebrow={scope.isEditorView ? 'Editor portal' : 'Library'}>
+          {scope.isEditorView ? 'Your queue + creative library' : 'Creative library'}
         </SectionHead>
 
         {/* Tab switcher */}
@@ -71,7 +92,7 @@ export default function AdsCreativeLibrary() {
         </div>
       </div>
 
-      {tab === 'library' ? <LibraryTab /> : <EditingQueueTab />}
+      {tab === 'library' ? <LibraryTab scope={scope} /> : <EditingQueueTab scope={scope} />}
     </div>
   )
 }
@@ -91,7 +112,7 @@ function TabBtn({ active, onClick, children }) {
 
 /* ─────────────────────────── LIBRARY TAB ─────────────────────────── */
 
-function LibraryTab() {
+function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
@@ -210,9 +231,11 @@ function LibraryTab() {
             <ViewBtn active={view === 'tile'} onClick={() => setView('tile')}>Tiles</ViewBtn>
             <ViewBtn active={view === 'list'} onClick={() => setView('list')}>List</ViewBtn>
           </div>
-          <button onClick={() => setUploadOpen(true)} style={primaryBtn}>
-            + Upload creative
-          </button>
+          {scope.canUpload && (
+            <button onClick={() => setUploadOpen(true)} style={primaryBtn}>
+              + Upload creative
+            </button>
+          )}
         </div>
 
         {/* Row 2: type filter chips */}
@@ -275,7 +298,7 @@ function LibraryTab() {
                 <CreativeListView
                   rows={group.rows}
                   onClick={setDrawerRow}
-                  onDelete={setConfirmDelete}
+                  onDelete={scope.canDelete ? setConfirmDelete : null}
                 />
               )}
             </section>
@@ -286,6 +309,7 @@ function LibraryTab() {
       {drawerRow && (
         <CreativeDetailModal
           row={drawerRow}
+          scope={scope}
           onClose={() => setDrawerRow(null)}
           onSaved={() => { setDrawerRow(null); load() }}
         />
@@ -449,6 +473,7 @@ function CreativeListView({ rows, onClick, onDelete }) {
 }
 
 function ListRow({ row: r, isLast, onClick, onDelete }) {
+  // `onDelete` may be null when the viewer doesn't have delete permission
   const [hover, setHover] = useState(false)
   return (
         <div
@@ -505,12 +530,14 @@ function ListRow({ row: r, isLast, onClick, onDelete }) {
           <div><StatusBadge status={r.status} /></div>
           {/* Actions */}
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-            <button onClick={e => { e.stopPropagation(); onDelete() }} style={{
-              padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
-              letterSpacing: '0.06em', textTransform: 'uppercase',
-              background: 'transparent', color: '#b53e3e',
-              border: '1px solid #b53e3e', cursor: 'pointer',
-            }}>Delete</button>
+            {onDelete && (
+              <button onClick={e => { e.stopPropagation(); onDelete() }} style={{
+                padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: 'transparent', color: '#b53e3e',
+                border: '1px solid #b53e3e', cursor: 'pointer',
+              }}>Delete</button>
+            )}
           </div>
         </div>
   )
@@ -658,12 +685,13 @@ function CreativeCard({ row, onClick }) {
 
 /* ─────────────────────── DETAIL MODAL (click row) ─────────────────────── */
 
-function CreativeDetailModal({ row, onClose, onSaved }) {
+function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
   const [edit, setEdit] = useState(row)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
   const [editors, setEditors] = useState([])
-  const [assignEditor, setAssignEditor] = useState('')
+  // When the viewer is an editor on /editor-view, auto-target them as the assignee.
+  const [assignEditor, setAssignEditor] = useState(scope.isEditorView ? (scope.editorId || '') : '')
   const [assignDue, setAssignDue] = useState('')
   const [assignPriority, setAssignPriority] = useState('P2 - Medium')
   const [assignTaskType, setAssignTaskType] = useState('rough_cut')
@@ -728,9 +756,11 @@ function CreativeDetailModal({ row, onClose, onSaved }) {
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <button onClick={onClose} style={ghostBtn}>Close</button>
-          <button onClick={save} disabled={saving} style={primaryBtn}>
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
+          {scope.canEditCreative && (
+            <button onClick={save} disabled={saving} style={primaryBtn}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          )}
         </>
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 16 }}>
@@ -844,7 +874,8 @@ function CreativeDetailModal({ row, onClose, onSaved }) {
           </Field>
         )}
 
-        {/* Assign editor block */}
+        {/* Assign editor block — only when viewer can manage assignments */}
+        {scope.canEditTask && (
         <div style={{
           padding: '14px 16px', border: '1px solid var(--rule)', background: 'var(--paper-2)',
         }}>
@@ -852,7 +883,7 @@ function CreativeDetailModal({ row, onClose, onSaved }) {
             fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
             letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)',
             marginBottom: 10,
-          }}>Assign editor</div>
+          }}>{scope.isEditorView ? 'Self-assign this clip' : 'Assign editor'}</div>
           <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1.2fr 1fr 1fr 1.4fr auto' }}>
             <select value={assignEditor} onChange={e => setAssignEditor(e.target.value)} style={selectStyle}>
               <option value="">Pick editor…</option>
@@ -877,6 +908,7 @@ function CreativeDetailModal({ row, onClose, onSaved }) {
             </button>
           </div>
         </div>
+        )}
 
         {row.drive_url && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
@@ -1039,7 +1071,7 @@ function UploadModal({ onClose, onSaved }) {
 
 /* ─────────────────────────── EDITING QUEUE TAB ─────────────────────────── */
 
-function EditingQueueTab() {
+function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   const [tasks, setTasks] = useState([])
   const [editors, setEditors] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1052,8 +1084,12 @@ function EditingQueueTab() {
   const [addTaskOpen, setAddTaskOpen] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
   const [editingEditor, setEditingEditor] = useState(null)
-  // Editor multi-select for filtering (empty Set = show all)
-  const [selectedEditors, setSelectedEditors] = useState(() => new Set())
+  // Editor multi-select for filtering. Editor-view auto-selects the
+  // viewing editor on first mount so they see their own tasks by default.
+  const [selectedEditors, setSelectedEditors] = useState(() => {
+    if (scope.isEditorView && scope.editorId) return new Set([scope.editorId])
+    return new Set()
+  })
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
@@ -1120,8 +1156,12 @@ function EditingQueueTab() {
         display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
         marginBottom: 14, padding: '10px 14px', background: 'var(--paper-2)', border: '1px solid var(--rule)',
       }}>
-        <button onClick={() => setAddTaskOpen(true)} style={primaryBtn}>+ Add task</button>
-        <button onClick={() => setAddEditorOpen(true)} style={ghostBtn}>+ Add editor</button>
+        {scope.canEditTask && (
+          <button onClick={() => setAddTaskOpen(true)} style={primaryBtn}>+ Add task</button>
+        )}
+        {scope.canManageEditors && (
+          <button onClick={() => setAddEditorOpen(true)} style={ghostBtn}>+ Add editor</button>
+        )}
         <span style={{ flex: 1 }} />
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
           {editors.filter(e => e.active).length} editor{editors.filter(e => e.active).length === 1 ? '' : 's'} · {filteredTasks.length} of {tasks.length} task{tasks.length === 1 ? '' : 's'}
@@ -1135,15 +1175,18 @@ function EditingQueueTab() {
       </div>
 
       {/* Editor selection bar — click a chip to FILTER tasks to that editor.
-          Empty selection = show all. Right-click / edit icon to manage editors. */}
-      <EditorSelector
-        editors={editors}
-        selected={selectedEditors}
-        onToggle={toggleEditor}
-        onClearAll={() => setSelectedEditors(new Set())}
-        onEditEditor={(e) => setEditingEditor(e)}
-        tasks={tasks}
-      />
+          Empty selection = show all. Hidden in editor-view mode (their
+          selection is already locked to themselves). */}
+      {!scope.isEditorView && (
+        <EditorSelector
+          editors={editors}
+          selected={selectedEditors}
+          onToggle={toggleEditor}
+          onClearAll={() => setSelectedEditors(new Set())}
+          onEditEditor={scope.canManageEditors ? (e) => setEditingEditor(e) : null}
+          tasks={tasks}
+        />
+      )}
 
       {tasks.length === 0 ? (
         <div style={{
@@ -1189,6 +1232,7 @@ function EditingQueueTab() {
         <EditTaskModal
           task={editingTask}
           editors={editors}
+          scope={scope}
           onClose={() => setEditingTask(null)}
           onSaved={() => { setEditingTask(null); load() }}
           onDeleted={() => { setEditingTask(null); load() }} />
@@ -1394,7 +1438,7 @@ function StatusPipBadge({ status, isOverdue }) {
 
 /* Click any task anywhere → opens this modal. Change editor / status /
    priority / type / due date / notes. Or delete the task. */
-function EditTaskModal({ task, editors, onClose, onSaved, onDeleted }) {
+function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, onDeleted }) {
   const [editorId, setEditorId] = useState(task.editor_id || '')
   const [status, setStatus] = useState(task.status || 'queued')
   const [priority, setPriority] = useState(task.priority || 'P2 - Medium')
@@ -1447,9 +1491,11 @@ function EditTaskModal({ task, editors, onClose, onSaved, onDeleted }) {
             </>
           ) : (
             <>
-              <button onClick={() => setConfirmDel(true)} disabled={busy} style={{
-                ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
-              }}>Delete</button>
+              {scope.canDeleteTask && (
+                <button onClick={() => setConfirmDel(true)} disabled={busy} style={{
+                  ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
+                }}>Delete</button>
+              )}
               <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
               <button onClick={save} disabled={busy} style={primaryBtn}>{busy ? 'Saving…' : 'Save'}</button>
             </>
@@ -1527,6 +1573,63 @@ function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [confirmDel, setConfirmDel] = useState(false)
+  // Share links state — load existing + allow generate / revoke
+  const [links, setLinks] = useState([])
+  const [linksLoading, setLinksLoading] = useState(true)
+  const [copyOk, setCopyOk] = useState(null)
+
+  const [linksAvailable, setLinksAvailable] = useState(true)
+  useEffect(() => {
+    let mounted = true
+    supabase.from('lib_editor_share_links')
+      .select('*')
+      .eq('editor_id', editor.id)
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (!mounted) return
+        if (error) {
+          // Migration 077 hasn't been applied yet — degrade gracefully
+          setLinksAvailable(false)
+        } else {
+          setLinks(data || [])
+        }
+        setLinksLoading(false)
+      })
+    return () => { mounted = false }
+  }, [editor.id])
+
+  const generateLink = async () => {
+    // Random URL-safe token, 28 chars
+    const arr = new Uint8Array(21)
+    crypto.getRandomValues(arr)
+    const token = btoa(String.fromCharCode(...arr))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const { data, error } = await supabase.from('lib_editor_share_links')
+      .insert({
+        token, editor_id: editor.id,
+        label: `${editor.name}'s share link`,
+        created_by: 'admin',
+      })
+      .select()
+      .single()
+    if (error) setErr(error.message)
+    else setLinks([data, ...links])
+  }
+  const revokeLink = async (id) => {
+    const { error } = await supabase.from('lib_editor_share_links')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('id', id)
+    if (error) setErr(error.message)
+    else setLinks(links.map(l => l.id === id ? { ...l, revoked_at: new Date().toISOString() } : l))
+  }
+  const buildUrl = (token) =>
+    `${window.location.origin}/editor-view/${token}`
+  const copyLink = async (token) => {
+    try {
+      await navigator.clipboard.writeText(buildUrl(token))
+      setCopyOk(token); setTimeout(() => setCopyOk(null), 1800)
+    } catch {}
+  }
 
   const save = async () => {
     setBusy(true); setErr(null)
@@ -1588,6 +1691,63 @@ function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
             style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--sans)' }}
             placeholder="Internal notes about this editor (specialty, working hours, etc.)" />
+        </Field>
+
+        {/* Share links — for giving editors a public /editor-view URL */}
+        <Field label="Share link">
+          {linksLoading ? (
+            <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12 }}>Loading…</div>
+          ) : !linksAvailable ? (
+            <div style={{
+              padding: '10px 12px', background: 'rgba(184,106,12,0.08)',
+              border: '1px solid rgba(184,106,12,0.3)',
+              fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink-2)',
+            }}>
+              <strong>Pending migration 077.</strong> Apply <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'white', padding: '1px 5px' }}>supabase/migrations/077_editor_share_links.sql</code> in Supabase Studio → SQL Editor to enable share links. Existing functionality is unaffected.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {links.filter(l => !l.revoked_at).map(l => (
+                <div key={l.id} style={{
+                  padding: '8px 12px', background: 'var(--paper-2)', border: '1px solid var(--rule)',
+                  display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 10, alignItems: 'center',
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{
+                      fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{buildUrl(l.token)}</div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginTop: 2 }}>
+                      Created {new Date(l.created_at).toLocaleDateString()}
+                      {l.last_used_at && ` · last used ${new Date(l.last_used_at).toLocaleDateString()}`}
+                    </div>
+                  </div>
+                  <button onClick={() => copyLink(l.token)} style={{
+                    padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                    background: copyOk === l.token ? '#3e8a5e' : 'white',
+                    color: copyOk === l.token ? 'white' : 'var(--ink-2)',
+                    border: '1px solid ' + (copyOk === l.token ? '#3e8a5e' : 'var(--rule)'),
+                    cursor: 'pointer',
+                  }}>{copyOk === l.token ? 'Copied' : 'Copy'}</button>
+                  <button onClick={() => revokeLink(l.id)} style={{
+                    padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                    background: 'transparent', color: '#b53e3e',
+                    border: '1px solid rgba(181,62,62,0.4)', cursor: 'pointer',
+                  }}>Revoke</button>
+                </div>
+              ))}
+              <button onClick={generateLink} style={{
+                ...ghostBtn, justifySelf: 'flex-start',
+              }}>+ Generate share link</button>
+              <div style={{ fontFamily: 'var(--sans)', fontSize: 11.5, color: 'var(--ink-3)', fontStyle: 'italic' }}>
+                Anyone with the link can view {editor.name}'s queue + the creative library, and update
+                task status. They can't delete creatives, change canonical names, or manage editors.
+                Revoke to kill access.
+              </div>
+            </div>
+          )}
         </Field>
       </div>
     </Modal>
