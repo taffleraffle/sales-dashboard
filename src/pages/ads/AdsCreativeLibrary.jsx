@@ -3890,13 +3890,29 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                             borderRight: '1px solid var(--rule)', flexShrink: 0,
                             background: isDropTarget ? 'rgba(244,225,74,0.18)' : 'var(--paper-2)',
                             borderLeft: `4px solid ${color}`,
+                            position: 'relative',
                           }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0 }} />
                   <span style={{ fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500 }}>{editor.name}</span>
                 </div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 4 }}>
-                  {editorTasks.length} task{editorTasks.length === 1 ? '' : 's'}
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 4,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                }}>
+                  <span>{editorTasks.length} task{editorTasks.length === 1 ? '' : 's'}</span>
+                  {onAddTask && editor.id !== 'unassigned' && (
+                    <button type="button"
+                      onClick={(e) => { e.stopPropagation(); onAddTask({ editorId: editor.id, due: '' }) }}
+                      title={`Add a new task for ${editor.name}`}
+                      style={{
+                        padding: '3px 8px',
+                        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'var(--ink)', color: 'var(--paper)',
+                        border: 'none', cursor: 'pointer', borderRadius: 2,
+                      }}>+ Add</button>
+                  )}
                 </div>
               </div>
               <div style={{ position: 'relative', flex: 1, width: totalWidth, height: laneHeight }}>
