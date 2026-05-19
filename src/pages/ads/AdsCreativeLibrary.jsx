@@ -2198,7 +2198,8 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           ))}
         </div>
       ) : view === 'timeline' ? (
-        <TimelineView tasks={filteredTasks} editors={editors.filter(e => e.active)} onEdit={setEditingTask} />
+        <TimelineView tasks={filteredTasks} editors={editors.filter(e => e.active)}
+          onEdit={setEditingTask} onMoveEditor={moveTaskToEditor} />
       ) : (
         <KanbanView tasks={filteredTasks} onEdit={setEditingTask} onMove={moveTaskStatus} />
       )}
@@ -3619,12 +3620,47 @@ function AddTaskModal({ editors, onClose, onSaved }) {
 
 /* ─────────────────────── TIMELINE (Gantt-style) ─────────────────────── */
 
-function TimelineView({ tasks, editors, onEdit }) {
+function TimelineView({ tasks, editors, onEdit, onMoveEditor }) {
   const [range, setRange] = useState(() => {
     try { return localStorage.getItem('queue.timelineRange') || 'month' } catch { return 'month' }
   })
   useEffect(() => { try { localStorage.setItem('queue.timelineRange', range) } catch {} }, [range])
   const [offsetDays, setOffsetDays] = useState(0)
+  // Drag/drop state — which editor lane is currently a hover-drop target.
+  // Tracked by editor.id (or 'unassigned' for the unassigned row).
+  const [dropOnId, setDropOnId] = useState(null)
+  const tasksById = useMemo(() => Object.fromEntries(tasks.map(t => [t.task_id, t])), [tasks])
+
+  const handleTaskDragStart = (e, task) => {
+    e.dataTransfer.setData('application/x-task-id', task.task_id)
+    e.dataTransfer.setData('text/plain', task.task_id)
+    e.dataTransfer.effectAllowed = 'move'
+    // Stop the click from firing onEdit when the drag actually starts
+    e.stopPropagation()
+  }
+  const handleLaneDragOver = (e, editorId) => {
+    if (!onMoveEditor) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dropOnId !== editorId) setDropOnId(editorId)
+  }
+  const handleLaneDragLeave = (e, editorId) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return
+    if (dropOnId === editorId) setDropOnId(null)
+  }
+  const handleLaneDrop = (e, editorId) => {
+    if (!onMoveEditor) return
+    e.preventDefault()
+    setDropOnId(null)
+    const taskId = e.dataTransfer.getData('application/x-task-id') || e.dataTransfer.getData('text/plain')
+    if (!taskId) return
+    const task = tasksById[taskId]
+    if (!task) return
+    // 'unassigned' sentinel maps to null editor_id
+    const targetEditorId = editorId === 'unassigned' ? null : editorId
+    if ((task.editor_id || null) === (targetEditorId || null)) return
+    onMoveEditor(task, targetEditorId)
+  }
 
   const today = new Date(); today.setHours(0,0,0,0)
   // Range = exact intended span. Week starts today, no back-padding.
@@ -3747,11 +3783,22 @@ function TimelineView({ tasks, editors, onEdit }) {
           const ROW_GAP = 6
           const PADDING = 10
           const laneHeight = Math.max(72, PADDING * 2 + rowCount * (BAR_HEIGHT + ROW_GAP) - ROW_GAP)
+          const isDropTarget = dropOnId === editor.id
           return (
-            <div key={editor.id} style={{ display: 'flex', borderBottom: '1px solid var(--rule)', minHeight: laneHeight }}>
+            <div key={editor.id}
+              onDragOver={onMoveEditor ? (e) => handleLaneDragOver(e, editor.id) : undefined}
+              onDragLeave={onMoveEditor ? (e) => handleLaneDragLeave(e, editor.id) : undefined}
+              onDrop={onMoveEditor ? (e) => handleLaneDrop(e, editor.id) : undefined}
+              style={{
+                display: 'flex',
+                borderBottom: '1px solid var(--rule)',
+                minHeight: laneHeight,
+                background: isDropTarget ? 'rgba(244,225,74,0.10)' : 'transparent',
+                transition: 'background 0.1s',
+              }}>
               <div style={{ width: 200, padding: '12px 14px',
                             borderRight: '1px solid var(--rule)', flexShrink: 0,
-                            background: 'var(--paper-2)',
+                            background: isDropTarget ? 'rgba(244,225,74,0.18)' : 'var(--paper-2)',
                             borderLeft: `4px solid ${color}`,
                           }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -3763,6 +3810,16 @@ function TimelineView({ tasks, editors, onEdit }) {
                 </div>
               </div>
               <div style={{ position: 'relative', flex: 1, width: totalWidth, height: laneHeight }}>
+                {/* Drop-here hint shown on empty lanes during a drag */}
+                {isDropTarget && editorTasks.length === 0 && (
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                    letterSpacing: '0.1em', textTransform: 'uppercase',
+                    color: 'var(--ink-3)', pointerEvents: 'none', zIndex: 3,
+                  }}>Drop to assign to {editor.name}</div>
+                )}
                 {/* Day grid lines */}
                 {Array.from({ length: totalDays }, (_, i) => {
                   const d = dayLabel(i); const dow = d.getDay()
@@ -3790,7 +3847,9 @@ function TimelineView({ tasks, editors, onEdit }) {
                   return (
                     <div key={t.task_id}
                       onClick={() => onEdit?.(t)}
-                      title={`${t.creative_name} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}`}
+                      draggable={!!onMoveEditor}
+                      onDragStart={(e) => handleTaskDragStart(e, t)}
+                      title={`${t.creative_name} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}${onMoveEditor ? ' · drag to a different editor row to reassign' : ''}`}
                       style={{
                         position: 'absolute', left: x + 2, top: y,
                         width: w, height: BAR_HEIGHT,
@@ -3801,7 +3860,9 @@ function TimelineView({ tasks, editors, onEdit }) {
                         display: 'flex', alignItems: 'center', gap: 6,
                         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
                         color: 'white',
-                        overflow: 'hidden', cursor: onEdit ? 'pointer' : 'default', zIndex: 1,
+                        overflow: 'hidden',
+                        cursor: onMoveEditor ? 'grab' : (onEdit ? 'pointer' : 'default'),
+                        zIndex: 1,
                         boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
                       }}>
                       <span style={{
