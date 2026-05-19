@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Icon } from '../../components/editorial/atoms'
 import Modal from '../../components/editorial/Modal'
@@ -150,6 +150,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [statusFilter, setStatusFilter] = useState('')
   const [offerFilter, setOfferFilter] = useState('')   // '' | offer_slug | '__none__'
   const [runFilter, setRunFilter] = useState('')       // '' | 'yes' | 'no'
+  const [stageFilter, setStageFilter] = useState('')   // '' | 'unedited' | 'edited_seg' | 'merged'
   const [rawEditedFilter, setRawEditedFilter] = useState(() => {
     try { return localStorage.getItem('lib.rawEdited') || 'edited' } catch { return 'edited' }
   })
@@ -184,6 +185,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     })
   }, [])
   const clearSelection = useCallback(() => setSelected(new Set()), [])
+  // Stable reference for the row-click handler — MatrixRow uses React.memo
+  // so passing a fresh inline lambda each render would defeat the memo.
+  const openDrawer = useCallback((row) => setDrawerRow(row), [])
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
@@ -264,8 +268,12 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     else if (offerFilter)           list = list.filter(r => r.offer_slug === offerFilter)
     if (runFilter === 'yes')        list = list.filter(r => r.has_been_run)
     else if (runFilter === 'no')    list = list.filter(r => !r.has_been_run)
+    // Pipeline-state filter — combines type + status into workflow states
+    if (stageFilter === 'unedited')   list = list.filter(r => r.status === 'raw')
+    else if (stageFilter === 'edited_seg') list = list.filter(r => r.status === 'edited' && r.type !== 'Joined')
+    else if (stageFilter === 'merged')list = list.filter(r => r.type === 'Joined' && r.status === 'edited')
     return list
-  }, [rows, q, typeFilter, statusFilter, rawEditedFilter, offerFilter, runFilter])
+  }, [rows, q, typeFilter, statusFilter, rawEditedFilter, offerFilter, runFilter, stageFilter])
 
   // Counts for the Raw/Edited toggle (always over ALL rows)
   const rawCount = useMemo(() => rows.filter(r => r.status === 'raw').length, [rows])
@@ -295,6 +303,15 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   const runCount    = useMemo(() => rows.filter(r => r.has_been_run).length, [rows])
   const notRunCount = useMemo(() => rows.filter(r => !r.has_been_run).length, [rows])
+  // Stable reference for MatrixRow's editor dropdown — same memo concern
+  // as openDrawer: avoid re-creating this array each render.
+  const activeEditors = useMemo(() => editors.filter(e => e.active), [editors])
+  // Pipeline-state counts (workflow buckets — status+type combined)
+  const stageCounts = useMemo(() => ({
+    unedited:   rows.filter(r => r.status === 'raw').length,
+    edited_seg: rows.filter(r => r.status === 'edited' && r.type !== 'Joined').length,
+    merged:     rows.filter(r => r.type === 'Joined' && r.status === 'edited').length,
+  }), [rows])
 
   // Section groups for the list view — used when no type filter, shows
   // Hooks/Bodies/Joined/Testimony as separate sections
@@ -357,6 +374,25 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
               + Upload creative
             </button>
           )}
+        </div>
+
+        {/* Row 1.5: Pipeline stage — workflow buckets that combine type+status
+            so Ben can see at a glance what's unedited vs merged final. */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={chipLabelStyle}>Stage</span>
+          <FilterChip active={!stageFilter} onClick={() => setStageFilter('')} count={rows.length}>All</FilterChip>
+          <FilterChip active={stageFilter === 'unedited'}
+            onClick={() => setStageFilter('unedited')}
+            count={stageCounts.unedited}
+            color="var(--ink-4)">Unedited</FilterChip>
+          <FilterChip active={stageFilter === 'edited_seg'}
+            onClick={() => setStageFilter('edited_seg')}
+            count={stageCounts.edited_seg}
+            color="#3e8a5e">Edited segment</FilterChip>
+          <FilterChip active={stageFilter === 'merged'}
+            onClick={() => setStageFilter('merged')}
+            count={stageCounts.merged}
+            color="#b86a0c">Merged final</FilterChip>
         </div>
 
         {/* Row 2: type filter chips */}
@@ -509,9 +545,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
               ) : (
                 <CreativeMatrixView
                   rows={group.rows}
-                  editors={editors}
+                  editors={activeEditors}
                   offers={offers}
-                  onClick={setDrawerRow}
+                  onRowClick={openDrawer}
                   onPatch={scope.canEditCreative ? patchRow : null}
                   selected={selected}
                   selectionMode={selected.size > 0}
@@ -821,7 +857,7 @@ function ListRow({ row: r, isLast, gridCols, onClick, onDelete }) {
 const MATRIX_COLS_BASE = '38px minmax(110px, 0.85fr) minmax(180px, 1.8fr) 86px 70px 120px 120px 56px 76px 62px'
 const MATRIX_COLS_SEL  = `26px ${MATRIX_COLS_BASE}`
 
-function CreativeMatrixView({ rows, editors, offers, onClick, onPatch, selected, selectionMode, onToggleSelect }) {
+function CreativeMatrixView({ rows, editors, offers, onRowClick, onPatch, selected, selectionMode, onToggleSelect }) {
   const selectable = !!onToggleSelect
   const cols = selectable ? MATRIX_COLS_SEL : MATRIX_COLS_BASE
   const allVisible = rows.every(r => selected?.has(r.id))
@@ -876,7 +912,7 @@ function CreativeMatrixView({ rows, editors, offers, onClick, onPatch, selected,
         <MatrixRow key={r.id} row={r}
           editors={editors} offers={offers}
           isLast={i === rows.length - 1}
-          onClick={() => onClick(r)}
+          onRowClick={onRowClick}
           onPatch={onPatch}
           cols={cols}
           selected={selected?.has(r.id)}
@@ -905,7 +941,7 @@ const cellInputStyle = {
   outline: 'none',
 }
 
-function MatrixRow({ row: r, editors, offers, isLast, onClick, onPatch, cols, selected, selectionMode, onToggleSelect }) {
+const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, isLast, onRowClick, onPatch, cols, selected, selectionMode, onToggleSelect }) {
   const [hover, setHover] = useState(false)
   const tc = typeColor(r.type)
   const oc = offerColor(r.offer_slug)
@@ -922,10 +958,16 @@ function MatrixRow({ row: r, editors, offers, isLast, onClick, onPatch, cols, se
   // In selection mode, clicking row body toggles selection instead of
   // opening the drawer. Inline-editor cells still stopPropagation so
   // editing doesn't toggle selection.
-  const handleRowClick = (e) => {
+  const handleRowClick = () => {
     if (selectionMode && selectable) onToggleSelect(r.id)
-    else onClick?.()
+    else onRowClick?.(r)
   }
+  // Pipeline-state color stripe on the left edge of every row — fast
+  // visual scan of which rows are unedited / edited segment / merged.
+  const stripeColor =
+    (r.type === 'Joined' && r.status === 'edited') ? '#b86a0c'     // merged final (orange)
+    : (r.status === 'edited')                       ? '#3e8a5e'     // edited segment (green)
+    :                                                 'var(--ink-4)' // unedited (grey)
   return (
     <div
       onClick={handleRowClick}
@@ -935,6 +977,7 @@ function MatrixRow({ row: r, editors, offers, isLast, onClick, onPatch, cols, se
         display: 'grid', gridTemplateColumns: cols,
         gap: 5, padding: '4px 10px', alignItems: 'center',
         borderBottom: isLast ? 'none' : '1px solid var(--rule)',
+        borderLeft: `3px solid ${stripeColor}`,
         background: selected ? 'rgba(244,225,74,0.15)' : (hover ? 'var(--paper-2)' : 'transparent'),
         cursor: 'pointer', transition: 'background 0.08s',
         fontFamily: 'var(--mono)', fontSize: 10,
@@ -1113,7 +1156,7 @@ function MatrixRow({ row: r, editors, offers, isLast, onClick, onPatch, cols, se
       </div>
     </div>
   )
-}
+})
 
 /* StageLinkCell — if there's a URL for this stage, render a colored
    clickable link pill that opens the file. If status is set but URL
