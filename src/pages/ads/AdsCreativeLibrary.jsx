@@ -427,25 +427,43 @@ function CreativeListView({ rows, onClick, onDelete }) {
         <div style={{ textAlign: 'right' }}>Actions</div>
       </div>
       {rows.map((r, i) => (
-        <div key={r.id}
+        <ListRow key={r.id} row={r} isLast={i === rows.length - 1}
+          onClick={() => onClick(r)} onDelete={() => onDelete(r)} />
+      ))}
+    </div>
+  )
+}
+
+function ListRow({ row: r, isLast, onClick, onDelete }) {
+  const [hover, setHover] = useState(false)
+  return (
+        <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '52px minmax(280px, 1.8fr) 110px 130px 90px 80px 80px 100px',
+            gridTemplateColumns: '60px minmax(280px, 1.8fr) 110px 130px 90px 80px 90px 100px',
             padding: '10px 14px', gap: 12, alignItems: 'center',
-            borderBottom: i === rows.length - 1 ? 'none' : '1px solid var(--rule)',
-            background: 'transparent', transition: 'background 0.12s',
+            borderBottom: isLast ? 'none' : '1px solid var(--rule)',
+            background: hover ? 'var(--paper-2)' : 'transparent', transition: 'background 0.12s',
             cursor: 'pointer',
           }}
-          onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          onClick={() => onClick(r)}>
-          {/* Thumb */}
+          onMouseEnter={() => setHover(true)}
+          onMouseLeave={() => setHover(false)}
+          onClick={onClick}>
+          {/* Thumb (with hover-to-play) */}
           <div style={{
-            width: 44, height: 28, background: 'var(--paper-2)',
-            backgroundImage: r.thumbnail_url ? `url('${r.thumbnail_url}')` : 'none',
-            backgroundSize: 'cover', backgroundPosition: 'center',
-            border: '1px solid var(--rule)',
-          }} />
+            width: 56, height: 36, background: '#000',
+            border: '1px solid var(--rule)', overflow: 'hidden',
+            position: 'relative',
+          }}>
+            {r.thumbnail_url && !(hover && r.preview_url) && (
+              <img src={r.thumbnail_url} alt="" loading="lazy"
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            )}
+            {hover && r.preview_url && (
+              <video src={r.preview_url} autoPlay muted loop playsInline
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            )}
+          </div>
           {/* Name (canonical + original) */}
           <div style={{ minWidth: 0 }}>
             <div style={{
@@ -473,7 +491,7 @@ function CreativeListView({ rows, onClick, onDelete }) {
           <div><StatusBadge status={r.status} /></div>
           {/* Actions */}
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-            <button onClick={e => { e.stopPropagation(); onDelete(r) }} style={{
+            <button onClick={e => { e.stopPropagation(); onDelete() }} style={{
               padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
               letterSpacing: '0.06em', textTransform: 'uppercase',
               background: 'transparent', color: '#b53e3e',
@@ -481,8 +499,6 @@ function CreativeListView({ rows, onClick, onDelete }) {
             }}>Delete</button>
           </div>
         </div>
-      ))}
-    </div>
   )
 }
 
@@ -543,15 +559,17 @@ const chipLabelStyle = {
 }
 
 function CreativeCard({ row, onClick }) {
+  const [hover, setHover] = useState(false)
   return (
-    <div onClick={onClick} style={{
-      cursor: 'pointer',
-      background: 'var(--paper)',
-      border: '1px solid var(--rule)',
-      transition: 'border-color 0.12s, transform 0.12s',
-    }}
-    onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ink)'}
-    onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--rule)'}>
+    <div onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        cursor: 'pointer',
+        background: 'var(--paper)',
+        border: hover ? '1px solid var(--ink)' : '1px solid var(--rule)',
+        transition: 'border-color 0.12s',
+      }}>
       {/* Thumbnail */}
       <div style={{
         aspectRatio: '16 / 9',
@@ -561,9 +579,17 @@ function CreativeCard({ row, onClick }) {
         position: 'relative', overflow: 'hidden',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        {row.thumbnail_url && (
+        {row.thumbnail_url && !(hover && row.preview_url) && (
           <img src={row.thumbnail_url} alt=""
             loading="lazy"
+            style={{
+              width: '100%', height: '100%', objectFit: 'cover',
+              display: 'block',
+            }} />
+        )}
+        {hover && row.preview_url && (
+          <video src={row.preview_url}
+            autoPlay muted loop playsInline
             style={{
               width: '100%', height: '100%', objectFit: 'cover',
               display: 'block',
@@ -1316,14 +1342,17 @@ function TimelineView({ tasks, editors }) {
   const [offsetDays, setOffsetDays] = useState(0)
 
   const today = new Date(); today.setHours(0,0,0,0)
-  // Decide date window based on `range` + offset (operator can pan)
-  const windowDays = range === 'week' ? 14 : range === 'month' ? 42 : range === '90days' ? 90 : 180
-  const startBackDays = range === 'week' ? 3 : range === 'month' ? 7 : 14
-  const minDate = new Date(today); minDate.setDate(today.getDate() - startBackDays + offsetDays); minDate.setHours(0,0,0,0)
-  const maxDate = new Date(minDate); maxDate.setDate(minDate.getDate() + windowDays); maxDate.setHours(0,0,0,0)
-
-  const totalDays = windowDays + 1
-  const dayWidth = range === 'week' ? 56 : range === 'month' ? 28 : range === '90days' ? 14 : 8
+  // Range = exact intended span. Week starts today, no back-padding.
+  const RANGES = {
+    week:    { days: 7,   back: 0,  width: 100 },
+    month:   { days: 30,  back: 3,  width: 38 },
+    '90days':{ days: 90,  back: 7,  width: 16 },
+    '6months':{ days: 180, back: 14, width: 9 },
+  }
+  const cfg = RANGES[range] || RANGES.month
+  const minDate = new Date(today); minDate.setDate(today.getDate() - cfg.back + offsetDays); minDate.setHours(0,0,0,0)
+  const totalDays = cfg.days
+  const dayWidth = cfg.width
   const totalWidth = totalDays * dayWidth
 
   // Build editor rows (always show all active editors)
@@ -1342,6 +1371,47 @@ function TimelineView({ tasks, editors }) {
   const xForDate = (dateStr) => {
     const d = new Date(dateStr); d.setHours(0,0,0,0)
     return Math.round((d - minDate) / 86400000) * dayWidth
+  }
+
+  // Distinct color per editor (stable hash of slug). Status becomes a
+  // 4px left stripe on each bar instead of bar fill.
+  const EDITOR_COLORS = [
+    '#3e7eba', '#e0853e', '#5fa55a', '#a05fa5', '#c44b6e',
+    '#3eb2a8', '#b8893e', '#7e3eb8', '#5b8a3e', '#b83e3e',
+  ]
+  function editorColor(slug) {
+    let h = 0
+    for (let i = 0; i < (slug || '').length; i++) h = ((h << 5) - h + slug.charCodeAt(i)) | 0
+    return EDITOR_COLORS[Math.abs(h) % EDITOR_COLORS.length]
+  }
+  const STATUS_STRIPE = {
+    queued: '#999', in_progress: '#e0853e',
+    review: '#3e7eba', done: '#3e8a5e',
+    blocked: '#b53e3e',
+  }
+
+  // Pack tasks into non-overlapping rows per editor (interval scheduling).
+  // Each row gets a y-position based on which row it lands in. Row count
+  // determines how tall the editor's lane needs to be.
+  function packTasks(taskList) {
+    const items = taskList
+      .map(t => {
+        const start = t.assigned_at ? new Date(t.assigned_at) : null
+        const end = t.completed_at ? new Date(t.completed_at) : (t.due_date ? new Date(t.due_date) : new Date())
+        if (!start) return null
+        return { task: t, start: start.getTime(), end: end.getTime() }
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.start - b.start)
+    const rows = []  // each entry = end-of-last-task in that row
+    const placed = []  // [{ task, rowIdx, start, end }]
+    for (const it of items) {
+      let rowIdx = rows.findIndex(endTs => endTs <= it.start)
+      if (rowIdx === -1) { rows.push(it.end); rowIdx = rows.length - 1 }
+      else { rows[rowIdx] = it.end }
+      placed.push({ ...it, rowIdx })
+    }
+    return { placed, rowCount: rows.length || 1 }
   }
 
   return (
@@ -1396,17 +1466,28 @@ function TimelineView({ tasks, editors }) {
         {/* Rows */}
         {editorRows.map(editor => {
           const editorTasks = tasksByEditor.get(editor.slug) || []
+          const color = editorColor(editor.slug)
+          const { placed, rowCount } = packTasks(editorTasks)
+          const BAR_HEIGHT = 22
+          const ROW_GAP = 6
+          const PADDING = 10
+          const laneHeight = Math.max(72, PADDING * 2 + rowCount * (BAR_HEIGHT + ROW_GAP) - ROW_GAP)
           return (
-            <div key={editor.id} style={{ display: 'flex', borderBottom: '1px solid var(--rule)', minHeight: 72 }}>
+            <div key={editor.id} style={{ display: 'flex', borderBottom: '1px solid var(--rule)', minHeight: laneHeight }}>
               <div style={{ width: 200, padding: '12px 14px',
                             borderRight: '1px solid var(--rule)', flexShrink: 0,
-                            background: 'var(--paper-2)' }}>
-                <div style={{ fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500 }}>{editor.name}</div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 3 }}>
+                            background: 'var(--paper-2)',
+                            borderLeft: `4px solid ${color}`,
+                          }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0 }} />
+                  <span style={{ fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500 }}>{editor.name}</span>
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 4 }}>
                   {editorTasks.length} task{editorTasks.length === 1 ? '' : 's'}
                 </div>
               </div>
-              <div style={{ position: 'relative', flex: 1, width: totalWidth, height: 72 }}>
+              <div style={{ position: 'relative', flex: 1, width: totalWidth, height: laneHeight }}>
                 {/* Day grid lines */}
                 {Array.from({ length: totalDays }, (_, i) => {
                   const d = dayLabel(i); const dow = d.getDay()
@@ -1423,28 +1504,41 @@ function TimelineView({ tasks, editors }) {
                   position: 'absolute', left: xForDate(today.toISOString()),
                   top: 0, bottom: 0, width: 2, background: 'var(--accent)', zIndex: 2,
                 }} />
-                {/* Task bars */}
-                {editorTasks.map((t, idx) => {
-                  const start = t.assigned_at ? new Date(t.assigned_at) : null
-                  const end = t.completed_at ? new Date(t.completed_at) : (t.due_date ? new Date(t.due_date) : new Date())
-                  if (!start) return null
-                  const x = xForDate(start.toISOString())
-                  const w = Math.max(dayWidth, xForDate(end.toISOString()) - x + dayWidth)
-                  const y = 10 + (idx % 3) * 18  // simple stagger
-                  const color = t.is_overdue ? '#b53e3e'
-                              : t.status === 'in_progress' ? '#b86a0c'
-                              : t.status === 'review' ? '#3e7eba'
-                              : t.status === 'done' ? '#3e8a5e'
-                              : t.status === 'blocked' ? '#666'
-                              : 'var(--ink-3)'
+                {/* Packed task bars */}
+                {placed.map(({ task: t, rowIdx, start }) => {
+                  const startStr = new Date(start).toISOString()
+                  const endTs = t.completed_at ? new Date(t.completed_at).getTime() : (t.due_date ? new Date(t.due_date).getTime() : Date.now())
+                  const x = xForDate(startStr)
+                  const w = Math.max(dayWidth - 2, xForDate(new Date(endTs).toISOString()) - x + dayWidth - 2)
+                  const y = PADDING + rowIdx * (BAR_HEIGHT + ROW_GAP)
+                  const stripe = t.is_overdue ? '#b53e3e' : (STATUS_STRIPE[t.status] || '#999')
                   return (
-                    <div key={t.task_id} title={`${t.creative_name} · ${t.status} · ${t.due_date || ''}`} style={{
-                      position: 'absolute', left: x, top: y, width: w, height: 14,
-                      background: color, borderRadius: 2, paddingLeft: 6,
-                      fontFamily: 'var(--mono)', fontSize: 9.5, color: 'white',
-                      lineHeight: '14px', overflow: 'hidden', whiteSpace: 'nowrap',
-                      textOverflow: 'ellipsis', cursor: 'default', zIndex: 1,
-                    }}>{t.creative_name}</div>
+                    <div key={t.task_id}
+                      title={`${t.creative_name} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}`}
+                      style={{
+                        position: 'absolute', left: x + 2, top: y,
+                        width: w, height: BAR_HEIGHT,
+                        background: color,
+                        borderLeft: `4px solid ${stripe}`,
+                        borderRadius: 2,
+                        paddingLeft: 8, paddingRight: 6,
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
+                        color: 'white',
+                        overflow: 'hidden', cursor: 'default', zIndex: 1,
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+                      }}>
+                      <span style={{
+                        flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>{t.creative_name}</span>
+                      {t.is_overdue && (
+                        <span style={{
+                          fontSize: 9, padding: '1px 4px',
+                          background: 'rgba(255,255,255,0.25)', borderRadius: 2,
+                          textTransform: 'uppercase', letterSpacing: '0.06em',
+                        }}>OVD</span>
+                      )}
+                    </div>
                   )
                 })}
               </div>
