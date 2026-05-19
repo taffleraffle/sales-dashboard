@@ -4201,7 +4201,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                   )}
                 </div>
               </div>
-              <div style={{ position: 'relative', flex: 1, width: totalWidth, height: laneHeight }}
+              <div style={{ position: 'relative', flex: 1, width: totalWidth, height: laneHeight, overflow: 'hidden' }}
                 // Calendar-style drag-to-create: mousedown on an empty area,
                 // drag across N days, release to open AddTask with editor +
                 // start/end pre-filled. Skipped during a reassign-drag, on
