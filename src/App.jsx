@@ -72,6 +72,7 @@ const AdsPerformance = lazyWithReload(() => import('./pages/ads/AdsPerformance')
 const AdsCreativeTestingLayout = lazyWithReload(() => import('./pages/ads/AdsCreativeTestingLayout'))
 const AdsInsights = lazyWithReload(() => import('./pages/ads/AdsInsights'))
 const AdsCreativesLibrary = lazyWithReload(() => import('./pages/ads/AdsCreativesLibrary'))
+const AdsCreativeLibrary = lazyWithReload(() => import('./pages/ads/AdsCreativeLibrary'))
 const AdsAttributesPage = lazyWithReload(() => import('./pages/ads/AdsAttributesPage'))
 const AdsExplorations = lazyWithReload(() => import('./pages/ads/AdsExplorations'))
 const AdsTestScope = lazyWithReload(() => import('./pages/ads/AdsTestScope'))
@@ -200,6 +201,7 @@ export default function App() {
                   <Route path="ads" element={<Suspense fallback={<PageSkeleton />}><AdsList /></Suspense>} />
                   <Route path="insights" element={<Suspense fallback={<PageSkeleton />}><AdsInsights /></Suspense>} />
                   <Route path="creatives" element={<Suspense fallback={<PageSkeleton />}><AdsCreativesLibrary /></Suspense>} />
+                  <Route path="library" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeLibrary /></Suspense>} />
                   <Route path="attributes" element={<Suspense fallback={<PageSkeleton />}><AdsAttributesPage /></Suspense>} />
                   <Route path="explorations" element={<Suspense fallback={<PageSkeleton />}><AdsExplorations /></Suspense>} />
                   <Route path="tests" element={<Suspense fallback={<PageSkeleton />}><AdsTestScope /></Suspense>} />

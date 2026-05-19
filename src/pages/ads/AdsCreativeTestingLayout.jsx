@@ -27,6 +27,7 @@ const SUBNAV = [
   { to: '/sales/ads/creative/insights',     label: 'Insights' },
   { to: '/sales/ads/creative/tests',        label: 'Tests' },
   { to: '/sales/ads/creative/creatives',    label: 'Creatives' },
+  { to: '/sales/ads/creative/library',      label: 'Library' },
   { to: '/sales/ads/creative/attributes',   label: 'Attributes' },
   { to: '/sales/ads/creative/explorations', label: 'Explorations' },
   { to: '/sales/ads/creative/generate',     label: 'Generate' },
