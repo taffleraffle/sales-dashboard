@@ -1439,6 +1439,7 @@ function FilterStrip({ label, active, options, onPick, onClear, totalCount }) {
           fontWeight: !active ? 600 : 400,
           borderBottom: !active ? '2px solid var(--accent)' : '2px solid transparent',
           lineHeight: 1.5,
+          textTransform: 'uppercase', letterSpacing: '0.06em',
         }}>
         All <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>{totalCount}</span>
       </button>
@@ -1456,6 +1457,7 @@ function FilterStrip({ label, active, options, onPick, onClear, totalCount }) {
                 borderBottom: isOn ? '2px solid var(--accent)' : '2px solid transparent',
                 lineHeight: 1.5,
                 display: 'inline-flex', alignItems: 'center', gap: 5,
+                textTransform: 'uppercase', letterSpacing: '0.06em',
               }}>
               {opt.dot && (
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: opt.dot, display: 'inline-block' }} />
