@@ -2005,6 +2005,9 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   useEffect(() => { try { localStorage.setItem('queue.view', view) } catch {} }, [view])
   const [addEditorOpen, setAddEditorOpen] = useState(false)
   const [addTaskOpen, setAddTaskOpen] = useState(false)
+  // Prefill for AddTaskModal — set when the user clicks a Timeline cell.
+  // Falls back to empty fields when opened from the toolbar button.
+  const [addTaskPrefill, setAddTaskPrefill] = useState({ editorId: '', due: '' })
   const [manageEditorsOpen, setManageEditorsOpen] = useState(false)
   const [shareLinksOpen, setShareLinksOpen] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
@@ -2199,7 +2202,8 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         </div>
       ) : view === 'timeline' ? (
         <TimelineView tasks={filteredTasks} editors={editors.filter(e => e.active)}
-          onEdit={setEditingTask} onMoveEditor={moveTaskToEditor} />
+          onEdit={setEditingTask} onMoveEditor={moveTaskToEditor}
+          onAddTask={(pre) => { setAddTaskPrefill(pre); setAddTaskOpen(true) }} />
       ) : (
         <KanbanView tasks={filteredTasks} onEdit={setEditingTask} onMove={moveTaskStatus} />
       )}
@@ -2227,8 +2231,10 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       {addTaskOpen && (
         <AddTaskModal
           editors={editors.filter(e => e.active)}
-          onClose={() => setAddTaskOpen(false)}
-          onSaved={() => { setAddTaskOpen(false); load() }} />
+          prefillEditorId={addTaskPrefill.editorId}
+          prefillDue={addTaskPrefill.due}
+          onClose={() => { setAddTaskOpen(false); setAddTaskPrefill({ editorId: '', due: '' }) }}
+          onSaved={() => { setAddTaskOpen(false); setAddTaskPrefill({ editorId: '', due: '' }); load() }} />
       )}
       {editingTask && (
         <EditTaskModal
@@ -3360,22 +3366,28 @@ function AddEditorModal({ onClose, onSaved }) {
   )
 }
 
-function AddTaskModal({ editors, onClose, onSaved }) {
+function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefillDue = '' }) {
   const [mode, setMode] = useState('pick')   // 'pick' or 'upload'
   const [creatives, setCreatives] = useState([])
   const [search, setSearch] = useState('')
-  const [creativeId, setCreativeId] = useState('')
+  // Selected creative(s) — Set of ids. UI toggles between single and multi:
+  // checkbox per row + a "Select all visible" affordance.
+  const [creativeIds, setCreativeIds] = useState(() => new Set())
   // Upload-mode state
   const [uploadFile, setUploadFile] = useState(null)
   const [uploadName, setUploadName] = useState('')
   const [uploadType, setUploadType] = useState('Joined')
   const [uploadProgress, setUploadProgress] = useState(null)
   const uploadInputRef = useRef(null)
-  // Common state
-  const [editorId, setEditorId] = useState('')
+  // Common state — accept pre-fill from Timeline click
+  const [editorId, setEditorId] = useState(prefillEditorId || '')
   const [taskType, setTaskType] = useState('rough_cut')
   const [priority, setPriority] = useState('P2 - Medium')
-  const [due, setDue] = useState('')
+  const [due, setDue] = useState(prefillDue || '')
+  // Optional project name applied as canonical_name prefix when assigning
+  // multiple creatives at once — Ben asked to "rename the project for
+  // multiple videos" in one shot from this modal.
+  const [projectName, setProjectName] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
@@ -3407,8 +3419,8 @@ function AddTaskModal({ editors, onClose, onSaved }) {
   const submit = async () => {
     setBusy(true); setErr(null)
     try {
-      let cid = creativeId
-      // Upload mode: upload file → insert lib_creative_library row → use its id
+      let cids = []
+      // Upload mode: upload file → insert library row → single creative id
       if (mode === 'upload') {
         if (!uploadFile || !uploadName.trim()) {
           setErr('Pick a file and give it a name'); setBusy(false); return
@@ -3436,18 +3448,39 @@ function AddTaskModal({ editors, onClose, onSaved }) {
           .select()
           .single()
         if (insErr) throw insErr
-        cid = newRow.id
+        cids = [newRow.id]
         setUploadProgress(85)
+      } else {
+        cids = Array.from(creativeIds)
       }
-      if (!cid) { setErr('Pick a creative or upload a new file'); setBusy(false); return }
+      if (cids.length === 0) { setErr('Pick one or more creatives or upload a new file'); setBusy(false); return }
 
-      // Insert the task (editor optional — admin assigns later if blank)
-      const { error: taskErr } = await supabase.from('lib_editing_tasks').insert({
-        creative_id: cid,
+      // Optional: bulk-rename the picked creatives to a shared project name.
+      // Format: "<projectName> 1", "<projectName> 2", ... so each row has
+      // a unique canonical_name (no DB unique constraint, but Ben wants
+      // them visually distinct in lists).
+      if (projectName.trim() && mode === 'pick') {
+        const proj = projectName.trim()
+        const updates = cids.map((id, i) => ({ id, canonical_name: cids.length === 1 ? proj : `${proj} ${i + 1}` }))
+        // Bulk update via individual writes — Supabase doesn't have a clean
+        // 'upsert different values per row' API. N is small (selected count)
+        // so this is fine.
+        for (const u of updates) {
+          const { error: rnErr } = await supabase.from('lib_creative_library')
+            .update({ canonical_name: u.canonical_name })
+            .eq('id', u.id)
+          if (rnErr) throw rnErr
+        }
+      }
+
+      // Insert ONE task per selected creative
+      const rows = cids.map(creative_id => ({
+        creative_id,
         editor_id: editorId || null,
         task_type: taskType, priority, due_date: due || null,
-        status: editorId ? 'queued' : 'review',  // unassigned uploads land in review
-      })
+        status: editorId ? 'queued' : 'review',
+      }))
+      const { error: taskErr } = await supabase.from('lib_editing_tasks').insert(rows)
       if (taskErr) throw taskErr
       setUploadProgress(100)
       onSaved?.()
@@ -3459,8 +3492,15 @@ function AddTaskModal({ editors, onClose, onSaved }) {
   }
 
   const canSubmit = mode === 'pick'
-    ? !!creativeId
+    ? creativeIds.size > 0
     : !!uploadFile && !!uploadName.trim()
+  const toggleCreative = (id) => {
+    setCreativeIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
 
   return (
     <Modal open={true} onClose={busy ? () => {} : onClose} size="lg"
@@ -3500,33 +3540,83 @@ function AddTaskModal({ editors, onClose, onSaved }) {
         </div>
 
         {mode === 'pick' ? (
-          <Field label="Creative">
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search by name…" style={{ ...inputStyle, marginBottom: 8 }} />
-            <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--rule)' }}>
-              {filtered.length === 0 && (
-                <div style={{ padding: 12, fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12 }}>
-                  No matches.
-                </div>
-              )}
-              {filtered.map(c => (
-                <div key={c.id}
-                  onClick={() => setCreativeId(c.id)}
+          <>
+            <Field label={`Creatives ${creativeIds.size > 0 ? `· ${creativeIds.size} selected` : ''}`}>
+              <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Search by name…" style={{ ...inputStyle, marginBottom: 8 }} />
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                marginBottom: 6, gap: 8,
+              }}>
+                <button type="button"
+                  onClick={() => setCreativeIds(new Set(filtered.map(c => c.id)))}
                   style={{
-                    padding: '8px 12px', cursor: 'pointer',
-                    background: creativeId === c.id ? 'var(--accent-soft, rgba(244,225,74,0.18))' : 'transparent',
-                    borderBottom: '1px solid var(--rule)',
-                    fontFamily: 'var(--mono)', fontSize: 11.5,
-                    display: 'flex', alignItems: 'center', gap: 10,
-                  }}>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {c.canonical_name || c.name}
-                  </span>
-                  <span style={{ color: 'var(--ink-4)', fontSize: 10 }}>{c.type}</span>
-                </div>
-              ))}
-            </div>
-          </Field>
+                    padding: '4px 9px',
+                    fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em',
+                    textTransform: 'uppercase', background: 'transparent',
+                    border: '1px solid var(--rule)', cursor: 'pointer', color: 'var(--ink-2)',
+                  }}>Select all visible ({filtered.length})</button>
+                {creativeIds.size > 0 && (
+                  <button type="button" onClick={() => setCreativeIds(new Set())}
+                    style={{
+                      padding: '4px 9px',
+                      fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em',
+                      textTransform: 'uppercase', background: 'transparent',
+                      border: '1px solid var(--rule)', cursor: 'pointer', color: 'var(--ink-3)',
+                    }}>Clear</button>
+                )}
+              </div>
+              <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--rule)' }}>
+                {filtered.length === 0 && (
+                  <div style={{ padding: 12, fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12 }}>
+                    No matches.
+                  </div>
+                )}
+                {filtered.map(c => {
+                  const isOn = creativeIds.has(c.id)
+                  return (
+                    <div key={c.id}
+                      onClick={() => toggleCreative(c.id)}
+                      style={{
+                        padding: '8px 12px', cursor: 'pointer',
+                        background: isOn ? 'rgba(244,225,74,0.18)' : 'transparent',
+                        borderBottom: '1px solid var(--rule)',
+                        fontFamily: 'var(--mono)', fontSize: 11.5,
+                        display: 'flex', alignItems: 'center', gap: 10,
+                      }}>
+                      <span style={{
+                        width: 16, height: 16, borderRadius: 2,
+                        border: isOn ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
+                        background: isOn ? 'var(--accent)' : 'white',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0,
+                      }}>
+                        {isOn && (
+                          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                            <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                              strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </span>
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {c.canonical_name || c.name}
+                      </span>
+                      <span style={{ color: 'var(--ink-4)', fontSize: 10 }}>{c.type}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </Field>
+            {/* Project rename — applies the same project name to all selected
+                creatives (auto-numbered when there's more than one). */}
+            {creativeIds.size > 0 && (
+              <Field label={creativeIds.size === 1 ? 'Optional: rename this creative' : `Optional: rename all ${creativeIds.size} as a project`}>
+                <input type="text" value={projectName} onChange={e => setProjectName(e.target.value)}
+                  placeholder={creativeIds.size === 1 ? 'New name (leave blank to keep current)' : 'e.g. HAMMER campaign — will become "HAMMER campaign 1", "HAMMER campaign 2"…'}
+                  style={inputStyle} />
+              </Field>
+            )}
+          </>
         ) : (
           <>
             <Field label="Upload your finished file">
@@ -3620,7 +3710,7 @@ function AddTaskModal({ editors, onClose, onSaved }) {
 
 /* ─────────────────────── TIMELINE (Gantt-style) ─────────────────────── */
 
-function TimelineView({ tasks, editors, onEdit, onMoveEditor }) {
+function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
   const [range, setRange] = useState(() => {
     try { return localStorage.getItem('queue.timelineRange') || 'month' } catch { return 'month' }
   })
@@ -3820,15 +3910,32 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor }) {
                     color: 'var(--ink-3)', pointerEvents: 'none', zIndex: 3,
                   }}>Drop to assign to {editor.name}</div>
                 )}
-                {/* Day grid lines */}
+                {/* Day grid lines — clickable to add a task on that day for
+                    this editor. Click goes through to onAddTask which opens
+                    AddTaskModal with editor + due_date pre-filled. */}
                 {Array.from({ length: totalDays }, (_, i) => {
                   const d = dayLabel(i); const dow = d.getDay()
+                  const dueISO = d.toISOString().slice(0, 10)
+                  const canAdd = !!onAddTask && editor.id !== 'unassigned'
                   return (
-                    <div key={i} style={{
-                      position: 'absolute', left: i * dayWidth, top: 0, bottom: 0,
-                      width: dayWidth, borderRight: '1px solid var(--rule)',
-                      background: dow === 0 || dow === 6 ? 'var(--paper-2)' : 'transparent',
-                    }} />
+                    <div key={i}
+                      onClick={canAdd ? (e) => {
+                        // Don't open AddTask if the click hit a task bar
+                        // (bars are absolute-positioned siblings, but the
+                        // grid line has z-index 0 / no zIndex). The bar's
+                        // zIndex:1 means clicks on bars hit them first.
+                        onAddTask({ editorId: editor.id, due: dueISO })
+                      } : undefined}
+                      title={canAdd ? `Add a task for ${editor.name} due ${dueISO}` : undefined}
+                      style={{
+                        position: 'absolute', left: i * dayWidth, top: 0, bottom: 0,
+                        width: dayWidth, borderRight: '1px solid var(--rule)',
+                        background: dow === 0 || dow === 6 ? 'var(--paper-2)' : 'transparent',
+                        cursor: canAdd ? 'cell' : 'default',
+                      }}
+                      onMouseEnter={canAdd ? (e) => { e.currentTarget.style.background = 'rgba(244,225,74,0.15)' } : undefined}
+                      onMouseLeave={canAdd ? (e) => { e.currentTarget.style.background = dow === 0 || dow === 6 ? 'var(--paper-2)' : 'transparent' } : undefined}
+                    />
                   )
                 })}
                 {/* Today line */}
