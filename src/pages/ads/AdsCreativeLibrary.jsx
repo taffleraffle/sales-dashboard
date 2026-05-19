@@ -931,6 +931,7 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
   const [edit, setEdit] = useState(row)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
+  const [autoSaveStatus, setAutoSaveStatus] = useState('idle') // idle | saving | saved | error
   const [editors, setEditors] = useState([])
   // When the viewer is an editor on /editor-view, auto-target them as the assignee.
   const [assignEditor, setAssignEditor] = useState(scope.isEditorView ? (scope.editorId || '') : '')
@@ -939,6 +940,9 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
   const [assignTaskType, setAssignTaskType] = useState('rough_cut')
   const [assignBusy, setAssignBusy] = useState(false)
   const [existingTasks, setExistingTasks] = useState([])
+  const firstEditRef = useRef(true)
+  const saveTimerRef = useRef(null)
+  const savedFlashTimerRef = useRef(null)
 
   useEffect(() => {
     let mounted = true
@@ -949,8 +953,10 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
     return () => { mounted = false }
   }, [row.id])
 
-  const save = async () => {
-    setSaving(true); setErr(null)
+  const save = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setSaving(true)
+    setErr(null)
+    setAutoSaveStatus('saving')
     const { error } = await supabase
       .from('lib_creative_library')
       .update({
@@ -966,10 +972,34 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
         stage_delivered: edit.stage_delivered || null,
       })
       .eq('id', row.id)
-    setSaving(false)
-    if (error) setErr(error.message)
-    else onSaved?.()
-  }
+    if (!silent) setSaving(false)
+    if (error) {
+      setErr(error.message)
+      setAutoSaveStatus('error')
+    } else {
+      setAutoSaveStatus('saved')
+      onSaved?.()
+      if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current)
+      savedFlashTimerRef.current = setTimeout(() => setAutoSaveStatus('idle'), 1500)
+    }
+  }, [edit, row.id, onSaved])
+
+  // Auto-save on field changes — Notion-style. Debounced 600ms so we don't
+  // hammer the DB during typing. Skip the first render (edit was just
+  // hydrated from row) and skip entirely for read-only viewers.
+  useEffect(() => {
+    if (firstEditRef.current) { firstEditRef.current = false; return }
+    if (!scope.canEditCreative) return
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => { save({ silent: true }) }, 600)
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
+  }, [edit, save, scope.canEditCreative])
+
+  // Cleanup pending timers on unmount
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current)
+  }, [])
 
   const assign = async () => {
     if (!assignEditor) return
@@ -1003,11 +1033,33 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
       subtitle={row.canonical_name ? row.name : `${row.source_bucket || ''}${row.size_mb ? ' · ' + Math.round(row.size_mb) + ' MB' : ''}`}
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {scope.canEditCreative && (
+            <span style={{
+              fontSize: 11, fontFamily: 'var(--mono)', marginRight: 'auto',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              color: autoSaveStatus === 'error' ? '#b53e3e'
+                   : autoSaveStatus === 'saving' ? 'var(--ink-3)'
+                   : autoSaveStatus === 'saved' ? '#3e8a5e'
+                   : 'var(--ink-4)',
+            }}>
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: autoSaveStatus === 'error' ? '#b53e3e'
+                          : autoSaveStatus === 'saving' ? '#e8b408'
+                          : autoSaveStatus === 'saved' ? '#3e8a5e'
+                          : 'var(--ink-4)',
+              }} />
+              {autoSaveStatus === 'saving' ? 'Saving…'
+                : autoSaveStatus === 'saved' ? 'Saved'
+                : autoSaveStatus === 'error' ? (err || 'Save failed')
+                : 'Changes save automatically'}
+            </span>
+          )}
+          {err && !scope.canEditCreative && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <button onClick={onClose} style={ghostBtn}>Close</button>
           {scope.canEditCreative && (
-            <button onClick={save} disabled={saving} style={primaryBtn}>
-              {saving ? 'Saving…' : 'Save changes'}
+            <button onClick={() => save()} disabled={saving} style={primaryBtn}>
+              {saving ? 'Saving…' : 'Save now'}
             </button>
           )}
         </>
