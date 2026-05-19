@@ -37,6 +37,31 @@ const STATUS_COLOR = {
   archived: '#999',
 }
 
+// Distinct color per type — helps you scan a busy Matrix view and immediately
+// see hooks vs bodies vs full videos vs testimonials.
+const TYPE_COLOR = {
+  'Hook':       { ink: '#1f4e8f', soft: 'rgba(31,78,143,0.10)',  border: 'rgba(31,78,143,0.35)' },
+  'Body':       { ink: '#a05810', soft: 'rgba(160,88,16,0.10)',  border: 'rgba(160,88,16,0.35)' },
+  'Full Video': { ink: '#2e6e3f', soft: 'rgba(46,110,63,0.10)',  border: 'rgba(46,110,63,0.35)' },
+  'Testimony':  { ink: '#7a3aa8', soft: 'rgba(122,58,168,0.10)', border: 'rgba(122,58,168,0.35)' },
+}
+function typeColor(t) {
+  return TYPE_COLOR[t] || { ink: 'var(--ink-3)', soft: 'var(--paper-2)', border: 'var(--rule)' }
+}
+
+// Per-stage indicator values for the Matrix view
+const STAGE_VALUES = [
+  { v: null,           label: '—',          color: '#ccc',   bg: 'transparent' },
+  { v: 'done',         label: 'X',          color: 'white',  bg: '#3e8a5e' },
+  { v: 'in_progress',  label: 'In progress', color: '#7a4e08', bg: 'rgba(232,180,8,0.25)' },
+  { v: 'blocked',      label: 'Blocked',    color: 'white',  bg: '#b53e3e' },
+  { v: 'skip',         label: 'Skip',       color: 'var(--ink-3)', bg: 'rgba(0,0,0,0.05)' },
+]
+function stageStyle(value) {
+  const v = STAGE_VALUES.find(s => s.v === value) || STAGE_VALUES[0]
+  return v
+}
+
 // Stable distinct color per editor (hash of slug → 10-color palette).
 // Used everywhere the editor needs a visual identity (selector chips,
 // queue cards, timeline bars, list-view dot).
@@ -137,11 +162,17 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     setLoading(true); setErr(null)
     const { data, error } = await supabase
       .from('lib_creative_library')
-      .select('*')
+      .select('*, assigned_editor:assigned_editor_id (id, name)')
       .eq('exclude_from_library', false)
       .order('added_at', { ascending: false })
     if (error) setErr(error.message)
-    else setRows(data || [])
+    else {
+      // Flatten the joined editor name for table consumption
+      setRows((data || []).map(r => ({
+        ...r,
+        assigned_editor_name: r.assigned_editor?.name || null,
+      })))
+    }
     setLoading(false)
   }, [])
 
@@ -228,8 +259,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
             {filtered.length} / {rows.length}
           </span>
           <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'white' }}>
-            <ViewBtn active={view === 'tile'} onClick={() => setView('tile')}>Tiles</ViewBtn>
-            <ViewBtn active={view === 'list'} onClick={() => setView('list')}>List</ViewBtn>
+            <ViewBtn active={view === 'tile'}   onClick={() => setView('tile')}>Tiles</ViewBtn>
+            <ViewBtn active={view === 'list'}   onClick={() => setView('list')}>List</ViewBtn>
+            <ViewBtn active={view === 'matrix'} onClick={() => setView('matrix')}>Matrix</ViewBtn>
           </div>
           {scope.canUpload && (
             <button onClick={() => setUploadOpen(true)} style={primaryBtn}>
@@ -294,11 +326,16 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                     <CreativeCard key={r.id} row={r} onClick={() => setDrawerRow(r)} />
                   ))}
                 </div>
-              ) : (
+              ) : view === 'list' ? (
                 <CreativeListView
                   rows={group.rows}
                   onClick={setDrawerRow}
                   onDelete={scope.canDelete ? setConfirmDelete : null}
+                />
+              ) : (
+                <CreativeMatrixView
+                  rows={group.rows}
+                  onClick={setDrawerRow}
                 />
               )}
             </section>
@@ -518,7 +555,18 @@ function ListRow({ row: r, isLast, onClick, onDelete }) {
               }}>{r.name}</div>
             )}
           </div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.type}</div>
+          <div>
+            <span style={{
+              display: 'inline-block',
+              padding: '2px 7px',
+              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              background: typeColor(r.type).soft,
+              color: typeColor(r.type).ink,
+              border: '1px solid ' + typeColor(r.type).border,
+              borderRadius: 2,
+            }}>{r.type}</span>
+          </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.creator || '—'}</div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
                         color: r.v21_script_id ? 'var(--ink)' : 'var(--ink-4)' }}>
@@ -540,6 +588,160 @@ function ListRow({ row: r, isLast, onClick, onDelete }) {
             )}
           </div>
         </div>
+  )
+}
+
+/* Matrix view — mirrors the Component Edits spreadsheet column-by-column.
+   Per-stage pills (Raw / Rough Cut / Final Cut / Approved / Delivered)
+   with editable values, type color coding, hover-to-preview thumbnail.
+   Click any row to open the detail modal. */
+function CreativeMatrixView({ rows, onClick }) {
+  return (
+    <div style={{ overflowX: 'auto', background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+      <div style={{ minWidth: 1500 }}>
+        {/* Header */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '140px 60px 100px minmax(220px, 1.4fr) 90px 110px 90px 60px 70px 70px 70px 70px 60px 90px',
+          gap: 10, padding: '10px 14px',
+          background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
+          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+          letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
+        }}>
+          <div>ID</div>
+          <div>Thumb</div>
+          <div>Type</div>
+          <div>Description</div>
+          <div>Creator</div>
+          <div>Editor</div>
+          <div>Priority</div>
+          <div style={{ textAlign: 'center' }}>Raw</div>
+          <div style={{ textAlign: 'center' }}>Rough cut</div>
+          <div style={{ textAlign: 'center' }}>Final cut</div>
+          <div style={{ textAlign: 'center' }}>Approved</div>
+          <div style={{ textAlign: 'center' }}>Delivered</div>
+          <div style={{ textAlign: 'center' }}>File</div>
+          <div>Status</div>
+        </div>
+        {rows.map((r, i) => (
+          <MatrixRow key={r.id} row={r} isLast={i === rows.length - 1} onClick={() => onClick(r)} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MatrixRow({ row: r, isLast, onClick }) {
+  const [hover, setHover] = useState(false)
+  const tc = typeColor(r.type)
+  const rawStage = r.drive_url ? 'done' : null  // raw is "done" if we have a file
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '140px 60px 100px minmax(220px, 1.4fr) 90px 110px 90px 60px 70px 70px 70px 70px 60px 90px',
+        gap: 10, padding: '8px 14px', alignItems: 'center',
+        borderBottom: isLast ? 'none' : '1px solid var(--rule)',
+        background: hover ? 'var(--paper-2)' : 'transparent',
+        cursor: 'pointer', transition: 'background 0.12s',
+        fontFamily: 'var(--mono)', fontSize: 10.5,
+      }}>
+      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        title={r.canonical_name || r.name}>{r.canonical_name || r.name}</div>
+      <div style={{ width: 50, height: 30, overflow: 'hidden', background: '#000', border: '1px solid var(--rule)' }}>
+        {r.thumbnail_url && !(hover && r.preview_url) && (
+          <img src={r.thumbnail_url} alt="" loading="lazy"
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        )}
+        {hover && r.preview_url && (
+          <video src={r.preview_url} autoPlay muted loop playsInline
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        )}
+      </div>
+      <div>
+        <span style={{
+          padding: '2px 6px',
+          background: tc.soft, color: tc.ink, border: '1px solid ' + tc.border,
+          fontWeight: 600, fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'uppercase',
+        }}>{r.type}</span>
+      </div>
+      <div style={{
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        fontFamily: 'var(--sans)', fontSize: 11.5,
+      }} title={r.description || r.name}>{r.description || r.name}</div>
+      <div style={{ color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.creator || '—'}</div>
+      <div style={{ color: r.assigned_editor_id ? 'var(--ink)' : 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {r.assigned_editor_name || '—'}
+      </div>
+      <div style={{ color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {r.priority?.replace(' - ', ' ') || '—'}
+      </div>
+      <StageCell value={rawStage} />
+      <StageCell value={r.stage_rough_cut} />
+      <StageCell value={r.stage_final_cut} />
+      <StageCell value={r.stage_approved} />
+      <StageCell value={r.stage_delivered} />
+      <div style={{ textAlign: 'center' }}>
+        {r.drive_url ? (
+          <a href={r.drive_url} target="_blank" rel="noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)', textDecoration: 'none' }}
+            title="Open Drive file">↗</a>
+        ) : '—'}
+      </div>
+      <div><StatusBadge status={r.status} /></div>
+    </div>
+  )
+}
+
+/* Inline stage value editor — used inside CreativeDetailModal so Ben can
+   set Raw / Rough cut / Final cut / Approved / Delivered per-creative. */
+function StageEditor({ label, value, onChange }) {
+  return (
+    <div>
+      <div style={{
+        fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+        letterSpacing: '0.1em', textTransform: 'uppercase',
+        color: 'var(--ink-3)', marginBottom: 4,
+      }}>{label}</div>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        {STAGE_VALUES.map(s => {
+          const active = (value || null) === s.v
+          const styleProps = active
+            ? { background: s.bg === 'transparent' ? 'var(--ink)' : s.bg, color: s.color === '#ccc' ? 'white' : s.color }
+            : { background: 'white', color: 'var(--ink-3)' }
+          return (
+            <button key={String(s.v)} onClick={() => onChange(s.v)} style={{
+              padding: '4px 8px',
+              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 500,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              border: '1px solid ' + (active ? 'transparent' : 'var(--rule)'),
+              borderRadius: 2, cursor: 'pointer',
+              ...styleProps,
+            }}>{s.label === 'X' && !active ? 'Done' : s.label === '—' ? 'Not started' : s.label}</button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function StageCell({ value }) {
+  const s = stageStyle(value)
+  if (!value) return <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontFamily: 'var(--mono)', fontSize: 12 }}>—</div>
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <span style={{
+        display: 'inline-block', minWidth: 22, padding: '2px 6px',
+        background: s.bg, color: s.color,
+        fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+        letterSpacing: '0.06em', textTransform: 'uppercase',
+        border: value === 'skip' ? '1px solid var(--rule)' : 'none',
+      }}>{s.label}</span>
+    </div>
   )
 }
 
@@ -641,16 +843,19 @@ function CreativeCard({ row, onClick }) {
             No thumbnail
           </span>
         )}
-        {/* Type pill — top-left */}
-        {row.type && row.type !== 'unknown' && (
-          <span style={{
-            position: 'absolute', top: 6, left: 6,
-            padding: '2px 6px',
-            background: 'rgba(0,0,0,0.7)', color: 'white',
-            fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 500,
-            letterSpacing: '0.06em', textTransform: 'uppercase',
-          }}>{row.type}</span>
-        )}
+        {/* Type pill — top-left, color-coded per type */}
+        {row.type && row.type !== 'unknown' && (() => {
+          const tc = typeColor(row.type)
+          return (
+            <span style={{
+              position: 'absolute', top: 6, left: 6,
+              padding: '2px 7px',
+              background: tc.ink, color: 'white',
+              fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+            }}>{row.type}</span>
+          )
+        })()}
         {/* v21 match pill — top-right */}
         {row.v21_script_id && (
           <span style={{
@@ -715,6 +920,13 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
         type: edit.type, creator: edit.creator, status: edit.status,
         v21_script_id: edit.v21_script_id, notes: edit.notes,
         canonical_name: edit.canonical_name,
+        description: edit.description || null,
+        priority: edit.priority || null,
+        assigned_editor_id: edit.assigned_editor_id || null,
+        stage_rough_cut: edit.stage_rough_cut || null,
+        stage_final_cut: edit.stage_final_cut || null,
+        stage_approved:  edit.stage_approved || null,
+        stage_delivered: edit.stage_delivered || null,
       })
       .eq('id', row.id)
     setSaving(false)
@@ -834,6 +1046,50 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
             }} title={row.name}>{row.name}</div>
           </Field>
         </div>
+
+        <Field label="Description (separate from canonical name)">
+          <input type="text" value={edit.description || ''}
+            onChange={e => setEdit({ ...edit, description: e.target.value })}
+            placeholder="Short human description for the Matrix view"
+            style={inputStyle} />
+        </Field>
+
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
+          <Field label="Priority">
+            <select value={edit.priority || ''}
+              onChange={e => setEdit({ ...edit, priority: e.target.value || null })}
+              style={selectStyle}>
+              <option value="">—</option>
+              <option>P1 - High</option>
+              <option>P2 - Medium</option>
+              <option>P3 - Low</option>
+            </select>
+          </Field>
+          <Field label="Assigned editor">
+            <select value={edit.assigned_editor_id || ''}
+              onChange={e => setEdit({ ...edit, assigned_editor_id: e.target.value || null })}
+              style={selectStyle}>
+              <option value="">— Unassigned</option>
+              {editors.filter(e => e.active).map(e => (
+                <option key={e.id} value={e.id}>{e.name}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        {/* Production stages — mirror the Component Edits sheet columns */}
+        <Field label="Production stages">
+          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, 1fr)' }}>
+            <StageEditor label="Rough cut" value={edit.stage_rough_cut}
+              onChange={v => setEdit({ ...edit, stage_rough_cut: v })} />
+            <StageEditor label="Final cut" value={edit.stage_final_cut}
+              onChange={v => setEdit({ ...edit, stage_final_cut: v })} />
+            <StageEditor label="Approved"  value={edit.stage_approved}
+              onChange={v => setEdit({ ...edit, stage_approved: v })} />
+            <StageEditor label="Delivered" value={edit.stage_delivered}
+              onChange={v => setEdit({ ...edit, stage_delivered: v })} />
+          </div>
+        </Field>
 
         <Field label="Notes">
           <textarea value={edit.notes || ''} onChange={e => setEdit({ ...edit, notes: e.target.value })}
@@ -1082,6 +1338,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   useEffect(() => { try { localStorage.setItem('queue.view', view) } catch {} }, [view])
   const [addEditorOpen, setAddEditorOpen] = useState(false)
   const [addTaskOpen, setAddTaskOpen] = useState(false)
+  const [manageEditorsOpen, setManageEditorsOpen] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
   const [editingEditor, setEditingEditor] = useState(null)
   // Editor multi-select for filtering. Editor-view auto-selects the
@@ -1160,7 +1417,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           <button onClick={() => setAddTaskOpen(true)} style={primaryBtn}>+ Add task</button>
         )}
         {scope.canManageEditors && (
-          <button onClick={() => setAddEditorOpen(true)} style={ghostBtn}>+ Add editor</button>
+          <button onClick={() => setManageEditorsOpen(true)} style={ghostBtn}>Manage editors</button>
         )}
         <span style={{ flex: 1 }} />
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
@@ -1221,6 +1478,15 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         <AddEditorModal
           onClose={() => setAddEditorOpen(false)}
           onSaved={() => { setAddEditorOpen(false); load() }} />
+      )}
+      {manageEditorsOpen && (
+        <ManageEditorsModal
+          editors={editors}
+          tasks={tasks}
+          onClose={() => setManageEditorsOpen(false)}
+          onChanged={load}
+          onOpenEditor={(e) => { setManageEditorsOpen(false); setEditingEditor(e) }}
+        />
       )}
       {addTaskOpen && (
         <AddTaskModal
@@ -1448,6 +1714,10 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [confirmDel, setConfirmDel] = useState(false)
+  // Upload edited version state
+  const [uploadFile, setUploadFile] = useState(null)
+  const [uploadProgress, setUploadProgress] = useState(null)
+  const uploadInputRef = useRef(null)
 
   const save = async () => {
     setBusy(true); setErr(null)
@@ -1471,6 +1741,50 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     setBusy(false)
     if (error) setErr(error.message)
     else onDeleted?.()
+  }
+
+  // Upload an edited version: file → creative-uploads bucket → new lib_creative_library
+  // row with parent_id = source creative. Also auto-advances the task status to
+  // 'review' so admin knows there's something to look at.
+  const uploadEditedVersion = async () => {
+    if (!uploadFile) return
+    setBusy(true); setErr(null); setUploadProgress(0)
+    try {
+      const sanitized = uploadFile.name.replace(/[^A-Za-z0-9._-]+/g, '_')
+      const storagePath = `edited/${Date.now()}_${sanitized}`
+      const { error: upErr } = await supabase.storage
+        .from('creative-uploads')
+        .upload(storagePath, uploadFile, { upsert: false })
+      if (upErr) throw upErr
+      setUploadProgress(60)
+      const publicUrl = `${supabase.storageUrl || 'https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1'}/object/public/creative-uploads/${storagePath}`
+      // Insert new library row pointing at the source
+      const { error: insErr } = await supabase.from('lib_creative_library').insert({
+        name: uploadFile.name,
+        type: task.creative_type || 'Full Video',
+        creator: task.creative_creator || null,
+        size_mb: Math.round(uploadFile.size / 1024 / 1024 * 10) / 10,
+        status: 'review',
+        source_bucket: 'Editor upload',
+        preview_url: publicUrl,
+        drive_url: publicUrl,
+        parent_id: task.creative_id,
+        assigned_editor_id: task.editor_id || editorId || null,
+        notes: `Edited version uploaded ${new Date().toISOString().slice(0,10)} for task ${task.task_id} (${task.task_type || 'edit'})`,
+      })
+      if (insErr) throw insErr
+      setUploadProgress(85)
+      // Auto-advance the task status to review
+      await supabase.from('lib_editing_tasks')
+        .update({ status: 'review', started_at: task.started_at || new Date().toISOString() })
+        .eq('id', task.task_id)
+      setUploadProgress(100)
+      onSaved?.()
+    } catch (e) {
+      setErr(e.message || 'upload failed')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -1556,11 +1870,206 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             placeholder="Notes on this task — feedback, blockers, links to revisions…" />
         </Field>
 
+        {/* Upload edited version — editors drop their cut here. New library
+            row is created with parent_id pointing at the source. Task auto-
+            advances to 'review' so admin sees there's a new version. */}
+        <div style={{
+          padding: '14px 16px', border: '1px solid var(--rule)', background: 'var(--paper-2)',
+        }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+            letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)',
+            marginBottom: 10,
+          }}>Upload edited version</div>
+          <div
+            onClick={() => !busy && uploadInputRef.current?.click()}
+            onDrop={e => {
+              e.preventDefault()
+              const f = e.dataTransfer.files?.[0]
+              if (f) setUploadFile(f)
+            }}
+            onDragOver={e => e.preventDefault()}
+            style={{
+              padding: 20, textAlign: 'center', cursor: busy ? 'not-allowed' : 'pointer',
+              border: '2px dashed var(--rule)',
+              background: uploadFile ? 'white' : 'transparent',
+            }}>
+            <input ref={uploadInputRef} type="file" accept="video/*"
+              style={{ display: 'none' }}
+              onChange={e => setUploadFile(e.target.files?.[0] || null)} />
+            {uploadFile ? (
+              <>
+                <div style={{ fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 500 }}>{uploadFile.name}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 4 }}>
+                  {(uploadFile.size / 1024 / 1024).toFixed(1)} MB · click to change
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)' }}>
+                  Drop the edited version here
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 3 }}>
+                  or click to select
+                </div>
+              </>
+            )}
+          </div>
+          {uploadProgress != null && (
+            <div style={{
+              marginTop: 8, height: 4, background: 'var(--rule)', borderRadius: 2, overflow: 'hidden',
+            }}>
+              <div style={{
+                width: `${uploadProgress}%`, height: '100%',
+                background: uploadProgress === 100 ? '#3e8a5e' : 'var(--accent)',
+                transition: 'width 0.2s',
+              }} />
+            </div>
+          )}
+          {uploadFile && (
+            <button onClick={uploadEditedVersion} disabled={busy} style={{
+              ...primaryBtn, marginTop: 10,
+            }}>
+              {busy ? `Uploading… ${uploadProgress || 0}%` : 'Upload + mark for review'}
+            </button>
+          )}
+        </div>
+
         {task.drive_url && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
             Source file: <a href={task.drive_url} target="_blank" rel="noreferrer" style={{ color: 'var(--ink)' }}>{task.drive_url.slice(0, 80)}…</a>
           </div>
         )}
+      </div>
+    </Modal>
+  )
+}
+
+/* Dedicated Manage Editors modal — centralized roster view + add new +
+   row-level edit click-through. Replaces the inline ✎ chip pattern. */
+function ManageEditorsModal({ editors, tasks, onClose, onChanged, onOpenEditor }) {
+  const [newName, setNewName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  // Task counts per editor (active + overall)
+  const counts = useMemo(() => {
+    const m = {}
+    for (const t of tasks) {
+      const id = t.editor_id || '__unassigned'
+      if (!m[id]) m[id] = { open: 0, done: 0 }
+      if (t.status === 'done') m[id].done++
+      else m[id].open++
+    }
+    return m
+  }, [tasks])
+
+  const addEditor = async () => {
+    if (!newName.trim()) return
+    setBusy(true); setErr(null)
+    const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    const { error } = await supabase.from('lib_creative_editors')
+      .insert({ name: newName.trim(), slug })
+    setBusy(false)
+    if (error) setErr(error.message)
+    else {
+      setNewName('')
+      onChanged?.()
+    }
+  }
+
+  const toggleActive = async (e) => {
+    await supabase.from('lib_creative_editors')
+      .update({ active: !e.active }).eq('id', e.id)
+    onChanged?.()
+  }
+
+  return (
+    <Modal open={true} onClose={busy ? () => {} : onClose} size="lg"
+      eyebrow="Settings"
+      title="Manage editors"
+      subtitle="Roster of short-form editors. Add new ones, deactivate inactive ones, click any row to edit details + share links."
+      footer={
+        <>
+          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          <button onClick={onClose} disabled={busy} style={primaryBtn}>Done</button>
+        </>
+      }>
+      <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
+        {/* Add new editor */}
+        <div style={{
+          padding: '12px 14px', background: 'var(--paper-2)', border: '1px solid var(--rule)',
+          display: 'flex', gap: 8, alignItems: 'center',
+        }}>
+          <span style={chipLabelStyle}>Add new</span>
+          <input type="text" value={newName} onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') addEditor() }}
+            placeholder="Editor name (e.g. Sarah)"
+            style={{ ...inputStyle, flex: 1 }} />
+          <button onClick={addEditor} disabled={!newName.trim() || busy} style={primaryBtn}>
+            {busy ? '…' : '+ Add'}
+          </button>
+        </div>
+
+        {/* Roster table */}
+        <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '32px minmax(160px, 1fr) 90px 90px 100px 80px',
+            gap: 10, padding: '10px 14px',
+            background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
+            fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+            letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
+          }}>
+            <div></div>
+            <div>Name</div>
+            <div style={{ textAlign: 'right' }}>Open</div>
+            <div style={{ textAlign: 'right' }}>Done</div>
+            <div>Active</div>
+            <div></div>
+          </div>
+          {editors.length === 0 && (
+            <div style={{ padding: 20, textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
+              No editors yet — add one above.
+            </div>
+          )}
+          {editors.map((e, i) => {
+            const c = counts[e.id] || { open: 0, done: 0 }
+            const color = editorColor(e.slug)
+            return (
+              <div key={e.id} onClick={() => onOpenEditor(e)} style={{
+                display: 'grid',
+                gridTemplateColumns: '32px minmax(160px, 1fr) 90px 90px 100px 80px',
+                gap: 10, padding: '10px 14px', alignItems: 'center',
+                borderBottom: i === editors.length - 1 ? 'none' : '1px solid var(--rule)',
+                cursor: 'pointer', transition: 'background 0.12s',
+                opacity: e.active ? 1 : 0.55,
+              }}
+                onMouseEnter={ev => ev.currentTarget.style.background = 'var(--paper-2)'}
+                onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
+                <span style={{ width: 18, height: 18, borderRadius: 3, background: color }} />
+                <div style={{ fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>
+                  {e.name}
+                  {!e.active && <span style={{ marginLeft: 8, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>(inactive)</span>}
+                </div>
+                <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12 }}>{c.open}</div>
+                <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)' }}>{c.done}</div>
+                <div>
+                  <label onClick={ev => ev.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={e.active}
+                      onChange={() => toggleActive(e)} />
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+                      {e.active ? 'Active' : 'Off'}
+                    </span>
+                  </label>
+                </div>
+                <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
+                  Edit ↗
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </Modal>
   )
