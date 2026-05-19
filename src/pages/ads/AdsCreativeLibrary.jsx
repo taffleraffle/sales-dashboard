@@ -1805,24 +1805,22 @@ function UploadModal({ onClose, onSaved }) {
     acceptFiles(e.dataTransfer.files)
   }
 
+  // Per-file pipeline:
+  //   1. Insert library row (status='raw', type='Joined' as default)
+  //   2. Upload file to creative-uploads bucket (skips files >900MB — bucket limit)
+  //   3. Call transcribe-library-clip Edge Function → writes transcript
+  //      onto the library row.
+  // Each step updates the progress map so the user sees what's happening.
   const submit = async () => {
     if (!files.length) return
     setBusy(true); setErr(null)
     const stamp = new Date().toISOString().slice(0,10)
     let ok = 0, fail = 0
     for (const file of files) {
-      setProgress(p => ({ ...p, [file.name]: 'uploading' }))
+      setProgress(p => ({ ...p, [file.name]: 'creating row' }))
       try {
-        const path = `incoming/${Date.now()}_${file.name.replace(/[^A-Za-z0-9._-]/g, '_')}`
-        // Skip the Storage upload for large files (>50MB) — they'd hit limits
-        // and we don't need the temp copy. Just insert the row.
-        if (file.size < 50 * 1024 * 1024) {
-          const { error: upErr } = await supabase.storage
-            .from('creative-thumbnails')
-            .upload(path, file, { upsert: false })
-          if (upErr && !upErr.message?.includes('already exists')) throw upErr
-        }
-        const { error: insErr } = await supabase
+        // 1. Insert library row first so we get an ID to associate the upload with
+        const { data: inserted, error: insErr } = await supabase
           .from('lib_creative_library')
           .insert({
             name: file.name,
@@ -1830,10 +1828,46 @@ function UploadModal({ onClose, onSaved }) {
             size_mb: Math.round(file.size / 1024 / 1024 * 10) / 10,
             status: 'raw',
             source_bucket: 'Manual upload',
-            notes: `Uploaded via /sales/ads/creative/library on ${stamp}. Pending Drive upload + transcribe.`,
+            notes: `Uploaded via /sales/ads/creative/library on ${stamp}.`,
           })
+          .select('id')
+          .single()
         if (insErr) throw insErr
-        setProgress(p => ({ ...p, [file.name]: 'done' }))
+        const libraryId = inserted.id
+
+        // 2. Upload file to creative-uploads bucket. Skip massive files
+        //    (>900MB) — bucket limit is 1GB and we leave headroom.
+        const tooLarge = file.size > 900 * 1024 * 1024
+        let storagePath = null
+        if (!tooLarge) {
+          setProgress(p => ({ ...p, [file.name]: 'uploading' }))
+          storagePath = `incoming/${libraryId}_${file.name.replace(/[^A-Za-z0-9._-]/g, '_')}`
+          const { error: upErr } = await supabase.storage
+            .from('creative-uploads')
+            .upload(storagePath, file, { upsert: false, contentType: file.type || 'video/mp4' })
+          if (upErr) throw upErr
+        }
+
+        // 3. Kick off transcription (only if we successfully uploaded the file).
+        //    Don't await the response strictly — it can take 30s+ for long
+        //    files. Fire-and-forget with a status check; UI will pick up the
+        //    transcript on next page refresh.
+        if (storagePath) {
+          setProgress(p => ({ ...p, [file.name]: 'transcribing' }))
+          supabase.functions.invoke('transcribe-library-clip', {
+            body: { library_id: libraryId, storage_path: storagePath },
+          }).then(({ error: fnErr }) => {
+            if (fnErr) {
+              setProgress(p => ({ ...p, [file.name]: 'transcribe failed: ' + fnErr.message }))
+            } else {
+              setProgress(p => ({ ...p, [file.name]: 'done (transcribed)' }))
+            }
+          })
+          // Mark "uploaded" right away — transcript arrives later
+          setProgress(p => ({ ...p, [file.name]: 'uploaded · transcribing in background' }))
+        } else {
+          setProgress(p => ({ ...p, [file.name]: 'row created (file too large to upload)' }))
+        }
         ok++
       } catch (e) {
         setProgress(p => ({ ...p, [file.name]: 'error: ' + (e.message || 'failed') }))
@@ -1842,8 +1876,9 @@ function UploadModal({ onClose, onSaved }) {
     }
     setBusy(false)
     if (fail === 0) {
-      // All good — close + refresh
-      setTimeout(() => onSaved?.(), 500)
+      // Refresh list immediately so new rows appear; transcripts fill in
+      // a few seconds later (next manual refresh picks them up).
+      setTimeout(() => onSaved?.(), 800)
     } else {
       setErr(`${ok} uploaded, ${fail} failed — see list below`)
     }
@@ -1853,7 +1888,7 @@ function UploadModal({ onClose, onSaved }) {
     <Modal open={true} onClose={busy ? () => {} : onClose} size="md"
       eyebrow="Upload"
       title={`Add ${files.length || ''} new creative${files.length === 1 ? '' : 's'}`}
-      subtitle="Drop one or more video files. We add rows to the library — Drive upload + auto-transcribe runs after via the background pipeline."
+      subtitle="Drop video files (up to 900MB each). We upload to the library bucket and auto-transcribe via Whisper. Transcripts appear in the row's detail modal once ready (usually <60s)."
       footer={
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
