@@ -148,6 +148,8 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [q, setQ] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [offerFilter, setOfferFilter] = useState('')   // '' | offer_slug | '__none__'
+  const [runFilter, setRunFilter] = useState('')       // '' | 'yes' | 'no'
   const [rawEditedFilter, setRawEditedFilter] = useState(() => {
     try { return localStorage.getItem('lib.rawEdited') || 'edited' } catch { return 'edited' }
   })
@@ -253,13 +255,17 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     else if (rawEdited === 'edited') list = list.filter(r => r.status !== 'raw')
     const search = q.trim().toLowerCase()
     if (search) list = list.filter(r => {
-      const blob = `${r.name} ${r.canonical_name || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.transcript || ''}`.toLowerCase()
+      const blob = `${r.name} ${r.canonical_name || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
       return blob.includes(search)
     })
     if (typeFilter)   list = list.filter(r => r.type === typeFilter)
     if (statusFilter) list = list.filter(r => r.status === statusFilter)
+    if (offerFilter === '__none__') list = list.filter(r => !r.offer_slug)
+    else if (offerFilter)           list = list.filter(r => r.offer_slug === offerFilter)
+    if (runFilter === 'yes')        list = list.filter(r => r.has_been_run)
+    else if (runFilter === 'no')    list = list.filter(r => !r.has_been_run)
     return list
-  }, [rows, q, typeFilter, statusFilter, rawEditedFilter])
+  }, [rows, q, typeFilter, statusFilter, rawEditedFilter, offerFilter, runFilter])
 
   // Counts for the Raw/Edited toggle (always over ALL rows)
   const rawCount = useMemo(() => rows.filter(r => r.status === 'raw').length, [rows])
@@ -277,6 +283,18 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     for (const r of rows) m[r.status] = (m[r.status] || 0) + 1
     return m
   }, [rows])
+
+  const offerCounts = useMemo(() => {
+    const m = { __none__: 0 }
+    for (const r of rows) {
+      if (r.offer_slug) m[r.offer_slug] = (m[r.offer_slug] || 0) + 1
+      else m.__none__ += 1
+    }
+    return m
+  }, [rows])
+
+  const runCount    = useMemo(() => rows.filter(r => r.has_been_run).length, [rows])
+  const notRunCount = useMemo(() => rows.filter(r => !r.has_been_run).length, [rows])
 
   // Section groups for the list view — used when no type filter, shows
   // Hooks/Bodies/Joined/Testimony as separate sections
@@ -363,6 +381,47 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
               {STATUS_LABEL[s]}
             </FilterChip>
           ))}
+        </div>
+
+        {/* Row 4: offer / niche filter chips */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={chipLabelStyle}>Offer</span>
+          <FilterChip active={!offerFilter} onClick={() => setOfferFilter('')} count={rows.length}>All</FilterChip>
+          {offers.map(o => {
+            const oc = offerColor(o.slug)
+            const short = o.slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '')
+            return (
+              <FilterChip key={o.slug}
+                active={offerFilter === o.slug}
+                onClick={() => setOfferFilter(o.slug)}
+                count={offerCounts[o.slug] || 0}
+                color={oc.ink}>
+                {short}
+              </FilterChip>
+            )
+          })}
+          {offerCounts.__none__ > 0 && (
+            <FilterChip active={offerFilter === '__none__'}
+              onClick={() => setOfferFilter('__none__')}
+              count={offerCounts.__none__}
+              color="var(--ink-4)">
+              No offer
+            </FilterChip>
+          )}
+        </div>
+
+        {/* Row 5: run? filter chips */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={chipLabelStyle}>Run?</span>
+          <FilterChip active={!runFilter} onClick={() => setRunFilter('')} count={rows.length}>All</FilterChip>
+          <FilterChip active={runFilter === 'yes'}
+            onClick={() => setRunFilter('yes')}
+            count={runCount}
+            color="#3e8a5e">Run before</FilterChip>
+          <FilterChip active={runFilter === 'no'}
+            onClick={() => setRunFilter('no')}
+            count={notRunCount}
+            color="var(--ink-4)">Not yet</FilterChip>
         </div>
       </div>
 
@@ -454,6 +513,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                   offers={offers}
                   onClick={setDrawerRow}
                   onPatch={scope.canEditCreative ? patchRow : null}
+                  selected={selected}
+                  selectionMode={selected.size > 0}
+                  onToggleSelect={scope.canEditCreative ? toggleSelect : null}
                 />
               )}
             </section>
@@ -754,18 +816,51 @@ function ListRow({ row: r, isLast, gridCols, onClick, onDelete }) {
    offer, run?, status) is inline-editable via onPatch — no modal click
    needed. Static thumbnail only (no hover-to-play) to keep scrolling fast
    when 100+ rows are visible. */
-const MATRIX_COLS = '46px minmax(120px, 0.9fr) minmax(180px, 1.8fr) 96px 76px 130px 130px 64px 84px 70px'
+// Condensed edge-to-edge layout. Adds a 22px checkbox column when bulk-
+// select handlers are wired in. Slightly tighter column widths than before.
+const MATRIX_COLS_BASE = '38px minmax(110px, 0.85fr) minmax(180px, 1.8fr) 86px 70px 120px 120px 56px 76px 62px'
+const MATRIX_COLS_SEL  = `26px ${MATRIX_COLS_BASE}`
 
-function CreativeMatrixView({ rows, editors, offers, onClick, onPatch }) {
+function CreativeMatrixView({ rows, editors, offers, onClick, onPatch, selected, selectionMode, onToggleSelect }) {
+  const selectable = !!onToggleSelect
+  const cols = selectable ? MATRIX_COLS_SEL : MATRIX_COLS_BASE
+  const allVisible = rows.every(r => selected?.has(r.id))
+  const someVisible = !allVisible && rows.some(r => selected?.has(r.id))
+  const toggleAll = () => {
+    if (!onToggleSelect) return
+    if (allVisible) rows.forEach(r => onToggleSelect(r.id))   // toggles off all
+    else            rows.forEach(r => !selected?.has(r.id) && onToggleSelect(r.id))  // adds missing
+  }
   return (
     <div style={{ width: '100%', background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       <div style={{
-        display: 'grid', gridTemplateColumns: MATRIX_COLS,
-        gap: 6, padding: '8px 10px',
+        display: 'grid', gridTemplateColumns: cols,
+        gap: 5, padding: '6px 10px',
         background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
         fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
         letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
+        alignItems: 'center',
       }}>
+        {selectable && (
+          <div onClick={toggleAll} title="Select / deselect all visible"
+            style={{
+              width: 16, height: 16, borderRadius: 2,
+              border: '1.5px solid var(--ink-3)',
+              background: allVisible ? 'var(--accent)' : (someVisible ? 'var(--paper-2)' : 'white'),
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+            }}>
+            {allVisible && (
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                  strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+            {someVisible && (
+              <span style={{ width: 8, height: 2, background: 'var(--ink-3)' }} />
+            )}
+          </div>
+        )}
         <div></div>
         <div>ID</div>
         <div>Description</div>
@@ -782,7 +877,11 @@ function CreativeMatrixView({ rows, editors, offers, onClick, onPatch }) {
           editors={editors} offers={offers}
           isLast={i === rows.length - 1}
           onClick={() => onClick(r)}
-          onPatch={onPatch} />
+          onPatch={onPatch}
+          cols={cols}
+          selected={selected?.has(r.id)}
+          selectionMode={selectionMode}
+          onToggleSelect={onToggleSelect} />
       ))}
     </div>
   )
@@ -806,11 +905,12 @@ const cellInputStyle = {
   outline: 'none',
 }
 
-function MatrixRow({ row: r, editors, offers, isLast, onClick, onPatch }) {
+function MatrixRow({ row: r, editors, offers, isLast, onClick, onPatch, cols, selected, selectionMode, onToggleSelect }) {
   const [hover, setHover] = useState(false)
   const tc = typeColor(r.type)
   const oc = offerColor(r.offer_slug)
   const editable = !!onPatch
+  const selectable = !!onToggleSelect
   // Local state mirrors the row so inline edits feel snappy. The parent's
   // optimistic update in patchRow will sync the canonical state on next
   // render — so we re-init from row when it changes.
@@ -819,21 +919,45 @@ function MatrixRow({ row: r, editors, offers, isLast, onClick, onPatch }) {
   useEffect(() => { setDesc(r.description || r.name || '') }, [r.description, r.name])
   useEffect(() => { setCreator(r.creator || '') }, [r.creator])
   const stop = e => e.stopPropagation()
+  // In selection mode, clicking row body toggles selection instead of
+  // opening the drawer. Inline-editor cells still stopPropagation so
+  // editing doesn't toggle selection.
+  const handleRowClick = (e) => {
+    if (selectionMode && selectable) onToggleSelect(r.id)
+    else onClick?.()
+  }
   return (
     <div
-      onClick={onClick}
+      onClick={handleRowClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        display: 'grid', gridTemplateColumns: MATRIX_COLS,
-        gap: 6, padding: '6px 10px', alignItems: 'center',
+        display: 'grid', gridTemplateColumns: cols,
+        gap: 5, padding: '4px 10px', alignItems: 'center',
         borderBottom: isLast ? 'none' : '1px solid var(--rule)',
-        background: hover ? 'var(--paper-2)' : 'transparent',
+        background: selected ? 'rgba(244,225,74,0.15)' : (hover ? 'var(--paper-2)' : 'transparent'),
         cursor: 'pointer', transition: 'background 0.08s',
-        fontFamily: 'var(--mono)', fontSize: 10.5,
+        fontFamily: 'var(--mono)', fontSize: 10,
       }}>
+      {selectable && (
+        <div onClick={(e) => { e.stopPropagation(); onToggleSelect(r.id) }}
+          style={{
+            width: 16, height: 16, borderRadius: 2,
+            border: selected ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
+            background: selected ? 'var(--accent)' : 'white',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer',
+          }}>
+          {selected && (
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+              <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </div>
+      )}
       {/* Thumbnail — static, no hover-to-play (was slowing the page) */}
-      <div style={{ width: 42, height: 28, overflow: 'hidden', background: '#000', border: '1px solid var(--rule)' }}>
+      <div style={{ width: 36, height: 24, overflow: 'hidden', background: '#000', border: '1px solid var(--rule)' }}>
         {r.thumbnail_url && (
           <img src={r.thumbnail_url} alt="" loading="lazy"
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
