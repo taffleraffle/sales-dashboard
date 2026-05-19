@@ -1431,7 +1431,7 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
   const [assignEditor, setAssignEditor] = useState(scope.isEditorView ? (scope.editorId || '') : '')
   const [assignDue, setAssignDue] = useState('')
   const [assignPriority, setAssignPriority] = useState('P2 - Medium')
-  const [assignTaskType, setAssignTaskType] = useState('rough_cut')
+  const [assignTaskType, setAssignTaskType] = useState('edit')
   const [assignBusy, setAssignBusy] = useState(false)
   const [existingTasks, setExistingTasks] = useState([])
   const firstEditRef = useRef(true)
@@ -1774,12 +1774,9 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
               <option>P3 - Low</option>
             </select>
             <select value={assignTaskType} onChange={e => setAssignTaskType(e.target.value)} style={selectStyle}>
-              <option value="rough_cut">Rough cut</option>
-              <option value="final_cut">Final cut</option>
-              <option value="patch_hook_body">Patch hook+body</option>
+              <option value="edit">Edit</option>
+              <option value="patch">Patch</option>
               <option value="revision">Revision</option>
-              <option value="thumbnail">Thumbnail</option>
-              <option value="other">Other</option>
             </select>
             <input type="date" value={assignDue} onChange={e => setAssignDue(e.target.value)} style={inputStyle} />
             <button onClick={assign} disabled={!assignEditor || assignBusy} style={primaryBtn}>
@@ -2452,7 +2449,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   const [editorId, setEditorId] = useState(task.editor_id || '')
   const [status, setStatus] = useState(task.status || 'queued')
   const [priority, setPriority] = useState(task.priority || 'P2 - Medium')
-  const [taskType, setTaskType] = useState(task.task_type || 'rough_cut')
+  const [taskType, setTaskType] = useState(task.task_type || 'edit')
   const [due, setDue] = useState(task.due_date || '')
   const [notes, setNotes] = useState(task.notes || '')
   const [busy, setBusy] = useState(false)
@@ -2506,11 +2503,12 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
 
       // Map task type → which stage URL / stage column to update on the source.
+      // All three task types now land in the 'final cut' slot — the editor's
+      // output is treated as the working final cut, ready for review.
       const stageMap = {
-        rough_cut: { url: 'rough_cut_url', flag: 'stage_rough_cut' },
-        final_cut: { url: 'final_cut_url', flag: 'stage_final_cut' },
-        thumbnail: { url: 'thumbnail_url', flag: null },
-        revision:  { url: 'final_cut_url', flag: 'stage_final_cut' },
+        edit:     { url: 'final_cut_url', flag: 'stage_final_cut' },
+        patch:    { url: 'final_cut_url', flag: 'stage_final_cut' },
+        revision: { url: 'final_cut_url', flag: 'stage_final_cut' },
       }
       const target = stageMap[task.task_type] || { url: 'delivered_url', flag: 'stage_delivered' }
       const patch = { [target.url]: publicUrl }
@@ -2635,12 +2633,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           </Field>
           <Field label="Task type">
             <select value={taskType} onChange={e => setTaskType(e.target.value)} style={selectStyle}>
-              <option value="rough_cut">Rough cut</option>
-              <option value="final_cut">Final cut</option>
-              <option value="patch_hook_body">Patch hook+body</option>
+              <option value="edit">Edit</option>
+              <option value="patch">Patch</option>
               <option value="revision">Revision</option>
-              <option value="thumbnail">Thumbnail</option>
-              <option value="other">Other</option>
             </select>
           </Field>
           <Field label="Due date">
@@ -3383,7 +3378,7 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
   const uploadInputRef = useRef(null)
   // Common state — accept pre-fill from Timeline drag
   const [editorId, setEditorId] = useState(prefillEditorId || '')
-  const [taskType, setTaskType] = useState('rough_cut')
+  const [taskType, setTaskType] = useState('edit')
   const [priority, setPriority] = useState('P2 - Medium')
   const [due, setDue] = useState(prefillDue || '')
   // Optional start date — if user dragged across multiple days in the
@@ -3398,7 +3393,7 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
 
   useEffect(() => {
     supabase.from('lib_creative_library')
-      .select('id,name,canonical_name,type,creator')
+      .select('id,name,canonical_name,type,creator,thumbnail_url,description')
       .eq('exclude_from_library', false)
       .order('canonical_name', { ascending: true })
       .limit(500)
@@ -3588,7 +3583,7 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
                     <div key={c.id}
                       onClick={() => toggleCreative(c.id)}
                       style={{
-                        padding: '8px 12px', cursor: 'pointer',
+                        padding: '6px 10px', cursor: 'pointer',
                         background: isOn ? 'rgba(244,225,74,0.18)' : 'transparent',
                         borderBottom: '1px solid var(--rule)',
                         fontFamily: 'var(--mono)', fontSize: 11.5,
@@ -3608,9 +3603,36 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
                           </svg>
                         )}
                       </span>
-                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {c.canonical_name || c.name}
-                      </span>
+                      {/* Thumbnail — visual ID for cryptic canonical names */}
+                      <div style={{
+                        width: 48, height: 32, background: '#000',
+                        border: '1px solid var(--rule)',
+                        overflow: 'hidden', flexShrink: 0,
+                      }}>
+                        {c.thumbnail_url ? (
+                          <img src={c.thumbnail_url} alt="" loading="lazy"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                        ) : (
+                          <div style={{
+                            width: '100%', height: '100%',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)',
+                          }}>—</div>
+                        )}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          fontWeight: 500,
+                        }}>{c.canonical_name || c.name}</div>
+                        {c.description && (
+                          <div style={{
+                            fontFamily: 'var(--sans)', fontSize: 10.5, color: 'var(--ink-3)',
+                            marginTop: 1,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>{c.description}</div>
+                        )}
+                      </div>
                       <span style={{ color: 'var(--ink-4)', fontSize: 10 }}>{c.type}</span>
                     </div>
                   )
@@ -3694,12 +3716,9 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
           </Field>
           <Field label="Task type">
             <select value={taskType} onChange={e => setTaskType(e.target.value)} style={selectStyle}>
-              <option value="rough_cut">Rough cut</option>
-              <option value="final_cut">Final cut</option>
-              <option value="patch_hook_body">Patch hook+body</option>
+              <option value="edit">Edit</option>
+              <option value="patch">Patch</option>
               <option value="revision">Revision</option>
-              <option value="thumbnail">Thumbnail</option>
-              <option value="other">Other</option>
             </select>
           </Field>
           <Field label="Priority">
