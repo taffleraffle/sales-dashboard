@@ -104,10 +104,10 @@ export default function EditorView() {
             margin: '4px 0 0', fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500,
             color: 'var(--ink)',
           }}>
-            {editor ? `${editor.name}'s queue` : 'Creative library'}
+            {editor ? `${editor.name}'s queue` : 'Editing team portal'}
           </h1>
         </div>
-        {editor && (
+        {editor ? (
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
             padding: '6px 12px', background: 'white', border: '1px solid var(--rule)',
@@ -115,25 +115,39 @@ export default function EditorView() {
           }}>
             <span style={{
               width: 9, height: 9, borderRadius: 2,
-              background: '#3e7eba',  /* placeholder; matches the hash */
+              background: '#3e7eba',
             }} />
             <span style={{ color: 'var(--ink-3)' }}>Logged in as</span>
             <span style={{ fontWeight: 600 }}>{editor.name}</span>
+          </div>
+        ) : (
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '6px 12px', background: '#fffaea', border: '1px solid #e8b408',
+            fontFamily: 'var(--mono)', fontSize: 11,
+          }}>
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: '#e8b408' }} />
+            <span style={{ color: '#7a4e08' }}>Team-wide view · all editors</span>
           </div>
         )}
       </header>
 
       {/* Wrapper — main content uses the existing AdsCreativeLibrary with
-          a permissions object so it knows to lock down the admin-only bits */}
+          a permissions object so it knows to lock down the admin-only bits.
+          Team-wide links (no editor binding) get a manager-like scope:
+          they see everything, can upload finished work, can update any task. */}
       <div style={{
         maxWidth: 1400, margin: '0 auto', padding: '0 32px',
       }}>
         <AdsCreativeLibrary editorScope={{
           isEditorView: true,
+          isTeamWide: !editor,
           editorId: editor?.id || null,
           editorName: editor?.name || null,
           canDelete: false,
-          canUpload: false,
+          // Team-wide links can upload finished work (admin reviews + assigns).
+          // Per-editor links can only upload inside an assigned task.
+          canUpload: !editor,
           canEditCreative: false,
           canEditTask: true,
           canAssignSelf: true,

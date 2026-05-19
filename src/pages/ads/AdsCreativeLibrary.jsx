@@ -2130,11 +2130,16 @@ function ManageEditorsModal({ editors, tasks, onClose, onChanged, onOpenEditor }
 }
 
 /* Dedicated share-with-editor modal — opens straight from the toolbar so
-   Ben doesn't have to dig through Manage Editors → click row → scroll. */
+   Ben doesn't have to dig through Manage Editors → click row → scroll.
+   Two link types:
+     1. TEAM-WIDE link (no editor_id binding) — anyone can see the whole queue
+     2. Per-editor links (editor_id bound) — filtered to one editor's tasks */
 function ShareLinksModal({ editors, onClose }) {
   const [links, setLinks] = useState({})   // editor_id -> link row
+  const [teamLink, setTeamLink] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busyEditor, setBusyEditor] = useState(null)
+  const [busyTeam, setBusyTeam] = useState(false)
   const [copyOk, setCopyOk] = useState(null)
   const [err, setErr] = useState(null)
 
@@ -2150,16 +2155,49 @@ function ShareLinksModal({ editors, onClose }) {
           setErr('Migration 077 not yet applied — share links unavailable')
         } else {
           const m = {}
+          let team = null
           for (const link of (data || [])) {
-            // Keep only the most recent active link per editor
-            if (link.editor_id && !m[link.editor_id]) m[link.editor_id] = link
+            if (link.editor_id) {
+              if (!m[link.editor_id]) m[link.editor_id] = link
+            } else if (!team) {
+              team = link  // most recent team-wide link
+            }
           }
           setLinks(m)
+          setTeamLink(team)
         }
         setLoading(false)
       })
     return () => { mounted = false }
   }, [])
+
+  const generateTeamLink = async () => {
+    setBusyTeam(true); setErr(null)
+    const arr = new Uint8Array(21)
+    crypto.getRandomValues(arr)
+    const token = btoa(String.fromCharCode(...arr))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const { data, error } = await supabase.from('lib_editor_share_links')
+      .insert({
+        token, editor_id: null,
+        label: 'Team-wide link',
+        created_by: 'admin',
+      })
+      .select()
+      .single()
+    setBusyTeam(false)
+    if (error) setErr(error.message)
+    else setTeamLink(data)
+  }
+  const revokeTeamLink = async () => {
+    if (!teamLink) return
+    setBusyTeam(true)
+    await supabase.from('lib_editor_share_links')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('id', teamLink.id)
+    setTeamLink(null)
+    setBusyTeam(false)
+  }
 
   const generate = async (editor) => {
     setBusyEditor(editor.id); setErr(null)
@@ -2203,7 +2241,7 @@ function ShareLinksModal({ editors, onClose }) {
     <Modal open={true} onClose={onClose} size="lg"
       eyebrow="Share"
       title="Share the editor portal"
-      subtitle="Each editor gets a private URL — no login required. Click Generate to make one, Copy to grab it, Revoke to kill it."
+      subtitle="One link the whole team uses, OR per-editor links. No login required for either."
       footer={
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
@@ -2213,14 +2251,94 @@ function ShareLinksModal({ editors, onClose }) {
       <div style={{ padding: '20px 28px' }}>
         {loading ? (
           <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 13 }}>Loading…</div>
-        ) : editors.length === 0 ? (
-          <div style={{
-            padding: 24, textAlign: 'center', border: '1px dashed var(--rule)',
-            fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
-          }}>
-            No active editors. Add one in Manage editors first.
-          </div>
         ) : (
+          <>
+            {/* Team-wide link — the primary CTA. One link, everyone sees
+                everything, can upload their own finished work, can update
+                their own task status. */}
+            <div style={{
+              padding: '16px 18px', marginBottom: 20,
+              background: '#fffaea', border: '2px solid #e8b408',
+              borderRadius: 2,
+            }}>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7a4e08',
+                marginBottom: 4,
+              }}>Team-wide link · recommended</div>
+              <div style={{
+                fontFamily: 'var(--serif)', fontSize: 17, fontWeight: 500,
+                color: 'var(--ink)', marginBottom: 12,
+              }}>
+                One link for the whole editing team
+              </div>
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center',
+              }}>
+                {teamLink ? (
+                  <>
+                    <div style={{
+                      padding: '8px 12px', background: 'white', border: '1px solid var(--rule)',
+                      fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-2)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }} title={buildUrl(teamLink.token)}>{buildUrl(teamLink.token)}</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => copyLink(teamLink.token)} style={{
+                        padding: '8px 16px',
+                        fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: copyOk === teamLink.token ? '#3e8a5e' : '#e8b408',
+                        color: copyOk === teamLink.token ? 'white' : '#3a2a08',
+                        border: 'none', cursor: 'pointer',
+                      }}>{copyOk === teamLink.token ? '✓ Copied' : '↗ Copy link'}</button>
+                      <button onClick={revokeTeamLink} disabled={busyTeam} style={{
+                        padding: '8px 12px',
+                        fontFamily: 'var(--mono)', fontSize: 10,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'transparent', color: '#b53e3e',
+                        border: '1px solid rgba(181,62,62,0.4)', cursor: 'pointer',
+                      }}>Revoke</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
+                      No team-wide link yet
+                    </span>
+                    <button onClick={generateTeamLink} disabled={busyTeam} style={{
+                      padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                      letterSpacing: '0.06em', textTransform: 'uppercase',
+                      background: '#e8b408', color: '#3a2a08',
+                      border: 'none', cursor: 'pointer',
+                    }}>{busyTeam ? '…' : '+ Generate team link'}</button>
+                  </>
+                )}
+              </div>
+              <p style={{
+                marginTop: 10, fontFamily: 'var(--serif)', fontSize: 12.5,
+                color: 'var(--ink-3)', fontStyle: 'italic', lineHeight: 1.45, margin: '10px 0 0',
+              }}>
+                Anyone with this link sees the whole queue (all editors' tasks), the full creative
+                library, and can <strong>upload finished work</strong> — even without an assigned task.
+                You review + assign it from your admin view. They can't delete creatives or manage
+                editors.
+              </p>
+            </div>
+
+            {/* Per-editor links — secondary */}
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
+              marginBottom: 10,
+            }}>Per-editor links (optional)</div>
+            {editors.length === 0 ? (
+              <div style={{
+                padding: 16, textAlign: 'center', border: '1px dashed var(--rule)',
+                fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12,
+              }}>
+                No active editors. Add one in Manage editors first.
+              </div>
+            ) : (
           <div style={{ display: 'grid', gap: 10 }}>
             {editors.map(e => {
               const link = links[e.id]
@@ -2285,11 +2403,11 @@ function ShareLinksModal({ editors, onClose }) {
           marginTop: 14, fontFamily: 'var(--serif)', fontSize: 12.5,
           color: 'var(--ink-3)', fontStyle: 'italic', lineHeight: 1.5,
         }}>
-          Anyone with the link sees the queue (filtered to that editor) + the full creative
-          library + previews. They can update task status, add notes, and self-assign from
-          the unassigned pile. They cannot delete creatives, upload new sources, or manage
-          other editors.
+          Per-editor links narrow the view to that editor's tasks only. Use these
+          if you want a contractor to see exactly what they're working on and nothing else.
         </p>
+          </>
+        )}
       </div>
     </Modal>
   )
