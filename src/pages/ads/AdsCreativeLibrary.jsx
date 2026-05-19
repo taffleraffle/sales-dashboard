@@ -1483,6 +1483,22 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     })
   }
 
+  // Move a task to a new status (Kanban drag-and-drop). Optimistic update:
+  // patch local state immediately, then write to DB. Roll back on error.
+  const moveTaskStatus = useCallback(async (task, nextStatus) => {
+    if (!task || !nextStatus || task.status === nextStatus) return
+    const prevStatus = task.status
+    setTasks(prev => prev.map(t => t.task_id === task.task_id ? { ...t, status: nextStatus } : t))
+    const { error } = await supabase
+      .from('lib_editing_tasks')
+      .update({ status: nextStatus })
+      .eq('id', task.task_id)
+    if (error) {
+      setTasks(prev => prev.map(t => t.task_id === task.task_id ? { ...t, status: prevStatus } : t))
+      setErr(error.message)
+    }
+  }, [])
+
   if (loading) return <LoadingState />
   if (err) return <ErrorBanner msg={err} />
 
@@ -1566,7 +1582,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       ) : view === 'timeline' ? (
         <TimelineView tasks={filteredTasks} editors={editors.filter(e => e.active)} onEdit={setEditingTask} />
       ) : (
-        <KanbanView tasks={filteredTasks} onEdit={setEditingTask} />
+        <KanbanView tasks={filteredTasks} onEdit={setEditingTask} onMove={moveTaskStatus} />
       )}
 
       {addEditorOpen && (
@@ -3163,33 +3179,84 @@ function TimelineView({ tasks, editors, onEdit }) {
 
 /* ─────────────────────────── KANBAN view ─────────────────────────── */
 
-function KanbanView({ tasks, onEdit }) {
+function KanbanView({ tasks, onEdit, onMove }) {
   const cols = ['queued', 'in_progress', 'review', 'blocked', 'done']
   const colLabels = {
     queued: 'Queued', in_progress: 'In progress', review: 'Review',
     blocked: 'Blocked', done: 'Done',
   }
+  const colAccent = {
+    queued: 'var(--ink-3)', in_progress: '#b86a0c', review: '#3e7eba',
+    blocked: '#b53e3e', done: '#3e8a5e',
+  }
   const byCol = Object.fromEntries(cols.map(c => [c, tasks.filter(t => t.status === c)]))
+  const taskById = useMemo(() => Object.fromEntries(tasks.map(t => [t.task_id, t])), [tasks])
+  const [dragOver, setDragOver] = useState(null)
+
+  const handleDragStart = (e, task) => {
+    e.dataTransfer.setData('text/plain', task.task_id)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const handleDragOver = (e, col) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOver !== col) setDragOver(col)
+  }
+  const handleDragLeave = (e, col) => {
+    // Only clear if leaving the column (not entering a child)
+    if (e.currentTarget.contains(e.relatedTarget)) return
+    if (dragOver === col) setDragOver(null)
+  }
+  const handleDrop = (e, col) => {
+    e.preventDefault()
+    setDragOver(null)
+    const taskId = e.dataTransfer.getData('text/plain')
+    const task = taskById[taskId]
+    if (task && task.status !== col) onMove?.(task, col)
+  }
+
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: `repeat(${cols.length}, 1fr)`,
       gap: 10, alignItems: 'flex-start',
     }}>
       {cols.map(c => (
-        <div key={c} style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+        <div key={c}
+          onDragOver={e => handleDragOver(e, c)}
+          onDragLeave={e => handleDragLeave(e, c)}
+          onDrop={e => handleDrop(e, c)}
+          style={{
+            background: 'var(--paper)',
+            border: dragOver === c ? `2px dashed ${colAccent[c]}` : '1px solid var(--rule)',
+            minHeight: 200, transition: 'border-color 0.12s',
+          }}>
           <div style={{
             padding: '10px 14px', background: 'var(--paper-2)',
             borderBottom: '1px solid var(--rule)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6,
+                          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                           letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+              <span style={{ width: 7, height: 7, borderRadius: 2, background: colAccent[c] }} />
               {colLabels[c]}
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{byCol[c].length}</div>
           </div>
           <div style={{ padding: 8, display: 'grid', gap: 8 }}>
-            {byCol[c].map(t => <QueueCard key={t.task_id} task={t} onClick={() => onEdit?.(t)} />)}
+            {byCol[c].map(t => (
+              <QueueCard key={t.task_id} task={t}
+                onClick={() => onEdit?.(t)}
+                draggable={!!onMove}
+                onDragStart={e => handleDragStart(e, t)} />
+            ))}
+            {byCol[c].length === 0 && dragOver === c && (
+              <div style={{
+                padding: '20px 12px', textAlign: 'center',
+                fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>Drop to move</div>
+            )}
           </div>
         </div>
       ))}
@@ -3225,7 +3292,7 @@ function EditorLane({ editor, tasks, onEdit }) {
   )
 }
 
-function QueueCard({ task, onClick }) {
+function QueueCard({ task, onClick, draggable, onDragStart }) {
   const statusColor = {
     queued: 'var(--ink-3)',
     in_progress: '#b86a0c',
@@ -3234,16 +3301,23 @@ function QueueCard({ task, onClick }) {
     blocked: '#b53e3e',
   }[task.status] || 'var(--ink-3)'
 
+  const eColor = task.editor_slug ? editorColor(task.editor_slug) : null
+
   return (
-    <div onClick={onClick} style={{
-      background: 'white', border: '1px solid var(--rule)',
-      borderLeft: `3px solid ${statusColor}`,
-      padding: '10px 12px',
-      cursor: onClick ? 'pointer' : 'default',
-      transition: 'background 0.12s',
-    }}
-    onMouseEnter={e => onClick && (e.currentTarget.style.background = 'var(--paper-2)')}
-    onMouseLeave={e => onClick && (e.currentTarget.style.background = 'white')}>
+    <div onClick={onClick}
+      draggable={!!draggable}
+      onDragStart={onDragStart}
+      style={{
+        background: 'white', border: '1px solid var(--rule)',
+        borderLeft: `3px solid ${statusColor}`,
+        padding: '10px 12px',
+        cursor: draggable ? 'grab' : (onClick ? 'pointer' : 'default'),
+        transition: 'background 0.12s, opacity 0.12s',
+      }}
+      onMouseEnter={e => onClick && (e.currentTarget.style.background = 'var(--paper-2)')}
+      onMouseLeave={e => onClick && (e.currentTarget.style.background = 'white')}
+      onDragStartCapture={e => { e.currentTarget.style.opacity = '0.5' }}
+      onDragEnd={e => { e.currentTarget.style.opacity = '1' }}>
       {task.thumbnail_url && (
         <div style={{
           aspectRatio: '16/9', backgroundImage: `url('${task.thumbnail_url}')`,
@@ -3255,8 +3329,34 @@ function QueueCard({ task, onClick }) {
         fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>{task.creative_name}</div>
+      {/* Editor pill — surfaces who is working on this card */}
+      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+        {eColor ? (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            padding: '2px 7px', borderRadius: 999,
+            background: 'white', border: `1px solid ${eColor}`,
+            fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-2)',
+            fontWeight: 500,
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: eColor }} />
+            {task.editor_name}
+          </span>
+        ) : (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            padding: '2px 7px', borderRadius: 999,
+            background: '#fffaea', border: '1px solid #e8b408',
+            fontFamily: 'var(--mono)', fontSize: 9.5, color: '#7a4e08',
+            fontWeight: 500,
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#e8b408' }} />
+            Unassigned
+          </span>
+        )}
+      </div>
       <div style={{
-        marginTop: 4, display: 'flex', gap: 6, alignItems: 'center',
+        marginTop: 6, display: 'flex', gap: 6, alignItems: 'center',
         fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-3)',
         letterSpacing: '0.06em', textTransform: 'uppercase',
       }}>
