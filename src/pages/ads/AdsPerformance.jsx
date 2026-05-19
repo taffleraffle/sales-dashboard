@@ -1482,6 +1482,7 @@ export default function AdsPerformance() {
           onClearAdv={() => setAdvFilter({ spendMin:'', spendMax:'', leadsMin:'', leadsMax:'', closesMin:'', closesMax:'', showMin:'', showMax:'', cacMin:'', cacMax:'' })}
           onClearAdvKey={(k) => setAdvFilter({ ...advFilter, [k]: '' })}
           onClearStatus={() => setStatusFilter('ACTIVE')}
+          onWiden={(preset) => setDateRange(rangeFromPreset(preset))}
         />
       )}
 
@@ -1849,9 +1850,9 @@ function advFilterLabel(k) {
 }
 // Empty-state diagnostic — when nothing matches the current filters, tell
 // the operator WHY: which filters are active, what the actual ceiling in
-// the current window is, and a one-click "clear all". Replaces the old
-// "Adjust filters or run a Meta sync" tombstone (uninformative).
-function EmptyStateDiagnostic({ ads, statusFilter, advFilter, dateRange, onClearAdv, onClearAdvKey, onClearStatus }) {
+// the current window is, and a one-click "clear all" / "widen window".
+// Replaces the old "Adjust filters or run a Meta sync" tombstone.
+function EmptyStateDiagnostic({ ads, statusFilter, advFilter, dateRange, onClearAdv, onClearAdvKey, onClearStatus, onWiden }) {
   // Compute unfiltered campaign-level rollups so we can surface the ceiling
   // for whichever metric the operator is filtering by. "Why didn't my
   // $40k spend filter match?" → "highest campaign spent $27k in this window."
@@ -1867,12 +1868,14 @@ function EmptyStateDiagnostic({ ads, statusFilter, advFilter, dateRange, onClear
       r.closes += a.tfCloses  || 0
     }
     let spend = 0, leads = 0, closes = 0
+    let totalSpend = 0
     for (const r of camps.values()) {
       if (r.spend  > spend)  spend  = r.spend
       if (r.leads  > leads)  leads  = r.leads
       if (r.closes > closes) closes = r.closes
+      totalSpend += r.spend
     }
-    return { campaignCount: camps.size, spend, leads, closes }
+    return { campaignCount: camps.size, spend, leads, closes, totalSpend }
   })()
 
   const activeAdv = Object.entries(advFilter)
@@ -1881,9 +1884,9 @@ function EmptyStateDiagnostic({ ads, statusFilter, advFilter, dateRange, onClear
 
   const hasActiveFilters = activeAdv.length > 0 || statusFilter !== 'ACTIVE'
   const noDataAtAll = !ads.length
+  const dataExistsButNoActivity = !noDataAtAll && !hasActiveFilters && (ceilings?.totalSpend || 0) === 0
 
-  // Choose the most relevant ceiling to surface — whichever metric Ben is
-  // filtering on. If he's filtering by spend, show max spend etc.
+  // Choose the most relevant ceiling to surface based on what's active.
   let ceilingHint = null
   if (ceilings && hasActiveFilters) {
     const hasSpend  = activeAdv.some(f => f.key === 'spendMin'  || f.key === 'spendMax')
@@ -1894,28 +1897,54 @@ function EmptyStateDiagnostic({ ads, statusFilter, advFilter, dateRange, onClear
     else if (hasCloses) ceilingHint = `Most-closes campaign in this window: ${ceilings.closes}`
   }
 
+  const dateLabel = dateRange ? rangeLabel(dateRange) : null
+
+  // Three distinct branches: completely no data, data-without-activity-in-window,
+  // and filters-too-tight. Each gets its own copy + CTA.
+  let eyebrow, heading, body
+  const ctas = []
+  if (noDataAtAll) {
+    eyebrow = 'No ads in this window'
+    heading = 'No ads loaded for this date range.'
+    body = 'Either no Meta ads ran in the selected window, or sync hasn’t caught up yet. Try widening the range or running an autoSync.'
+    if (onWiden) {
+      ctas.push({ label: 'Widen to 90 days', action: () => onWiden('90') })
+      ctas.push({ label: 'All time', action: () => onWiden('all') })
+    }
+  } else if (dataExistsButNoActivity) {
+    eyebrow = 'No activity in this window'
+    heading = `${ceilings.campaignCount} campaigns on file, none active in this window.`
+    body = `The campaigns exist in your dataset but none of them spent, generated leads, or closed inside ${dateLabel || 'the selected range'}. Widen the date range to find them.`
+    if (onWiden) {
+      ctas.push({ label: 'Widen to 90 days', action: () => onWiden('90') })
+      ctas.push({ label: 'All time', action: () => onWiden('all') })
+    }
+  } else {
+    // Filters too tight — there IS activity in the window, but the user's
+    // filters reject every campaign. Show the filter pills + clear-all.
+    eyebrow = 'Nothing matches current filters'
+    heading = `Filtered ${ceilings?.campaignCount || 0} campaigns down to zero.`
+    body = 'Loosen or clear a filter below to see ads again.'
+  }
+
   return (
     <div style={{ border: '1px dashed var(--rule)', borderRadius: 4, padding: 32, textAlign: 'center', background: 'var(--paper-2)' }}>
       <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center', display: 'inline-flex', marginBottom: 12 }}>
-        {noDataAtAll ? 'No ads in this window' : 'Nothing matches current filters'}
+        {eyebrow}
       </span>
-      <h3 className="h3" style={{ fontSize: 22, marginBottom: 10 }}>
-        {noDataAtAll ? 'No ads loaded for this date range.' : `Filtered ${ceilings?.campaignCount || 0} campaigns down to zero.`}
-      </h3>
+      <h3 className="h3" style={{ fontSize: 22, marginBottom: 10 }}>{heading}</h3>
+      <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', margin: '0 auto 14px', maxWidth: 560 }}>
+        {body}
+      </p>
 
-      {noDataAtAll && (
-        <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', margin: '0 auto', maxWidth: 520 }}>
-          Either no Meta ads ran in the selected date range, or sync hasn't caught up yet.
-          Try widening the date range or running an autoSync.
+      {dateLabel && (
+        <p style={{ fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 14 }}>
+          Current window: {dateLabel}
         </p>
       )}
 
       {!noDataAtAll && hasActiveFilters && (
         <>
-          <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', margin: '0 0 14px' }}>
-            Loosen or clear a filter below to see ads again.
-          </p>
-
           <div style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginBottom: 14, maxWidth: 640 }}>
             {statusFilter !== 'ACTIVE' && (
               <ActiveFilterPill label={`Status: ${statusFilter}`} onClear={onClearStatus} />
@@ -1942,10 +1971,18 @@ function EmptyStateDiagnostic({ ads, statusFilter, advFilter, dateRange, onClear
         </>
       )}
 
-      {!noDataAtAll && !hasActiveFilters && (
-        <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)' }}>
-          No campaigns in this date range have any activity. Try widening the window.
-        </p>
+      {ctas.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: hasActiveFilters ? 8 : 0 }}>
+          {ctas.map((c, i) => (
+            <button key={i} onClick={c.action} style={{
+              padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              background: i === 0 ? 'var(--ink)' : 'transparent',
+              color: i === 0 ? 'var(--paper)' : 'var(--ink)',
+              border: '1px solid var(--ink)', borderRadius: 2, cursor: 'pointer',
+            }}>{c.label}</button>
+          ))}
+        </div>
       )}
     </div>
   )
