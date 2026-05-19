@@ -1474,11 +1474,15 @@ export default function AdsPerformance() {
       {loading && <div className="flex items-center justify-center py-16"><Loader className="animate-spin" style={{ color: 'var(--ink-3)' }} /></div>}
 
       {!loading && tree.length === 0 && !error && (
-        <div style={{ border: '1px dashed var(--rule)', borderRadius: 4, padding: 32, textAlign: 'center', background: 'var(--paper-2)' }}>
-          <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center', display: 'inline-flex', marginBottom: 12 }}>No ads loaded</span>
-          <h3 className="h3" style={{ fontSize: 22, marginBottom: 10 }}>Nothing matches.</h3>
-          <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)' }}>Adjust filters or run a Meta sync.</p>
-        </div>
+        <EmptyStateDiagnostic
+          ads={ads}
+          statusFilter={statusFilter}
+          advFilter={advFilter}
+          dateRange={dateRange}
+          onClearAdv={() => setAdvFilter({ spendMin:'', spendMax:'', leadsMin:'', leadsMax:'', closesMin:'', closesMax:'', showMin:'', showMax:'', cacMin:'', cacMax:'' })}
+          onClearAdvKey={(k) => setAdvFilter({ ...advFilter, [k]: '' })}
+          onClearStatus={() => setStatusFilter('ACTIVE')}
+        />
       )}
 
       {/* Hierarchical table */}
@@ -1843,6 +1847,110 @@ function advFilterLabel(k) {
     cacMin:'CAC ≥', cacMax:'CAC ≤' }
   return map[k] || k
 }
+// Empty-state diagnostic — when nothing matches the current filters, tell
+// the operator WHY: which filters are active, what the actual ceiling in
+// the current window is, and a one-click "clear all". Replaces the old
+// "Adjust filters or run a Meta sync" tombstone (uninformative).
+function EmptyStateDiagnostic({ ads, statusFilter, advFilter, dateRange, onClearAdv, onClearAdvKey, onClearStatus }) {
+  // Compute unfiltered campaign-level rollups so we can surface the ceiling
+  // for whichever metric the operator is filtering by. "Why didn't my
+  // $40k spend filter match?" → "highest campaign spent $27k in this window."
+  const ceilings = (() => {
+    if (!ads.length) return null
+    const camps = new Map()
+    for (const a of ads) {
+      const cid = a.campaign_id || 'no-campaign'
+      if (!camps.has(cid)) camps.set(cid, { spend: 0, leads: 0, closes: 0 })
+      const r = camps.get(cid)
+      r.spend  += a.spend     || 0
+      r.leads  += a.tfLeads   || 0
+      r.closes += a.tfCloses  || 0
+    }
+    let spend = 0, leads = 0, closes = 0
+    for (const r of camps.values()) {
+      if (r.spend  > spend)  spend  = r.spend
+      if (r.leads  > leads)  leads  = r.leads
+      if (r.closes > closes) closes = r.closes
+    }
+    return { campaignCount: camps.size, spend, leads, closes }
+  })()
+
+  const activeAdv = Object.entries(advFilter)
+    .filter(([_k, v]) => v !== '' && v != null)
+    .map(([k, v]) => ({ key: k, label: advFilterLabel(k), value: v }))
+
+  const hasActiveFilters = activeAdv.length > 0 || statusFilter !== 'ACTIVE'
+  const noDataAtAll = !ads.length
+
+  // Choose the most relevant ceiling to surface — whichever metric Ben is
+  // filtering on. If he's filtering by spend, show max spend etc.
+  let ceilingHint = null
+  if (ceilings && hasActiveFilters) {
+    const hasSpend  = activeAdv.some(f => f.key === 'spendMin'  || f.key === 'spendMax')
+    const hasLeads  = activeAdv.some(f => f.key === 'leadsMin'  || f.key === 'leadsMax')
+    const hasCloses = activeAdv.some(f => f.key === 'closesMin' || f.key === 'closesMax')
+    if (hasSpend)       ceilingHint = `Highest-spend campaign in this window: $${Math.round(ceilings.spend).toLocaleString()}`
+    else if (hasLeads)  ceilingHint = `Most-leads campaign in this window: ${ceilings.leads}`
+    else if (hasCloses) ceilingHint = `Most-closes campaign in this window: ${ceilings.closes}`
+  }
+
+  return (
+    <div style={{ border: '1px dashed var(--rule)', borderRadius: 4, padding: 32, textAlign: 'center', background: 'var(--paper-2)' }}>
+      <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center', display: 'inline-flex', marginBottom: 12 }}>
+        {noDataAtAll ? 'No ads in this window' : 'Nothing matches current filters'}
+      </span>
+      <h3 className="h3" style={{ fontSize: 22, marginBottom: 10 }}>
+        {noDataAtAll ? 'No ads loaded for this date range.' : `Filtered ${ceilings?.campaignCount || 0} campaigns down to zero.`}
+      </h3>
+
+      {noDataAtAll && (
+        <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', margin: '0 auto', maxWidth: 520 }}>
+          Either no Meta ads ran in the selected date range, or sync hasn't caught up yet.
+          Try widening the date range or running an autoSync.
+        </p>
+      )}
+
+      {!noDataAtAll && hasActiveFilters && (
+        <>
+          <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', margin: '0 0 14px' }}>
+            Loosen or clear a filter below to see ads again.
+          </p>
+
+          <div style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginBottom: 14, maxWidth: 640 }}>
+            {statusFilter !== 'ACTIVE' && (
+              <ActiveFilterPill label={`Status: ${statusFilter}`} onClear={onClearStatus} />
+            )}
+            {activeAdv.map(f => (
+              <ActiveFilterPill key={f.key} label={`${f.label} ${f.value}`} onClear={() => onClearAdvKey(f.key)} />
+            ))}
+          </div>
+
+          {ceilingHint && (
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.04em', marginBottom: 14 }}>
+              {ceilingHint}
+            </p>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+            <button onClick={onClearAdv} style={{
+              padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              background: 'var(--ink)', color: 'var(--paper)',
+              border: '1px solid var(--ink)', borderRadius: 2, cursor: 'pointer',
+            }}>Clear all filters</button>
+          </div>
+        </>
+      )}
+
+      {!noDataAtAll && !hasActiveFilters && (
+        <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)' }}>
+          No campaigns in this date range have any activity. Try widening the window.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function ActiveFilterPill({ label, onClear }) {
   return (
     <span style={{
