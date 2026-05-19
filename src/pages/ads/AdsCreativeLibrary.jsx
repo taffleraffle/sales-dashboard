@@ -72,6 +72,11 @@ function LibraryTab() {
   const [statusFilter, setStatusFilter] = useState('')
   const [drawerRow, setDrawerRow] = useState(null)
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem('lib.view') || 'tile' } catch { return 'tile' }
+  })
+  useEffect(() => { try { localStorage.setItem('lib.view', view) } catch {} }, [view])
+  const [confirmDelete, setConfirmDelete] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
@@ -126,6 +131,10 @@ function LibraryTab() {
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
           {filtered.length} / {rows.length}
         </span>
+        <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'white' }}>
+          <ViewBtn active={view === 'tile'} onClick={() => setView('tile')}>Tiles</ViewBtn>
+          <ViewBtn active={view === 'list'} onClick={() => setView('list')}>List</ViewBtn>
+        </div>
         <button onClick={() => setUploadOpen(true)} style={primaryBtn}>
           + Upload creative
         </button>
@@ -137,7 +146,7 @@ function LibraryTab() {
         <LoadingState />
       ) : filtered.length === 0 ? (
         <EmptyState />
-      ) : (
+      ) : view === 'tile' ? (
         <div style={{
           display: 'grid', gap: 14,
           gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
@@ -146,6 +155,12 @@ function LibraryTab() {
             <CreativeCard key={r.id} row={r} onClick={() => setDrawerRow(r)} />
           ))}
         </div>
+      ) : (
+        <CreativeListView
+          rows={filtered}
+          onClick={setDrawerRow}
+          onDelete={setConfirmDelete}
+        />
       )}
 
       {drawerRow && (
@@ -162,7 +177,164 @@ function LibraryTab() {
           onSaved={() => { setUploadOpen(false); load() }}
         />
       )}
+
+      {confirmDelete && (
+        <ConfirmDeleteModal
+          row={confirmDelete}
+          onClose={() => setConfirmDelete(null)}
+          onDeleted={() => { setConfirmDelete(null); load() }}
+        />
+      )}
     </>
+  )
+}
+
+function ViewBtn({ active, onClick, children }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '6px 12px',
+      fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+      letterSpacing: '0.06em', textTransform: 'uppercase',
+      background: active ? 'var(--ink)' : 'transparent',
+      color: active ? 'var(--paper)' : 'var(--ink-3)',
+      border: 'none', cursor: 'pointer',
+    }}>{children}</button>
+  )
+}
+
+function CreativeListView({ rows, onClick, onDelete }) {
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '52px minmax(280px, 1.8fr) 110px 130px 90px 80px 80px 100px',
+        padding: '10px 14px', gap: 12,
+        background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+        letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
+      }}>
+        <div></div>
+        <div>Name</div>
+        <div>Type</div>
+        <div>Creator</div>
+        <div>v21</div>
+        <div>Size</div>
+        <div>Status</div>
+        <div style={{ textAlign: 'right' }}>Actions</div>
+      </div>
+      {rows.map((r, i) => (
+        <div key={r.id}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '52px minmax(280px, 1.8fr) 110px 130px 90px 80px 80px 100px',
+            padding: '10px 14px', gap: 12, alignItems: 'center',
+            borderBottom: i === rows.length - 1 ? 'none' : '1px solid var(--rule)',
+            background: 'transparent', transition: 'background 0.12s',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          onClick={() => onClick(r)}>
+          {/* Thumb */}
+          <div style={{
+            width: 44, height: 28, background: 'var(--paper-2)',
+            backgroundImage: r.thumbnail_url ? `url('${r.thumbnail_url}')` : 'none',
+            backgroundSize: 'cover', backgroundPosition: 'center',
+            border: '1px solid var(--rule)',
+          }} />
+          {/* Name (canonical + original) */}
+          <div style={{ minWidth: 0 }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 500,
+              color: 'var(--ink)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{r.canonical_name || r.name}</div>
+            {r.canonical_name && r.canonical_name !== r.name && (
+              <div style={{
+                fontFamily: 'var(--sans)', fontSize: 10.5, color: 'var(--ink-4)',
+                marginTop: 2,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{r.name}</div>
+            )}
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.type}</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.creator || '—'}</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                        color: r.v21_script_id ? 'var(--ink)' : 'var(--ink-4)' }}>
+            {r.v21_script_id || '—'}
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>
+            {r.size_mb ? `${Math.round(r.size_mb)} MB` : '—'}
+          </div>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+            color: r.status === 'live' ? '#6a5b00'
+                 : r.status === 'approved' ? '#3e8a5e'
+                 : r.status === 'in_edit' ? '#b86a0c'
+                 : 'var(--ink-3)',
+          }}>{r.status}</div>
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button onClick={e => { e.stopPropagation(); onDelete(r) }} style={{
+              padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              background: 'transparent', color: '#b53e3e',
+              border: '1px solid #b53e3e', cursor: 'pointer',
+            }}>Delete</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ConfirmDeleteModal({ row, onClose, onDeleted }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const confirm = async () => {
+    setBusy(true); setErr(null)
+    const { error } = await supabase
+      .from('lib_creative_library')
+      .delete()
+      .eq('id', row.id)
+    setBusy(false)
+    if (error) setErr(error.message)
+    else onDeleted?.()
+  }
+
+  return (
+    <Modal open={true} onClose={busy ? () => {} : onClose} size="sm"
+      eyebrow="Delete"
+      title="Remove this creative?"
+      subtitle="This removes the database row from your library. The file in Drive is NOT deleted — you can re-add it later by uploading again."
+      footer={
+        <>
+          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
+          <button onClick={confirm} disabled={busy} style={{
+            ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e',
+          }}>
+            {busy ? 'Deleting…' : 'Delete'}
+          </button>
+        </>
+      }>
+      <div style={{ padding: '20px 28px' }}>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 12, padding: 12,
+          background: 'var(--paper-2)', border: '1px solid var(--rule)',
+          color: 'var(--ink-2)',
+        }}>
+          <div style={{ fontWeight: 600, color: 'var(--ink)' }}>{row.canonical_name || row.name}</div>
+          {row.canonical_name && row.canonical_name !== row.name && (
+            <div style={{ marginTop: 4, color: 'var(--ink-4)', fontSize: 11 }}>{row.name}</div>
+          )}
+          <div style={{ marginTop: 6, color: 'var(--ink-3)', fontSize: 11 }}>
+            {row.type} · {row.creator || 'no creator'} · {row.size_mb ? Math.round(row.size_mb) + ' MB' : ''}
+          </div>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -226,12 +398,10 @@ function CreativeCard({ row, onClick }) {
       {/* Body */}
       <div style={{ padding: '10px 12px' }}>
         <div style={{
-          fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
+          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
           color: 'var(--ink)', lineHeight: 1.35,
-          overflow: 'hidden', textOverflow: 'ellipsis',
-          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-          minHeight: 32,
-        }}>{row.name}</div>
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }} title={row.name}>{row.canonical_name || row.name}</div>
         <div style={{
           marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap',
           fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
