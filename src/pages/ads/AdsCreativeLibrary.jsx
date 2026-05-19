@@ -37,6 +37,20 @@ const STATUS_COLOR = {
   archived: '#999',
 }
 
+// Stable distinct color per editor (hash of slug → 10-color palette).
+// Used everywhere the editor needs a visual identity (selector chips,
+// queue cards, timeline bars, list-view dot).
+const EDITOR_COLORS = [
+  '#3e7eba', '#e0853e', '#5fa55a', '#a05fa5', '#c44b6e',
+  '#3eb2a8', '#b8893e', '#7e3eb8', '#5b8a3e', '#b83e3e',
+]
+function editorColor(slug) {
+  if (!slug) return '#999'
+  let h = 0
+  for (let i = 0; i < slug.length; i++) h = ((h << 5) - h + slug.charCodeAt(i)) | 0
+  return EDITOR_COLORS[Math.abs(h) % EDITOR_COLORS.length]
+}
+
 export default function AdsCreativeLibrary() {
   const [tab, setTab] = useState(() => {
     try { return localStorage.getItem('lib.tab') || 'library' } catch { return 'library' }
@@ -1775,17 +1789,7 @@ function TimelineView({ tasks, editors, onEdit }) {
     return Math.round((d - minDate) / 86400000) * dayWidth
   }
 
-  // Distinct color per editor (stable hash of slug). Status becomes a
-  // 4px left stripe on each bar instead of bar fill.
-  const EDITOR_COLORS = [
-    '#3e7eba', '#e0853e', '#5fa55a', '#a05fa5', '#c44b6e',
-    '#3eb2a8', '#b8893e', '#7e3eb8', '#5b8a3e', '#b83e3e',
-  ]
-  function editorColor(slug) {
-    let h = 0
-    for (let i = 0; i < (slug || '').length; i++) h = ((h << 5) - h + slug.charCodeAt(i)) | 0
-    return EDITOR_COLORS[Math.abs(h) % EDITOR_COLORS.length]
-  }
+  // Status stripe color (per task bar's left edge in the timeline)
   const STATUS_STRIPE = {
     queued: '#999', in_progress: '#e0853e',
     review: '#3e7eba', done: '#3e8a5e',
