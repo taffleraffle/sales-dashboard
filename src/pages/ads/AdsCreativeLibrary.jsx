@@ -18,31 +18,35 @@ import Modal from '../../components/editorial/Modal'
     - lib_editing_queue (view)
 */
 
-const TYPES = ['Hook', 'Body', 'Full Video', 'Testimony']
-const STATUSES = ['raw', 'in_edit', 'review', 'approved', 'live', 'archived']
+const TYPES = ['Hook', 'Body', 'Joined', 'Testimony']
+const STATUSES = ['raw', 'edited']
 const STATUS_LABEL = {
   raw: 'Raw',
-  in_edit: 'In edit',
-  review: 'Review',
-  approved: 'Approved',
-  live: 'Live',
-  archived: 'Archived',
+  edited: 'Edited',
 }
 const STATUS_COLOR = {
   raw: '#999',
-  in_edit: '#b86a0c',
-  review: '#3e7eba',
-  approved: '#3e8a5e',
-  live: '#3e8a5e',
-  archived: '#999',
+  edited: '#3e8a5e',
+}
+
+// Known offer slugs surface as filter chips + pill colors. Source of truth
+// is the `offers` table — we fetch the live list and merge with these
+// colors. Anything unrecognised falls back to a neutral grey pill.
+const OFFER_COLOR = {
+  'opt-restoration':        { ink: '#1f4e8f', soft: 'rgba(31,78,143,0.10)',  border: 'rgba(31,78,143,0.35)' },
+  'opt-roofing-stub':       { ink: '#a05810', soft: 'rgba(160,88,16,0.10)',  border: 'rgba(160,88,16,0.35)' },
+  'opt-whitelabel-template':{ ink: '#7a3aa8', soft: 'rgba(122,58,168,0.10)', border: 'rgba(122,58,168,0.35)' },
+}
+function offerColor(slug) {
+  return OFFER_COLOR[slug] || { ink: 'var(--ink-3)', soft: 'var(--paper-2)', border: 'var(--rule)' }
 }
 
 // Distinct color per type — helps you scan a busy Matrix view and immediately
-// see hooks vs bodies vs full videos vs testimonials.
+// see hooks vs bodies vs joined videos vs testimonials.
 const TYPE_COLOR = {
   'Hook':       { ink: '#1f4e8f', soft: 'rgba(31,78,143,0.10)',  border: 'rgba(31,78,143,0.35)' },
   'Body':       { ink: '#a05810', soft: 'rgba(160,88,16,0.10)',  border: 'rgba(160,88,16,0.35)' },
-  'Full Video': { ink: '#2e6e3f', soft: 'rgba(46,110,63,0.10)',  border: 'rgba(46,110,63,0.35)' },
+  'Joined':     { ink: '#2e6e3f', soft: 'rgba(46,110,63,0.10)',  border: 'rgba(46,110,63,0.35)' },
   'Testimony':  { ink: '#7a3aa8', soft: 'rgba(122,58,168,0.10)', border: 'rgba(122,58,168,0.35)' },
 }
 function typeColor(t) {
@@ -233,7 +237,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // Hooks/Bodies/Full Videos/Testimony as separate sections
   const grouped = useMemo(() => {
     if (typeFilter) return [{ type: typeFilter, rows: filtered }]
-    const order = ['Hook', 'Body', 'Full Video', 'Testimony']
+    const order = ['Hook', 'Body', 'Joined', 'Testimony']
     return order
       .map(t => ({ type: t, rows: filtered.filter(r => r.type === t) }))
       .filter(g => g.rows.length > 0)
@@ -559,11 +563,14 @@ function StatusBadge({ status }) {
 }
 
 function CreativeListView({ rows, onClick, onDelete }) {
+  // 8 columns: thumb · name · type · creator · offer · run? · status · actions.
+  // Dropped v21 + size — both available in the detail modal. Keeps the row
+  // scannable without horizontal scroll on 1280px+ screens.
+  const gridCols = '52px minmax(240px, 1.6fr) 90px 90px 140px 70px 80px 80px'
   return (
     <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: '52px minmax(280px, 1.8fr) 110px 130px 90px 80px 80px 100px',
+        display: 'grid', gridTemplateColumns: gridCols,
         padding: '10px 14px', gap: 12,
         background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
@@ -573,27 +580,29 @@ function CreativeListView({ rows, onClick, onDelete }) {
         <div>Name</div>
         <div>Type</div>
         <div>Creator</div>
-        <div>v21</div>
-        <div>Size</div>
+        <div>Offer</div>
+        <div>Run?</div>
         <div>Status</div>
         <div style={{ textAlign: 'right' }}>Actions</div>
       </div>
       {rows.map((r, i) => (
         <ListRow key={r.id} row={r} isLast={i === rows.length - 1}
+          gridCols={gridCols}
           onClick={() => onClick(r)} onDelete={() => onDelete(r)} />
       ))}
     </div>
   )
 }
 
-function ListRow({ row: r, isLast, onClick, onDelete }) {
+function ListRow({ row: r, isLast, gridCols, onClick, onDelete }) {
   // `onDelete` may be null when the viewer doesn't have delete permission
   const [hover, setHover] = useState(false)
+  const offerName = r.offer_slug ? r.offer_slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '') : null
+  const oc = offerColor(r.offer_slug)
   return (
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: '60px minmax(280px, 1.8fr) 110px 130px 90px 80px 90px 100px',
+            display: 'grid', gridTemplateColumns: gridCols,
             padding: '10px 14px', gap: 12, alignItems: 'center',
             borderBottom: isLast ? 'none' : '1px solid var(--rule)',
             background: hover ? 'var(--paper-2)' : 'transparent', transition: 'background 0.12s',
@@ -617,21 +626,15 @@ function ListRow({ row: r, isLast, onClick, onDelete }) {
                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
             )}
           </div>
-          {/* Name (canonical + original) */}
+          {/* Name */}
           <div style={{ minWidth: 0 }}>
             <div style={{
               fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 500,
               color: 'var(--ink)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>{r.canonical_name || r.name}</div>
-            {r.canonical_name && r.canonical_name !== r.name && (
-              <div style={{
-                fontFamily: 'var(--sans)', fontSize: 10.5, color: 'var(--ink-4)',
-                marginTop: 2,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>{r.name}</div>
-            )}
           </div>
+          {/* Type pill */}
           <div>
             <span style={{
               display: 'inline-block',
@@ -645,12 +648,37 @@ function ListRow({ row: r, isLast, onClick, onDelete }) {
             }}>{r.type}</span>
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{r.creator || '—'}</div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
-                        color: r.v21_script_id ? 'var(--ink)' : 'var(--ink-4)' }}>
-            {r.v21_script_id || '—'}
+          {/* Offer pill */}
+          <div>
+            {offerName ? (
+              <span style={{
+                display: 'inline-block', padding: '2px 7px',
+                fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: oc.soft, color: oc.ink,
+                border: '1px solid ' + oc.border, borderRadius: 2,
+              }}>{offerName}</span>
+            ) : (
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)' }}>—</span>
+            )}
           </div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>
-            {r.size_mb ? `${Math.round(r.size_mb)} MB` : '—'}
+          {/* Run? pill */}
+          <div>
+            {r.has_been_run ? (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '2px 7px',
+                fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: 'rgba(62,138,94,0.10)', color: '#3e8a5e',
+                border: '1px solid rgba(62,138,94,0.35)', borderRadius: 2,
+              }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#3e8a5e' }} />
+                Yes
+              </span>
+            ) : (
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)' }}>—</span>
+            )}
           </div>
           <div><StatusBadge status={r.status} /></div>
           {/* Actions */}
@@ -862,10 +890,12 @@ function StageCell({ value }) {
 function BulkEditModal({ ids, onClose, onSaved }) {
   const [type, setType] = useState('')
   const [status, setStatus] = useState('')
-  const [priority, setPriority] = useState('')
   const [assignedEditorId, setAssignedEditorId] = useState('')
+  const [offerSlug, setOfferSlug] = useState('')
+  const [hasBeenRun, setHasBeenRun] = useState('')  // '' | 'yes' | 'no'
   const [v21ScriptId, setV21ScriptId] = useState('')
   const [editors, setEditors] = useState([])
+  const [offers, setOffers] = useState([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
@@ -873,19 +903,24 @@ function BulkEditModal({ ids, onClose, onSaved }) {
     let mounted = true
     supabase.from('lib_creative_editors').select('*').eq('active', true).order('name')
       .then(({ data }) => { if (mounted) setEditors(data || []) })
+    supabase.from('offers').select('slug,name').eq('retired', false).order('slug')
+      .then(({ data }) => { if (mounted) setOffers(data || []) })
     return () => { mounted = false }
   }, [])
 
   // Build the patch — only fields with a value get written. The special
-  // string '__CLEAR__' (used only for editor) writes null.
+  // string '__CLEAR__' (used for editor + offer) writes null.
   const buildPatch = () => {
     const patch = {}
     if (type)     patch.type = type
     if (status)   patch.status = status
-    if (priority) patch.priority = priority
     if (v21ScriptId.trim()) patch.v21_script_id = v21ScriptId.trim()
     if (assignedEditorId === '__CLEAR__') patch.assigned_editor_id = null
     else if (assignedEditorId)            patch.assigned_editor_id = assignedEditorId
+    if (offerSlug === '__CLEAR__') patch.offer_slug = null
+    else if (offerSlug)            patch.offer_slug = offerSlug
+    if (hasBeenRun === 'yes')      patch.has_been_run = true
+    else if (hasBeenRun === 'no')  patch.has_been_run = false
     return patch
   }
   const patch = buildPatch()
@@ -937,12 +972,18 @@ function BulkEditModal({ ids, onClose, onSaved }) {
               {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
             </select>
           </Field>
-          <Field label="Priority">
-            <select value={priority} onChange={e => setPriority(e.target.value)} style={selectStyle}>
+          <Field label="Offer / niche">
+            <select value={offerSlug} onChange={e => setOfferSlug(e.target.value)} style={selectStyle}>
               <option value="">— Keep existing —</option>
-              <option>P1 - High</option>
-              <option>P2 - Medium</option>
-              <option>P3 - Low</option>
+              <option value="__CLEAR__">Clear offer</option>
+              {offers.map(o => <option key={o.slug} value={o.slug}>{o.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Run before?">
+            <select value={hasBeenRun} onChange={e => setHasBeenRun(e.target.value)} style={selectStyle}>
+              <option value="">— Keep existing —</option>
+              <option value="yes">Yes — mark as run</option>
+              <option value="no">No — mark as not run</option>
             </select>
           </Field>
           <Field label="Assigned editor">
@@ -952,13 +993,13 @@ function BulkEditModal({ ids, onClose, onSaved }) {
               {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
             </select>
           </Field>
+          <Field label="v21 script (e.g. A.1, B.2)">
+            <input type="text" value={v21ScriptId}
+              onChange={e => setV21ScriptId(e.target.value)}
+              placeholder="Leave blank to keep existing"
+              style={inputStyle} />
+          </Field>
         </div>
-        <Field label="v21 script (e.g. A.1, B.2)">
-          <input type="text" value={v21ScriptId}
-            onChange={e => setV21ScriptId(e.target.value)}
-            placeholder="Leave blank to keep existing"
-            style={inputStyle} />
-        </Field>
         {hasChanges && (
           <div style={{
             padding: '10px 12px', background: 'var(--paper-2)',
@@ -1153,12 +1194,27 @@ function CreativeCard({ row, onClick, selected = false, selectionMode = false, o
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }} title={row.name}>{row.canonical_name || row.name}</div>
         <div style={{
-          marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap',
+          marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center',
           fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
           letterSpacing: '0.06em', textTransform: 'uppercase',
         }}>
           {row.creator && <span>{row.creator}</span>}
-          {row.size_mb && <span>· {Math.round(row.size_mb)} MB</span>}
+          {row.offer_slug && (() => {
+            const oc = offerColor(row.offer_slug)
+            const short = row.offer_slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '')
+            return (
+              <span style={{
+                padding: '1px 5px',
+                background: oc.soft, color: oc.ink,
+                border: '1px solid ' + oc.border, borderRadius: 2,
+                fontWeight: 600,
+              }}>{short}</span>
+            )
+          })()}
+          {row.has_been_run && (
+            <span title="Run before"
+              style={{ width: 7, height: 7, borderRadius: '50%', background: '#3e8a5e' }} />
+          )}
           <span style={{ marginLeft: 'auto' }}><StatusBadge status={row.status} /></span>
         </div>
       </div>
@@ -1174,6 +1230,8 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
   const [err, setErr] = useState(null)
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle') // idle | saving | saved | error
   const [editors, setEditors] = useState([])
+  const [offers, setOffers] = useState([])
+  const [showAdvanced, setShowAdvanced] = useState(false)
   // When the viewer is an editor on /editor-view, auto-target them as the assignee.
   const [assignEditor, setAssignEditor] = useState(scope.isEditorView ? (scope.editorId || '') : '')
   const [assignDue, setAssignDue] = useState('')
@@ -1193,6 +1251,8 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
     let mounted = true
     supabase.from('lib_creative_editors').select('*').eq('active', true).order('name')
       .then(({ data }) => { if (mounted) setEditors(data || []) })
+    supabase.from('offers').select('slug,name').eq('retired', false).order('slug')
+      .then(({ data }) => { if (mounted) setOffers(data || []) })
     supabase.from('lib_editing_queue').select('*').eq('creative_id', row.id)
       .then(({ data }) => { if (mounted) setExistingTasks(data || []) })
     return () => { mounted = false }
@@ -1208,13 +1268,9 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
         type: edit.type, creator: edit.creator, status: edit.status,
         v21_script_id: edit.v21_script_id, notes: edit.notes,
         canonical_name: edit.canonical_name,
-        description: edit.description || null,
-        priority: edit.priority || null,
         assigned_editor_id: edit.assigned_editor_id || null,
-        stage_rough_cut: edit.stage_rough_cut || null,
-        stage_final_cut: edit.stage_final_cut || null,
-        stage_approved:  edit.stage_approved || null,
-        stage_delivered: edit.stage_delivered || null,
+        offer_slug: edit.offer_slug || null,
+        has_been_run: !!edit.has_been_run,
       })
       .eq('id', row.id)
     if (!silent) setSaving(false)
@@ -1363,55 +1419,53 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
           </div>
         )}
 
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
-          <Field label="Canonical name">
-            <input type="text" value={edit.canonical_name || ''}
-              onChange={e => setEdit({ ...edit, canonical_name: e.target.value })}
-              style={inputStyle} />
-          </Field>
+        {/* Slim form — only the fields Ben actually uses to organise creatives.
+            Notes, v21 script, and original filename are tucked into the
+            'Advanced' disclosure below. */}
+        <Field label="Name">
+          <input type="text" value={edit.canonical_name || ''}
+            onChange={e => setEdit({ ...edit, canonical_name: e.target.value })}
+            style={inputStyle} />
+        </Field>
+
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(3, 1fr)' }}>
           <Field label="Type">
             <select value={edit.type || ''} onChange={e => setEdit({ ...edit, type: e.target.value })} style={selectStyle}>
               {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
-          <Field label="Creator">
-            <input type="text" value={edit.creator || ''} onChange={e => setEdit({ ...edit, creator: e.target.value })} style={inputStyle} />
-          </Field>
           <Field label="Status">
             <select value={edit.status || 'raw'} onChange={e => setEdit({ ...edit, status: e.target.value })} style={selectStyle}>
-              {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
             </select>
           </Field>
-          <Field label="v21 script">
-            <input type="text" value={edit.v21_script_id || ''} onChange={e => setEdit({ ...edit, v21_script_id: e.target.value })}
-              placeholder="A.1, B.2, etc." style={inputStyle} />
-          </Field>
-          <Field label="Original filename">
-            <div style={{
-              padding: '8px 11px', fontFamily: 'var(--mono)', fontSize: 11,
-              background: 'var(--paper-2)', border: '1px solid var(--rule)',
-              color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }} title={row.name}>{row.name}</div>
+          <Field label="Run before?">
+            <button type="button"
+              onClick={() => setEdit({ ...edit, has_been_run: !edit.has_been_run })}
+              style={{
+                padding: '8px 12px', fontFamily: 'var(--mono)', fontSize: 11,
+                fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: edit.has_been_run ? '#3e8a5e' : 'white',
+                color: edit.has_been_run ? 'white' : 'var(--ink-3)',
+                border: edit.has_been_run ? '1px solid #3e8a5e' : '1px solid var(--rule)',
+                cursor: 'pointer', textAlign: 'center', width: '100%',
+              }}>
+              {edit.has_been_run ? 'Yes — run before' : 'No — not yet'}
+            </button>
           </Field>
         </div>
 
-        <Field label="Description (separate from canonical name)">
-          <input type="text" value={edit.description || ''}
-            onChange={e => setEdit({ ...edit, description: e.target.value })}
-            placeholder="Short human description for the Matrix view"
-            style={inputStyle} />
-        </Field>
-
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
-          <Field label="Priority">
-            <select value={edit.priority || ''}
-              onChange={e => setEdit({ ...edit, priority: e.target.value || null })}
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <Field label="Creator">
+            <input type="text" value={edit.creator || ''}
+              onChange={e => setEdit({ ...edit, creator: e.target.value })} style={inputStyle} />
+          </Field>
+          <Field label="Offer / niche">
+            <select value={edit.offer_slug || ''}
+              onChange={e => setEdit({ ...edit, offer_slug: e.target.value || null })}
               style={selectStyle}>
-              <option value="">—</option>
-              <option>P1 - High</option>
-              <option>P2 - Medium</option>
-              <option>P3 - Low</option>
+              <option value="">— Pick offer —</option>
+              {offers.map(o => <option key={o.slug} value={o.slug}>{o.name}</option>)}
             </select>
           </Field>
           <Field label="Assigned editor">
@@ -1426,24 +1480,42 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
           </Field>
         </div>
 
-        {/* Production stages — mirror the Component Edits sheet columns */}
-        <Field label="Production stages">
-          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, 1fr)' }}>
-            <StageEditor label="Rough cut" value={edit.stage_rough_cut}
-              onChange={v => setEdit({ ...edit, stage_rough_cut: v })} />
-            <StageEditor label="Final cut" value={edit.stage_final_cut}
-              onChange={v => setEdit({ ...edit, stage_final_cut: v })} />
-            <StageEditor label="Approved"  value={edit.stage_approved}
-              onChange={v => setEdit({ ...edit, stage_approved: v })} />
-            <StageEditor label="Delivered" value={edit.stage_delivered}
-              onChange={v => setEdit({ ...edit, stage_delivered: v })} />
-          </div>
-        </Field>
-
-        <Field label="Notes">
-          <textarea value={edit.notes || ''} onChange={e => setEdit({ ...edit, notes: e.target.value })}
-            rows={3} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--sans)' }} />
-        </Field>
+        {/* Advanced disclosure — only opens if user wants to touch the rarely-
+            used fields. Keeps the default view clean. */}
+        <button type="button" onClick={() => setShowAdvanced(v => !v)}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            padding: '6px 0', textAlign: 'left',
+            fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: 'var(--ink-3)',
+          }}>
+          {showAdvanced ? '▾ Hide details' : '▸ More details (notes, v21 script, original filename)'}
+        </button>
+        {showAdvanced && (
+          <>
+            <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
+              <Field label="v21 script slot">
+                <input type="text" value={edit.v21_script_id || ''}
+                  onChange={e => setEdit({ ...edit, v21_script_id: e.target.value })}
+                  placeholder="A.1, B.2, etc." style={inputStyle} />
+              </Field>
+              <Field label="Original filename">
+                <div style={{
+                  padding: '8px 11px', fontFamily: 'var(--mono)', fontSize: 11,
+                  background: 'var(--paper-2)', border: '1px solid var(--rule)',
+                  color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }} title={row.name}>{row.name}</div>
+              </Field>
+            </div>
+            <Field label="Notes">
+              <textarea value={edit.notes || ''}
+                onChange={e => setEdit({ ...edit, notes: e.target.value })}
+                rows={3} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--sans)' }} />
+            </Field>
+          </>
+        )}
 
         {row.transcript && (
           <Field label="Transcript">
