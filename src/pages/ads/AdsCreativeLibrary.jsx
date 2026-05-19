@@ -84,6 +84,12 @@ function LibraryTab() {
   const [q, setQ] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [rawEditedFilter, setRawEditedFilter] = useState(() => {
+    try { return localStorage.getItem('lib.rawEdited') || 'edited' } catch { return 'edited' }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('lib.rawEdited', rawEditedFilter) } catch {}
+  }, [rawEditedFilter])
   const [drawerRow, setDrawerRow] = useState(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [view, setView] = useState(() => {
@@ -108,6 +114,9 @@ function LibraryTab() {
 
   const filtered = useMemo(() => {
     let list = rows
+    // Raw/Edited top-level toggle — raw=just status='raw', edited=everything else, all=both
+    if (rawEditedFilter === 'raw')         list = list.filter(r => r.status === 'raw')
+    else if (rawEditedFilter === 'edited') list = list.filter(r => r.status !== 'raw')
     const search = q.trim().toLowerCase()
     if (search) list = list.filter(r => {
       const blob = `${r.name} ${r.canonical_name || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.transcript || ''}`.toLowerCase()
@@ -116,7 +125,11 @@ function LibraryTab() {
     if (typeFilter)   list = list.filter(r => r.type === typeFilter)
     if (statusFilter) list = list.filter(r => r.status === statusFilter)
     return list
-  }, [rows, q, typeFilter, statusFilter])
+  }, [rows, q, typeFilter, statusFilter, rawEditedFilter])
+
+  // Counts for the Raw/Edited toggle (always over ALL rows)
+  const rawCount = useMemo(() => rows.filter(r => r.status === 'raw').length, [rows])
+  const editedCount = useMemo(() => rows.filter(r => r.status !== 'raw').length, [rows])
 
   // Per-type counts for the chip badges (over ALL rows, ignoring current type filter)
   const typeCounts = useMemo(() => {
@@ -143,6 +156,23 @@ function LibraryTab() {
 
   return (
     <>
+      {/* Big Raw vs Edited toggle — sits above the toolbar so it's the
+          first decision when you land on the page */}
+      <div style={{
+        display: 'flex', gap: 0, marginBottom: 14,
+        border: '1px solid var(--rule)',
+      }}>
+        <BigToggle active={rawEditedFilter === 'edited'} onClick={() => setRawEditedFilter('edited')}
+          label="Edited" count={editedCount}
+          subtitle="Finished UGC, hooks, bodies, full ads — ready to use" />
+        <BigToggle active={rawEditedFilter === 'raw'} onClick={() => setRawEditedFilter('raw')}
+          label="Raw footage" count={rawCount}
+          subtitle="Camera files + unedited clips — sources for editing" />
+        <BigToggle active={rawEditedFilter === 'all'} onClick={() => setRawEditedFilter('all')}
+          label="All" count={rows.length}
+          subtitle="Everything in the library" />
+      </div>
+
       {/* Toolbar */}
       <div style={{
         display: 'grid', gap: 10,
@@ -275,6 +305,35 @@ function ViewBtn({ active, onClick, children }) {
       color: active ? 'var(--paper)' : 'var(--ink-3)',
       border: 'none', cursor: 'pointer',
     }}>{children}</button>
+  )
+}
+
+function BigToggle({ active, onClick, label, count, subtitle }) {
+  return (
+    <button onClick={onClick} style={{
+      flex: 1, padding: '14px 20px', textAlign: 'left',
+      cursor: 'pointer', border: 'none',
+      borderRight: '1px solid var(--rule)',
+      background: active ? 'var(--ink)' : 'white',
+      color: active ? 'var(--paper)' : 'var(--ink)',
+      transition: 'background 0.12s',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4,
+      }}>
+        <span style={{
+          fontFamily: 'var(--serif)', fontSize: 18, fontWeight: 500,
+        }}>{label}</span>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
+          color: active ? 'rgba(255,255,255,0.7)' : 'var(--ink-3)',
+        }}>{count}</span>
+      </div>
+      <div style={{
+        fontFamily: 'var(--sans)', fontSize: 11.5, lineHeight: 1.35,
+        color: active ? 'rgba(255,255,255,0.7)' : 'var(--ink-3)',
+      }}>{subtitle}</div>
+    </button>
   )
 }
 
@@ -495,12 +554,21 @@ function CreativeCard({ row, onClick }) {
     onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--rule)'}>
       {/* Thumbnail */}
       <div style={{
-        aspectRatio: '16 / 9', background: 'var(--paper-2)',
-        backgroundImage: row.thumbnail_url ? `url('${row.thumbnail_url}')` : 'none',
-        backgroundSize: 'cover', backgroundPosition: 'center',
+        aspectRatio: '16 / 9',
+        background: row.thumbnail_url
+          ? '#000'   // black behind the image to hide letterbox for portrait
+          : 'linear-gradient(135deg, var(--paper-2) 0%, var(--rule) 100%)',
+        position: 'relative', overflow: 'hidden',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        position: 'relative',
       }}>
+        {row.thumbnail_url && (
+          <img src={row.thumbnail_url} alt=""
+            loading="lazy"
+            style={{
+              width: '100%', height: '100%', objectFit: 'cover',
+              display: 'block',
+            }} />
+        )}
         {!row.thumbnail_url && (
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
             No thumbnail
@@ -1241,22 +1309,21 @@ function AddTaskModal({ editors, onClose, onSaved }) {
 /* ─────────────────────── TIMELINE (Gantt-style) ─────────────────────── */
 
 function TimelineView({ tasks, editors }) {
-  // Date range: min(assigned_at) → max(due_date or completed_at) + 7 days buffer
+  const [range, setRange] = useState(() => {
+    try { return localStorage.getItem('queue.timelineRange') || 'month' } catch { return 'month' }
+  })
+  useEffect(() => { try { localStorage.setItem('queue.timelineRange', range) } catch {} }, [range])
+  const [offsetDays, setOffsetDays] = useState(0)
+
   const today = new Date(); today.setHours(0,0,0,0)
-  const allDates = []
-  for (const t of tasks) {
-    if (t.assigned_at)   allDates.push(new Date(t.assigned_at))
-    if (t.due_date)      allDates.push(new Date(t.due_date))
-    if (t.completed_at)  allDates.push(new Date(t.completed_at))
-  }
-  if (!allDates.length) {
-    return <div style={{ padding: 30, fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)' }}>No dates to plot.</div>
-  }
-  const minDate = new Date(Math.min(...allDates.map(d => d.getTime())))
-  const maxDate = new Date(Math.max(...allDates.map(d => d.getTime()), today.getTime() + 7*86400000))
-  minDate.setHours(0,0,0,0); maxDate.setHours(0,0,0,0)
-  const totalDays = Math.ceil((maxDate - minDate) / 86400000) + 1
-  const dayWidth = Math.max(28, Math.min(56, Math.round(900 / totalDays)))
+  // Decide date window based on `range` + offset (operator can pan)
+  const windowDays = range === 'week' ? 14 : range === 'month' ? 42 : range === '90days' ? 90 : 180
+  const startBackDays = range === 'week' ? 3 : range === 'month' ? 7 : 14
+  const minDate = new Date(today); minDate.setDate(today.getDate() - startBackDays + offsetDays); minDate.setHours(0,0,0,0)
+  const maxDate = new Date(minDate); maxDate.setDate(minDate.getDate() + windowDays); maxDate.setHours(0,0,0,0)
+
+  const totalDays = windowDays + 1
+  const dayWidth = range === 'week' ? 56 : range === 'month' ? 28 : range === '90days' ? 14 : 8
   const totalWidth = totalDays * dayWidth
 
   // Build editor rows (always show all active editors)
@@ -1278,7 +1345,25 @@ function TimelineView({ tasks, editors }) {
   }
 
   return (
-    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)', overflow: 'auto' }}>
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+      {/* Range controls */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        padding: '10px 14px', borderBottom: '1px solid var(--rule)',
+        background: 'var(--paper-2)',
+      }}>
+        <span style={chipLabelStyle}>Zoom</span>
+        <FilterChip active={range === 'week'}    onClick={() => { setRange('week'); setOffsetDays(0) }}>Week</FilterChip>
+        <FilterChip active={range === 'month'}   onClick={() => { setRange('month'); setOffsetDays(0) }}>Month</FilterChip>
+        <FilterChip active={range === '90days'}  onClick={() => { setRange('90days'); setOffsetDays(0) }}>90 days</FilterChip>
+        <FilterChip active={range === '6months'} onClick={() => { setRange('6months'); setOffsetDays(0) }}>6 months</FilterChip>
+        <span style={{ flex: 1 }} />
+        <button onClick={() => setOffsetDays(o => o - (range === 'week' ? 7 : range === 'month' ? 14 : 30))} style={ghostBtn}>← Back</button>
+        <button onClick={() => setOffsetDays(0)} style={ghostBtn}>Today</button>
+        <button onClick={() => setOffsetDays(o => o + (range === 'week' ? 7 : range === 'month' ? 14 : 30))} style={ghostBtn}>Forward →</button>
+      </div>
+
+      <div style={{ overflow: 'auto' }}>
       <div style={{ minWidth: totalWidth + 200 }}>
         {/* Date header */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
@@ -1366,6 +1451,7 @@ function TimelineView({ tasks, editors }) {
             </div>
           )
         })}
+      </div>
       </div>
     </div>
   )
