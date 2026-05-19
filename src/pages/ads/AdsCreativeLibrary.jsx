@@ -206,28 +206,41 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   }, [])
 
   // Inline patch — used by the Matrix view when an inline dropdown changes.
-  // Optimistic: patch local state immediately, fire the DB write, roll back
-  // on error. No full reload, so the matrix doesn't flicker between edits.
+  // Optimistic: capture the pre-update snapshot inside the setRows updater
+  // so concurrent calls (e.g. user blurs description, then editor select
+  // fires before the first patch resolves) each get a fresh `prev` from
+  // current state — no stale-closure clobbering.
   const patchRow = useCallback(async (id, patch) => {
-    const prev = rows.find(r => r.id === id)
-    if (!prev) return
-    // Optimistic update — merge the joined-editor name if we changed editor
-    setRows(curr => curr.map(r => {
-      if (r.id !== id) return r
-      const next = { ...r, ...patch }
+    let prevRow = null
+    setRows(curr => {
+      const idx = curr.findIndex(r => r.id === id)
+      if (idx < 0) return curr
+      prevRow = curr[idx]
+      const next = { ...prevRow, ...patch }
       if ('assigned_editor_id' in patch) {
         const ed = editors.find(e => e.id === patch.assigned_editor_id)
         next.assigned_editor_name = ed?.name || null
       }
-      return next
-    }))
+      const out = curr.slice()
+      out[idx] = next
+      return out
+    })
+    if (!prevRow) return
     const { error } = await supabase.from('lib_creative_library').update(patch).eq('id', id)
     if (error) {
-      // Roll back
-      setRows(curr => curr.map(r => (r.id === id ? prev : r)))
+      // Roll back ONLY this row's columns — preserve any other patches that
+      // landed between the optimistic update and now.
+      const rollbackKeys = Object.keys(patch)
+      setRows(curr => curr.map(r => {
+        if (r.id !== id) return r
+        const restored = { ...r }
+        for (const k of rollbackKeys) restored[k] = prevRow[k]
+        if ('assigned_editor_id' in patch) restored.assigned_editor_name = prevRow.assigned_editor_name
+        return restored
+      }))
       setErr(error.message)
     }
-  }, [rows, editors])
+  }, [editors])
 
   useEffect(() => { load() }, [load])
 
@@ -1472,15 +1485,22 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
   }, [edit, row.id, onSaved])
 
   // Wrap onClose so we trigger a single parent reload if anything changed.
-  const handleClose = useCallback(() => {
-    // Flush any pending debounced save first
-    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+  // Critically: if there's a pending debounced save (user typed fast then
+  // hit Close before 600ms elapsed), flush it synchronously before closing
+  // so the keystrokes aren't lost.
+  const handleClose = useCallback(async () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+      // Flush the pending write — same as the debounce would have done.
+      await save({ silent: true })
+    }
     if (dirtyDuringSessionRef.current) {
       onSaved?.()
       dirtyDuringSessionRef.current = false
     }
     onClose?.()
-  }, [onClose, onSaved])
+  }, [onClose, onSaved, save])
 
   // Auto-save on field changes — Notion-style. Debounced 600ms so we don't
   // hammer the DB during typing. Skip the first render (edit was just
@@ -1794,6 +1814,12 @@ function UploadModal({ onClose, onSaved }) {
   const [err, setErr] = useState(null)
   const [progress, setProgress] = useState({})  // filename -> 'uploading'|'done'|err msg
   const inputRef = useRef(null)
+  // Transcription is fire-and-forget — the modal can close before Whisper
+  // returns. Gate setProgress calls so we don't try to setState on an
+  // unmounted component.
+  const mountedRef = useRef(true)
+  useEffect(() => () => { mountedRef.current = false }, [])
+  const safeSetProgress = (updater) => { if (mountedRef.current) setProgress(updater) }
 
   const acceptFiles = (incoming) => {
     const added = Array.from(incoming || []).filter(f => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name))
@@ -1853,20 +1879,23 @@ function UploadModal({ onClose, onSaved }) {
         //    files. Fire-and-forget with a status check; UI will pick up the
         //    transcript on next page refresh.
         if (storagePath) {
-          setProgress(p => ({ ...p, [file.name]: 'transcribing' }))
+          safeSetProgress(p => ({ ...p, [file.name]: 'transcribing' }))
           supabase.functions.invoke('transcribe-library-clip', {
             body: { library_id: libraryId, storage_path: storagePath },
-          }).then(({ error: fnErr }) => {
+          }).then(({ data, error: fnErr }) => {
             if (fnErr) {
-              setProgress(p => ({ ...p, [file.name]: 'transcribe failed: ' + fnErr.message }))
+              safeSetProgress(p => ({ ...p, [file.name]: 'transcribe failed: ' + fnErr.message }))
+            } else if (data?.error) {
+              // Function returned 4xx/5xx body (e.g. Whisper 25MB limit)
+              safeSetProgress(p => ({ ...p, [file.name]: 'transcribe failed: ' + data.error }))
             } else {
-              setProgress(p => ({ ...p, [file.name]: 'done (transcribed)' }))
+              safeSetProgress(p => ({ ...p, [file.name]: 'done (transcribed)' }))
             }
           })
           // Mark "uploaded" right away — transcript arrives later
-          setProgress(p => ({ ...p, [file.name]: 'uploaded · transcribing in background' }))
+          safeSetProgress(p => ({ ...p, [file.name]: 'uploaded · transcribing in background' }))
         } else {
-          setProgress(p => ({ ...p, [file.name]: 'row created (file too large to upload)' }))
+          safeSetProgress(p => ({ ...p, [file.name]: 'row created (file too large to upload)' }))
         }
         ok++
       } catch (e) {
@@ -3338,7 +3367,7 @@ function AddTaskModal({ editors, onClose, onSaved }) {
   // Upload-mode state
   const [uploadFile, setUploadFile] = useState(null)
   const [uploadName, setUploadName] = useState('')
-  const [uploadType, setUploadType] = useState('Full Video')
+  const [uploadType, setUploadType] = useState('Joined')
   const [uploadProgress, setUploadProgress] = useState(null)
   const uploadInputRef = useRef(null)
   // Common state
@@ -3548,10 +3577,7 @@ function AddTaskModal({ editors, onClose, onSaved }) {
               </Field>
               <Field label="Type">
                 <select value={uploadType} onChange={e => setUploadType(e.target.value)} style={selectStyle}>
-                  <option>Hook</option>
-                  <option>Body</option>
-                  <option>Full Video</option>
-                  <option>Testimony</option>
+                  {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </Field>
             </div>

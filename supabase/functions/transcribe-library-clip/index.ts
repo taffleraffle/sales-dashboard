@@ -63,6 +63,22 @@ serve(async (req) => {
   if (dl.error) return json({ error: `storage download: ${dl.error.message}` }, 502)
   const buf = new Uint8Array(await dl.data.arrayBuffer())
 
+  // Whisper API caps the request payload at 25MB. Anything bigger gets a
+  // 413 from OpenAI; surface a clear error to the caller so the row can
+  // be flagged rather than silently leaving transcript empty.
+  const WHISPER_MAX_BYTES = 24 * 1024 * 1024
+  if (buf.byteLength > WHISPER_MAX_BYTES) {
+    const note = `Skipped transcription: file is ${Math.round(buf.byteLength / 1e6)}MB (Whisper API cap is 25MB). Trim or compress and re-upload to transcribe.`
+    await supabase.from('lib_creative_library')
+      .update({ notes: note })
+      .eq('id', libraryId)
+    return json({
+      ok: false,
+      error: `file too large for Whisper (${Math.round(buf.byteLength / 1e6)}MB > 25MB)`,
+      library_id: libraryId,
+    }, 413)
+  }
+
   // 2. Whisper — same params as transcribe-uploaded-ad
   const form = new FormData()
   form.append('file', new Blob([buf], { type: 'video/mp4' }), `${libraryId}.mp4`)
