@@ -157,6 +157,23 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   })
   useEffect(() => { try { localStorage.setItem('lib.view', view) } catch {} }, [view])
   const [confirmDelete, setConfirmDelete] = useState(null)
+  // Bulk selection — set of row IDs. When non-empty, shows the bulk
+  // action bar above the grid. Clicking a tile's checkbox toggles
+  // membership; clicking the body (outside checkbox) still opens
+  // the detail drawer as normal.
+  const [selected, setSelected] = useState(() => new Set())
+  const [bulkEditOpen, setBulkEditOpen] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
+
+  const toggleSelect = useCallback((id) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+  const clearSelection = useCallback(() => setSelected(new Set()), [])
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
@@ -302,6 +319,46 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
       {err && <ErrorBanner msg={err} />}
 
+      {/* Bulk selection bar — sticky, appears when ≥1 tile is selected */}
+      {selected.size > 0 && scope.canEditCreative && (
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 50,
+          marginBottom: 14, padding: '10px 14px',
+          background: 'var(--ink)', color: 'white',
+          display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        }}>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+            letterSpacing: '0.08em',
+          }}>
+            {selected.size} selected
+          </span>
+          <button onClick={() => setSelected(new Set(filtered.map(r => r.id)))}
+            style={{
+              padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+              fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: 'transparent', color: 'white',
+              border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
+            }}>Select all visible ({filtered.length})</button>
+          <button onClick={clearSelection}
+            style={{
+              padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+              fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: 'transparent', color: 'white',
+              border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
+            }}>Clear</button>
+          <span style={{ flex: 1 }} />
+          <button onClick={() => setBulkEditOpen(true)} disabled={bulkBusy}
+            style={{
+              padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 10.5,
+              fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: 'var(--accent)', color: 'var(--ink)',
+              border: 'none', cursor: 'pointer',
+            }}>Bulk edit {selected.size}</button>
+        </div>
+      )}
+
       {loading ? (
         <LoadingState />
       ) : filtered.length === 0 ? (
@@ -328,7 +385,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                   gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
                 }}>
                   {group.rows.map(r => (
-                    <CreativeCard key={r.id} row={r} onClick={() => setDrawerRow(r)} />
+                    <CreativeCard key={r.id} row={r}
+                      onClick={() => setDrawerRow(r)}
+                      selected={selected.has(r.id)}
+                      selectionMode={selected.size > 0}
+                      onToggleSelect={scope.canEditCreative ? toggleSelect : null} />
                   ))}
                 </div>
               ) : view === 'list' ? (
@@ -370,6 +431,17 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           onClose={() => setConfirmDelete(null)}
           onDeleted={() => { setConfirmDelete(null); load() }}
         />
+      )}
+
+      {bulkEditOpen && (
+        <BulkEditModal
+          ids={Array.from(selected)}
+          onClose={() => setBulkEditOpen(false)}
+          onSaved={() => {
+            setBulkEditOpen(false)
+            clearSelection()
+            load()
+          }} />
       )}
     </>
   )
@@ -782,6 +854,129 @@ function StageCell({ value }) {
   )
 }
 
+/* ──────────────────────── BULK EDIT MODAL ──────────────────────── */
+/* Applies a patch to N selected library rows in a single .update().in()
+   call. Empty fields are skipped — only fields the user explicitly sets
+   are written. Lets Ben reorganise dozens of clips in one pass. */
+
+function BulkEditModal({ ids, onClose, onSaved }) {
+  const [type, setType] = useState('')
+  const [status, setStatus] = useState('')
+  const [priority, setPriority] = useState('')
+  const [assignedEditorId, setAssignedEditorId] = useState('')
+  const [v21ScriptId, setV21ScriptId] = useState('')
+  const [editors, setEditors] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  useEffect(() => {
+    let mounted = true
+    supabase.from('lib_creative_editors').select('*').eq('active', true).order('name')
+      .then(({ data }) => { if (mounted) setEditors(data || []) })
+    return () => { mounted = false }
+  }, [])
+
+  // Build the patch — only fields with a value get written. The special
+  // string '__CLEAR__' (used only for editor) writes null.
+  const buildPatch = () => {
+    const patch = {}
+    if (type)     patch.type = type
+    if (status)   patch.status = status
+    if (priority) patch.priority = priority
+    if (v21ScriptId.trim()) patch.v21_script_id = v21ScriptId.trim()
+    if (assignedEditorId === '__CLEAR__') patch.assigned_editor_id = null
+    else if (assignedEditorId)            patch.assigned_editor_id = assignedEditorId
+    return patch
+  }
+  const patch = buildPatch()
+  const hasChanges = Object.keys(patch).length > 0
+
+  const apply = async () => {
+    if (!hasChanges) return
+    setBusy(true); setErr(null)
+    const { error } = await supabase
+      .from('lib_creative_library')
+      .update(patch)
+      .in('id', ids)
+    setBusy(false)
+    if (error) setErr(error.message)
+    else onSaved?.()
+  }
+
+  return (
+    <Modal open={true} onClose={onClose} size="md"
+      eyebrow={`Bulk edit · ${ids.length} clip${ids.length === 1 ? '' : 's'}`}
+      title="Reorganise selected creatives"
+      subtitle="Only fields you set below will be updated. Leave blank to keep existing values."
+      footer={
+        <>
+          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {!hasChanges && !err && (
+            <span style={{
+              fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-4)',
+              marginRight: 'auto', fontStyle: 'italic',
+            }}>Set at least one field to apply</span>
+          )}
+          <button onClick={onClose} style={ghostBtn}>Cancel</button>
+          <button onClick={apply} disabled={busy || !hasChanges} style={primaryBtn}>
+            {busy ? 'Applying…' : `Apply to ${ids.length} clip${ids.length === 1 ? '' : 's'}`}
+          </button>
+        </>
+      }>
+      <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
+          <Field label="Type">
+            <select value={type} onChange={e => setType(e.target.value)} style={selectStyle}>
+              <option value="">— Keep existing —</option>
+              {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </Field>
+          <Field label="Status">
+            <select value={status} onChange={e => setStatus(e.target.value)} style={selectStyle}>
+              <option value="">— Keep existing —</option>
+              {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
+            </select>
+          </Field>
+          <Field label="Priority">
+            <select value={priority} onChange={e => setPriority(e.target.value)} style={selectStyle}>
+              <option value="">— Keep existing —</option>
+              <option>P1 - High</option>
+              <option>P2 - Medium</option>
+              <option>P3 - Low</option>
+            </select>
+          </Field>
+          <Field label="Assigned editor">
+            <select value={assignedEditorId} onChange={e => setAssignedEditorId(e.target.value)} style={selectStyle}>
+              <option value="">— Keep existing —</option>
+              <option value="__CLEAR__">Unassign (clear editor)</option>
+              {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="v21 script (e.g. A.1, B.2)">
+          <input type="text" value={v21ScriptId}
+            onChange={e => setV21ScriptId(e.target.value)}
+            placeholder="Leave blank to keep existing"
+            style={inputStyle} />
+        </Field>
+        {hasChanges && (
+          <div style={{
+            padding: '10px 12px', background: 'var(--paper-2)',
+            border: '1px dashed var(--rule)',
+            fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
+            letterSpacing: '0.04em',
+          }}>
+            <strong style={{ color: 'var(--ink)' }}>Will write:</strong>{' '}
+            {Object.entries(patch).map(([k, v]) => (
+              <span key={k}>{k}={v === null ? 'null' : String(v)}; </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
 function ConfirmDeleteModal({ row, onClose, onDeleted }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -838,18 +1033,64 @@ const chipLabelStyle = {
   color: 'var(--ink-3)', marginRight: 6,
 }
 
-function CreativeCard({ row, onClick }) {
+function CreativeCard({ row, onClick, selected = false, selectionMode = false, onToggleSelect = null }) {
   const [hover, setHover] = useState(false)
+  // In selectionMode, clicking the tile body toggles selection instead of
+  // opening the drawer. Click the checkbox directly to toggle out of
+  // selection mode. The checkbox is always visible to onToggleSelect-
+  // enabled viewers (otherwise it's hidden entirely).
+  const handleCardClick = (e) => {
+    if (selectionMode && onToggleSelect) {
+      onToggleSelect(row.id)
+    } else {
+      onClick?.()
+    }
+  }
+  const handleCheckboxClick = (e) => {
+    e.stopPropagation()
+    if (onToggleSelect) onToggleSelect(row.id)
+  }
   return (
-    <div onClick={onClick}
+    <div onClick={handleCardClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
         cursor: 'pointer',
         background: 'var(--paper)',
-        border: hover ? '1px solid var(--ink)' : '1px solid var(--rule)',
+        border: selected ? '2px solid var(--accent)'
+              : hover ? '1px solid var(--ink)'
+              : '1px solid var(--rule)',
         transition: 'border-color 0.12s',
+        position: 'relative',
+        outline: selected ? '1px solid rgba(240,224,80,0.5)' : 'none',
+        outlineOffset: selected ? 1 : 0,
       }}>
+      {/* Selection checkbox — top-left corner. Always visible if a
+          toggle handler is wired in; hover/selected states have stronger
+          contrast. */}
+      {onToggleSelect && (
+        <div onClick={handleCheckboxClick}
+          style={{
+            position: 'absolute', top: 8, left: 8, zIndex: 3,
+            width: 22, height: 22,
+            borderRadius: 3,
+            background: selected ? 'var(--accent)' : 'rgba(255,255,255,0.92)',
+            border: selected ? '2px solid var(--ink)' : '1.5px solid var(--ink)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer',
+            opacity: (selected || hover || selectionMode) ? 1 : 0.55,
+            transition: 'opacity 0.12s, background 0.12s',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+          }}
+          title={selected ? 'Deselect' : 'Select for bulk edit'}>
+          {selected && (
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </div>
+      )}
       {/* Thumbnail */}
       <div style={{
         aspectRatio: '16 / 9',
@@ -943,6 +1184,10 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
   const firstEditRef = useRef(true)
   const saveTimerRef = useRef(null)
   const savedFlashTimerRef = useRef(null)
+  // Track if any auto-save fired during this modal session — if so, we
+  // ping onSaved() ONCE when the modal closes so the parent list reloads
+  // with fresh data. Avoids the "screen refreshes every keystroke" jank.
+  const dirtyDuringSessionRef = useRef(false)
 
   useEffect(() => {
     let mounted = true
@@ -978,11 +1223,26 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
       setAutoSaveStatus('error')
     } else {
       setAutoSaveStatus('saved')
-      onSaved?.()
+      // Auto-saves DON'T trigger a parent reload — that was causing the
+      // "screen refreshes on every keystroke" jank. We track that something
+      // changed and ping onSaved() once when the modal closes.
+      if (silent) dirtyDuringSessionRef.current = true
+      else onSaved?.()
       if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current)
       savedFlashTimerRef.current = setTimeout(() => setAutoSaveStatus('idle'), 1500)
     }
   }, [edit, row.id, onSaved])
+
+  // Wrap onClose so we trigger a single parent reload if anything changed.
+  const handleClose = useCallback(() => {
+    // Flush any pending debounced save first
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+    if (dirtyDuringSessionRef.current) {
+      onSaved?.()
+      dirtyDuringSessionRef.current = false
+    }
+    onClose?.()
+  }, [onClose, onSaved])
 
   // Auto-save on field changes — Notion-style. Debounced 600ms so we don't
   // hammer the DB during typing. Skip the first render (edit was just
@@ -1027,7 +1287,7 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
   const playbackKind = row.preview_url ? 'video' : row.drive_url ? 'iframe' : 'none'
 
   return (
-    <Modal open={true} onClose={onClose} size="lg"
+    <Modal open={true} onClose={handleClose} size="lg"
       eyebrow={edit.canonical_name || row.type || 'Creative'}
       title={row.canonical_name || row.name}
       subtitle={row.canonical_name ? row.name : `${row.source_bucket || ''}${row.size_mb ? ' · ' + Math.round(row.size_mb) + ' MB' : ''}`}
@@ -1056,7 +1316,7 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
             </span>
           )}
           {err && !scope.canEditCreative && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
-          <button onClick={onClose} style={ghostBtn}>Close</button>
+          <button onClick={handleClose} style={ghostBtn}>Close</button>
           {scope.canEditCreative && (
             <button onClick={() => save()} disabled={saving} style={primaryBtn}>
               {saving ? 'Saving…' : 'Save now'}
