@@ -2005,9 +2005,10 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   useEffect(() => { try { localStorage.setItem('queue.view', view) } catch {} }, [view])
   const [addEditorOpen, setAddEditorOpen] = useState(false)
   const [addTaskOpen, setAddTaskOpen] = useState(false)
-  // Prefill for AddTaskModal — set when the user clicks a Timeline cell.
-  // Falls back to empty fields when opened from the toolbar button.
-  const [addTaskPrefill, setAddTaskPrefill] = useState({ editorId: '', due: '' })
+  // Prefill for AddTaskModal — set when the user drags across days in
+  // the Timeline view. Falls back to empty fields when opened via the
+  // toolbar button or the editor row '+ Add' button.
+  const [addTaskPrefill, setAddTaskPrefill] = useState({ editorId: '', due: '', start: '' })
   const [manageEditorsOpen, setManageEditorsOpen] = useState(false)
   const [shareLinksOpen, setShareLinksOpen] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
@@ -2233,8 +2234,9 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           editors={editors.filter(e => e.active)}
           prefillEditorId={addTaskPrefill.editorId}
           prefillDue={addTaskPrefill.due}
-          onClose={() => { setAddTaskOpen(false); setAddTaskPrefill({ editorId: '', due: '' }) }}
-          onSaved={() => { setAddTaskOpen(false); setAddTaskPrefill({ editorId: '', due: '' }); load() }} />
+          prefillStart={addTaskPrefill.start}
+          onClose={() => { setAddTaskOpen(false); setAddTaskPrefill({ editorId: '', due: '', start: '' }) }}
+          onSaved={() => { setAddTaskOpen(false); setAddTaskPrefill({ editorId: '', due: '', start: '' }); load() }} />
       )}
       {editingTask && (
         <EditTaskModal
@@ -3366,7 +3368,7 @@ function AddEditorModal({ onClose, onSaved }) {
   )
 }
 
-function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefillDue = '' }) {
+function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefillDue = '', prefillStart = '' }) {
   const [mode, setMode] = useState('pick')   // 'pick' or 'upload'
   const [creatives, setCreatives] = useState([])
   const [search, setSearch] = useState('')
@@ -3379,11 +3381,14 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
   const [uploadType, setUploadType] = useState('Joined')
   const [uploadProgress, setUploadProgress] = useState(null)
   const uploadInputRef = useRef(null)
-  // Common state — accept pre-fill from Timeline click
+  // Common state — accept pre-fill from Timeline drag
   const [editorId, setEditorId] = useState(prefillEditorId || '')
   const [taskType, setTaskType] = useState('rough_cut')
   const [priority, setPriority] = useState('P2 - Medium')
   const [due, setDue] = useState(prefillDue || '')
+  // Optional start date — if user dragged across multiple days in the
+  // timeline, we capture the first day as the task's assigned_at.
+  const [startDate, setStartDate] = useState(prefillStart || '')
   // Optional project name applied as canonical_name prefix when assigning
   // multiple creatives at once — Ben asked to "rename the project for
   // multiple videos" in one shot from this modal.
@@ -3474,10 +3479,15 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
       }
 
       // Insert ONE task per selected creative
+      // If the user dragged across days in Timeline, startDate is set —
+      // we use it as assigned_at so the bar in Timeline spans from start
+      // to due_date instead of from "now" to due.
+      const assignedAt = startDate ? new Date(startDate + 'T00:00:00Z').toISOString() : null
       const rows = cids.map(creative_id => ({
         creative_id,
         editor_id: editorId || null,
         task_type: taskType, priority, due_date: due || null,
+        ...(assignedAt ? { assigned_at: assignedAt } : {}),
         status: editorId ? 'queued' : 'review',
       }))
       const { error: taskErr } = await supabase.from('lib_editing_tasks').insert(rows)
@@ -3703,6 +3713,13 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
             <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
           </Field>
         </div>
+        {/* Optional start date — appears auto-filled when user dragged
+            across days in Timeline. Lets them tweak before saving. */}
+        {(startDate || prefillStart) && (
+          <Field label="Start date (drag-created task)">
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
+          </Field>
+        )}
       </div>
     </Modal>
   )
@@ -3721,6 +3738,10 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
   // highlight every drop target while drag is in flight).
   const [dropOnId, setDropOnId] = useState(null)
   const [draggingTaskId, setDraggingTaskId] = useState(null)
+  // Calendar-style drag-to-create: click on a day cell, drag across N days,
+  // release to open AddTask with editor + start/end dates pre-filled.
+  // { editorId, startIdx, endIdx } or null.
+  const [dragCreate, setDragCreate] = useState(null)
   const tasksById = useMemo(() => Object.fromEntries(tasks.map(t => [t.task_id, t])), [tasks])
   const draggingTask = draggingTaskId ? tasksById[draggingTaskId] : null
 
@@ -3958,7 +3979,39 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                   )}
                 </div>
               </div>
-              <div style={{ position: 'relative', flex: 1, width: totalWidth, height: laneHeight }}>
+              <div style={{ position: 'relative', flex: 1, width: totalWidth, height: laneHeight }}
+                // Calendar-style drag-to-create: mousedown on an empty area,
+                // drag across N days, release to open AddTask with editor +
+                // start/end pre-filled. Skipped during a reassign-drag, on
+                // the Unassigned row, or if onAddTask isn't wired.
+                onMouseDown={(e) => {
+                  if (draggingTaskId) return
+                  if (!onAddTask || editor.id === 'unassigned') return
+                  // Don't start drag-create if mousedown landed on a task bar
+                  if (e.target.closest('[data-task-bar]')) return
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const idx = Math.max(0, Math.min(totalDays - 1, Math.floor((e.clientX - rect.left) / dayWidth)))
+                  setDragCreate({ editorId: editor.id, startIdx: idx, endIdx: idx })
+                }}
+                onMouseMove={(e) => {
+                  if (!dragCreate || dragCreate.editorId !== editor.id) return
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const idx = Math.max(0, Math.min(totalDays - 1, Math.floor((e.clientX - rect.left) / dayWidth)))
+                  if (idx !== dragCreate.endIdx) setDragCreate({ ...dragCreate, endIdx: idx })
+                }}
+                onMouseUp={() => {
+                  if (!dragCreate || dragCreate.editorId !== editor.id) return
+                  const sIdx = Math.min(dragCreate.startIdx, dragCreate.endIdx)
+                  const eIdx = Math.max(dragCreate.startIdx, dragCreate.endIdx)
+                  const startISO = dayLabel(sIdx).toISOString().slice(0, 10)
+                  const endISO = dayLabel(eIdx).toISOString().slice(0, 10)
+                  onAddTask({ editorId: editor.id, due: endISO, start: startISO })
+                  setDragCreate(null)
+                }}
+                onMouseLeave={() => {
+                  // If they leave the lane mid-drag, cancel (avoids hung state)
+                  if (dragCreate?.editorId === editor.id) setDragCreate(null)
+                }}>
                 {/* Drop-here hint shown on empty lanes during a drag */}
                 {isDropTarget && editorTasks.length === 0 && (
                   <div style={{
@@ -3969,35 +4022,45 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                     color: 'var(--ink-3)', pointerEvents: 'none', zIndex: 3,
                   }}>Drop to assign to {editor.name}</div>
                 )}
-                {/* Day grid lines — clickable to add a task on that day for
-                    this editor. Click goes through to onAddTask which opens
-                    AddTaskModal with editor + due_date pre-filled. */}
+                {/* Day grid lines — purely visual now. Pointer events are
+                    disabled so the lane-level mouse handlers see the events
+                    directly and we can drag-create across cells. */}
                 {Array.from({ length: totalDays }, (_, i) => {
                   const d = dayLabel(i); const dow = d.getDay()
-                  const dueISO = d.toISOString().slice(0, 10)
-                  const canAdd = !!onAddTask && editor.id !== 'unassigned' && !draggingTaskId
                   return (
                     <div key={i}
-                      onClick={canAdd ? (e) => {
-                        onAddTask({ editorId: editor.id, due: dueISO })
-                      } : undefined}
-                      title={canAdd ? `Add a task for ${editor.name} due ${dueISO}` : undefined}
                       style={{
                         position: 'absolute', left: i * dayWidth, top: 0, bottom: 0,
                         width: dayWidth, borderRight: '1px solid var(--rule)',
                         background: dow === 0 || dow === 6 ? 'var(--paper-2)' : 'transparent',
-                        cursor: canAdd ? 'cell' : 'default',
-                        // During a drag, disable pointer events on grid cells
-                        // so drag events bubble straight to the row's drop
-                        // handlers without being absorbed by cell hover/click
-                        // logic.
-                        pointerEvents: draggingTaskId ? 'none' : 'auto',
-                      }}
-                      onMouseEnter={canAdd ? (e) => { e.currentTarget.style.background = 'rgba(244,225,74,0.15)' } : undefined}
-                      onMouseLeave={canAdd ? (e) => { e.currentTarget.style.background = dow === 0 || dow === 6 ? 'var(--paper-2)' : 'transparent' } : undefined}
-                    />
+                        pointerEvents: 'none',
+                      }} />
                   )
                 })}
+                {/* Drag-create overlay — yellow rectangle while user is
+                    dragging across days to define a new task's date range. */}
+                {dragCreate && dragCreate.editorId === editor.id && (() => {
+                  const sIdx = Math.min(dragCreate.startIdx, dragCreate.endIdx)
+                  const eIdx = Math.max(dragCreate.startIdx, dragCreate.endIdx)
+                  const left = sIdx * dayWidth
+                  const width = (eIdx - sIdx + 1) * dayWidth
+                  const startD = dayLabel(sIdx)
+                  const endD = dayLabel(eIdx)
+                  return (
+                    <div style={{
+                      position: 'absolute', left, top: 6, height: laneHeight - 12, width,
+                      background: 'rgba(244,225,74,0.4)',
+                      border: '2px solid var(--accent)',
+                      borderRadius: 2, zIndex: 3, pointerEvents: 'none',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                      letterSpacing: '0.06em', textTransform: 'uppercase',
+                      color: 'var(--ink)',
+                    }}>
+                      {startD.getDate()}{sIdx !== eIdx ? ` → ${endD.getDate()}` : ''} · release to add task
+                    </div>
+                  )
+                })()}
                 {/* Today line */}
                 <div style={{
                   position: 'absolute', left: xForDate(today.toISOString()),
@@ -4013,6 +4076,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                   const stripe = t.is_overdue ? '#b53e3e' : (STATUS_STRIPE[t.status] || '#999')
                   return (
                     <div key={t.task_id}
+                      data-task-bar="true"
                       onClick={() => onEdit?.(t)}
                       draggable={!!onMoveEditor}
                       onDragStart={(e) => handleTaskDragStart(e, t)}
