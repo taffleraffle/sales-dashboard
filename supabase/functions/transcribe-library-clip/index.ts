@@ -68,9 +68,16 @@ serve(async (req) => {
   // be flagged rather than silently leaving transcript empty.
   const WHISPER_MAX_BYTES = 24 * 1024 * 1024
   if (buf.byteLength > WHISPER_MAX_BYTES) {
-    const note = `Skipped transcription: file is ${Math.round(buf.byteLength / 1e6)}MB (Whisper API cap is 25MB). Trim or compress and re-upload to transcribe.`
+    const noteLine = `[${new Date().toISOString().slice(0,10)}] Skipped transcription: file is ${Math.round(buf.byteLength / 1e6)}MB (Whisper API cap is 25MB). Trim or compress and re-upload to transcribe.`
+    // Read existing notes first and prepend — don't clobber any curator
+    // notes that may already be on the row.
+    const cur = await supabase.from('lib_creative_library')
+      .select('notes')
+      .eq('id', libraryId)
+      .maybeSingle()
+    const merged = cur.data?.notes ? `${noteLine}\n\n${cur.data.notes}` : noteLine
     await supabase.from('lib_creative_library')
-      .update({ notes: note })
+      .update({ notes: merged })
       .eq('id', libraryId)
     return json({
       ok: false,

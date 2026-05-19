@@ -279,7 +279,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   }, [rows])
 
   // Section groups for the list view — used when no type filter, shows
-  // Hooks/Bodies/Full Videos/Testimony as separate sections
+  // Hooks/Bodies/Joined/Testimony as separate sections
   const grouped = useMemo(() => {
     if (typeFilter) return [{ type: typeFilter, rows: filtered }]
     const order = ['Hook', 'Body', 'Joined', 'Testimony']
