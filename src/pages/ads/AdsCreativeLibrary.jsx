@@ -1826,7 +1826,7 @@ function UploadModal({ onClose, onSaved }) {
           .from('lib_creative_library')
           .insert({
             name: file.name,
-            type: 'Full Video',
+            type: 'Joined',
             size_mb: Math.round(file.size / 1024 / 1024 * 10) / 10,
             status: 'raw',
             source_bucket: 'Manual upload',
