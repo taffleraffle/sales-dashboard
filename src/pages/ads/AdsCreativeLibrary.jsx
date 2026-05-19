@@ -428,6 +428,22 @@ function CreativeDetailModal({ row, onClose, onSaved }) {
   const [edit, setEdit] = useState(row)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
+  const [editors, setEditors] = useState([])
+  const [assignEditor, setAssignEditor] = useState('')
+  const [assignDue, setAssignDue] = useState('')
+  const [assignPriority, setAssignPriority] = useState('P2 - Medium')
+  const [assignTaskType, setAssignTaskType] = useState('rough_cut')
+  const [assignBusy, setAssignBusy] = useState(false)
+  const [existingTasks, setExistingTasks] = useState([])
+
+  useEffect(() => {
+    let mounted = true
+    supabase.from('lib_creative_editors').select('*').eq('active', true).order('name')
+      .then(({ data }) => { if (mounted) setEditors(data || []) })
+    supabase.from('lib_editing_queue').select('*').eq('creative_id', row.id)
+      .then(({ data }) => { if (mounted) setExistingTasks(data || []) })
+    return () => { mounted = false }
+  }, [row.id])
 
   const save = async () => {
     setSaving(true); setErr(null)
@@ -436,6 +452,7 @@ function CreativeDetailModal({ row, onClose, onSaved }) {
       .update({
         type: edit.type, creator: edit.creator, status: edit.status,
         v21_script_id: edit.v21_script_id, notes: edit.notes,
+        canonical_name: edit.canonical_name,
       })
       .eq('id', row.id)
     setSaving(false)
@@ -443,11 +460,36 @@ function CreativeDetailModal({ row, onClose, onSaved }) {
     else onSaved?.()
   }
 
+  const assign = async () => {
+    if (!assignEditor) return
+    setAssignBusy(true); setErr(null)
+    const { error } = await supabase.from('lib_editing_tasks').insert({
+      creative_id: row.id,
+      editor_id: assignEditor,
+      due_date: assignDue || null,
+      priority: assignPriority,
+      task_type: assignTaskType,
+      status: 'queued',
+    })
+    setAssignBusy(false)
+    if (error) setErr(error.message)
+    else {
+      // Refresh existing tasks
+      const { data } = await supabase.from('lib_editing_queue').select('*').eq('creative_id', row.id)
+      setExistingTasks(data || [])
+      // Reset form
+      setAssignEditor(''); setAssignDue('')
+    }
+  }
+
+  // Pick the best playback URL — self-hosted preview > drive iframe
+  const playbackKind = row.preview_url ? 'video' : row.drive_url ? 'iframe' : 'none'
+
   return (
     <Modal open={true} onClose={onClose} size="lg"
-      eyebrow={row.type || 'Creative'}
-      title={row.name}
-      subtitle={`${row.source_bucket || ''}${row.size_mb ? ' · ' + Math.round(row.size_mb) + ' MB' : ''}`}
+      eyebrow={edit.canonical_name || row.type || 'Creative'}
+      title={row.canonical_name || row.name}
+      subtitle={row.canonical_name ? row.name : `${row.source_bucket || ''}${row.size_mb ? ' · ' + Math.round(row.size_mb) + ' MB' : ''}`}
       footer={
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
@@ -459,16 +501,49 @@ function CreativeDetailModal({ row, onClose, onSaved }) {
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 16 }}>
         {/* Video preview */}
-        {row.drive_url && (
+        {playbackKind === 'video' && (
           <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
+            <video
+              src={row.preview_url}
+              controls
+              preload="metadata"
+              poster={row.thumbnail_url || undefined}
+              style={{ width: '100%', height: '100%', display: 'block' }}
+            />
+          </div>
+        )}
+        {playbackKind === 'iframe' && (
+          <div style={{ aspectRatio: '16 / 9', background: 'black', position: 'relative' }}>
             <iframe src={driveEmbedUrl(row.drive_url)}
               title={row.name}
               style={{ width: '100%', height: '100%', border: 'none' }}
               allow="autoplay" />
+            <div style={{
+              position: 'absolute', bottom: 6, left: 6, right: 6,
+              padding: '4px 8px', fontSize: 10.5, fontFamily: 'var(--mono)',
+              background: 'rgba(0,0,0,0.6)', color: 'rgba(255,255,255,0.85)',
+              letterSpacing: '0.05em', borderRadius: 2,
+            }}>
+              Drive-hosted preview · self-hosted version still processing
+            </div>
+          </div>
+        )}
+        {playbackKind === 'none' && (
+          <div style={{
+            aspectRatio: '16 / 9', background: 'var(--paper-2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+          }}>
+            No playback available
           </div>
         )}
 
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
+          <Field label="Canonical name">
+            <input type="text" value={edit.canonical_name || ''}
+              onChange={e => setEdit({ ...edit, canonical_name: e.target.value })}
+              style={inputStyle} />
+          </Field>
           <Field label="Type">
             <select value={edit.type || ''} onChange={e => setEdit({ ...edit, type: e.target.value })} style={selectStyle}>
               {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -485,6 +560,14 @@ function CreativeDetailModal({ row, onClose, onSaved }) {
           <Field label="v21 script">
             <input type="text" value={edit.v21_script_id || ''} onChange={e => setEdit({ ...edit, v21_script_id: e.target.value })}
               placeholder="A.1, B.2, etc." style={inputStyle} />
+          </Field>
+          <Field label="Original filename">
+            <div style={{
+              padding: '8px 11px', fontFamily: 'var(--mono)', fontSize: 11,
+              background: 'var(--paper-2)', border: '1px solid var(--rule)',
+              color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }} title={row.name}>{row.name}</div>
           </Field>
         </div>
 
@@ -504,6 +587,62 @@ function CreativeDetailModal({ row, onClose, onSaved }) {
             }}>{row.transcript}</div>
           </Field>
         )}
+
+        {/* Existing tasks */}
+        {existingTasks.length > 0 && (
+          <Field label="Editing tasks">
+            <div style={{ display: 'grid', gap: 6 }}>
+              {existingTasks.map(t => (
+                <div key={t.task_id} style={{
+                  padding: '8px 12px', background: 'var(--paper-2)', border: '1px solid var(--rule)',
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  fontFamily: 'var(--mono)', fontSize: 11,
+                }}>
+                  <span style={{ fontWeight: 600 }}>{t.editor_name}</span>
+                  <span style={{ color: 'var(--ink-3)' }}>{t.task_type}</span>
+                  <span style={{ color: 'var(--ink-3)' }}>{t.status}</span>
+                  <span style={{ marginLeft: 'auto', color: t.is_overdue ? '#b53e3e' : 'var(--ink-4)' }}>
+                    {t.is_overdue ? '⚠ overdue ' : ''}{t.due_date || 'no due date'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Field>
+        )}
+
+        {/* Assign editor block */}
+        <div style={{
+          padding: '14px 16px', border: '1px solid var(--rule)', background: 'var(--paper-2)',
+        }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+            letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)',
+            marginBottom: 10,
+          }}>Assign editor</div>
+          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1.2fr 1fr 1fr 1.4fr auto' }}>
+            <select value={assignEditor} onChange={e => setAssignEditor(e.target.value)} style={selectStyle}>
+              <option value="">Pick editor…</option>
+              {editors.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+            <select value={assignPriority} onChange={e => setAssignPriority(e.target.value)} style={selectStyle}>
+              <option>P1 - High</option>
+              <option>P2 - Medium</option>
+              <option>P3 - Low</option>
+            </select>
+            <select value={assignTaskType} onChange={e => setAssignTaskType(e.target.value)} style={selectStyle}>
+              <option value="rough_cut">Rough cut</option>
+              <option value="final_cut">Final cut</option>
+              <option value="patch_hook_body">Patch hook+body</option>
+              <option value="revision">Revision</option>
+              <option value="thumbnail">Thumbnail</option>
+              <option value="other">Other</option>
+            </select>
+            <input type="date" value={assignDue} onChange={e => setAssignDue(e.target.value)} style={inputStyle} />
+            <button onClick={assign} disabled={!assignEditor || assignBusy} style={primaryBtn}>
+              {assignBusy ? 'Assigning…' : 'Assign'}
+            </button>
+          </div>
+        </div>
 
         {row.drive_url && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
@@ -630,6 +769,10 @@ function EditingQueueTab() {
   const [editors, setEditors] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem('queue.view') || 'lanes' } catch { return 'lanes' }
+  })
+  useEffect(() => { try { localStorage.setItem('queue.view', view) } catch {} }, [view])
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
@@ -656,7 +799,6 @@ function EditingQueueTab() {
     return Array.from(m.entries()).map(([slug, v]) => ({ slug, ...v }))
   }, [tasks])
 
-  // Counts
   const overdue = tasks.filter(t => t.is_overdue).length
   const inProg  = tasks.filter(t => t.status === 'in_progress').length
   const queued  = tasks.filter(t => t.status === 'queued').length
@@ -677,6 +819,15 @@ function EditingQueueTab() {
         <KpiTile label="Done"        value={done} />
       </div>
 
+      {/* View toggle */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+        <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'white' }}>
+          <ViewBtn active={view === 'lanes'}    onClick={() => setView('lanes')}>Editor lanes</ViewBtn>
+          <ViewBtn active={view === 'timeline'} onClick={() => setView('timeline')}>Timeline</ViewBtn>
+          <ViewBtn active={view === 'kanban'}   onClick={() => setView('kanban')}>Kanban</ViewBtn>
+        </div>
+      </div>
+
       {tasks.length === 0 ? (
         <div style={{
           border: '1px dashed var(--rule)', padding: 40, textAlign: 'center',
@@ -684,18 +835,191 @@ function EditingQueueTab() {
         }}>
           <SectionHead level="section" eyebrow="Empty queue">No editing tasks yet</SectionHead>
           <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-3)', marginTop: 8 }}>
-            Assign a creative to an editor from the Library tab — click a card → set editor + due date.
-            Tasks will appear here grouped by editor.
+            Assign a creative from the Library tab — click a card → "Assign editor" block at the bottom of the modal.
+            Tasks will appear here grouped by editor / by date / by status.
           </p>
         </div>
-      ) : (
+      ) : view === 'lanes' ? (
         <div style={{ display: 'grid', gap: 18 }}>
           {byEditor.map(({ slug, editor_name, tasks: t }) => (
             <EditorLane key={slug} editor={editor_name} tasks={t} />
           ))}
         </div>
+      ) : view === 'timeline' ? (
+        <TimelineView tasks={tasks} editors={editors} />
+      ) : (
+        <KanbanView tasks={tasks} />
       )}
     </>
+  )
+}
+
+/* ─────────────────────── TIMELINE (Gantt-style) ─────────────────────── */
+
+function TimelineView({ tasks, editors }) {
+  // Date range: min(assigned_at) → max(due_date or completed_at) + 7 days buffer
+  const today = new Date(); today.setHours(0,0,0,0)
+  const allDates = []
+  for (const t of tasks) {
+    if (t.assigned_at)   allDates.push(new Date(t.assigned_at))
+    if (t.due_date)      allDates.push(new Date(t.due_date))
+    if (t.completed_at)  allDates.push(new Date(t.completed_at))
+  }
+  if (!allDates.length) {
+    return <div style={{ padding: 30, fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)' }}>No dates to plot.</div>
+  }
+  const minDate = new Date(Math.min(...allDates.map(d => d.getTime())))
+  const maxDate = new Date(Math.max(...allDates.map(d => d.getTime()), today.getTime() + 7*86400000))
+  minDate.setHours(0,0,0,0); maxDate.setHours(0,0,0,0)
+  const totalDays = Math.ceil((maxDate - minDate) / 86400000) + 1
+  const dayWidth = Math.max(28, Math.min(56, Math.round(900 / totalDays)))
+  const totalWidth = totalDays * dayWidth
+
+  // Build editor rows (always show all active editors)
+  const editorRows = editors.length ? editors : [{ id: 'unassigned', name: 'Unassigned', slug: 'unassigned' }]
+  const tasksByEditor = new Map()
+  for (const t of tasks) {
+    const key = t.editor_slug || 'unassigned'
+    if (!tasksByEditor.has(key)) tasksByEditor.set(key, [])
+    tasksByEditor.get(key).push(t)
+  }
+
+  const dayLabel = (i) => {
+    const d = new Date(minDate); d.setDate(minDate.getDate() + i)
+    return d
+  }
+  const xForDate = (dateStr) => {
+    const d = new Date(dateStr); d.setHours(0,0,0,0)
+    return Math.round((d - minDate) / 86400000) * dayWidth
+  }
+
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)', overflow: 'auto' }}>
+      <div style={{ minWidth: totalWidth + 200 }}>
+        {/* Date header */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+          <div style={{ width: 200, padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                        letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
+                        borderRight: '1px solid var(--rule)' }}>Editor</div>
+          <div style={{ display: 'flex', flex: 1, position: 'relative' }}>
+            {Array.from({ length: totalDays }, (_, i) => {
+              const d = dayLabel(i)
+              const isToday = d.getTime() === today.getTime()
+              const dow = d.getDay()
+              const weekend = dow === 0 || dow === 6
+              return (
+                <div key={i} style={{
+                  width: dayWidth, padding: '6px 4px', textAlign: 'center',
+                  fontFamily: 'var(--mono)', fontSize: 9.5,
+                  color: isToday ? 'var(--ink)' : 'var(--ink-3)',
+                  background: isToday ? 'rgba(244,225,74,0.25)' : weekend ? 'var(--paper-2)' : 'transparent',
+                  borderRight: '1px solid var(--rule)',
+                  fontWeight: isToday ? 600 : 400,
+                }}>
+                  <div>{d.toLocaleString('en', { weekday: 'short' }).slice(0,2)}</div>
+                  <div style={{ fontSize: 11, marginTop: 2 }}>{d.getDate()}</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Rows */}
+        {editorRows.map(editor => {
+          const editorTasks = tasksByEditor.get(editor.slug) || []
+          return (
+            <div key={editor.id} style={{ display: 'flex', borderBottom: '1px solid var(--rule)', minHeight: 72 }}>
+              <div style={{ width: 200, padding: '12px 14px',
+                            borderRight: '1px solid var(--rule)', flexShrink: 0,
+                            background: 'var(--paper-2)' }}>
+                <div style={{ fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500 }}>{editor.name}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', marginTop: 3 }}>
+                  {editorTasks.length} task{editorTasks.length === 1 ? '' : 's'}
+                </div>
+              </div>
+              <div style={{ position: 'relative', flex: 1, width: totalWidth, height: 72 }}>
+                {/* Day grid lines */}
+                {Array.from({ length: totalDays }, (_, i) => {
+                  const d = dayLabel(i); const dow = d.getDay()
+                  return (
+                    <div key={i} style={{
+                      position: 'absolute', left: i * dayWidth, top: 0, bottom: 0,
+                      width: dayWidth, borderRight: '1px solid var(--rule)',
+                      background: dow === 0 || dow === 6 ? 'var(--paper-2)' : 'transparent',
+                    }} />
+                  )
+                })}
+                {/* Today line */}
+                <div style={{
+                  position: 'absolute', left: xForDate(today.toISOString()),
+                  top: 0, bottom: 0, width: 2, background: 'var(--accent)', zIndex: 2,
+                }} />
+                {/* Task bars */}
+                {editorTasks.map((t, idx) => {
+                  const start = t.assigned_at ? new Date(t.assigned_at) : null
+                  const end = t.completed_at ? new Date(t.completed_at) : (t.due_date ? new Date(t.due_date) : new Date())
+                  if (!start) return null
+                  const x = xForDate(start.toISOString())
+                  const w = Math.max(dayWidth, xForDate(end.toISOString()) - x + dayWidth)
+                  const y = 10 + (idx % 3) * 18  // simple stagger
+                  const color = t.is_overdue ? '#b53e3e'
+                              : t.status === 'in_progress' ? '#b86a0c'
+                              : t.status === 'review' ? '#3e7eba'
+                              : t.status === 'done' ? '#3e8a5e'
+                              : t.status === 'blocked' ? '#666'
+                              : 'var(--ink-3)'
+                  return (
+                    <div key={t.task_id} title={`${t.creative_name} · ${t.status} · ${t.due_date || ''}`} style={{
+                      position: 'absolute', left: x, top: y, width: w, height: 14,
+                      background: color, borderRadius: 2, paddingLeft: 6,
+                      fontFamily: 'var(--mono)', fontSize: 9.5, color: 'white',
+                      lineHeight: '14px', overflow: 'hidden', whiteSpace: 'nowrap',
+                      textOverflow: 'ellipsis', cursor: 'default', zIndex: 1,
+                    }}>{t.creative_name}</div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────── KANBAN view ─────────────────────────── */
+
+function KanbanView({ tasks }) {
+  const cols = ['queued', 'in_progress', 'review', 'blocked', 'done']
+  const colLabels = {
+    queued: 'Queued', in_progress: 'In progress', review: 'Review',
+    blocked: 'Blocked', done: 'Done',
+  }
+  const byCol = Object.fromEntries(cols.map(c => [c, tasks.filter(t => t.status === c)]))
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: `repeat(${cols.length}, 1fr)`,
+      gap: 10, alignItems: 'flex-start',
+    }}>
+      {cols.map(c => (
+        <div key={c} style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+          <div style={{
+            padding: '10px 14px', background: 'var(--paper-2)',
+            borderBottom: '1px solid var(--rule)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                          letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+              {colLabels[c]}
+            </div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{byCol[c].length}</div>
+          </div>
+          <div style={{ padding: 8, display: 'grid', gap: 8 }}>
+            {byCol[c].map(t => <QueueCard key={t.task_id} task={t} />)}
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 
