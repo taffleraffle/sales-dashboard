@@ -1031,11 +1031,15 @@ function EditingQueueTab() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
   const [view, setView] = useState(() => {
-    try { return localStorage.getItem('queue.view') || 'lanes' } catch { return 'lanes' }
+    try { return localStorage.getItem('queue.view') || 'list' } catch { return 'list' }
   })
   useEffect(() => { try { localStorage.setItem('queue.view', view) } catch {} }, [view])
   const [addEditorOpen, setAddEditorOpen] = useState(false)
   const [addTaskOpen, setAddTaskOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState(null)
+  const [editingEditor, setEditingEditor] = useState(null)
+  // Editor multi-select for filtering (empty Set = show all)
+  const [selectedEditors, setSelectedEditors] = useState(() => new Set())
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
@@ -1051,21 +1055,36 @@ function EditingQueueTab() {
 
   useEffect(() => { load() }, [load])
 
-  // Group by editor
+  // Filter tasks by selected editors (when set is empty, show all)
+  const filteredTasks = useMemo(() => {
+    if (selectedEditors.size === 0) return tasks
+    return tasks.filter(t => selectedEditors.has(t.editor_id) || (t.editor_id == null && selectedEditors.has('unassigned')))
+  }, [tasks, selectedEditors])
+
+  // Group by editor (on filtered tasks)
   const byEditor = useMemo(() => {
     const m = new Map()
-    for (const t of tasks) {
+    for (const t of filteredTasks) {
       const key = t.editor_slug || 'unassigned'
       if (!m.has(key)) m.set(key, { editor_name: t.editor_name || 'Unassigned', tasks: [] })
       m.get(key).tasks.push(t)
     }
     return Array.from(m.entries()).map(([slug, v]) => ({ slug, ...v }))
-  }, [tasks])
+  }, [filteredTasks])
 
-  const overdue = tasks.filter(t => t.is_overdue).length
-  const inProg  = tasks.filter(t => t.status === 'in_progress').length
-  const queued  = tasks.filter(t => t.status === 'queued').length
-  const done    = tasks.filter(t => t.status === 'done').length
+  const overdue = filteredTasks.filter(t => t.is_overdue).length
+  const inProg  = filteredTasks.filter(t => t.status === 'in_progress').length
+  const queued  = filteredTasks.filter(t => t.status === 'queued').length
+  const done    = filteredTasks.filter(t => t.status === 'done').length
+
+  const toggleEditor = (id) => {
+    setSelectedEditors(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   if (loading) return <LoadingState />
   if (err) return <ErrorBanner msg={err} />
@@ -1091,21 +1110,26 @@ function EditingQueueTab() {
         <button onClick={() => setAddEditorOpen(true)} style={ghostBtn}>+ Add editor</button>
         <span style={{ flex: 1 }} />
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
-          {editors.filter(e => e.active).length} editor{editors.filter(e => e.active).length === 1 ? '' : 's'} · {tasks.length} task{tasks.length === 1 ? '' : 's'}
+          {editors.filter(e => e.active).length} editor{editors.filter(e => e.active).length === 1 ? '' : 's'} · {filteredTasks.length} of {tasks.length} task{tasks.length === 1 ? '' : 's'}
         </span>
         <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'white' }}>
+          <ViewBtn active={view === 'list'}     onClick={() => setView('list')}>List</ViewBtn>
           <ViewBtn active={view === 'lanes'}    onClick={() => setView('lanes')}>Editor lanes</ViewBtn>
           <ViewBtn active={view === 'timeline'} onClick={() => setView('timeline')}>Timeline</ViewBtn>
           <ViewBtn active={view === 'kanban'}   onClick={() => setView('kanban')}>Kanban</ViewBtn>
         </div>
       </div>
 
-      {/* Editor roster (always shown so Ben can see who's on the team) */}
-      <EditorRoster editors={editors} onToggleActive={async (e) => {
-        await supabase.from('lib_creative_editors')
-          .update({ active: !e.active }).eq('id', e.id)
-        load()
-      }} />
+      {/* Editor selection bar — click a chip to FILTER tasks to that editor.
+          Empty selection = show all. Right-click / edit icon to manage editors. */}
+      <EditorSelector
+        editors={editors}
+        selected={selectedEditors}
+        onToggle={toggleEditor}
+        onClearAll={() => setSelectedEditors(new Set())}
+        onEditEditor={(e) => setEditingEditor(e)}
+        tasks={tasks}
+      />
 
       {tasks.length === 0 ? (
         <div style={{
@@ -1122,16 +1146,18 @@ function EditingQueueTab() {
             <button onClick={() => setAddEditorOpen(true)} style={ghostBtn}>+ Add editor</button>
           </div>
         </div>
+      ) : view === 'list' ? (
+        <QueueListView tasks={filteredTasks} editors={editors} onEdit={setEditingTask} />
       ) : view === 'lanes' ? (
         <div style={{ display: 'grid', gap: 18 }}>
           {byEditor.map(({ slug, editor_name, tasks: t }) => (
-            <EditorLane key={slug} editor={editor_name} tasks={t} />
+            <EditorLane key={slug} editor={editor_name} tasks={t} onEdit={setEditingTask} />
           ))}
         </div>
       ) : view === 'timeline' ? (
-        <TimelineView tasks={tasks} editors={editors} />
+        <TimelineView tasks={filteredTasks} editors={editors.filter(e => e.active)} onEdit={setEditingTask} />
       ) : (
-        <KanbanView tasks={tasks} />
+        <KanbanView tasks={filteredTasks} onEdit={setEditingTask} />
       )}
 
       {addEditorOpen && (
@@ -1145,36 +1171,412 @@ function EditingQueueTab() {
           onClose={() => setAddTaskOpen(false)}
           onSaved={() => { setAddTaskOpen(false); load() }} />
       )}
+      {editingTask && (
+        <EditTaskModal
+          task={editingTask}
+          editors={editors}
+          onClose={() => setEditingTask(null)}
+          onSaved={() => { setEditingTask(null); load() }}
+          onDeleted={() => { setEditingTask(null); load() }} />
+      )}
+      {editingEditor && (
+        <EditEditorModal
+          editor={editingEditor}
+          onClose={() => setEditingEditor(null)}
+          onSaved={() => { setEditingEditor(null); load() }}
+          onDeleted={() => { setEditingEditor(null); load() }} />
+      )}
     </>
   )
 }
 
-function EditorRoster({ editors, onToggleActive }) {
+/* Editor selection bar — multi-select chips that FILTER tasks to chosen editors.
+   Empty selection = show all. Each chip has a small (✎) icon to open the edit modal. */
+function EditorSelector({ editors, selected, onToggle, onClearAll, onEditEditor, tasks }) {
   if (!editors.length) return null
+  const taskCountByEditorId = useMemo(() => {
+    const m = {}
+    for (const t of tasks) m[t.editor_id || 'unassigned'] = (m[t.editor_id || 'unassigned'] || 0) + 1
+    return m
+  }, [tasks])
+  const sortedEditors = editors.filter(e => e.active)
+
   return (
     <div style={{
-      display: 'flex', flexWrap: 'wrap', gap: 8,
+      display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
       padding: '10px 14px', background: 'var(--paper)',
       border: '1px solid var(--rule)', marginBottom: 14,
     }}>
-      <span style={chipLabelStyle}>Editors</span>
-      {editors.map(e => (
-        <span key={e.id} title={e.active ? 'Click to deactivate' : 'Click to reactivate'}
-          onClick={() => onToggleActive(e)}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '4px 10px', cursor: 'pointer',
-            fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
-            letterSpacing: '0.04em',
-            background: e.active ? 'white' : 'var(--paper-2)',
-            color: e.active ? 'var(--ink)' : 'var(--ink-4)',
-            border: '1px solid var(--rule)',
-            textDecoration: e.active ? 'none' : 'line-through',
+      <span style={chipLabelStyle}>Show tasks for</span>
+      <button onClick={onClearAll} style={{
+        padding: '5px 11px',
+        fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+        letterSpacing: '0.04em', textTransform: 'uppercase',
+        background: selected.size === 0 ? 'var(--ink)' : 'white',
+        color: selected.size === 0 ? 'var(--paper)' : 'var(--ink-2)',
+        border: '1px solid ' + (selected.size === 0 ? 'var(--ink)' : 'var(--rule)'),
+        borderRadius: 2, cursor: 'pointer',
+      }}>All editors</button>
+      {sortedEditors.map(e => {
+        const isSelected = selected.has(e.id)
+        const color = editorColor(e.slug)
+        const count = taskCountByEditorId[e.id] || 0
+        return (
+          <span key={e.id} style={{
+            display: 'inline-flex', alignItems: 'stretch', borderRadius: 2,
+            border: '1px solid ' + (isSelected ? color : 'var(--rule)'),
+            background: isSelected ? color : 'white',
+            overflow: 'hidden',
           }}>
-          {e.name}
-        </span>
-      ))}
+            <button onClick={() => onToggle(e.id)} style={{
+              padding: '5px 10px 5px 8px', display: 'inline-flex', alignItems: 'center', gap: 7,
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+              letterSpacing: '0.04em',
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: isSelected ? 'white' : 'var(--ink-2)',
+            }}>
+              {!isSelected && <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />}
+              <span>{e.name}</span>
+              {count > 0 && (
+                <span style={{
+                  fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+                  color: isSelected ? 'rgba(255,255,255,0.7)' : 'var(--ink-4)',
+                }}>{count}</span>
+              )}
+            </button>
+            <button onClick={() => onEditEditor(e)} title="Edit editor"
+              style={{
+                padding: '0 6px', cursor: 'pointer',
+                fontSize: 11, color: isSelected ? 'rgba(255,255,255,0.8)' : 'var(--ink-4)',
+                background: 'transparent', border: 'none',
+                borderLeft: '1px solid ' + (isSelected ? 'rgba(255,255,255,0.25)' : 'var(--rule)'),
+              }}>✎</button>
+          </span>
+        )
+      })}
     </div>
+  )
+}
+
+/* QueueListView — matrix-style task list with sortable columns + inline edit
+   on click. Mirrors the Component Edits sheet pattern. */
+function QueueListView({ tasks, editors, onEdit }) {
+  if (!tasks.length) return null
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '56px minmax(220px, 1.6fr) 130px 110px 110px 120px 90px 50px',
+        padding: '10px 14px', gap: 12,
+        background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+        letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
+      }}>
+        <div></div>
+        <div>Creative</div>
+        <div>Editor</div>
+        <div>Status</div>
+        <div>Task type</div>
+        <div>Due</div>
+        <div>Priority</div>
+        <div style={{ textAlign: 'right' }}>Source</div>
+      </div>
+      {tasks.map((t, i) => {
+        const color = editorColor(t.editor_slug || 'unassigned')
+        return (
+          <div key={t.task_id}
+            onClick={() => onEdit(t)}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '56px minmax(220px, 1.6fr) 130px 110px 110px 120px 90px 50px',
+              padding: '10px 14px', gap: 12, alignItems: 'center',
+              borderBottom: i === tasks.length - 1 ? 'none' : '1px solid var(--rule)',
+              cursor: 'pointer', transition: 'background 0.12s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <div style={{
+              width: 50, height: 32, overflow: 'hidden',
+              background: '#000', border: '1px solid var(--rule)',
+            }}>
+              {t.thumbnail_url && <img src={t.thumbnail_url} alt="" loading="lazy"
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 500, color: 'var(--ink)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{t.creative_name}</div>
+              <div style={{
+                fontFamily: 'var(--sans)', fontSize: 10.5, color: 'var(--ink-4)', marginTop: 2,
+              }}>{t.creative_type}{t.creative_creator ? ' · ' + t.creative_creator : ''}{t.v21_script_id ? ' · ' + t.v21_script_id : ''}</div>
+            </div>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+              fontFamily: 'var(--mono)', fontSize: 11,
+            }}>
+              {t.editor_name && <span style={{ width: 9, height: 9, borderRadius: 2, background: color, flexShrink: 0 }} />}
+              <span style={{ color: t.editor_name ? 'var(--ink)' : 'var(--ink-4)' }}>{t.editor_name || 'Unassigned'}</span>
+            </div>
+            <div><StatusPipBadge status={t.status} isOverdue={t.is_overdue} /></div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{t.task_type || '—'}</div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 11,
+                          color: t.is_overdue ? '#b53e3e' : 'var(--ink-3)' }}>
+              {t.is_overdue && '⚠ '}{t.due_date || '—'}
+            </div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+              {t.priority?.replace(' - ', ' ') || '—'}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              {t.drive_url && (
+                <a href={t.drive_url} target="_blank" rel="noreferrer"
+                  onClick={e => e.stopPropagation()}
+                  title="Open Drive file"
+                  style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', textDecoration: 'none' }}>↗</a>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function StatusPipBadge({ status, isOverdue }) {
+  const STEPS = ['queued', 'in_progress', 'review', 'done']
+  if (status === 'blocked') {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '2px 8px',
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+        letterSpacing: '0.06em', textTransform: 'uppercase',
+        background: 'rgba(181,62,62,0.1)', color: '#b53e3e',
+        border: '1px solid rgba(181,62,62,0.3)', borderRadius: 2,
+      }}>Blocked</span>
+    )
+  }
+  const idx = STEPS.indexOf(status)
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ display: 'inline-flex', gap: 3 }}>
+        {STEPS.map((s, i) => (
+          <span key={s} style={{
+            width: 7, height: 7, borderRadius: '50%',
+            background: i <= idx
+              ? (isOverdue ? '#b53e3e' : (s === 'done' ? '#3e8a5e' : '#3e7eba'))
+              : 'var(--rule)',
+          }} />
+        ))}
+      </span>
+      <span style={{
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
+        letterSpacing: '0.06em', textTransform: 'uppercase',
+        color: STATUS_COLOR[status] || 'var(--ink-3)',
+      }}>{STATUS_LABEL[status] || status}</span>
+    </span>
+  )
+}
+
+/* Click any task anywhere → opens this modal. Change editor / status /
+   priority / type / due date / notes. Or delete the task. */
+function EditTaskModal({ task, editors, onClose, onSaved, onDeleted }) {
+  const [editorId, setEditorId] = useState(task.editor_id || '')
+  const [status, setStatus] = useState(task.status || 'queued')
+  const [priority, setPriority] = useState(task.priority || 'P2 - Medium')
+  const [taskType, setTaskType] = useState(task.task_type || 'rough_cut')
+  const [due, setDue] = useState(task.due_date || '')
+  const [notes, setNotes] = useState(task.notes || '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [confirmDel, setConfirmDel] = useState(false)
+
+  const save = async () => {
+    setBusy(true); setErr(null)
+    const patch = {
+      editor_id: editorId || null,
+      status, priority, task_type: taskType, due_date: due || null,
+      notes: notes || null,
+    }
+    // Auto-set started_at when moving into in_progress
+    if (status === 'in_progress' && !task.started_at) patch.started_at = new Date().toISOString()
+    // Auto-set completed_at when moving to done
+    if (status === 'done' && !task.completed_at) patch.completed_at = new Date().toISOString()
+    const { error } = await supabase.from('lib_editing_tasks').update(patch).eq('id', task.task_id)
+    setBusy(false)
+    if (error) setErr(error.message)
+    else onSaved?.()
+  }
+  const remove = async () => {
+    setBusy(true); setErr(null)
+    const { error } = await supabase.from('lib_editing_tasks').delete().eq('id', task.task_id)
+    setBusy(false)
+    if (error) setErr(error.message)
+    else onDeleted?.()
+  }
+
+  return (
+    <Modal open={true} onClose={busy ? () => {} : onClose} size="lg"
+      eyebrow="Edit task"
+      title={task.creative_name}
+      subtitle={`${task.creative_type || ''}${task.creative_creator ? ' · ' + task.creative_creator : ''}${task.v21_script_id ? ' · ' + task.v21_script_id : ''}`}
+      footer={
+        <>
+          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {confirmDel ? (
+            <>
+              <span style={{ fontSize: 12, color: '#b53e3e', marginRight: 'auto' }}>Delete this task? It can't be undone.</span>
+              <button onClick={() => setConfirmDel(false)} disabled={busy} style={ghostBtn}>Cancel</button>
+              <button onClick={remove} disabled={busy} style={{ ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e' }}>
+                {busy ? 'Deleting…' : 'Delete task'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setConfirmDel(true)} disabled={busy} style={{
+                ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
+              }}>Delete</button>
+              <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
+              <button onClick={save} disabled={busy} style={primaryBtn}>{busy ? 'Saving…' : 'Save'}</button>
+            </>
+          )}
+        </>
+      }>
+      <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
+        {/* Quick-action status row */}
+        <div>
+          <div style={chipLabelStyle}>Status</div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            {['queued', 'in_progress', 'review', 'done', 'blocked'].map(s => (
+              <button key={s} onClick={() => setStatus(s)} style={{
+                padding: '6px 11px',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: status === s ? (STATUS_COLOR[s] || 'var(--ink)') : 'white',
+                color: status === s ? 'white' : 'var(--ink-2)',
+                border: '1px solid ' + (status === s ? (STATUS_COLOR[s] || 'var(--ink)') : 'var(--rule)'),
+                borderRadius: 2, cursor: 'pointer',
+              }}>{STATUS_LABEL[s] || s}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
+          <Field label="Editor">
+            <select value={editorId} onChange={e => setEditorId(e.target.value)} style={selectStyle}>
+              <option value="">Unassigned</option>
+              {editors.filter(e => e.active).map(e => (
+                <option key={e.id} value={e.id}>{e.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Priority">
+            <select value={priority} onChange={e => setPriority(e.target.value)} style={selectStyle}>
+              <option>P1 - High</option><option>P2 - Medium</option><option>P3 - Low</option>
+            </select>
+          </Field>
+          <Field label="Task type">
+            <select value={taskType} onChange={e => setTaskType(e.target.value)} style={selectStyle}>
+              <option value="rough_cut">Rough cut</option>
+              <option value="final_cut">Final cut</option>
+              <option value="patch_hook_body">Patch hook+body</option>
+              <option value="revision">Revision</option>
+              <option value="thumbnail">Thumbnail</option>
+              <option value="other">Other</option>
+            </select>
+          </Field>
+          <Field label="Due date">
+            <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
+          </Field>
+        </div>
+
+        <Field label="Notes">
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--sans)' }}
+            placeholder="Notes on this task — feedback, blockers, links to revisions…" />
+        </Field>
+
+        {task.drive_url && (
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
+            Source file: <a href={task.drive_url} target="_blank" rel="noreferrer" style={{ color: 'var(--ink)' }}>{task.drive_url.slice(0, 80)}…</a>
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
+  const [name, setName] = useState(editor.name || '')
+  const [active, setActive] = useState(editor.active !== false)
+  const [notes, setNotes] = useState(editor.notes || '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [confirmDel, setConfirmDel] = useState(false)
+
+  const save = async () => {
+    setBusy(true); setErr(null)
+    const { error } = await supabase.from('lib_creative_editors')
+      .update({ name: name.trim(), active, notes: notes || null })
+      .eq('id', editor.id)
+    setBusy(false)
+    if (error) setErr(error.message)
+    else onSaved?.()
+  }
+  const remove = async () => {
+    setBusy(true); setErr(null)
+    // Soft-delete by deactivating (don't hard-delete since tasks reference this row)
+    const { error } = await supabase.from('lib_creative_editors')
+      .update({ active: false }).eq('id', editor.id)
+    setBusy(false)
+    if (error) setErr(error.message)
+    else onDeleted?.()
+  }
+  return (
+    <Modal open={true} onClose={busy ? () => {} : onClose} size="sm"
+      eyebrow="Edit editor"
+      title={editor.name}
+      footer={
+        <>
+          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {confirmDel ? (
+            <>
+              <span style={{ fontSize: 12, color: '#b53e3e', marginRight: 'auto' }}>Deactivate this editor? Their existing tasks stay.</span>
+              <button onClick={() => setConfirmDel(false)} disabled={busy} style={ghostBtn}>Cancel</button>
+              <button onClick={remove} disabled={busy} style={{ ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e' }}>
+                {busy ? '…' : 'Deactivate'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setConfirmDel(true)} disabled={busy} style={{
+                ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
+              }}>Deactivate</button>
+              <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
+              <button onClick={save} disabled={!name.trim() || busy} style={primaryBtn}>
+                {busy ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          )}
+        </>
+      }>
+      <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
+        <Field label="Name">
+          <input type="text" value={name} onChange={e => setName(e.target.value)} style={inputStyle} />
+        </Field>
+        <Field label="Active">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--sans)', fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} />
+            Editor is currently working on the team
+          </label>
+        </Field>
+        <Field label="Notes">
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--sans)' }}
+            placeholder="Internal notes about this editor (specialty, working hours, etc.)" />
+        </Field>
+      </div>
+    </Modal>
   )
 }
 
@@ -1334,7 +1736,7 @@ function AddTaskModal({ editors, onClose, onSaved }) {
 
 /* ─────────────────────── TIMELINE (Gantt-style) ─────────────────────── */
 
-function TimelineView({ tasks, editors }) {
+function TimelineView({ tasks, editors, onEdit }) {
   const [range, setRange] = useState(() => {
     try { return localStorage.getItem('queue.timelineRange') || 'month' } catch { return 'month' }
   })
@@ -1514,6 +1916,7 @@ function TimelineView({ tasks, editors }) {
                   const stripe = t.is_overdue ? '#b53e3e' : (STATUS_STRIPE[t.status] || '#999')
                   return (
                     <div key={t.task_id}
+                      onClick={() => onEdit?.(t)}
                       title={`${t.creative_name} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}`}
                       style={{
                         position: 'absolute', left: x + 2, top: y,
@@ -1525,7 +1928,7 @@ function TimelineView({ tasks, editors }) {
                         display: 'flex', alignItems: 'center', gap: 6,
                         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
                         color: 'white',
-                        overflow: 'hidden', cursor: 'default', zIndex: 1,
+                        overflow: 'hidden', cursor: onEdit ? 'pointer' : 'default', zIndex: 1,
                         boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
                       }}>
                       <span style={{
@@ -1553,7 +1956,7 @@ function TimelineView({ tasks, editors }) {
 
 /* ─────────────────────────── KANBAN view ─────────────────────────── */
 
-function KanbanView({ tasks }) {
+function KanbanView({ tasks, onEdit }) {
   const cols = ['queued', 'in_progress', 'review', 'blocked', 'done']
   const colLabels = {
     queued: 'Queued', in_progress: 'In progress', review: 'Review',
@@ -1579,7 +1982,7 @@ function KanbanView({ tasks }) {
             <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{byCol[c].length}</div>
           </div>
           <div style={{ padding: 8, display: 'grid', gap: 8 }}>
-            {byCol[c].map(t => <QueueCard key={t.task_id} task={t} />)}
+            {byCol[c].map(t => <QueueCard key={t.task_id} task={t} onClick={() => onEdit?.(t)} />)}
           </div>
         </div>
       ))}
@@ -1587,7 +1990,7 @@ function KanbanView({ tasks }) {
   )
 }
 
-function EditorLane({ editor, tasks }) {
+function EditorLane({ editor, tasks, onEdit }) {
   return (
     <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       <div style={{
@@ -1609,13 +2012,13 @@ function EditorLane({ editor, tasks }) {
         display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
         gap: 10, padding: 12,
       }}>
-        {tasks.map(t => <QueueCard key={t.task_id} task={t} />)}
+        {tasks.map(t => <QueueCard key={t.task_id} task={t} onClick={() => onEdit?.(t)} />)}
       </div>
     </div>
   )
 }
 
-function QueueCard({ task }) {
+function QueueCard({ task, onClick }) {
   const statusColor = {
     queued: 'var(--ink-3)',
     in_progress: '#b86a0c',
@@ -1625,11 +2028,15 @@ function QueueCard({ task }) {
   }[task.status] || 'var(--ink-3)'
 
   return (
-    <div style={{
+    <div onClick={onClick} style={{
       background: 'white', border: '1px solid var(--rule)',
       borderLeft: `3px solid ${statusColor}`,
       padding: '10px 12px',
-    }}>
+      cursor: onClick ? 'pointer' : 'default',
+      transition: 'background 0.12s',
+    }}
+    onMouseEnter={e => onClick && (e.currentTarget.style.background = 'var(--paper-2)')}
+    onMouseLeave={e => onClick && (e.currentTarget.style.background = 'white')}>
       {task.thumbnail_url && (
         <div style={{
           aspectRatio: '16/9', backgroundImage: `url('${task.thumbnail_url}')`,
