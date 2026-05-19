@@ -180,9 +180,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   const filtered = useMemo(() => {
     let list = rows
-    // Raw/Edited top-level toggle — raw=just status='raw', edited=everything else, all=both
-    if (rawEditedFilter === 'raw')         list = list.filter(r => r.status === 'raw')
-    else if (rawEditedFilter === 'edited') list = list.filter(r => r.status !== 'raw')
+    // Raw/Edited top-level toggle — bypassed in Matrix view (one row per
+    // creative, stage columns handle the raw-vs-delivered distinction)
+    const rawEdited = view === 'matrix' ? 'all' : rawEditedFilter
+    if (rawEdited === 'raw')         list = list.filter(r => r.status === 'raw')
+    else if (rawEdited === 'edited') list = list.filter(r => r.status !== 'raw')
     const search = q.trim().toLowerCase()
     if (search) list = list.filter(r => {
       const blob = `${r.name} ${r.canonical_name || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.transcript || ''}`.toLowerCase()
@@ -222,22 +224,25 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   return (
     <>
-      {/* Big Raw vs Edited toggle — sits above the toolbar so it's the
-          first decision when you land on the page */}
-      <div style={{
-        display: 'flex', gap: 0, marginBottom: 14,
-        border: '1px solid var(--rule)',
-      }}>
-        <BigToggle active={rawEditedFilter === 'edited'} onClick={() => setRawEditedFilter('edited')}
-          label="Edited" count={editedCount}
-          subtitle="Finished UGC, hooks, bodies, full ads — ready to use" />
-        <BigToggle active={rawEditedFilter === 'raw'} onClick={() => setRawEditedFilter('raw')}
-          label="Raw footage" count={rawCount}
-          subtitle="Camera files + unedited clips — sources for editing" />
-        <BigToggle active={rawEditedFilter === 'all'} onClick={() => setRawEditedFilter('all')}
-          label="All" count={rows.length}
-          subtitle="Everything in the library" />
-      </div>
+      {/* Big Raw vs Edited toggle — hidden in Matrix view because Matrix
+          shows raw + delivered side-by-side in stage columns on the same
+          row, so a top-level raw/edited split doesn't make sense there. */}
+      {view !== 'matrix' && (
+        <div style={{
+          display: 'flex', gap: 0, marginBottom: 14,
+          border: '1px solid var(--rule)',
+        }}>
+          <BigToggle active={rawEditedFilter === 'edited'} onClick={() => setRawEditedFilter('edited')}
+            label="Edited" count={editedCount}
+            subtitle="Finished UGC, hooks, bodies, full ads — ready to use" />
+          <BigToggle active={rawEditedFilter === 'raw'} onClick={() => setRawEditedFilter('raw')}
+            label="Raw footage" count={rawCount}
+            subtitle="Camera files + unedited clips — sources for editing" />
+          <BigToggle active={rawEditedFilter === 'all'} onClick={() => setRawEditedFilter('all')}
+            label="All" count={rows.length}
+            subtitle="Everything in the library" />
+        </div>
+      )}
 
       {/* Toolbar */}
       <div style={{
@@ -599,10 +604,10 @@ function CreativeMatrixView({ rows, onClick }) {
   return (
     <div style={{ overflowX: 'auto', background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       <div style={{ minWidth: 1500 }}>
-        {/* Header */}
+        {/* Header — stage columns ARE the file links now (no separate File column) */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '140px 60px 100px minmax(220px, 1.4fr) 90px 110px 90px 60px 70px 70px 70px 70px 60px 90px',
+          gridTemplateColumns: '140px 60px 100px minmax(220px, 1.4fr) 90px 110px 90px 80px 80px 80px 80px 80px 90px',
           gap: 10, padding: '10px 14px',
           background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
           fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
@@ -620,7 +625,6 @@ function CreativeMatrixView({ rows, onClick }) {
           <div style={{ textAlign: 'center' }}>Final cut</div>
           <div style={{ textAlign: 'center' }}>Approved</div>
           <div style={{ textAlign: 'center' }}>Delivered</div>
-          <div style={{ textAlign: 'center' }}>File</div>
           <div>Status</div>
         </div>
         {rows.map((r, i) => (
@@ -634,7 +638,8 @@ function CreativeMatrixView({ rows, onClick }) {
 function MatrixRow({ row: r, isLast, onClick }) {
   const [hover, setHover] = useState(false)
   const tc = typeColor(r.type)
-  const rawStage = r.drive_url ? 'done' : null  // raw is "done" if we have a file
+  // Raw is "done" if there's a drive_url (the source file)
+  const rawStage = r.drive_url ? 'done' : null
   return (
     <div
       onClick={onClick}
@@ -642,7 +647,7 @@ function MatrixRow({ row: r, isLast, onClick }) {
       onMouseLeave={() => setHover(false)}
       style={{
         display: 'grid',
-        gridTemplateColumns: '140px 60px 100px minmax(220px, 1.4fr) 90px 110px 90px 60px 70px 70px 70px 70px 60px 90px',
+        gridTemplateColumns: '140px 60px 100px minmax(220px, 1.4fr) 90px 110px 90px 80px 80px 80px 80px 80px 90px',
         gap: 10, padding: '8px 14px', alignItems: 'center',
         borderBottom: isLast ? 'none' : '1px solid var(--rule)',
         background: hover ? 'var(--paper-2)' : 'transparent',
@@ -679,20 +684,52 @@ function MatrixRow({ row: r, isLast, onClick }) {
       <div style={{ color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {r.priority?.replace(' - ', ' ') || '—'}
       </div>
-      <StageCell value={rawStage} />
-      <StageCell value={r.stage_rough_cut} />
-      <StageCell value={r.stage_final_cut} />
-      <StageCell value={r.stage_approved} />
-      <StageCell value={r.stage_delivered} />
-      <div style={{ textAlign: 'center' }}>
-        {r.drive_url ? (
-          <a href={r.drive_url} target="_blank" rel="noreferrer"
-            onClick={e => e.stopPropagation()}
-            style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)', textDecoration: 'none' }}
-            title="Open Drive file">↗</a>
-        ) : '—'}
-      </div>
+      {/* Each stage cell: clickable link to the file IF a URL is set,
+          falls back to status indicator otherwise. */}
+      <StageLinkCell value={rawStage}              url={r.drive_url}     label="Open raw" />
+      <StageLinkCell value={r.stage_rough_cut}     url={r.rough_cut_url} label="Open rough cut" />
+      <StageLinkCell value={r.stage_final_cut}     url={r.final_cut_url} label="Open final cut" />
+      <StageLinkCell value={r.stage_approved}      url={r.approved_url}  label="Open approved" />
+      <StageLinkCell value={r.stage_delivered}     url={r.delivered_url} label="Open delivered" />
       <div><StatusBadge status={r.status} /></div>
+    </div>
+  )
+}
+
+/* StageLinkCell — if there's a URL for this stage, render a colored
+   clickable link pill that opens the file. If status is set but URL
+   isn't, fall back to the status indicator (X / In progress / Blocked /
+   Skip). If neither, show '—'. */
+function StageLinkCell({ value, url, label }) {
+  const s = stageStyle(value)
+  if (url) {
+    return (
+      <div style={{ textAlign: 'center' }}>
+        <a href={url} target="_blank" rel="noreferrer"
+          onClick={e => e.stopPropagation()}
+          title={label}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            padding: '3px 8px', textDecoration: 'none',
+            background: value === 'done' ? '#3e8a5e' : '#1f4e8f',
+            color: 'white',
+            fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            borderRadius: 2,
+          }}>Open ↗</a>
+      </div>
+    )
+  }
+  if (!value) return <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontFamily: 'var(--mono)', fontSize: 12 }}>—</div>
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <span style={{
+        display: 'inline-block', minWidth: 22, padding: '2px 6px',
+        background: s.bg, color: s.color,
+        fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+        letterSpacing: '0.06em', textTransform: 'uppercase',
+        border: value === 'skip' ? '1px solid var(--rule)' : 'none',
+      }}>{s.label}</span>
     </div>
   )
 }
@@ -1339,6 +1376,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   const [addEditorOpen, setAddEditorOpen] = useState(false)
   const [addTaskOpen, setAddTaskOpen] = useState(false)
   const [manageEditorsOpen, setManageEditorsOpen] = useState(false)
+  const [shareLinksOpen, setShareLinksOpen] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
   const [editingEditor, setEditingEditor] = useState(null)
   // Editor multi-select for filtering. Editor-view auto-selects the
@@ -1417,7 +1455,12 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           <button onClick={() => setAddTaskOpen(true)} style={primaryBtn}>+ Add task</button>
         )}
         {scope.canManageEditors && (
-          <button onClick={() => setManageEditorsOpen(true)} style={ghostBtn}>Manage editors</button>
+          <>
+            <button onClick={() => setShareLinksOpen(true)} style={{ ...ghostBtn, color: '#a86a08', borderColor: '#a86a08' }}>
+              ↗ Share with editor
+            </button>
+            <button onClick={() => setManageEditorsOpen(true)} style={ghostBtn}>Manage editors</button>
+          </>
         )}
         <span style={{ flex: 1 }} />
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
@@ -1486,6 +1529,12 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           onClose={() => setManageEditorsOpen(false)}
           onChanged={load}
           onOpenEditor={(e) => { setManageEditorsOpen(false); setEditingEditor(e) }}
+        />
+      )}
+      {shareLinksOpen && (
+        <ShareLinksModal
+          editors={editors.filter(e => e.active)}
+          onClose={() => setShareLinksOpen(false)}
         />
       )}
       {addTaskOpen && (
@@ -1743,9 +1792,11 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     else onDeleted?.()
   }
 
-  // Upload an edited version: file → creative-uploads bucket → new lib_creative_library
-  // row with parent_id = source creative. Also auto-advances the task status to
-  // 'review' so admin knows there's something to look at.
+  // Upload an edited version of the SAME creative — file → creative-uploads
+  // bucket → write the URL into the appropriate stage on the SOURCE creative
+  // (rough_cut_url / final_cut_url / approved_url / delivered_url) based on
+  // task_type, AND mark that stage as 'done'. One row per creative; the
+  // matrix view's stage cells become clickable file links.
   const uploadEditedVersion = async () => {
     if (!uploadFile) return
     setBusy(true); setErr(null); setUploadProgress(0)
@@ -1756,24 +1807,27 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         .from('creative-uploads')
         .upload(storagePath, uploadFile, { upsert: false })
       if (upErr) throw upErr
-      setUploadProgress(60)
-      const publicUrl = `${supabase.storageUrl || 'https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1'}/object/public/creative-uploads/${storagePath}`
-      // Insert new library row pointing at the source
-      const { error: insErr } = await supabase.from('lib_creative_library').insert({
-        name: uploadFile.name,
-        type: task.creative_type || 'Full Video',
-        creator: task.creative_creator || null,
-        size_mb: Math.round(uploadFile.size / 1024 / 1024 * 10) / 10,
-        status: 'review',
-        source_bucket: 'Editor upload',
-        preview_url: publicUrl,
-        drive_url: publicUrl,
-        parent_id: task.creative_id,
-        assigned_editor_id: task.editor_id || editorId || null,
-        notes: `Edited version uploaded ${new Date().toISOString().slice(0,10)} for task ${task.task_id} (${task.task_type || 'edit'})`,
-      })
-      if (insErr) throw insErr
+      setUploadProgress(50)
+      const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+
+      // Map task type → which stage URL / stage column to update on the source.
+      const stageMap = {
+        rough_cut: { url: 'rough_cut_url', flag: 'stage_rough_cut' },
+        final_cut: { url: 'final_cut_url', flag: 'stage_final_cut' },
+        thumbnail: { url: 'thumbnail_url', flag: null },
+        revision:  { url: 'final_cut_url', flag: 'stage_final_cut' },
+      }
+      const target = stageMap[task.task_type] || { url: 'delivered_url', flag: 'stage_delivered' }
+      const patch = { [target.url]: publicUrl }
+      if (target.flag) patch[target.flag] = 'done'
+
+      // Write to the SOURCE creative row (no new row created)
+      const { error: pErr } = await supabase.from('lib_creative_library')
+        .update(patch)
+        .eq('id', task.creative_id)
+      if (pErr) throw pErr
       setUploadProgress(85)
+
       // Auto-advance the task status to review
       await supabase.from('lib_editing_tasks')
         .update({ status: 'review', started_at: task.started_at || new Date().toISOString() })
@@ -2070,6 +2124,172 @@ function ManageEditorsModal({ editors, tasks, onClose, onChanged, onOpenEditor }
             )
           })}
         </div>
+      </div>
+    </Modal>
+  )
+}
+
+/* Dedicated share-with-editor modal — opens straight from the toolbar so
+   Ben doesn't have to dig through Manage Editors → click row → scroll. */
+function ShareLinksModal({ editors, onClose }) {
+  const [links, setLinks] = useState({})   // editor_id -> link row
+  const [loading, setLoading] = useState(true)
+  const [busyEditor, setBusyEditor] = useState(null)
+  const [copyOk, setCopyOk] = useState(null)
+  const [err, setErr] = useState(null)
+
+  useEffect(() => {
+    let mounted = true
+    supabase.from('lib_editor_share_links')
+      .select('*')
+      .is('revoked_at', null)
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (!mounted) return
+        if (error) {
+          setErr('Migration 077 not yet applied — share links unavailable')
+        } else {
+          const m = {}
+          for (const link of (data || [])) {
+            // Keep only the most recent active link per editor
+            if (link.editor_id && !m[link.editor_id]) m[link.editor_id] = link
+          }
+          setLinks(m)
+        }
+        setLoading(false)
+      })
+    return () => { mounted = false }
+  }, [])
+
+  const generate = async (editor) => {
+    setBusyEditor(editor.id); setErr(null)
+    const arr = new Uint8Array(21)
+    crypto.getRandomValues(arr)
+    const token = btoa(String.fromCharCode(...arr))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    const { data, error } = await supabase.from('lib_editor_share_links')
+      .insert({
+        token, editor_id: editor.id,
+        label: `${editor.name}'s share link`,
+        created_by: 'admin',
+      })
+      .select()
+      .single()
+    setBusyEditor(null)
+    if (error) setErr(error.message)
+    else setLinks({ ...links, [editor.id]: data })
+  }
+
+  const revoke = async (link) => {
+    setBusyEditor(link.editor_id); setErr(null)
+    await supabase.from('lib_editor_share_links')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('id', link.id)
+    const next = { ...links }
+    delete next[link.editor_id]
+    setLinks(next)
+    setBusyEditor(null)
+  }
+
+  const buildUrl = (token) => `${window.location.origin}/editor-view/${token}`
+  const copyLink = async (token) => {
+    try {
+      await navigator.clipboard.writeText(buildUrl(token))
+      setCopyOk(token); setTimeout(() => setCopyOk(null), 1800)
+    } catch {}
+  }
+
+  return (
+    <Modal open={true} onClose={onClose} size="lg"
+      eyebrow="Share"
+      title="Share the editor portal"
+      subtitle="Each editor gets a private URL — no login required. Click Generate to make one, Copy to grab it, Revoke to kill it."
+      footer={
+        <>
+          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          <button onClick={onClose} style={primaryBtn}>Done</button>
+        </>
+      }>
+      <div style={{ padding: '20px 28px' }}>
+        {loading ? (
+          <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 13 }}>Loading…</div>
+        ) : editors.length === 0 ? (
+          <div style={{
+            padding: 24, textAlign: 'center', border: '1px dashed var(--rule)',
+            fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+          }}>
+            No active editors. Add one in Manage editors first.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {editors.map(e => {
+              const link = links[e.id]
+              const color = editorColor(e.slug)
+              return (
+                <div key={e.id} style={{
+                  padding: '12px 14px', background: 'var(--paper)',
+                  border: '1px solid var(--rule)',
+                  display: 'grid', gridTemplateColumns: '180px 1fr auto', gap: 14, alignItems: 'center',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ width: 14, height: 14, borderRadius: 3, background: color }} />
+                    <span style={{ fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500 }}>{e.name}</span>
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    {link ? (
+                      <div style={{
+                        padding: '6px 10px', background: 'var(--paper-2)',
+                        border: '1px solid var(--rule)',
+                        fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }} title={buildUrl(link.token)}>{buildUrl(link.token)}</div>
+                    ) : (
+                      <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)', fontSize: 12 }}>
+                        No active link yet
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {link ? (
+                      <>
+                        <button onClick={() => copyLink(link.token)} style={{
+                          padding: '6px 12px',
+                          fontFamily: 'var(--mono)', fontSize: 10.5,
+                          letterSpacing: '0.06em', textTransform: 'uppercase',
+                          background: copyOk === link.token ? '#3e8a5e' : 'var(--ink)',
+                          color: copyOk === link.token ? 'white' : 'var(--paper)',
+                          border: 'none', cursor: 'pointer',
+                        }}>{copyOk === link.token ? '✓ Copied' : '↗ Copy link'}</button>
+                        <button onClick={() => revoke(link)}
+                          disabled={busyEditor === e.id} style={{
+                            padding: '6px 10px',
+                            fontFamily: 'var(--mono)', fontSize: 10,
+                            letterSpacing: '0.06em', textTransform: 'uppercase',
+                            background: 'transparent', color: '#b53e3e',
+                            border: '1px solid rgba(181,62,62,0.4)', cursor: 'pointer',
+                          }}>Revoke</button>
+                      </>
+                    ) : (
+                      <button onClick={() => generate(e)}
+                        disabled={busyEditor === e.id} style={primaryBtn}>
+                        {busyEditor === e.id ? '…' : 'Generate'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <p style={{
+          marginTop: 14, fontFamily: 'var(--serif)', fontSize: 12.5,
+          color: 'var(--ink-3)', fontStyle: 'italic', lineHeight: 1.5,
+        }}>
+          Anyone with the link sees the queue (filtered to that editor) + the full creative
+          library + previews. They can update task status, add notes, and self-assign from
+          the unassigned pile. They cannot delete creatives, upload new sources, or manage
+          other editors.
+        </p>
       </div>
     </Modal>
   )
