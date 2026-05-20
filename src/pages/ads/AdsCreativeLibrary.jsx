@@ -151,6 +151,23 @@ function rowStatusTintForTask(t) {
   return null
 }
 
+// Module-level cache — survives component unmount so tab switches
+// (Library ↔ Editing Queue) don't show a blank "Loading…" state for
+// 2+ seconds while the same data re-fetches. We hydrate the new tab
+// instantly from this cache, then quietly refetch in the background to
+// catch any updates. Stale-while-revalidate.
+const PAGE_CACHE = {
+  rows: null,          // lib_creative_library (lean columns, no transcripts)
+  rowsTime: 0,
+  transcripts: null,   // Map of id → transcript text (loaded async)
+  tasks: null,         // lib_editing_queue
+  tasksTime: 0,
+  editors: null,
+  editorsTime: 0,
+  offers: null,
+  offersTime: 0,
+}
+
 // Default scope = full admin permissions (when used inside the regular dashboard).
 // EditorView passes a restricted scope for the public /editor-view/:token surface.
 const ADMIN_SCOPE = {
@@ -217,8 +234,11 @@ function TabBtn({ active, onClick, children }) {
 /* ─────────────────────────── LIBRARY TAB ─────────────────────────── */
 
 function LibraryTab({ scope = ADMIN_SCOPE }) {
-  const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
+  // Hydrate from module cache so tab-switches don't re-show a blank
+  // "Loading…" — we show the previous data instantly and revalidate.
+  const cached = scope.isEditorView ? null : PAGE_CACHE
+  const [rows, setRows] = useState(() => cached?.rows || [])
+  const [loading, setLoading] = useState(() => !cached?.rows)
   const [err, setErr] = useState(null)
   // Search input: defer the value used for filtering so typing stays
   // snappy on a 200+ row library. The visible <input> uses `q` (fast),
@@ -252,8 +272,8 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [bulkBusy, setBulkBusy] = useState(false)
   // Editors + offers for inline dropdowns in the Matrix view. Loaded once
   // alongside the main rows fetch — not chained, so we don't add latency.
-  const [editors, setEditors] = useState([])
-  const [offers, setOffers] = useState([])
+  const [editors, setEditors] = useState(() => cached?.editors || [])
+  const [offers, setOffers] = useState(() => cached?.offers || [])
   // Distinct creators derived from current rows — used for the Creator
   // dropdown in matrix + detail modal. Recomputed when rows change so a
   // newly-added creator immediately appears in the picker.
@@ -314,8 +334,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // in a follow-up query after first paint so library search still works.
   const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id'
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr(null)
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true)
+    setErr(null)
     const [rowsRes, edRes, ofRes] = await Promise.all([
       supabase.from('lib_creative_library')
         .select(`${LIB_LEAN_COLS},assigned_editor:assigned_editor_id (id, name)`)
@@ -326,18 +347,32 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     ])
     if (rowsRes.error) setErr(rowsRes.error.message)
     else {
-      setRows((rowsRes.data || []).map(r => ({
+      // Preserve any transcripts we already loaded from a previous
+      // session (or from the background loader below) — the lean
+      // refetch doesn't include them, so without this we'd nuke
+      // transcript-aware search on every revalidate.
+      const existingTx = new Map((PAGE_CACHE.rows || []).filter(r => r.transcript).map(r => [r.id, r.transcript]))
+      const merged = (rowsRes.data || []).map(r => ({
         ...r,
         assigned_editor_name: r.assigned_editor?.name || null,
-      })))
+        transcript: existingTx.get(r.id) || undefined,
+      }))
+      setRows(merged)
+      // Cache for cross-mount + cross-tab hydration
+      PAGE_CACHE.rows = merged
+      PAGE_CACHE.rowsTime = Date.now()
     }
     setEditors(edRes.data || [])
     setOffers(ofRes.data || [])
+    PAGE_CACHE.editors = edRes.data || []
+    PAGE_CACHE.editorsTime = Date.now()
+    PAGE_CACHE.offers = ofRes.data || []
+    PAGE_CACHE.offersTime = Date.now()
     setLoading(false)
 
-    // Background-load transcripts after first paint so search can match
-    // transcript text. Doesn't block the visible UI; rows get patched
-    // with their transcripts as soon as the second query resolves.
+    // Background-load transcripts after first paint so library search
+    // covers transcript text. Doesn't block the visible UI; rows get
+    // patched with their transcripts when the second query resolves.
     setTimeout(async () => {
       const { data: tx } = await supabase
         .from('lib_creative_library')
@@ -346,7 +381,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         .not('transcript', 'is', null)
       if (!tx) return
       const byId = new Map(tx.map(r => [r.id, r.transcript]))
-      setRows(curr => curr.map(r => byId.has(r.id) ? { ...r, transcript: byId.get(r.id) } : r))
+      setRows(curr => {
+        const next = curr.map(r => byId.has(r.id) ? { ...r, transcript: byId.get(r.id) } : r)
+        PAGE_CACHE.rows = next
+        return next
+      })
     }, 0)
   }, [])
 
@@ -387,7 +426,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     }
   }, [editors])
 
-  useEffect(() => { load() }, [load])
+  // On mount: cached data → silent revalidate; cold → foreground load.
+  useEffect(() => {
+    load(!!cached?.rows)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Compute which raw rows have already been edited (incorporated into
   // an edited composite).
@@ -3575,9 +3618,13 @@ function UploadModal({ onClose, onSaved }) {
 /* ─────────────────────────── EDITING QUEUE TAB ─────────────────────────── */
 
 function EditingQueueTab({ scope = ADMIN_SCOPE }) {
-  const [tasks, setTasks] = useState([])
-  const [editors, setEditors] = useState([])
-  const [loading, setLoading] = useState(true)
+  // Stale-while-revalidate: hydrate from the cross-tab module cache
+  // so re-mounting the queue tab doesn't show a blank loading state
+  // for 2+ seconds while the same data re-fetches.
+  const cached = scope.isEditorView ? null : PAGE_CACHE
+  const [tasks, setTasks] = useState(() => cached?.tasks || [])
+  const [editors, setEditors] = useState(() => cached?.editors || [])
+  const [loading, setLoading] = useState(() => !cached?.tasks)
   const [err, setErr] = useState(null)
   const [view, setView] = useState(() => {
     try { return localStorage.getItem('queue.view') || 'list' } catch { return 'list' }
@@ -3602,19 +3649,32 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   // Status multi-select for filtering — empty = show all.
   const [selectedStatuses, setSelectedStatuses] = useState(() => new Set())
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr(null)
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true)
+    setErr(null)
     const [t, e] = await Promise.all([
       supabase.from('lib_editing_queue').select('*'),
       supabase.from('lib_creative_editors').select('*').order('name'),
     ])
     if (t.error) setErr(t.error.message)
-    else setTasks(t.data || [])
+    else {
+      setTasks(t.data || [])
+      PAGE_CACHE.tasks = t.data || []
+      PAGE_CACHE.tasksTime = Date.now()
+    }
     setEditors(e.data || [])
+    PAGE_CACHE.editors = e.data || []
+    PAGE_CACHE.editorsTime = Date.now()
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  // On mount: if we have cached data, do a silent background revalidate.
+  // Otherwise show the spinner and do a foreground load.
+  useEffect(() => {
+    if (cached?.tasks) load(true)
+    else load(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Filter tasks by selected editors + selected statuses. Empty sets =
   // no filter on that dimension. Both filters are AND-combined.
