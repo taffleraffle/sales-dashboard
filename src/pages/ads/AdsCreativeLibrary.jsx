@@ -30,6 +30,24 @@ const STATUS_COLOR = {
   edited: '#3e8a5e',   // green — done
 }
 
+// Task-status (lib_editing_tasks.status) is separate from creative-status.
+// Friendly labels — no underscores in display — paired with colors used
+// in pill buttons, timeline badges, and the queue's status filter.
+const TASK_STATUS_LABEL = {
+  queued:      'Queued',
+  in_progress: 'In progress',
+  review:      'In review',
+  done:        'Done',
+  blocked:     'Blocked',
+}
+const TASK_STATUS_COLOR = {
+  queued:      'var(--ink-3)',
+  in_progress: '#e0853e',
+  review:      '#3e7eba',
+  done:        '#3e8a5e',
+  blocked:     '#b53e3e',
+}
+
 // Known offer slugs surface as filter chips + pill colors. Source of truth
 // is the `offers` table — we fetch the live list and merge with these
 // colors. Anything unrecognised falls back to a neutral grey pill.
@@ -3481,6 +3499,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           {editors.filter(e => e.active).length} editor{editors.filter(e => e.active).length === 1 ? '' : 's'} · {filteredTasks.length} of {tasks.length} task{tasks.length === 1 ? '' : 's'}
         </span>
         <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'white' }}>
+          <ViewBtn active={view === 'inbox'}    onClick={() => setView('inbox')}>Inbox</ViewBtn>
           <ViewBtn active={view === 'list'}     onClick={() => setView('list')}>List</ViewBtn>
           <ViewBtn active={view === 'lanes'}    onClick={() => setView('lanes')}>Editor lanes</ViewBtn>
           <ViewBtn active={view === 'timeline'} onClick={() => setView('timeline')}>Timeline</ViewBtn>
@@ -3488,32 +3507,51 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         </div>
       </div>
 
-      {/* Editor selection bar — click a chip to FILTER tasks to that editor.
-          Empty selection = show all. Hidden in editor-view mode (their
-          selection is already locked to themselves). */}
+      {/* Filter bar — uses the same FilterDropdown component as the
+          Library tab so the UI language matches. Two compact buttons
+          (Editors, Status) open to multi-select dropdowns instead of
+          eating two horizontal strips of chips. Hidden in editor-view
+          since the editor is already locked to their own tasks. */}
       {!scope.isEditorView && (
-        <EditorSelector
-          editors={editors}
-          selected={selectedEditors}
-          onToggle={toggleEditor}
-          onClearAll={() => setSelectedEditors(new Set())}
-          onEditEditor={scope.canManageEditors ? (e) => setEditingEditor(e) : null}
-          tasks={tasks}
-        />
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
+          padding: '10px 14px', background: 'var(--paper)',
+          border: '1px solid var(--rule)', marginBottom: 14,
+        }}>
+          <span style={chipLabelStyle}>Filter</span>
+          <FilterDropdown
+            label="Editors"
+            options={[
+              { value: 'unassigned', label: 'Unassigned', dot: '#999',
+                count: tasks.filter(t => t.editor_id == null).length },
+              ...editors.filter(e => e.active).map(e => ({
+                value: e.id, label: e.name, dot: editorColor(e),
+                count: tasks.filter(t => t.editor_id === e.id).length,
+              }))
+            ]}
+            selected={selectedEditors}
+            allCount={tasks.length}
+            onChange={setSelectedEditors}
+          />
+          <FilterDropdown
+            label="Status"
+            options={[
+              { value: 'queued',      label: 'Queued',      dot: TASK_STATUS_COLOR.queued,      count: tasks.filter(t => t.status === 'queued').length },
+              { value: 'in_progress', label: 'In progress', dot: TASK_STATUS_COLOR.in_progress, count: tasks.filter(t => t.status === 'in_progress').length },
+              { value: 'review',      label: 'In review',   dot: TASK_STATUS_COLOR.review,      count: tasks.filter(t => t.status === 'review').length },
+              { value: 'done',        label: 'Done',        dot: TASK_STATUS_COLOR.done,        count: tasks.filter(t => t.status === 'done').length },
+              { value: 'blocked',     label: 'Blocked',     dot: TASK_STATUS_COLOR.blocked,     count: tasks.filter(t => t.status === 'blocked').length },
+            ]}
+            selected={selectedStatuses}
+            allCount={tasks.length}
+            onChange={setSelectedStatuses}
+          />
+          <span style={{ flex: 1 }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', letterSpacing: '0.04em' }}>
+            {filteredTasks.length} of {tasks.length} task{tasks.length === 1 ? '' : 's'}
+          </span>
+        </div>
       )}
-
-      {/* Status filter strip — chip-style, multi-select. Click 'All
-          statuses' to clear; click any status to toggle that filter. */}
-      <StatusFilterStrip
-        tasks={tasks}
-        selected={selectedStatuses}
-        onToggle={(s) => setSelectedStatuses(prev => {
-          const next = new Set(prev)
-          if (next.has(s)) next.delete(s); else next.add(s)
-          return next
-        })}
-        onClearAll={() => setSelectedStatuses(new Set())}
-      />
 
       {tasks.length === 0 ? (
         <div style={{
@@ -3567,6 +3605,8 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           onEdit={setEditingTask} onMoveEditor={moveTaskToEditor}
           onUpdateAssignment={updateTaskAssignment}
           onAddTask={(pre) => { setAddTaskPrefill(pre); setAddTaskOpen(true) }} />
+      ) : view === 'inbox' ? (
+        <InboxView tasks={filteredTasks} onEdit={setEditingTask} />
       ) : (
         <KanbanView tasks={filteredTasks} onEdit={setEditingTask} onMove={moveTaskStatus} />
       )}
@@ -4010,8 +4050,8 @@ function StatusPipBadge({ status, isOverdue }) {
       <span style={{
         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
         letterSpacing: '0.06em', textTransform: 'uppercase',
-        color: STATUS_COLOR[status] || 'var(--ink-3)',
-      }}>{STATUS_LABEL[status] || status}</span>
+        color: TASK_STATUS_COLOR[status] || 'var(--ink-3)',
+      }}>{TASK_STATUS_LABEL[status] || status}</span>
     </span>
   )
 }
@@ -4279,21 +4319,31 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           </div>
         ) : null}
 
-        {/* Quick-action status row */}
+        {/* Quick-action status row — colored pill per status when selected.
+            Uses TASK_STATUS_COLOR/LABEL so display reads "In progress" not
+            the raw "IN_PROGRESS" enum string. */}
         <div>
           <div style={chipLabelStyle}>Status</div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-            {['queued', 'in_progress', 'review', 'done', 'blocked'].map(s => (
-              <button key={s} onClick={() => setStatus(s)} style={{
-                padding: '6px 11px',
-                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
-                letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: status === s ? (STATUS_COLOR[s] || 'var(--ink)') : 'white',
-                color: status === s ? 'white' : 'var(--ink-2)',
-                border: '1px solid ' + (status === s ? (STATUS_COLOR[s] || 'var(--ink)') : 'var(--rule)'),
-                borderRadius: 2, cursor: 'pointer',
-              }}>{STATUS_LABEL[s] || s}</button>
-            ))}
+            {['queued', 'in_progress', 'review', 'done', 'blocked'].map(s => {
+              const isOn = status === s
+              const c = TASK_STATUS_COLOR[s] || 'var(--ink)'
+              return (
+                <button key={s} onClick={() => setStatus(s)} style={{
+                  padding: '6px 12px',
+                  fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  background: isOn ? c : 'white',
+                  color: isOn ? 'white' : 'var(--ink-2)',
+                  border: '1px solid ' + (isOn ? c : 'var(--rule)'),
+                  borderRadius: 2, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                }}>
+                  {!isOn && <span style={{ width: 7, height: 7, borderRadius: '50%', background: c }} />}
+                  <span>{TASK_STATUS_LABEL[s] || s}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
 
@@ -4389,6 +4439,19 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                 background: uploadProgress === 100 ? '#3e8a5e' : 'var(--accent)',
                 transition: 'width 0.2s',
               }} />
+            </div>
+          )}
+          {/* Inline error surface — same red treatment as the footer but
+              right next to the drop zone so the editor doesn't miss it. */}
+          {err && (
+            <div style={{
+              marginTop: 10, padding: '10px 12px',
+              background: 'rgba(181,62,62,0.08)', border: '1px solid rgba(181,62,62,0.3)',
+              borderLeft: '3px solid #b53e3e',
+              fontFamily: 'var(--mono)', fontSize: 11, color: '#b53e3e',
+              lineHeight: 1.5,
+            }}>
+              <strong>Upload failed:</strong> {err}
             </div>
           )}
         </div>
@@ -6121,6 +6184,157 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
         })}
       </div>
       </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────── INBOX view ─────────────────────────── */
+
+/* Inbox is the operator's "what needs my attention?" view. It surfaces:
+   - Tasks awaiting review (an editor submitted; you need to approve/revise)
+   - Overdue tasks (past due_date, not done/blocked)
+   - Blocked tasks (something's stuck)
+   Each is a click-through card with thumbnail, name, editor, last note,
+   prominent status badge. Clicking opens the EditTaskModal where Ben
+   can watch the submission, leave notes, advance status. */
+function InboxView({ tasks, onEdit }) {
+  const sections = useMemo(() => {
+    const review  = tasks.filter(t => t.status === 'review')
+    const overdue = tasks.filter(t => t.is_overdue && t.status !== 'review')
+    const blocked = tasks.filter(t => t.status === 'blocked' && !t.is_overdue)
+    // Sort each section: most recently touched first. We don't have a
+    // last_activity_at column so use due_date desc as a proxy — recently-due
+    // tasks rise to the top.
+    const byDueDesc = (a, b) => (b.due_date || '').localeCompare(a.due_date || '')
+    return [
+      { key: 'review',  label: 'Awaiting review',    color: '#3e7eba', items: review.sort(byDueDesc) },
+      { key: 'overdue', label: 'Overdue',            color: '#b53e3e', items: overdue.sort(byDueDesc) },
+      { key: 'blocked', label: 'Blocked',            color: '#7a4e08', items: blocked.sort(byDueDesc) },
+    ].filter(s => s.items.length > 0)
+  }, [tasks])
+
+  if (sections.length === 0) {
+    return (
+      <div style={{
+        border: '1px dashed var(--rule)', padding: 40, textAlign: 'center',
+        background: 'var(--paper-2)',
+      }}>
+        <div style={{ fontFamily: 'var(--serif)', fontSize: 18, color: 'var(--ink-2)', marginBottom: 6 }}>
+          Inbox zero
+        </div>
+        <p style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink-3)' }}>
+          Nothing awaiting review, no overdue tasks, nothing blocked. When an editor uploads a cut, it'll show up here.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 24 }}>
+      {sections.map(section => (
+        <div key={section.key}>
+          <div style={{
+            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+            marginBottom: 10,
+          }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+              letterSpacing: '0.14em', textTransform: 'uppercase',
+              color: section.color,
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+            }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: section.color }} />
+              {section.label}
+              <span style={{ color: 'var(--ink-4)', fontWeight: 500 }}>· {section.items.length}</span>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {section.items.map(t => <InboxCard key={t.task_id} task={t} onEdit={onEdit} sectionColor={section.color} />)}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function InboxCard({ task: t, onEdit, sectionColor }) {
+  const [hover, setHover] = useState(false)
+  const editorCol = editorColor(t)
+  const dueLabel = t.due_date
+    ? (() => {
+        const d = new Date(t.due_date); d.setHours(0,0,0,0)
+        const today = new Date(); today.setHours(0,0,0,0)
+        const days = Math.round((d - today) / 86400000)
+        if (days < 0) return `${Math.abs(days)}d overdue`
+        if (days === 0) return 'Due today'
+        if (days === 1) return 'Due tomorrow'
+        return `Due in ${days}d`
+      })()
+    : null
+  return (
+    <div
+      onClick={() => onEdit?.(t)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 14,
+        padding: '12px 16px', alignItems: 'center',
+        background: hover ? 'var(--paper-2)' : 'var(--paper)',
+        border: '1px solid var(--rule)', borderLeft: `4px solid ${sectionColor}`,
+        cursor: 'pointer', transition: 'background 0.12s',
+      }}>
+      <div style={{
+        width: 64, height: 40, background: '#000',
+        border: '1px solid var(--rule)', overflow: 'hidden', position: 'relative',
+      }}>
+        {t.thumbnail_url && !(hover && t.preview_url) && (
+          <img src={t.thumbnail_url} alt="" loading="lazy"
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        )}
+        {hover && t.preview_url && (
+          <video src={t.preview_url} autoPlay muted loop playsInline
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        )}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: 'var(--ink)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{t.creative_canonical_name || t.creative_name}</div>
+        <div style={{
+          fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-4)', marginTop: 2,
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            {t.editor_name && <span style={{ width: 7, height: 7, borderRadius: '50%', background: editorCol }} />}
+            <span>{t.editor_name || 'Unassigned'}</span>
+          </span>
+          {dueLabel && (
+            <>
+              <span style={{ color: 'var(--ink-4)' }}>·</span>
+              <span style={{ color: t.is_overdue ? '#b53e3e' : 'var(--ink-4)' }}>{dueLabel}</span>
+            </>
+          )}
+          {t.notes && (
+            <>
+              <span style={{ color: 'var(--ink-4)' }}>·</span>
+              <span style={{
+                color: 'var(--ink-3)', fontStyle: 'italic',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                maxWidth: 320,
+              }}>{t.notes}</span>
+            </>
+          )}
+        </div>
+      </div>
+      <div style={{
+        padding: '4px 9px',
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        background: TASK_STATUS_COLOR[t.status] || 'var(--ink-3)',
+        color: 'white', borderRadius: 2,
+        flexShrink: 0,
+      }}>{TASK_STATUS_LABEL[t.status] || t.status}</div>
     </div>
   )
 }
