@@ -98,6 +98,40 @@ function editorColor(slugOrEditorOrTask) {
   return EDITOR_COLORS[Math.abs(h) % EDITOR_COLORS.length]
 }
 
+// Soft full-row background tint for library / queue rows so Ben can
+// scan status at a glance:
+//   green  = edited (creative is done)
+//   yellow = raw + assigned to an editor (work in progress)
+//   red    = raw + unassigned + still needs editing (i.e. not auto-used Hooks)
+function rowStatusTint(r, isUsed) {
+  if (!r) return null
+  if (r.status === 'edited') {
+    return { base: 'rgba(62,138,94,0.06)', hover: 'rgba(62,138,94,0.14)' }
+  }
+  if (r.status === 'raw') {
+    if (r.assigned_editor_id) {
+      return { base: 'rgba(244,225,74,0.10)', hover: 'rgba(244,225,74,0.22)' }
+    }
+    // Skip the red tint for raw clips that are already in use (Hooks, etc.)
+    if (!isUsed) {
+      return { base: 'rgba(181,62,62,0.06)', hover: 'rgba(181,62,62,0.14)' }
+    }
+  }
+  return null
+}
+
+// Same colour language for editing-queue task rows:
+//   green  = done
+//   yellow = in_progress or review
+//   red    = blocked (or queued + overdue)
+function rowStatusTintForTask(t) {
+  if (!t) return null
+  if (t.status === 'done')                            return { base: 'rgba(62,138,94,0.06)' }
+  if (t.status === 'in_progress' || t.status === 'review') return { base: 'rgba(244,225,74,0.10)' }
+  if (t.status === 'blocked' || t.is_overdue)         return { base: 'rgba(181,62,62,0.08)' }
+  return null
+}
+
 // Default scope = full admin permissions (when used inside the regular dashboard).
 // EditorView passes a restricted scope for the public /editor-view/:token surface.
 const ADMIN_SCOPE = {
@@ -704,10 +738,25 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           offers={offers}
           knownCreators={knownCreators}
           onClose={() => setBulkEditOpen(false)}
-          onSaved={() => {
+          onSaved={(updatedIds, patch) => {
+            // Merge the patch into local rows state instead of refetching —
+            // keeps scroll position, filters, and section expansion intact.
+            // Derive assigned_editor_name from the editors array so the
+            // editor chip on each row updates without a roundtrip.
+            const editor = patch.assigned_editor_id
+              ? editors.find(e => e.id === patch.assigned_editor_id)
+              : null
+            const idSet = new Set(updatedIds)
+            setRows(curr => curr.map(r => {
+              if (!idSet.has(r.id)) return r
+              const merged = { ...r, ...patch }
+              if (patch.assigned_editor_id !== undefined) {
+                merged.assigned_editor_name = editor?.name || null
+              }
+              return merged
+            }))
             setBulkEditOpen(false)
             clearSelection()
-            load()
           }} />
       )}
     </>
@@ -870,6 +919,11 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete }) {
     : (r.status === 'edited')                       ? '#3e8a5e'
     : (r.status === 'raw' && isUsed)                ? '#999'
     :                                                 '#b53e3e'
+  // Soft full-row tint that lets Ben see at a glance:
+  //   green = edited / done
+  //   yellow = assigned to an editor, in progress
+  //   red = raw + unassigned + actually needs editing (i.e. not auto-used Hooks)
+  const tint = rowStatusTint(r, isUsed)
   return (
         <div
           style={{
@@ -877,7 +931,8 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete }) {
             padding: '10px 14px', gap: 12, alignItems: 'center',
             borderBottom: isLast ? 'none' : '1px solid var(--rule)',
             borderLeft: `3px solid ${stripeColor}`,
-            background: hover ? 'var(--paper-2)' : 'transparent', transition: 'background 0.12s',
+            background: hover ? (tint?.hover || 'var(--paper-2)') : (tint?.base || 'transparent'),
+            transition: 'background 0.12s',
             cursor: 'pointer',
           }}
           onMouseEnter={() => setHover(true)}
@@ -1388,6 +1443,31 @@ function StageLinkCell({ value, url, label }) {
    it isn't clipped by ancestor 'overflow: auto' containers (Modal body,
    matrix scroll, etc.) and renders above modal backdrops via high
    z-index. */
+// Compute popover coords from a button rect, flipping vertically/
+// horizontally if the popover would clip off-screen. Used by both
+// EditorPicker and OptionPicker so they always stay on-screen even
+// in narrow modals or near viewport edges.
+function popoverCoords(rect, maxHeight = 280, gap = 2) {
+  if (!rect) return null
+  const vh = window.innerHeight || document.documentElement.clientHeight
+  const vw = window.innerWidth  || document.documentElement.clientWidth
+  const spaceBelow = vh - rect.bottom
+  const spaceAbove = rect.top
+  // Flip above when not enough room below AND there's more room above.
+  const placeAbove = spaceBelow < maxHeight + gap && spaceAbove > spaceBelow
+  const computedHeight = Math.min(maxHeight, placeAbove ? spaceAbove - gap - 8 : spaceBelow - gap - 8)
+  // Horizontal: anchor left, but clamp to keep right edge inside viewport.
+  let left = rect.left
+  const width = rect.width
+  if (left + width > vw - 8) left = Math.max(8, vw - width - 8)
+  return {
+    top: placeAbove ? Math.max(8, rect.top - computedHeight - gap) : rect.bottom + gap,
+    left,
+    width,
+    maxHeight: computedHeight,
+  }
+}
+
 function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned' }) {
   const [open, setOpen] = useState(false)
   const [rect, setRect] = useState(null)
@@ -1418,6 +1498,7 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
     }
   }, [open])
   const current = editors.find(e => e.id === value)
+  const coords = popoverCoords(rect)
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button type="button"
@@ -1437,13 +1518,13 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
         )}
         <span style={{ fontSize: 9, opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && rect && (
+      {open && coords && (
         <div ref={popRef} style={{
           position: 'fixed',
-          top: rect.bottom + 2,
-          left: rect.left,
-          width: rect.width,
-          maxHeight: 280, overflowY: 'auto',
+          top: coords.top,
+          left: coords.left,
+          width: coords.width,
+          maxHeight: coords.maxHeight, overflowY: 'auto',
           // High z-index so we sit above modal backdrops (z 100+) and
           // their dialogs (z 101+). Picker is the topmost UI when open.
           zIndex: 9999,
@@ -1918,7 +1999,7 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
       .in('id', ids)
     setBusy(false)
     if (error) setErr(error.message)
-    else onSaved?.()
+    else onSaved?.(ids, patch)  // parent merges in-place; no full reload
   }
 
   // Small "Keep existing" pill that appears when a field is null
@@ -2223,12 +2304,18 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
         <span>{buttonLabel}</span>
         <span style={{ fontSize: 8, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && rect && (
+      {open && rect && (() => {
+        const popoverWidth = Math.max(260, rect.width)
+        const synthRect = { ...rect, width: popoverWidth }
+        const coords = popoverCoords(synthRect, 320, 4)
+        if (!coords) return null
+        return (
         <div ref={popRef} style={{
           position: 'fixed',
-          top: rect.bottom + 4,
-          left: rect.left,
-          minWidth: Math.max(260, rect.width),
+          top: coords.top,
+          left: coords.left,
+          minWidth: popoverWidth,
+          maxHeight: coords.maxHeight, overflowY: 'auto',
           zIndex: 9999,
           background: 'white', border: '1px solid var(--ink)',
           boxShadow: '0 8px 24px rgba(10,10,10,0.25)',
@@ -2309,7 +2396,8 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
             )
           })}
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
@@ -2389,17 +2477,18 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
     e.stopPropagation()
     if (onToggleSelect) onToggleSelect(row.id)
   }
+  const tint = rowStatusTint(row, isUsed)
   return (
     <div onClick={handleCardClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
         cursor: 'pointer',
-        background: 'var(--paper)',
+        background: tint ? (hover ? tint.hover : tint.base) : 'var(--paper)',
         border: selected ? '2px solid var(--accent)'
               : hover ? '1px solid var(--ink)'
               : '1px solid var(--rule)',
-        transition: 'border-color 0.12s',
+        transition: 'border-color 0.12s, background 0.12s',
         position: 'relative',
         outline: selected ? '1px solid rgba(240,224,80,0.5)' : 'none',
         outlineOffset: selected ? 1 : 0,
@@ -3417,7 +3506,25 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           </div>
         </div>
       ) : view === 'list' ? (
-        <QueueListView tasks={filteredTasks} editors={editors} onEdit={setEditingTask} />
+        <QueueListView tasks={filteredTasks} editors={editors} onEdit={setEditingTask}
+          onReorder={async (orderedIds) => {
+            // Optimistic local update — assign sequential sort_order to
+            // the open tasks in their new order. Tasks not in the
+            // ordered list keep their existing sort_order (done tasks).
+            const orderMap = new Map(orderedIds.map((id, i) => [id, i + 1]))
+            setTasks(curr => curr.map(t =>
+              orderMap.has(t.task_id) ? { ...t, sort_order: orderMap.get(t.task_id) } : t))
+            // Persist: batch updates one row at a time (Supabase doesn't
+            // have a bulk UPDATE with per-row values; this is ~20 rows
+            // worst case so latency is fine).
+            const errors = []
+            for (const [id, order] of orderMap) {
+              const { error } = await supabase.from('lib_editing_tasks')
+                .update({ sort_order: order }).eq('id', id)
+              if (error) errors.push(error.message)
+            }
+            if (errors.length) setErr(errors.join(' · '))
+          }} />
       ) : view === 'lanes' ? (
         <div style={{ display: 'grid', gap: 18 }}>
           {byEditor.map(({ slug, editor_id, editor_name, tasks: t }) => (
@@ -3600,9 +3707,9 @@ function priorityOrder(p) {
   if (p && Object.prototype.hasOwnProperty.call(PRIORITY_RANK, p)) return PRIORITY_RANK[p]
   return 99
 }
-function QueueListView({ tasks, editors, onEdit }) {
-  // Sort by priority, then due date ascending (overdue / sooner first),
-  // then by assigned_at as a tiebreaker. Done tasks always sink to the bottom.
+function QueueListView({ tasks, editors, onEdit, onReorder }) {
+  // Sort by manual sort_order first (when any open task carries one), else
+  // by priority + due date. Done tasks always sink to the bottom.
   const ordered = useMemo(() => {
     const open = tasks.filter(t => t.status !== 'done')
     const done = tasks.filter(t => t.status === 'done')
@@ -3617,10 +3724,54 @@ function QueueListView({ tasks, editors, onEdit }) {
       const ab = b.assigned_at || '9999-12-31'
       return aa < ab ? -1 : aa > ab ? 1 : 0
     }
-    open.sort(byPriority)
+    const bySortThenPriority = (a, b) => {
+      const sa = a.sort_order ?? 999999
+      const sb = b.sort_order ?? 999999
+      if (sa !== sb) return sa - sb
+      return byPriority(a, b)
+    }
+    const hasManual = open.some(t => t.sort_order != null)
+    open.sort(hasManual ? bySortThenPriority : byPriority)
     done.sort(byPriority)
     return [...open, ...done]
   }, [tasks])
+
+  // Drag-to-reorder state
+  const [dragId, setDragId] = useState(null)
+  const [dropTargetId, setDropTargetId] = useState(null)
+  const [dropPosition, setDropPosition] = useState(null)  // 'before' | 'after'
+  const handleRowDragStart = (e, taskId) => {
+    e.dataTransfer.setData('text/plain', `queue-row:${taskId}`)
+    e.dataTransfer.effectAllowed = 'move'
+    setDragId(taskId)
+  }
+  const handleRowDragOver = (e, taskId) => {
+    if (!dragId || dragId === taskId) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const rect = e.currentTarget.getBoundingClientRect()
+    const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    if (dropTargetId !== taskId || dropPosition !== pos) {
+      setDropTargetId(taskId); setDropPosition(pos)
+    }
+  }
+  const handleRowDrop = (e, targetTaskId) => {
+    e.preventDefault()
+    if (!dragId || dragId === targetTaskId) { setDragId(null); setDropTargetId(null); return }
+    // Build the new ID order based on the current `ordered` list of open
+    // tasks. Done tasks aren't reorderable (they sink to the bottom).
+    const openIds = ordered.filter(t => t.status !== 'done').map(t => t.task_id)
+    const fromIdx = openIds.indexOf(dragId)
+    const toIdxOriginal = openIds.indexOf(targetTaskId)
+    if (fromIdx < 0 || toIdxOriginal < 0) { setDragId(null); setDropTargetId(null); return }
+    // Remove dragged id, compute insertion index relative to the shrunk array
+    const withoutDragged = openIds.filter(id => id !== dragId)
+    let insertAt = withoutDragged.indexOf(targetTaskId)
+    if (dropPosition === 'after') insertAt += 1
+    withoutDragged.splice(insertAt, 0, dragId)
+    setDragId(null); setDropTargetId(null); setDropPosition(null)
+    onReorder?.(withoutDragged)
+  }
 
   if (!ordered.length) return null
   // 7-col grid: rank · thumb · creative · editor · status · task-type · due · priority · source
@@ -3649,25 +3800,43 @@ function QueueListView({ tasks, editors, onEdit }) {
         const isDone = t.status === 'done'
         // Rank only for open tasks. Done sinks to the bottom and gets a "—".
         const openIdx = i < ordered.length - tasks.filter(x => x.status === 'done').length ? i + 1 : null
+        const isDragging = dragId === t.task_id
+        const isDropTarget = dropTargetId === t.task_id && dragId && dragId !== t.task_id
+        const tint = rowStatusTintForTask(t)
         return (
           <div key={t.task_id}
+            draggable={!isDone}
+            onDragStart={isDone ? undefined : (e) => handleRowDragStart(e, t.task_id)}
+            onDragOver={isDone ? undefined : (e) => handleRowDragOver(e, t.task_id)}
+            onDragLeave={() => {
+              if (dropTargetId === t.task_id) { setDropTargetId(null); setDropPosition(null) }
+            }}
+            onDrop={isDone ? undefined : (e) => handleRowDrop(e, t.task_id)}
+            onDragEnd={() => { setDragId(null); setDropTargetId(null); setDropPosition(null) }}
             onClick={() => onEdit(t)}
             style={{
               display: 'grid', gridTemplateColumns: GRID,
               padding: '10px 14px', gap: 12, alignItems: 'center',
               borderBottom: i === ordered.length - 1 ? 'none' : '1px solid var(--rule)',
-              cursor: 'pointer', transition: 'background 0.12s',
-              opacity: isDone ? 0.55 : 1,
+              borderTop: isDropTarget && dropPosition === 'before' ? '2px solid var(--ink)' : '2px solid transparent',
+              cursor: isDone ? 'pointer' : 'grab',
+              transition: 'background 0.12s',
+              opacity: isDragging ? 0.4 : (isDone ? 0.55 : 1),
+              background: tint?.base || 'transparent',
+              boxShadow: isDropTarget && dropPosition === 'after' ? 'inset 0 -2px 0 0 var(--ink)' : 'none',
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            onMouseEnter={e => { if (!tint) e.currentTarget.style.background = 'var(--paper-2)' }}
+            onMouseLeave={e => { if (!tint) e.currentTarget.style.background = 'transparent' }}>
             <div style={{
               fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
               color: openIdx === 1 ? 'var(--accent-ink, #b8920c)'
                    : openIdx === 2 ? 'var(--ink-2)'
                    : openIdx === 3 ? 'var(--ink-3)'
                    : 'var(--ink-4)',
-            }}>{openIdx ? `#${openIdx}` : '—'}</div>
+            }} title={isDone ? '' : 'Drag to reorder'}>
+              {openIdx ? `#${openIdx}` : '—'}
+              {!isDone && <span style={{ marginLeft: 4, opacity: 0.35, fontSize: 9 }}>⋮⋮</span>}
+            </div>
             <div style={{
               width: 50, height: 32, overflow: 'hidden',
               background: '#000', border: '1px solid var(--rule)',
@@ -3755,6 +3924,93 @@ function StatusPipBadge({ status, isOverdue }) {
     </span>
   )
 }
+
+/* Generic option picker — same fixed-positioned popover pattern as
+   EditorPicker. Each option gets a small color dot when `color` is set.
+   Used for Priority + Task Type in EditTaskModal so the modal stops
+   leaning on native <select> elements (which don't match the rest of
+   the editorial design language). */
+function OptionPicker({ value, options, onChange, placeholder = '— Select' }) {
+  const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState(null)
+  const ref = useRef(null)
+  const popRef = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    if (ref.current) setRect(ref.current.getBoundingClientRect())
+    const onDoc = (e) => {
+      const inBtn = ref.current && ref.current.contains(e.target)
+      const inPop = popRef.current && popRef.current.contains(e.target)
+      if (!inBtn && !inPop) setOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    const onScroll = () => { if (ref.current) setRect(ref.current.getBoundingClientRect()) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [open])
+  const current = options.find(o => o.value === value)
+  const coords = popoverCoords(rect)
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" onClick={() => setOpen(v => !v)}
+        style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+        {current ? (
+          <>
+            {current.color && <span style={{ width: 10, height: 10, borderRadius: 2, background: current.color, flexShrink: 0 }} />}
+            <span style={{ flex: 1, fontFamily: 'var(--sans)' }}>{current.label}</span>
+          </>
+        ) : (
+          <span style={{ flex: 1, fontFamily: 'var(--sans)', color: 'var(--ink-4)' }}>{placeholder}</span>
+        )}
+        <span style={{ fontSize: 9, opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && coords && (
+        <div ref={popRef} style={{
+          position: 'fixed', top: coords.top, left: coords.left, width: coords.width,
+          maxHeight: coords.maxHeight, overflowY: 'auto', zIndex: 9999,
+          background: 'white', border: '1px solid var(--ink)',
+          boxShadow: '0 8px 24px rgba(10,10,10,0.25)', padding: 4,
+        }}>
+          {options.map(o => {
+            const isOn = o.value === value
+            return (
+              <button key={o.value} type="button"
+                onClick={() => { onChange(o.value); setOpen(false) }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                  padding: '6px 10px', background: isOn ? 'var(--paper-2)' : 'transparent',
+                  border: 'none', cursor: 'pointer', textAlign: 'left',
+                  fontFamily: 'var(--sans)', fontSize: 13, fontWeight: isOn ? 600 : 500,
+                }}>
+                {o.color && <span style={{ width: 10, height: 10, borderRadius: 2, background: o.color, flexShrink: 0 }} />}
+                <span style={{ flex: 1 }}>{o.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const PRIORITY_OPTIONS = [
+  { value: 'P1 - High',   label: 'P1 · High',   color: '#b53e3e' },
+  { value: 'P2 - Medium', label: 'P2 · Medium', color: '#b8893e' },
+  { value: 'P3 - Low',    label: 'P3 · Low',    color: 'var(--ink-4)' },
+]
+const TASK_TYPE_OPTIONS = [
+  { value: 'edit',     label: 'Edit' },
+  { value: 'patch',    label: 'Patch' },
+  { value: 'revision', label: 'Revision' },
+]
 
 /* Click any task anywhere → opens this modal. Change editor / status /
    priority / type / due date / notes. Or delete the task. */
@@ -3877,21 +4133,49 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         </>
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
-        {/* Source file — editor needs to grab the original to start editing.
-            Yellow accent so it's the first thing they see when the modal opens. */}
-        {task.drive_url && (
+        {/* Inline video preview — playable in the modal so the editor
+            can watch the source without bouncing to Drive. preview_url
+            is the compressed 720p mp4 from creative-uploads; falls back
+            to a thumbnail-only placeholder + Drive link when no preview
+            has been encoded yet. */}
+        {task.preview_url ? (
+          <div style={{ background: '#000', border: '1px solid var(--rule)' }}>
+            <video controls preload="metadata"
+              poster={task.thumbnail_url || undefined}
+              src={task.preview_url}
+              style={{ display: 'block', width: '100%', maxHeight: 360, objectFit: 'contain', background: '#000' }} />
+            {task.drive_url && (
+              <div style={{
+                padding: '8px 12px', background: 'var(--paper-2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
+              }}>
+                <span>Source file</span>
+                <a href={task.drive_url} target="_blank" rel="noreferrer"
+                  style={{ color: 'var(--ink-2)', textDecoration: 'underline' }}>
+                  Open original in Drive ↗
+                </a>
+              </div>
+            )}
+          </div>
+        ) : task.drive_url ? (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '10px 14px',
-            background: 'var(--paper-2)',
-            border: '1px solid var(--rule)',
-            borderLeft: '3px solid var(--accent)',
+            padding: '14px 16px', background: 'var(--paper-2)',
+            border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
+            display: 'flex', alignItems: 'center', gap: 12,
           }}>
-            <span style={{
-              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
-              letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
-            }}>Source file</span>
-            <span style={{ flex: 1 }} />
+            {task.thumbnail_url && (
+              <img src={task.thumbnail_url} alt="" loading="lazy"
+                style={{ width: 80, height: 50, objectFit: 'cover', border: '1px solid var(--rule)' }} />
+            )}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }}>
+                No preview encoded
+              </div>
+              <div style={{ fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink-3)' }}>
+                The compressed preview hasn't been generated for this creative yet. Open the original on Drive while it transcodes.
+              </div>
+            </div>
             <a href={task.drive_url} target="_blank" rel="noreferrer"
               style={{
                 padding: '6px 12px',
@@ -3900,17 +4184,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                 background: 'var(--accent)', color: 'var(--ink)',
                 border: 'none', cursor: 'pointer', textDecoration: 'none',
               }}>Open in Drive</a>
-            <a href={task.drive_url} target="_blank" rel="noreferrer"
-              download
-              style={{
-                padding: '6px 12px',
-                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-                letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: 'white', color: 'var(--ink)',
-                border: '1px solid var(--ink)', cursor: 'pointer', textDecoration: 'none',
-              }}>Download original</a>
           </div>
-        )}
+        ) : null}
 
         {/* Quick-action status row */}
         <div>
@@ -3932,24 +4207,17 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
 
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
           <Field label="Editor">
-            <select value={editorId} onChange={e => setEditorId(e.target.value)} style={selectStyle}>
-              <option value="">Unassigned</option>
-              {editors.filter(e => e.active).map(e => (
-                <option key={e.id} value={e.id}>{e.name}</option>
-              ))}
-            </select>
+            <EditorPicker value={editorId || null} editors={editors}
+              onChange={(id) => setEditorId(id || '')}
+              placeholder="— Unassigned" />
           </Field>
           <Field label="Priority">
-            <select value={priority} onChange={e => setPriority(e.target.value)} style={selectStyle}>
-              <option>P1 - High</option><option>P2 - Medium</option><option>P3 - Low</option>
-            </select>
+            <OptionPicker value={priority} options={PRIORITY_OPTIONS}
+              onChange={setPriority} />
           </Field>
           <Field label="Task type">
-            <select value={taskType} onChange={e => setTaskType(e.target.value)} style={selectStyle}>
-              <option value="edit">Edit</option>
-              <option value="patch">Patch</option>
-              <option value="revision">Revision</option>
-            </select>
+            <OptionPicker value={taskType} options={TASK_TYPE_OPTIONS}
+              onChange={setTaskType} />
           </Field>
           <Field label="Due date">
             <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
