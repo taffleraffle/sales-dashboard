@@ -6014,6 +6014,22 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                   const stripe = t.is_overdue ? '#b53e3e' : (STATUS_STRIPE[t.status] || '#999')
                   const label = t.creative_canonical_name || t.creative_name
                   const thumbVisible = !!t.thumbnail_url && w >= 80
+                  // Status badge: show prominently for non-queued states.
+                  //   review      → solid blue "REVIEW"
+                  //   in_progress → solid orange "WIP"
+                  //   done        → solid green "DONE" + bar dimmed
+                  //   blocked     → solid red "BLOCKED"
+                  // Overdue replaces the badge with "OVD" in red.
+                  const STATUS_BADGE = {
+                    review:      { label: 'REVIEW', bg: '#3e7eba' },
+                    in_progress: { label: 'WIP',    bg: '#e0853e' },
+                    done:        { label: 'DONE',   bg: '#3e8a5e' },
+                    blocked:     { label: 'BLOCK',  bg: '#b53e3e' },
+                  }
+                  const badge = t.is_overdue
+                    ? { label: 'OVD', bg: '#b53e3e' }
+                    : STATUS_BADGE[t.status] || null
+                  const isDone = t.status === 'done'
                   return (
                     <div key={t.task_id}
                       data-task-bar="true"
@@ -6033,6 +6049,8 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
                         color: 'white',
                         overflow: 'hidden',
+                        opacity: isDone ? 0.65 : 1,
+                        textDecoration: isDone ? 'line-through' : 'none',
                         cursor: isResizing ? 'ew-resize'
                               : (onMoveEditor || onUpdateAssignment) ? 'grab'
                               : (onEdit ? 'pointer' : 'default'),
@@ -6065,12 +6083,16 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                           {resizing.currentDeltaDays > 0 ? '+' : ''}{resizing.currentDeltaDays}d
                         </span>
                       )}
-                      {t.is_overdue && !isResizing && (
+                      {!isResizing && badge && w >= 60 && (
                         <span style={{
-                          fontSize: 9, padding: '1px 4px',
-                          background: 'rgba(255,255,255,0.25)', borderRadius: 2,
-                          textTransform: 'uppercase', letterSpacing: '0.06em',
-                        }}>OVD</span>
+                          fontSize: 9, padding: '2px 5px',
+                          background: badge.bg, color: 'white',
+                          borderRadius: 2, fontWeight: 700,
+                          letterSpacing: '0.08em', textTransform: 'uppercase',
+                          textDecoration: 'none',
+                          flexShrink: 0,
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                        }}>{badge.label}</span>
                       )}
                       {/* Right-edge resize handle — 6px wide, only visible
                           when onUpdateAssignment is wired. Uses mouse events
