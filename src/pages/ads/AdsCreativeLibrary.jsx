@@ -182,6 +182,14 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // alongside the main rows fetch — not chained, so we don't add latency.
   const [editors, setEditors] = useState([])
   const [offers, setOffers] = useState([])
+  // Distinct creators derived from current rows — used for the Creator
+  // dropdown in matrix + detail modal. Recomputed when rows change so a
+  // newly-added creator immediately appears in the picker.
+  const knownCreators = useMemo(() => {
+    const set = new Set()
+    for (const r of rows) if (r.creator) set.add(r.creator)
+    return Array.from(set).sort()
+  }, [rows])
 
   const toggleSelect = useCallback((id) => {
     setSelected(prev => {
@@ -510,6 +518,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                   rows={group.rows}
                   editors={activeEditors}
                   offers={offers}
+                  creators={knownCreators}
                   onRowClick={openDrawer}
                   onPatch={scope.canEditCreative ? patchRow : null}
                   selected={selected}
@@ -846,7 +855,7 @@ function SortableHeader({ label, k, sortKey, sortDir, onSort }) {
   )
 }
 
-function CreativeMatrixView({ rows, editors, offers, onRowClick, onPatch, selected, selectionMode, onToggleSelect, sortKey, sortDir, onSort }) {
+function CreativeMatrixView({ rows, editors, offers, creators, onRowClick, onPatch, selected, selectionMode, onToggleSelect, sortKey, sortDir, onSort }) {
   const selectable = !!onToggleSelect
   const cols = selectable ? MATRIX_COLS_SEL : MATRIX_COLS_BASE
   const allVisible = rows.every(r => selected?.has(r.id))
@@ -899,7 +908,7 @@ function CreativeMatrixView({ rows, editors, offers, onRowClick, onPatch, select
       </div>
       {rows.map((r, i) => (
         <MatrixRow key={r.id} row={r}
-          editors={editors} offers={offers}
+          editors={editors} offers={offers} creators={creators}
           isLast={i === rows.length - 1}
           onRowClick={onRowClick}
           onPatch={onPatch}
@@ -930,7 +939,7 @@ const cellInputStyle = {
   outline: 'none',
 }
 
-const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, isLast, onRowClick, onPatch, cols, selected, selectionMode, onToggleSelect }) {
+const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, isLast, onRowClick, onPatch, cols, selected, selectionMode, onToggleSelect }) {
   const [hover, setHover] = useState(false)
   const tc = typeColor(r.type)
   const oc = offerColor(r.offer_slug)
@@ -1034,14 +1043,28 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, isLast, onR
           }}>{r.type}</span>
         )}
       </div>
-      {/* Creator — inline text */}
+      {/* Creator — inline select from known creators */}
       <div onClick={stop}>
         {editable ? (
-          <input type="text" value={creator}
-            onChange={e => setCreator(e.target.value)}
-            onBlur={() => { if (creator !== r.creator) onPatch(r.id, { creator: creator || null }) }}
-            placeholder="—"
-            style={cellInputStyle} />
+          <select value={r.creator || ''}
+            onChange={e => {
+              const v = e.target.value
+              if (v === '__ADD__') {
+                const next = prompt('New creator name')
+                if (next && next.trim()) onPatch(r.id, { creator: next.trim().toUpperCase() })
+              } else {
+                onPatch(r.id, { creator: v || null })
+              }
+            }}
+            style={cellSelectStyle}>
+            <option value="">—</option>
+            {(creators || []).map(c => <option key={c} value={c}>{c}</option>)}
+            {/* Ensure current value is in options even if not in known list */}
+            {r.creator && !(creators || []).includes(r.creator) && (
+              <option value={r.creator}>{r.creator}</option>
+            )}
+            <option value="__ADD__">+ Add new…</option>
+          </select>
         ) : (
           <span style={{ color: 'var(--ink-3)' }}>{r.creator || '—'}</span>
         )}
@@ -1182,6 +1205,44 @@ function StageLinkCell({ value, url, label }) {
         border: value === 'skip' ? '1px solid var(--rule)' : 'none',
       }}>{s.label}</span>
     </div>
+  )
+}
+
+/* Creator picker — dropdown of known creators with an inline 'Add new'
+   that switches to a free-text input. Avoids typos that fragment creators
+   into multiple variants (NATALIE vs Natalie vs natalie). */
+function CreatorPicker({ value, known, onChange }) {
+  const [addingNew, setAddingNew] = useState(false)
+  // If the current value isn't in the known list, expose it inline so the
+  // dropdown still shows it as selected.
+  const options = useMemo(() => {
+    const set = new Set(known)
+    if (value && !set.has(value)) set.add(value)
+    return Array.from(set).sort()
+  }, [known, value])
+  if (addingNew) {
+    return (
+      <div style={{ display: 'flex', gap: 4 }}>
+        <input type="text" autoFocus
+          defaultValue={value || ''}
+          onBlur={e => { onChange(e.target.value.toUpperCase().trim() || null); setAddingNew(false) }}
+          onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+          placeholder="New creator name"
+          style={inputStyle} />
+      </div>
+    )
+  }
+  return (
+    <select value={value || ''}
+      onChange={e => {
+        if (e.target.value === '__ADD__') setAddingNew(true)
+        else onChange(e.target.value || null)
+      }}
+      style={selectStyle}>
+      <option value="">— Pick creator —</option>
+      {options.map(c => <option key={c} value={c}>{c}</option>)}
+      <option value="__ADD__">+ Add new creator…</option>
+    </select>
   )
 }
 
@@ -1790,6 +1851,7 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onDel
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle') // idle | saving | saved | error
   const [editors, setEditors] = useState([])
   const [offers, setOffers] = useState([])
+  const [knownCreators, setKnownCreators] = useState([])
   const [showAdvanced, setShowAdvanced] = useState(false)
   // When the viewer is an editor on /editor-view, auto-target them as the assignee.
   const [assignEditor, setAssignEditor] = useState(scope.isEditorView ? (scope.editorId || '') : '')
@@ -1832,6 +1894,16 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onDel
       .then(({ data }) => { if (mounted) setOffers(data || []) })
     supabase.from('lib_editing_queue').select('*').eq('creative_id', row.id)
       .then(({ data }) => { if (mounted) setExistingTasks(data || []) })
+    // Distinct creators from the library — used to populate the Creator
+    // dropdown so users pick from existing ones instead of free-typing.
+    supabase.from('lib_creative_library').select('creator')
+      .not('creator', 'is', null)
+      .eq('exclude_from_library', false)
+      .then(({ data }) => {
+        if (!mounted) return
+        const set = new Set((data || []).map(r => r.creator).filter(Boolean))
+        setKnownCreators(Array.from(set).sort())
+      })
     return () => { mounted = false }
   }, [row.id])
 
@@ -2099,8 +2171,9 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onDel
 
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(3, 1fr)' }}>
           <Field label="Creator">
-            <input type="text" value={edit.creator || ''}
-              onChange={e => setEdit({ ...edit, creator: e.target.value })} style={inputStyle} />
+            <CreatorPicker value={edit.creator || ''}
+              known={knownCreators}
+              onChange={v => setEdit({ ...edit, creator: v || null })} />
           </Field>
           <Field label="Offer / niche">
             <select value={edit.offer_slug || ''}
