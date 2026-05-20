@@ -78,7 +78,16 @@ const EDITOR_COLORS = [
   '#3e7eba', '#e0853e', '#5fa55a', '#a05fa5', '#c44b6e',
   '#3eb2a8', '#b8893e', '#7e3eb8', '#5b8a3e', '#b83e3e',
 ]
-function editorColor(slug) {
+function editorColor(slugOrEditor) {
+  // Accept either a slug string OR an editor object. When given an editor
+  // object with a `color` set, use that — lets operators override the
+  // hash-derived color via the Manage Editors UI. Falls back to slug-hash
+  // otherwise (stable across renders for the same slug).
+  if (slugOrEditor && typeof slugOrEditor === 'object') {
+    if (slugOrEditor.color) return slugOrEditor.color
+    return editorColor(slugOrEditor.slug || '')
+  }
+  const slug = slugOrEditor
   if (!slug) return '#999'
   let h = 0
   for (let i = 0; i < slug.length; i++) h = ((h << 5) - h + slug.charCodeAt(i)) | 0
@@ -1341,6 +1350,85 @@ function StageLinkCell({ value, url, label }) {
   )
 }
 
+/* Editor picker — custom dropdown that shows each editor with their
+   color dot inline (which a plain <select> can't do). Used in the
+   detail modal + bulk edit + matrix inline cell. */
+function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned' }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  const current = editors.find(e => e.id === value)
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{
+          ...inputStyle, display: 'flex', alignItems: 'center', gap: 8,
+          cursor: 'pointer', width: '100%', textAlign: 'left',
+        }}>
+        {current ? (
+          <>
+            <span style={{ width: 10, height: 10, borderRadius: 2,
+              background: editorColor(current), flexShrink: 0 }} />
+            <span style={{ flex: 1, fontFamily: 'var(--sans)' }}>{current.name}</span>
+          </>
+        ) : (
+          <span style={{ flex: 1, fontFamily: 'var(--sans)', color: 'var(--ink-4)' }}>{placeholder}</span>
+        )}
+        <span style={{ fontSize: 9, opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0,
+          maxHeight: 280, overflowY: 'auto', zIndex: 30,
+          background: 'white', border: '1px solid var(--ink)',
+          boxShadow: '0 8px 24px rgba(10,10,10,0.18)',
+          padding: 4,
+        }}>
+          <button type="button"
+            onClick={() => { onChange(null); setOpen(false) }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+              padding: '6px 10px', background: !value ? 'var(--paper-2)' : 'transparent',
+              border: 'none', cursor: 'pointer', textAlign: 'left',
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: !value ? 700 : 500,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+            }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--ink-4)', flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>Unassigned</span>
+          </button>
+          {editors.filter(e => e.active !== false).map(e => {
+            const isOn = e.id === value
+            return (
+              <button key={e.id} type="button"
+                onClick={() => { onChange(e.id); setOpen(false) }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                  padding: '6px 10px', background: isOn ? 'var(--paper-2)' : 'transparent',
+                  border: 'none', cursor: 'pointer', textAlign: 'left',
+                  fontFamily: 'var(--sans)', fontSize: 13, fontWeight: isOn ? 600 : 500,
+                }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: editorColor(e), flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>{e.name}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* Creator picker — dropdown of known creators with an inline 'Add new'
    that switches to a free-text input. Avoids typos that fragment creators
    into multiple variants (NATALIE vs Natalie vs natalie). */
@@ -2572,14 +2660,9 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onRow
             </select>
           </Field>
           <Field label="Assigned editor">
-            <select value={edit.assigned_editor_id || ''}
-              onChange={e => setEdit({ ...edit, assigned_editor_id: e.target.value || null })}
-              style={selectStyle}>
-              <option value="">— Unassigned</option>
-              {editors.filter(e => e.active).map(e => (
-                <option key={e.id} value={e.id}>{e.name}</option>
-              ))}
-            </select>
+            <EditorPicker value={edit.assigned_editor_id}
+              editors={editors}
+              onChange={v => setEdit({ ...edit, assigned_editor_id: v || null })} />
           </Field>
         </div>
 
@@ -3644,6 +3727,25 @@ function ManageEditorsModal({ editors, tasks, onClose, onChanged, onOpenEditor }
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const toggleSel = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const selectAll = () => setSelectedIds(new Set(editors.map(e => e.id)))
+  const clearSel = () => setSelectedIds(new Set())
+  const bulkDelete = async () => {
+    setBusy(true); setErr(null)
+    const { error } = await supabase.from('lib_creative_editors')
+      .delete().in('id', Array.from(selectedIds))
+    setBusy(false)
+    if (error) setErr(error.message)
+    else { setSelectedIds(new Set()); setConfirmBulkDelete(false); onChanged?.() }
+  }
 
   // Task counts per editor (active + overall)
   const counts = useMemo(() => {
@@ -3704,16 +3806,67 @@ function ManageEditorsModal({ editors, tasks, onClose, onChanged, onOpenEditor }
           </button>
         </div>
 
+        {/* Bulk selection bar — sticky when any editor is selected */}
+        {selectedIds.size > 0 && (
+          <div style={{
+            padding: '10px 14px', background: 'var(--ink)', color: 'white',
+            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em' }}>
+              {selectedIds.size} SELECTED
+            </span>
+            <button onClick={selectAll} style={{
+              padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: 'transparent', color: 'white',
+              border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
+            }}>Select all ({editors.length})</button>
+            <button onClick={clearSel} style={{
+              padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: 'transparent', color: 'white',
+              border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
+            }}>Clear</button>
+            <span style={{ flex: 1 }} />
+            {confirmBulkDelete ? (
+              <>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: '#ffb4b4' }}>
+                  Delete {selectedIds.size} editor{selectedIds.size === 1 ? '' : 's'} forever? Their tasks become Unassigned.
+                </span>
+                <button onClick={() => setConfirmBulkDelete(false)} disabled={busy} style={{
+                  padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  background: 'transparent', color: 'white',
+                  border: '1px solid rgba(255,255,255,0.5)', cursor: 'pointer',
+                }}>Cancel</button>
+                <button onClick={bulkDelete} disabled={busy} style={{
+                  padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  background: '#b53e3e', color: 'white', border: 'none', cursor: 'pointer',
+                }}>{busy ? 'Deleting…' : 'Delete forever'}</button>
+              </>
+            ) : (
+              <button onClick={() => setConfirmBulkDelete(true)} style={{
+                padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                background: 'var(--accent)', color: 'var(--ink)',
+                border: 'none', cursor: 'pointer',
+              }}>Delete {selectedIds.size}</button>
+            )}
+          </div>
+        )}
+
         {/* Roster table */}
         <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '32px minmax(160px, 1fr) 90px 90px 100px 80px',
+            gridTemplateColumns: '24px 32px minmax(160px, 1fr) 90px 90px 100px 80px',
             gap: 10, padding: '10px 14px',
             background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
             fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
             letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
           }}>
+            <div></div>
             <div></div>
             <div>Name</div>
             <div style={{ textAlign: 'right' }}>Open</div>
@@ -3728,18 +3881,35 @@ function ManageEditorsModal({ editors, tasks, onClose, onChanged, onOpenEditor }
           )}
           {editors.map((e, i) => {
             const c = counts[e.id] || { open: 0, done: 0 }
-            const color = editorColor(e.slug)
+            const color = editorColor(e)
+            const isSel = selectedIds.has(e.id)
             return (
               <div key={e.id} onClick={() => onOpenEditor(e)} style={{
                 display: 'grid',
-                gridTemplateColumns: '32px minmax(160px, 1fr) 90px 90px 100px 80px',
+                gridTemplateColumns: '24px 32px minmax(160px, 1fr) 90px 90px 100px 80px',
                 gap: 10, padding: '10px 14px', alignItems: 'center',
                 borderBottom: i === editors.length - 1 ? 'none' : '1px solid var(--rule)',
                 cursor: 'pointer', transition: 'background 0.12s',
                 opacity: e.active ? 1 : 0.55,
+                background: isSel ? 'rgba(244,225,74,0.15)' : 'transparent',
               }}
-                onMouseEnter={ev => ev.currentTarget.style.background = 'var(--paper-2)'}
-                onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}>
+                onMouseEnter={ev => { if (!isSel) ev.currentTarget.style.background = 'var(--paper-2)' }}
+                onMouseLeave={ev => { if (!isSel) ev.currentTarget.style.background = 'transparent' }}>
+                <div onClick={ev => { ev.stopPropagation(); toggleSel(e.id) }}
+                  style={{
+                    width: 16, height: 16, borderRadius: 2,
+                    border: isSel ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
+                    background: isSel ? 'var(--accent)' : 'white',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}>
+                  {isSel && (
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                      <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                        strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </div>
                 <span style={{ width: 18, height: 18, borderRadius: 3, background: color }} />
                 <div style={{ fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>
                   {e.name}
@@ -4056,9 +4226,11 @@ function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
   const [name, setName] = useState(editor.name || '')
   const [active, setActive] = useState(editor.active !== false)
   const [notes, setNotes] = useState(editor.notes || '')
+  const [color, setColor] = useState(editor.color || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-  const [confirmDel, setConfirmDel] = useState(false)
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false)
+  const [confirmHardDelete, setConfirmHardDelete] = useState(false)
   // Share links state — load existing + allow generate / revoke
   const [links, setLinks] = useState([])
   const [linksLoading, setLinksLoading] = useState(true)
@@ -4120,17 +4292,26 @@ function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
   const save = async () => {
     setBusy(true); setErr(null)
     const { error } = await supabase.from('lib_creative_editors')
-      .update({ name: name.trim(), active, notes: notes || null })
+      .update({ name: name.trim(), active, notes: notes || null, color: color || null })
       .eq('id', editor.id)
     setBusy(false)
     if (error) setErr(error.message)
     else onSaved?.()
   }
-  const remove = async () => {
+  const deactivate = async () => {
     setBusy(true); setErr(null)
-    // Soft-delete by deactivating (don't hard-delete since tasks reference this row)
     const { error } = await supabase.from('lib_creative_editors')
       .update({ active: false }).eq('id', editor.id)
+    setBusy(false)
+    if (error) setErr(error.message)
+    else onDeleted?.()
+  }
+  // Hard delete — removes the row entirely. Editing tasks that referenced
+  // this editor get editor_id=NULL via ON DELETE SET NULL (per migration 075).
+  const hardDelete = async () => {
+    setBusy(true); setErr(null)
+    const { error } = await supabase.from('lib_creative_editors')
+      .delete().eq('id', editor.id)
     setBusy(false)
     if (error) setErr(error.message)
     else onDeleted?.()
@@ -4142,19 +4323,32 @@ function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
       footer={
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
-          {confirmDel ? (
+          {confirmDeactivate ? (
             <>
               <span style={{ fontSize: 12, color: '#b53e3e', marginRight: 'auto' }}>Deactivate this editor? Their existing tasks stay.</span>
-              <button onClick={() => setConfirmDel(false)} disabled={busy} style={ghostBtn}>Cancel</button>
-              <button onClick={remove} disabled={busy} style={{ ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e' }}>
+              <button onClick={() => setConfirmDeactivate(false)} disabled={busy} style={ghostBtn}>Cancel</button>
+              <button onClick={deactivate} disabled={busy} style={{ ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e' }}>
                 {busy ? '…' : 'Deactivate'}
+              </button>
+            </>
+          ) : confirmHardDelete ? (
+            <>
+              <span style={{ fontSize: 12, color: '#b53e3e', marginRight: 'auto' }}>
+                Permanently delete? Their existing tasks become Unassigned. Can't be undone.
+              </span>
+              <button onClick={() => setConfirmHardDelete(false)} disabled={busy} style={ghostBtn}>Cancel</button>
+              <button onClick={hardDelete} disabled={busy} style={{ ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e' }}>
+                {busy ? '…' : 'Delete forever'}
               </button>
             </>
           ) : (
             <>
-              <button onClick={() => setConfirmDel(true)} disabled={busy} style={{
-                ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
+              <button onClick={() => setConfirmDeactivate(true)} disabled={busy} style={{
+                ...ghostBtn, color: 'var(--ink-3)', borderColor: 'var(--rule)', marginRight: 4,
               }}>Deactivate</button>
+              <button onClick={() => setConfirmHardDelete(true)} disabled={busy} style={{
+                ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
+              }}>Delete forever</button>
               <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
               <button onClick={save} disabled={!name.trim() || busy} style={primaryBtn}>
                 {busy ? 'Saving…' : 'Save'}
@@ -4166,6 +4360,36 @@ function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
       <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
         <Field label="Name">
           <input type="text" value={name} onChange={e => setName(e.target.value)} style={inputStyle} />
+        </Field>
+        <Field label="Color">
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Reset to auto (hash-derived) */}
+            <button type="button" onClick={() => setColor('')}
+              title="Use the auto color (hash from name)"
+              style={{
+                width: 28, height: 28, borderRadius: 4,
+                background: 'repeating-linear-gradient(45deg, var(--paper), var(--paper) 4px, var(--rule) 4px, var(--rule) 6px)',
+                border: !color ? '2px solid var(--ink)' : '1px solid var(--rule)',
+                cursor: 'pointer',
+              }} />
+            {EDITOR_COLORS.map(c => (
+              <button key={c} type="button" onClick={() => setColor(c)}
+                title={c}
+                style={{
+                  width: 28, height: 28, borderRadius: 4,
+                  background: c,
+                  border: color === c ? '2px solid var(--ink)' : '1px solid rgba(0,0,0,0.15)',
+                  cursor: 'pointer',
+                }} />
+            ))}
+            <input type="color" value={color || editorColor({ slug: editor.slug, color: null })}
+              onChange={e => setColor(e.target.value)}
+              title="Pick a custom hex color"
+              style={{ width: 28, height: 28, border: '1px solid var(--rule)', borderRadius: 4, cursor: 'pointer', background: 'white', padding: 0 }} />
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 6 }}>
+            {color ? `Custom: ${color}` : 'Auto (hash of name)'}
+          </div>
         </Field>
         <Field label="Active">
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--sans)', fontSize: 13, cursor: 'pointer' }}>
@@ -4892,7 +5116,12 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
           const BAR_HEIGHT = 22
           const ROW_GAP = 6
           const PADDING = 10
-          const laneHeight = Math.max(72, PADDING * 2 + rowCount * (BAR_HEIGHT + ROW_GAP) - ROW_GAP)
+          // Always give the lane enough vertical room to fit every packed
+          // bar with a row of padding to spare. The -ROW_GAP from before
+          // could tighten the last row against the bottom edge so a 3rd+
+          // bar would clip into the next editor's lane when overflow:hidden
+          // was on. Now we add ROW_GAP of buffer instead.
+          const laneHeight = Math.max(72, PADDING * 2 + rowCount * (BAR_HEIGHT + ROW_GAP) + ROW_GAP)
           const isDropTarget = dropOnId === editor.id
           // Every row gets a visible "drop target" indicator while a drag
           // is in flight — even ones not currently hovered — so Ben can
