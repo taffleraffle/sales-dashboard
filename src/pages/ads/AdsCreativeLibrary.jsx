@@ -527,6 +527,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           scope={scope}
           onClose={() => setDrawerRow(null)}
           onSaved={() => { setDrawerRow(null); load() }}
+          onDeleted={() => { setDrawerRow(null); load() }}
         />
       )}
 
@@ -1630,7 +1631,7 @@ function CreativeCard({ row, onClick, selected = false, selectionMode = false, o
 
 /* ─────────────────────── DETAIL MODAL (click row) ─────────────────────── */
 
-function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
+function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onDeleted }) {
   const [edit, setEdit] = useState(row)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
@@ -1652,6 +1653,20 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
   // ping onSaved() ONCE when the modal closes so the parent list reloads
   // with fresh data. Avoids the "screen refreshes every keystroke" jank.
   const dirtyDuringSessionRef = useRef(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const deleteCreative = async () => {
+    setDeleting(true); setErr(null)
+    const { error } = await supabase.from('lib_creative_library').delete().eq('id', row.id)
+    setDeleting(false)
+    if (error) {
+      setErr(error.message)
+      setConfirmDelete(false)
+    } else {
+      onDeleted?.()
+    }
+  }
 
   useEffect(() => {
     let mounted = true
@@ -1761,37 +1776,56 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved }) {
       title={row.canonical_name || row.name}
       subtitle={row.canonical_name ? row.name : `${row.source_bucket || ''}${row.size_mb ? ' · ' + Math.round(row.size_mb) + ' MB' : ''}`}
       footer={
-        <>
-          {scope.canEditCreative && (
-            <span style={{
-              fontSize: 11, fontFamily: 'var(--mono)', marginRight: 'auto',
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              color: autoSaveStatus === 'error' ? '#b53e3e'
-                   : autoSaveStatus === 'saving' ? 'var(--ink-3)'
-                   : autoSaveStatus === 'saved' ? '#3e8a5e'
-                   : 'var(--ink-4)',
-            }}>
-              <span style={{
-                width: 7, height: 7, borderRadius: '50%',
-                background: autoSaveStatus === 'error' ? '#b53e3e'
-                          : autoSaveStatus === 'saving' ? '#e8b408'
-                          : autoSaveStatus === 'saved' ? '#3e8a5e'
-                          : 'var(--ink-4)',
-              }} />
-              {autoSaveStatus === 'saving' ? 'Saving…'
-                : autoSaveStatus === 'saved' ? 'Saved'
-                : autoSaveStatus === 'error' ? (err || 'Save failed')
-                : 'Changes save automatically'}
+        confirmDelete ? (
+          <>
+            <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto', fontFamily: 'var(--mono)' }}>
+              Delete this creative permanently? Can't be undone.
             </span>
-          )}
-          {err && !scope.canEditCreative && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
-          <button onClick={handleClose} style={ghostBtn}>Close</button>
-          {scope.canEditCreative && (
-            <button onClick={() => save()} disabled={saving} style={primaryBtn}>
-              {saving ? 'Saving…' : 'Save now'}
+            <button onClick={() => setConfirmDelete(false)} disabled={deleting} style={ghostBtn}>Cancel</button>
+            <button onClick={deleteCreative} disabled={deleting}
+              style={{ ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e' }}>
+              {deleting ? 'Deleting…' : 'Delete forever'}
             </button>
-          )}
-        </>
+          </>
+        ) : (
+          <>
+            {scope.canEditCreative && (
+              <span style={{
+                fontSize: 11, fontFamily: 'var(--mono)', marginRight: 'auto',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                color: autoSaveStatus === 'error' ? '#b53e3e'
+                     : autoSaveStatus === 'saving' ? 'var(--ink-3)'
+                     : autoSaveStatus === 'saved' ? '#3e8a5e'
+                     : 'var(--ink-4)',
+              }}>
+                <span style={{
+                  width: 7, height: 7, borderRadius: '50%',
+                  background: autoSaveStatus === 'error' ? '#b53e3e'
+                            : autoSaveStatus === 'saving' ? '#e8b408'
+                            : autoSaveStatus === 'saved' ? '#3e8a5e'
+                            : 'var(--ink-4)',
+                }} />
+                {autoSaveStatus === 'saving' ? 'Saving…'
+                  : autoSaveStatus === 'saved' ? 'Saved'
+                  : autoSaveStatus === 'error' ? (err || 'Save failed')
+                  : 'Changes save automatically'}
+              </span>
+            )}
+            {err && !scope.canEditCreative && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+            {scope.canDelete && onDeleted && (
+              <button onClick={() => setConfirmDelete(true)}
+                style={{ ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)' }}>
+                Delete
+              </button>
+            )}
+            <button onClick={handleClose} style={ghostBtn}>Close</button>
+            {scope.canEditCreative && (
+              <button onClick={() => save()} disabled={saving} style={primaryBtn}>
+                {saving ? 'Saving…' : 'Save now'}
+              </button>
+            )}
+          </>
+        )
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 16 }}>
         {/* Video preview */}
