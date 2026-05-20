@@ -456,20 +456,36 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // been merged into Joined composites already, and bodies are his
   // current editing queue. The heuristic covers Testimony / Full Video
   // raws that fall between those buckets.
+  // Previously O(R × W × E × L) — for every raw row, every 10-word phrase
+  // was substring-searched against every edited transcript. With 200 rows
+  // and full transcripts this was millions of `String.prototype.includes`
+  // calls running on every rows update (including the background
+  // transcript merge), and it routinely froze the UI for 1-3 seconds.
+  //
+  // New approach: build a Set of all 10-word phrases (sliding by 5) from
+  // edited transcripts ONCE, then for each raw row test its phrases via
+  // Set.has — O(R + E×W) with hash lookups.
   const usedRawIds = useMemo(() => {
     const used = new Set()
-    // Type-based fast path
+    // Type-based fast path — every raw Hook auto-marks as "already used"
+    // since they're all merged into Joined composites by now. Bodies
+    // stay in the editing queue regardless.
     for (const r of rows) {
-      if (r.status !== 'raw') continue
-      if (r.type === 'Hook') { used.add(r.id); continue }
-      // Body is explicitly the editing queue — never auto-mark as edited
-      // even if transcript happens to overlap.
+      if (r.status === 'raw' && r.type === 'Hook') used.add(r.id)
     }
-    // Transcript-overlap heuristic for non-Hook / non-Body raws
-    const editedTexts = rows
-      .filter(r => r.status === 'edited')
-      .map(e => (e.transcript || '').toLowerCase())
-    if (editedTexts.length === 0) return used
+    // Build phrase Set from edited transcripts
+    const editedPhrases = new Set()
+    for (const r of rows) {
+      if (r.status !== 'edited' || !r.transcript) continue
+      const t = r.transcript.toLowerCase().replace(/\s+/g, ' ').trim()
+      const words = t.split(' ')
+      if (words.length < 10) continue
+      for (let i = 0; i <= words.length - 10; i++) {
+        editedPhrases.add(words.slice(i, i + 10).join(' '))
+      }
+    }
+    if (editedPhrases.size === 0) return used
+    // Test each raw row against the Set
     for (const r of rows) {
       if (r.status !== 'raw') continue
       if (r.type === 'Hook' || r.type === 'Body') continue
@@ -478,16 +494,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       if (t.length < 60) continue
       const words = t.split(' ')
       if (words.length < 10) continue
-      let matched = false
-      for (let i = 0; i <= words.length - 10 && !matched; i += 5) {
-        const phrase = words.slice(i, i + 10).join(' ')
-        for (const eT of editedTexts) {
-          if (eT.length >= phrase.length && eT.includes(phrase)) {
-            matched = true; break
-          }
+      for (let i = 0; i <= words.length - 10; i += 5) {
+        if (editedPhrases.has(words.slice(i, i + 10).join(' '))) {
+          used.add(r.id); break
         }
       }
-      if (matched) used.add(r.id)
     }
     return used
   }, [rows])
