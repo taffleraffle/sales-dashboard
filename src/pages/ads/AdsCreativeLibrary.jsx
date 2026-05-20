@@ -1611,9 +1611,17 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
   const [rect, setRect] = useState(null)
   const ref = useRef(null)
   const popRef = useRef(null)
+  // Synchronously capture rect on the opening click so the first render
+  // after `open=true` already has coords. Avoids the empty-popover frame
+  // gap that could swallow the popover on slow re-renders.
+  const handleToggle = () => {
+    setOpen(curr => {
+      if (!curr && ref.current) setRect(ref.current.getBoundingClientRect())
+      return !curr
+    })
+  }
   useEffect(() => {
     if (!open) return
-    // Compute the button rect so we can place the popover via fixed pos.
     if (ref.current) setRect(ref.current.getBoundingClientRect())
     const onDoc = (e) => {
       const inBtn = ref.current && ref.current.contains(e.target)
@@ -1640,7 +1648,7 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button type="button"
-        onClick={() => setOpen(v => !v)}
+        onClick={handleToggle}
         style={{
           ...inputStyle, display: 'flex', alignItems: 'center', gap: 8,
           cursor: 'pointer', width: '100%', textAlign: 'left',
@@ -2569,8 +2577,24 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
   const [rect, setRect] = useState(null)
   const ref = useRef(null)
   const popRef = useRef(null)
+  // Click handler that synchronously captures the trigger's rect BEFORE
+  // toggling open. Previously the rect was set in a useEffect that ran
+  // after the open=true render committed — which meant `open && rect`
+  // was false on the first render (rect still null), the popover
+  // didn't appear, and on slow machines the second render could be
+  // skipped entirely if the user clicked anywhere else first.
+  const handleToggle = () => {
+    setOpen(curr => {
+      if (!curr && ref.current) {
+        setRect(ref.current.getBoundingClientRect())
+      }
+      return !curr
+    })
+  }
   useEffect(() => {
     if (!open) return
+    // Re-capture on subsequent re-renders in case the trigger moved
+    // (filter bar reflowed, the page scrolled, etc.).
     if (ref.current) setRect(ref.current.getBoundingClientRect())
     const onDocClick = (e) => {
       const inBtn = ref.current && ref.current.contains(e.target)
@@ -2609,7 +2633,7 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
   return (
     <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
       <button type="button"
-        onClick={() => setOpen(v => !v)}
+        onClick={handleToggle}
         style={{
           padding: '5px 9px',
           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
@@ -4433,11 +4457,17 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
       window.removeEventListener('resize', onScroll)
     }
   }, [open])
+  const handleToggle = () => {
+    setOpen(curr => {
+      if (!curr && ref.current) setRect(ref.current.getBoundingClientRect())
+      return !curr
+    })
+  }
   const current = options.find(o => o.value === value)
   const coords = popoverCoords(rect)
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button type="button" onClick={() => setOpen(v => !v)}
+      <button type="button" onClick={handleToggle}
         style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: '100%', textAlign: 'left' }}>
         {current ? (
           <>
