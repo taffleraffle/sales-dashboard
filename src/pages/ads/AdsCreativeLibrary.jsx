@@ -25,8 +25,8 @@ const STATUS_LABEL = {
   edited: 'Edited',
 }
 const STATUS_COLOR = {
-  raw: '#999',
-  edited: '#3e8a5e',
+  raw: '#b53e3e',      // red — needs attention / not yet edited
+  edited: '#3e8a5e',   // green — done
 }
 
 // Known offer slugs surface as filter chips + pill colors. Source of truth
@@ -378,13 +378,13 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
             text-style instead of buttoned chips. Click the label/"All" to
             clear that group. Click any value to filter by it. Active value
             is bold + accent-underlined. Counts in muted grey. */}
-        <FilterStrip label="Stage"
+        <FilterStrip label="Status"
           active={stageFilter} onClear={() => setStageFilter('')}
           totalCount={rows.length}
           options={[
-            { value: 'unedited',   label: 'Unedited',       count: stageCounts.unedited,   dot: 'var(--ink-4)' },
-            { value: 'edited_seg', label: 'Edited segment', count: stageCounts.edited_seg, dot: '#3e8a5e' },
-            { value: 'merged',     label: 'Merged final',   count: stageCounts.merged,     dot: '#b86a0c' },
+            { value: 'unedited',   label: 'Raw',     count: stageCounts.unedited,   dot: '#b53e3e' },
+            { value: 'edited_seg', label: 'Edited',  count: stageCounts.edited_seg, dot: '#3e8a5e' },
+            { value: 'merged',     label: 'Merged',  count: stageCounts.merged,     dot: '#b86a0c' },
           ]}
           onPick={setStageFilter} />
         <FilterStrip label="Type"
@@ -942,11 +942,11 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, isLast, onR
     else onRowClick?.(r)
   }
   // Pipeline-state color stripe on the left edge of every row — fast
-  // visual scan of which rows are unedited / edited segment / merged.
+  // visual scan of which rows are raw / edited / merged.
   const stripeColor =
-    (r.type === 'Joined' && r.status === 'edited') ? '#b86a0c'     // merged final (orange)
-    : (r.status === 'edited')                       ? '#3e8a5e'     // edited segment (green)
-    :                                                 'var(--ink-4)' // unedited (grey)
+    (r.type === 'Joined' && r.status === 'edited') ? '#b86a0c'     // merged (orange)
+    : (r.status === 'edited')                       ? '#3e8a5e'     // edited (green)
+    :                                                 '#b53e3e'     // raw (red — needs attention)
   return (
     <div
       onClick={handleRowClick}
