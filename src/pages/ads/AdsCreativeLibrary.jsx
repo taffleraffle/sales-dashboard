@@ -1380,20 +1380,37 @@ function StageLinkCell({ value, url, label }) {
 }
 
 /* Editor picker — custom dropdown that shows each editor with their
-   color dot inline (which a plain <select> can't do). Used in the
-   detail modal + bulk edit + matrix inline cell. */
+   color dot inline. Popover uses position: fixed + computed coords so
+   it isn't clipped by ancestor 'overflow: auto' containers (Modal body,
+   matrix scroll, etc.) and renders above modal backdrops via high
+   z-index. */
 function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned' }) {
   const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState(null)
   const ref = useRef(null)
+  const popRef = useRef(null)
   useEffect(() => {
     if (!open) return
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    // Compute the button rect so we can place the popover via fixed pos.
+    if (ref.current) setRect(ref.current.getBoundingClientRect())
+    const onDoc = (e) => {
+      const inBtn = ref.current && ref.current.contains(e.target)
+      const inPop = popRef.current && popRef.current.contains(e.target)
+      if (!inBtn && !inPop) setOpen(false)
+    }
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    const onScroll = () => {
+      if (ref.current) setRect(ref.current.getBoundingClientRect())
+    }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
     return () => {
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
     }
   }, [open])
   const current = editors.find(e => e.id === value)
@@ -1416,12 +1433,18 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
         )}
         <span style={{ fontSize: 9, opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0,
-          maxHeight: 280, overflowY: 'auto', zIndex: 30,
+      {open && rect && (
+        <div ref={popRef} style={{
+          position: 'fixed',
+          top: rect.bottom + 2,
+          left: rect.left,
+          width: rect.width,
+          maxHeight: 280, overflowY: 'auto',
+          // High z-index so we sit above modal backdrops (z 100+) and
+          // their dialogs (z 101+). Picker is the topmost UI when open.
+          zIndex: 9999,
           background: 'white', border: '1px solid var(--ink)',
-          boxShadow: '0 8px 24px rgba(10,10,10,0.18)',
+          boxShadow: '0 8px 24px rgba(10,10,10,0.25)',
           padding: 4,
         }}>
           <button type="button"
@@ -2136,16 +2159,28 @@ const chipLabelStyle = {
    Click outside or Esc to close. */
 function FilterDropdown({ label, selected, options, allCount, onChange }) {
   const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState(null)
   const ref = useRef(null)
+  const popRef = useRef(null)
   useEffect(() => {
     if (!open) return
-    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    if (ref.current) setRect(ref.current.getBoundingClientRect())
+    const onDocClick = (e) => {
+      const inBtn = ref.current && ref.current.contains(e.target)
+      const inPop = popRef.current && popRef.current.contains(e.target)
+      if (!inBtn && !inPop) setOpen(false)
+    }
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    const onScroll = () => { if (ref.current) setRect(ref.current.getBoundingClientRect()) }
     document.addEventListener('mousedown', onDocClick)
     document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
     return () => {
       document.removeEventListener('mousedown', onDocClick)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
     }
   }, [open])
 
@@ -2184,12 +2219,15 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
         <span>{buttonLabel}</span>
         <span style={{ fontSize: 8, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
-          minWidth: 260, zIndex: 30,
+      {open && rect && (
+        <div ref={popRef} style={{
+          position: 'fixed',
+          top: rect.bottom + 4,
+          left: rect.left,
+          minWidth: Math.max(260, rect.width),
+          zIndex: 9999,
           background: 'white', border: '1px solid var(--ink)',
-          boxShadow: '0 8px 24px rgba(10,10,10,0.18)',
+          boxShadow: '0 8px 24px rgba(10,10,10,0.25)',
           padding: 4,
         }}>
           <button onClick={clear}
