@@ -624,6 +624,21 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           scope={scope}
           onClose={() => setDrawerRow(null)}
           onSaved={() => { setDrawerRow(null); load() }}
+          onRowPatched={(id, patch) => {
+            // Merge changed fields into the parent's rows state.
+            // No full DB reload — DB is already updated by the modal's
+            // debounced auto-save. Updates the assigned_editor_name
+            // derived field too.
+            setRows(curr => curr.map(r => {
+              if (r.id !== id) return r
+              const next = { ...r, ...patch }
+              if ('assigned_editor_id' in patch) {
+                const ed = editors.find(e => e.id === patch.assigned_editor_id)
+                next.assigned_editor_name = ed?.name || null
+              }
+              return next
+            }))
+          }}
           onDeleted={() => { setDrawerRow(null); load() }}
         />
       )}
@@ -2204,7 +2219,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
 
 /* ─────────────────────── DETAIL MODAL (click row) ─────────────────────── */
 
-function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onDeleted }) {
+function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onRowPatched, onDeleted }) {
   const [edit, setEdit] = useState(row)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
@@ -2298,23 +2313,36 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onDel
     }
   }, [edit, row.id, onSaved])
 
-  // Wrap onClose so we trigger a single parent reload if anything changed.
-  // Critically: if there's a pending debounced save (user typed fast then
-  // hit Close before 600ms elapsed), flush it synchronously before closing
-  // so the keystrokes aren't lost.
+  // Wrap onClose. If we made any auto-saves during the session, patch
+  // the parent's row state in-place via onRowPatched instead of calling
+  // onSaved (which used to trigger a full grid reload — annoying). DB
+  // is already up to date from the debounced saves; we just need the
+  // parent to merge the new field values for this row.
   const handleClose = useCallback(async () => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
-      // Flush the pending write — same as the debounce would have done.
       await save({ silent: true })
     }
     if (dirtyDuringSessionRef.current) {
-      onSaved?.()
+      if (onRowPatched) {
+        // Pass the full editable shape; parent merges only the fields it
+        // tracks. No full reload, no grid flicker.
+        onRowPatched(row.id, {
+          type: edit.type, creator: edit.creator, status: edit.status,
+          v21_script_id: edit.v21_script_id, notes: edit.notes,
+          canonical_name: edit.canonical_name,
+          assigned_editor_id: edit.assigned_editor_id || null,
+          offer_slug: edit.offer_slug || null,
+          has_been_run: !!edit.has_been_run,
+        })
+      } else {
+        onSaved?.()  // legacy fallback if parent didn't wire onRowPatched
+      }
       dirtyDuringSessionRef.current = false
     }
     onClose?.()
-  }, [onClose, onSaved, save])
+  }, [onClose, onSaved, onRowPatched, save, row.id, edit])
 
   // Auto-save on field changes — Notion-style. Debounced 600ms so we don't
   // hammer the DB during typing. Skip the first render (edit was just
