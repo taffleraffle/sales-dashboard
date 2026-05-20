@@ -2605,16 +2605,17 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
     if (!silent) setSaving(true)
     setErr(null)
     setAutoSaveStatus('saving')
+    const patch = {
+      type: edit.type, creator: edit.creator, status: edit.status,
+      v21_script_id: edit.v21_script_id, notes: edit.notes,
+      canonical_name: edit.canonical_name,
+      assigned_editor_id: edit.assigned_editor_id || null,
+      offer_slug: edit.offer_slug || null,
+      has_been_run: !!edit.has_been_run,
+    }
     const { error } = await supabase
       .from('lib_creative_library')
-      .update({
-        type: edit.type, creator: edit.creator, status: edit.status,
-        v21_script_id: edit.v21_script_id, notes: edit.notes,
-        canonical_name: edit.canonical_name,
-        assigned_editor_id: edit.assigned_editor_id || null,
-        offer_slug: edit.offer_slug || null,
-        has_been_run: !!edit.has_been_run,
-      })
+      .update(patch)
       .eq('id', row.id)
     if (!silent) setSaving(false)
     if (error) {
@@ -2622,46 +2623,33 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
       setAutoSaveStatus('error')
     } else {
       setAutoSaveStatus('saved')
-      // Auto-saves DON'T trigger a parent reload — that was causing the
-      // "screen refreshes on every keystroke" jank. We track that something
-      // changed and ping onSaved() once when the modal closes.
+      // Both auto-save AND manual 'Save now' merge the changes into the
+      // parent's row state in place — no full reload, no scroll jump,
+      // no loss of section visibility / grouping. DB is already updated.
+      if (onRowPatched) {
+        onRowPatched(row.id, patch)
+      } else if (!silent) {
+        // Fallback for cases where parent didn't wire onRowPatched
+        onSaved?.()
+      }
       if (silent) dirtyDuringSessionRef.current = true
-      else onSaved?.()
       if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current)
       savedFlashTimerRef.current = setTimeout(() => setAutoSaveStatus('idle'), 1500)
     }
-  }, [edit, row.id, onSaved])
+  }, [edit, row.id, onSaved, onRowPatched])
 
-  // Wrap onClose. If we made any auto-saves during the session, patch
-  // the parent's row state in-place via onRowPatched instead of calling
-  // onSaved (which used to trigger a full grid reload — annoying). DB
-  // is already up to date from the debounced saves; we just need the
-  // parent to merge the new field values for this row.
+  // Close handler. Flushes any pending debounced save first (so the
+  // last few keystrokes always land in DB + parent state), then closes.
+  // save() itself now does the in-place onRowPatched merge — no full
+  // reload from this path.
   const handleClose = useCallback(async () => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
       await save({ silent: true })
     }
-    if (dirtyDuringSessionRef.current) {
-      if (onRowPatched) {
-        // Pass the full editable shape; parent merges only the fields it
-        // tracks. No full reload, no grid flicker.
-        onRowPatched(row.id, {
-          type: edit.type, creator: edit.creator, status: edit.status,
-          v21_script_id: edit.v21_script_id, notes: edit.notes,
-          canonical_name: edit.canonical_name,
-          assigned_editor_id: edit.assigned_editor_id || null,
-          offer_slug: edit.offer_slug || null,
-          has_been_run: !!edit.has_been_run,
-        })
-      } else {
-        onSaved?.()  // legacy fallback if parent didn't wire onRowPatched
-      }
-      dirtyDuringSessionRef.current = false
-    }
     onClose?.()
-  }, [onClose, onSaved, onRowPatched, save, row.id, edit])
+  }, [onClose, save])
 
   // Auto-save on field changes — Notion-style. Debounced 600ms so we don't
   // hammer the DB during typing. Skip the first render (edit was just
