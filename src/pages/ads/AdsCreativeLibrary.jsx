@@ -1678,14 +1678,18 @@ function TranscriptBox({ text }) {
         </div>
       </div>
       <div style={{
-        maxHeight: expanded ? 'none' : 160,
+        // Default shows ~420px (most short clips fit entirely; long ones
+        // expose a scrollbar inside the box). "Show full" un-caps the
+        // height so the operator can scan the whole script without
+        // wrestling a nested scroll surface inside the modal.
+        maxHeight: expanded ? 'none' : 420,
         overflowY: expanded ? 'visible' : 'auto',
-        padding: 12,
+        padding: 14,
         background: 'var(--paper-2)', border: '1px solid var(--rule)',
-        fontFamily: 'var(--serif)', fontSize: 13, lineHeight: 1.5,
-        color: 'var(--ink-2)', fontStyle: 'italic',
+        fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
+        color: 'var(--ink)',
         whiteSpace: 'pre-wrap',
-      }}>{text}</div>
+      }}>{text || <em style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>Transcript not generated yet — re-run transcription from the source clip's detail modal.</em>}</div>
     </div>
   )
 }
@@ -1857,42 +1861,121 @@ function VersionsPanel({ row, onReload }) {
 }
 
 function UsageHistory({ row }) {
+  // Two-way derivation panel:
+  //   - Hooks/Bodies: list composites where derived_hook_id == this.id
+  //                   (or derived_body_id for bodies). Falls back to the
+  //                   legacy "Hook N" name-pattern match for older rows
+  //                   that haven't had transcript matching run yet.
+  //   - Composites (Joined / Full Video / Retargeting / Testimony):
+  //                   show the matched Hook + Body source clips by
+  //                   derived_hook_id / derived_body_id.
+  const isSource    = row && (row.type === 'Hook' || row.type === 'Body')
+  const isComposite = row && ['Joined', 'Full Video', 'Retargeting', 'Testimony'].includes(row.type)
   const [matches, setMatches] = useState([])
+  const [sources, setSources] = useState({ hook: null, body: null })
   const [loading, setLoading] = useState(false)
+
+  // SOURCE → COMPOSITES: pull rows where derived_*_id points at this row
   useEffect(() => {
     let mounted = true
-    if (!row || (row.type !== 'Hook' && row.type !== 'Body')) { setMatches([]); return }
-    // Slot extraction from original name. Note: integer hook numbers only —
-    // 'CLIP-H1.1-SOFIA' is treated as 'Hook 1', same bucket as 'CLIP-H1-OSO'.
-    // OK today because Joined composite names ('Hook 4 Body C') only use
-    // integer hook numbers. If sub-versions are ever introduced (e.g.
-    // 'Hook 1.1 Body C') this will need a finer-grained match.
-    const name = row.name || ''
-    let pattern = null
-    if (row.type === 'Hook') {
-      const m = name.match(/H(\d+)(?:\.(\d+))?/i)
-      if (m) pattern = `Hook ${m[1]}`
-    } else if (row.type === 'Body') {
-      const lt = name.match(/Body\s*([A-Z])/i)
-      const nm = name.match(/B(\d+)/i)
-      if (lt)      pattern = `Body ${lt[1].toUpperCase()}`
-      else if (nm) pattern = `Body ${nm[1]}`
-    }
-    if (!pattern) { setMatches([]); return () => { mounted = false } }
+    if (!isSource) { setMatches([]); return }
     setLoading(true)
+    const col = row.type === 'Hook' ? 'derived_hook_id' : 'derived_body_id'
+    Promise.all([
+      // Transcript-derived matches (authoritative)
+      supabase.from('lib_creative_library')
+        .select('id, name, canonical_name, status, thumbnail_url, preview_url, derivation_score, type')
+        .eq(col, row.id)
+        .order('name'),
+      // Legacy name-pattern fallback (for Joined rows whose transcript
+      // match didn't reach the 0.7 threshold)
+      (() => {
+        const name = row.name || ''
+        let pattern = null
+        if (row.type === 'Hook') {
+          const m = name.match(/H(\d+)(?:\.(\d+))?/i)
+          if (m) pattern = `Hook ${m[1]}`
+        } else {
+          const lt = name.match(/Body\s*([A-Z])/i)
+          const nm = name.match(/B(\d+)/i)
+          if (lt)      pattern = `Body ${lt[1].toUpperCase()}`
+          else if (nm) pattern = `Body ${nm[1]}`
+        }
+        if (!pattern) return Promise.resolve({ data: [] })
+        return supabase.from('lib_creative_library')
+          .select('id, name, canonical_name, status, thumbnail_url, preview_url, type')
+          .eq('type', 'Joined')
+          .ilike('name', `%${pattern}%`)
+          .order('name')
+      })(),
+    ]).then(([derived, byName]) => {
+      if (!mounted) return
+      // Merge: derived wins. Add name-matched rows that aren't already there.
+      const seen = new Set((derived.data || []).map(r => r.id))
+      const fallback = (byName.data || []).filter(r => !seen.has(r.id)).map(r => ({ ...r, _fallback: true }))
+      setMatches([...(derived.data || []), ...fallback])
+      setLoading(false)
+    })
+    return () => { mounted = false }
+  }, [row?.id, row?.type, isSource])
+
+  // COMPOSITE → SOURCES: pull Hook + Body source rows by id
+  useEffect(() => {
+    let mounted = true
+    if (!isComposite) { setSources({ hook: null, body: null }); return }
+    const ids = [row.derived_hook_id, row.derived_body_id].filter(Boolean)
+    if (ids.length === 0) { setSources({ hook: null, body: null }); return }
     supabase.from('lib_creative_library')
-      .select('id, name, canonical_name, status, thumbnail_url, preview_url')
-      .eq('type', 'Joined')
-      .ilike('name', `%${pattern}%`)
-      .order('name')
+      .select('id, name, canonical_name, type, status, thumbnail_url, preview_url')
+      .in('id', ids)
       .then(({ data }) => {
         if (!mounted) return
-        setMatches(data || []); setLoading(false)
+        const byId = Object.fromEntries((data || []).map(r => [r.id, r]))
+        setSources({
+          hook: row.derived_hook_id ? byId[row.derived_hook_id] || null : null,
+          body: row.derived_body_id ? byId[row.derived_body_id] || null : null,
+        })
       })
     return () => { mounted = false }
-  }, [row?.id, row?.type, row?.name])
+  }, [row?.id, row?.derived_hook_id, row?.derived_body_id, isComposite])
 
-  if (!row || (row.type !== 'Hook' && row.type !== 'Body')) return null
+  // Composite "Made from" panel
+  if (isComposite) {
+    if (!sources.hook && !sources.body) {
+      return (
+        <div>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+            textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
+            marginBottom: 5,
+          }}>Made from</div>
+          <div style={{
+            padding: '10px 12px', background: 'var(--paper-2)',
+            border: '1px dashed var(--rule)',
+            fontFamily: 'var(--serif)', fontStyle: 'italic',
+            fontSize: 12, color: 'var(--ink-3)',
+          }}>
+            No hook/body source matched. Run the transcript matcher after every new ingest to populate these links.
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
+          marginBottom: 5,
+        }}>Made from</div>
+        <div style={{ display: 'grid', gap: 6 }}>
+          {sources.hook && <DerivationLinkRow row={sources.hook} role="HOOK SOURCE" />}
+          {sources.body && <DerivationLinkRow row={sources.body} role="BODY SOURCE" />}
+        </div>
+      </div>
+    )
+  }
+
+  if (!isSource) return null
   if (loading) return null
   return (
     <div>
@@ -1916,29 +1999,46 @@ function UsageHistory({ row }) {
       ) : (
         <div style={{ display: 'grid', gap: 6 }}>
           {matches.map(m => (
-            <div key={m.id} style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '6px 10px',
-              background: 'var(--paper-2)', border: '1px solid var(--rule)',
-              fontFamily: 'var(--mono)', fontSize: 11,
-            }}>
-              <div style={{ width: 40, height: 24, background: '#000', overflow: 'hidden', flexShrink: 0 }}>
-                {m.thumbnail_url && (
-                  <img src={m.thumbnail_url} alt="" loading="lazy"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                )}
-              </div>
-              <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <div style={{ fontWeight: 600 }}>{m.canonical_name || m.name}</div>
-                <div style={{ color: 'var(--ink-4)', fontSize: 10 }}>{m.name}</div>
-              </div>
-              <span style={{ color: m.status === 'edited' ? '#3e8a5e' : 'var(--ink-4)', fontSize: 9.5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                {m.status}
-              </span>
-            </div>
+            <DerivationLinkRow key={m.id} row={m} role={m._fallback ? 'NAME-MATCH' : null} />
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/* Small row for "Made from" + "Used in" lists. Same look as the previous
+   inline list but extracted so both panels share. Role label appears as
+   a tiny eyebrow on the right ("HOOK SOURCE", "BODY SOURCE", or
+   "NAME-MATCH" for legacy fallbacks). */
+function DerivationLinkRow({ row, role }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '6px 10px',
+      background: 'var(--paper-2)', border: '1px solid var(--rule)',
+      fontFamily: 'var(--mono)', fontSize: 11,
+    }}>
+      <div style={{ width: 40, height: 24, background: '#000', overflow: 'hidden', flexShrink: 0 }}>
+        {row.thumbnail_url && (
+          <img src={row.thumbnail_url} alt="" loading="lazy"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        )}
+      </div>
+      <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontWeight: 600 }}>{row.canonical_name || row.name}</div>
+        <div style={{ color: 'var(--ink-4)', fontSize: 10 }}>{row.name}</div>
+      </div>
+      {role && (
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
+          letterSpacing: '0.08em', color: 'var(--ink-4)',
+        }}>{role}</span>
+      )}
+      <span style={{
+        color: row.status === 'edited' ? '#3e8a5e' : 'var(--ink-4)',
+        fontSize: 9.5, letterSpacing: '0.08em', textTransform: 'uppercase',
+      }}>{row.status}</span>
     </div>
   )
 }
@@ -3617,7 +3717,23 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       ) : view === 'inbox' ? (
         <InboxView tasks={filteredTasks} onEdit={setEditingTask} />
       ) : (
-        <KanbanView tasks={filteredTasks} onEdit={setEditingTask} onMove={moveTaskStatus} />
+        <KanbanView
+          tasks={filteredTasks}
+          editors={editors.filter(e => e.active)}
+          onEdit={setEditingTask}
+          onMove={moveTaskStatus}
+          onReassignEditor={moveTaskToEditor}
+          onAddInColumn={(col) => {
+            // Pre-set the addTask form to land in this Kanban column.
+            // We don't have a "prefillStatus" field today — easiest path
+            // is to add the task with the column's status applied right
+            // after creation. For now, just open the modal; operator
+            // picks editor/dates as usual. (Column-aware prefill is a
+            // small follow-up.)
+            setAddTaskPrefill({ editorId: '', due: '', start: '' })
+            setAddTaskOpen(true)
+          }}
+        />
       )}
 
       {addEditorOpen && (
@@ -6411,16 +6527,8 @@ function InboxCard({ task: t, onEdit, sectionColor }) {
 
 /* ─────────────────────────── KANBAN view ─────────────────────────── */
 
-function KanbanView({ tasks, onEdit, onMove }) {
+function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInColumn }) {
   const cols = ['queued', 'in_progress', 'review', 'blocked', 'done']
-  const colLabels = {
-    queued: 'Queued', in_progress: 'In progress', review: 'Review',
-    blocked: 'Blocked', done: 'Done',
-  }
-  const colAccent = {
-    queued: 'var(--ink-3)', in_progress: '#b86a0c', review: '#3e7eba',
-    blocked: '#b53e3e', done: '#3e8a5e',
-  }
   const byCol = Object.fromEntries(cols.map(c => [c, tasks.filter(t => t.status === c)]))
   const taskById = useMemo(() => Object.fromEntries(tasks.map(t => [t.task_id, t])), [tasks])
   const [dragOver, setDragOver] = useState(null)
@@ -6435,7 +6543,6 @@ function KanbanView({ tasks, onEdit, onMove }) {
     if (dragOver !== col) setDragOver(col)
   }
   const handleDragLeave = (e, col) => {
-    // Only clear if leaving the column (not entering a child)
     if (e.currentTarget.contains(e.relatedTarget)) return
     if (dragOver === col) setDragOver(null)
   }
@@ -6459,7 +6566,7 @@ function KanbanView({ tasks, onEdit, onMove }) {
           onDrop={e => handleDrop(e, c)}
           style={{
             background: 'var(--paper)',
-            border: dragOver === c ? `2px dashed ${colAccent[c]}` : '1px solid var(--rule)',
+            border: dragOver === c ? `2px dashed ${TASK_STATUS_COLOR[c]}` : '1px solid var(--rule)',
             minHeight: 200, transition: 'border-color 0.12s',
           }}>
           <div style={{
@@ -6470,24 +6577,38 @@ function KanbanView({ tasks, onEdit, onMove }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6,
                           fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                           letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
-              <span style={{ width: 7, height: 7, borderRadius: 2, background: colAccent[c] }} />
-              {colLabels[c]}
+              <span style={{ width: 7, height: 7, borderRadius: 2, background: TASK_STATUS_COLOR[c] }} />
+              {TASK_STATUS_LABEL[c]}
             </div>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{byCol[c].length}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{byCol[c].length}</span>
+              {onAddInColumn && (
+                <button onClick={() => onAddInColumn(c)} title={`Add a task in ${TASK_STATUS_LABEL[c]}`}
+                  style={{
+                    background: 'var(--ink)', color: 'var(--paper)', border: 'none',
+                    width: 22, height: 22, borderRadius: 2, cursor: 'pointer',
+                    fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700, lineHeight: 1,
+                  }}>+</button>
+              )}
+            </div>
           </div>
           <div style={{ padding: 8, display: 'grid', gap: 8 }}>
             {byCol[c].map(t => (
               <QueueCard key={t.task_id} task={t}
+                editors={editors}
                 onClick={() => onEdit?.(t)}
+                onReassignEditor={onReassignEditor}
                 draggable={!!onMove}
                 onDragStart={e => handleDragStart(e, t)} />
             ))}
-            {byCol[c].length === 0 && dragOver === c && (
+            {byCol[c].length === 0 && (
               <div style={{
                 padding: '20px 12px', textAlign: 'center',
                 fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
                 letterSpacing: '0.08em', textTransform: 'uppercase',
-              }}>Drop to move</div>
+                border: dragOver === c ? '2px dashed var(--ink-4)' : '2px dashed transparent',
+                fontStyle: 'italic', transition: 'border-color 0.12s',
+              }}>{dragOver === c ? 'Drop to move' : 'Empty'}</div>
             )}
           </div>
         </div>
@@ -6587,16 +6708,45 @@ function EditorLane({ editor, editorId, editorRecord, tasks, onEdit, onMoveEdito
   )
 }
 
-function QueueCard({ task, onClick, draggable, onDragStart }) {
-  const statusColor = {
-    queued: 'var(--ink-3)',
-    in_progress: '#b86a0c',
-    review: '#3e7eba',
-    done: '#3e8a5e',
-    blocked: '#b53e3e',
-  }[task.status] || 'var(--ink-3)'
-
+/* QueueCard — fixed-shape card used by EditorLane + Kanban.
+   Layout (locked so every card is the same size regardless of content):
+     - 96px thumbnail strip (object-fit: cover, no aspect drift)
+     - Title line (mono, truncated to one line)
+     - Subtitle line (creative_name fallback, truncated)
+     - Editor pill row (clickable when `editors` + onReassignEditor are wired)
+     - Status / priority / due footer row
+   Total card height ≈ 188px so a column of cards reads as a clean stack
+   instead of the random-tile mishmash Ben flagged. */
+function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDragStart }) {
+  const statusColor = TASK_STATUS_COLOR[task.status] || 'var(--ink-3)'
   const eColor = task.editor_slug ? editorColor(task) : null
+  const editable = !!(editors && onReassignEditor)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerRect, setPickerRect] = useState(null)
+  const pillRef = useRef(null)
+  const popRef = useRef(null)
+  useEffect(() => {
+    if (!pickerOpen) return
+    if (pillRef.current) setPickerRect(pillRef.current.getBoundingClientRect())
+    const onDoc = (e) => {
+      const inBtn = pillRef.current && pillRef.current.contains(e.target)
+      const inPop = popRef.current && popRef.current.contains(e.target)
+      if (!inBtn && !inPop) setPickerOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setPickerOpen(false) }
+    const onScroll = () => { if (pillRef.current) setPickerRect(pillRef.current.getBoundingClientRect()) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [pickerOpen])
+  const coords = popoverCoords(pickerRect)
 
   return (
     <div onClick={onClick}
@@ -6608,60 +6758,67 @@ function QueueCard({ task, onClick, draggable, onDragStart }) {
         padding: '10px 12px',
         cursor: draggable ? 'grab' : (onClick ? 'pointer' : 'default'),
         transition: 'background 0.12s, opacity 0.12s',
+        display: 'flex', flexDirection: 'column', gap: 6,
       }}
       onMouseEnter={e => onClick && (e.currentTarget.style.background = 'var(--paper-2)')}
       onMouseLeave={e => onClick && (e.currentTarget.style.background = 'white')}
       onDragStartCapture={e => { e.currentTarget.style.opacity = '0.5' }}
       onDragEnd={e => { e.currentTarget.style.opacity = '1' }}>
-      {task.thumbnail_url && (
-        <div style={{
-          aspectRatio: '16/9', backgroundImage: `url('${task.thumbnail_url}')`,
-          backgroundSize: 'cover', backgroundPosition: 'center',
-          marginBottom: 8,
-        }} />
-      )}
+      {/* Locked 16:9 thumbnail strip. Always rendered (with a fallback
+          glyph when no thumbnail) so the card heights line up regardless
+          of which clips have previews. */}
+      <div style={{
+        width: '100%', aspectRatio: '16 / 9', background: '#0a0a0a',
+        overflow: 'hidden', border: '1px solid var(--rule)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {task.thumbnail_url ? (
+          <img src={task.thumbnail_url} alt="" loading="lazy"
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        ) : (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.08em' }}>NO PREVIEW</span>
+        )}
+      </div>
       <div style={{
         fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 500,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>{task.creative_canonical_name || task.creative_name}</div>
-      {task.creative_canonical_name && (
-        <div style={{
-          fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-4)', marginTop: 1,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{task.creative_name}</div>
-      )}
-      {/* Editor pill — surfaces who is working on this card */}
-      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-        {eColor ? (
-          <span style={{
+      <div style={{
+        fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-4)',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        minHeight: 14,
+      }}>{task.creative_canonical_name ? task.creative_name : ''}</div>
+      {/* Editor pill — clickable when `editors` + onReassignEditor wired
+          (Kanban view). Opens a portal-mounted EditorPicker so the
+          operator can reassign without leaving the column. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button
+          ref={pillRef}
+          type="button"
+          disabled={!editable}
+          onClick={editable ? (e) => { e.stopPropagation(); setPickerOpen(v => !v) } : undefined}
+          title={editable ? 'Reassign editor' : ''}
+          style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,
             padding: '2px 7px', borderRadius: 999,
-            background: 'white', border: `1px solid ${eColor}`,
-            fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-2)',
+            background: eColor ? 'white' : '#fffaea',
+            border: `1px solid ${eColor || '#e8b408'}`,
+            fontFamily: 'var(--mono)', fontSize: 9.5,
+            color: eColor ? 'var(--ink-2)' : '#7a4e08',
             fontWeight: 500,
+            cursor: editable ? 'pointer' : 'default',
           }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: eColor }} />
-            {task.editor_name}
-          </span>
-        ) : (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5,
-            padding: '2px 7px', borderRadius: 999,
-            background: '#fffaea', border: '1px solid #e8b408',
-            fontFamily: 'var(--mono)', fontSize: 9.5, color: '#7a4e08',
-            fontWeight: 500,
-          }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#e8b408' }} />
-            Unassigned
-          </span>
-        )}
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: eColor || '#e8b408' }} />
+          {task.editor_name || 'Unassigned'}
+          {editable && <span style={{ fontSize: 8, opacity: 0.55, marginLeft: 2 }}>▾</span>}
+        </button>
       </div>
       <div style={{
-        marginTop: 6, display: 'flex', gap: 6, alignItems: 'center',
+        marginTop: 'auto', display: 'flex', gap: 6, alignItems: 'center',
         fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-3)',
         letterSpacing: '0.06em', textTransform: 'uppercase',
       }}>
-        <span style={{ color: statusColor, fontWeight: 600 }}>{task.status}</span>
+        <span style={{ color: statusColor, fontWeight: 600 }}>{TASK_STATUS_LABEL[task.status] || task.status}</span>
         <span>·</span>
         <span>{task.priority}</span>
         {task.due_date && (
@@ -6670,6 +6827,45 @@ function QueueCard({ task, onClick, draggable, onDragStart }) {
           </span>
         )}
       </div>
+      {pickerOpen && coords && createPortal(
+        <div ref={popRef} style={{
+          position: 'fixed',
+          top: coords.top, left: coords.left, width: Math.max(180, coords.width),
+          maxHeight: coords.maxHeight, overflowY: 'auto', zIndex: 9999,
+          background: 'white', border: '1px solid var(--ink)',
+          boxShadow: '0 8px 24px rgba(10,10,10,0.25)', padding: 4,
+        }}>
+          <button type="button"
+            onClick={(e) => { e.stopPropagation(); onReassignEditor?.(task, null); setPickerOpen(false) }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+              padding: '6px 10px', background: !task.editor_id ? 'var(--paper-2)' : 'transparent',
+              border: 'none', cursor: 'pointer', textAlign: 'left',
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: !task.editor_id ? 700 : 500,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+            }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--ink-4)', flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>Unassign</span>
+          </button>
+          {(editors || []).filter(e => e.active !== false).map(e => {
+            const isOn = e.id === task.editor_id
+            return (
+              <button key={e.id} type="button"
+                onClick={(ev) => { ev.stopPropagation(); onReassignEditor?.(task, e.id); setPickerOpen(false) }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                  padding: '6px 10px', background: isOn ? 'var(--paper-2)' : 'transparent',
+                  border: 'none', cursor: 'pointer', textAlign: 'left',
+                  fontFamily: 'var(--sans)', fontSize: 13, fontWeight: isOn ? 600 : 500,
+                }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: editorColor(e), flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>{e.name}</span>
+              </button>
+            )
+          })}
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
