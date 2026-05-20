@@ -951,6 +951,16 @@ function CreativeListView({ rows, usedRawIds, onClick, onDelete }) {
 function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete }) {
   // `onDelete` may be null when the viewer doesn't have delete permission
   const [hover, setHover] = useState(false)
+  // Debounced hover-to-play. The raw `hover` boolean drives the visual
+  // (paper-2 tint) immediately; `hoverPlay` is only set 320ms after
+  // hover begins, so dragging the mouse across 200 rows no longer
+  // spawns 200 video elements / network requests.
+  const [hoverPlay, setHoverPlay] = useState(false)
+  useEffect(() => {
+    if (!hover) { setHoverPlay(false); return }
+    const t = setTimeout(() => setHoverPlay(true), 320)
+    return () => clearTimeout(t)
+  }, [hover])
   const offerName = r.offer_slug ? r.offer_slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '') : null
   const oc = offerColor(r.offer_slug)
   // Left stripe color matches Matrix view: red = raw needs editing,
@@ -979,18 +989,22 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete }) {
           onMouseEnter={() => setHover(true)}
           onMouseLeave={() => setHover(false)}
           onClick={onClick}>
-          {/* Thumb (with hover-to-play) */}
+          {/* Thumb. Hover-to-play used to swap to a <video> on every
+              mouseenter — that fired N requests for every pass of the
+              mouse and tanked scroll perf. Now we wait for `hoverPlay`
+              (set after a 320ms hover via the parent's debounced
+              useEffect), then load the preview with preload=metadata. */}
           <div style={{
             width: 56, height: 36, background: '#000',
             border: '1px solid var(--rule)', overflow: 'hidden',
             position: 'relative',
           }}>
-            {r.thumbnail_url && !(hover && r.preview_url) && (
+            {r.thumbnail_url && !(hoverPlay && r.preview_url) && (
               <img src={r.thumbnail_url} alt="" loading="lazy"
                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
             )}
-            {hover && r.preview_url && (
-              <video src={r.preview_url} autoPlay muted loop playsInline
+            {hoverPlay && r.preview_url && (
+              <video src={r.preview_url} autoPlay muted loop playsInline preload="metadata"
                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
             )}
           </div>
@@ -1289,17 +1303,14 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
           {r.canonical_name || r.name}
         </span>
       </div>
-      {/* Description — inline-editable text */}
-      <div onClick={stop} style={{ minWidth: 0 }}>
-        {editable ? (
-          <input type="text" value={desc}
-            onChange={e => setDesc(e.target.value)}
-            onBlur={() => { if (desc !== (r.description || r.name)) onPatch(r.id, { description: desc }) }}
-            placeholder={r.name}
-            style={{ ...cellInputStyle, fontFamily: 'var(--sans)', fontSize: 11.5 }} />
-        ) : (
-          <span style={{ fontFamily: 'var(--sans)', fontSize: 11.5 }}>{r.description || r.name}</span>
-        )}
+      {/* Description — read-only at this scope. Editing happens in the
+          detail modal (click the row) so the matrix stays a clean
+          scan-friendly grid instead of a sea of focusable inputs. */}
+      <div style={{
+        minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        fontFamily: 'var(--sans)', fontSize: 11.5, color: 'var(--ink-2)',
+      }} title={r.description || r.name}>
+        {r.description || r.name}
       </div>
       {/* Type — inline select, rendered as colored pill */}
       <div onClick={stop} style={{ position: 'relative' }}>
@@ -2697,6 +2708,15 @@ function FilterStrip({ label, active, options, onPick, onClear, totalCount }) {
 
 function CreativeCard({ row, isUsed = false, onClick, selected = false, selectionMode = false, onToggleSelect = null }) {
   const [hover, setHover] = useState(false)
+  // 320ms hover delay before swapping to the preview video — avoids
+  // spawning a network request + video decoder for every tile the
+  // operator's cursor crosses during a scan.
+  const [hoverPlay, setHoverPlay] = useState(false)
+  useEffect(() => {
+    if (!hover) { setHoverPlay(false); return }
+    const t = setTimeout(() => setHoverPlay(true), 320)
+    return () => clearTimeout(t)
+  }, [hover])
   // In selectionMode, clicking the tile body toggles selection instead of
   // opening the drawer. Click the checkbox directly to toggle out of
   // selection mode. The checkbox is always visible to onToggleSelect-
@@ -2763,7 +2783,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
         position: 'relative', overflow: 'hidden',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        {row.thumbnail_url && !(hover && row.preview_url) && (
+        {row.thumbnail_url && !(hoverPlay && row.preview_url) && (
           <img src={row.thumbnail_url} alt=""
             loading="lazy"
             style={{
@@ -2771,9 +2791,9 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
               display: 'block',
             }} />
         )}
-        {hover && row.preview_url && (
+        {hoverPlay && row.preview_url && (
           <video src={row.preview_url}
-            autoPlay muted loop playsInline
+            autoPlay muted loop playsInline preload="metadata"
             style={{
               width: '100%', height: '100%', objectFit: 'cover',
               display: 'block',
@@ -4395,6 +4415,23 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   // Live reference to the in-flight XHR so we can abort it on close.
   const uploadXhrRef = useRef(null)
 
+  // Submitted-work state — the stage URLs live on the source creative row,
+  // not on the task itself, and the lib_editing_queue view doesn't expose
+  // them. We fetch them directly so the modal can show "here's what you've
+  // already uploaded against this task" instead of leaving the file
+  // invisible after submission.
+  const [submitted, setSubmitted] = useState(null)
+  useEffect(() => {
+    let mounted = true
+    if (!task.creative_id) return
+    supabase.from('lib_creative_library')
+      .select('rough_cut_url, final_cut_url, approved_url, delivered_url, stage_rough_cut, stage_final_cut, stage_approved, stage_delivered')
+      .eq('id', task.creative_id)
+      .maybeSingle()
+      .then(({ data }) => { if (mounted) setSubmitted(data || null) })
+    return () => { mounted = false }
+  }, [task.creative_id])
+
   const save = async () => {
     setBusy(true); setErr(null)
     const patch = {
@@ -4488,8 +4525,10 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         .eq('id', task.task_id)
       if (tErr) throw tErr
       setUploadProgress(100)
-      // Reflect the new status inline (modal stays open so editor sees confirmation)
+      // Reflect the new status inline + surface the uploaded file in the
+      // submitted-work panel right away (don't wait for a reload).
       setStatus('review')
+      setSubmitted(prev => ({ ...(prev || {}), final_cut_url: publicUrl, stage_final_cut: 'done' }))
       onSaved?.()
     } catch (e) {
       setErr(e.message || 'upload failed')
@@ -4650,6 +4689,12 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             placeholder="Notes on this task — feedback, blockers, links to revisions…" />
         </Field>
 
+        {/* Submitted work — shows whichever stage URLs already exist on
+            this creative so the editor can see "yes, my file landed" instead
+            of having to trust that pressing Upload did anything. Hides itself
+            when nothing's been uploaded yet. */}
+        <SubmittedWorkPanel submitted={submitted} />
+
         {/* Upload edited version — editors drop their cut here. Upload
             starts IMMEDIATELY on file select / drop, no two-step click.
             The lib_creative_library row gets the new URL and the task
@@ -4741,6 +4786,53 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         )}
       </div>
     </Modal>
+  )
+}
+
+/* Submitted work panel — renders inline playable previews for whichever
+   stage URLs are populated on the source creative. Shown above the upload
+   dropzone in EditTaskModal so editors can see what they've already
+   submitted against this task. Suppresses itself when nothing's there. */
+function SubmittedWorkPanel({ submitted }) {
+  if (!submitted) return null
+  const stages = [
+    { url: submitted.rough_cut_url, flag: submitted.stage_rough_cut, label: 'Rough cut'   },
+    { url: submitted.final_cut_url, flag: submitted.stage_final_cut, label: 'Final cut'   },
+    { url: submitted.approved_url,  flag: submitted.stage_approved,  label: 'Approved'    },
+    { url: submitted.delivered_url, flag: submitted.stage_delivered, label: 'Delivered'   },
+  ].filter(s => s.url)
+  if (stages.length === 0) return null
+  return (
+    <div style={{
+      padding: '14px 16px', border: '1px solid var(--rule)',
+      background: 'white', borderLeft: '3px solid #3e8a5e',
+    }}>
+      <div style={{
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+        letterSpacing: '0.12em', textTransform: 'uppercase', color: '#3e8a5e',
+        marginBottom: 10,
+      }}>
+        Submitted work · {stages.length} file{stages.length === 1 ? '' : 's'}
+      </div>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {stages.map(s => (
+          <div key={s.label} style={{ display: 'grid', gap: 6 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              fontFamily: 'var(--mono)', fontSize: 11,
+            }}>
+              <span style={{ fontWeight: 600 }}>{s.label}</span>
+              <a href={s.url} target="_blank" rel="noreferrer"
+                style={{ color: 'var(--ink-2)', textDecoration: 'underline', fontSize: 10.5 }}>
+                Open in new tab ↗
+              </a>
+            </div>
+            <video controls preload="metadata" src={s.url}
+              style={{ display: 'block', width: '100%', maxHeight: 280, background: '#000', objectFit: 'contain' }} />
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -6552,6 +6644,12 @@ function InboxView({ tasks, onEdit }) {
 
 function InboxCard({ task: t, onEdit, sectionColor }) {
   const [hover, setHover] = useState(false)
+  const [hoverPlay, setHoverPlay] = useState(false)
+  useEffect(() => {
+    if (!hover) { setHoverPlay(false); return }
+    const tm = setTimeout(() => setHoverPlay(true), 320)
+    return () => clearTimeout(tm)
+  }, [hover])
   const editorCol = editorColor(t)
   const dueLabel = t.due_date
     ? (() => {
@@ -6580,12 +6678,12 @@ function InboxCard({ task: t, onEdit, sectionColor }) {
         width: 64, height: 40, background: '#000',
         border: '1px solid var(--rule)', overflow: 'hidden', position: 'relative',
       }}>
-        {t.thumbnail_url && !(hover && t.preview_url) && (
+        {t.thumbnail_url && !(hoverPlay && t.preview_url) && (
           <img src={t.thumbnail_url} alt="" loading="lazy"
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
         )}
-        {hover && t.preview_url && (
-          <video src={t.preview_url} autoPlay muted loop playsInline
+        {hoverPlay && t.preview_url && (
+          <video src={t.preview_url} autoPlay muted loop playsInline preload="metadata"
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
         )}
       </div>
