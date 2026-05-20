@@ -265,6 +265,39 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   useEffect(() => { load() }, [load])
 
+  // Compute which raw rows have been 'used' — i.e. there exists at least
+  // one Joined composite that references the same hook/body slot. Declared
+  // BEFORE `filtered` because `filtered` references it.
+  // Heuristic: extract H<n> from raw hook names, B<x>|Body X from raw
+  // bodies, then check Joined names + canonical names for that token.
+  const usedRawIds = useMemo(() => {
+    const used = new Set()
+    const joinedBlob = rows
+      .filter(r => r.type === 'Joined')
+      .map(r => ((r.name || '') + ' ' + (r.canonical_name || '')).toUpperCase())
+      .join(' | ')
+    if (!joinedBlob) return used
+    for (const r of rows) {
+      if (r.status !== 'raw') continue
+      const n = (r.name || '').toUpperCase()
+      let token = null
+      if (r.type === 'Hook') {
+        const m = n.match(/H(\d+)(?:\.(\d+))?/)
+        if (m) token = `H${m[1]}`
+      } else if (r.type === 'Body') {
+        const lt = n.match(/BODY\s*([A-Z])/)
+        const nm = n.match(/B(\d+)/)
+        if (lt)      token = `B${lt[1]}`
+        else if (nm) token = `B${nm[1]}`
+      }
+      if (!token) continue
+      // Must be followed by non-digit so 'H1' doesn't match 'H10'.
+      const rx = new RegExp(token + '(?!\\d)')
+      if (rx.test(joinedBlob)) used.add(r.id)
+    }
+    return used
+  }, [rows])
+
   const filtered = useMemo(() => {
     let list = rows
     const search = q.trim().toLowerCase()
@@ -345,39 +378,6 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // Stable reference for MatrixRow's editor dropdown — same memo concern
   // as openDrawer: avoid re-creating this array each render.
   const activeEditors = useMemo(() => editors.filter(e => e.active), [editors])
-  // Compute which raw rows have been 'used' — i.e. there exists at least
-  // one Joined composite that references the same hook/body slot. Used so
-  // Ben can filter raws by 'already merged' vs 'not yet edited'.
-  // Heuristic: extract H<n> from raw hook names, B<x>|Body X from raw
-  // bodies, then check Joined names + canonical names for that token.
-  const usedRawIds = useMemo(() => {
-    const used = new Set()
-    const joinedBlob = rows
-      .filter(r => r.type === 'Joined')
-      .map(r => ((r.name || '') + ' ' + (r.canonical_name || '')).toUpperCase())
-      .join(' | ')
-    if (!joinedBlob) return used
-    for (const r of rows) {
-      if (r.status !== 'raw') continue
-      const n = (r.name || '').toUpperCase()
-      let token = null
-      if (r.type === 'Hook') {
-        const m = n.match(/H(\d+)(?:\.(\d+))?/)
-        if (m) token = `H${m[1]}`
-      } else if (r.type === 'Body') {
-        const lt = n.match(/BODY\s*([A-Z])/)
-        const nm = n.match(/B(\d+)/)
-        if (lt)      token = `B${lt[1]}`
-        else if (nm) token = `B${nm[1]}`
-      }
-      if (!token) continue
-      // Must be followed by non-digit so 'H1' doesn't match 'H10'.
-      const rx = new RegExp(token + '(?!\\d)')
-      if (rx.test(joinedBlob)) used.add(r.id)
-    }
-    return used
-  }, [rows])
-
   // Status counts. 'Edited' includes Joined (since Joined is a sub-state of
   // edited). 'Merged' is a narrower filter showing only Joined.
   const stageCounts = useMemo(() => ({
