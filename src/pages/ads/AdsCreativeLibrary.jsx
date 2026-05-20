@@ -155,10 +155,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
   const [q, setQ] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
-  const [offerFilter, setOfferFilter] = useState('')   // '' | offer_slug | '__none__'
-  const [runFilter, setRunFilter] = useState('')       // '' | 'yes' | 'no'
-  const [stageFilter, setStageFilter] = useState('')   // '' | 'unedited' | 'edited_seg' | 'merged'
+  // All filters are Sets to support multi-select. Empty set = no filter applied.
+  const [typeFilter, setTypeFilter]   = useState(() => new Set())
+  const [offerFilter, setOfferFilter] = useState(() => new Set())  // values: offer_slug | '__none__'
+  const [runFilter, setRunFilter]     = useState(() => new Set())  // values: 'yes' | 'no'
+  const [stageFilter, setStageFilter] = useState(() => new Set())  // values: 'raw_unused' | 'raw_used' | 'edited_seg' | 'merged'
   // Column sort for the Matrix view. sortKey = '' means default order
   // (insertion / added_at desc). Clicking a header sets the key; clicking
   // the same key again toggles direction.
@@ -305,21 +306,27 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       const blob = `${r.name} ${r.canonical_name || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
       return blob.includes(search)
     })
-    if (typeFilter)   list = list.filter(r => r.type === typeFilter)
-    if (offerFilter === '__none__') list = list.filter(r => !r.offer_slug)
-    else if (offerFilter)           list = list.filter(r => r.offer_slug === offerFilter)
-    if (runFilter === 'yes')        list = list.filter(r => r.has_been_run)
-    else if (runFilter === 'no')    list = list.filter(r => !r.has_been_run)
-    // Pipeline-state filter — combines type + status into workflow states
-    // 'Edited' includes Joined (Joined is a subset of edited).
-    // 'Merged' narrows to type=Joined.
-    // 'Raw / used'   = status=raw AND a Joined references this slot.
-    // 'Raw / unused' = status=raw AND no Joined references this slot.
-    if (stageFilter === 'unedited')   list = list.filter(r => r.status === 'raw')
-    else if (stageFilter === 'raw_used') list = list.filter(r => r.status === 'raw' && usedRawIds.has(r.id))
-    else if (stageFilter === 'raw_unused') list = list.filter(r => r.status === 'raw' && !usedRawIds.has(r.id))
-    else if (stageFilter === 'edited_seg') list = list.filter(r => r.status === 'edited')
-    else if (stageFilter === 'merged')list = list.filter(r => r.type === 'Joined' && r.status === 'edited')
+    // Multi-select filters: empty Set = no filter; otherwise OR within
+    // a group (any-match) and AND across groups (intersection).
+    if (typeFilter.size > 0) list = list.filter(r => typeFilter.has(r.type))
+    if (offerFilter.size > 0) list = list.filter(r => {
+      if (offerFilter.has('__none__') && !r.offer_slug) return true
+      return r.offer_slug && offerFilter.has(r.offer_slug)
+    })
+    if (runFilter.size > 0) list = list.filter(r => {
+      if (runFilter.has('yes') && r.has_been_run) return true
+      if (runFilter.has('no') && !r.has_been_run) return true
+      return false
+    })
+    if (stageFilter.size > 0) {
+      list = list.filter(r => {
+        if (stageFilter.has('raw_used') && r.status === 'raw' && usedRawIds.has(r.id)) return true
+        if (stageFilter.has('raw_unused') && r.status === 'raw' && !usedRawIds.has(r.id)) return true
+        if (stageFilter.has('edited_seg') && r.status === 'edited') return true
+        if (stageFilter.has('merged') && r.type === 'Joined' && r.status === 'edited') return true
+        return false
+      })
+    }
     // Column sort (Matrix view) — applied last so it works on the filtered list
     if (sortKey) {
       const dir = sortDir === 'desc' ? -1 : 1
@@ -389,14 +396,15 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   }), [rows, usedRawIds])
 
   // Section groups for the list view — used when no type filter, shows
-  // Hooks/Bodies/Joined/Testimony as separate sections
+  // Hooks/Bodies/Joined/Testimony as separate sections. With multi-select
+  // type filter, still group by type so each selected type gets its own
+  // section.
   const grouped = useMemo(() => {
-    if (typeFilter) return [{ type: typeFilter, rows: filtered }]
     const order = ['Hook', 'Body', 'Full Video', 'Joined', 'Testimony', 'Retargeting']
     return order
       .map(t => ({ type: t, rows: filtered.filter(r => r.type === t) }))
       .filter(g => g.rows.length > 0)
-  }, [filtered, typeFilter])
+  }, [filtered])
 
   return (
     <>
@@ -436,47 +444,48 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
         }}>
-          <FilterDropdown label="Status"
-            active={stageFilter}
+          <FilterDropdown label="STATUS"
+            selected={stageFilter}
             options={[
-              { value: 'unedited',   label: 'Raw — needs editing', sublabel: 'unmerged raw clips', count: stageCounts.raw_unused, dot: '#b53e3e' },
-              { value: 'raw_used',   label: 'Raw — already merged', sublabel: 'used in a composite', count: stageCounts.raw_used, dot: '#999' },
-              { value: 'edited_seg', label: 'Edited',  count: stageCounts.edited_seg, dot: '#3e8a5e' },
-              { value: 'merged',     label: 'Merged final',  count: stageCounts.merged,     dot: '#b86a0c' },
+              { value: 'raw_unused', label: 'RAW — NEEDS EDITING', sublabel: 'unmerged raw clips', count: stageCounts.raw_unused, dot: '#b53e3e' },
+              { value: 'raw_used',   label: 'RAW — ALREADY MERGED', sublabel: 'used in a composite', count: stageCounts.raw_used, dot: '#999' },
+              { value: 'edited_seg', label: 'EDITED',       count: stageCounts.edited_seg, dot: '#3e8a5e' },
+              { value: 'merged',     label: 'MERGED FINAL', count: stageCounts.merged,     dot: '#b86a0c' },
             ]}
             allCount={rows.length}
-            onPick={setStageFilter}
-            // Map 'unedited' display→ raw_unused filter (Ben's main "needs editing" view)
-            valueAdapter={v => v === 'unedited' ? 'raw_unused' : v} />
-          <FilterDropdown label="Type"
-            active={typeFilter}
-            options={TYPES.map(t => ({ value: t, label: t, count: typeCounts[t] || 0, dot: typeColor(t).ink }))}
+            onChange={setStageFilter} />
+          <FilterDropdown label="TYPE"
+            selected={typeFilter}
+            options={TYPES.map(t => ({ value: t, label: t.toUpperCase(), count: typeCounts[t] || 0, dot: typeColor(t).ink }))}
             allCount={rows.length}
-            onPick={setTypeFilter} />
-          <FilterDropdown label="Offer"
-            active={offerFilter}
+            onChange={setTypeFilter} />
+          <FilterDropdown label="OFFER"
+            selected={offerFilter}
             options={[
               ...offers.map(o => ({
                 value: o.slug,
-                label: o.slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, ''),
+                label: o.slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '').toUpperCase(),
                 count: offerCounts[o.slug] || 0,
                 dot: offerColor(o.slug).ink,
               })),
-              ...(offerCounts.__none__ > 0 ? [{ value: '__none__', label: 'No offer', count: offerCounts.__none__, dot: 'var(--ink-4)' }] : []),
+              ...(offerCounts.__none__ > 0 ? [{ value: '__none__', label: 'NO OFFER', count: offerCounts.__none__, dot: 'var(--ink-4)' }] : []),
             ]}
             allCount={rows.length}
-            onPick={setOfferFilter} />
-          <FilterDropdown label="Run?"
-            active={runFilter}
+            onChange={setOfferFilter} />
+          <FilterDropdown label="RUN"
+            selected={runFilter}
             options={[
-              { value: 'yes', label: 'Run before', count: runCount,    dot: '#3e8a5e' },
-              { value: 'no',  label: 'Not yet',   count: notRunCount, dot: 'var(--ink-4)' },
+              { value: 'yes', label: 'RUN BEFORE', count: runCount,    dot: '#3e8a5e' },
+              { value: 'no',  label: 'NOT YET',    count: notRunCount, dot: 'var(--ink-4)' },
             ]}
             allCount={rows.length}
-            onPick={setRunFilter} />
-          {(stageFilter || typeFilter || offerFilter || runFilter) && (
+            onChange={setRunFilter} />
+          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size > 0) && (
             <button type="button"
-              onClick={() => { setStageFilter(''); setTypeFilter(''); setOfferFilter(''); setRunFilter('') }}
+              onClick={() => {
+                setStageFilter(new Set()); setTypeFilter(new Set())
+                setOfferFilter(new Set()); setRunFilter(new Set())
+              }}
               style={{
                 marginLeft: 4, padding: '4px 9px',
                 fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
@@ -557,6 +566,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                 }}>
                   {group.rows.map(r => (
                     <CreativeCard key={r.id} row={r}
+                      isUsed={usedRawIds.has(r.id)}
                       onClick={() => setDrawerRow(r)}
                       selected={selected.has(r.id)}
                       selectionMode={selected.size > 0}
@@ -566,6 +576,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
               ) : view === 'list' ? (
                 <CreativeListView
                   rows={group.rows}
+                  usedRawIds={usedRawIds}
                   onClick={setDrawerRow}
                   onDelete={scope.canDelete ? setConfirmDelete : null}
                 />
@@ -741,7 +752,7 @@ function StatusBadge({ status }) {
   )
 }
 
-function CreativeListView({ rows, onClick, onDelete }) {
+function CreativeListView({ rows, usedRawIds, onClick, onDelete }) {
   // 8 columns: thumb · name · type · creator · offer · run? · status · actions.
   // Dropped v21 + size — both available in the detail modal. Keeps the row
   // scannable without horizontal scroll on 1280px+ screens.
@@ -766,6 +777,7 @@ function CreativeListView({ rows, onClick, onDelete }) {
       </div>
       {rows.map((r, i) => (
         <ListRow key={r.id} row={r} isLast={i === rows.length - 1}
+          isUsed={usedRawIds?.has(r.id)}
           gridCols={gridCols}
           onClick={() => onClick(r)} onDelete={() => onDelete(r)} />
       ))}
@@ -773,17 +785,25 @@ function CreativeListView({ rows, onClick, onDelete }) {
   )
 }
 
-function ListRow({ row: r, isLast, gridCols, onClick, onDelete }) {
+function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete }) {
   // `onDelete` may be null when the viewer doesn't have delete permission
   const [hover, setHover] = useState(false)
   const offerName = r.offer_slug ? r.offer_slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '') : null
   const oc = offerColor(r.offer_slug)
+  // Left stripe color matches Matrix view: red = raw needs editing,
+  // grey = raw already merged, green = edited, orange = merged final
+  const stripeColor =
+    (r.type === 'Joined' && r.status === 'edited') ? '#b86a0c'
+    : (r.status === 'edited')                       ? '#3e8a5e'
+    : (r.status === 'raw' && isUsed)                ? '#999'
+    :                                                 '#b53e3e'
   return (
         <div
           style={{
             display: 'grid', gridTemplateColumns: gridCols,
             padding: '10px 14px', gap: 12, alignItems: 'center',
             borderBottom: isLast ? 'none' : '1px solid var(--rule)',
+            borderLeft: `3px solid ${stripeColor}`,
             background: hover ? 'var(--paper-2)' : 'transparent', transition: 'background 0.12s',
             cursor: 'pointer',
           }}
@@ -811,7 +831,15 @@ function ListRow({ row: r, isLast, gridCols, onClick, onDelete }) {
               fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 500,
               color: 'var(--ink)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>{r.canonical_name || r.name}</div>
+              textDecoration: (r.status === 'raw' && isUsed) ? 'line-through' : 'none',
+              opacity: (r.status === 'raw' && isUsed) ? 0.7 : 1,
+            }}>
+              {(r.status === 'raw' && isUsed) && (
+                <span title="Already merged into a Joined composite"
+                  style={{ color: '#3e8a5e', fontWeight: 600, marginRight: 5 }}>✓</span>
+              )}
+              {r.canonical_name || r.name}
+            </div>
           </div>
           {/* Type pill */}
           <div>
@@ -1708,15 +1736,13 @@ const chipLabelStyle = {
   color: 'var(--ink-3)', marginRight: 6,
 }
 
-/* Compact filter dropdown — a small button that shows the current
-   filter state ('Status: All' or 'Status: Raw — needs editing'),
-   click to open a popover with all options + counts. Replaces the
-   stacked FilterStrip rows when there are too many filter groups
-   to comfortably fit inline. */
-function FilterDropdown({ label, active, options, allCount, onPick, valueAdapter }) {
+/* Multi-select filter dropdown — small button that opens a popover with
+   checkboxes. selected is a Set of currently-chosen values; onChange
+   receives a new Set. Button label shows count when 2+ are selected.
+   Click outside or Esc to close. */
+function FilterDropdown({ label, selected, options, allCount, onChange }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
-  // Outside-click + Escape close
   useEffect(() => {
     if (!open) return
     const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
@@ -1729,14 +1755,20 @@ function FilterDropdown({ label, active, options, allCount, onPick, valueAdapter
     }
   }, [open])
 
-  // Adapter lets us map a stored filter value (e.g. raw_unused) back to
-  // the option's display value (e.g. unedited). Default: identity.
-  const adapt = valueAdapter || (v => v)
-  const currentOpt = options.find(o => adapt(o.value) === active)
-  const isAll = !active
+  const isAll = selected.size === 0
+  const selectedOpts = options.filter(o => selected.has(o.value))
   const buttonLabel = isAll
-    ? `${label}: All`
-    : `${label}: ${currentOpt?.label || active}`
+    ? `${label}: ALL`
+    : selectedOpts.length === 1
+      ? `${label}: ${selectedOpts[0].label}`
+      : `${label}: ${selectedOpts.length} SELECTED`
+
+  const toggle = (v) => {
+    const next = new Set(selected)
+    if (next.has(v)) next.delete(v); else next.add(v)
+    onChange(next)
+  }
+  const clear = () => onChange(new Set())
 
   return (
     <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
@@ -1752,8 +1784,8 @@ function FilterDropdown({ label, active, options, allCount, onPick, valueAdapter
           borderRadius: 2, cursor: 'pointer',
           display: 'inline-flex', alignItems: 'center', gap: 6,
         }}>
-        {currentOpt?.dot && !isAll && (
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: currentOpt.dot, display: 'inline-block' }} />
+        {selectedOpts.length === 1 && selectedOpts[0].dot && (
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: selectedOpts[0].dot, display: 'inline-block' }} />
         )}
         <span>{buttonLabel}</span>
         <span style={{ fontSize: 8, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
@@ -1761,12 +1793,12 @@ function FilterDropdown({ label, active, options, allCount, onPick, valueAdapter
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 4px)', left: 0,
-          minWidth: 220, zIndex: 30,
+          minWidth: 260, zIndex: 30,
           background: 'white', border: '1px solid var(--ink)',
           boxShadow: '0 8px 24px rgba(10,10,10,0.18)',
           padding: 4,
         }}>
-          <button onClick={() => { onPick(''); setOpen(false) }}
+          <button onClick={clear}
             type="button"
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
@@ -1775,17 +1807,30 @@ function FilterDropdown({ label, active, options, allCount, onPick, valueAdapter
               border: 'none', cursor: 'pointer', textAlign: 'left',
               fontFamily: 'var(--mono)', fontSize: 11,
               fontWeight: isAll ? 700 : 500,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
             }}>
-            <span style={{ width: 6, height: 6 }} />
+            <span style={{
+              width: 16, height: 16, borderRadius: 2,
+              border: isAll ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
+              background: isAll ? 'var(--accent)' : 'white',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              {isAll && (
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                    strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </span>
             <span style={{ flex: 1 }}>All</span>
             <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>{allCount}</span>
           </button>
           {options.map(opt => {
-            const stored = adapt(opt.value)
-            const isOn = stored === active
+            const isOn = selected.has(opt.value)
             return (
               <button key={opt.value}
-                onClick={() => { onPick(stored); setOpen(false) }}
+                onClick={() => toggle(opt.value)}
                 type="button"
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
@@ -1794,7 +1839,22 @@ function FilterDropdown({ label, active, options, allCount, onPick, valueAdapter
                   border: 'none', cursor: 'pointer', textAlign: 'left',
                   fontFamily: 'var(--mono)', fontSize: 11,
                   fontWeight: isOn ? 700 : 500,
+                  letterSpacing: '0.06em',
                 }}>
+                <span style={{
+                  width: 16, height: 16, borderRadius: 2,
+                  border: isOn ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
+                  background: isOn ? 'var(--accent)' : 'white',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  {isOn && (
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                      <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                        strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </span>
                 <span style={{
                   width: 6, height: 6, borderRadius: '50%',
                   background: opt.dot || 'var(--ink-4)',
@@ -1803,7 +1863,7 @@ function FilterDropdown({ label, active, options, allCount, onPick, valueAdapter
                 <span style={{ flex: 1 }}>
                   {opt.label}
                   {opt.sublabel && (
-                    <span style={{ marginLeft: 6, color: 'var(--ink-4)', fontSize: 9.5, fontWeight: 400 }}>
+                    <span style={{ marginLeft: 6, color: 'var(--ink-4)', fontSize: 9.5, fontWeight: 400, textTransform: 'none' }}>
                       · {opt.sublabel}
                     </span>
                   )}
@@ -1876,7 +1936,7 @@ function FilterStrip({ label, active, options, onPick, onClear, totalCount }) {
   )
 }
 
-function CreativeCard({ row, onClick, selected = false, selectionMode = false, onToggleSelect = null }) {
+function CreativeCard({ row, isUsed = false, onClick, selected = false, selectionMode = false, onToggleSelect = null }) {
   const [hover, setHover] = useState(false)
   // In selectionMode, clicking the tile body toggles selection instead of
   // opening the drawer. Click the checkbox directly to toggle out of
@@ -1994,7 +2054,15 @@ function CreativeCard({ row, onClick, selected = false, selectionMode = false, o
           fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
           color: 'var(--ink)', lineHeight: 1.35,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }} title={row.name}>{row.canonical_name || row.name}</div>
+          textDecoration: (row.status === 'raw' && isUsed) ? 'line-through' : 'none',
+          opacity: (row.status === 'raw' && isUsed) ? 0.7 : 1,
+        }} title={row.name}>
+          {(row.status === 'raw' && isUsed) && (
+            <span title="Already merged"
+              style={{ color: '#3e8a5e', marginRight: 4 }}>✓</span>
+          )}
+          {row.canonical_name || row.name}
+        </div>
         <div style={{
           marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center',
           fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
