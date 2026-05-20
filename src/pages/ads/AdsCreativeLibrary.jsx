@@ -306,8 +306,19 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // Also excludes excluded-from-library rows so we don't navigate to
   // intentionally-hidden creatives.
   const openRowRef = useRef(null)
+  // Mirror drawerRow.id in a ref so openRowById can short-circuit same-id
+  // re-clicks without depending on drawerRow itself (which would rebuild
+  // the callback every time the drawer opens or closes).
+  const drawerRowIdRef = useRef(null)
+  useEffect(() => { drawerRowIdRef.current = drawerRow?.id || null }, [drawerRow])
+
   const openRowById = useCallback(async (id) => {
     if (!id) return
+    // Same row is already in the drawer — bail out. Crucial: the lean
+    // `rows` state has no `transcript` field, but the modal lazy-loads it
+    // on open. Re-clicking the same row would call setDrawerRow(local)
+    // with the lean row, nuking the in-modal transcript.
+    if (id === drawerRowIdRef.current) return
     const local = rows.find(r => r.id === id)
     if (local) { setDrawerRow(local); return }
     const token = {}
@@ -639,9 +650,14 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           <FilterDropdown label="STATUS"
             selected={stageFilter}
             options={[
-              { value: 'raw_unused', label: 'RAW — NEEDS EDITING', sublabel: 'not yet edited', count: stageCounts.raw_unused, dot: '#b53e3e' },
-              { value: 'raw_used',   label: 'RAW — ALREADY EDITED', sublabel: 'already used in a composite', count: stageCounts.raw_used, dot: '#999' },
-              { value: 'edited_seg', label: 'EDITED',       count: stageCounts.edited_seg, dot: '#3e8a5e' },
+              // Match the actual lib_creative_library.status enum
+              // (raw / edited) so the filter labels don't lie about
+              // what's behind them. The "raw clip already used in a
+              // composite" signal still shows on the row itself as a
+              // strikethrough + green ✓; it doesn't deserve its own
+              // filter chip because the language got confusing.
+              { value: 'raw',    label: 'RAW',    sublabel: 'not yet edited',   count: (stageCounts.raw_unused || 0) + (stageCounts.raw_used || 0), dot: '#b53e3e' },
+              { value: 'edited', label: 'EDITED', sublabel: 'finished cut',     count: stageCounts.edited_seg, dot: '#3e8a5e' },
             ]}
             allCount={rows.length}
             onChange={setStageFilter} />
@@ -1611,14 +1627,12 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
   const [rect, setRect] = useState(null)
   const ref = useRef(null)
   const popRef = useRef(null)
-  // Synchronously capture rect on the opening click so the first render
-  // after `open=true` already has coords. Avoids the empty-popover frame
-  // gap that could swallow the popover on slow re-renders.
+  // Capture rect synchronously in the click handler (paired with the
+  // setOpen below — React 18 batches them, both apply in one render).
+  // Don't nest setRect inside setOpen's updater; updaters must be pure.
   const handleToggle = () => {
-    setOpen(curr => {
-      if (!curr && ref.current) setRect(ref.current.getBoundingClientRect())
-      return !curr
-    })
+    if (!open && ref.current) setRect(ref.current.getBoundingClientRect())
+    setOpen(v => !v)
   }
   useEffect(() => {
     if (!open) return
@@ -2574,22 +2588,24 @@ const chipLabelStyle = {
    Click outside or Esc to close. */
 function FilterDropdown({ label, selected, options, allCount, onChange }) {
   const [open, setOpen] = useState(false)
+  // Initialise rect lazily so the popover render gate (`open && rect`)
+  // doesn't need an extra round-trip on the first click. Once the
+  // trigger is mounted, ref.current is available; we capture rect
+  // synchronously in the click handler below.
   const [rect, setRect] = useState(null)
   const ref = useRef(null)
   const popRef = useRef(null)
-  // Click handler that synchronously captures the trigger's rect BEFORE
-  // toggling open. Previously the rect was set in a useEffect that ran
-  // after the open=true render committed — which meant `open && rect`
-  // was false on the first render (rect still null), the popover
-  // didn't appear, and on slow machines the second render could be
-  // skipped entirely if the user clicked anywhere else first.
+  // Capture rect SYNCHRONOUSLY in the same event handler that flips
+  // `open`. React 18 auto-batches both setStates so a single render
+  // commits with open=true AND rect=set — the popover appears on the
+  // first click, no useEffect round-trip required. The previous version
+  // nested setRect inside setOpen's updater, which is a non-deterministic
+  // anti-pattern (updaters must be pure).
   const handleToggle = () => {
-    setOpen(curr => {
-      if (!curr && ref.current) {
-        setRect(ref.current.getBoundingClientRect())
-      }
-      return !curr
-    })
+    if (!open && ref.current) {
+      setRect(ref.current.getBoundingClientRect())
+    }
+    setOpen(v => !v)
   }
   useEffect(() => {
     if (!open) return
@@ -4457,11 +4473,11 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
       window.removeEventListener('resize', onScroll)
     }
   }, [open])
+  // Same synchronous-rect-capture pattern as FilterDropdown / EditorPicker
+  // so the popover appears on the first click (no useEffect round-trip).
   const handleToggle = () => {
-    setOpen(curr => {
-      if (!curr && ref.current) setRect(ref.current.getBoundingClientRect())
-      return !curr
-    })
+    if (!open && ref.current) setRect(ref.current.getBoundingClientRect())
+    setOpen(v => !v)
   }
   const current = options.find(o => o.value === value)
   const coords = popoverCoords(rect)
