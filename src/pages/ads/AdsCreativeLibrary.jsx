@@ -117,15 +117,29 @@ function editorColor(slugOrEditorOrTask) {
   return EDITOR_COLORS[Math.abs(h) % EDITOR_COLORS.length]
 }
 
-/* Recent-activity banner — collapsible feed of the latest editor
-   submissions across the team. Expanded view shows thumbnail + version
-   badge + submitter + relative time per row. Collapsed view is just
-   the headline count. Lives at the top of the Library tab so admin
-   sees "what's been happening" before drilling into individual rows. */
-function RecentActivityBanner({ submissions }) {
+/* Notification bell — floating button in the top-right of the Library
+   tab. Click to open a right-side slider with the recent submissions
+   feed. Unseen count (anything created since last open) shows as a
+   red dot on the bell. */
+function NotificationBell({ submissions }) {
   const [open, setOpen] = useState(false)
-  const newestCount = submissions.length
-  const pendingApproval = submissions.filter(s => !s.approved_at).length
+  // "Seen" timestamp — anything created AFTER this counts as new.
+  // Persists in localStorage so the bell remembers across reloads.
+  const [seenAt, setSeenAt] = useState(() => {
+    try { return localStorage.getItem('lib.notifSeenAt') || '' } catch { return '' }
+  })
+  const unseenCount = submissions.filter(s => !seenAt || s.created_at > seenAt).length
+  const markSeen = () => {
+    const ts = new Date().toISOString()
+    try { localStorage.setItem('lib.notifSeenAt', ts) } catch {}
+    setSeenAt(ts)
+  }
+  const handleOpen = () => {
+    setOpen(true)
+    // Mark seen after a small delay so the unread badge animation
+    // can play before disappearing.
+    setTimeout(markSeen, 300)
+  }
   const relTime = (iso) => {
     const t = new Date(iso).getTime()
     const diff = Date.now() - t
@@ -137,91 +151,150 @@ function RecentActivityBanner({ submissions }) {
     const days = Math.round(hrs / 24)
     return `${days}d ago`
   }
+  // Close on Escape while the drawer is open.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
   return (
-    <div style={{
-      marginBottom: 10, border: '1px solid var(--rule)',
-      borderLeft: '3px solid #3e7eba', background: 'white',
-    }}>
-      <div onClick={() => setOpen(v => !v)}
+    <>
+      {/* Floating bell — fixed in the top-right of the viewport so it
+          doesn't fight for space in the toolbar. Red ping when there's
+          activity since last open. */}
+      <button onClick={handleOpen} title="Recent activity"
         style={{
-          display: 'flex', alignItems: 'center', gap: 12,
-          padding: '10px 14px', cursor: 'pointer',
-          fontFamily: 'var(--mono)', fontSize: 11.5,
-          letterSpacing: '0.04em', color: 'var(--ink-2)',
+          position: 'fixed', top: 12, right: 16, zIndex: 90,
+          width: 38, height: 38, borderRadius: 999,
+          background: 'var(--paper)', border: '1px solid var(--rule)',
+          cursor: 'pointer', boxShadow: '0 2px 6px rgba(10,10,10,0.10)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-        <span style={{
-          fontSize: 10, color: 'var(--ink-4)',
-          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-          transition: 'transform 0.12s',
-          display: 'inline-block', width: 10,
-        }}>▶</span>
-        <span style={{
-          padding: '2px 8px', borderRadius: 2,
-          background: '#3e7eba', color: 'white', fontWeight: 700,
-          fontSize: 10, letterSpacing: '0.08em',
-        }}>RECENT ACTIVITY</span>
-        <span><strong>{newestCount}</strong> submission{newestCount === 1 ? '' : 's'} this week</span>
-        {pendingApproval > 0 && (
-          <>
-            <span style={{ color: 'var(--ink-4)' }}>·</span>
-            <span style={{ color: '#7a4e08' }}>
-              <strong>{pendingApproval}</strong> awaiting your review
-            </span>
-          </>
+        <span style={{ fontSize: 16, lineHeight: 1 }}>🔔</span>
+        {unseenCount > 0 && (
+          <span style={{
+            position: 'absolute', top: -2, right: -2,
+            minWidth: 18, height: 18, borderRadius: 999,
+            background: '#b53e3e', color: 'white',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+            padding: '0 5px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+          }}>{unseenCount > 99 ? '99+' : unseenCount}</span>
         )}
-        <span style={{ flex: 1 }} />
-        <span style={{ color: 'var(--ink-4)', textDecoration: 'underline' }}>
-          {open ? 'Hide' : 'Show'} activity
-        </span>
-      </div>
-      {open && (
-        <div style={{
-          padding: '4px 12px 12px', display: 'grid', gap: 6,
-          borderTop: '1px solid var(--rule)',
-        }}>
-          {submissions.slice(0, 15).map(s => (
-            <div key={s.id} style={{
-              display: 'grid', gridTemplateColumns: '44px 1fr auto auto',
-              gap: 10, alignItems: 'center',
-              padding: '6px 10px',
-              background: s.approved_at ? 'rgba(62,138,94,0.04)' : 'var(--paper-2)',
-              border: '1px solid var(--rule)',
+      </button>
+      {open && createPortal(
+        <>
+          <div onClick={() => setOpen(false)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 200,
+              background: 'rgba(10,10,10,0.32)', backdropFilter: 'blur(2px)',
+            }} />
+          <div style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0,
+            width: 'min(420px, 92vw)', zIndex: 201,
+            background: 'var(--paper)',
+            borderLeft: '1px solid var(--rule)',
+            boxShadow: '-12px 0 32px rgba(10,10,10,0.15)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{
+              padding: '16px 20px', borderBottom: '1px solid var(--rule)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              background: 'var(--paper-2)',
             }}>
-              <div style={{
-                width: 44, height: 28, background: '#000', overflow: 'hidden',
-                border: '1px solid var(--rule)',
-              }}>
-                {s.thumbnail_url && (
-                  <img src={s.thumbnail_url} alt="" loading="lazy"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                )}
-              </div>
-              <div style={{ minWidth: 0, fontFamily: 'var(--mono)', fontSize: 11 }}>
-                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  <span style={{
-                    padding: '1px 6px', background: 'var(--ink-3)', color: 'white',
-                    borderRadius: 2, fontSize: 9.5, fontWeight: 700, marginRight: 6,
-                  }}>v{s.version_number}</span>
-                  {s.submitted_by_name || 'Unknown'}
-                  <span style={{ color: 'var(--ink-4)', marginLeft: 8 }}>· {relTime(s.created_at)}</span>
+              <div>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                  letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
+                }}>Recent activity</div>
+                <div style={{ fontFamily: 'var(--serif)', fontSize: 18, fontWeight: 500, marginTop: 4 }}>
+                  {submissions.length} submission{submissions.length === 1 ? '' : 's'} this week
+                  {pendingApproval > 0 && (
+                    <span style={{ marginLeft: 8, fontFamily: 'var(--mono)', fontSize: 12, color: '#7a4e08' }}>
+                      · {pendingApproval} awaiting review
+                    </span>
+                  )}
                 </div>
               </div>
-              <span style={{
-                fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
-                letterSpacing: '0.08em', textTransform: 'uppercase',
-                color: s.approved_at ? '#3e8a5e' : '#3e7eba',
-              }}>{s.approved_at ? 'Approved' : 'In review'}</span>
-              {(s.file_url || s.external_url) && (
-                <a href={s.file_url || s.external_url} target="_blank" rel="noreferrer"
-                  style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)', textDecoration: 'underline' }}>
-                  Open ↗
-                </a>
-              )}
+              <button onClick={() => setOpen(false)}
+                style={{
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  color: 'var(--ink-3)', fontSize: 22, padding: 4,
+                  lineHeight: 1,
+                }}>×</button>
             </div>
-          ))}
-        </div>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12 }}>
+              {submissions.length === 0 && (
+                <div style={{
+                  padding: 40, textAlign: 'center',
+                  fontFamily: 'var(--serif)', fontStyle: 'italic',
+                  color: 'var(--ink-3)',
+                }}>Nothing new this week. When an editor uploads a cut, it'll appear here.</div>
+              )}
+              <div style={{ display: 'grid', gap: 8 }}>
+                {submissions.map(s => {
+                  const isNew = !seenAt || s.created_at > seenAt
+                  return (
+                    <div key={s.id} style={{
+                      display: 'grid', gridTemplateColumns: '52px 1fr',
+                      gap: 12, alignItems: 'center',
+                      padding: '8px 10px',
+                      background: s.approved_at ? 'rgba(62,138,94,0.05)' : 'var(--paper)',
+                      border: '1px solid ' + (isNew ? '#3e7eba' : 'var(--rule)'),
+                      borderLeft: '3px solid ' + (s.approved_at ? '#3e8a5e' : '#3e7eba'),
+                    }}>
+                      <div style={{
+                        width: 52, height: 34, background: '#000', overflow: 'hidden',
+                      }}>
+                        {s.thumbnail_url && (
+                          <img src={s.thumbnail_url} alt="" loading="lazy"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        )}
+                      </div>
+                      <div style={{ minWidth: 0, fontFamily: 'var(--mono)', fontSize: 11 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{
+                            padding: '1px 6px', background: 'var(--ink-3)', color: 'white',
+                            borderRadius: 2, fontSize: 9.5, fontWeight: 700,
+                          }}>v{s.version_number}</span>
+                          <span style={{ fontWeight: 600 }}>{s.submitted_by_name || 'Unknown'}</span>
+                          <span style={{ color: 'var(--ink-4)' }}>· {relTime(s.created_at)}</span>
+                          {isNew && (
+                            <span style={{
+                              padding: '1px 5px', background: '#3e7eba', color: 'white',
+                              borderRadius: 2, fontSize: 9, fontWeight: 700,
+                              letterSpacing: '0.08em',
+                            }}>NEW</span>
+                          )}
+                        </div>
+                        <div style={{
+                          marginTop: 4, display: 'flex', alignItems: 'center', gap: 10,
+                          fontSize: 10.5, color: 'var(--ink-3)',
+                        }}>
+                          <span style={{
+                            fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+                            color: s.approved_at ? '#3e8a5e' : '#3e7eba',
+                          }}>{s.approved_at ? 'Approved' : 'In review'}</span>
+                          {(s.file_url || s.external_url) && (
+                            <a href={s.file_url || s.external_url} target="_blank" rel="noreferrer"
+                              style={{ color: 'var(--ink-2)', textDecoration: 'underline' }}>
+                              Open ↗
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
       )}
-    </div>
+    </>
   )
 }
 
@@ -1002,11 +1075,10 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         </div>
       )}
 
-      {/* Recent activity feed — shows the latest submissions across
-          the team. Empty when nothing's happened in the last 7 days. */}
-      {recentSubmissions.length > 0 && (
-        <RecentActivityBanner submissions={recentSubmissions} />
-      )}
+      {/* Notification bell — small icon, opens a right-side slider with
+          the recent submissions feed. No banner space wasted at the
+          top; ping shows the unseen count. */}
+      <NotificationBell submissions={recentSubmissions} />
 
       {/* Toolbar — compact, single block. No more 5-row chip stack. */}
       <div style={{
@@ -1269,6 +1341,8 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
       {uploadOpen && (
         <UploadModal
+          editors={editors}
+          offers={offers}
           onClose={() => setUploadOpen(false)}
           onSaved={() => { setUploadOpen(false); load() }}
         />
@@ -3911,11 +3985,18 @@ function driveEmbedUrl(url) {
 
 /* ─────────────────────────── UPLOAD MODAL ─────────────────────────── */
 
-function UploadModal({ onClose, onSaved }) {
+function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
   const [files, setFiles] = useState([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [progress, setProgress] = useState({})  // filename -> 'uploading'|'done'|err msg
+  // Bulk-assign fields — apply to EVERY file in this batch. Saves the
+  // "upload, find rows, select rows, bulk edit, set editor" four-step
+  // dance Ben described. Defaults to 'Joined' type / no editor / no
+  // offer so existing behaviour is unchanged when fields are left blank.
+  const [batchType, setBatchType] = useState('Joined')
+  const [batchEditorId, setBatchEditorId] = useState('')
+  const [batchOfferSlug, setBatchOfferSlug] = useState('')
   const inputRef = useRef(null)
   // Transcription is fire-and-forget — the modal can close before Whisper
   // returns. Gate setProgress calls so we don't try to setState on an
@@ -3948,14 +4029,22 @@ function UploadModal({ onClose, onSaved }) {
     for (const file of files) {
       setProgress(p => ({ ...p, [file.name]: 'creating row' }))
       try {
-        // 1. Insert library row first so we get an ID to associate the upload with
+        // 1. Insert library row first so we get an ID to associate the upload with.
+        // Bulk-assign fields (type / editor / offer) apply to EVERY file
+        // in this batch — operator sets them once at the top of the modal
+        // and gets a fully-assigned roster in one shot. Migration 087's
+        // trigger auto-creates a task whenever assigned_editor_id is set
+        // on a raw clip, so picking an editor here means the file lands
+        // in their queue without any further action.
         const { data: inserted, error: insErr } = await supabase
           .from('lib_creative_library')
           .insert({
             name: file.name,
-            type: 'Joined',
+            type: batchType || 'Joined',
             size_mb: Math.round(file.size / 1024 / 1024 * 10) / 10,
             status: 'raw',
+            assigned_editor_id: batchEditorId || null,
+            offer_slug: batchOfferSlug || null,
             source_bucket: 'Manual upload',
             notes: `Uploaded via /sales/ads/creative/library on ${stamp}.`,
           })
@@ -4031,6 +4120,45 @@ function UploadModal({ onClose, onSaved }) {
         </>
       }>
       <div style={{ padding: 28 }}>
+        {/* Bulk-assign row — apply Type / Editor / Offer to every
+            file in this batch. Operator sets these once instead of
+            uploading then selecting + bulk-editing later. */}
+        <div style={{
+          marginBottom: 14, padding: '12px 14px',
+          background: 'var(--paper-2)', border: '1px solid var(--rule)',
+        }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+            letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)',
+            marginBottom: 8,
+          }}>Apply to all files in this batch</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+            <div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Type</div>
+              <select value={batchType} onChange={e => setBatchType(e.target.value)} style={selectStyle} disabled={busy}>
+                {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Assign to editor</div>
+              <select value={batchEditorId} onChange={e => setBatchEditorId(e.target.value)} style={selectStyle} disabled={busy}>
+                <option value="">— Leave unassigned —</option>
+                {editors.filter(e => e.active !== false).map(e => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Offer / niche</div>
+              <select value={batchOfferSlug} onChange={e => setBatchOfferSlug(e.target.value)} style={selectStyle} disabled={busy}>
+                <option value="">— None —</option>
+                {offers.map(o => (
+                  <option key={o.slug} value={o.slug}>{o.name || o.slug}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
         <div
           onDrop={handleDrop}
           onDragOver={e => e.preventDefault()}
