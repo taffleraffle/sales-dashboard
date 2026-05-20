@@ -432,45 +432,60 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
         {/* Editorial inline filter strip — 4 groups, each on its own line,
             text-style instead of buttoned chips. Click the label/"All" to
-            clear that group. Click any value to filter by it. Active value
-            is bold + accent-underlined. Counts in muted grey. */}
-        <FilterStrip label="Status"
-          active={stageFilter} onClear={() => setStageFilter('')}
-          totalCount={rows.length}
-          options={[
-            { value: 'unedited',   label: 'Raw',           count: stageCounts.unedited,   dot: '#b53e3e' },
-            { value: 'raw_unused', label: 'Raw · not merged', count: stageCounts.raw_unused, dot: '#b53e3e' },
-            { value: 'raw_used',   label: 'Raw · already merged', count: stageCounts.raw_used, dot: '#999' },
-            { value: 'edited_seg', label: 'Edited',        count: stageCounts.edited_seg, dot: '#3e8a5e' },
-            { value: 'merged',     label: 'Merged',        count: stageCounts.merged,     dot: '#b86a0c' },
-          ]}
-          onPick={setStageFilter} />
-        <FilterStrip label="Type"
-          active={typeFilter} onClear={() => setTypeFilter('')}
-          totalCount={rows.length}
-          options={TYPES.map(t => ({ value: t, label: t, count: typeCounts[t] || 0, dot: typeColor(t).ink }))}
-          onPick={setTypeFilter} />
-        <FilterStrip label="Offer"
-          active={offerFilter} onClear={() => setOfferFilter('')}
-          totalCount={rows.length}
-          options={[
-            ...offers.map(o => ({
-              value: o.slug,
-              label: o.slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, ''),
-              count: offerCounts[o.slug] || 0,
-              dot: offerColor(o.slug).ink,
-            })),
-            ...(offerCounts.__none__ > 0 ? [{ value: '__none__', label: 'No offer', count: offerCounts.__none__, dot: 'var(--ink-4)' }] : []),
-          ]}
-          onPick={setOfferFilter} />
-        <FilterStrip label="Run?"
-          active={runFilter} onClear={() => setRunFilter('')}
-          totalCount={rows.length}
-          options={[
-            { value: 'yes', label: 'Run before', count: runCount,    dot: '#3e8a5e' },
-            { value: 'no',  label: 'Not yet',   count: notRunCount, dot: 'var(--ink-4)' },
-          ]}
-          onPick={setRunFilter} />
+            click the small button to open a popover with options. */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+        }}>
+          <FilterDropdown label="Status"
+            active={stageFilter}
+            options={[
+              { value: 'unedited',   label: 'Raw — needs editing', sublabel: 'unmerged raw clips', count: stageCounts.raw_unused, dot: '#b53e3e' },
+              { value: 'raw_used',   label: 'Raw — already merged', sublabel: 'used in a composite', count: stageCounts.raw_used, dot: '#999' },
+              { value: 'edited_seg', label: 'Edited',  count: stageCounts.edited_seg, dot: '#3e8a5e' },
+              { value: 'merged',     label: 'Merged final',  count: stageCounts.merged,     dot: '#b86a0c' },
+            ]}
+            allCount={rows.length}
+            onPick={setStageFilter}
+            // Map 'unedited' display→ raw_unused filter (Ben's main "needs editing" view)
+            valueAdapter={v => v === 'unedited' ? 'raw_unused' : v} />
+          <FilterDropdown label="Type"
+            active={typeFilter}
+            options={TYPES.map(t => ({ value: t, label: t, count: typeCounts[t] || 0, dot: typeColor(t).ink }))}
+            allCount={rows.length}
+            onPick={setTypeFilter} />
+          <FilterDropdown label="Offer"
+            active={offerFilter}
+            options={[
+              ...offers.map(o => ({
+                value: o.slug,
+                label: o.slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, ''),
+                count: offerCounts[o.slug] || 0,
+                dot: offerColor(o.slug).ink,
+              })),
+              ...(offerCounts.__none__ > 0 ? [{ value: '__none__', label: 'No offer', count: offerCounts.__none__, dot: 'var(--ink-4)' }] : []),
+            ]}
+            allCount={rows.length}
+            onPick={setOfferFilter} />
+          <FilterDropdown label="Run?"
+            active={runFilter}
+            options={[
+              { value: 'yes', label: 'Run before', count: runCount,    dot: '#3e8a5e' },
+              { value: 'no',  label: 'Not yet',   count: notRunCount, dot: 'var(--ink-4)' },
+            ]}
+            allCount={rows.length}
+            onPick={setRunFilter} />
+          {(stageFilter || typeFilter || offerFilter || runFilter) && (
+            <button type="button"
+              onClick={() => { setStageFilter(''); setTypeFilter(''); setOfferFilter(''); setRunFilter('') }}
+              style={{
+                marginLeft: 4, padding: '4px 9px',
+                fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                background: 'transparent', color: 'var(--ink-3)',
+                border: '1px solid var(--rule)', cursor: 'pointer',
+              }}>Clear filters</button>
+          )}
+        </div>
       </div>
 
       {err && <ErrorBanner msg={err} />}
@@ -1693,10 +1708,118 @@ const chipLabelStyle = {
   color: 'var(--ink-3)', marginRight: 6,
 }
 
-/* Editorial-style inline filter strip — replaces the chunky button-chip
-   rows. Label on left (60px column), 'All N' as the clear-affordance,
-   then dot · label · count for each option. Active value bolds + ink
-   color; inactive stays muted grey. Compact: one line per filter. */
+/* Compact filter dropdown — a small button that shows the current
+   filter state ('Status: All' or 'Status: Raw — needs editing'),
+   click to open a popover with all options + counts. Replaces the
+   stacked FilterStrip rows when there are too many filter groups
+   to comfortably fit inline. */
+function FilterDropdown({ label, active, options, allCount, onPick, valueAdapter }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  // Outside-click + Escape close
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  // Adapter lets us map a stored filter value (e.g. raw_unused) back to
+  // the option's display value (e.g. unedited). Default: identity.
+  const adapt = valueAdapter || (v => v)
+  const currentOpt = options.find(o => adapt(o.value) === active)
+  const isAll = !active
+  const buttonLabel = isAll
+    ? `${label}: All`
+    : `${label}: ${currentOpt?.label || active}`
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{
+          padding: '5px 9px',
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+          letterSpacing: '0.06em', textTransform: 'uppercase',
+          background: isAll ? 'white' : 'var(--accent)',
+          color: 'var(--ink)',
+          border: '1px solid ' + (isAll ? 'var(--rule)' : 'var(--ink)'),
+          borderRadius: 2, cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+        }}>
+        {currentOpt?.dot && !isAll && (
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: currentOpt.dot, display: 'inline-block' }} />
+        )}
+        <span>{buttonLabel}</span>
+        <span style={{ fontSize: 8, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
+          minWidth: 220, zIndex: 30,
+          background: 'white', border: '1px solid var(--ink)',
+          boxShadow: '0 8px 24px rgba(10,10,10,0.18)',
+          padding: 4,
+        }}>
+          <button onClick={() => { onPick(''); setOpen(false) }}
+            type="button"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              width: '100%', padding: '6px 10px',
+              background: isAll ? 'var(--paper-2)' : 'transparent',
+              border: 'none', cursor: 'pointer', textAlign: 'left',
+              fontFamily: 'var(--mono)', fontSize: 11,
+              fontWeight: isAll ? 700 : 500,
+            }}>
+            <span style={{ width: 6, height: 6 }} />
+            <span style={{ flex: 1 }}>All</span>
+            <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>{allCount}</span>
+          </button>
+          {options.map(opt => {
+            const stored = adapt(opt.value)
+            const isOn = stored === active
+            return (
+              <button key={opt.value}
+                onClick={() => { onPick(stored); setOpen(false) }}
+                type="button"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  width: '100%', padding: '6px 10px',
+                  background: isOn ? 'var(--paper-2)' : 'transparent',
+                  border: 'none', cursor: 'pointer', textAlign: 'left',
+                  fontFamily: 'var(--mono)', fontSize: 11,
+                  fontWeight: isOn ? 700 : 500,
+                }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: opt.dot || 'var(--ink-4)',
+                  flexShrink: 0,
+                }} />
+                <span style={{ flex: 1 }}>
+                  {opt.label}
+                  {opt.sublabel && (
+                    <span style={{ marginLeft: 6, color: 'var(--ink-4)', fontSize: 9.5, fontWeight: 400 }}>
+                      · {opt.sublabel}
+                    </span>
+                  )}
+                </span>
+                <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>{opt.count}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* Editorial-style inline filter strip — kept for any callers that still
+   want the inline format. New library toolbar uses FilterDropdown. */
 function FilterStrip({ label, active, options, onPick, onClear, totalCount }) {
   const sep = (
     <span style={{ color: 'var(--ink-4)', opacity: 0.5, padding: '0 8px' }}>·</span>
