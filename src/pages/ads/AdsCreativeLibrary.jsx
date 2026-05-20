@@ -117,6 +117,35 @@ function editorColor(slugOrEditorOrTask) {
   return EDITOR_COLORS[Math.abs(h) % EDITOR_COLORS.length]
 }
 
+/* Modal video preview with explicit teardown. The native <video> element
+   sometimes stalls the main thread for hundreds of ms when unmounted
+   mid-buffer (browser cleans up decoder + network connection). Pausing
+   and clearing src in a useEffect cleanup forces immediate teardown so
+   closing the detail modal feels instant instead of laggy. */
+function PreviewVideo({ src, poster, style }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const v = ref.current
+    return () => {
+      if (v) {
+        try { v.pause() } catch {}
+        v.removeAttribute('src')
+        try { v.load() } catch {}
+      }
+    }
+  }, [src])
+  return (
+    <video
+      ref={ref}
+      src={src}
+      controls
+      preload="metadata"
+      poster={poster || undefined}
+      style={style || { width: '100%', height: '100%', display: 'block' }}
+    />
+  )
+}
+
 // Soft full-row background tint for library / queue rows so Ben can
 // scan status at a glance:
 //   green  = edited (creative is done)
@@ -1634,28 +1663,28 @@ function popoverCoords(rect, maxHeight = 280, gap = 2) {
 }
 
 function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned' }) {
-  const [open, setOpen] = useState(false)
-  const [rect, setRect] = useState(null)
+  // Single combined state (null = closed, { rect } = open). Avoids the
+  // race where setOpen(true) commits a frame before setRect(...) lands —
+  // see FilterDropdown for the full breakdown.
+  const [popover, setPopover] = useState(null)
   const ref = useRef(null)
   const popRef = useRef(null)
-  // Capture rect synchronously in the click handler (paired with the
-  // setOpen below — React 18 batches them, both apply in one render).
-  // Don't nest setRect inside setOpen's updater; updaters must be pure.
+  const open = !!popover
   const handleToggle = () => {
-    if (!open && ref.current) setRect(ref.current.getBoundingClientRect())
-    setOpen(v => !v)
+    if (popover) setPopover(null)
+    else if (ref.current) setPopover({ rect: ref.current.getBoundingClientRect() })
   }
+  const closePopover = () => setPopover(null)
   useEffect(() => {
-    if (!open) return
-    if (ref.current) setRect(ref.current.getBoundingClientRect())
+    if (!popover) return
     const onDoc = (e) => {
       const inBtn = ref.current && ref.current.contains(e.target)
       const inPop = popRef.current && popRef.current.contains(e.target)
-      if (!inBtn && !inPop) setOpen(false)
+      if (!inBtn && !inPop) setPopover(null)
     }
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setPopover(null) }
     const onScroll = () => {
-      if (ref.current) setRect(ref.current.getBoundingClientRect())
+      if (ref.current) setPopover({ rect: ref.current.getBoundingClientRect() })
     }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
@@ -1667,9 +1696,9 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onScroll)
     }
-  }, [open])
+  }, [!!popover])
   const current = editors.find(e => e.id === value)
-  const coords = popoverCoords(rect)
+  const coords = popover ? popoverCoords(popover.rect) : null
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button type="button"
@@ -1689,7 +1718,7 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
         )}
         <span style={{ fontSize: 9, opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && coords && createPortal(
+      {popover && coords && createPortal(
         <div ref={popRef} style={{
           position: 'fixed',
           top: coords.top,
@@ -1704,7 +1733,7 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
           padding: 4,
         }}>
           <button type="button"
-            onClick={() => { onChange(null); setOpen(false) }}
+            onClick={() => { onChange(null); closePopover() }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8, width: '100%',
               padding: '6px 10px', background: !value ? 'var(--paper-2)' : 'transparent',
@@ -1719,7 +1748,7 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
             const isOn = e.id === value
             return (
               <button key={e.id} type="button"
-                onClick={() => { onChange(e.id); setOpen(false) }}
+                onClick={() => { onChange(e.id); closePopover() }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                   padding: '6px 10px', background: isOn ? 'var(--paper-2)' : 'transparent',
@@ -2598,38 +2627,35 @@ const chipLabelStyle = {
    receives a new Set. Button label shows count when 2+ are selected.
    Click outside or Esc to close. */
 function FilterDropdown({ label, selected, options, allCount, onChange }) {
-  const [open, setOpen] = useState(false)
-  // Initialise rect lazily so the popover render gate (`open && rect`)
-  // doesn't need an extra round-trip on the first click. Once the
-  // trigger is mounted, ref.current is available; we capture rect
-  // synchronously in the click handler below.
-  const [rect, setRect] = useState(null)
+  // Single combined state: null = closed, { rect } = open with captured
+  // trigger rect. Earlier two-state versions had a subtle race where
+  // `setOpen(true)` could commit a frame before `setRect(...)` landed,
+  // leaving the render gate `open && rect` false for one render and
+  // letting concurrent setRows updates (from background transcript
+  // loader / cache hydration) replace the popover instance before it
+  // appeared. Collapsing to one state means a single atomic update.
+  const [popover, setPopover] = useState(null)
   const ref = useRef(null)
   const popRef = useRef(null)
-  // Capture rect SYNCHRONOUSLY in the same event handler that flips
-  // `open`. React 18 auto-batches both setStates so a single render
-  // commits with open=true AND rect=set — the popover appears on the
-  // first click, no useEffect round-trip required. The previous version
-  // nested setRect inside setOpen's updater, which is a non-deterministic
-  // anti-pattern (updaters must be pure).
+  const open = !!popover
   const handleToggle = () => {
-    if (!open && ref.current) {
-      setRect(ref.current.getBoundingClientRect())
+    if (popover) {
+      setPopover(null)
+    } else if (ref.current) {
+      setPopover({ rect: ref.current.getBoundingClientRect() })
     }
-    setOpen(v => !v)
   }
   useEffect(() => {
-    if (!open) return
-    // Re-capture on subsequent re-renders in case the trigger moved
-    // (filter bar reflowed, the page scrolled, etc.).
-    if (ref.current) setRect(ref.current.getBoundingClientRect())
+    if (!popover) return
     const onDocClick = (e) => {
       const inBtn = ref.current && ref.current.contains(e.target)
       const inPop = popRef.current && popRef.current.contains(e.target)
-      if (!inBtn && !inPop) setOpen(false)
+      if (!inBtn && !inPop) setPopover(null)
     }
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
-    const onScroll = () => { if (ref.current) setRect(ref.current.getBoundingClientRect()) }
+    const onKey = (e) => { if (e.key === 'Escape') setPopover(null) }
+    const onScroll = () => {
+      if (ref.current) setPopover({ rect: ref.current.getBoundingClientRect() })
+    }
     document.addEventListener('mousedown', onDocClick)
     document.addEventListener('keydown', onKey)
     window.addEventListener('scroll', onScroll, true)
@@ -2640,7 +2666,7 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onScroll)
     }
-  }, [open])
+  }, [!!popover])
 
   const isAll = selected.size === 0
   const selectedOpts = options.filter(o => selected.has(o.value))
@@ -2677,9 +2703,9 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
         <span>{buttonLabel}</span>
         <span style={{ fontSize: 8, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && rect && (() => {
-        const popoverWidth = Math.max(260, rect.width)
-        const synthRect = { ...rect, width: popoverWidth }
+      {popover && (() => {
+        const popoverWidth = Math.max(260, popover.rect.width)
+        const synthRect = { ...popover.rect, width: popoverWidth }
         const coords = popoverCoords(synthRect, 320, 4)
         if (!coords) return null
         return createPortal(
@@ -3227,16 +3253,12 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
         )
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 16 }}>
-        {/* Video preview */}
+        {/* Video preview — explicit pause + src clear on unmount so the
+            browser doesn't stall when the modal closes mid-stream (Ben
+            flagged "click out of pop-up is super slow"). */}
         {playbackKind === 'video' && (
           <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
-            <video
-              src={row.preview_url}
-              controls
-              preload="metadata"
-              poster={row.thumbnail_url || undefined}
-              style={{ width: '100%', height: '100%', display: 'block' }}
-            />
+            <PreviewVideo src={row.preview_url} poster={row.thumbnail_url} />
           </div>
         )}
         {playbackKind === 'iframe' && (
@@ -4459,20 +4481,27 @@ function StatusPipBadge({ status, isOverdue }) {
    leaning on native <select> elements (which don't match the rest of
    the editorial design language). */
 function OptionPicker({ value, options, onChange, placeholder = '— Select' }) {
-  const [open, setOpen] = useState(false)
-  const [rect, setRect] = useState(null)
+  // Single combined state, same atomic-update pattern as FilterDropdown.
+  const [popover, setPopover] = useState(null)
   const ref = useRef(null)
   const popRef = useRef(null)
+  const open = !!popover
+  const handleToggle = () => {
+    if (popover) setPopover(null)
+    else if (ref.current) setPopover({ rect: ref.current.getBoundingClientRect() })
+  }
+  const closePopover = () => setPopover(null)
   useEffect(() => {
-    if (!open) return
-    if (ref.current) setRect(ref.current.getBoundingClientRect())
+    if (!popover) return
     const onDoc = (e) => {
       const inBtn = ref.current && ref.current.contains(e.target)
       const inPop = popRef.current && popRef.current.contains(e.target)
-      if (!inBtn && !inPop) setOpen(false)
+      if (!inBtn && !inPop) setPopover(null)
     }
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
-    const onScroll = () => { if (ref.current) setRect(ref.current.getBoundingClientRect()) }
+    const onKey = (e) => { if (e.key === 'Escape') setPopover(null) }
+    const onScroll = () => {
+      if (ref.current) setPopover({ rect: ref.current.getBoundingClientRect() })
+    }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
     window.addEventListener('scroll', onScroll, true)
@@ -4483,15 +4512,9 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onScroll)
     }
-  }, [open])
-  // Same synchronous-rect-capture pattern as FilterDropdown / EditorPicker
-  // so the popover appears on the first click (no useEffect round-trip).
-  const handleToggle = () => {
-    if (!open && ref.current) setRect(ref.current.getBoundingClientRect())
-    setOpen(v => !v)
-  }
+  }, [!!popover])
   const current = options.find(o => o.value === value)
-  const coords = popoverCoords(rect)
+  const coords = popover ? popoverCoords(popover.rect) : null
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button type="button" onClick={handleToggle}
@@ -4506,7 +4529,7 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
         )}
         <span style={{ fontSize: 9, opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && coords && createPortal(
+      {popover && coords && createPortal(
         <div ref={popRef} style={{
           position: 'fixed', top: coords.top, left: coords.left, width: coords.width,
           maxHeight: coords.maxHeight, overflowY: 'auto', zIndex: 9999,
@@ -4517,7 +4540,7 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
             const isOn = o.value === value
             return (
               <button key={o.value} type="button"
-                onClick={() => { onChange(o.value); setOpen(false) }}
+                onClick={() => { onChange(o.value); closePopover() }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                   padding: '6px 10px', background: isOn ? 'var(--paper-2)' : 'transparent',
@@ -4740,9 +4763,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             has been encoded yet. */}
         {task.preview_url ? (
           <div style={{ background: '#000', border: '1px solid var(--rule)' }}>
-            <video controls preload="metadata"
-              poster={task.thumbnail_url || undefined}
-              src={task.preview_url}
+            <PreviewVideo src={task.preview_url} poster={task.thumbnail_url}
               style={{ display: 'block', width: '100%', maxHeight: 360, objectFit: 'contain', background: '#000' }} />
             {task.drive_url && (
               <div style={{
