@@ -629,18 +629,25 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // Set.has — O(R + E×W) with hash lookups.
   const usedRawIds = useMemo(() => {
     const used = new Set()
-    // Manual override: any raw row the operator bulk-marked as
-    // 'EDITED RAW' (manually_marked_used=true) is treated as used
-    // regardless of what the transcript heuristic says. Lets Ben
-    // override misses without re-running the matcher.
+    // Tri-state manual override:
+    //   manually_marked_used = TRUE  → force into "used" set
+    //   manually_marked_used = FALSE → explicitly NOT used; skip the
+    //                                  Hook / transcript heuristics
+    //                                  for this row entirely
+    //   manually_marked_used = NULL  → let the heuristic decide
+    // This is what lets clicking "RAW" on a Hook actually move it to
+    // the RAW filter bucket — without the tri-state the fast-path
+    // would silently keep it classified as EDITED RAW.
+    const overridden = new Set()
     for (const r of rows) {
-      if (r.status === 'raw' && r.manually_marked_used) used.add(r.id)
+      if (r.status !== 'raw') continue
+      if (r.manually_marked_used === true)  { used.add(r.id); overridden.add(r.id) }
+      if (r.manually_marked_used === false) {                  overridden.add(r.id) }
     }
-    // Type-based fast path — every raw Hook auto-marks as "already used"
-    // since they're all merged into Joined composites by now. Bodies
-    // stay in the editing queue regardless.
+    // Type-based fast path — raw Hooks are "already used" by default
+    // unless the operator explicitly overrode to RAW.
     for (const r of rows) {
-      if (r.status === 'raw' && r.type === 'Hook') used.add(r.id)
+      if (r.status === 'raw' && r.type === 'Hook' && !overridden.has(r.id)) used.add(r.id)
     }
     // Build phrase Set from edited transcripts
     const editedPhrases = new Set()
@@ -654,11 +661,13 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       }
     }
     if (editedPhrases.size === 0) return used
-    // Test each raw row against the Set
+    // Test each raw row against the Set. Skip if the operator
+    // explicitly overrode this row to unused via manually_marked_used=false.
     for (const r of rows) {
       if (r.status !== 'raw') continue
       if (r.type === 'Hook' || r.type === 'Body') continue
       if (used.has(r.id)) continue
+      if (overridden.has(r.id)) continue   // explicit override wins
       const t = (r.transcript || '').toLowerCase().replace(/\s+/g, ' ').trim()
       if (t.length < 60) continue
       const words = t.split(' ')
@@ -1006,6 +1015,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       {drawerRow && (
         <CreativeDetailModal
           row={drawerRow}
+          isUsed={!!usedRawIds?.has(drawerRow.id)}
           scope={scope}
           editors={editors}
           offers={offers}
@@ -3219,7 +3229,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
 
 /* ─────────────────────── DETAIL MODAL (click row) ─────────────────────── */
 
-function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, offers: offersProp, knownCreators: knownCreatorsProp, onOpenRow, onClose, onSaved, onRowPatched, onDeleted }) {
+function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors: editorsProp, offers: offersProp, knownCreators: knownCreatorsProp, onOpenRow, onClose, onSaved, onRowPatched, onDeleted }) {
   const [edit, setEdit] = useState(row)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
@@ -3348,16 +3358,22 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
     onClose?.()
   }, [onClose, save])
 
-  // Auto-save on field changes — Notion-style. Debounced 600ms so we don't
-  // hammer the DB during typing. Skip the first render (edit was just
-  // hydrated from row) and skip entirely for read-only viewers.
+  // Auto-save on field changes — Notion-style, debounced 600ms.
+  // The `save` callback is kept in a ref so the useEffect only fires
+  // when `edit` actually changes — NOT every time the save ref
+  // re-creates (which happens on every parent re-render because
+  // onRowPatched is passed as an inline arrow). Without this ref,
+  // every onRowPatched-triggered parent re-render scheduled ANOTHER
+  // save 600ms later → 'Saving… Saved' would flicker forever.
+  const saveRef = useRef(save)
+  useEffect(() => { saveRef.current = save }, [save])
   useEffect(() => {
     if (firstEditRef.current) { firstEditRef.current = false; return }
     if (!scope.canEditCreative) return
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => { save({ silent: true }) }, 600)
+    saveTimerRef.current = setTimeout(() => { saveRef.current({ silent: true }) }, 600)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [edit, save, scope.canEditCreative])
+  }, [edit, scope.canEditCreative])
 
   // Cleanup pending timers on unmount
   useEffect(() => () => {
@@ -3502,17 +3518,25 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
           <Field label="Status">
             {/* Three buttons matching the Library STATUS filter +
-                Bulk Edit modal. RAW / EDITED RAW (raw+manually_marked_used)
-                / EDITED. The middle bucket writes status='raw' AND
-                manually_marked_used=true so the library filter +
-                row-strikethrough decoration both pick it up. */}
+                Bulk Edit modal. Selected-state uses the SAME isUsed
+                calculation as the filter (manually_marked_used OR
+                Hook fast-path OR transcript overlap), so a row that
+                lands in the EDITED RAW filter bucket also shows the
+                EDITED RAW button highlighted. Clicking writes a tri-
+                state value to manually_marked_used:
+                  RAW         → false (explicit override of heuristic)
+                  EDITED RAW  → true  (force into used set)
+                  EDITED      → status='edited' (flag left alone) */}
             <div style={{ display: 'flex', gap: 5 }}>
               {[
-                { v: 'raw_unused', label: 'RAW',        color: '#b53e3e', isOn: edit.status === 'raw'    && !edit.manually_marked_used,
+                { v: 'raw_unused', label: 'RAW',        color: '#b53e3e',
+                  isOn: edit.status === 'raw' && !isUsed && edit.manually_marked_used !== true,
                   apply: () => setEdit({ ...edit, status: 'raw',    manually_marked_used: false }) },
-                { v: 'raw_used',   label: 'EDITED RAW', color: '#999',    isOn: edit.status === 'raw'    &&  edit.manually_marked_used,
+                { v: 'raw_used',   label: 'EDITED RAW', color: '#999',
+                  isOn: edit.status === 'raw' && (isUsed || edit.manually_marked_used === true),
                   apply: () => setEdit({ ...edit, status: 'raw',    manually_marked_used: true  }) },
-                { v: 'edited',     label: 'EDITED',     color: '#3e8a5e', isOn: edit.status === 'edited',
+                { v: 'edited',     label: 'EDITED',     color: '#3e8a5e',
+                  isOn: edit.status === 'edited',
                   apply: () => setEdit({ ...edit, status: 'edited' }) },
               ].map(opt => (
                 <button key={opt.v} type="button"
