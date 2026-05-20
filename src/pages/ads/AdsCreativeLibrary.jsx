@@ -1202,6 +1202,13 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
     : (r.status === 'edited')                       ? '#3e8a5e'     // edited (green)
     : (r.status === 'raw' && isUsed)                ? '#999'        // raw + used (muted)
     :                                                 '#b53e3e'     // raw + unused (red — needs attention)
+  // Soft full-row tint so Ben can scan status from across the matrix:
+  //   green  = edited / done
+  //   yellow = raw + assigned (in progress)
+  //   red    = raw + unassigned + needs attention
+  // Selection state and hover take precedence over the tint so the UI
+  // stays consistent with the rest of the surface.
+  const tint = rowStatusTint(r, isUsed)
   return (
     <div
       onClick={handleRowClick}
@@ -1212,7 +1219,9 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
         gap: 5, padding: '4px 10px', alignItems: 'center',
         borderBottom: isLast ? 'none' : '1px solid var(--rule)',
         borderLeft: `3px solid ${stripeColor}`,
-        background: selected ? 'rgba(244,225,74,0.15)' : (hover ? 'var(--paper-2)' : 'transparent'),
+        background: selected
+          ? 'rgba(244,225,74,0.15)'
+          : (hover ? (tint?.hover || 'var(--paper-2)') : (tint?.base || 'transparent')),
         cursor: 'pointer', transition: 'background 0.08s',
         fontFamily: 'var(--mono)', fontSize: 10,
       }}>
@@ -4160,6 +4169,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   const [uploadFile, setUploadFile] = useState(null)
   const [uploadProgress, setUploadProgress] = useState(null)
   const uploadInputRef = useRef(null)
+  // Live reference to the in-flight XHR so we can abort it on close.
+  const uploadXhrRef = useRef(null)
 
   const save = async () => {
     setBusy(true); setErr(null)
@@ -4195,20 +4206,50 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   const startUpload = useCallback(async (file) => {
     if (!file) return
     setUploadFile(file)
-    setBusy(true); setErr(null); setUploadProgress(5)
+    setBusy(true); setErr(null); setUploadProgress(0)
     try {
       const sanitized = file.name.replace(/[^A-Za-z0-9._-]+/g, '_')
       const storagePath = `edited/${Date.now()}_${sanitized}`
-      // Note: supabase.storage doesn't expose per-byte progress through
-      // the JS client. We bump the bar at known waypoints so Ben can see
-      // that the request is alive — 5% on start, 70% after the storage
-      // PUT lands, 100% once the DB rows are updated.
-      setUploadProgress(20)
-      const { error: upErr } = await supabase.storage
-        .from('creative-uploads')
-        .upload(storagePath, file, { upsert: false, contentType: file.type || 'video/mp4' })
-      if (upErr) throw upErr
-      setUploadProgress(70)
+      // Direct XHR upload to Supabase Storage REST API. The supabase-js
+      // SDK's storage.upload() routes through fetch which doesn't expose
+      // per-byte progress, so we'd be stuck showing a frozen 20% bar
+      // until the whole file landed. XHR gives us real onprogress events
+      // AND an abort() handle for the close-during-upload path.
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+      const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        uploadXhrRef.current = xhr
+        const url = `${SUPABASE_URL}/storage/v1/object/creative-uploads/${storagePath}`
+        xhr.open('POST', url)
+        xhr.setRequestHeader('Authorization', `Bearer ${SUPABASE_KEY}`)
+        xhr.setRequestHeader('apikey', SUPABASE_KEY)
+        xhr.setRequestHeader('Content-Type', file.type || 'video/mp4')
+        xhr.setRequestHeader('x-upsert', 'false')
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            // Reserve 0-70% for the actual byte upload, 70-100% for the
+            // DB-row patches that follow.
+            setUploadProgress(Math.round((e.loaded / e.total) * 70))
+          }
+        }
+        xhr.onload = () => {
+          uploadXhrRef.current = null
+          if (xhr.status >= 200 && xhr.status < 300) return resolve()
+          let msg = `HTTP ${xhr.status}`
+          try {
+            const body = JSON.parse(xhr.responseText)
+            if (body.error || body.message) msg = body.error || body.message
+          } catch {}
+          reject(new Error(msg))
+        }
+        xhr.onerror = () => { uploadXhrRef.current = null; reject(new Error('Network error during upload')) }
+        xhr.onabort = () => { uploadXhrRef.current = null; reject(new Error('Upload cancelled')) }
+        xhr.ontimeout = () => { uploadXhrRef.current = null; reject(new Error('Upload timed out (10 min)')) }
+        xhr.timeout = 10 * 60 * 1000
+        xhr.send(file)
+      })
+      setUploadProgress(75)
       const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
 
       const target = { url: 'final_cut_url', flag: 'stage_final_cut' }
@@ -4235,8 +4276,20 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     }
   }, [task.task_id, task.creative_id, task.started_at, onSaved])
 
+  // Close handler — aborts the in-flight upload (if any) so the editor
+  // can bail out of a stuck or unwanted upload. The XHR's onabort path
+  // fires reject('Upload cancelled') and the cleanup branch in startUpload
+  // unsets busy.
+  const handleCloseModal = useCallback(() => {
+    if (uploadXhrRef.current) {
+      try { uploadXhrRef.current.abort() } catch {}
+      uploadXhrRef.current = null
+    }
+    onClose?.()
+  }, [onClose])
+
   return (
-    <Modal open={true} onClose={busy ? () => {} : onClose} size="lg"
+    <Modal open={true} onClose={handleCloseModal} size="lg"
       eyebrow="Edit task"
       title={task.creative_name}
       subtitle={`${task.creative_type || ''}${task.creative_creator ? ' · ' + task.creative_creator : ''}${task.v21_script_id ? ' · ' + task.v21_script_id : ''}`}
@@ -4258,7 +4311,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                   ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
                 }}>Delete</button>
               )}
-              <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
+              <button onClick={handleCloseModal} style={ghostBtn}>
+                {busy && uploadXhrRef.current ? 'Cancel upload' : 'Cancel'}
+              </button>
               <button onClick={save} disabled={busy} style={primaryBtn}>{busy ? 'Saving…' : 'Save'}</button>
             </>
           )}
@@ -5652,6 +5707,10 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
   // Resize state for "drag right edge to extend due date".
   // { taskId, startClientX, originalDueDate, originalAssignedAt, currentDelta }
   const [resizing, setResizing] = useState(null)
+  // Survives the resizing-state cleanup. Set when a resize ends and
+  // checked in the bar's onClick to suppress the post-mouseup "click"
+  // event that would otherwise open the EditTaskModal.
+  const justResizedRef = useRef(false)
   const tasksById = useMemo(() => Object.fromEntries(tasks.map(t => [t.task_id, t])), [tasks])
   const draggingTask = draggingTaskId ? tasksById[draggingTaskId] : null
 
@@ -5780,6 +5839,11 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
         const task = tasksById[resizing.taskId]
         if (task) onUpdateAssignment?.(task, { dueDate: finalDue })
       }
+      // Suppress the click event that fires immediately after mouseup —
+      // it would otherwise bubble up to the bar's onClick and re-open
+      // the EditTaskModal right after the operator finished resizing.
+      justResizedRef.current = true
+      setTimeout(() => { justResizedRef.current = false }, 300)
       setResizing(null)
     }
     window.addEventListener('mousemove', onMove)
@@ -6096,7 +6160,13 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                   return (
                     <div key={t.task_id}
                       data-task-bar="true"
-                      onClick={() => { if (!isResizing) onEdit?.(t) }}
+                      onClick={() => {
+                        // Suppress the click that fires right after a resize
+                        // mouseup — otherwise releasing the resize handle
+                        // opens the modal every time.
+                        if (isResizing || justResizedRef.current) return
+                        onEdit?.(t)
+                      }}
                       draggable={!!(onMoveEditor || onUpdateAssignment) && !isResizing}
                       onDragStart={(e) => handleTaskDragStart(e, t)}
                       onDragEnd={handleTaskDragEnd}
