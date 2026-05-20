@@ -1216,7 +1216,10 @@ function StatusBadge({ status }) {
   )
 }
 
-function CreativeListView({ rows, usedRawIds, onClick, onDelete }) {
+// memo'd for the same reason as CreativeMatrixView — modal open/close
+// shouldn't force the entire list to re-render when no list-relevant
+// props changed.
+const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onClick, onDelete }) {
   // 8 columns: thumb · name · type · creator · offer · run? · status · actions.
   // Dropped v21 + size — both available in the detail modal. Keeps the row
   // scannable without horizontal scroll on 1280px+ screens.
@@ -1247,7 +1250,7 @@ function CreativeListView({ rows, usedRawIds, onClick, onDelete }) {
       ))}
     </div>
   )
-}
+})
 
 function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete }) {
   // `onDelete` may be null when the viewer doesn't have delete permission
@@ -1424,7 +1427,13 @@ function SortableHeader({ label, k, sortKey, sortDir, onSort }) {
   )
 }
 
-function CreativeMatrixView({ rows, editors, offers, creators, usedRawIds, onRowClick, onPatch, selected, selectionMode, onToggleSelect, sortKey, sortDir, onSort }) {
+// React.memo wraps the matrix view so opening / closing the detail
+// modal (which only flips the parent's drawerRow state) doesn't force
+// a full re-render of 200+ rows. The view's own props don't change
+// when drawerRow toggles, so the memo short-circuits → matrix DOM
+// stays put → close-modal feels instant instead of taking 200-500ms
+// to re-reconcile every row.
+const CreativeMatrixView = memo(function CreativeMatrixView({ rows, editors, offers, creators, usedRawIds, onRowClick, onPatch, selected, selectionMode, onToggleSelect, sortKey, sortDir, onSort }) {
   const selectable = !!onToggleSelect
   const cols = selectable ? MATRIX_COLS_SEL : MATRIX_COLS_BASE
   const allVisible = rows.every(r => selected?.has(r.id))
@@ -1489,7 +1498,7 @@ function CreativeMatrixView({ rows, editors, offers, creators, usedRawIds, onRow
       ))}
     </div>
   )
-}
+})
 
 /* Native <select>/<input> styled to look flat in the cell. Clicking opens
    the native picker (which is fast and avoids hand-rolling popovers).
