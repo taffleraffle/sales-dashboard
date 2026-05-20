@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef, memo, useDeferredValue } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Icon } from '../../components/editorial/atoms'
@@ -220,7 +220,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
+  // Search input: defer the value used for filtering so typing stays
+  // snappy on a 200+ row library. The visible <input> uses `q` (fast),
+  // the heavy filter useMemo below uses `deferredQ` (low priority).
   const [q, setQ] = useState('')
+  const deferredQ = useDeferredValue(q)
   // All filters are Sets to support multi-select. Empty set = no filter applied.
   const [typeFilter, setTypeFilter]   = useState(() => new Set())
   const [offerFilter, setOfferFilter] = useState(() => new Set())  // values: offer_slug | '__none__'
@@ -405,7 +409,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   const filtered = useMemo(() => {
     let list = rows
-    const search = q.trim().toLowerCase()
+    const search = deferredQ.trim().toLowerCase()
     if (search) list = list.filter(r => {
       const blob = `${r.name} ${r.canonical_name || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
       return blob.includes(search)
@@ -467,7 +471,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       })
     }
     return list
-  }, [rows, q, typeFilter, offerFilter, runFilter, stageFilter, latestOnly, sortKey, sortDir, usedRawIds])
+  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, latestOnly, sortKey, sortDir, usedRawIds])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -1214,12 +1218,11 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
   const oc = offerColor(r.offer_slug)
   const editable = !!onPatch
   const selectable = !!onToggleSelect
-  // Local state mirrors the row so inline edits feel snappy. The parent's
-  // optimistic update in patchRow will sync the canonical state on next
-  // render — so we re-init from row when it changes.
-  const [desc, setDesc] = useState(r.description || r.name || '')
+  // Local state for the still-editable creator field. Description is
+  // read-only at this scope (edits live in the detail modal) so we
+  // don't carry desc state any more — fewer setState calls + no
+  // re-init useEffect firing on every row patch.
   const [creator, setCreator] = useState(r.creator || '')
-  useEffect(() => { setDesc(r.description || r.name || '') }, [r.description, r.name])
   useEffect(() => { setCreator(r.creator || '') }, [r.creator])
   const stop = e => e.stopPropagation()
   // In selection mode, clicking row body toggles selection instead of
