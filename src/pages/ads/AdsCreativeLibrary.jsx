@@ -690,14 +690,15 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           <FilterDropdown label="STATUS"
             selected={stageFilter}
             options={[
-              // Match the actual lib_creative_library.status enum
-              // (raw / edited) so the filter labels don't lie about
-              // what's behind them. The "raw clip already used in a
-              // composite" signal still shows on the row itself as a
-              // strikethrough + green ✓; it doesn't deserve its own
-              // filter chip because the language got confusing.
-              { value: 'raw',    label: 'RAW',    sublabel: 'not yet edited',   count: (stageCounts.raw_unused || 0) + (stageCounts.raw_used || 0), dot: '#b53e3e' },
-              { value: 'edited', label: 'EDITED', sublabel: 'finished cut',     count: stageCounts.edited_seg, dot: '#3e8a5e' },
+              // Three states matching Ben's mental model:
+              //   RAW         = needs editing (not used in any composite yet)
+              //   EDITED RAW  = raw clip already merged into a composite
+              //   EDITED      = a finished cut (status='edited' in the DB)
+              // The filter matcher below maps these to the existing
+              // raw_unused / raw_used / edited_seg internal values.
+              { value: 'raw_unused', label: 'RAW',        sublabel: 'needs editing',           count: stageCounts.raw_unused, dot: '#b53e3e' },
+              { value: 'raw_used',   label: 'EDITED RAW', sublabel: 'already used in a cut',   count: stageCounts.raw_used,   dot: '#999' },
+              { value: 'edited_seg', label: 'EDITED',     sublabel: 'finished cut',            count: stageCounts.edited_seg, dot: '#3e8a5e' },
             ]}
             allCount={rows.length}
             onChange={setStageFilter} />
@@ -5021,7 +5022,7 @@ function SubmittedWorkPanel({ submitted }) {
                 Open in new tab ↗
               </a>
             </div>
-            <video controls preload="metadata" src={s.url}
+            <PreviewVideo src={s.url}
               style={{ display: 'block', width: '100%', maxHeight: 280, background: '#000', objectFit: 'contain' }} />
           </div>
         ))}
