@@ -4628,22 +4628,23 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   // Live reference to the in-flight XHR so we can abort it on close.
   const uploadXhrRef = useRef(null)
 
-  // Submitted-work state — the stage URLs live on the source creative row,
-  // not on the task itself, and the lib_editing_queue view doesn't expose
-  // them. We fetch them directly so the modal can show "here's what you've
-  // already uploaded against this task" instead of leaving the file
-  // invisible after submission.
-  const [submitted, setSubmitted] = useState(null)
-  useEffect(() => {
-    let mounted = true
-    if (!task.creative_id) return
-    supabase.from('lib_creative_library')
-      .select('rough_cut_url, final_cut_url, approved_url, delivered_url, stage_rough_cut, stage_final_cut, stage_approved, stage_delivered')
-      .eq('id', task.creative_id)
-      .maybeSingle()
-      .then(({ data }) => { if (mounted) setSubmitted(data || null) })
-    return () => { mounted = false }
-  }, [task.creative_id])
+  // Submitted-work state — fetches all submission rows for this task
+  // from lib_task_submissions. Each upload is now a separate row so the
+  // editor can have v1/v2/v3 instead of overwriting their last cut.
+  // The legacy single-slot URLs on lib_creative_library are still kept
+  // up-to-date with the latest submission so existing read paths
+  // (library matrix view, etc.) continue to work.
+  const [submissions, setSubmissions] = useState([])
+  const reloadSubmissions = useCallback(async () => {
+    if (!task.task_id) return
+    const { data } = await supabase.from('lib_task_submissions')
+      .select('*')
+      .eq('task_id', task.task_id)
+      .is('deleted_at', null)
+      .order('version_number', { ascending: false })
+    setSubmissions(data || [])
+  }, [task.task_id])
+  useEffect(() => { reloadSubmissions() }, [reloadSubmissions])
 
   const save = async () => {
     setBusy(true); setErr(null)
@@ -4725,12 +4726,30 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       setUploadProgress(75)
       const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
 
-      const target = { url: 'final_cut_url', flag: 'stage_final_cut' }
-      const patch = { [target.url]: publicUrl, [target.flag]: 'done' }
+      // Insert a NEW submission row (v1, v2, v3, …). version_number is
+      // computed as (count of existing non-deleted submissions) + 1 so
+      // the editor's revisions stack instead of overwriting each other.
+      const nextVersion = (submissions.length || 0) + 1
+      const { error: sErr } = await supabase.from('lib_task_submissions').insert({
+        task_id: task.task_id,
+        submitted_by_editor_id: task.editor_id || null,
+        submitted_by_name: task.editor_name || null,
+        file_url: publicUrl,
+        file_storage_path: storagePath,
+        version_number: nextVersion,
+      })
+      if (sErr) throw sErr
+      setUploadProgress(85)
+
+      // Keep the source creative's final_cut_url pointing at the LATEST
+      // submission so the library matrix / aux views still surface the
+      // most recent cut. Approving an older version explicitly
+      // (via the Approve button on the submissions list) overrides this.
       const { error: pErr } = await supabase.from('lib_creative_library')
-        .update(patch).eq('id', task.creative_id)
+        .update({ final_cut_url: publicUrl, stage_final_cut: 'done' })
+        .eq('id', task.creative_id)
       if (pErr) throw pErr
-      setUploadProgress(90)
+      setUploadProgress(95)
 
       // Auto-advance to review + set started_at if missing
       const { error: tErr } = await supabase.from('lib_editing_tasks')
@@ -4738,10 +4757,10 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         .eq('id', task.task_id)
       if (tErr) throw tErr
       setUploadProgress(100)
-      // Reflect the new status inline + surface the uploaded file in the
-      // submitted-work panel right away (don't wait for a reload).
       setStatus('review')
-      setSubmitted(prev => ({ ...(prev || {}), final_cut_url: publicUrl, stage_final_cut: 'done' }))
+      // Refresh the submissions list so the new v_n card appears
+      await reloadSubmissions()
+      setUploadFile(null)
       onSaved?.()
     } catch (e) {
       setErr(e.message || 'upload failed')
@@ -4749,7 +4768,54 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     } finally {
       setBusy(false)
     }
-  }, [task.task_id, task.creative_id, task.started_at, onSaved])
+  }, [task.task_id, task.creative_id, task.started_at, task.editor_id, task.editor_name, submissions.length, reloadSubmissions, onSaved])
+
+  // Approve a specific submission — bumps the creative's final_cut_url
+  // to point at that version and marks the submission as approved.
+  const approveSubmission = useCallback(async (sub) => {
+    setBusy(true); setErr(null)
+    try {
+      const { error: e1 } = await supabase.from('lib_task_submissions')
+        .update({ approved_at: new Date().toISOString(), approved_by_name: 'admin' })
+        .eq('id', sub.id)
+      if (e1) throw e1
+      if (sub.file_url) {
+        await supabase.from('lib_creative_library')
+          .update({ final_cut_url: sub.file_url, stage_final_cut: 'done' })
+          .eq('id', task.creative_id)
+      }
+      // Move task to 'done' on approval
+      await supabase.from('lib_editing_tasks')
+        .update({ status: 'done', completed_at: new Date().toISOString() })
+        .eq('id', task.task_id)
+      setStatus('done')
+      await reloadSubmissions()
+      onSaved?.()
+    } catch (e) {
+      setErr(e.message || 'approve failed')
+    } finally {
+      setBusy(false)
+    }
+  }, [task.task_id, task.creative_id, reloadSubmissions, onSaved])
+
+  // Soft-delete a submission. File in storage is left alone (cheap;
+  // operator can remove from the bucket via Supabase Studio if it
+  // really matters). The row is hidden from the list and version
+  // numbers DON'T renumber — so v1/v2 stay stable even after deletion.
+  const deleteSubmission = useCallback(async (sub) => {
+    setBusy(true); setErr(null)
+    try {
+      const { error } = await supabase.from('lib_task_submissions')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', sub.id)
+      if (error) throw error
+      await reloadSubmissions()
+    } catch (e) {
+      setErr(e.message || 'delete failed')
+    } finally {
+      setBusy(false)
+    }
+  }, [reloadSubmissions])
 
   // Close handler — aborts the in-flight upload (if any) so the editor
   // can bail out of a stuck or unwanted upload. The XHR's onabort path
@@ -4900,11 +4966,17 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             placeholder="Notes on this task — feedback, blockers, links to revisions…" />
         </Field>
 
-        {/* Submitted work — shows whichever stage URLs already exist on
-            this creative so the editor can see "yes, my file landed" instead
-            of having to trust that pressing Upload did anything. Hides itself
-            when nothing's been uploaded yet. */}
-        <SubmittedWorkPanel submitted={submitted} />
+        {/* Submitted work — stacked list of every upload (v1, v2, v3, …)
+            from lib_task_submissions. Newest first. Each card has its
+            own video preview, Approve button (admin), Delete button. */}
+        <SubmissionsPanel
+          submissions={submissions}
+          canApprove={scope.canEditTask}
+          canDelete={scope.canEditTask}
+          busy={busy}
+          onApprove={approveSubmission}
+          onDelete={deleteSubmission}
+        />
 
         {/* Upload edited version — editors drop their cut here. Upload
             starts IMMEDIATELY on file select / drop, no two-step click.
@@ -5005,48 +5077,139 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   )
 }
 
-/* Submitted work panel — renders inline playable previews for whichever
-   stage URLs are populated on the source creative. Shown above the upload
-   dropzone in EditTaskModal so editors can see what they've already
-   submitted against this task. Suppresses itself when nothing's there. */
-function SubmittedWorkPanel({ submitted }) {
-  if (!submitted) return null
-  const stages = [
-    { url: submitted.rough_cut_url, flag: submitted.stage_rough_cut, label: 'Rough cut'   },
-    { url: submitted.final_cut_url, flag: submitted.stage_final_cut, label: 'Final cut'   },
-    { url: submitted.approved_url,  flag: submitted.stage_approved,  label: 'Approved'    },
-    { url: submitted.delivered_url, flag: submitted.stage_delivered, label: 'Delivered'   },
-  ].filter(s => s.url)
-  if (stages.length === 0) return null
+/* Submissions panel — stack of submission cards (v1, v2, v3, …) from
+   lib_task_submissions, newest first. Each card has its own inline
+   playable preview + per-version Approve / Delete buttons. Replaces
+   the old single-slot SubmittedWorkPanel. */
+function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove, onDelete }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  if (!submissions || submissions.length === 0) return null
+  const approvedSub = submissions.find(s => s.approved_at)
   return (
     <div style={{
       padding: '14px 16px', border: '1px solid var(--rule)',
       background: 'white', borderLeft: '3px solid #3e8a5e',
     }}>
       <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
         letterSpacing: '0.12em', textTransform: 'uppercase', color: '#3e8a5e',
-        marginBottom: 10,
+        marginBottom: 12,
       }}>
-        Submitted work · {stages.length} file{stages.length === 1 ? '' : 's'}
+        <span>Submitted work · {submissions.length} version{submissions.length === 1 ? '' : 's'}</span>
+        {approvedSub && (
+          <span style={{ color: 'var(--ink-3)' }}>
+            v{approvedSub.version_number} approved
+          </span>
+        )}
       </div>
-      <div style={{ display: 'grid', gap: 12 }}>
-        {stages.map(s => (
-          <div key={s.label} style={{ display: 'grid', gap: 6 }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              fontFamily: 'var(--mono)', fontSize: 11,
+      <div style={{ display: 'grid', gap: 14 }}>
+        {submissions.map(sub => {
+          const isApproved = !!sub.approved_at
+          return (
+            <div key={sub.id} style={{
+              border: '1px solid var(--rule)',
+              borderLeft: isApproved ? '3px solid #3e8a5e' : '3px solid var(--ink-4)',
+              background: isApproved ? 'rgba(62,138,94,0.04)' : 'var(--paper)',
             }}>
-              <span style={{ fontWeight: 600 }}>{s.label}</span>
-              <a href={s.url} target="_blank" rel="noreferrer"
-                style={{ color: 'var(--ink-2)', textDecoration: 'underline', fontSize: 10.5 }}>
-                Open in new tab ↗
-              </a>
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 12px', borderBottom: '1px solid var(--rule)',
+                background: 'var(--paper-2)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{
+                    fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                    padding: '3px 8px', borderRadius: 2,
+                    background: isApproved ? '#3e8a5e' : 'var(--ink-3)', color: 'white',
+                    letterSpacing: '0.06em',
+                  }}>v{sub.version_number}</span>
+                  {isApproved && (
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                      color: '#3e8a5e',
+                    }}>Approved</span>
+                  )}
+                  <span style={{
+                    fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
+                  }}>
+                    {sub.submitted_by_name || 'Unknown'} · {new Date(sub.created_at).toLocaleString()}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {sub.file_url && (
+                    <a href={sub.file_url} target="_blank" rel="noreferrer"
+                      style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)', textDecoration: 'underline' }}>
+                      Open ↗
+                    </a>
+                  )}
+                  {canApprove && !isApproved && (
+                    <button type="button" disabled={busy}
+                      onClick={() => onApprove?.(sub)}
+                      style={{
+                        padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                        fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: '#3e8a5e', color: 'white',
+                        border: 'none', borderRadius: 2, cursor: busy ? 'not-allowed' : 'pointer',
+                      }}>Approve</button>
+                  )}
+                  {canDelete && confirmDeleteId !== sub.id && (
+                    <button type="button" disabled={busy}
+                      onClick={() => setConfirmDeleteId(sub.id)}
+                      style={{
+                        padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                        fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'transparent', color: '#b53e3e',
+                        border: '1px solid rgba(181,62,62,0.35)', borderRadius: 2,
+                        cursor: busy ? 'not-allowed' : 'pointer',
+                      }}>Delete</button>
+                  )}
+                  {canDelete && confirmDeleteId === sub.id && (
+                    <>
+                      <button type="button" disabled={busy}
+                        onClick={() => setConfirmDeleteId(null)}
+                        style={{
+                          padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                          fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                          background: 'transparent', color: 'var(--ink-3)',
+                          border: '1px solid var(--rule)', borderRadius: 2, cursor: 'pointer',
+                        }}>Cancel</button>
+                      <button type="button" disabled={busy}
+                        onClick={() => { onDelete?.(sub); setConfirmDeleteId(null) }}
+                        style={{
+                          padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                          fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                          background: '#b53e3e', color: 'white',
+                          border: 'none', borderRadius: 2, cursor: 'pointer',
+                        }}>Confirm delete</button>
+                    </>
+                  )}
+                </div>
+              </div>
+              {sub.file_url && (
+                <PreviewVideo src={sub.file_url} poster={sub.thumbnail_url}
+                  style={{ display: 'block', width: '100%', maxHeight: 280, background: '#000', objectFit: 'contain' }} />
+              )}
+              {sub.external_url && !sub.file_url && (
+                <div style={{ padding: 14, fontFamily: 'var(--mono)', fontSize: 11.5 }}>
+                  <a href={sub.external_url} target="_blank" rel="noreferrer"
+                    style={{ color: 'var(--ink)', textDecoration: 'underline' }}>
+                    External link → {sub.external_url}
+                  </a>
+                </div>
+              )}
+              {sub.notes && (
+                <div style={{
+                  padding: '8px 12px', background: 'var(--paper-2)',
+                  borderTop: '1px solid var(--rule)',
+                  fontFamily: 'var(--serif)', fontSize: 12.5, color: 'var(--ink-2)',
+                  fontStyle: 'italic',
+                }}>{sub.notes}</div>
+              )}
             </div>
-            <PreviewVideo src={s.url}
-              style={{ display: 'block', width: '100%', maxHeight: 280, background: '#000', objectFit: 'contain' }} />
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
