@@ -2289,32 +2289,50 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     }
   }, [])
 
-  // Move a task to a new editor (Editor Lanes drag-and-drop). nextEditorId
-  // may be null to un-assign. Optimistic + rollback pattern.
-  const moveTaskToEditor = useCallback(async (task, nextEditorId) => {
+  // General-purpose task assignment update — handles editor change AND/OR
+  // date shift in a single optimistic update + DB write. Used by:
+  //   - Lane drop (drag to another editor's row)
+  //   - Date drop  (drag within a row to a different X position)
+  //   - Combined  (drag to another row at a different X)
+  const updateTaskAssignment = useCallback(async (task, { editorId, assignedAt, dueDate }) => {
     if (!task) return
-    if ((task.editor_id || null) === (nextEditorId || null)) return
-    const prevEditorId = task.editor_id || null
-    const prevEditorName = task.editor_name
-    const prevEditorSlug = task.editor_slug
-    const nextEditor = editors.find(e => e.id === nextEditorId)
-    setTasks(prev => prev.map(t => t.task_id === task.task_id ? {
-      ...t,
-      editor_id: nextEditorId || null,
-      editor_name: nextEditor?.name || (nextEditorId ? '…' : 'Unassigned'),
-      editor_slug: nextEditor?.slug || null,
-    } : t))
-    const { error } = await supabase
-      .from('lib_editing_tasks')
-      .update({ editor_id: nextEditorId || null })
-      .eq('id', task.task_id)
+    const patch = {}
+    if (editorId !== undefined)  patch.editor_id  = editorId
+    if (assignedAt !== undefined) patch.assigned_at = assignedAt
+    if (dueDate !== undefined)   patch.due_date   = dueDate
+    if (Object.keys(patch).length === 0) return
+
+    const prevState = {
+      editor_id: task.editor_id, editor_name: task.editor_name, editor_slug: task.editor_slug,
+      assigned_at: task.assigned_at, due_date: task.due_date,
+    }
+    const editor = editorId !== undefined ? editors.find(e => e.id === editorId) : null
+    setTasks(curr => curr.map(t => {
+      if (t.task_id !== task.task_id) return t
+      const next = { ...t }
+      if (editorId !== undefined) {
+        next.editor_id   = editorId
+        next.editor_name = editor?.name || (editorId ? '…' : 'Unassigned')
+        next.editor_slug = editor?.slug || null
+      }
+      if (assignedAt !== undefined) next.assigned_at = assignedAt
+      if (dueDate !== undefined)    next.due_date    = dueDate
+      return next
+    }))
+    const { error } = await supabase.from('lib_editing_tasks').update(patch).eq('id', task.task_id)
     if (error) {
-      setTasks(prev => prev.map(t => t.task_id === task.task_id ? {
-        ...t, editor_id: prevEditorId, editor_name: prevEditorName, editor_slug: prevEditorSlug,
-      } : t))
+      setTasks(curr => curr.map(t => t.task_id === task.task_id ? { ...t, ...prevState } : t))
       setErr(error.message)
     }
   }, [editors])
+
+  // Compatibility wrapper — existing callers (Editor Lanes view, etc.)
+  // still call moveTaskToEditor(task, editorId).
+  const moveTaskToEditor = useCallback((task, nextEditorId) => {
+    if (!task) return
+    if ((task.editor_id || null) === (nextEditorId || null)) return
+    return updateTaskAssignment(task, { editorId: nextEditorId || null })
+  }, [updateTaskAssignment])
 
   if (loading) return <LoadingState />
   if (err) return <ErrorBanner msg={err} />
@@ -2404,6 +2422,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       ) : view === 'timeline' ? (
         <TimelineView tasks={filteredTasks} editors={editors.filter(e => e.active)}
           onEdit={setEditingTask} onMoveEditor={moveTaskToEditor}
+          onUpdateAssignment={updateTaskAssignment}
           onAddTask={(pre) => { setAddTaskPrefill(pre); setAddTaskOpen(true) }} />
       ) : (
         <KanbanView tasks={filteredTasks} onEdit={setEditingTask} onMove={moveTaskStatus} />
@@ -3949,7 +3968,7 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
 
 /* ─────────────────────── TIMELINE (Gantt-style) ─────────────────────── */
 
-function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
+function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment, onAddTask }) {
   const [range, setRange] = useState(() => {
     try { return localStorage.getItem('queue.timelineRange') || 'month' } catch { return 'month' }
   })
@@ -3994,7 +4013,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
     if (dropOnId === editorId) setDropOnId(null)
   }
   const handleLaneDrop = (e, editorId) => {
-    if (!onMoveEditor) return
+    if (!onMoveEditor && !onUpdateAssignment) return
     e.preventDefault()
     setDropOnId(null)
     setDraggingTaskId(null)
@@ -4003,8 +4022,41 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
     const task = tasksById[taskId]
     if (!task) return
     const targetEditorId = editorId === 'unassigned' ? null : editorId
-    if ((task.editor_id || null) === (targetEditorId || null)) return
-    onMoveEditor(task, targetEditorId)
+
+    // Compute the new start day from drop X relative to the lane container.
+    // The row's left edge + 200px (editor info column) = lane's left edge.
+    // Subtracting that from clientX gives lane-local X.
+    const rowRect = e.currentTarget.getBoundingClientRect()
+    const laneLeftPx = rowRect.left + 200
+    const dropXInLane = e.clientX - laneLeftPx
+    const newDayIdx = Math.max(0, Math.min(totalDays - 1, Math.floor(dropXInLane / dayWidth)))
+    const newStart = dayLabel(newDayIdx)
+    const newStartISO = newStart.toISOString()
+
+    // Preserve duration: if task had assigned_at + due_date, shift due_date
+    // by the same delta. Otherwise just set assigned_at and leave due alone.
+    let newDueDate
+    if (task.assigned_at && task.due_date) {
+      const oldStart = new Date(task.assigned_at); oldStart.setUTCHours(0,0,0,0)
+      const oldDue   = new Date(task.due_date);    oldDue.setUTCHours(0,0,0,0)
+      const durationDays = Math.max(0, Math.round((oldDue - oldStart) / 86400000))
+      const newDue = new Date(newStart); newDue.setUTCDate(newDue.getUTCDate() + durationDays)
+      newDueDate = newDue.toISOString().slice(0, 10)
+    }
+
+    // Detect no-op: same editor + same start day = nothing to do
+    const editorChanged = (task.editor_id || null) !== (targetEditorId || null)
+    const oldStartISO = task.assigned_at ? new Date(task.assigned_at).toISOString().slice(0, 10) : null
+    const dateChanged = newStart.toISOString().slice(0, 10) !== oldStartISO
+    if (!editorChanged && !dateChanged) return
+
+    const patch = {}
+    if (editorChanged) patch.editorId = targetEditorId
+    if (dateChanged) {
+      patch.assignedAt = newStartISO
+      if (newDueDate) patch.dueDate = newDueDate
+    }
+    onUpdateAssignment?.(task, patch)
   }
 
   const today = new Date(); today.setHours(0,0,0,0)
@@ -4157,10 +4209,10 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
             (draggingTask?.editor_id || null) !== (editor.id === 'unassigned' ? null : editor.id)
           return (
             <div key={editor.id}
-              onDragEnter={onMoveEditor ? (e) => handleLaneDragEnter(e, editor.id) : undefined}
-              onDragOver={onMoveEditor ? (e) => handleLaneDragOver(e, editor.id) : undefined}
-              onDragLeave={onMoveEditor ? (e) => handleLaneDragLeave(e, editor.id) : undefined}
-              onDrop={onMoveEditor ? (e) => handleLaneDrop(e, editor.id) : undefined}
+              onDragEnter={(onMoveEditor || onUpdateAssignment) ? (e) => handleLaneDragEnter(e, editor.id) : undefined}
+              onDragOver={(onMoveEditor || onUpdateAssignment) ? (e) => handleLaneDragOver(e, editor.id) : undefined}
+              onDragLeave={(onMoveEditor || onUpdateAssignment) ? (e) => handleLaneDragLeave(e, editor.id) : undefined}
+              onDrop={(onMoveEditor || onUpdateAssignment) ? (e) => handleLaneDrop(e, editor.id) : undefined}
               style={{
                 display: 'flex',
                 borderBottom: '1px solid var(--rule)',
@@ -4300,10 +4352,10 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                     <div key={t.task_id}
                       data-task-bar="true"
                       onClick={() => onEdit?.(t)}
-                      draggable={!!onMoveEditor}
+                      draggable={!!(onMoveEditor || onUpdateAssignment)}
                       onDragStart={(e) => handleTaskDragStart(e, t)}
                       onDragEnd={handleTaskDragEnd}
-                      title={`${t.creative_name} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}${onMoveEditor ? ' · drag to a different editor row to reassign' : ''}`}
+                      title={`${t.creative_name} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}${(onMoveEditor || onUpdateAssignment) ? ' · drag horizontally to reschedule, or to another row to reassign' : ''}`}
                       style={{
                         position: 'absolute', left: x + 2, top: y,
                         width: w, height: BAR_HEIGHT,
@@ -4315,7 +4367,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onAddTask }) {
                         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
                         color: 'white',
                         overflow: 'hidden',
-                        cursor: onMoveEditor ? 'grab' : (onEdit ? 'pointer' : 'default'),
+                        cursor: (onMoveEditor || onUpdateAssignment) ? 'grab' : (onEdit ? 'pointer' : 'default'),
                         zIndex: 1,
                         boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
                       }}>
