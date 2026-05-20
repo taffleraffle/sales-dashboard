@@ -18,7 +18,7 @@ import Modal from '../../components/editorial/Modal'
     - lib_editing_queue (view)
 */
 
-const TYPES = ['Hook', 'Body', 'Joined', 'Testimony']
+const TYPES = ['Hook', 'Body', 'Full Video', 'Joined', 'Testimony']
 const STATUSES = ['raw', 'edited']
 const STATUS_LABEL = {
   raw: 'Raw',
@@ -46,7 +46,10 @@ function offerColor(slug) {
 const TYPE_COLOR = {
   'Hook':       { ink: '#1f4e8f', soft: 'rgba(31,78,143,0.10)',  border: 'rgba(31,78,143,0.35)' },
   'Body':       { ink: '#a05810', soft: 'rgba(160,88,16,0.10)',  border: 'rgba(160,88,16,0.35)' },
-  'Joined':     { ink: '#2e6e3f', soft: 'rgba(46,110,63,0.10)',  border: 'rgba(46,110,63,0.35)' },
+  // Full Video = a whole script delivered as one raw clip (no edit needed)
+  'Full Video': { ink: '#2e6e3f', soft: 'rgba(46,110,63,0.10)',  border: 'rgba(46,110,63,0.35)' },
+  // Joined = a merged hook+body (post-edit composite)
+  'Joined':     { ink: '#b86a0c', soft: 'rgba(184,106,12,0.10)', border: 'rgba(184,106,12,0.35)' },
   'Testimony':  { ink: '#7a3aa8', soft: 'rgba(122,58,168,0.10)', border: 'rgba(122,58,168,0.35)' },
 }
 function typeColor(t) {
@@ -333,7 +336,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // Hooks/Bodies/Joined/Testimony as separate sections
   const grouped = useMemo(() => {
     if (typeFilter) return [{ type: typeFilter, rows: filtered }]
-    const order = ['Hook', 'Body', 'Joined', 'Testimony']
+    const order = ['Hook', 'Body', 'Full Video', 'Joined', 'Testimony']
     return order
       .map(t => ({ type: t, rows: filtered.filter(r => r.type === t) }))
       .filter(g => g.rows.length > 0)
