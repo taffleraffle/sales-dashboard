@@ -348,7 +348,6 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         if (stageFilter.has('raw_used') && r.status === 'raw' && usedRawIds.has(r.id)) return true
         if (stageFilter.has('raw_unused') && r.status === 'raw' && !usedRawIds.has(r.id)) return true
         if (stageFilter.has('edited_seg') && r.status === 'edited') return true
-        if (stageFilter.has('merged') && r.type === 'Joined' && r.status === 'edited') return true
         return false
       })
     }
@@ -413,11 +412,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // Status counts. 'Edited' includes Joined (since Joined is a sub-state of
   // edited). 'Merged' is a narrower filter showing only Joined.
   const stageCounts = useMemo(() => ({
-    unedited:   rows.filter(r => r.status === 'raw').length,
     raw_used:   rows.filter(r => r.status === 'raw' && usedRawIds.has(r.id)).length,
     raw_unused: rows.filter(r => r.status === 'raw' && !usedRawIds.has(r.id)).length,
     edited_seg: rows.filter(r => r.status === 'edited').length,
-    merged:     rows.filter(r => r.type === 'Joined' && r.status === 'edited').length,
   }), [rows, usedRawIds])
 
   // Section groups for the list view — used when no type filter, shows
@@ -475,7 +472,6 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
               { value: 'raw_unused', label: 'RAW — NEEDS EDITING', sublabel: 'not yet edited', count: stageCounts.raw_unused, dot: '#b53e3e' },
               { value: 'raw_used',   label: 'RAW — ALREADY EDITED', sublabel: 'already used in a composite', count: stageCounts.raw_used, dot: '#999' },
               { value: 'edited_seg', label: 'EDITED',       count: stageCounts.edited_seg, dot: '#3e8a5e' },
-              { value: 'merged',     label: 'MERGED FINAL', count: stageCounts.merged,     dot: '#b86a0c' },
             ]}
             allCount={rows.length}
             onChange={setStageFilter} />
@@ -631,6 +627,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         <CreativeDetailModal
           row={drawerRow}
           scope={scope}
+          editors={editors}
+          offers={offers}
+          knownCreators={knownCreators}
           onClose={() => setDrawerRow(null)}
           onSaved={() => { setDrawerRow(null); load() }}
           onRowPatched={(id, patch) => {
@@ -670,6 +669,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       {bulkEditOpen && (
         <BulkEditModal
           ids={Array.from(selected)}
+          editors={editors}
+          offers={offers}
+          knownCreators={knownCreators}
           onClose={() => setBulkEditOpen(false)}
           onSaved={() => {
             setBulkEditOpen(false)
@@ -1668,7 +1670,7 @@ function StageCell({ value }) {
    call. Empty fields are skipped — only fields the user explicitly sets
    are written. Lets Ben reorganise dozens of clips in one pass. */
 
-function BulkEditModal({ ids, onClose, onSaved }) {
+function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onClose, onSaved }) {
   // null = no change, otherwise the value to write
   const [type, setType] = useState(null)
   const [status, setStatus] = useState(null)
@@ -1676,36 +1678,16 @@ function BulkEditModal({ ids, onClose, onSaved }) {
   const [assignedEditorId, setAssignedEditorId] = useState(null)
   const [offerSlug, setOfferSlug] = useState(null)
   const [hasBeenRun, setHasBeenRun] = useState(null)   // null | true | false
-  const [editors, setEditors] = useState([])
-  const [offers, setOffers] = useState([])
-  const [knownCreators, setKnownCreators] = useState([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-
-  useEffect(() => {
-    let mounted = true
-    supabase.from('lib_creative_editors').select('*').eq('active', true).order('name')
-      .then(({ data }) => { if (mounted) setEditors(data || []) })
-    supabase.from('offers').select('slug,name').eq('retired', false).order('slug')
-      .then(({ data }) => { if (mounted) setOffers(data || []) })
-    supabase.from('lib_creative_library').select('creator')
-      .not('creator', 'is', null)
-      .eq('exclude_from_library', false)
-      .then(({ data }) => {
-        if (!mounted) return
-        const set = new Set((data || []).map(r => r.creator).filter(Boolean))
-        setKnownCreators(Array.from(set).sort())
-      })
-    return () => { mounted = false }
-  }, [])
 
   const patch = useMemo(() => {
     const p = {}
     if (type !== null)             p.type = type
     if (status !== null)           p.status = status
     if (creator !== null)          p.creator = creator
-    if (assignedEditorId !== null) p.assigned_editor_id = assignedEditorId
-    if (offerSlug !== null)        p.offer_slug = offerSlug
+    if (assignedEditorId !== null) p.assigned_editor_id = assignedEditorId || null
+    if (offerSlug !== null)        p.offer_slug = offerSlug || null
     if (hasBeenRun !== null)       p.has_been_run = hasBeenRun
     return p
   }, [type, status, creator, assignedEditorId, offerSlug, hasBeenRun])
@@ -1860,18 +1842,28 @@ function BulkEditModal({ ids, onClose, onSaved }) {
             </select>
           </Field>
           <Field label="Assigned editor">
-            <select value={assignedEditorId === null ? '__KEEP__' : assignedEditorId || ''}
-              onChange={e => {
-                const v = e.target.value
-                if (v === '__KEEP__') setAssignedEditorId(null)
-                else if (v === '') setAssignedEditorId(null)  // 'Unassign' -> null
-                else setAssignedEditorId(v)
-              }}
-              style={selectStyle}>
-              <option value="__KEEP__">— KEEP EXISTING —</option>
-              <option value="">Unassign (clear editor)</option>
-              {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
-            </select>
+            {/* Tri-state: 'KEEP EXISTING' / 'Unassign' / specific editor.
+                Custom UI since EditorPicker doesn't model 'keep existing'. */}
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button type="button" onClick={() => setAssignedEditorId(null)}
+                style={assignedEditorId === null ? {
+                  padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                  fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                  background: 'var(--accent)', color: 'var(--ink)',
+                  border: '1px solid var(--ink)', borderRadius: 2, cursor: 'pointer',
+                } : {
+                  padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                  fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                  background: 'transparent', color: 'var(--ink-4)',
+                  border: '1px dashed var(--rule)', borderRadius: 2, cursor: 'pointer',
+                }}>Keep existing</button>
+              <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+                <EditorPicker value={assignedEditorId === null ? '' : (assignedEditorId || '')}
+                  editors={editors}
+                  onChange={v => setAssignedEditorId(v || '')}
+                  placeholder="Unassign (clear editor)" />
+              </div>
+            </div>
           </Field>
         </div>
 
@@ -2307,14 +2299,20 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
 
 /* ─────────────────────── DETAIL MODAL (click row) ─────────────────────── */
 
-function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onRowPatched, onDeleted }) {
+function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, offers: offersProp, knownCreators: knownCreatorsProp, onClose, onSaved, onRowPatched, onDeleted }) {
   const [edit, setEdit] = useState(row)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle') // idle | saving | saved | error
-  const [editors, setEditors] = useState([])
-  const [offers, setOffers] = useState([])
-  const [knownCreators, setKnownCreators] = useState([])
+  // Prefer props from the parent (avoid 3 extra network roundtrips
+  // each time the modal opens). Fall back to local fetch if the
+  // parent didn't pass them (e.g. modal opened standalone somewhere).
+  const [editorsLocal, setEditorsLocal] = useState([])
+  const [offersLocal, setOffersLocal] = useState([])
+  const [knownCreatorsLocal, setKnownCreatorsLocal] = useState([])
+  const editors = editorsProp && editorsProp.length > 0 ? editorsProp : editorsLocal
+  const offers = offersProp && offersProp.length > 0 ? offersProp : offersLocal
+  const knownCreators = knownCreatorsProp && knownCreatorsProp.length > 0 ? knownCreatorsProp : knownCreatorsLocal
   const [showAdvanced, setShowAdvanced] = useState(false)
   // When the viewer is an editor on /editor-view, auto-target them as the assignee.
   const [assignEditor, setAssignEditor] = useState(scope.isEditorView ? (scope.editorId || '') : '')
@@ -2351,24 +2349,30 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onRow
 
   useEffect(() => {
     let mounted = true
-    supabase.from('lib_creative_editors').select('*').eq('active', true).order('name')
-      .then(({ data }) => { if (mounted) setEditors(data || []) })
-    supabase.from('offers').select('slug,name').eq('retired', false).order('slug')
-      .then(({ data }) => { if (mounted) setOffers(data || []) })
+    // Editing-queue tasks for this creative — always fetch (row-specific).
     supabase.from('lib_editing_queue').select('*').eq('creative_id', row.id)
       .then(({ data }) => { if (mounted) setExistingTasks(data || []) })
-    // Distinct creators from the library — used to populate the Creator
-    // dropdown so users pick from existing ones instead of free-typing.
-    supabase.from('lib_creative_library').select('creator')
-      .not('creator', 'is', null)
-      .eq('exclude_from_library', false)
-      .then(({ data }) => {
-        if (!mounted) return
-        const set = new Set((data || []).map(r => r.creator).filter(Boolean))
-        setKnownCreators(Array.from(set).sort())
-      })
+    // Only fetch editors / offers / creators if the parent didn't pass
+    // them as props. Avoids 3 redundant queries per modal open.
+    if (!editorsProp || editorsProp.length === 0) {
+      supabase.from('lib_creative_editors').select('*').eq('active', true).order('name')
+        .then(({ data }) => { if (mounted) setEditorsLocal(data || []) })
+    }
+    if (!offersProp || offersProp.length === 0) {
+      supabase.from('offers').select('slug,name').eq('retired', false).order('slug')
+        .then(({ data }) => { if (mounted) setOffersLocal(data || []) })
+    }
+    if (!knownCreatorsProp || knownCreatorsProp.length === 0) {
+      supabase.from('lib_creative_library').select('creator')
+        .not('creator', 'is', null).eq('exclude_from_library', false)
+        .then(({ data }) => {
+          if (!mounted) return
+          const set = new Set((data || []).map(r => r.creator).filter(Boolean))
+          setKnownCreatorsLocal(Array.from(set).sort())
+        })
+    }
     return () => { mounted = false }
-  }, [row.id])
+  }, [row.id, editorsProp, offersProp, knownCreatorsProp])
 
   const save = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setSaving(true)
