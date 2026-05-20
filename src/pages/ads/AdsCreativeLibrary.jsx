@@ -372,7 +372,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // of transcript = 600KB+ wasted on the first paint. Pulling without it
   // cuts the initial payload roughly in half. Transcripts get lazy-loaded
   // in a follow-up query after first paint so library search still works.
-  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id'
+  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id'
 
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true)
@@ -496,6 +496,13 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // Set.has — O(R + E×W) with hash lookups.
   const usedRawIds = useMemo(() => {
     const used = new Set()
+    // Manual override: any raw row the operator bulk-marked as
+    // 'EDITED RAW' (manually_marked_used=true) is treated as used
+    // regardless of what the transcript heuristic says. Lets Ben
+    // override misses without re-running the matcher.
+    for (const r of rows) {
+      if (r.status === 'raw' && r.manually_marked_used) used.add(r.id)
+    }
     // Type-based fast path — every raw Hook auto-marks as "already used"
     // since they're all merged into Joined composites by now. Bodies
     // stay in the editing queue regardless.
@@ -2355,7 +2362,12 @@ function StageCell({ value }) {
 function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onClose, onSaved }) {
   // null = no change, otherwise the value to write
   const [type, setType] = useState(null)
-  const [status, setStatus] = useState(null)
+  // statusChoice represents the THREE buckets the Library uses:
+  //   'raw_unused' → status='raw',    manually_marked_used=false
+  //   'raw_used'   → status='raw',    manually_marked_used=true     (EDITED RAW)
+  //   'edited'     → status='edited'  (manually_marked_used left alone)
+  // null = keep existing for both columns.
+  const [statusChoice, setStatusChoice] = useState(null)
   const [creator, setCreator] = useState(null)
   const [assignedEditorId, setAssignedEditorId] = useState(null)
   const [offerSlug, setOfferSlug] = useState(null)
@@ -2366,13 +2378,15 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
   const patch = useMemo(() => {
     const p = {}
     if (type !== null)             p.type = type
-    if (status !== null)           p.status = status
+    if (statusChoice === 'raw_unused') { p.status = 'raw';    p.manually_marked_used = false }
+    if (statusChoice === 'raw_used')   { p.status = 'raw';    p.manually_marked_used = true  }
+    if (statusChoice === 'edited')     { p.status = 'edited' }
     if (creator !== null)          p.creator = creator
     if (assignedEditorId !== null) p.assigned_editor_id = assignedEditorId || null
     if (offerSlug !== null)        p.offer_slug = offerSlug || null
     if (hasBeenRun !== null)       p.has_been_run = hasBeenRun
     return p
-  }, [type, status, creator, assignedEditorId, offerSlug, hasBeenRun])
+  }, [type, statusChoice, creator, assignedEditorId, offerSlug, hasBeenRun])
   const hasChanges = Object.keys(patch).length > 0
 
   const apply = async () => {
@@ -2439,26 +2453,33 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
           </div>
         </Field>
 
-        {/* STATUS — Raw/Edited pill toggle */}
+        {/* STATUS — three pill buttons matching the Library STATUS filter:
+              RAW         (status='raw',   manually_marked_used=false)
+              EDITED RAW  (status='raw',   manually_marked_used=true)
+              EDITED      (status='edited')
+            so the bulk-edit dropdown reads consistently with the filter. */}
         <Field label="Status">
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-            <button onClick={() => setStatus(null)} type="button"
-              style={status === null ? { ...keepPill, color: 'var(--ink)', borderColor: 'var(--ink)', borderStyle: 'solid', background: 'var(--accent)' } : keepPill}>
+            <button onClick={() => setStatusChoice(null)} type="button"
+              style={statusChoice === null ? { ...keepPill, color: 'var(--ink)', borderColor: 'var(--ink)', borderStyle: 'solid', background: 'var(--accent)' } : keepPill}>
               Keep existing
             </button>
-            {STATUSES.map(s => {
-              const isOn = status === s
-              const color = STATUS_COLOR[s] || 'var(--ink-3)'
+            {[
+              { v: 'raw_unused', label: 'RAW',        color: '#b53e3e' },
+              { v: 'raw_used',   label: 'EDITED RAW', color: '#999'    },
+              { v: 'edited',     label: 'EDITED',     color: '#3e8a5e' },
+            ].map(opt => {
+              const isOn = statusChoice === opt.v
               return (
-                <button key={s} type="button" onClick={() => setStatus(s)}
+                <button key={opt.v} type="button" onClick={() => setStatusChoice(opt.v)}
                   style={{
                     padding: '5px 14px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                     letterSpacing: '0.06em', textTransform: 'uppercase',
-                    background: isOn ? color : 'white',
-                    color: isOn ? 'white' : color,
-                    border: '1px solid ' + color,
+                    background: isOn ? opt.color : 'white',
+                    color: isOn ? 'white' : opt.color,
+                    border: '1px solid ' + opt.color,
                     borderRadius: 2, cursor: 'pointer',
-                  }}>{STATUS_LABEL[s] || s}</button>
+                  }}>{opt.label}</button>
               )
             })}
           </div>
