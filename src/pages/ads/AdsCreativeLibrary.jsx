@@ -122,6 +122,139 @@ function editorColor(slugOrEditorOrTask) {
    mid-buffer (browser cleans up decoder + network connection). Pausing
    and clearing src in a useEffect cleanup forces immediate teardown so
    closing the detail modal feels instant instead of laggy. */
+/* Frame.io / Drive / Dropbox link submission. Lets editors paste a
+   review-tool URL as v_n instead of uploading the raw file. Same
+   submission row, just with external_url instead of file_url. */
+function ExternalLinkSubmitter({ taskId, editorId, editorName, currentVersionCount, onSubmitted }) {
+  const [url, setUrl] = useState('')
+  const [note, setNote] = useState('')
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const submit = async () => {
+    const trimmed = url.trim()
+    if (!trimmed) return
+    setBusy(true); setErr(null)
+    try {
+      const { error } = await supabase.from('lib_task_submissions').insert({
+        task_id: taskId,
+        submitted_by_editor_id: editorId || null,
+        submitted_by_name: editorName || null,
+        external_url: trimmed,
+        notes: note.trim() || null,
+        version_number: (currentVersionCount || 0) + 1,
+      })
+      if (error) throw error
+      setUrl(''); setNote(''); setOpen(false)
+      await onSubmitted?.()
+    } catch (e) {
+      setErr(e.message || 'submission failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (!open) {
+    return (
+      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{
+          flex: 1, height: 1, background: 'var(--rule)',
+        }} />
+        <button type="button" onClick={() => setOpen(true)}
+          style={{
+            padding: '5px 11px',
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            background: 'white', color: 'var(--ink-2)',
+            border: '1px dashed var(--rule)', borderRadius: 2, cursor: 'pointer',
+          }}>+ Or paste a review link</button>
+        <span style={{ flex: 1, height: 1, background: 'var(--rule)' }} />
+      </div>
+    )
+  }
+  return (
+    <div style={{
+      marginTop: 10, padding: '12px 14px',
+      border: '1px solid var(--rule)', background: 'white',
+      borderLeft: '3px solid #3e7eba',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+        letterSpacing: '0.12em', textTransform: 'uppercase', color: '#3e7eba',
+        marginBottom: 8,
+      }}>
+        <span>Submit a review link (Frame.io / Drive / Dropbox)</span>
+        <button type="button" onClick={() => setOpen(false)}
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: 'var(--ink-4)', fontSize: 16, padding: 0,
+          }}>×</button>
+      </div>
+      <input type="text" value={url}
+        onChange={e => setUrl(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) submit() }}
+        placeholder="https://f.io/abc123 or https://drive.google.com/…"
+        autoFocus
+        style={{
+          width: '100%', padding: '7px 10px',
+          fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)',
+          border: '1px solid var(--rule)', borderRadius: 2,
+          background: 'var(--paper-2)', outline: 'none',
+          marginBottom: 8,
+        }} />
+      <textarea value={note} onChange={e => setNote(e.target.value)}
+        placeholder="Optional note for Ben (what to look at, what's changed since last version)…"
+        rows={2}
+        style={{
+          width: '100%', padding: '7px 10px',
+          fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--ink)',
+          border: '1px solid var(--rule)', borderRadius: 2,
+          background: 'var(--paper-2)', outline: 'none',
+          resize: 'vertical',
+        }} />
+      {err && (
+        <div style={{
+          marginTop: 8, padding: '7px 10px',
+          background: 'rgba(181,62,62,0.08)', border: '1px solid rgba(181,62,62,0.3)',
+          fontFamily: 'var(--mono)', fontSize: 11, color: '#b53e3e',
+        }}>{err}</div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+        <button type="button" onClick={submit}
+          disabled={busy || !url.trim()}
+          style={{
+            padding: '6px 14px',
+            fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            background: busy || !url.trim() ? 'var(--ink-4)' : '#3e7eba',
+            color: 'white', border: 'none', borderRadius: 2,
+            cursor: busy || !url.trim() ? 'not-allowed' : 'pointer',
+          }}>{busy ? 'Submitting…' : 'Submit review link'}</button>
+      </div>
+    </div>
+  )
+}
+
+/* Common Whisper mishearings that pollute OPT's brand. Apply when
+   rendering a transcript so the operator doesn't see "up digital"
+   when a person clearly said "OPT digital". Case-insensitive matching,
+   preserves trailing/leading whitespace. Add more rules here as they
+   surface — Whisper biases toward common English words. */
+const TRANSCRIPT_NORMALIZATIONS = [
+  [/\bup digital\b/gi, 'OPT Digital'],
+  [/\bopt\.?\s+digital\b/gi, 'OPT Digital'],
+  [/\bapt digital\b/gi, 'OPT Digital'],
+  [/\boptimist digital\b/gi, 'OPT Digital'],
+]
+function normaliseTranscript(text) {
+  if (!text) return text
+  let out = text
+  for (const [pattern, replacement] of TRANSCRIPT_NORMALIZATIONS) {
+    out = out.replace(pattern, replacement)
+  }
+  return out
+}
+
 function PreviewVideo({ src, poster, style }) {
   const ref = useRef(null)
   useEffect(() => {
@@ -895,7 +1028,16 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
               return next
             }))
           }}
-          onDeleted={() => { setDrawerRow(null); load() }}
+          onDeleted={() => {
+            // Remove the row from local state instead of calling load()
+            // — load() refetches everything and the page scrolls to top.
+            const id = drawerRow?.id
+            setDrawerRow(null)
+            if (id) {
+              setRows(curr => curr.filter(r => r.id !== id))
+              if (PAGE_CACHE.rows) PAGE_CACHE.rows = PAGE_CACHE.rows.filter(r => r.id !== id)
+            }
+          }}
         />
       )}
 
@@ -910,7 +1052,14 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         <ConfirmDeleteModal
           row={confirmDelete}
           onClose={() => setConfirmDelete(null)}
-          onDeleted={() => { setConfirmDelete(null); load() }}
+          onDeleted={() => {
+            const id = confirmDelete?.id
+            setConfirmDelete(null)
+            if (id) {
+              setRows(curr => curr.filter(r => r.id !== id))
+              if (PAGE_CACHE.rows) PAGE_CACHE.rows = PAGE_CACHE.rows.filter(r => r.id !== id)
+            }
+          }}
         />
       )}
 
@@ -1816,7 +1965,10 @@ function CreatorPicker({ value, known, onChange }) {
 /* Transcript display with expand/collapse + copy-to-clipboard. Sits in
    the detail modal under the form. Long transcripts collapse to ~6 lines
    with a 'Show more' affordance. */
-function TranscriptBox({ text }) {
+function TranscriptBox({ text: rawText }) {
+  // Apply OPT-brand normalisations so Whisper's "up digital" / "apt
+  // digital" mishearings don't leak into the displayed transcript.
+  const text = useMemo(() => normaliseTranscript(rawText), [rawText])
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   const [query, setQuery] = useState('')
@@ -5076,6 +5228,25 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               <strong>Upload failed:</strong> {err}
             </div>
           )}
+          {/* Alternative: paste a review link instead of uploading the
+              raw file. Useful for Frame.io / Drive review pages / Dropbox
+              previews — editor doesn't have to wait for a multi-GB upload
+              + Ben can leave comments inside the linked tool. */}
+          <ExternalLinkSubmitter
+            taskId={task.task_id}
+            editorId={task.editor_id}
+            editorName={task.editor_name}
+            currentVersionCount={submissions.length}
+            onSubmitted={async () => {
+              await reloadSubmissions()
+              // Move task to review (same effect as a file upload)
+              await supabase.from('lib_editing_tasks')
+                .update({ status: 'review', started_at: task.started_at || new Date().toISOString() })
+                .eq('id', task.task_id)
+              setStatus('review')
+              onSaved?.()
+            }}
+          />
         </div>
         )}
 
@@ -5095,6 +5266,22 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
    the old single-slot SubmittedWorkPanel. */
 function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove, onDelete }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  // Per-card expand/collapse state. Default: only the LATEST (first
+  // in the list) is expanded, older versions are collapsed so the
+  // modal doesn't sprout three video players for a long revision
+  // history. Click the card header to toggle.
+  const [expanded, setExpanded] = useState(() => {
+    const set = new Set()
+    if (submissions && submissions[0]) set.add(submissions[0].id)
+    return set
+  })
+  const toggleExpanded = (id) => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
   if (!submissions || submissions.length === 0) return null
   const approvedSub = submissions.find(s => s.approved_at)
   return (
@@ -5118,18 +5305,29 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove,
       <div style={{ display: 'grid', gap: 14 }}>
         {submissions.map(sub => {
           const isApproved = !!sub.approved_at
+          const isExpanded = expanded.has(sub.id)
           return (
             <div key={sub.id} style={{
               border: '1px solid var(--rule)',
               borderLeft: isApproved ? '3px solid #3e8a5e' : '3px solid var(--ink-4)',
               background: isApproved ? 'rgba(62,138,94,0.04)' : 'var(--paper)',
             }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '8px 12px', borderBottom: '1px solid var(--rule)',
-                background: 'var(--paper-2)',
-              }}>
+              <div
+                onClick={() => toggleExpanded(sub.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  borderBottom: isExpanded ? '1px solid var(--rule)' : 'none',
+                  background: 'var(--paper-2)',
+                  cursor: 'pointer',
+                }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{
+                    fontSize: 10, color: 'var(--ink-4)',
+                    transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                    transition: 'transform 0.12s',
+                    display: 'inline-block', width: 10,
+                  }}>▶</span>
                   <span style={{
                     fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
                     padding: '3px 8px', borderRadius: 2,
@@ -5149,9 +5347,9 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove,
                     {sub.submitted_by_name || 'Unknown'} · {new Date(sub.created_at).toLocaleString()}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {sub.file_url && (
-                    <a href={sub.file_url} target="_blank" rel="noreferrer"
+                <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
+                  {(sub.file_url || sub.external_url) && (
+                    <a href={sub.file_url || sub.external_url} target="_blank" rel="noreferrer"
                       style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)', textDecoration: 'underline' }}>
                       Open ↗
                     </a>
@@ -5199,11 +5397,14 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove,
                   )}
                 </div>
               </div>
-              {sub.file_url && (
+              {/* Body only renders when expanded — avoids spinning up
+                  N video <video> elements + N decoders just to show a
+                  revision history. */}
+              {isExpanded && sub.file_url && (
                 <PreviewVideo src={sub.file_url} poster={sub.thumbnail_url}
                   style={{ display: 'block', width: '100%', maxHeight: 280, background: '#000', objectFit: 'contain' }} />
               )}
-              {sub.external_url && !sub.file_url && (
+              {isExpanded && sub.external_url && !sub.file_url && (
                 <div style={{ padding: 14, fontFamily: 'var(--mono)', fontSize: 11.5 }}>
                   <a href={sub.external_url} target="_blank" rel="noreferrer"
                     style={{ color: 'var(--ink)', textDecoration: 'underline' }}>
@@ -5211,7 +5412,7 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove,
                   </a>
                 </div>
               )}
-              {sub.notes && (
+              {isExpanded && sub.notes && (
                 <div style={{
                   padding: '8px 12px', background: 'var(--paper-2)',
                   borderTop: '1px solid var(--rule)',
