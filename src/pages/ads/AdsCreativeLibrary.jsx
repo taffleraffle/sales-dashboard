@@ -307,11 +307,18 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     }
   }, [rows])
 
+  // Lean column list — everything EXCEPT `transcript` (which can be 5-16KB
+  // per row and is only needed inside the detail modal). 200+ rows × ~3KB
+  // of transcript = 600KB+ wasted on the first paint. Pulling without it
+  // cuts the initial payload roughly in half. Transcripts get lazy-loaded
+  // in a follow-up query after first paint so library search still works.
+  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id'
+
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
     const [rowsRes, edRes, ofRes] = await Promise.all([
       supabase.from('lib_creative_library')
-        .select('*, assigned_editor:assigned_editor_id (id, name)')
+        .select(`${LIB_LEAN_COLS},assigned_editor:assigned_editor_id (id, name)`)
         .eq('exclude_from_library', false)
         .order('added_at', { ascending: false }),
       supabase.from('lib_creative_editors').select('*').eq('active', true).order('name'),
@@ -327,6 +334,20 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     setEditors(edRes.data || [])
     setOffers(ofRes.data || [])
     setLoading(false)
+
+    // Background-load transcripts after first paint so search can match
+    // transcript text. Doesn't block the visible UI; rows get patched
+    // with their transcripts as soon as the second query resolves.
+    setTimeout(async () => {
+      const { data: tx } = await supabase
+        .from('lib_creative_library')
+        .select('id,transcript')
+        .eq('exclude_from_library', false)
+        .not('transcript', 'is', null)
+      if (!tx) return
+      const byId = new Map(tx.map(r => [r.id, r.transcript]))
+      setRows(curr => curr.map(r => byId.has(r.id) ? { ...r, transcript: byId.get(r.id) } : r))
+    }, 0)
   }, [])
 
   // Inline patch — used by the Matrix view when an inline dropdown changes.
