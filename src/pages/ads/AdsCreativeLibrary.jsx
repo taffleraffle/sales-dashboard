@@ -280,15 +280,25 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // link inside the detail modal, jump the modal to that row. Looks up the
   // full row from our local rows state first (no network) and only fetches
   // if it's not in the current filter window.
+  //
+  // Race-safe via a token ref — if the user clicks two links quickly and
+  // the network reorders responses, only the most recent click wins.
+  // Also excludes excluded-from-library rows so we don't navigate to
+  // intentionally-hidden creatives.
+  const openRowRef = useRef(null)
   const openRowById = useCallback(async (id) => {
     if (!id) return
     const local = rows.find(r => r.id === id)
     if (local) { setDrawerRow(local); return }
+    const token = {}
+    openRowRef.current = token
     const { data } = await supabase
       .from('lib_creative_library')
       .select('*, assigned_editor:assigned_editor_id (id, name)')
       .eq('id', id)
+      .eq('exclude_from_library', false)
       .maybeSingle()
+    if (openRowRef.current !== token) return  // a newer click superseded this fetch
     if (data) {
       setDrawerRow({
         ...data,
@@ -4701,7 +4711,11 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         {/* Upload edited version — editors drop their cut here. Upload
             starts IMMEDIATELY on file select / drop, no two-step click.
             The lib_creative_library row gets the new URL and the task
-            auto-advances to 'review' so admin sees the submission. */}
+            auto-advances to 'review' so admin sees the submission.
+            Hidden when the viewer can't upload (per-editor share links
+            that aren't bound to this task's editor, or admin views that
+            disabled uploads — but those don't open this modal anyway). */}
+        {scope.canUpload && (
         <div style={{
           padding: '14px 16px', border: '1px solid var(--rule)', background: 'var(--paper-2)',
         }}>
@@ -4781,6 +4795,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             </div>
           )}
         </div>
+        )}
 
         {task.drive_url && !task.preview_url && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
