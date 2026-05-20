@@ -1191,8 +1191,15 @@ function StageLinkCell({ value, url, label }) {
 function TranscriptBox({ text }) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
+  const copiedTimerRef = useRef(null)
+  useEffect(() => () => { if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current) }, [])
   const onCopy = async () => {
-    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch {}
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1500)
+    } catch {}
   }
   return (
     <div>
@@ -1243,33 +1250,36 @@ function UsageHistory({ row }) {
   const [matches, setMatches] = useState([])
   const [loading, setLoading] = useState(false)
   useEffect(() => {
+    let mounted = true
     if (!row || (row.type !== 'Hook' && row.type !== 'Body')) { setMatches([]); return }
-    // Extract the slot identifier from the source clip's original name.
-    // Patterns we know:
-    //   CLIP-H1.1-SOFIA  -> hook 1.1
-    //   CLIP-H1-OSO      -> hook 1
-    //   HAMMER-H1-BEN    -> hook 1
-    //   HAMMER-B2-BEN    -> body 2
-    //   3- Body B        -> body B
+    // Slot extraction from original name. Note: integer hook numbers only —
+    // 'CLIP-H1.1-SOFIA' is treated as 'Hook 1', same bucket as 'CLIP-H1-OSO'.
+    // OK today because Joined composite names ('Hook 4 Body C') only use
+    // integer hook numbers. If sub-versions are ever introduced (e.g.
+    // 'Hook 1.1 Body C') this will need a finer-grained match.
     const name = row.name || ''
     let pattern = null
     if (row.type === 'Hook') {
       const m = name.match(/H(\d+)(?:\.(\d+))?/i)
-      if (m) pattern = `Hook ${m[1]}`  // joined names use "Hook N Body X"
+      if (m) pattern = `Hook ${m[1]}`
     } else if (row.type === 'Body') {
       const lt = name.match(/Body\s*([A-Z])/i)
       const nm = name.match(/B(\d+)/i)
       if (lt)      pattern = `Body ${lt[1].toUpperCase()}`
       else if (nm) pattern = `Body ${nm[1]}`
     }
-    if (!pattern) { setMatches([]); return }
+    if (!pattern) { setMatches([]); return () => { mounted = false } }
     setLoading(true)
     supabase.from('lib_creative_library')
       .select('id, name, canonical_name, status, thumbnail_url, preview_url')
       .eq('type', 'Joined')
       .ilike('name', `%${pattern}%`)
       .order('name')
-      .then(({ data }) => { setMatches(data || []); setLoading(false) })
+      .then(({ data }) => {
+        if (!mounted) return
+        setMatches(data || []); setLoading(false)
+      })
+    return () => { mounted = false }
   }, [row?.id, row?.type, row?.name])
 
   if (!row || (row.type !== 'Hook' && row.type !== 'Body')) return null
@@ -1799,6 +1809,10 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onDel
   const [deleting, setDeleting] = useState(false)
 
   const deleteCreative = async () => {
+    // Cancel any pending debounced auto-save — without this, a save that
+    // was queued (e.g. user edited a field then clicked Delete within 600ms)
+    // would fire AFTER the delete, re-upserting the row back into the DB.
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     setDeleting(true); setErr(null)
     const { error } = await supabase.from('lib_creative_library').delete().eq('id', row.id)
     setDeleting(false)
