@@ -169,6 +169,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [offerFilter, setOfferFilter] = useState(() => new Set())  // values: offer_slug | '__none__'
   const [runFilter, setRunFilter]     = useState(() => new Set())  // values: 'yes' | 'no'
   const [stageFilter, setStageFilter] = useState(() => new Set())  // values: 'raw_unused' | 'raw_used' | 'edited_seg' | 'merged'
+  const [latestOnly, setLatestOnly] = useState(false)  // when true, hide non-latest versions
   // Column sort for the Matrix view. sortKey = '' means default order
   // (insertion / added_at desc). Clicking a header sets the key; clicking
   // the same key again toggles direction.
@@ -351,6 +352,19 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         return false
       })
     }
+    if (latestOnly) {
+      // For each root (parent_id || id), keep only the row with the
+      // highest version_number. Roots without children just stay.
+      const latestByRoot = new Map()
+      for (const r of rows) {
+        const rootId = r.parent_id || r.id
+        const v = r.version_number || 1
+        const cur = latestByRoot.get(rootId)
+        if (!cur || v > (cur.version_number || 1)) latestByRoot.set(rootId, r)
+      }
+      const keepIds = new Set(Array.from(latestByRoot.values()).map(r => r.id))
+      list = list.filter(r => keepIds.has(r.id))
+    }
     // Column sort (Matrix view) — applied last so it works on the filtered list
     if (sortKey) {
       const dir = sortDir === 'desc' ? -1 : 1
@@ -375,7 +389,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       })
     }
     return list
-  }, [rows, q, typeFilter, offerFilter, runFilter, stageFilter, sortKey, sortDir, usedRawIds])
+  }, [rows, q, typeFilter, offerFilter, runFilter, stageFilter, latestOnly, sortKey, sortDir, usedRawIds])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -501,11 +515,24 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
             ]}
             allCount={rows.length}
             onChange={setRunFilter} />
-          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size > 0) && (
+          <button type="button"
+            onClick={() => setLatestOnly(v => !v)}
+            title="Show only the latest version of each clip (hide v1 when a v2 exists)"
+            style={{
+              padding: '5px 9px',
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              background: latestOnly ? 'var(--accent)' : 'white',
+              color: 'var(--ink)',
+              border: '1px solid ' + (latestOnly ? 'var(--ink)' : 'var(--rule)'),
+              borderRadius: 2, cursor: 'pointer',
+            }}>{latestOnly ? '☑ Latest only' : 'Latest only'}</button>
+          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size > 0 || latestOnly) && (
             <button type="button"
               onClick={() => {
                 setStageFilter(new Set()); setTypeFilter(new Set())
                 setOfferFilter(new Set()); setRunFilter(new Set())
+                setLatestOnly(false)
               }}
               style={{
                 marginLeft: 4, padding: '4px 9px',
@@ -1530,6 +1557,168 @@ function TranscriptBox({ text }) {
    Joined composites used it. Match is heuristic: extract the slot from
    the row's original name (Hook 4, Body C, HAMMER-H1, etc.) then query
    joined rows whose name contains that slot. */
+/* Versions panel — lists all version siblings of the current creative
+   (linked via parent_id pointing at v1). Lets Ben upload a new version
+   that inherits most metadata from the current one but gets its own
+   row + new transcript + new preview. */
+function VersionsPanel({ row, onReload }) {
+  const [versions, setVersions] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploadFile, setUploadFile] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState(null)
+  const [err, setErr] = useState(null)
+  const fileInputRef = useRef(null)
+
+  // Root id = the v1 row. If current row has parent_id, that's the root.
+  // Otherwise this row IS the root.
+  const rootId = row.parent_id || row.id
+
+  useEffect(() => {
+    let mounted = true
+    // Pull all versions: the root + everything with parent_id = root.
+    supabase.from('lib_creative_library')
+      .select('id, canonical_name, name, version_number, status, type, thumbnail_url, preview_url, added_at')
+      .or(`id.eq.${rootId},parent_id.eq.${rootId}`)
+      .eq('exclude_from_library', false)
+      .order('version_number', { ascending: true })
+      .then(({ data }) => {
+        if (!mounted) return
+        setVersions(data || [])
+        setLoading(false)
+      })
+    return () => { mounted = false }
+  }, [rootId])
+
+  const handleUpload = async (file) => {
+    if (!file) return
+    setUploading(true); setErr(null); setProgress('Uploading…')
+    try {
+      const nextVersion = Math.max(0, ...versions.map(v => v.version_number || 1)) + 1
+      const sanitized = file.name.replace(/[^A-Za-z0-9._-]+/g, '_')
+      const storagePath = `ingest/${Date.now()}_v${nextVersion}_${sanitized}`
+      // 1. Upload to creative-uploads (full file for preview)
+      const { error: upErr } = await supabase.storage
+        .from('creative-uploads')
+        .upload(storagePath, file, { upsert: false, contentType: file.type || 'video/mp4' })
+      if (upErr) throw upErr
+      const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+      // 2. Insert new library row inheriting metadata
+      setProgress('Creating version…')
+      const { data: inserted, error: insErr } = await supabase.from('lib_creative_library')
+        .insert({
+          name: `v${nextVersion} of ${row.canonical_name || row.name}`,
+          type: row.type,
+          creator: row.creator,
+          status: 'edited',
+          offer_slug: row.offer_slug,
+          assigned_editor_id: row.assigned_editor_id,
+          parent_id: rootId,
+          version_number: nextVersion,
+          size_mb: Math.round(file.size / 1024 / 1024 * 10) / 10,
+          preview_url: publicUrl,
+          source_bucket: 'New version upload',
+          notes: `v${nextVersion} of ${row.canonical_name || row.name}, uploaded ${new Date().toISOString().slice(0,10)}.`,
+        })
+        .select()
+        .single()
+      if (insErr) throw insErr
+      // 3. Fire transcribe + describe asynchronously (don't block UI)
+      setProgress('Transcribing in background…')
+      supabase.functions.invoke('transcribe-library-clip', {
+        body: { library_id: inserted.id, storage_path: storagePath },
+      }).then(() => {
+        supabase.functions.invoke('creative-library-describe', {
+          body: { library_ids: [inserted.id] },
+        })
+      })
+      // Optimistic: add to local list
+      setVersions(prev => [...prev, inserted])
+      setUploadOpen(false); setUploadFile(null); setProgress(null)
+    } catch (e) {
+      setErr(e.message || 'upload failed')
+      setProgress(null)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  if (loading) return null
+  // Only show panel if there's a version structure to display OR upload affordance
+  return (
+    <div>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        marginBottom: 6,
+      }}>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
+        }}>
+          Versions {versions.length > 1 && `· ${versions.length}`}
+        </div>
+        <button onClick={() => { setUploadOpen(true); setTimeout(() => fileInputRef.current?.click(), 50) }}
+          type="button"
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            color: 'var(--ink)', textDecoration: 'underline',
+          }}>+ Upload new version</button>
+      </div>
+      {/* Hidden file picker triggered by the button above */}
+      <input ref={fileInputRef} type="file" accept="video/*"
+        style={{ display: 'none' }}
+        onChange={e => { const f = e.target.files?.[0]; if (f) { setUploadFile(f); handleUpload(f) } }} />
+      {err && (
+        <div style={{ padding: '6px 10px', background: 'rgba(181,62,62,0.08)', border: '1px solid rgba(181,62,62,0.3)', color: '#b53e3e', fontFamily: 'var(--mono)', fontSize: 11, marginBottom: 6 }}>
+          {err}
+        </div>
+      )}
+      {progress && (
+        <div style={{ padding: '6px 10px', background: 'var(--paper-2)', border: '1px solid var(--rule)', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', marginBottom: 6 }}>
+          {progress}
+        </div>
+      )}
+      <div style={{ display: 'grid', gap: 6 }}>
+        {versions.map(v => {
+          const isCurrent = v.id === row.id
+          return (
+            <div key={v.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '6px 10px',
+              background: isCurrent ? 'rgba(244,225,74,0.18)' : 'var(--paper-2)',
+              border: isCurrent ? '1px solid var(--ink)' : '1px solid var(--rule)',
+              fontFamily: 'var(--mono)', fontSize: 11,
+            }}>
+              <div style={{ width: 40, height: 24, background: '#000', overflow: 'hidden', flexShrink: 0 }}>
+                {v.thumbnail_url && (
+                  <img src={v.thumbnail_url} alt="" loading="lazy"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
+              </div>
+              <span style={{
+                padding: '2px 7px', background: 'var(--ink)', color: 'var(--paper)',
+                fontWeight: 600, letterSpacing: '0.06em',
+              }}>v{v.version_number || 1}</span>
+              <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontWeight: isCurrent ? 700 : 500 }}>
+                  {v.canonical_name || v.name}
+                  {isCurrent && <span style={{ marginLeft: 6, color: 'var(--ink-3)', fontSize: 9.5 }}>CURRENT</span>}
+                </div>
+              </div>
+              <span style={{ color: v.status === 'edited' ? '#3e8a5e' : '#b53e3e', fontSize: 9.5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                {v.status}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function UsageHistory({ row }) {
   const [matches, setMatches] = useState([])
   const [loading, setLoading] = useState(false)
@@ -2708,6 +2897,10 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
         )}
 
         {row.transcript && <TranscriptBox text={row.transcript} />}
+
+        {/* Versions — show v1/v2/v3... if this clip has siblings linked
+            via parent_id. Includes an Upload-new-version button. */}
+        <VersionsPanel row={row} onReload={() => onSaved?.()} />
 
         {/* Hook/Body history — when viewing a source clip, show which
             Joined composites have used it. */}
