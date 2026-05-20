@@ -278,9 +278,13 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     if (runFilter === 'yes')        list = list.filter(r => r.has_been_run)
     else if (runFilter === 'no')    list = list.filter(r => !r.has_been_run)
     // Pipeline-state filter — combines type + status into workflow states
-    // 'Edited' now includes Joined (Joined is a subset of edited by definition).
-    // 'Merged' filter still narrows to type=Joined.
+    // 'Edited' includes Joined (Joined is a subset of edited).
+    // 'Merged' narrows to type=Joined.
+    // 'Raw / used'   = status=raw AND a Joined references this slot.
+    // 'Raw / unused' = status=raw AND no Joined references this slot.
     if (stageFilter === 'unedited')   list = list.filter(r => r.status === 'raw')
+    else if (stageFilter === 'raw_used') list = list.filter(r => r.status === 'raw' && usedRawIds.has(r.id))
+    else if (stageFilter === 'raw_unused') list = list.filter(r => r.status === 'raw' && !usedRawIds.has(r.id))
     else if (stageFilter === 'edited_seg') list = list.filter(r => r.status === 'edited')
     else if (stageFilter === 'merged')list = list.filter(r => r.type === 'Joined' && r.status === 'edited')
     // Column sort (Matrix view) — applied last so it works on the filtered list
@@ -307,7 +311,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       })
     }
     return list
-  }, [rows, q, typeFilter, offerFilter, runFilter, stageFilter, sortKey, sortDir])
+  }, [rows, q, typeFilter, offerFilter, runFilter, stageFilter, sortKey, sortDir, usedRawIds])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -341,13 +345,48 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // Stable reference for MatrixRow's editor dropdown — same memo concern
   // as openDrawer: avoid re-creating this array each render.
   const activeEditors = useMemo(() => editors.filter(e => e.active), [editors])
+  // Compute which raw rows have been 'used' — i.e. there exists at least
+  // one Joined composite that references the same hook/body slot. Used so
+  // Ben can filter raws by 'already merged' vs 'not yet edited'.
+  // Heuristic: extract H<n> from raw hook names, B<x>|Body X from raw
+  // bodies, then check Joined names + canonical names for that token.
+  const usedRawIds = useMemo(() => {
+    const used = new Set()
+    const joinedBlob = rows
+      .filter(r => r.type === 'Joined')
+      .map(r => ((r.name || '') + ' ' + (r.canonical_name || '')).toUpperCase())
+      .join(' | ')
+    if (!joinedBlob) return used
+    for (const r of rows) {
+      if (r.status !== 'raw') continue
+      const n = (r.name || '').toUpperCase()
+      let token = null
+      if (r.type === 'Hook') {
+        const m = n.match(/H(\d+)(?:\.(\d+))?/)
+        if (m) token = `H${m[1]}`
+      } else if (r.type === 'Body') {
+        const lt = n.match(/BODY\s*([A-Z])/)
+        const nm = n.match(/B(\d+)/)
+        if (lt)      token = `B${lt[1]}`
+        else if (nm) token = `B${nm[1]}`
+      }
+      if (!token) continue
+      // Must be followed by non-digit so 'H1' doesn't match 'H10'.
+      const rx = new RegExp(token + '(?!\\d)')
+      if (rx.test(joinedBlob)) used.add(r.id)
+    }
+    return used
+  }, [rows])
+
   // Status counts. 'Edited' includes Joined (since Joined is a sub-state of
   // edited). 'Merged' is a narrower filter showing only Joined.
   const stageCounts = useMemo(() => ({
     unedited:   rows.filter(r => r.status === 'raw').length,
+    raw_used:   rows.filter(r => r.status === 'raw' && usedRawIds.has(r.id)).length,
+    raw_unused: rows.filter(r => r.status === 'raw' && !usedRawIds.has(r.id)).length,
     edited_seg: rows.filter(r => r.status === 'edited').length,
     merged:     rows.filter(r => r.type === 'Joined' && r.status === 'edited').length,
-  }), [rows])
+  }), [rows, usedRawIds])
 
   // Section groups for the list view — used when no type filter, shows
   // Hooks/Bodies/Joined/Testimony as separate sections
@@ -399,9 +438,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           active={stageFilter} onClear={() => setStageFilter('')}
           totalCount={rows.length}
           options={[
-            { value: 'unedited',   label: 'Raw',     count: stageCounts.unedited,   dot: '#b53e3e' },
-            { value: 'edited_seg', label: 'Edited',  count: stageCounts.edited_seg, dot: '#3e8a5e' },
-            { value: 'merged',     label: 'Merged',  count: stageCounts.merged,     dot: '#b86a0c' },
+            { value: 'unedited',   label: 'Raw',           count: stageCounts.unedited,   dot: '#b53e3e' },
+            { value: 'raw_unused', label: 'Raw · not merged', count: stageCounts.raw_unused, dot: '#b53e3e' },
+            { value: 'raw_used',   label: 'Raw · already merged', count: stageCounts.raw_used, dot: '#999' },
+            { value: 'edited_seg', label: 'Edited',        count: stageCounts.edited_seg, dot: '#3e8a5e' },
+            { value: 'merged',     label: 'Merged',        count: stageCounts.merged,     dot: '#b86a0c' },
           ]}
           onPick={setStageFilter} />
         <FilterStrip label="Type"
@@ -519,6 +560,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                   editors={activeEditors}
                   offers={offers}
                   creators={knownCreators}
+                  usedRawIds={usedRawIds}
                   onRowClick={openDrawer}
                   onPatch={scope.canEditCreative ? patchRow : null}
                   selected={selected}
@@ -855,7 +897,7 @@ function SortableHeader({ label, k, sortKey, sortDir, onSort }) {
   )
 }
 
-function CreativeMatrixView({ rows, editors, offers, creators, onRowClick, onPatch, selected, selectionMode, onToggleSelect, sortKey, sortDir, onSort }) {
+function CreativeMatrixView({ rows, editors, offers, creators, usedRawIds, onRowClick, onPatch, selected, selectionMode, onToggleSelect, sortKey, sortDir, onSort }) {
   const selectable = !!onToggleSelect
   const cols = selectable ? MATRIX_COLS_SEL : MATRIX_COLS_BASE
   const allVisible = rows.every(r => selected?.has(r.id))
@@ -910,6 +952,7 @@ function CreativeMatrixView({ rows, editors, offers, creators, onRowClick, onPat
         <MatrixRow key={r.id} row={r}
           editors={editors} offers={offers} creators={creators}
           isLast={i === rows.length - 1}
+          isUsed={!!usedRawIds?.has(r.id)}
           onRowClick={onRowClick}
           onPatch={onPatch}
           cols={cols}
@@ -939,7 +982,7 @@ const cellInputStyle = {
   outline: 'none',
 }
 
-const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, isLast, onRowClick, onPatch, cols, selected, selectionMode, onToggleSelect }) {
+const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, isLast, isUsed, onRowClick, onPatch, cols, selected, selectionMode, onToggleSelect }) {
   const [hover, setHover] = useState(false)
   const tc = typeColor(r.type)
   const oc = offerColor(r.offer_slug)
@@ -962,10 +1005,13 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
   }
   // Pipeline-state color stripe on the left edge of every row — fast
   // visual scan of which rows are raw / edited / merged.
+  // Used raws (already merged into a Joined) get a muted grey stripe
+  // instead of red — so you can spot them as "done, no action needed".
   const stripeColor =
     (r.type === 'Joined' && r.status === 'edited') ? '#b86a0c'     // merged (orange)
     : (r.status === 'edited')                       ? '#3e8a5e'     // edited (green)
-    :                                                 '#b53e3e'     // raw (red — needs attention)
+    : (r.status === 'raw' && isUsed)                ? '#999'        // raw + used (muted)
+    :                                                 '#b53e3e'     // raw + unused (red — needs attention)
   return (
     <div
       onClick={handleRowClick}
@@ -1004,11 +1050,24 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
         )}
       </div>
-      {/* ID (canonical_name, small mono) */}
+      {/* ID (canonical_name, small mono). Raw+used = strikethrough +
+          green check so it's obvious the raw is already merged into a
+          Joined elsewhere and doesn't need editing. */}
       <div style={{
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         fontSize: 10, color: 'var(--ink-3)',
-      }} title={r.canonical_name || r.name}>{r.canonical_name || r.name}</div>
+        display: 'flex', alignItems: 'center', gap: 4,
+        textDecoration: (r.status === 'raw' && isUsed) ? 'line-through' : 'none',
+        opacity: (r.status === 'raw' && isUsed) ? 0.65 : 1,
+      }} title={r.canonical_name || r.name}>
+        {(r.status === 'raw' && isUsed) && (
+          <span title="Already merged into a Joined composite"
+            style={{ color: '#3e8a5e', fontWeight: 600, flexShrink: 0 }}>✓</span>
+        )}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {r.canonical_name || r.name}
+        </span>
+      </div>
       {/* Description — inline-editable text */}
       <div onClick={stop} style={{ minWidth: 0 }}>
         {editable ? (
