@@ -6509,7 +6509,9 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
           const editorTasks = tasksByEditor.get(editor.slug) || []
           const color = editorColor(editor)
           const { placed, rowCount } = packTasks(editorTasks)
-          const BAR_HEIGHT = 22
+          // Taller bars (32px) so thumbnails are actually visible.
+          // Previously 22px → thumbnail was ~14×14, basically invisible.
+          const BAR_HEIGHT = 32
           const ROW_GAP = 6
           const PADDING = 10
           // Always give the lane enough vertical room to fit every packed
