@@ -149,6 +149,11 @@ export default function EditorView() {
           // Per-editor links can only upload inside an assigned task.
           canUpload: !editor,
           canEditCreative: false,
+          // Team-wide links can ALSO reassign editors from the matrix —
+          // that's the whole point of the team view, otherwise the
+          // editor column is just a read-only label. Per-editor links
+          // still can't (they only see their own tasks).
+          canAssignEditor: !editor,
           canEditTask: true,
           canAssignSelf: true,
           canDeleteTask: false,

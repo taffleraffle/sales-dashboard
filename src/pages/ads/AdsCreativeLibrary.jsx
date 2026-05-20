@@ -520,6 +520,7 @@ const ADMIN_SCOPE = {
   canDelete: true,
   canUpload: true,
   canEditCreative: true,
+  canAssignEditor: true,
   canEditTask: true,
   canAssignSelf: true,
   canDeleteTask: true,
@@ -1287,6 +1288,10 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                   usedRawIds={usedRawIds}
                   onRowClick={openDrawer}
                   onPatch={scope.canEditCreative ? patchRow : null}
+                  /* onAssignEditor enabled separately so team-wide
+                     editor portal can reassign rows without unlocking
+                     every other inline cell. */
+                  onAssignEditor={(scope.canEditCreative || scope.canAssignEditor) ? patchRow : null}
                   selected={selected}
                   selectionMode={selected.size > 0}
                   onToggleSelect={scope.canEditCreative ? toggleSelect : null}
@@ -1723,7 +1728,7 @@ function SortableHeader({ label, k, sortKey, sortDir, onSort }) {
 // when drawerRow toggles, so the memo short-circuits → matrix DOM
 // stays put → close-modal feels instant instead of taking 200-500ms
 // to re-reconcile every row.
-const CreativeMatrixView = memo(function CreativeMatrixView({ rows, editors, offers, creators, usedRawIds, onRowClick, onPatch, selected, selectionMode, onToggleSelect, sortKey, sortDir, onSort }) {
+const CreativeMatrixView = memo(function CreativeMatrixView({ rows, editors, offers, creators, usedRawIds, onRowClick, onPatch, onAssignEditor, selected, selectionMode, onToggleSelect, sortKey, sortDir, onSort }) {
   const selectable = !!onToggleSelect
   const cols = selectable ? MATRIX_COLS_SEL : MATRIX_COLS_BASE
   const allVisible = rows.every(r => selected?.has(r.id))
@@ -1781,6 +1786,7 @@ const CreativeMatrixView = memo(function CreativeMatrixView({ rows, editors, off
           isUsed={!!usedRawIds?.has(r.id)}
           onRowClick={onRowClick}
           onPatch={onPatch}
+          onAssignEditor={onAssignEditor}
           cols={cols}
           selected={selected?.has(r.id)}
           selectionMode={selectionMode}
@@ -1808,11 +1814,14 @@ const cellInputStyle = {
   outline: 'none',
 }
 
-const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, isLast, isUsed, onRowClick, onPatch, cols, selected, selectionMode, onToggleSelect }) {
+const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, isLast, isUsed, onRowClick, onPatch, onAssignEditor, cols, selected, selectionMode, onToggleSelect }) {
   const [hover, setHover] = useState(false)
   const tc = typeColor(r.type)
   const oc = offerColor(r.offer_slug)
   const editable = !!onPatch
+  // Editor assignment is gated separately so team-wide editor portal
+  // can reassign rows even when the rest of the cells are read-only.
+  const canAssignEditor = !!(onAssignEditor || onPatch)
   const selectable = !!onToggleSelect
   // Local state for the still-editable creator field. Description is
   // read-only at this scope (edits live in the detail modal) so we
@@ -1959,11 +1968,13 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
           <span style={{ color: 'var(--ink-3)' }}>{r.creator || '—'}</span>
         )}
       </div>
-      {/* Editor — inline select */}
+      {/* Editor — inline select. Uses canAssignEditor (separate gate
+          from `editable`) so the team-wide editor portal can reassign
+          rows even when other cells are read-only. */}
       <div onClick={stop}>
-        {editable ? (
+        {canAssignEditor ? (
           <select value={r.assigned_editor_id || ''}
-            onChange={e => onPatch(r.id, { assigned_editor_id: e.target.value || null })}
+            onChange={e => (onAssignEditor || onPatch)(r.id, { assigned_editor_id: e.target.value || null })}
             style={{ ...cellSelectStyle, color: r.assigned_editor_id ? 'var(--ink)' : 'var(--ink-4)' }}>
             <option value="">—</option>
             {editors.filter(e => e.active).map(e => (
