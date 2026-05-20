@@ -3235,11 +3235,11 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
   const knownCreators = knownCreatorsProp && knownCreatorsProp.length > 0 ? knownCreatorsProp : knownCreatorsLocal
   const [showAdvanced, setShowAdvanced] = useState(false)
   // When the viewer is an editor on /editor-view, auto-target them as the assignee.
-  const [assignEditor, setAssignEditor] = useState(scope.isEditorView ? (scope.editorId || '') : '')
-  const [assignDue, setAssignDue] = useState('')
-  const [assignPriority, setAssignPriority] = useState('P2 - Medium')
-  const [assignTaskType, setAssignTaskType] = useState('edit')
-  const [assignBusy, setAssignBusy] = useState(false)
+  // 2026-05-21: dropped the inline assign-editor form below the existing
+  // tasks list — it duplicated the main 'Assigned Editor' picker higher
+  // up in the modal. Migration 087's trigger auto-creates a task whenever
+  // assigned_editor_id is set on a raw clip, so the lower form was just
+  // doing the same thing in a wordier way.
   const [existingTasks, setExistingTasks] = useState([])
   const firstEditRef = useRef(true)
   const saveTimerRef = useRef(null)
@@ -3365,27 +3365,9 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
     if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current)
   }, [])
 
-  const assign = async () => {
-    if (!assignEditor) return
-    setAssignBusy(true); setErr(null)
-    const { error } = await supabase.from('lib_editing_tasks').insert({
-      creative_id: row.id,
-      editor_id: assignEditor,
-      due_date: assignDue || null,
-      priority: assignPriority,
-      task_type: assignTaskType,
-      status: 'queued',
-    })
-    setAssignBusy(false)
-    if (error) setErr(error.message)
-    else {
-      // Refresh existing tasks
-      const { data } = await supabase.from('lib_editing_queue').select('*').eq('creative_id', row.id)
-      setExistingTasks(data || [])
-      // Reset form
-      setAssignEditor(''); setAssignDue('')
-    }
-  }
+  // The legacy `assign()` handler is gone with the form it backed —
+  // assignment now flows through the upper `assigned_editor_id`
+  // picker + migration 087's auto-task trigger.
 
   // Pick the best playback URL — self-hosted preview > drive iframe
   const playbackKind = row.preview_url ? 'video' : row.drive_url ? 'iframe' : 'none'
@@ -3655,38 +3637,11 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
           </Field>
         )}
 
-        {/* Assign editor block — only when viewer can manage assignments */}
-        {scope.canEditTask && (
-        <div style={{
-          padding: '14px 16px', border: '1px solid var(--rule)', background: 'var(--paper-2)',
-        }}>
-          <div style={{
-            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
-            letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)',
-            marginBottom: 10,
-          }}>{scope.isEditorView ? 'Self-assign this clip' : 'Assign editor'}</div>
-          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1.2fr 1fr 1fr 1.4fr auto' }}>
-            <select value={assignEditor} onChange={e => setAssignEditor(e.target.value)} style={selectStyle}>
-              <option value="">Pick editor…</option>
-              {editors.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
-            <select value={assignPriority} onChange={e => setAssignPriority(e.target.value)} style={selectStyle}>
-              <option>P1 - High</option>
-              <option>P2 - Medium</option>
-              <option>P3 - Low</option>
-            </select>
-            <select value={assignTaskType} onChange={e => setAssignTaskType(e.target.value)} style={selectStyle}>
-              <option value="edit">Edit</option>
-              <option value="patch">Patch</option>
-              <option value="revision">Revision</option>
-            </select>
-            <input type="date" value={assignDue} onChange={e => setAssignDue(e.target.value)} style={inputStyle} />
-            <button onClick={assign} disabled={!assignEditor || assignBusy} style={primaryBtn}>
-              {assignBusy ? 'Assigning…' : 'Assign'}
-            </button>
-          </div>
-        </div>
-        )}
+        {/* The duplicate "Assign editor" block that lived here is gone.
+            Setting `Assigned Editor` higher up in the modal already
+            creates a task automatically (via migration 087's trigger).
+            Priority / task type / due date can be tweaked from the
+            Editing Queue tab on the freshly-created task row. */}
 
         {row.drive_url && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
