@@ -272,6 +272,27 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // so passing a fresh inline lambda each render would defeat the memo.
   const openDrawer = useCallback((row) => setDrawerRow(row), [])
 
+  // Cross-modal navigation: when a user clicks a "Used in" or "Made from"
+  // link inside the detail modal, jump the modal to that row. Looks up the
+  // full row from our local rows state first (no network) and only fetches
+  // if it's not in the current filter window.
+  const openRowById = useCallback(async (id) => {
+    if (!id) return
+    const local = rows.find(r => r.id === id)
+    if (local) { setDrawerRow(local); return }
+    const { data } = await supabase
+      .from('lib_creative_library')
+      .select('*, assigned_editor:assigned_editor_id (id, name)')
+      .eq('id', id)
+      .maybeSingle()
+    if (data) {
+      setDrawerRow({
+        ...data,
+        assigned_editor_name: data.assigned_editor?.name || null,
+      })
+    }
+  }, [rows])
+
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
     const [rowsRes, edRes, ofRes] = await Promise.all([
@@ -714,6 +735,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           editors={editors}
           offers={offers}
           knownCreators={knownCreators}
+          onOpenRow={openRowById}
           onClose={() => setDrawerRow(null)}
           onSaved={() => { setDrawerRow(null); load() }}
           onRowPatched={(id, patch) => {
@@ -1948,15 +1970,19 @@ function VersionsPanel({ row, onReload }) {
   )
 }
 
-function UsageHistory({ row }) {
+function UsageHistory({ row, onOpenRow }) {
   // Two-way derivation panel:
   //   - Hooks/Bodies: list composites where derived_hook_id == this.id
-  //                   (or derived_body_id for bodies). Falls back to the
-  //                   legacy "Hook N" name-pattern match for older rows
-  //                   that haven't had transcript matching run yet.
+  //                   (or derived_body_id for bodies). This is the
+  //                   transcript-matcher's authoritative output.
   //   - Composites (Joined / Full Video / Retargeting / Testimony):
   //                   show the matched Hook + Body source clips by
   //                   derived_hook_id / derived_body_id.
+  //
+  // A legacy name-pattern fallback used to live here but it produced
+  // false positives (Hook 1.5 matched Hook 1's composites because the
+  // decimal was dropped, then ilike '%Hook 1%' over-matched). Removed.
+  // If a Joined row doesn't show up here, run the transcript matcher.
   const isSource    = row && (row.type === 'Hook' || row.type === 'Body')
   const isComposite = row && ['Joined', 'Full Video', 'Retargeting', 'Testimony'].includes(row.type)
   const [matches, setMatches] = useState([])
@@ -1969,41 +1995,15 @@ function UsageHistory({ row }) {
     if (!isSource) { setMatches([]); return }
     setLoading(true)
     const col = row.type === 'Hook' ? 'derived_hook_id' : 'derived_body_id'
-    Promise.all([
-      // Transcript-derived matches (authoritative)
-      supabase.from('lib_creative_library')
-        .select('id, name, canonical_name, status, thumbnail_url, preview_url, derivation_score, type')
-        .eq(col, row.id)
-        .order('name'),
-      // Legacy name-pattern fallback (for Joined rows whose transcript
-      // match didn't reach the 0.7 threshold)
-      (() => {
-        const name = row.name || ''
-        let pattern = null
-        if (row.type === 'Hook') {
-          const m = name.match(/H(\d+)(?:\.(\d+))?/i)
-          if (m) pattern = `Hook ${m[1]}`
-        } else {
-          const lt = name.match(/Body\s*([A-Z])/i)
-          const nm = name.match(/B(\d+)/i)
-          if (lt)      pattern = `Body ${lt[1].toUpperCase()}`
-          else if (nm) pattern = `Body ${nm[1]}`
-        }
-        if (!pattern) return Promise.resolve({ data: [] })
-        return supabase.from('lib_creative_library')
-          .select('id, name, canonical_name, status, thumbnail_url, preview_url, type')
-          .eq('type', 'Joined')
-          .ilike('name', `%${pattern}%`)
-          .order('name')
-      })(),
-    ]).then(([derived, byName]) => {
-      if (!mounted) return
-      // Merge: derived wins. Add name-matched rows that aren't already there.
-      const seen = new Set((derived.data || []).map(r => r.id))
-      const fallback = (byName.data || []).filter(r => !seen.has(r.id)).map(r => ({ ...r, _fallback: true }))
-      setMatches([...(derived.data || []), ...fallback])
-      setLoading(false)
-    })
+    supabase.from('lib_creative_library')
+      .select('id, name, canonical_name, status, thumbnail_url, preview_url, derivation_score, type')
+      .eq(col, row.id)
+      .order('name')
+      .then(({ data }) => {
+        if (!mounted) return
+        setMatches(data || [])
+        setLoading(false)
+      })
     return () => { mounted = false }
   }, [row?.id, row?.type, isSource])
 
@@ -2056,8 +2056,8 @@ function UsageHistory({ row }) {
           marginBottom: 5,
         }}>Made from</div>
         <div style={{ display: 'grid', gap: 6 }}>
-          {sources.hook && <DerivationLinkRow row={sources.hook} role="HOOK SOURCE" />}
-          {sources.body && <DerivationLinkRow row={sources.body} role="BODY SOURCE" />}
+          {sources.hook && <DerivationLinkRow row={sources.hook} role="HOOK SOURCE" onOpenRow={onOpenRow} />}
+          {sources.body && <DerivationLinkRow row={sources.body} role="BODY SOURCE" onOpenRow={onOpenRow} />}
         </div>
       </div>
     )
@@ -2087,7 +2087,7 @@ function UsageHistory({ row }) {
       ) : (
         <div style={{ display: 'grid', gap: 6 }}>
           {matches.map(m => (
-            <DerivationLinkRow key={m.id} row={m} role={m._fallback ? 'NAME-MATCH' : null} />
+            <DerivationLinkRow key={m.id} row={m} onOpenRow={onOpenRow} />
           ))}
         </div>
       )}
@@ -2097,16 +2097,27 @@ function UsageHistory({ row }) {
 
 /* Small row for "Made from" + "Used in" lists. Same look as the previous
    inline list but extracted so both panels share. Role label appears as
-   a tiny eyebrow on the right ("HOOK SOURCE", "BODY SOURCE", or
-   "NAME-MATCH" for legacy fallbacks). */
-function DerivationLinkRow({ row, role }) {
+   a tiny eyebrow on the right ("HOOK SOURCE", "BODY SOURCE").
+   Clicking the row jumps the parent modal to that creative when
+   onOpenRow is provided. */
+function DerivationLinkRow({ row, role, onOpenRow }) {
+  const [hover, setHover] = useState(false)
+  const clickable = !!onOpenRow
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 10,
-      padding: '6px 10px',
-      background: 'var(--paper-2)', border: '1px solid var(--rule)',
-      fontFamily: 'var(--mono)', fontSize: 11,
-    }}>
+    <div
+      onClick={clickable ? () => onOpenRow(row.id) : undefined}
+      onMouseEnter={clickable ? () => setHover(true) : undefined}
+      onMouseLeave={clickable ? () => setHover(false) : undefined}
+      title={clickable ? 'Open this creative' : undefined}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '6px 10px',
+        background: hover ? 'var(--paper)' : 'var(--paper-2)',
+        border: `1px solid ${hover ? 'var(--ink)' : 'var(--rule)'}`,
+        fontFamily: 'var(--mono)', fontSize: 11,
+        cursor: clickable ? 'pointer' : 'default',
+        transition: 'background 80ms, border-color 80ms',
+      }}>
       <div style={{ width: 40, height: 24, background: '#000', overflow: 'hidden', flexShrink: 0 }}>
         {row.thumbnail_url && (
           <img src={row.thumbnail_url} alt="" loading="lazy"
@@ -2127,6 +2138,12 @@ function DerivationLinkRow({ row, role }) {
         color: row.status === 'edited' ? '#3e8a5e' : 'var(--ink-4)',
         fontSize: 9.5, letterSpacing: '0.08em', textTransform: 'uppercase',
       }}>{row.status}</span>
+      {clickable && (
+        <span style={{
+          color: 'var(--ink-4)', fontSize: 13, lineHeight: 1,
+          opacity: hover ? 1 : 0.4, transition: 'opacity 80ms',
+        }}>→</span>
+      )}
     </div>
   )
 }
@@ -2837,7 +2854,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
 
 /* ─────────────────────── DETAIL MODAL (click row) ─────────────────────── */
 
-function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, offers: offersProp, knownCreators: knownCreatorsProp, onClose, onSaved, onRowPatched, onDeleted }) {
+function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, offers: offersProp, knownCreators: knownCreatorsProp, onOpenRow, onClose, onSaved, onRowPatched, onDeleted }) {
   const [edit, setEdit] = useState(row)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
@@ -3241,7 +3258,7 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
 
         {/* Hook/Body history — when viewing a source clip, show which
             Joined composites have used it. */}
-        <UsageHistory row={row} />
+        <UsageHistory row={row} onOpenRow={onOpenRow} />
 
         {/* Existing tasks */}
         {existingTasks.length > 0 && (
