@@ -117,6 +117,114 @@ function editorColor(slugOrEditorOrTask) {
   return EDITOR_COLORS[Math.abs(h) % EDITOR_COLORS.length]
 }
 
+/* Recent-activity banner — collapsible feed of the latest editor
+   submissions across the team. Expanded view shows thumbnail + version
+   badge + submitter + relative time per row. Collapsed view is just
+   the headline count. Lives at the top of the Library tab so admin
+   sees "what's been happening" before drilling into individual rows. */
+function RecentActivityBanner({ submissions }) {
+  const [open, setOpen] = useState(false)
+  const newestCount = submissions.length
+  const pendingApproval = submissions.filter(s => !s.approved_at).length
+  const relTime = (iso) => {
+    const t = new Date(iso).getTime()
+    const diff = Date.now() - t
+    const mins = Math.round(diff / 60000)
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.round(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    const days = Math.round(hrs / 24)
+    return `${days}d ago`
+  }
+  return (
+    <div style={{
+      marginBottom: 10, border: '1px solid var(--rule)',
+      borderLeft: '3px solid #3e7eba', background: 'white',
+    }}>
+      <div onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '10px 14px', cursor: 'pointer',
+          fontFamily: 'var(--mono)', fontSize: 11.5,
+          letterSpacing: '0.04em', color: 'var(--ink-2)',
+        }}>
+        <span style={{
+          fontSize: 10, color: 'var(--ink-4)',
+          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+          transition: 'transform 0.12s',
+          display: 'inline-block', width: 10,
+        }}>▶</span>
+        <span style={{
+          padding: '2px 8px', borderRadius: 2,
+          background: '#3e7eba', color: 'white', fontWeight: 700,
+          fontSize: 10, letterSpacing: '0.08em',
+        }}>RECENT ACTIVITY</span>
+        <span><strong>{newestCount}</strong> submission{newestCount === 1 ? '' : 's'} this week</span>
+        {pendingApproval > 0 && (
+          <>
+            <span style={{ color: 'var(--ink-4)' }}>·</span>
+            <span style={{ color: '#7a4e08' }}>
+              <strong>{pendingApproval}</strong> awaiting your review
+            </span>
+          </>
+        )}
+        <span style={{ flex: 1 }} />
+        <span style={{ color: 'var(--ink-4)', textDecoration: 'underline' }}>
+          {open ? 'Hide' : 'Show'} activity
+        </span>
+      </div>
+      {open && (
+        <div style={{
+          padding: '4px 12px 12px', display: 'grid', gap: 6,
+          borderTop: '1px solid var(--rule)',
+        }}>
+          {submissions.slice(0, 15).map(s => (
+            <div key={s.id} style={{
+              display: 'grid', gridTemplateColumns: '44px 1fr auto auto',
+              gap: 10, alignItems: 'center',
+              padding: '6px 10px',
+              background: s.approved_at ? 'rgba(62,138,94,0.04)' : 'var(--paper-2)',
+              border: '1px solid var(--rule)',
+            }}>
+              <div style={{
+                width: 44, height: 28, background: '#000', overflow: 'hidden',
+                border: '1px solid var(--rule)',
+              }}>
+                {s.thumbnail_url && (
+                  <img src={s.thumbnail_url} alt="" loading="lazy"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
+              </div>
+              <div style={{ minWidth: 0, fontFamily: 'var(--mono)', fontSize: 11 }}>
+                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{
+                    padding: '1px 6px', background: 'var(--ink-3)', color: 'white',
+                    borderRadius: 2, fontSize: 9.5, fontWeight: 700, marginRight: 6,
+                  }}>v{s.version_number}</span>
+                  {s.submitted_by_name || 'Unknown'}
+                  <span style={{ color: 'var(--ink-4)', marginLeft: 8 }}>· {relTime(s.created_at)}</span>
+                </div>
+              </div>
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: s.approved_at ? '#3e8a5e' : '#3e7eba',
+              }}>{s.approved_at ? 'Approved' : 'In review'}</span>
+              {(s.file_url || s.external_url) && (
+                <a href={s.file_url || s.external_url} target="_blank" rel="noreferrer"
+                  style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)', textDecoration: 'underline' }}>
+                  Open ↗
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* Modal video preview with explicit teardown. The native <video> element
    sometimes stalls the main thread for hundreds of ms when unmounted
    mid-buffer (browser cleans up decoder + network connection). Pausing
@@ -798,8 +906,108 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       .filter(g => g.rows.length > 0)
   }, [filtered])
 
+  // Unassigned raw clips that need an editor. Excludes Testimony per
+  // Ben's rule ("testimony footage can just sit in there raw"), and
+  // skips Hook auto-marked-used rows (already in the EDITED RAW
+  // bucket via usedRawIds heuristic). Only counted on the FULL row
+  // set, not the filtered view, so the warning is always accurate
+  // even when the user has filters applied.
+  const unassignedRawCount = useMemo(() => {
+    let n = 0
+    for (const r of rows) {
+      if (r.status !== 'raw') continue
+      if (r.type === 'Testimony') continue
+      if (r.assigned_editor_id) continue
+      if (usedRawIds.has(r.id)) continue
+      n += 1
+    }
+    return n
+  }, [rows, usedRawIds])
+
+  // Recent submissions for the activity feed. Loads in the background
+  // after first paint so the initial library render isn't blocked.
+  const [recentSubmissions, setRecentSubmissions] = useState([])
+  useEffect(() => {
+    let mounted = true
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    supabase.from('lib_task_submissions')
+      .select('id, task_id, version_number, submitted_by_name, file_url, external_url, thumbnail_url, approved_at, created_at')
+      .gte('created_at', sevenDaysAgo)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(20)
+      .then(({ data }) => { if (mounted) setRecentSubmissions(data || []) })
+    return () => { mounted = false }
+  }, [])
+
+  // Filter helper for clicking the unassigned banner — narrows the view
+  // to raw + unassigned non-Testimony rows by setting the existing
+  // filter chips.
+  const focusUnassignedRaw = useCallback(() => {
+    setStageFilter(new Set(['raw_unused']))
+    setTypeFilter(new Set(['Hook', 'Body', 'Joined', 'Full Video', 'Retargeting']))
+  }, [])
+
+  // Bulk download — for each selected row, kicks off a browser download
+  // of its best available video URL (final_cut_url ▸ preview_url ▸
+  // drive_url fallback). Sequential with a small stagger so the
+  // browser doesn't dedupe simultaneous downloads to the same origin.
+  const bulkDownload = useCallback(() => {
+    const ids = Array.from(selected)
+    const targets = ids
+      .map(id => rows.find(r => r.id === id))
+      .filter(Boolean)
+      .map(r => ({
+        name: r.canonical_name || r.name,
+        url: r.final_cut_url || r.preview_url || r.drive_url,
+      }))
+      .filter(t => t.url)
+    if (targets.length === 0) return
+    targets.forEach((t, i) => {
+      setTimeout(() => {
+        const a = document.createElement('a')
+        a.href = t.url
+        a.download = t.name || 'creative.mp4'
+        a.target = '_blank'
+        a.rel = 'noopener noreferrer'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+      }, i * 180)
+    })
+  }, [selected, rows])
+
   return (
     <>
+      {/* Unassigned-raw banner — yellow alert at the very top so it's
+          the first thing the operator sees on landing. Hidden when
+          count is zero so the page is clean during normal operation. */}
+      {unassignedRawCount > 0 && (
+        <div onClick={focusUnassignedRaw}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            padding: '10px 14px', marginBottom: 10,
+            background: '#fffaea', border: '1px solid #e8b408',
+            borderLeft: '3px solid #e8b408',
+            cursor: 'pointer',
+            fontFamily: 'var(--mono)', fontSize: 11.5,
+            letterSpacing: '0.04em', color: '#7a4e08',
+          }}
+          title="Click to filter the library to just these rows">
+          <span style={{ fontSize: 14 }}>⚠</span>
+          <span style={{ fontWeight: 600 }}>{unassignedRawCount}</span>
+          <span>raw creative{unassignedRawCount === 1 ? '' : 's'} need editor assignment</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ textDecoration: 'underline' }}>Filter to these →</span>
+        </div>
+      )}
+
+      {/* Recent activity feed — shows the latest submissions across
+          the team. Empty when nothing's happened in the last 7 days. */}
+      {recentSubmissions.length > 0 && (
+        <RecentActivityBanner submissions={recentSubmissions} />
+      )}
+
       {/* Toolbar — compact, single block. No more 5-row chip stack. */}
       <div style={{
         padding: '10px 14px', background: 'var(--paper-2)',
@@ -939,6 +1147,14 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
               border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
             }}>Clear</button>
           <span style={{ flex: 1 }} />
+          <button onClick={bulkDownload} disabled={bulkBusy}
+            title="Trigger a browser download of each selected file (final cut ▸ preview ▸ drive)"
+            style={{
+              padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 10.5,
+              fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: 'transparent', color: 'white',
+              border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer',
+            }}>↓ Download {selected.size}</button>
           <button onClick={() => setBulkEditOpen(true)} disabled={bulkBusy}
             style={{
               padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 10.5,
