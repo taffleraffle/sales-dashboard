@@ -113,13 +113,17 @@ export default function AdsCreativeLibrary({ editorScope }) {
   useEffect(() => { try { localStorage.setItem('lib.tab', tab) } catch {} }, [tab])
 
   return (
-    <div style={{ padding: '24px 0 60px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
-        <SectionHead level="page" eyebrow={scope.isEditorView ? 'Editor portal' : 'Library'}>
-          {scope.isEditorView ? 'Your queue + creative library' : 'Creative library'}
-        </SectionHead>
-
-        {/* Tab switcher */}
+    <div style={{ padding: '12px 0 60px' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 10, flexWrap: 'wrap', gap: 12,
+      }}>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+          letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
+        }}>
+          {scope.isEditorView ? 'Editor portal · ' : ''}{tab === 'library' ? 'Library' : 'Editing queue'}
+        </div>
         <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper)' }}>
           <TabBtn active={tab === 'library'} onClick={() => setTab('library')}>Library</TabBtn>
           <TabBtn active={tab === 'queue'}   onClick={() => setTab('queue')}>Editing queue</TabBtn>
@@ -1181,6 +1185,144 @@ function StageLinkCell({ value, url, label }) {
   )
 }
 
+/* Transcript display with expand/collapse + copy-to-clipboard. Sits in
+   the detail modal under the form. Long transcripts collapse to ~6 lines
+   with a 'Show more' affordance. */
+function TranscriptBox({ text }) {
+  const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const onCopy = async () => {
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch {}
+  }
+  return (
+    <div>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        marginBottom: 5,
+      }}>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
+        }}>Transcript</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+          <button onClick={onCopy} type="button"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              color: copied ? '#3e8a5e' : 'var(--ink-3)',
+              textDecoration: 'underline',
+            }}>{copied ? 'Copied' : 'Copy'}</button>
+          <button onClick={() => setExpanded(v => !v)} type="button"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              color: 'var(--ink-3)', textDecoration: 'underline',
+            }}>{expanded ? 'Collapse' : 'Show full'}</button>
+        </div>
+      </div>
+      <div style={{
+        maxHeight: expanded ? 'none' : 160,
+        overflowY: expanded ? 'visible' : 'auto',
+        padding: 12,
+        background: 'var(--paper-2)', border: '1px solid var(--rule)',
+        fontFamily: 'var(--serif)', fontSize: 13, lineHeight: 1.5,
+        color: 'var(--ink-2)', fontStyle: 'italic',
+        whiteSpace: 'pre-wrap',
+      }}>{text}</div>
+    </div>
+  )
+}
+
+/* Usage history — when viewing a Hook or Body source clip, show which
+   Joined composites used it. Match is heuristic: extract the slot from
+   the row's original name (Hook 4, Body C, HAMMER-H1, etc.) then query
+   joined rows whose name contains that slot. */
+function UsageHistory({ row }) {
+  const [matches, setMatches] = useState([])
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    if (!row || (row.type !== 'Hook' && row.type !== 'Body')) { setMatches([]); return }
+    // Extract the slot identifier from the source clip's original name.
+    // Patterns we know:
+    //   CLIP-H1.1-SOFIA  -> hook 1.1
+    //   CLIP-H1-OSO      -> hook 1
+    //   HAMMER-H1-BEN    -> hook 1
+    //   HAMMER-B2-BEN    -> body 2
+    //   3- Body B        -> body B
+    const name = row.name || ''
+    let pattern = null
+    if (row.type === 'Hook') {
+      const m = name.match(/H(\d+)(?:\.(\d+))?/i)
+      if (m) pattern = `Hook ${m[1]}`  // joined names use "Hook N Body X"
+    } else if (row.type === 'Body') {
+      const lt = name.match(/Body\s*([A-Z])/i)
+      const nm = name.match(/B(\d+)/i)
+      if (lt)      pattern = `Body ${lt[1].toUpperCase()}`
+      else if (nm) pattern = `Body ${nm[1]}`
+    }
+    if (!pattern) { setMatches([]); return }
+    setLoading(true)
+    supabase.from('lib_creative_library')
+      .select('id, name, canonical_name, status, thumbnail_url, preview_url')
+      .eq('type', 'Joined')
+      .ilike('name', `%${pattern}%`)
+      .order('name')
+      .then(({ data }) => { setMatches(data || []); setLoading(false) })
+  }, [row?.id, row?.type, row?.name])
+
+  if (!row || (row.type !== 'Hook' && row.type !== 'Body')) return null
+  if (loading) return null
+  return (
+    <div>
+      <div style={{
+        fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
+        marginBottom: 5,
+      }}>
+        Used in {matches.length} Joined composite{matches.length === 1 ? '' : 's'}
+      </div>
+      {matches.length === 0 ? (
+        <div style={{
+          padding: '10px 12px', background: 'var(--paper-2)',
+          border: '1px dashed var(--rule)',
+          fontFamily: 'var(--serif)', fontStyle: 'italic',
+          fontSize: 12, color: 'var(--ink-3)',
+        }}>
+          Not yet merged with any body / hook. Once a Joined creative
+          named after this slot exists, it'll show up here.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 6 }}>
+          {matches.map(m => (
+            <div key={m.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '6px 10px',
+              background: 'var(--paper-2)', border: '1px solid var(--rule)',
+              fontFamily: 'var(--mono)', fontSize: 11,
+            }}>
+              <div style={{ width: 40, height: 24, background: '#000', overflow: 'hidden', flexShrink: 0 }}>
+                {m.thumbnail_url && (
+                  <img src={m.thumbnail_url} alt="" loading="lazy"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
+              </div>
+              <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontWeight: 600 }}>{m.canonical_name || m.name}</div>
+                <div style={{ color: 'var(--ink-4)', fontSize: 10 }}>{m.name}</div>
+              </div>
+              <span style={{ color: m.status === 'edited' ? '#3e8a5e' : 'var(--ink-4)', fontSize: 9.5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                {m.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* Inline stage value editor — used inside CreativeDetailModal so Ben can
    set Raw / Rough cut / Final cut / Approved / Delivered per-creative. */
 function StageEditor({ label, value, onChange }) {
@@ -2003,17 +2145,11 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onDel
           </>
         )}
 
-        {row.transcript && (
-          <Field label="Transcript">
-            <div style={{
-              maxHeight: 200, overflowY: 'auto', padding: 12,
-              background: 'var(--paper-2)', border: '1px solid var(--rule)',
-              fontFamily: 'var(--serif)', fontSize: 13, lineHeight: 1.5,
-              color: 'var(--ink-2)', fontStyle: 'italic',
-              whiteSpace: 'pre-wrap',
-            }}>{row.transcript}</div>
-          </Field>
-        )}
+        {row.transcript && <TranscriptBox text={row.transcript} />}
+
+        {/* Hook/Body history — when viewing a source clip, show which
+            Joined composites have used it. */}
+        <UsageHistory row={row} />
 
         {/* Existing tasks */}
         {existingTasks.length > 0 && (
