@@ -3153,6 +3153,10 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
       assigned_editor_id: edit.assigned_editor_id || null,
       offer_slug: edit.offer_slug || null,
       has_been_run: !!edit.has_been_run,
+      // The third STATUS button (EDITED RAW) writes both status='raw'
+      // AND manually_marked_used=true, so include the flag in every
+      // save. Otherwise the override is lost on the next auto-save.
+      manually_marked_used: !!edit.manually_marked_used,
     }
     const { error } = await supabase
       .from('lib_creative_library')
@@ -3363,26 +3367,34 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, editors: editorsProp, o
 
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
           <Field label="Status">
+            {/* Three buttons matching the Library STATUS filter +
+                Bulk Edit modal. RAW / EDITED RAW (raw+manually_marked_used)
+                / EDITED. The middle bucket writes status='raw' AND
+                manually_marked_used=true so the library filter +
+                row-strikethrough decoration both pick it up. */}
             <div style={{ display: 'flex', gap: 5 }}>
-              {STATUSES.map(s => {
-                const isOn = edit.status === s
-                const color = STATUS_COLOR[s] || 'var(--ink-3)'
-                return (
-                  <button key={s} type="button"
-                    onClick={() => setEdit({ ...edit, status: s })}
-                    style={{
-                      flex: 1, padding: '8px 14px',
-                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
-                      letterSpacing: '0.08em', textTransform: 'uppercase',
-                      background: isOn ? color : 'white',
-                      color: isOn ? 'white' : color,
-                      border: '1px solid ' + color,
-                      cursor: 'pointer', borderRadius: 2,
-                    }}>
-                    {STATUS_LABEL[s] || s}
-                  </button>
-                )
-              })}
+              {[
+                { v: 'raw_unused', label: 'RAW',        color: '#b53e3e', isOn: edit.status === 'raw'    && !edit.manually_marked_used,
+                  apply: () => setEdit({ ...edit, status: 'raw',    manually_marked_used: false }) },
+                { v: 'raw_used',   label: 'EDITED RAW', color: '#999',    isOn: edit.status === 'raw'    &&  edit.manually_marked_used,
+                  apply: () => setEdit({ ...edit, status: 'raw',    manually_marked_used: true  }) },
+                { v: 'edited',     label: 'EDITED',     color: '#3e8a5e', isOn: edit.status === 'edited',
+                  apply: () => setEdit({ ...edit, status: 'edited' }) },
+              ].map(opt => (
+                <button key={opt.v} type="button"
+                  onClick={opt.apply}
+                  style={{
+                    flex: 1, padding: '8px 14px',
+                    fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                    background: opt.isOn ? opt.color : 'white',
+                    color: opt.isOn ? 'white' : opt.color,
+                    border: '1px solid ' + opt.color,
+                    cursor: 'pointer', borderRadius: 2,
+                  }}>
+                  {opt.label}
+                </button>
+              ))}
             </div>
           </Field>
           <Field label="Run before?">
