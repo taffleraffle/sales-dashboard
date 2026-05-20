@@ -266,8 +266,10 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     if (runFilter === 'yes')        list = list.filter(r => r.has_been_run)
     else if (runFilter === 'no')    list = list.filter(r => !r.has_been_run)
     // Pipeline-state filter — combines type + status into workflow states
+    // 'Edited' now includes Joined (Joined is a subset of edited by definition).
+    // 'Merged' filter still narrows to type=Joined.
     if (stageFilter === 'unedited')   list = list.filter(r => r.status === 'raw')
-    else if (stageFilter === 'edited_seg') list = list.filter(r => r.status === 'edited' && r.type !== 'Joined')
+    else if (stageFilter === 'edited_seg') list = list.filter(r => r.status === 'edited')
     else if (stageFilter === 'merged')list = list.filter(r => r.type === 'Joined' && r.status === 'edited')
     // Column sort (Matrix view) — applied last so it works on the filtered list
     if (sortKey) {
@@ -327,10 +329,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // Stable reference for MatrixRow's editor dropdown — same memo concern
   // as openDrawer: avoid re-creating this array each render.
   const activeEditors = useMemo(() => editors.filter(e => e.active), [editors])
-  // Pipeline-state counts (workflow buckets — status+type combined)
+  // Status counts. 'Edited' includes Joined (since Joined is a sub-state of
+  // edited). 'Merged' is a narrower filter showing only Joined.
   const stageCounts = useMemo(() => ({
     unedited:   rows.filter(r => r.status === 'raw').length,
-    edited_seg: rows.filter(r => r.status === 'edited' && r.type !== 'Joined').length,
+    edited_seg: rows.filter(r => r.status === 'edited').length,
     merged:     rows.filter(r => r.type === 'Joined' && r.status === 'edited').length,
   }), [rows])
 
