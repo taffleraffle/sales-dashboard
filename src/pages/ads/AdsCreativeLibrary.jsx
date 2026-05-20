@@ -1566,14 +1566,16 @@ function StageCell({ value }) {
    are written. Lets Ben reorganise dozens of clips in one pass. */
 
 function BulkEditModal({ ids, onClose, onSaved }) {
-  const [type, setType] = useState('')
-  const [status, setStatus] = useState('')
-  const [assignedEditorId, setAssignedEditorId] = useState('')
-  const [offerSlug, setOfferSlug] = useState('')
-  const [hasBeenRun, setHasBeenRun] = useState('')  // '' | 'yes' | 'no'
-  const [v21ScriptId, setV21ScriptId] = useState('')
+  // null = no change, otherwise the value to write
+  const [type, setType] = useState(null)
+  const [status, setStatus] = useState(null)
+  const [creator, setCreator] = useState(null)
+  const [assignedEditorId, setAssignedEditorId] = useState(null)
+  const [offerSlug, setOfferSlug] = useState(null)
+  const [hasBeenRun, setHasBeenRun] = useState(null)   // null | true | false
   const [editors, setEditors] = useState([])
   const [offers, setOffers] = useState([])
+  const [knownCreators, setKnownCreators] = useState([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
@@ -1583,25 +1585,27 @@ function BulkEditModal({ ids, onClose, onSaved }) {
       .then(({ data }) => { if (mounted) setEditors(data || []) })
     supabase.from('offers').select('slug,name').eq('retired', false).order('slug')
       .then(({ data }) => { if (mounted) setOffers(data || []) })
+    supabase.from('lib_creative_library').select('creator')
+      .not('creator', 'is', null)
+      .eq('exclude_from_library', false)
+      .then(({ data }) => {
+        if (!mounted) return
+        const set = new Set((data || []).map(r => r.creator).filter(Boolean))
+        setKnownCreators(Array.from(set).sort())
+      })
     return () => { mounted = false }
   }, [])
 
-  // Build the patch — only fields with a value get written. The special
-  // string '__CLEAR__' (used for editor + offer) writes null.
-  const buildPatch = () => {
-    const patch = {}
-    if (type)     patch.type = type
-    if (status)   patch.status = status
-    if (v21ScriptId.trim()) patch.v21_script_id = v21ScriptId.trim()
-    if (assignedEditorId === '__CLEAR__') patch.assigned_editor_id = null
-    else if (assignedEditorId)            patch.assigned_editor_id = assignedEditorId
-    if (offerSlug === '__CLEAR__') patch.offer_slug = null
-    else if (offerSlug)            patch.offer_slug = offerSlug
-    if (hasBeenRun === 'yes')      patch.has_been_run = true
-    else if (hasBeenRun === 'no')  patch.has_been_run = false
-    return patch
-  }
-  const patch = buildPatch()
+  const patch = useMemo(() => {
+    const p = {}
+    if (type !== null)             p.type = type
+    if (status !== null)           p.status = status
+    if (creator !== null)          p.creator = creator
+    if (assignedEditorId !== null) p.assigned_editor_id = assignedEditorId
+    if (offerSlug !== null)        p.offer_slug = offerSlug
+    if (hasBeenRun !== null)       p.has_been_run = hasBeenRun
+    return p
+  }, [type, status, creator, assignedEditorId, offerSlug, hasBeenRun])
   const hasChanges = Object.keys(patch).length > 0
 
   const apply = async () => {
@@ -1616,11 +1620,17 @@ function BulkEditModal({ ids, onClose, onSaved }) {
     else onSaved?.()
   }
 
+  // Small "Keep existing" pill that appears when a field is null
+  const keepPill = { padding: '5px 9px', fontSize: 10, fontFamily: 'var(--mono)',
+    background: 'transparent', color: 'var(--ink-4)',
+    border: '1px dashed var(--rule)', cursor: 'pointer', letterSpacing: '0.06em',
+    textTransform: 'uppercase', fontWeight: 600, borderRadius: 2 }
+
   return (
     <Modal open={true} onClose={onClose} size="md"
-      eyebrow={`Bulk edit · ${ids.length} clip${ids.length === 1 ? '' : 's'}`}
+      eyebrow={`BULK EDIT · ${ids.length} CLIP${ids.length === 1 ? '' : 'S'}`}
       title="Reorganise selected creatives"
-      subtitle="Only fields you set below will be updated. Leave blank to keep existing values."
+      subtitle="Click a field's value to set it. Anything left as KEEP EXISTING stays unchanged."
       footer={
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
@@ -1636,48 +1646,132 @@ function BulkEditModal({ ids, onClose, onSaved }) {
           </button>
         </>
       }>
-      <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
+      <div style={{ padding: '20px 28px', display: 'grid', gap: 16 }}>
+        {/* TYPE — colored pill buttons + keep-existing */}
+        <Field label="Type">
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            <button onClick={() => setType(null)} type="button"
+              style={type === null ? { ...keepPill, color: 'var(--ink)', borderColor: 'var(--ink)', borderStyle: 'solid', background: 'var(--accent)' } : keepPill}>
+              Keep existing
+            </button>
+            {TYPES.map(t => {
+              const isOn = type === t
+              const tc = typeColor(t)
+              return (
+                <button key={t} type="button" onClick={() => setType(t)}
+                  style={{
+                    padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                    background: isOn ? tc.ink : tc.soft,
+                    color: isOn ? 'white' : tc.ink,
+                    border: '1px solid ' + (isOn ? tc.ink : tc.border),
+                    borderRadius: 2, cursor: 'pointer',
+                  }}>{t}</button>
+              )
+            })}
+          </div>
+        </Field>
+
+        {/* STATUS — Raw/Edited pill toggle */}
+        <Field label="Status">
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            <button onClick={() => setStatus(null)} type="button"
+              style={status === null ? { ...keepPill, color: 'var(--ink)', borderColor: 'var(--ink)', borderStyle: 'solid', background: 'var(--accent)' } : keepPill}>
+              Keep existing
+            </button>
+            {STATUSES.map(s => {
+              const isOn = status === s
+              const color = STATUS_COLOR[s] || 'var(--ink-3)'
+              return (
+                <button key={s} type="button" onClick={() => setStatus(s)}
+                  style={{
+                    padding: '5px 14px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                    background: isOn ? color : 'white',
+                    color: isOn ? 'white' : color,
+                    border: '1px solid ' + color,
+                    borderRadius: 2, cursor: 'pointer',
+                  }}>{STATUS_LABEL[s] || s}</button>
+              )
+            })}
+          </div>
+        </Field>
+
+        {/* RUN BEFORE — pill toggle */}
+        <Field label="Run before">
+          <div style={{ display: 'flex', gap: 5 }}>
+            <button onClick={() => setHasBeenRun(null)} type="button"
+              style={hasBeenRun === null ? { ...keepPill, color: 'var(--ink)', borderColor: 'var(--ink)', borderStyle: 'solid', background: 'var(--accent)' } : keepPill}>
+              Keep existing
+            </button>
+            <button onClick={() => setHasBeenRun(true)} type="button"
+              style={{
+                padding: '5px 14px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: hasBeenRun === true ? '#3e8a5e' : 'white',
+                color: hasBeenRun === true ? 'white' : '#3e8a5e',
+                border: '1px solid #3e8a5e',
+                borderRadius: 2, cursor: 'pointer',
+              }}>Yes — run before</button>
+            <button onClick={() => setHasBeenRun(false)} type="button"
+              style={{
+                padding: '5px 14px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: hasBeenRun === false ? 'var(--ink)' : 'white',
+                color: hasBeenRun === false ? 'white' : 'var(--ink-3)',
+                border: '1px solid var(--rule)',
+                borderRadius: 2, cursor: 'pointer',
+              }}>No — not yet</button>
+          </div>
+        </Field>
+
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
-          <Field label="Type">
-            <select value={type} onChange={e => setType(e.target.value)} style={selectStyle}>
-              <option value="">— Keep existing —</option>
-              {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </Field>
-          <Field label="Status">
-            <select value={status} onChange={e => setStatus(e.target.value)} style={selectStyle}>
-              <option value="">— Keep existing —</option>
-              {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
+          <Field label="Creator">
+            <select value={creator === null ? '__KEEP__' : creator || ''}
+              onChange={e => {
+                const v = e.target.value
+                if (v === '__KEEP__') setCreator(null)
+                else if (v === '__ADD__') {
+                  const next = prompt('New creator name')
+                  if (next?.trim()) setCreator(next.trim().toUpperCase())
+                } else setCreator(v)
+              }}
+              style={selectStyle}>
+              <option value="__KEEP__">— KEEP EXISTING —</option>
+              {knownCreators.map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="__ADD__">+ Add new…</option>
             </select>
           </Field>
           <Field label="Offer / niche">
-            <select value={offerSlug} onChange={e => setOfferSlug(e.target.value)} style={selectStyle}>
-              <option value="">— Keep existing —</option>
-              <option value="__CLEAR__">Clear offer</option>
+            <select value={offerSlug === null ? '__KEEP__' : offerSlug || '__CLEAR__'}
+              onChange={e => {
+                const v = e.target.value
+                if (v === '__KEEP__') setOfferSlug(null)
+                else if (v === '__CLEAR__') setOfferSlug(null)
+                else setOfferSlug(v)
+              }}
+              style={selectStyle}>
+              <option value="__KEEP__">— KEEP EXISTING —</option>
+              <option value="">Clear offer</option>
               {offers.map(o => <option key={o.slug} value={o.slug}>{o.name}</option>)}
             </select>
           </Field>
-          <Field label="Run before?">
-            <select value={hasBeenRun} onChange={e => setHasBeenRun(e.target.value)} style={selectStyle}>
-              <option value="">— Keep existing —</option>
-              <option value="yes">Yes — mark as run</option>
-              <option value="no">No — mark as not run</option>
-            </select>
-          </Field>
           <Field label="Assigned editor">
-            <select value={assignedEditorId} onChange={e => setAssignedEditorId(e.target.value)} style={selectStyle}>
-              <option value="">— Keep existing —</option>
-              <option value="__CLEAR__">Unassign (clear editor)</option>
+            <select value={assignedEditorId === null ? '__KEEP__' : assignedEditorId || ''}
+              onChange={e => {
+                const v = e.target.value
+                if (v === '__KEEP__') setAssignedEditorId(null)
+                else if (v === '') setAssignedEditorId(null)  // 'Unassign' -> null
+                else setAssignedEditorId(v)
+              }}
+              style={selectStyle}>
+              <option value="__KEEP__">— KEEP EXISTING —</option>
+              <option value="">Unassign (clear editor)</option>
               {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
             </select>
           </Field>
-          <Field label="v21 script (e.g. A.1, B.2)">
-            <input type="text" value={v21ScriptId}
-              onChange={e => setV21ScriptId(e.target.value)}
-              placeholder="Leave blank to keep existing"
-              style={inputStyle} />
-          </Field>
         </div>
+
         {hasChanges && (
           <div style={{
             padding: '10px 12px', background: 'var(--paper-2)',
