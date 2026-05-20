@@ -1639,7 +1639,10 @@ function CreatorPicker({ value, known, onChange }) {
 function TranscriptBox({ text }) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [query, setQuery] = useState('')
+  const [currentMatch, setCurrentMatch] = useState(0)
   const copiedTimerRef = useRef(null)
+  const containerRef = useRef(null)
   useEffect(() => () => { if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current) }, [])
   const onCopy = async () => {
     try {
@@ -1649,16 +1652,93 @@ function TranscriptBox({ text }) {
       copiedTimerRef.current = setTimeout(() => setCopied(false), 1500)
     } catch {}
   }
+
+  // Compute highlighted segments for the search term. Splits the
+  // transcript on case-insensitive matches of the query and wraps each
+  // hit in a <mark> with a data-match index so we can scroll the
+  // focused match into view via prev / next.
+  const { segments, matchCount } = useMemo(() => {
+    if (!query || !text) return { segments: [{ text: text || '', highlight: false }], matchCount: 0 }
+    const q = query.trim()
+    if (!q) return { segments: [{ text, highlight: false }], matchCount: 0 }
+    const lowerText = text.toLowerCase()
+    const lowerQ = q.toLowerCase()
+    const segs = []
+    let i = 0
+    let count = 0
+    while (i < text.length) {
+      const idx = lowerText.indexOf(lowerQ, i)
+      if (idx < 0) { segs.push({ text: text.slice(i), highlight: false }); break }
+      if (idx > i) segs.push({ text: text.slice(i, idx), highlight: false })
+      segs.push({ text: text.slice(idx, idx + q.length), highlight: true, matchIdx: count })
+      count += 1
+      i = idx + q.length
+    }
+    return { segments: segs, matchCount: count }
+  }, [text, query])
+
+  useEffect(() => {
+    if (currentMatch >= matchCount) setCurrentMatch(Math.max(0, matchCount - 1))
+  }, [matchCount, currentMatch])
+
+  // Scroll the focused match into the visible portion of the scroller
+  useEffect(() => {
+    if (!query || matchCount === 0 || !containerRef.current) return
+    const target = containerRef.current.querySelector(`[data-match="${currentMatch}"]`)
+    if (target && target.scrollIntoView) {
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [currentMatch, query, matchCount])
+
   return (
     <div>
       <div style={{
-        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-        marginBottom: 5,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 5, gap: 12, flexWrap: 'wrap',
       }}>
         <div style={{
           fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
           textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
         }}>Transcript</div>
+        {/* Inline find-in-transcript — Ctrl+F-style search that highlights
+            matches inside the current clip and provides prev/next jumpers. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 180, maxWidth: 360 }}>
+          <input type="text" value={query}
+            onChange={e => { setQuery(e.target.value); setCurrentMatch(0) }}
+            placeholder="Find in transcript…"
+            style={{
+              flex: 1,
+              padding: '4px 8px',
+              border: '1px solid var(--rule)', borderRadius: 2,
+              background: 'white',
+              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)',
+              outline: 'none',
+            }} />
+          {query && (
+            <>
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
+                fontVariantNumeric: 'tabular-nums', minWidth: 40, textAlign: 'right',
+              }}>
+                {matchCount > 0 ? `${currentMatch + 1}/${matchCount}` : '0/0'}
+              </span>
+              <button onClick={() => setCurrentMatch(m => matchCount === 0 ? 0 : (m - 1 + matchCount) % matchCount)}
+                disabled={matchCount === 0} title="Previous match"
+                style={{
+                  padding: '2px 7px', fontFamily: 'var(--mono)', fontSize: 12,
+                  background: 'white', border: '1px solid var(--rule)', borderRadius: 2,
+                  cursor: matchCount === 0 ? 'default' : 'pointer', color: 'var(--ink-3)',
+                }}>‹</button>
+              <button onClick={() => setCurrentMatch(m => matchCount === 0 ? 0 : (m + 1) % matchCount)}
+                disabled={matchCount === 0} title="Next match"
+                style={{
+                  padding: '2px 7px', fontFamily: 'var(--mono)', fontSize: 12,
+                  background: 'white', border: '1px solid var(--rule)', borderRadius: 2,
+                  cursor: matchCount === 0 ? 'default' : 'pointer', color: 'var(--ink-3)',
+                }}>›</button>
+            </>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
           <button onClick={onCopy} type="button"
             style={{
@@ -1677,11 +1757,7 @@ function TranscriptBox({ text }) {
             }}>{expanded ? 'Collapse' : 'Show full'}</button>
         </div>
       </div>
-      <div style={{
-        // Default shows ~420px (most short clips fit entirely; long ones
-        // expose a scrollbar inside the box). "Show full" un-caps the
-        // height so the operator can scan the whole script without
-        // wrestling a nested scroll surface inside the modal.
+      <div ref={containerRef} style={{
         maxHeight: expanded ? 'none' : 420,
         overflowY: expanded ? 'visible' : 'auto',
         padding: 14,
@@ -1689,7 +1765,19 @@ function TranscriptBox({ text }) {
         fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
         color: 'var(--ink)',
         whiteSpace: 'pre-wrap',
-      }}>{text || <em style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>Transcript not generated yet — re-run transcription from the source clip's detail modal.</em>}</div>
+      }}>
+        {text
+          ? segments.map((s, i) => s.highlight
+              ? <mark key={i} data-match={s.matchIdx} style={{
+                  background: s.matchIdx === currentMatch ? '#f4e14a' : 'rgba(244,225,74,0.45)',
+                  color: 'var(--ink)',
+                  padding: '0 2px', borderRadius: 2,
+                  boxShadow: s.matchIdx === currentMatch ? '0 0 0 2px var(--ink)' : 'none',
+                }}>{s.text}</mark>
+              : <span key={i}>{s.text}</span>
+            )
+          : <em style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>Transcript not generated yet — re-run transcription from the source clip's detail modal.</em>}
+      </div>
     </div>
   )
 }
