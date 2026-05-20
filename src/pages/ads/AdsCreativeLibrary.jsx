@@ -1672,7 +1672,7 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
   const open = !!popover
   const handleToggle = () => {
     if (popover) setPopover(null)
-    else if (ref.current) setPopover({ rect: ref.current.getBoundingClientRect() })
+    else if (ref.current) setPopover({ rect: rectToObj(ref.current.getBoundingClientRect()) })
   }
   const closePopover = () => setPopover(null)
   useEffect(() => {
@@ -1684,7 +1684,7 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
     }
     const onKey = (e) => { if (e.key === 'Escape') setPopover(null) }
     const onScroll = () => {
-      if (ref.current) setPopover({ rect: ref.current.getBoundingClientRect() })
+      if (ref.current) setPopover({ rect: rectToObj(ref.current.getBoundingClientRect()) })
     }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
@@ -2626,6 +2626,23 @@ const chipLabelStyle = {
    checkboxes. selected is a Set of currently-chosen values; onChange
    receives a new Set. Button label shows count when 2+ are selected.
    Click outside or Esc to close. */
+// DOMRect has its top/left/bottom/right/width/height as getters on the
+// PROTOTYPE, not own enumerable properties. That means `{ ...domRect }`
+// silently drops every positioning field. The result of spread is just
+// `{}`. This caused FilterDropdown popovers to render with NaN coords
+// (top/left undefined → arithmetic produces NaN) and disappear — the
+// "▲ arrow but no panel" bug Ben kept hitting.
+//
+// rectToObj copies the values into a plain object that can be safely
+// spread / extended.
+function rectToObj(r) {
+  if (!r) return null
+  return {
+    top: r.top, left: r.left, bottom: r.bottom, right: r.right,
+    width: r.width, height: r.height,
+  }
+}
+
 function FilterDropdown({ label, selected, options, allCount, onChange }) {
   // Single combined state: null = closed, { rect } = open with captured
   // trigger rect. Earlier two-state versions had a subtle race where
@@ -2642,7 +2659,7 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
     if (popover) {
       setPopover(null)
     } else if (ref.current) {
-      setPopover({ rect: ref.current.getBoundingClientRect() })
+      setPopover({ rect: rectToObj(ref.current.getBoundingClientRect()) })
     }
   }
   useEffect(() => {
@@ -2654,7 +2671,7 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
     }
     const onKey = (e) => { if (e.key === 'Escape') setPopover(null) }
     const onScroll = () => {
-      if (ref.current) setPopover({ rect: ref.current.getBoundingClientRect() })
+      if (ref.current) setPopover({ rect: rectToObj(ref.current.getBoundingClientRect()) })
     }
     document.addEventListener('mousedown', onDocClick)
     document.addEventListener('keydown', onKey)
@@ -4488,7 +4505,7 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
   const open = !!popover
   const handleToggle = () => {
     if (popover) setPopover(null)
-    else if (ref.current) setPopover({ rect: ref.current.getBoundingClientRect() })
+    else if (ref.current) setPopover({ rect: rectToObj(ref.current.getBoundingClientRect()) })
   }
   const closePopover = () => setPopover(null)
   useEffect(() => {
@@ -4500,7 +4517,7 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
     }
     const onKey = (e) => { if (e.key === 'Escape') setPopover(null) }
     const onScroll = () => {
-      if (ref.current) setPopover({ rect: ref.current.getBoundingClientRect() })
+      if (ref.current) setPopover({ rect: rectToObj(ref.current.getBoundingClientRect()) })
     }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
