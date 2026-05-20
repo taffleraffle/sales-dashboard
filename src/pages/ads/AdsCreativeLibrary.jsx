@@ -3619,9 +3619,11 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       {/* Filter bar — uses the same FilterDropdown component as the
           Library tab so the UI language matches. Two compact buttons
           (Editors, Status) open to multi-select dropdowns instead of
-          eating two horizontal strips of chips. Hidden in editor-view
-          since the editor is already locked to their own tasks. */}
-      {!scope.isEditorView && (
+          eating two horizontal strips of chips.
+          Hidden only on per-editor links (where the editor is locked to
+          their own tasks). Team-wide links and admins both get the
+          full filter — that's the whole point of the team view. */}
+      {(!scope.isEditorView || scope.isTeamWide) && (
         <div style={{
           display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
           padding: '10px 14px', background: 'var(--paper)',
