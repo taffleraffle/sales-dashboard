@@ -18,7 +18,7 @@ import Modal from '../../components/editorial/Modal'
     - lib_editing_queue (view)
 */
 
-const TYPES = ['Hook', 'Body', 'Full Video', 'Joined', 'Testimony']
+const TYPES = ['Hook', 'Body', 'Full Video', 'Joined', 'Testimony', 'Retargeting']
 const STATUSES = ['raw', 'edited']
 const STATUS_LABEL = {
   raw: 'Raw',
@@ -51,6 +51,8 @@ const TYPE_COLOR = {
   // Joined = a merged hook+body (post-edit composite)
   'Joined':     { ink: '#b86a0c', soft: 'rgba(184,106,12,0.10)', border: 'rgba(184,106,12,0.35)' },
   'Testimony':  { ink: '#7a3aa8', soft: 'rgba(122,58,168,0.10)', border: 'rgba(122,58,168,0.35)' },
+  // Retargeting = a clip aimed at warm/lukewarm audiences (e.g. HAMMER recall content)
+  'Retargeting':{ ink: '#c44b6e', soft: 'rgba(196,75,110,0.10)', border: 'rgba(196,75,110,0.35)' },
 }
 function typeColor(t) {
   return TYPE_COLOR[t] || { ink: 'var(--ink-3)', soft: 'var(--paper-2)', border: 'var(--rule)' }
@@ -336,7 +338,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // Hooks/Bodies/Joined/Testimony as separate sections
   const grouped = useMemo(() => {
     if (typeFilter) return [{ type: typeFilter, rows: filtered }]
-    const order = ['Hook', 'Body', 'Full Video', 'Joined', 'Testimony']
+    const order = ['Hook', 'Body', 'Full Video', 'Joined', 'Testimony', 'Retargeting']
     return order
       .map(t => ({ type: t, rows: filtered.filter(r => r.type === t) }))
       .filter(g => g.rows.length > 0)
