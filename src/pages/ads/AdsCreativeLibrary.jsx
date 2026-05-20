@@ -3326,11 +3326,19 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
 
   // Compatibility wrapper — existing callers (Editor Lanes view, etc.)
   // still call moveTaskToEditor(task, editorId).
-  const moveTaskToEditor = useCallback((task, nextEditorId) => {
-    if (!task) return
-    if ((task.editor_id || null) === (nextEditorId || null)) return
-    return updateTaskAssignment(task, { editorId: nextEditorId || null })
-  }, [updateTaskAssignment])
+  //
+  // The caller (EditorLane) may pass a stub `{task_id, editor_id: null}`
+  // when the task being dragged isn't in the destination lane's scoped
+  // task list. Resolve to the full task from our complete tasks state
+  // before checking the no-op guard, otherwise drag-to-Unassigned from
+  // a populated lane is silently dropped (stub.editor_id === null ===
+  // target null).
+  const moveTaskToEditor = useCallback((taskOrStub, nextEditorId) => {
+    if (!taskOrStub?.task_id) return
+    const fullTask = tasks.find(t => t.task_id === taskOrStub.task_id) || taskOrStub
+    if ((fullTask.editor_id || null) === (nextEditorId || null)) return
+    return updateTaskAssignment(fullTask, { editorId: nextEditorId || null })
+  }, [updateTaskAssignment, tasks])
 
   if (loading) return <LoadingState />
   if (err) return <ErrorBanner msg={err} />
@@ -5170,7 +5178,10 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
     const dropXInLane = e.clientX - laneLeftPx
     const newDayIdx = Math.max(0, Math.min(totalDays - 1, Math.floor(dropXInLane / dayWidth)))
     const newStart = dayLabel(newDayIdx)
-    const newStartISO = newStart.toISOString()
+    // Slice to YYYY-MM-DD — assigned_at is a DATE column; sending a full
+    // UTC ISO string can drift one day backward when the operator is in a
+    // UTC-positive timezone (e.g. NZ evening drags).
+    const newStartISO = newStart.toISOString().slice(0, 10)
 
     // Preserve duration: if task had assigned_at + due_date, shift due_date
     // by the same delta. Otherwise just set assigned_at and leave due alone.
