@@ -78,16 +78,20 @@ const EDITOR_COLORS = [
   '#3e7eba', '#e0853e', '#5fa55a', '#a05fa5', '#c44b6e',
   '#3eb2a8', '#b8893e', '#7e3eb8', '#5b8a3e', '#b83e3e',
 ]
-function editorColor(slugOrEditor) {
-  // Accept either a slug string OR an editor object. When given an editor
-  // object with a `color` set, use that — lets operators override the
-  // hash-derived color via the Manage Editors UI. Falls back to slug-hash
-  // otherwise (stable across renders for the same slug).
-  if (slugOrEditor && typeof slugOrEditor === 'object') {
-    if (slugOrEditor.color) return slugOrEditor.color
-    return editorColor(slugOrEditor.slug || '')
+function editorColor(slugOrEditorOrTask) {
+  // Accept any of:
+  //   - a slug string ('ahmed') → hash fallback
+  //   - an editor row { slug, color, ... } from lib_creative_editors
+  //   - a task row { editor_slug, editor_color, ... } from lib_editing_queue
+  // The override `color` (or `editor_color` from the view) always wins so
+  // the operator's manual color choice from EditEditorModal is honoured
+  // everywhere — chips, timeline bars, lane labels, queue cards, list dots.
+  if (slugOrEditorOrTask && typeof slugOrEditorOrTask === 'object') {
+    if (slugOrEditorOrTask.color) return slugOrEditorOrTask.color
+    if (slugOrEditorOrTask.editor_color) return slugOrEditorOrTask.editor_color
+    return editorColor(slugOrEditorOrTask.slug || slugOrEditorOrTask.editor_slug || '')
   }
-  const slug = slugOrEditor
+  const slug = slugOrEditorOrTask
   if (!slug) return '#999'
   let h = 0
   for (let i = 0; i < slug.length; i++) h = ((h << 5) - h + slug.charCodeAt(i)) | 0
@@ -3420,6 +3424,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
             <EditorLane key={slug}
               editor={editor_name}
               editorId={editor_id}
+              editorRecord={editors.find(e => e.id === editor_id)}
               tasks={t}
               onEdit={setEditingTask}
               onMoveEditor={moveTaskToEditor} />
@@ -3444,7 +3449,16 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           editors={editors}
           tasks={tasks}
           onClose={() => setManageEditorsOpen(false)}
-          onChanged={load}
+          onEditorAdded={(e) => setEditors(curr => [...curr, e].sort((a, b) => (a.name || '').localeCompare(b.name || '')))}
+          onEditorPatched={(id, patch) => setEditors(curr => curr.map(e => e.id === id ? { ...e, ...patch } : e))}
+          onEditorsRemoved={(ids) => {
+            const idSet = new Set(ids)
+            setEditors(curr => curr.filter(e => !idSet.has(e.id)))
+            // Patch any tasks that were assigned to deleted editors → unassign
+            setTasks(curr => curr.map(t => idSet.has(t.editor_id)
+              ? { ...t, editor_id: null, editor_name: null, editor_slug: null, editor_color: null }
+              : t))
+          }}
           onOpenEditor={(e) => { setManageEditorsOpen(false); setEditingEditor(e) }}
         />
       )}
@@ -3476,8 +3490,25 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         <EditEditorModal
           editor={editingEditor}
           onClose={() => setEditingEditor(null)}
-          onSaved={() => { setEditingEditor(null); load() }}
-          onDeleted={() => { setEditingEditor(null); load() }} />
+          onSavedPatch={(patch) => {
+            setEditors(curr => curr.map(e => e.id === editingEditor.id ? { ...e, ...patch } : e))
+            // Propagate name/color/slug changes to tasks that reference this editor
+            setTasks(curr => curr.map(t => t.editor_id === editingEditor.id
+              ? {
+                  ...t,
+                  ...(patch.name  !== undefined ? { editor_name:  patch.name  } : {}),
+                  ...(patch.color !== undefined ? { editor_color: patch.color } : {}),
+                }
+              : t))
+            setEditingEditor(null)
+          }}
+          onDeleted={(id) => {
+            setEditors(curr => curr.filter(e => e.id !== id))
+            setTasks(curr => curr.map(t => t.editor_id === id
+              ? { ...t, editor_id: null, editor_name: null, editor_slug: null, editor_color: null }
+              : t))
+            setEditingEditor(null)
+          }} />
       )}
     </>
   )
@@ -3501,18 +3532,27 @@ function EditorSelector({ editors, selected, onToggle, onClearAll, onEditEditor,
       border: '1px solid var(--rule)', marginBottom: 14,
     }}>
       <span style={chipLabelStyle}>Show tasks for</span>
-      <button onClick={onClearAll} style={{
-        padding: '5px 11px',
-        fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
-        letterSpacing: '0.04em', textTransform: 'uppercase',
-        background: selected.size === 0 ? 'var(--ink)' : 'white',
-        color: selected.size === 0 ? 'var(--paper)' : 'var(--ink-2)',
-        border: '1px solid ' + (selected.size === 0 ? 'var(--ink)' : 'var(--rule)'),
-        borderRadius: 2, cursor: 'pointer',
-      }}>All editors</button>
+      {/* When selection is empty we're already in "all" mode — render the
+          button as a passive indicator (no cursor, no-op click) so the
+          operator doesn't get confused clicking it and seeing no change.
+          When filtered, it's an active "Reset to all" button. */}
+      <button
+        onClick={selected.size === 0 ? undefined : onClearAll}
+        disabled={selected.size === 0}
+        title={selected.size === 0 ? 'Currently showing all editors' : 'Reset to all editors'}
+        style={{
+          padding: '5px 11px',
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+          letterSpacing: '0.04em', textTransform: 'uppercase',
+          background: selected.size === 0 ? 'var(--ink)' : 'white',
+          color: selected.size === 0 ? 'var(--paper)' : 'var(--ink-2)',
+          border: '1px solid ' + (selected.size === 0 ? 'var(--ink)' : 'var(--rule)'),
+          borderRadius: 2,
+          cursor: selected.size === 0 ? 'default' : 'pointer',
+        }}>All editors</button>
       {sortedEditors.map(e => {
         const isSelected = selected.has(e.id)
-        const color = editorColor(e.slug)
+        const color = editorColor(e)
         const count = taskCountByEditorId[e.id] || 0
         return (
           <span key={e.id} style={{
@@ -3552,19 +3592,49 @@ function EditorSelector({ editors, selected, onToggle, onClearAll, onEditEditor,
 }
 
 /* QueueListView — matrix-style task list with sortable columns + inline edit
-   on click. Mirrors the Component Edits sheet pattern. */
+   on click. Mirrors the Component Edits sheet pattern.
+   Tasks are pre-sorted by priority (P0/P1/P2/P3) and then by due date,
+   so the leftmost numeric rank reflects "do this first". */
+const PRIORITY_RANK = { 'P0 - Critical': 0, 'P1 - High': 1, 'P2 - Medium': 2, 'P3 - Low': 3 }
+function priorityOrder(p) {
+  if (p && Object.prototype.hasOwnProperty.call(PRIORITY_RANK, p)) return PRIORITY_RANK[p]
+  return 99
+}
 function QueueListView({ tasks, editors, onEdit }) {
-  if (!tasks.length) return null
+  // Sort by priority, then due date ascending (overdue / sooner first),
+  // then by assigned_at as a tiebreaker. Done tasks always sink to the bottom.
+  const ordered = useMemo(() => {
+    const open = tasks.filter(t => t.status !== 'done')
+    const done = tasks.filter(t => t.status === 'done')
+    const byPriority = (a, b) => {
+      const pa = priorityOrder(a.priority)
+      const pb = priorityOrder(b.priority)
+      if (pa !== pb) return pa - pb
+      const da = a.due_date || '9999-12-31'
+      const db = b.due_date || '9999-12-31'
+      if (da !== db) return da < db ? -1 : 1
+      const aa = a.assigned_at || '9999-12-31'
+      const ab = b.assigned_at || '9999-12-31'
+      return aa < ab ? -1 : aa > ab ? 1 : 0
+    }
+    open.sort(byPriority)
+    done.sort(byPriority)
+    return [...open, ...done]
+  }, [tasks])
+
+  if (!ordered.length) return null
+  // 7-col grid: rank · thumb · creative · editor · status · task-type · due · priority · source
+  const GRID = '40px 56px minmax(220px, 1.6fr) 130px 110px 110px 120px 90px 50px'
   return (
     <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: '56px minmax(220px, 1.6fr) 130px 110px 110px 120px 90px 50px',
+        display: 'grid', gridTemplateColumns: GRID,
         padding: '10px 14px', gap: 12,
         background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
         letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
       }}>
+        <div>#</div>
         <div></div>
         <div>Creative</div>
         <div>Editor</div>
@@ -3574,20 +3644,30 @@ function QueueListView({ tasks, editors, onEdit }) {
         <div>Priority</div>
         <div style={{ textAlign: 'right' }}>Source</div>
       </div>
-      {tasks.map((t, i) => {
-        const color = editorColor(t.editor_slug || 'unassigned')
+      {ordered.map((t, i) => {
+        const color = editorColor(t)
+        const isDone = t.status === 'done'
+        // Rank only for open tasks. Done sinks to the bottom and gets a "—".
+        const openIdx = i < ordered.length - tasks.filter(x => x.status === 'done').length ? i + 1 : null
         return (
           <div key={t.task_id}
             onClick={() => onEdit(t)}
             style={{
-              display: 'grid',
-              gridTemplateColumns: '56px minmax(220px, 1.6fr) 130px 110px 110px 120px 90px 50px',
+              display: 'grid', gridTemplateColumns: GRID,
               padding: '10px 14px', gap: 12, alignItems: 'center',
-              borderBottom: i === tasks.length - 1 ? 'none' : '1px solid var(--rule)',
+              borderBottom: i === ordered.length - 1 ? 'none' : '1px solid var(--rule)',
               cursor: 'pointer', transition: 'background 0.12s',
+              opacity: isDone ? 0.55 : 1,
             }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
+              color: openIdx === 1 ? 'var(--accent-ink, #b8920c)'
+                   : openIdx === 2 ? 'var(--ink-2)'
+                   : openIdx === 3 ? 'var(--ink-3)'
+                   : 'var(--ink-4)',
+            }}>{openIdx ? `#${openIdx}` : '—'}</div>
             <div style={{
               width: 50, height: 32, overflow: 'hidden',
               background: '#000', border: '1px solid var(--rule)',
@@ -3599,10 +3679,15 @@ function QueueListView({ tasks, editors, onEdit }) {
               <div style={{
                 fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 500, color: 'var(--ink)',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>{t.creative_name}</div>
+              }}>{t.creative_canonical_name || t.creative_name}</div>
               <div style={{
                 fontFamily: 'var(--sans)', fontSize: 10.5, color: 'var(--ink-4)', marginTop: 2,
-              }}>{t.creative_type}{t.creative_creator ? ' · ' + t.creative_creator : ''}{t.v21_script_id ? ' · ' + t.v21_script_id : ''}</div>
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {t.creative_canonical_name
+                  ? t.creative_name
+                  : `${t.creative_type || ''}${t.creative_creator ? ' · ' + t.creative_creator : ''}${t.v21_script_id ? ' · ' + t.v21_script_id : ''}`}
+              </div>
             </div>
             <div style={{
               display: 'inline-flex', alignItems: 'center', gap: 7,
@@ -3954,7 +4039,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
 
 /* Dedicated Manage Editors modal — centralized roster view + add new +
    row-level edit click-through. Replaces the inline ✎ chip pattern. */
-function ManageEditorsModal({ editors, tasks, onClose, onChanged, onOpenEditor }) {
+function ManageEditorsModal({ editors, tasks, onClose, onEditorAdded, onEditorPatched, onEditorsRemoved, onOpenEditor }) {
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -3971,11 +4056,12 @@ function ManageEditorsModal({ editors, tasks, onClose, onChanged, onOpenEditor }
   const clearSel = () => setSelectedIds(new Set())
   const bulkDelete = async () => {
     setBusy(true); setErr(null)
+    const ids = Array.from(selectedIds)
     const { error } = await supabase.from('lib_creative_editors')
-      .delete().in('id', Array.from(selectedIds))
+      .delete().in('id', ids)
     setBusy(false)
     if (error) setErr(error.message)
-    else { setSelectedIds(new Set()); setConfirmBulkDelete(false); onChanged?.() }
+    else { setSelectedIds(new Set()); setConfirmBulkDelete(false); onEditorsRemoved?.(ids) }
   }
 
   // Task counts per editor (active + overall)
@@ -3994,20 +4080,24 @@ function ManageEditorsModal({ editors, tasks, onClose, onChanged, onOpenEditor }
     if (!newName.trim()) return
     setBusy(true); setErr(null)
     const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-    const { error } = await supabase.from('lib_creative_editors')
+    const { data, error } = await supabase.from('lib_creative_editors')
       .insert({ name: newName.trim(), slug })
+      .select()
+      .single()
     setBusy(false)
     if (error) setErr(error.message)
     else {
       setNewName('')
-      onChanged?.()
+      if (data) onEditorAdded?.(data)
     }
   }
 
   const toggleActive = async (e) => {
-    await supabase.from('lib_creative_editors')
-      .update({ active: !e.active }).eq('id', e.id)
-    onChanged?.()
+    const next = !e.active
+    const { error } = await supabase.from('lib_creative_editors')
+      .update({ active: next }).eq('id', e.id)
+    if (error) setErr(error.message)
+    else onEditorPatched?.(e.id, { active: next })
   }
 
   return (
@@ -4382,7 +4472,7 @@ function ShareLinksModal({ editors, onClose }) {
           <div style={{ display: 'grid', gap: 10 }}>
             {editors.map(e => {
               const link = links[e.id]
-              const color = editorColor(e.slug)
+              const color = editorColor(e)
               return (
                 <div key={e.id} style={{
                   padding: '12px 14px', background: 'var(--paper)',
@@ -4453,7 +4543,7 @@ function ShareLinksModal({ editors, onClose }) {
   )
 }
 
-function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
+function EditEditorModal({ editor, onClose, onSavedPatch, onDeleted }) {
   const [name, setName] = useState(editor.name || '')
   const [active, setActive] = useState(editor.active !== false)
   const [notes, setNotes] = useState(editor.notes || '')
@@ -4522,12 +4612,12 @@ function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
 
   const save = async () => {
     setBusy(true); setErr(null)
+    const patch = { name: name.trim(), active, notes: notes || null, color: color || null }
     const { error } = await supabase.from('lib_creative_editors')
-      .update({ name: name.trim(), active, notes: notes || null, color: color || null })
-      .eq('id', editor.id)
+      .update(patch).eq('id', editor.id)
     setBusy(false)
     if (error) setErr(error.message)
-    else onSaved?.()
+    else onSavedPatch?.(patch)  // parent merges in place; no full refetch
   }
   const deactivate = async () => {
     setBusy(true); setErr(null)
@@ -4535,7 +4625,7 @@ function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
       .update({ active: false }).eq('id', editor.id)
     setBusy(false)
     if (error) setErr(error.message)
-    else onDeleted?.()
+    else onSavedPatch?.({ active: false })  // soft-deactivate, keep editor in roster
   }
   // Hard delete — removes the row entirely. Editing tasks that referenced
   // this editor get editor_id=NULL via ON DELETE SET NULL (per migration 075).
@@ -4545,7 +4635,7 @@ function EditEditorModal({ editor, onClose, onSaved, onDeleted }) {
       .delete().eq('id', editor.id)
     setBusy(false)
     if (error) setErr(error.message)
-    else onDeleted?.()
+    else onDeleted?.(editor.id)
   }
   return (
     <Modal open={true} onClose={busy ? () => {} : onClose} size="sm"
@@ -5345,7 +5435,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
         {/* Rows */}
         {editorRows.map(editor => {
           const editorTasks = tasksByEditor.get(editor.slug) || []
-          const color = editorColor(editor.slug)
+          const color = editorColor(editor)
           const { placed, rowCount } = packTasks(editorTasks)
           const BAR_HEIGHT = 22
           const ROW_GAP = 6
@@ -5503,6 +5593,11 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                   const w = Math.max(dayWidth - 2, xForDate(new Date(endTs).toISOString()) - x + dayWidth - 2)
                   const y = PADDING + rowIdx * (BAR_HEIGHT + ROW_GAP)
                   const stripe = t.is_overdue ? '#b53e3e' : (STATUS_STRIPE[t.status] || '#999')
+                  // Show canonical_name (e.g. BODY-OSO-J.3) when present
+                  // — that's the human-curated label. Fall back to the
+                  // raw filename so unnamed clips still render.
+                  const label = t.creative_canonical_name || t.creative_name
+                  const thumbVisible = !!t.thumbnail_url && w >= 80
                   return (
                     <div key={t.task_id}
                       data-task-bar="true"
@@ -5510,14 +5605,14 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                       draggable={!!(onMoveEditor || onUpdateAssignment)}
                       onDragStart={(e) => handleTaskDragStart(e, t)}
                       onDragEnd={handleTaskDragEnd}
-                      title={`${t.creative_name} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}${(onMoveEditor || onUpdateAssignment) ? ' · drag horizontally to reschedule, or to another row to reassign' : ''}`}
+                      title={`${label}${t.creative_canonical_name ? ' · ' + t.creative_name : ''} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}${(onMoveEditor || onUpdateAssignment) ? ' · drag horizontally to reschedule, or to another row to reassign' : ''}`}
                       style={{
                         position: 'absolute', left: x + 2, top: y,
                         width: w, height: BAR_HEIGHT,
                         background: color,
                         borderLeft: `4px solid ${stripe}`,
                         borderRadius: 2,
-                        paddingLeft: 8, paddingRight: 6,
+                        paddingLeft: thumbVisible ? 4 : 8, paddingRight: 6,
                         display: 'flex', alignItems: 'center', gap: 6,
                         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
                         color: 'white',
@@ -5526,9 +5621,20 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                         zIndex: 1,
                         boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
                       }}>
+                      {thumbVisible && (
+                        <img src={t.thumbnail_url} alt="" loading="lazy"
+                          style={{
+                            width: Math.min(28, BAR_HEIGHT - 8),
+                            height: BAR_HEIGHT - 8,
+                            objectFit: 'cover',
+                            borderRadius: 2,
+                            flexShrink: 0,
+                            background: 'rgba(0,0,0,0.3)',
+                          }} />
+                      )}
                       <span style={{
                         flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>{t.creative_name}</span>
+                      }}>{label}</span>
                       {t.is_overdue && (
                         <span style={{
                           fontSize: 9, padding: '1px 4px',
@@ -5636,9 +5742,13 @@ function KanbanView({ tasks, onEdit, onMove }) {
   )
 }
 
-function EditorLane({ editor, editorId, tasks, onEdit, onMoveEditor }) {
+function EditorLane({ editor, editorId, editorRecord, tasks, onEdit, onMoveEditor }) {
   const [dragOver, setDragOver] = useState(false)
-  const eColor = editorId ? editorColor(editor?.toLowerCase().replace(/\s+/g, '-') || '') : '#999'
+  // Prefer the operator's saved color override (editorRecord.color),
+  // fall back to slug-hash from the editor name when no record is wired.
+  const eColor = editorId
+    ? (editorRecord?.color || editorColor(editor?.toLowerCase().replace(/\s+/g, '-') || ''))
+    : '#999'
 
   // Cache the task lookup once per render via a tasks-map on the parent
   // would be cleaner, but parsing the drag payload here is fine — it's
@@ -5732,7 +5842,7 @@ function QueueCard({ task, onClick, draggable, onDragStart }) {
     blocked: '#b53e3e',
   }[task.status] || 'var(--ink-3)'
 
-  const eColor = task.editor_slug ? editorColor(task.editor_slug) : null
+  const eColor = task.editor_slug ? editorColor(task) : null
 
   return (
     <div onClick={onClick}
@@ -5757,9 +5867,15 @@ function QueueCard({ task, onClick, draggable, onDragStart }) {
         }} />
       )}
       <div style={{
-        fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
+        fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 500,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>{task.creative_name}</div>
+      }}>{task.creative_canonical_name || task.creative_name}</div>
+      {task.creative_canonical_name && (
+        <div style={{
+          fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-4)', marginTop: 1,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{task.creative_name}</div>
+      )}
       {/* Editor pill — surfaces who is working on this card */}
       <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
         {eColor ? (
