@@ -1875,16 +1875,55 @@ function CreativeDetailModal({ row, scope = ADMIN_SCOPE, onClose, onSaved, onDel
             style={inputStyle} />
         </Field>
 
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(3, 1fr)' }}>
-          <Field label="Type">
-            <select value={edit.type || ''} onChange={e => setEdit({ ...edit, type: e.target.value })} style={selectStyle}>
-              {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </Field>
+        {/* Type — pill button group, color-coded per type. Much more
+            scannable than a native select. */}
+        <Field label="Type">
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {TYPES.map(t => {
+              const isOn = edit.type === t
+              const tc = typeColor(t)
+              return (
+                <button key={t} type="button"
+                  onClick={() => setEdit({ ...edit, type: t })}
+                  style={{
+                    padding: '7px 12px', fontFamily: 'var(--mono)', fontSize: 11,
+                    fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                    background: isOn ? tc.ink : tc.soft,
+                    color: isOn ? 'white' : tc.ink,
+                    border: '1px solid ' + (isOn ? tc.ink : tc.border),
+                    borderRadius: 2, cursor: 'pointer',
+                    transition: 'all 0.1s',
+                  }}>
+                  {t}
+                </button>
+              )
+            })}
+          </div>
+        </Field>
+
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
           <Field label="Status">
-            <select value={edit.status || 'raw'} onChange={e => setEdit({ ...edit, status: e.target.value })} style={selectStyle}>
-              {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] || s}</option>)}
-            </select>
+            <div style={{ display: 'flex', gap: 5 }}>
+              {STATUSES.map(s => {
+                const isOn = edit.status === s
+                const color = STATUS_COLOR[s] || 'var(--ink-3)'
+                return (
+                  <button key={s} type="button"
+                    onClick={() => setEdit({ ...edit, status: s })}
+                    style={{
+                      flex: 1, padding: '8px 14px',
+                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                      background: isOn ? color : 'white',
+                      color: isOn ? 'white' : color,
+                      border: '1px solid ' + color,
+                      cursor: 'pointer', borderRadius: 2,
+                    }}>
+                    {STATUS_LABEL[s] || s}
+                  </button>
+                )
+              })}
+            </div>
           </Field>
           <Field label="Run before?">
             <button type="button"
