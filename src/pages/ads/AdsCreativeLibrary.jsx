@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Icon } from '../../components/editorial/atoms'
 import Modal from '../../components/editorial/Modal'
@@ -1518,7 +1519,7 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
         )}
         <span style={{ fontSize: 9, opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && coords && (
+      {open && coords && createPortal(
         <div ref={popRef} style={{
           position: 'fixed',
           top: coords.top,
@@ -1560,7 +1561,8 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
               </button>
             )
           })}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
@@ -2309,7 +2311,7 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
         const synthRect = { ...rect, width: popoverWidth }
         const coords = popoverCoords(synthRect, 320, 4)
         if (!coords) return null
-        return (
+        return createPortal(
         <div ref={popRef} style={{
           position: 'fixed',
           top: coords.top,
@@ -2395,7 +2397,8 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
               </button>
             )
           })}
-        </div>
+        </div>,
+        document.body
         )
       })()}
     </div>
@@ -3310,6 +3313,8 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     if (scope.isEditorView && scope.editorId) return new Set([scope.editorId])
     return new Set()
   })
+  // Status multi-select for filtering — empty = show all.
+  const [selectedStatuses, setSelectedStatuses] = useState(() => new Set())
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
@@ -3325,11 +3330,18 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
 
   useEffect(() => { load() }, [load])
 
-  // Filter tasks by selected editors (when set is empty, show all)
+  // Filter tasks by selected editors + selected statuses. Empty sets =
+  // no filter on that dimension. Both filters are AND-combined.
   const filteredTasks = useMemo(() => {
-    if (selectedEditors.size === 0) return tasks
-    return tasks.filter(t => selectedEditors.has(t.editor_id) || (t.editor_id == null && selectedEditors.has('unassigned')))
-  }, [tasks, selectedEditors])
+    let out = tasks
+    if (selectedEditors.size > 0) {
+      out = out.filter(t => selectedEditors.has(t.editor_id) || (t.editor_id == null && selectedEditors.has('unassigned')))
+    }
+    if (selectedStatuses.size > 0) {
+      out = out.filter(t => selectedStatuses.has(t.status))
+    }
+    return out
+  }, [tasks, selectedEditors, selectedStatuses])
 
   // Group by editor (on filtered tasks). We also seed an entry for every
   // active editor — even if they have zero tasks — so they appear as a
@@ -3490,6 +3502,19 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         />
       )}
 
+      {/* Status filter strip — chip-style, multi-select. Click 'All
+          statuses' to clear; click any status to toggle that filter. */}
+      <StatusFilterStrip
+        tasks={tasks}
+        selected={selectedStatuses}
+        onToggle={(s) => setSelectedStatuses(prev => {
+          const next = new Set(prev)
+          if (next.has(s)) next.delete(s); else next.add(s)
+          return next
+        })}
+        onClearAll={() => setSelectedStatuses(new Set())}
+      />
+
       {tasks.length === 0 ? (
         <div style={{
           border: '1px dashed var(--rule)', padding: 40, textAlign: 'center',
@@ -3618,6 +3643,72 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           }} />
       )}
     </>
+  )
+}
+
+/* Status filter strip — same chip pattern as EditorSelector but keyed on
+   task.status. Counts shown per chip from the unfiltered tasks list. */
+function StatusFilterStrip({ tasks, selected, onToggle, onClearAll }) {
+  const STATUS_DEFS = [
+    { v: 'queued',      label: 'Queued',      color: 'var(--ink-3)' },
+    { v: 'in_progress', label: 'In progress', color: '#b86a0c' },
+    { v: 'review',      label: 'In review',   color: '#3e7eba' },
+    { v: 'done',        label: 'Done',        color: '#3e8a5e' },
+    { v: 'blocked',     label: 'Blocked',     color: '#b53e3e' },
+  ]
+  const counts = useMemo(() => {
+    const m = {}
+    for (const t of tasks) m[t.status] = (m[t.status] || 0) + 1
+    return m
+  }, [tasks])
+  return (
+    <div style={{
+      display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
+      padding: '10px 14px', background: 'var(--paper)',
+      border: '1px solid var(--rule)', marginBottom: 14,
+    }}>
+      <span style={chipLabelStyle}>Filter by status</span>
+      <button
+        onClick={selected.size === 0 ? undefined : onClearAll}
+        disabled={selected.size === 0}
+        title={selected.size === 0 ? 'Showing all statuses' : 'Reset to all statuses'}
+        style={{
+          padding: '5px 11px',
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+          letterSpacing: '0.04em', textTransform: 'uppercase',
+          background: selected.size === 0 ? 'var(--ink)' : 'white',
+          color: selected.size === 0 ? 'var(--paper)' : 'var(--ink-2)',
+          border: '1px solid ' + (selected.size === 0 ? 'var(--ink)' : 'var(--rule)'),
+          borderRadius: 2,
+          cursor: selected.size === 0 ? 'default' : 'pointer',
+        }}>All statuses</button>
+      {STATUS_DEFS.map(s => {
+        const isOn = selected.has(s.v)
+        const count = counts[s.v] || 0
+        return (
+          <button key={s.v} onClick={() => onToggle(s.v)}
+            style={{
+              padding: '5px 11px',
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+              background: isOn ? s.color : 'white',
+              color: isOn ? 'white' : 'var(--ink-2)',
+              border: '1px solid ' + (isOn ? s.color : 'var(--rule)'),
+              borderRadius: 2, cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+            }}>
+            {!isOn && <span style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />}
+            <span>{s.label}</span>
+            {count > 0 && (
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+                color: isOn ? 'rgba(255,255,255,0.7)' : 'var(--ink-4)',
+              }}>{count}</span>
+            )}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -3972,7 +4063,7 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
         )}
         <span style={{ fontSize: 9, opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && coords && (
+      {open && coords && createPortal(
         <div ref={popRef} style={{
           position: 'fixed', top: coords.top, left: coords.left, width: coords.width,
           maxHeight: coords.maxHeight, overflowY: 'auto', zIndex: 9999,
@@ -3995,7 +4086,8 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
               </button>
             )
           })}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
@@ -4055,53 +4147,53 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
 
   // Upload an edited version of the SAME creative — file → creative-uploads
   // bucket → write the URL into the appropriate stage on the SOURCE creative
-  // (rough_cut_url / final_cut_url / approved_url / delivered_url) based on
-  // task_type, AND mark that stage as 'done'. One row per creative; the
-  // matrix view's stage cells become clickable file links.
-  const uploadEditedVersion = async () => {
-    if (!uploadFile) return
-    setBusy(true); setErr(null); setUploadProgress(0)
+  // → auto-advance task status to 'review' so admin sees there's a new
+  // version. One-step flow now: dropping or selecting a file kicks this
+  // off immediately, no separate "Mark for review" button. Status moves to
+  // 'review' in local state so the modal reflects the new state without
+  // needing to close + reopen.
+  const startUpload = useCallback(async (file) => {
+    if (!file) return
+    setUploadFile(file)
+    setBusy(true); setErr(null); setUploadProgress(5)
     try {
-      const sanitized = uploadFile.name.replace(/[^A-Za-z0-9._-]+/g, '_')
+      const sanitized = file.name.replace(/[^A-Za-z0-9._-]+/g, '_')
       const storagePath = `edited/${Date.now()}_${sanitized}`
+      // Note: supabase.storage doesn't expose per-byte progress through
+      // the JS client. We bump the bar at known waypoints so Ben can see
+      // that the request is alive — 5% on start, 70% after the storage
+      // PUT lands, 100% once the DB rows are updated.
+      setUploadProgress(20)
       const { error: upErr } = await supabase.storage
         .from('creative-uploads')
-        .upload(storagePath, uploadFile, { upsert: false })
+        .upload(storagePath, file, { upsert: false, contentType: file.type || 'video/mp4' })
       if (upErr) throw upErr
-      setUploadProgress(50)
+      setUploadProgress(70)
       const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
 
-      // Map task type → which stage URL / stage column to update on the source.
-      // All three task types now land in the 'final cut' slot — the editor's
-      // output is treated as the working final cut, ready for review.
-      const stageMap = {
-        edit:     { url: 'final_cut_url', flag: 'stage_final_cut' },
-        patch:    { url: 'final_cut_url', flag: 'stage_final_cut' },
-        revision: { url: 'final_cut_url', flag: 'stage_final_cut' },
-      }
-      const target = stageMap[task.task_type] || { url: 'delivered_url', flag: 'stage_delivered' }
-      const patch = { [target.url]: publicUrl }
-      if (target.flag) patch[target.flag] = 'done'
-
-      // Write to the SOURCE creative row (no new row created)
+      const target = { url: 'final_cut_url', flag: 'stage_final_cut' }
+      const patch = { [target.url]: publicUrl, [target.flag]: 'done' }
       const { error: pErr } = await supabase.from('lib_creative_library')
-        .update(patch)
-        .eq('id', task.creative_id)
+        .update(patch).eq('id', task.creative_id)
       if (pErr) throw pErr
-      setUploadProgress(85)
+      setUploadProgress(90)
 
-      // Auto-advance the task status to review
-      await supabase.from('lib_editing_tasks')
+      // Auto-advance to review + set started_at if missing
+      const { error: tErr } = await supabase.from('lib_editing_tasks')
         .update({ status: 'review', started_at: task.started_at || new Date().toISOString() })
         .eq('id', task.task_id)
+      if (tErr) throw tErr
       setUploadProgress(100)
+      // Reflect the new status inline (modal stays open so editor sees confirmation)
+      setStatus('review')
       onSaved?.()
     } catch (e) {
       setErr(e.message || 'upload failed')
+      setUploadProgress(null)
     } finally {
       setBusy(false)
     }
-  }
+  }, [task.task_id, task.creative_id, task.started_at, onSaved])
 
   return (
     <Modal open={true} onClose={busy ? () => {} : onClose} size="lg"
@@ -4230,38 +4322,51 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             placeholder="Notes on this task — feedback, blockers, links to revisions…" />
         </Field>
 
-        {/* Upload edited version — editors drop their cut here. New library
-            row is created with parent_id pointing at the source. Task auto-
-            advances to 'review' so admin sees there's a new version. */}
+        {/* Upload edited version — editors drop their cut here. Upload
+            starts IMMEDIATELY on file select / drop, no two-step click.
+            The lib_creative_library row gets the new URL and the task
+            auto-advances to 'review' so admin sees the submission. */}
         <div style={{
           padding: '14px 16px', border: '1px solid var(--rule)', background: 'var(--paper-2)',
         }}>
           <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
             letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)',
             marginBottom: 10,
-          }}>Upload edited version</div>
+          }}>
+            <span>Upload edited version</span>
+            {uploadProgress === 100 && (
+              <span style={{ color: '#3e8a5e' }}>Submitted for review</span>
+            )}
+          </div>
           <div
             onClick={() => !busy && uploadInputRef.current?.click()}
             onDrop={e => {
               e.preventDefault()
               const f = e.dataTransfer.files?.[0]
-              if (f) setUploadFile(f)
+              if (f && !busy) startUpload(f)
             }}
             onDragOver={e => e.preventDefault()}
             style={{
               padding: 20, textAlign: 'center', cursor: busy ? 'not-allowed' : 'pointer',
-              border: '2px dashed var(--rule)',
+              border: '2px dashed ' + (busy ? 'var(--accent)' : 'var(--rule)'),
               background: uploadFile ? 'white' : 'transparent',
+              transition: 'border-color 0.2s',
             }}>
             <input ref={uploadInputRef} type="file" accept="video/*"
               style={{ display: 'none' }}
-              onChange={e => setUploadFile(e.target.files?.[0] || null)} />
+              onChange={e => {
+                const f = e.target.files?.[0]
+                if (f && !busy) startUpload(f)
+              }} />
             {uploadFile ? (
               <>
                 <div style={{ fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 500 }}>{uploadFile.name}</div>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 4 }}>
-                  {(uploadFile.size / 1024 / 1024).toFixed(1)} MB · click to change
+                  {(uploadFile.size / 1024 / 1024).toFixed(1)} MB
+                  {busy && uploadProgress != null && ` · ${uploadProgress}%`}
+                  {uploadProgress === 100 && ' · Done'}
                 </div>
               </>
             ) : (
@@ -4270,7 +4375,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                   Drop the edited version here
                 </div>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 3 }}>
-                  or click to select
+                  or click to select · uploads + flags for review automatically
                 </div>
               </>
             )}
@@ -4286,16 +4391,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               }} />
             </div>
           )}
-          {uploadFile && (
-            <button onClick={uploadEditedVersion} disabled={busy} style={{
-              ...primaryBtn, marginTop: 10,
-            }}>
-              {busy ? `Uploading… ${uploadProgress || 0}%` : 'Upload + mark for review'}
-            </button>
-          )}
         </div>
 
-        {task.drive_url && (
+        {task.drive_url && !task.preview_url && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
             Source file: <a href={task.drive_url} target="_blank" rel="noreferrer" style={{ color: 'var(--ink)' }}>{task.drive_url.slice(0, 80)}…</a>
           </div>
@@ -5488,6 +5586,9 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
   // release to open AddTask with editor + start/end dates pre-filled.
   // { editorId, startIdx, endIdx } or null.
   const [dragCreate, setDragCreate] = useState(null)
+  // Resize state for "drag right edge to extend due date".
+  // { taskId, startClientX, originalDueDate, originalAssignedAt, currentDelta }
+  const [resizing, setResizing] = useState(null)
   const tasksById = useMemo(() => Object.fromEntries(tasks.map(t => [t.task_id, t])), [tasks])
   const draggingTask = draggingTaskId ? tasksById[draggingTaskId] : null
 
@@ -5580,6 +5681,51 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
   const totalDays = cfg.days
   const dayWidth = cfg.width
   const totalWidth = totalDays * dayWidth
+
+  // Bar resize — drag the right edge to extend the due_date. Uses mouse
+  // events (not HTML5 drag) so it doesn't conflict with the bar's
+  // drag-to-reassign HTML5 handlers. Placed after `dayWidth` so the
+  // pixel-to-days conversion has the correct scale.
+  const handleResizeStart = (e, task) => {
+    if (!onUpdateAssignment) return
+    e.stopPropagation()
+    e.preventDefault()
+    setResizing({
+      taskId: task.task_id,
+      startClientX: e.clientX,
+      originalDueDate: task.due_date || task.assigned_at || new Date().toISOString().slice(0, 10),
+      originalAssignedAt: task.assigned_at,
+      currentDeltaDays: 0,
+    })
+  }
+  useEffect(() => {
+    if (!resizing) return
+    const onMove = (e) => {
+      const px = e.clientX - resizing.startClientX
+      const deltaDays = Math.round(px / dayWidth)
+      setResizing(r => (r && deltaDays !== r.currentDeltaDays) ? { ...r, currentDeltaDays: deltaDays } : r)
+    }
+    const onUp = () => {
+      const finalDelta = resizing.currentDeltaDays
+      if (finalDelta !== 0) {
+        const orig = new Date(resizing.originalDueDate); orig.setUTCHours(0, 0, 0, 0)
+        orig.setUTCDate(orig.getUTCDate() + finalDelta)
+        const newDue = orig.toISOString().slice(0, 10)
+        // Don't let due_date drop below assigned_at
+        const assignedAt = resizing.originalAssignedAt ? resizing.originalAssignedAt.slice(0, 10) : null
+        const finalDue = assignedAt && newDue < assignedAt ? assignedAt : newDue
+        const task = tasksById[resizing.taskId]
+        if (task) onUpdateAssignment?.(task, { dueDate: finalDue })
+      }
+      setResizing(null)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [resizing, dayWidth, tasksById, onUpdateAssignment])
 
   // Build editor rows (always show all active editors)
   const editorRows = editors.length ? editors : [{ id: 'unassigned', name: 'Unassigned', slug: 'unassigned' }]
@@ -5858,22 +6004,24 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                   const startStr = new Date(start).toISOString()
                   const endTs = t.completed_at ? new Date(t.completed_at).getTime() : (t.due_date ? new Date(t.due_date).getTime() : Date.now())
                   const x = xForDate(startStr)
-                  const w = Math.max(dayWidth - 2, xForDate(new Date(endTs).toISOString()) - x + dayWidth - 2)
+                  // Apply in-flight resize delta visually before the DB write.
+                  // Each `dayWidth` of cursor drag extends the bar by one day.
+                  const isResizing = resizing?.taskId === t.task_id
+                  const resizeDeltaPx = isResizing ? resizing.currentDeltaDays * dayWidth : 0
+                  const baseW = Math.max(dayWidth - 2, xForDate(new Date(endTs).toISOString()) - x + dayWidth - 2)
+                  const w = Math.max(dayWidth, baseW + resizeDeltaPx)
                   const y = PADDING + rowIdx * (BAR_HEIGHT + ROW_GAP)
                   const stripe = t.is_overdue ? '#b53e3e' : (STATUS_STRIPE[t.status] || '#999')
-                  // Show canonical_name (e.g. BODY-OSO-J.3) when present
-                  // — that's the human-curated label. Fall back to the
-                  // raw filename so unnamed clips still render.
                   const label = t.creative_canonical_name || t.creative_name
                   const thumbVisible = !!t.thumbnail_url && w >= 80
                   return (
                     <div key={t.task_id}
                       data-task-bar="true"
-                      onClick={() => onEdit?.(t)}
-                      draggable={!!(onMoveEditor || onUpdateAssignment)}
+                      onClick={() => { if (!isResizing) onEdit?.(t) }}
+                      draggable={!!(onMoveEditor || onUpdateAssignment) && !isResizing}
                       onDragStart={(e) => handleTaskDragStart(e, t)}
                       onDragEnd={handleTaskDragEnd}
-                      title={`${label}${t.creative_canonical_name ? ' · ' + t.creative_name : ''} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}${(onMoveEditor || onUpdateAssignment) ? ' · drag horizontally to reschedule, or to another row to reassign' : ''}`}
+                      title={`${label}${t.creative_canonical_name ? ' · ' + t.creative_name : ''} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}${(onMoveEditor || onUpdateAssignment) ? ' · drag the bar to reassign · drag the right edge to extend the due date' : ''}`}
                       style={{
                         position: 'absolute', left: x + 2, top: y,
                         width: w, height: BAR_HEIGHT,
@@ -5885,9 +6033,14 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
                         color: 'white',
                         overflow: 'hidden',
-                        cursor: (onMoveEditor || onUpdateAssignment) ? 'grab' : (onEdit ? 'pointer' : 'default'),
-                        zIndex: 1,
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+                        cursor: isResizing ? 'ew-resize'
+                              : (onMoveEditor || onUpdateAssignment) ? 'grab'
+                              : (onEdit ? 'pointer' : 'default'),
+                        zIndex: isResizing ? 4 : 1,
+                        boxShadow: isResizing
+                          ? '0 2px 8px rgba(10,10,10,0.35)'
+                          : '0 1px 2px rgba(0,0,0,0.15)',
+                        outline: isResizing ? '2px solid var(--ink)' : 'none',
                       }}>
                       {thumbVisible && (
                         <img src={t.thumbnail_url} alt="" loading="lazy"
@@ -5903,12 +6056,39 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                       <span style={{
                         flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>{label}</span>
-                      {t.is_overdue && (
+                      {isResizing && resizing.currentDeltaDays !== 0 && (
+                        <span style={{
+                          fontSize: 9, padding: '1px 4px',
+                          background: 'rgba(0,0,0,0.4)', borderRadius: 2,
+                          fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+                        }}>
+                          {resizing.currentDeltaDays > 0 ? '+' : ''}{resizing.currentDeltaDays}d
+                        </span>
+                      )}
+                      {t.is_overdue && !isResizing && (
                         <span style={{
                           fontSize: 9, padding: '1px 4px',
                           background: 'rgba(255,255,255,0.25)', borderRadius: 2,
                           textTransform: 'uppercase', letterSpacing: '0.06em',
                         }}>OVD</span>
+                      )}
+                      {/* Right-edge resize handle — 6px wide, only visible
+                          when onUpdateAssignment is wired. Uses mouse events
+                          so it bypasses the bar's HTML5 drag handlers. */}
+                      {!!onUpdateAssignment && (
+                        <div
+                          onMouseDown={(e) => handleResizeStart(e, t)}
+                          onClick={(e) => e.stopPropagation()}
+                          title="Drag to extend due date"
+                          style={{
+                            position: 'absolute', right: 0, top: 0, bottom: 0,
+                            width: 8, cursor: 'ew-resize',
+                            background: isResizing ? 'rgba(255,255,255,0.4)' : 'transparent',
+                            transition: 'background 0.12s',
+                          }}
+                          onMouseEnter={e => { if (!isResizing) e.currentTarget.style.background = 'rgba(255,255,255,0.25)' }}
+                          onMouseLeave={e => { if (!isResizing) e.currentTarget.style.background = 'transparent' }}
+                        />
                       )}
                     </div>
                   )
