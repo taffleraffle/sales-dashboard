@@ -266,60 +266,41 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   useEffect(() => { load() }, [load])
 
-  // Compute which raw rows have been 'used' (already edited into another
-  // clip). Two-pass heuristic:
+  // Compute which raw rows have already been edited (incorporated into
+  // an edited composite).
   //
-  //   1. Filename-slot match — for raws whose name encodes a slot (H1, B2,
-  //      Body D, HAMMER-H1, etc.), look for that slot token in any edited
-  //      row's name / canonical_name.
-  //   2. Transcript-overlap match — for any raw that has a transcript,
-  //      check if a 10-word phrase from it appears verbatim in any edited
-  //      row's transcript. Catches raws with cryptic filenames (IMG_xxx,
-  //      0510(20), Restoration - Office, etc.) where filename heuristic
-  //      misses entirely.
+  // Type-based rule from Ben (2026-05-20):
+  //   - Raw Hook   -> always treated as already edited
+  //   - Raw Body   -> always treated as NOT yet edited
+  //   - Other raw types -> transcript-overlap heuristic (10-word phrase
+  //     from raw appears verbatim in any edited row's transcript)
   //
-  // Computed once per rows change via useMemo. ~80 raws × ~50 edited ×
-  // a handful of phrase checks runs in well under 100ms.
+  // The type rule reflects Ben's actual workflow: all his hook raws have
+  // been merged into Joined composites already, and bodies are his
+  // current editing queue. The heuristic covers Testimony / Full Video
+  // raws that fall between those buckets.
   const usedRawIds = useMemo(() => {
     const used = new Set()
-    const edited = rows.filter(r => r.status === 'edited')
-    if (edited.length === 0) return used
-
-    // Pass 1: slot-token (filename) match
-    const editedNameBlob = edited
-      .map(r => ((r.name || '') + ' ' + (r.canonical_name || '')).toUpperCase())
-      .join(' | ')
+    // Type-based fast path
     for (const r of rows) {
       if (r.status !== 'raw') continue
-      const n = (r.name || '').toUpperCase()
-      let token = null
-      if (r.type === 'Hook') {
-        const m = n.match(/H(\d+)(?:\.(\d+))?/)
-        if (m) token = `H${m[1]}`
-      } else if (r.type === 'Body') {
-        const lt = n.match(/BODY\s*([A-Z])/)
-        const nm = n.match(/B(\d+)/)
-        if (lt)      token = `B${lt[1]}`
-        else if (nm) token = `B${nm[1]}`
-      }
-      if (token) {
-        const rx = new RegExp(token + '(?!\\d)')
-        if (rx.test(editedNameBlob)) used.add(r.id)
-      }
+      if (r.type === 'Hook') { used.add(r.id); continue }
+      // Body is explicitly the editing queue — never auto-mark as edited
+      // even if transcript happens to overlap.
     }
-
-    // Pass 2: transcript overlap — catch raws that filename pass missed.
-    // For each raw with a transcript, build a few 10-word phrases and
-    // check if any appears verbatim in any edited row's transcript.
-    const editedTexts = edited.map(e => (e.transcript || '').toLowerCase())
+    // Transcript-overlap heuristic for non-Hook / non-Body raws
+    const editedTexts = rows
+      .filter(r => r.status === 'edited')
+      .map(e => (e.transcript || '').toLowerCase())
+    if (editedTexts.length === 0) return used
     for (const r of rows) {
       if (r.status !== 'raw') continue
+      if (r.type === 'Hook' || r.type === 'Body') continue
       if (used.has(r.id)) continue
       const t = (r.transcript || '').toLowerCase().replace(/\s+/g, ' ').trim()
       if (t.length < 60) continue
       const words = t.split(' ')
       if (words.length < 10) continue
-      // Build phrases at 5-word stride for speed
       let matched = false
       for (let i = 0; i <= words.length - 10 && !matched; i += 5) {
         const phrase = words.slice(i, i + 10).join(' ')
@@ -331,7 +312,6 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       }
       if (matched) used.add(r.id)
     }
-
     return used
   }, [rows])
 
@@ -483,8 +463,8 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           <FilterDropdown label="STATUS"
             selected={stageFilter}
             options={[
-              { value: 'raw_unused', label: 'RAW — NEEDS EDITING', sublabel: 'unmerged raw clips', count: stageCounts.raw_unused, dot: '#b53e3e' },
-              { value: 'raw_used',   label: 'RAW — ALREADY MERGED', sublabel: 'used in a composite', count: stageCounts.raw_used, dot: '#999' },
+              { value: 'raw_unused', label: 'RAW — NEEDS EDITING', sublabel: 'not yet edited', count: stageCounts.raw_unused, dot: '#b53e3e' },
+              { value: 'raw_used',   label: 'RAW — ALREADY EDITED', sublabel: 'already used in a composite', count: stageCounts.raw_used, dot: '#999' },
               { value: 'edited_seg', label: 'EDITED',       count: stageCounts.edited_seg, dot: '#3e8a5e' },
               { value: 'merged',     label: 'MERGED FINAL', count: stageCounts.merged,     dot: '#b86a0c' },
             ]}
@@ -871,7 +851,7 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete }) {
               opacity: (r.status === 'raw' && isUsed) ? 0.7 : 1,
             }}>
               {(r.status === 'raw' && isUsed) && (
-                <span title="Already merged into a Joined composite"
+                <span title="Already edited"
                   style={{ color: '#3e8a5e', fontWeight: 600, marginRight: 5 }}>✓</span>
               )}
               {r.canonical_name || r.name}
@@ -1140,7 +1120,7 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
         opacity: (r.status === 'raw' && isUsed) ? 0.65 : 1,
       }} title={r.canonical_name || r.name}>
         {(r.status === 'raw' && isUsed) && (
-          <span title="Already merged into a Joined composite"
+          <span title="Already edited"
             style={{ color: '#3e8a5e', fontWeight: 600, flexShrink: 0 }}>✓</span>
         )}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -2094,7 +2074,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
           opacity: (row.status === 'raw' && isUsed) ? 0.7 : 1,
         }} title={row.name}>
           {(row.status === 'raw' && isUsed) && (
-            <span title="Already merged"
+            <span title="Already edited"
               style={{ color: '#3e8a5e', marginRight: 4 }}>✓</span>
           )}
           {row.canonical_name || row.name}
