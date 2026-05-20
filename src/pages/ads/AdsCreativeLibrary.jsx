@@ -266,18 +266,29 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   useEffect(() => { load() }, [load])
 
-  // Compute which raw rows have been 'used' — i.e. there exists at least
-  // one Joined composite that references the same hook/body slot. Declared
-  // BEFORE `filtered` because `filtered` references it.
-  // Heuristic: extract H<n> from raw hook names, B<x>|Body X from raw
-  // bodies, then check Joined names + canonical names for that token.
+  // Compute which raw rows have been 'used' (already edited into another
+  // clip). Two-pass heuristic:
+  //
+  //   1. Filename-slot match — for raws whose name encodes a slot (H1, B2,
+  //      Body D, HAMMER-H1, etc.), look for that slot token in any edited
+  //      row's name / canonical_name.
+  //   2. Transcript-overlap match — for any raw that has a transcript,
+  //      check if a 10-word phrase from it appears verbatim in any edited
+  //      row's transcript. Catches raws with cryptic filenames (IMG_xxx,
+  //      0510(20), Restoration - Office, etc.) where filename heuristic
+  //      misses entirely.
+  //
+  // Computed once per rows change via useMemo. ~80 raws × ~50 edited ×
+  // a handful of phrase checks runs in well under 100ms.
   const usedRawIds = useMemo(() => {
     const used = new Set()
-    const joinedBlob = rows
-      .filter(r => r.type === 'Joined')
+    const edited = rows.filter(r => r.status === 'edited')
+    if (edited.length === 0) return used
+
+    // Pass 1: slot-token (filename) match
+    const editedNameBlob = edited
       .map(r => ((r.name || '') + ' ' + (r.canonical_name || '')).toUpperCase())
       .join(' | ')
-    if (!joinedBlob) return used
     for (const r of rows) {
       if (r.status !== 'raw') continue
       const n = (r.name || '').toUpperCase()
@@ -291,11 +302,36 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         if (lt)      token = `B${lt[1]}`
         else if (nm) token = `B${nm[1]}`
       }
-      if (!token) continue
-      // Must be followed by non-digit so 'H1' doesn't match 'H10'.
-      const rx = new RegExp(token + '(?!\\d)')
-      if (rx.test(joinedBlob)) used.add(r.id)
+      if (token) {
+        const rx = new RegExp(token + '(?!\\d)')
+        if (rx.test(editedNameBlob)) used.add(r.id)
+      }
     }
+
+    // Pass 2: transcript overlap — catch raws that filename pass missed.
+    // For each raw with a transcript, build a few 10-word phrases and
+    // check if any appears verbatim in any edited row's transcript.
+    const editedTexts = edited.map(e => (e.transcript || '').toLowerCase())
+    for (const r of rows) {
+      if (r.status !== 'raw') continue
+      if (used.has(r.id)) continue
+      const t = (r.transcript || '').toLowerCase().replace(/\s+/g, ' ').trim()
+      if (t.length < 60) continue
+      const words = t.split(' ')
+      if (words.length < 10) continue
+      // Build phrases at 5-word stride for speed
+      let matched = false
+      for (let i = 0; i <= words.length - 10 && !matched; i += 5) {
+        const phrase = words.slice(i, i + 10).join(' ')
+        for (const eT of editedTexts) {
+          if (eT.length >= phrase.length && eT.includes(phrase)) {
+            matched = true; break
+          }
+        }
+      }
+      if (matched) used.add(r.id)
+    }
+
     return used
   }, [rows])
 
