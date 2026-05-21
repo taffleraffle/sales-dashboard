@@ -692,14 +692,34 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true)
     setErr(null)
-    const [rowsRes, edRes, ofRes] = await Promise.all([
-      supabase.from('lib_creative_library')
-        .select(`${LIB_LEAN_COLS},assigned_editor:assigned_editor_id (id, name)`)
-        .eq('exclude_from_library', false)
-        .order('added_at', { ascending: false }),
-      supabase.from('lib_creative_editors').select('*').eq('active', true).order('name'),
-      supabase.from('offers').select('slug,name').eq('retired', false).order('slug'),
-    ])
+    // 20s hard timeout. supabase-js has no built-in timeout, so when
+    // Supabase wedges (PostgREST schema-cache stall, Postgres pool
+    // exhaustion, Cloudflare 521) the request hangs forever and the
+    // page sits on its loading spinner. With Promise.race we surface
+    // a visible error after 20s and the user can hit retry.
+    const TIMEOUT_MS = 20_000
+    const timeoutErr = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(
+        'Supabase timed out — try again or restart the project from the Supabase dashboard.'
+      )), TIMEOUT_MS))
+    let rowsRes, edRes, ofRes
+    try {
+      ;[rowsRes, edRes, ofRes] = await Promise.race([
+        Promise.all([
+          supabase.from('lib_creative_library')
+            .select(`${LIB_LEAN_COLS},assigned_editor:assigned_editor_id (id, name)`)
+            .eq('exclude_from_library', false)
+            .order('added_at', { ascending: false }),
+          supabase.from('lib_creative_editors').select('*').eq('active', true).order('name'),
+          supabase.from('offers').select('slug,name').eq('retired', false).order('slug'),
+        ]),
+        timeoutErr,
+      ])
+    } catch (e) {
+      setErr(e.message || 'Load failed')
+      setLoading(false)
+      return
+    }
     if (rowsRes.error) setErr(rowsRes.error.message)
     else {
       // Preserve any transcripts we already loaded from a previous
@@ -1188,7 +1208,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         </div>
       </div>
 
-      {err && <ErrorBanner msg={err} />}
+      {err && <ErrorBanner msg={err} onRetry={() => load(false)} />}
 
       {/* Bulk selection bar — sticky, appears when ≥1 tile is selected */}
       {selected.size > 0 && scope.canEditCreative && (
@@ -4271,10 +4291,26 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true)
     setErr(null)
-    const [t, e] = await Promise.all([
-      supabase.from('lib_editing_queue').select('*'),
-      supabase.from('lib_creative_editors').select('*').order('name'),
-    ])
+    // 20s hard timeout (see LibraryTab.load — same reasoning).
+    const TIMEOUT_MS = 20_000
+    const timeoutErr = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(
+        'Supabase timed out — try again or restart the project from the Supabase dashboard.'
+      )), TIMEOUT_MS))
+    let t, e
+    try {
+      ;[t, e] = await Promise.race([
+        Promise.all([
+          supabase.from('lib_editing_queue').select('*'),
+          supabase.from('lib_creative_editors').select('*').order('name'),
+        ]),
+        timeoutErr,
+      ])
+    } catch (err) {
+      setErr(err.message || 'Load failed')
+      setLoading(false)
+      return
+    }
     if (t.error) setErr(t.error.message)
     else {
       setTasks(t.data || [])
@@ -4411,7 +4447,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   }, [updateTaskAssignment, tasks])
 
   if (loading) return <LoadingState />
-  if (err) return <ErrorBanner msg={err} />
+  if (err) return <ErrorBanner msg={err} onRetry={() => load(false)} />
 
   return (
     <>
@@ -8065,13 +8101,25 @@ function EmptyState() {
   )
 }
 
-function ErrorBanner({ msg }) {
+function ErrorBanner({ msg, onRetry }) {
   return (
     <div style={{
       padding: '10px 14px', marginBottom: 14,
       background: 'rgba(181,62,62,0.08)', border: '1px solid #b53e3e', color: '#b53e3e',
       fontFamily: 'var(--mono)', fontSize: 12,
-    }}>Error: {msg}</div>
+      display: 'flex', alignItems: 'center', gap: 12,
+    }}>
+      <span style={{ flex: 1 }}>Error: {msg}</span>
+      {onRetry && (
+        <button onClick={onRetry}
+          style={{
+            padding: '4px 12px', fontFamily: 'var(--mono)', fontSize: 11,
+            fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+            background: '#b53e3e', color: 'white',
+            border: 'none', borderRadius: 2, cursor: 'pointer',
+          }}>Retry</button>
+      )}
+    </div>
   )
 }
 
