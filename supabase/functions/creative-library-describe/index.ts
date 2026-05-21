@@ -58,15 +58,23 @@ function slugify(s: string): string {
 
 async function describeOne(row: any): Promise<{ topic: string, description: string } | null> {
   const transcript = (row.transcript || '').trim()
-  if (!transcript) return null
+  const visualDesc = (row.visual_description || '').trim()
+  // Two valid inputs: a Whisper transcript (video) OR a visual description
+  // from identify-actor (image / silent clip). If neither, skip — there's
+  // nothing for Claude to summarise.
+  if (!transcript && !visualDesc) return null
   const truncated = transcript.length > 4000 ? transcript.slice(0, 4000) + '...' : transcript
+
+  // Build the source-content block based on what we have. Image rows lean
+  // on the visual_description, video rows on the transcript. When both
+  // are present (rare but possible), give Claude both.
+  const sourceBlock = transcript
+    ? `TRANSCRIPT:\n"""\n${truncated}\n"""${visualDesc ? `\n\nVISUAL DESCRIPTION:\n"""\n${visualDesc}\n"""` : ''}`
+    : `VISUAL DESCRIPTION (no audio — static image or silent clip):\n"""\n${visualDesc}\n"""`
 
   const prompt = `You are reviewing a single short-form ad clip (UGC, hook, body, or full script).
 
-TRANSCRIPT:
-"""
-${truncated}
-"""
+${sourceBlock}
 
 Return JSON with exactly two fields:
   topic_short  - 2 to 4 UPPERCASE WORDS capturing the central hook/topic.
@@ -123,10 +131,11 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
 
-  // Pull all target rows
+  // Pull all target rows — include visual_description so image rows (no
+  // transcript) can be summarised from the identify-actor description.
   const { data: rows, error: selErr } = await supabase
     .from('lib_creative_library')
-    .select('id, name, canonical_name, creator, type, status, transcript')
+    .select('id, name, canonical_name, creator, type, status, transcript, visual_description')
     .in('id', ids)
   if (selErr) return json({ error: `select: ${selErr.message}` }, 500)
 

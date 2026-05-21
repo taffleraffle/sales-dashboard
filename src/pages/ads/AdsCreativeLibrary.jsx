@@ -117,6 +117,57 @@ function editorColor(slugOrEditorOrTask) {
   return EDITOR_COLORS[Math.abs(h) % EDITOR_COLORS.length]
 }
 
+/* Browser-side first-frame capture for video uploads. Manually-uploaded
+   videos arrive with no thumbnail (transcribe-library-clip doesn't extract
+   one, and there's no ffmpeg in the bucket). Without a thumbnail, the
+   identify-actor Edge Function silently no-ops because it has no image to
+   send to Claude Vision.
+
+   This helper loads the file into an off-DOM <video>, seeks to ~1s
+   (skips the typical black opening frame), draws to a <canvas>, and
+   returns a JPEG Blob ready to upload alongside the video. Returns null
+   on any failure so the upload can continue without blocking on it. */
+async function captureVideoThumbnail(file, { seekSeconds = 1, maxWidth = 720 } = {}) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const video = document.createElement('video')
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'auto'
+    video.crossOrigin = 'anonymous'
+    let settled = false
+    const finish = (blob) => {
+      if (settled) return
+      settled = true
+      URL.revokeObjectURL(url)
+      resolve(blob)
+    }
+    video.onloadedmetadata = () => {
+      // Pick the smaller of seekSeconds vs slightly-before-end (some
+      // short clips are <1s long).
+      const target = Math.min(seekSeconds, Math.max(0, (video.duration || 0) - 0.1))
+      video.currentTime = target
+    }
+    video.onseeked = () => {
+      try {
+        const w = Math.min(maxWidth, video.videoWidth || maxWidth)
+        const scale = w / (video.videoWidth || w)
+        const h = Math.round((video.videoHeight || 405) * scale)
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(video, 0, 0, w, h)
+        canvas.toBlob((blob) => finish(blob), 'image/jpeg', 0.82)
+      } catch { finish(null) }
+    }
+    video.onerror = () => finish(null)
+    // Safety net — never hang the upload more than 8s on thumbnail capture
+    setTimeout(() => finish(null), 8000)
+    video.src = url
+  })
+}
+
 /* Notification bell — floating button in the top-right of the Library
    tab. Click to open a right-side slider with the recent submissions
    feed. Unseen count (anything created since last open) shows as a
@@ -129,6 +180,10 @@ function NotificationBell({ submissions }) {
     try { return localStorage.getItem('lib.notifSeenAt') || '' } catch { return '' }
   })
   const unseenCount = submissions.filter(s => !seenAt || s.created_at > seenAt).length
+  // Pending-approval count = submissions that haven't been approved or
+  // soft-deleted. Surfaced in the drawer header so the operator sees the
+  // review backlog at a glance.
+  const pendingApproval = submissions.filter(s => !s.approved_at && !s.deleted_at).length
   const markSeen = () => {
     const ts = new Date().toISOString()
     try { localStorage.setItem('lib.notifSeenAt', ts) } catch {}
@@ -2505,7 +2560,24 @@ function VersionsPanel({ row, onReload }) {
         .upload(storagePath, file, { upsert: false, contentType: file.type || 'video/mp4' })
       if (upErr) throw upErr
       const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
-      // 2. Insert new library row inheriting metadata
+
+      // 2. Browser-side first-frame capture — gives identify-actor a real
+      //    image to face-match against. Best-effort; null result just means
+      //    the row has no thumbnail and identify-actor will skip it.
+      setProgress('Capturing thumbnail…')
+      let thumbnailUrl = null
+      const thumbBlob = await captureVideoThumbnail(file)
+      if (thumbBlob) {
+        const thumbPath = `ingest/${Date.now()}_v${nextVersion}_${sanitized}_thumb.jpg`
+        const { error: thumbErr } = await supabase.storage
+          .from('creative-uploads')
+          .upload(thumbPath, thumbBlob, { upsert: true, contentType: 'image/jpeg' })
+        if (!thumbErr) {
+          thumbnailUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${thumbPath}`
+        }
+      }
+
+      // 3. Insert new library row inheriting metadata + thumbnail
       setProgress('Creating version…')
       const { data: inserted, error: insErr } = await supabase.from('lib_creative_library')
         .insert({
@@ -2519,28 +2591,36 @@ function VersionsPanel({ row, onReload }) {
           version_number: nextVersion,
           size_mb: Math.round(file.size / 1024 / 1024 * 10) / 10,
           preview_url: publicUrl,
+          thumbnail_url: thumbnailUrl,
           source_bucket: 'New version upload',
           notes: `v${nextVersion} of ${row.canonical_name || row.name}, uploaded ${new Date().toISOString().slice(0,10)}.`,
         })
         .select()
         .single()
       if (insErr) throw insErr
-      // 3. Fire transcribe → identify-actor → describe asynchronously
-      //    (don't block UI). The chain matters: identify-actor writes
-      //    the creator column, then describe regenerates canonical_name
-      //    from the now-correct creator + transcript.
+
+      // 4. Fire transcribe → identify-actor → describe sequentially in the
+      //    background. The chain matters: identify-actor writes the
+      //    creator column, then describe regenerates canonical_name from
+      //    the now-correct creator + transcript. Async IIFE so it doesn't
+      //    block the modal close.
       setProgress('Transcribing in background…')
-      supabase.functions.invoke('transcribe-library-clip', {
-        body: { library_id: inserted.id, storage_path: storagePath },
-      }).then(() => {
-        return supabase.functions.invoke('identify-actor', {
-          body: { library_ids: [inserted.id] },
-        })
-      }).then(() => {
-        supabase.functions.invoke('creative-library-describe', {
-          body: { library_ids: [inserted.id] },
-        })
-      })
+      ;(async () => {
+        try {
+          await supabase.functions.invoke('transcribe-library-clip', {
+            body: { library_id: inserted.id, storage_path: storagePath },
+          })
+          await supabase.functions.invoke('identify-actor', {
+            body: { library_ids: [inserted.id] },
+          })
+          await supabase.functions.invoke('creative-library-describe', {
+            body: { library_ids: [inserted.id] },
+          })
+        } catch (e) {
+          // Background pipeline; surface to console but don't block UI.
+          console.warn('post-upload pipeline failed', e)
+        }
+      })()
       // Optimistic: add to local list
       setVersions(prev => [...prev, inserted])
       setUploadOpen(false); setUploadFile(null); setProgress(null)
@@ -4332,11 +4412,26 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
           if (upErr) throw upErr
           const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
           // Build the post-upload patch — only fields we want to change.
-          const postPatch = {}
-          // For images, the file itself IS the thumbnail. No ffmpeg step.
+          const postPatch = { preview_url: publicUrl }
+          // For images, the file itself IS the thumbnail.
           if (isImageFile) {
             postPatch.thumbnail_url = publicUrl
-            postPatch.preview_url = publicUrl
+          } else {
+            // For videos: capture the first frame in the browser and
+            // upload it as a separate JPEG. This unblocks identify-actor
+            // (it needs a real image to send to Claude Vision) and
+            // populates the matrix thumbnail right away.
+            safeSetProgress(p => ({ ...p, [file.name]: 'capturing thumbnail' }))
+            const thumbBlob = await captureVideoThumbnail(file)
+            if (thumbBlob) {
+              const thumbPath = `incoming/${libraryId}_thumb.jpg`
+              const { error: thumbErr } = await supabase.storage
+                .from('creative-uploads')
+                .upload(thumbPath, thumbBlob, { upsert: true, contentType: 'image/jpeg' })
+              if (!thumbErr) {
+                postPatch.thumbnail_url = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${thumbPath}`
+              }
+            }
           }
           // When the operator marked the batch as 'edited', the uploaded
           // file is the finished cut. Wire it into the stage columns
@@ -4362,16 +4457,26 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
         //            Turner's naming convention.
         const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
         const runActorAndDescribe = async () => {
+          // identify-actor + describe — both best-effort, but failures
+          // are now SURFACED in the per-file progress map instead of
+          // silently swallowed. supabase.functions.invoke doesn't throw
+          // on 4xx/5xx (it returns { data, error }) — check both.
+          let pipelineErr = null
           try {
-            await supabase.functions.invoke('identify-actor', {
+            const { data, error } = await supabase.functions.invoke('identify-actor', {
               body: { library_ids: [libraryId] },
             })
-          } catch (_) { /* identify-actor is best-effort */ }
+            if (error) pipelineErr = `actor-id: ${error.message}`
+            else if (data?.errors?.length > 0) pipelineErr = `actor-id: ${data.errors[0].error || 'unknown'}`
+          } catch (e) { pipelineErr = `actor-id threw: ${e.message}` }
           try {
-            await supabase.functions.invoke('creative-library-describe', {
+            const { data, error } = await supabase.functions.invoke('creative-library-describe', {
               body: { library_ids: [libraryId] },
             })
-          } catch (_) { /* describe is best-effort */ }
+            if (error) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe: ${error.message}`
+            else if (data?.errors?.length > 0) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe: ${data.errors[0].error || 'unknown'}`
+          } catch (e) { pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe threw: ${e.message}` }
+          return pipelineErr
         }
         if (storagePath && isVideo) {
           safeSetProgress(p => ({ ...p, [file.name]: 'transcribing' }))
@@ -4389,8 +4494,8 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
             // Run actor-ID + describe regardless of transcribe outcome —
             // canonical_name still benefits from a thumbnail-based match
             // even when transcription failed.
-            runActorAndDescribe().then(() => {
-              safeSetProgress(p => ({ ...p, [file.name]: 'done' }))
+            runActorAndDescribe().then((pipeErr) => {
+              safeSetProgress(p => ({ ...p, [file.name]: pipeErr ? `done · ${pipeErr}` : 'done' }))
             })
           })
           safeSetProgress(p => ({ ...p, [file.name]: 'uploaded · transcribing in background' }))
@@ -4398,8 +4503,8 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
           // Image path: no transcription, but thumbnail_url is set so
           // actor-ID + canonical-name regeneration still work.
           safeSetProgress(p => ({ ...p, [file.name]: 'uploaded · identifying actor…' }))
-          runActorAndDescribe().then(() => {
-            safeSetProgress(p => ({ ...p, [file.name]: 'done (image)' }))
+          runActorAndDescribe().then((pipeErr) => {
+            safeSetProgress(p => ({ ...p, [file.name]: pipeErr ? `done (image) · ${pipeErr}` : 'done (image)' }))
           })
         } else {
           safeSetProgress(p => ({ ...p, [file.name]: 'row created (file too large to upload)' }))

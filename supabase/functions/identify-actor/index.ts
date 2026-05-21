@@ -52,7 +52,15 @@ async function fetchAsBase64(url: string): Promise<{ data: string, mediaType: st
     let bin = ''
     for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i])
     const data = btoa(bin)
-    const mediaType = res.headers.get('content-type') || 'image/jpeg'
+    // Anthropic Messages API only accepts jpeg/png/gif/webp. Anything else
+    // (image/heic from iOS, video/mp4 from a Supabase video URL, missing
+    // header, etc.) gets a 400. Normalise the content-type to one of the
+    // four accepted values — fall back to jpeg which is the most common.
+    const ct = (res.headers.get('content-type') || '').toLowerCase()
+    const mediaType = ct.includes('png') ? 'image/png'
+      : ct.includes('webp') ? 'image/webp'
+      : ct.includes('gif')  ? 'image/gif'
+      : 'image/jpeg'
     return { data, mediaType }
   } catch { return null }
 }
@@ -124,8 +132,12 @@ serve(async (req) => {
       content.push({ type: 'text', text: 'Target frame:' })
       content.push({ type: 'image', source: { type: 'base64', media_type: target.mediaType, data: target.data } })
       if (refImages.length > 0) {
-        content.push({ type: 'text', text: 'Reference frames (one per known person, in order ' + referenceNames.join(', ') + '):' })
+        content.push({ type: 'text', text: 'Reference frames — one per known person, each labelled before the image:' })
+        // Label each reference image immediately before pushing it so
+        // Claude can match by labelled reference rather than position in
+        // a comma list. Standard multi-image labelling pattern.
         for (const r of refImages) {
+          content.push({ type: 'text', text: `Reference: ${r.name}` })
           content.push({ type: 'image', source: { type: 'base64', media_type: r.image.mediaType, data: r.image.data } })
         }
       }
