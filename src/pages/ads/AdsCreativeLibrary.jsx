@@ -4023,9 +4023,15 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
   const [progress, setProgress] = useState({})  // filename -> 'uploading'|'done'|err msg
   // Bulk-assign fields — apply to EVERY file in this batch. Saves the
   // "upload, find rows, select rows, bulk edit, set editor" four-step
-  // dance Ben described. Defaults to 'Joined' type / no editor / no
-  // offer so existing behaviour is unchanged when fields are left blank.
+  // dance Ben described. Defaults to 'Joined' type / 'raw' status /
+  // no editor / no offer so existing behaviour is unchanged when
+  // fields are left blank.
   const [batchType, setBatchType] = useState('Joined')
+  // batchStatus: 'raw' = needs editing (default), 'edited' = the file
+  // is already a finished cut. Edited uploads also get final_cut_url +
+  // stage_final_cut='done' so the library matrix surfaces them as done
+  // and migration 087's trigger doesn't spawn an editing task.
+  const [batchStatus, setBatchStatus] = useState('raw')
   const [batchEditorId, setBatchEditorId] = useState('')
   const [batchOfferSlug, setBatchOfferSlug] = useState('')
   const inputRef = useRef(null)
@@ -4079,7 +4085,7 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
             name: file.name,
             type: batchType || 'Joined',
             size_mb: Math.round(file.size / 1024 / 1024 * 10) / 10,
-            status: 'raw',
+            status: batchStatus,
             assigned_editor_id: batchEditorId || null,
             offer_slug: batchOfferSlug || null,
             source_bucket: 'Manual upload',
@@ -4109,14 +4115,25 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
             .from('creative-uploads')
             .upload(storagePath, file, { upsert: false, contentType })
           if (upErr) throw upErr
-          // For images, the file itself IS the thumbnail. Patch the row
-          // so the grid shows it immediately without waiting for a
-          // separate ffmpeg-thumbnail step.
+          const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+          // Build the post-upload patch — only fields we want to change.
+          const postPatch = {}
+          // For images, the file itself IS the thumbnail. No ffmpeg step.
           if (isImageFile) {
-            const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+            postPatch.thumbnail_url = publicUrl
+            postPatch.preview_url = publicUrl
+          }
+          // When the operator marked the batch as 'edited', the uploaded
+          // file is the finished cut. Wire it into the stage columns
+          // so the library matrix shows it as done + migration 087's
+          // trigger keeps its 'no task for non-raw rows' invariant.
+          if (batchStatus === 'edited') {
+            postPatch.final_cut_url = publicUrl
+            postPatch.stage_final_cut = 'done'
+          }
+          if (Object.keys(postPatch).length > 0) {
             await supabase.from('lib_creative_library')
-              .update({ thumbnail_url: publicUrl, preview_url: publicUrl })
-              .eq('id', libraryId)
+              .update(postPatch).eq('id', libraryId)
           }
         }
 
@@ -4188,11 +4205,18 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
             letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)',
             marginBottom: 8,
           }}>Apply to all files in this batch</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr 1fr', gap: 10 }}>
             <div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Type</div>
               <select value={batchType} onChange={e => setBatchType(e.target.value)} style={selectStyle} disabled={busy}>
                 {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Status</div>
+              <select value={batchStatus} onChange={e => setBatchStatus(e.target.value)} style={selectStyle} disabled={busy}>
+                <option value="raw">Raw · needs editing</option>
+                <option value="edited">Edited · finished cut</option>
               </select>
             </div>
             <div>
