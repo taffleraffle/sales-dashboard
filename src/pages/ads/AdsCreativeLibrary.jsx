@@ -2620,7 +2620,7 @@ function VersionsPanel({ row, onReload }) {
   )
 }
 
-function UsageHistory({ row, onOpenRow }) {
+function UsageHistory({ row, onOpenRow, onRowPatched }) {
   // Two-way derivation panel:
   //   - Hooks/Bodies: list composites where derived_hook_id == this.id
   //                   (or derived_body_id for bodies). This is the
@@ -2629,15 +2629,46 @@ function UsageHistory({ row, onOpenRow }) {
   //                   show the matched Hook + Body source clips by
   //                   derived_hook_id / derived_body_id.
   //
-  // A legacy name-pattern fallback used to live here but it produced
-  // false positives (Hook 1.5 matched Hook 1's composites because the
-  // decimal was dropped, then ilike '%Hook 1%' over-matched). Removed.
-  // If a Joined row doesn't show up here, run the transcript matcher.
+  // The transcript matcher misses sometimes (different audio mix, the
+  // hook got chopped in the edit, low-quality transcription). The
+  // operator can now manually override the Hook + Body source via
+  // the [Replace] action in each card's header — that writes
+  // derived_hook_id / derived_body_id directly and the matcher's
+  // guess is preserved if not touched.
   const isSource    = row && (row.type === 'Hook' || row.type === 'Body')
   const isComposite = row && ['Joined', 'Full Video', 'Retargeting', 'Testimony'].includes(row.type)
   const [matches, setMatches] = useState([])
   const [sources, setSources] = useState({ hook: null, body: null })
   const [loading, setLoading] = useState(false)
+  // Source picker state — { role: 'hook'|'body' } when open
+  const [picker, setPicker] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  // Apply a chosen source row to the composite. Writes
+  // derived_hook_id or derived_body_id + immediately patches local
+  // state so the panel refreshes without a network round-trip.
+  const applySource = async (role, sourceId) => {
+    if (!row || !isComposite) return
+    setBusy(true)
+    const col = role === 'hook' ? 'derived_hook_id' : 'derived_body_id'
+    const { error } = await supabase.from('lib_creative_library')
+      .update({ [col]: sourceId || null })
+      .eq('id', row.id)
+    setBusy(false)
+    if (error) { alert(error.message); return }
+    // Notify parent so the rows state mirrors the override
+    onRowPatched?.(row.id, { [col]: sourceId || null })
+    // Refresh the local sources display
+    if (!sourceId) {
+      setSources(prev => ({ ...prev, [role]: null }))
+    } else {
+      const { data } = await supabase.from('lib_creative_library')
+        .select('id, name, canonical_name, type, status, thumbnail_url, preview_url')
+        .eq('id', sourceId).maybeSingle()
+      if (data) setSources(prev => ({ ...prev, [role]: data }))
+    }
+    setPicker(null)
+  }
 
   // SOURCE → COMPOSITES: pull rows where derived_*_id points at this row
   useEffect(() => {
@@ -2677,27 +2708,8 @@ function UsageHistory({ row, onOpenRow }) {
     return () => { mounted = false }
   }, [row?.id, row?.derived_hook_id, row?.derived_body_id, isComposite])
 
-  // Composite "Made from" panel
+  // Composite "Made from" panel — now editable
   if (isComposite) {
-    if (!sources.hook && !sources.body) {
-      return (
-        <div>
-          <div style={{
-            fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
-            marginBottom: 5,
-          }}>Made from</div>
-          <div style={{
-            padding: '10px 12px', background: 'var(--paper-2)',
-            border: '1px dashed var(--rule)',
-            fontFamily: 'var(--serif)', fontStyle: 'italic',
-            fontSize: 12, color: 'var(--ink-3)',
-          }}>
-            No hook/body source matched. Run the transcript matcher after every new ingest to populate these links.
-          </div>
-        </div>
-      )
-    }
     return (
       <div>
         <div style={{
@@ -2706,9 +2718,33 @@ function UsageHistory({ row, onOpenRow }) {
           marginBottom: 5,
         }}>Made from</div>
         <div style={{ display: 'grid', gap: 6 }}>
-          {sources.hook && <DerivationLinkRow row={sources.hook} role="HOOK SOURCE" onOpenRow={onOpenRow} />}
-          {sources.body && <DerivationLinkRow row={sources.body} role="BODY SOURCE" onOpenRow={onOpenRow} />}
+          <SourceSlot
+            role="hook"
+            label="Hook source"
+            sourceRow={sources.hook}
+            busy={busy}
+            onOpenRow={onOpenRow}
+            onPick={() => setPicker({ role: 'hook' })}
+            onClear={() => applySource('hook', null)}
+          />
+          <SourceSlot
+            role="body"
+            label="Body source"
+            sourceRow={sources.body}
+            busy={busy}
+            onOpenRow={onOpenRow}
+            onPick={() => setPicker({ role: 'body' })}
+            onClear={() => applySource('body', null)}
+          />
         </div>
+        {picker && (
+          <SourcePickerModal
+            role={picker.role}
+            currentId={picker.role === 'hook' ? row.derived_hook_id : row.derived_body_id}
+            onClose={() => setPicker(null)}
+            onPick={(id) => applySource(picker.role, id)}
+          />
+        )}
       </div>
     )
   }
@@ -2742,6 +2778,178 @@ function UsageHistory({ row, onOpenRow }) {
         </div>
       )}
     </div>
+  )
+}
+
+/* Slot card for an editable Hook / Body source link inside the
+   composite's "Made from" panel. If sourceRow is set, shows the row
+   + a Replace / Clear pair. If empty, shows a single "+ Link {role}"
+   call-to-action. */
+function SourceSlot({ role, label, sourceRow, busy, onOpenRow, onPick, onClear }) {
+  if (!sourceRow) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '8px 10px',
+        background: 'var(--paper-2)', border: '1px dashed var(--rule)',
+        fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
+      }}>
+        <span style={{ flex: 1 }}>
+          No {label.toLowerCase()} linked yet
+        </span>
+        <button onClick={onPick} disabled={busy} type="button"
+          style={{
+            padding: '4px 10px',
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            background: 'var(--ink)', color: 'var(--paper)',
+            border: 'none', cursor: 'pointer', borderRadius: 2,
+          }}>+ Link {role}</button>
+      </div>
+    )
+  }
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '6px 10px',
+      background: 'var(--paper-2)', border: '1px solid var(--rule)',
+      fontFamily: 'var(--mono)', fontSize: 11,
+    }}>
+      <div style={{ width: 40, height: 24, background: '#000', overflow: 'hidden', flexShrink: 0 }}>
+        {sourceRow.thumbnail_url && (
+          <img src={sourceRow.thumbnail_url} alt="" loading="lazy"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        )}
+      </div>
+      <div onClick={() => onOpenRow?.(sourceRow.id)}
+        style={{
+          flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          cursor: onOpenRow ? 'pointer' : 'default',
+        }}>
+        <div style={{ fontWeight: 600 }}>{sourceRow.canonical_name || sourceRow.name}</div>
+        <div style={{ color: 'var(--ink-4)', fontSize: 10 }}>{sourceRow.name}</div>
+      </div>
+      <span style={{
+        fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
+        letterSpacing: '0.08em', color: 'var(--ink-4)',
+      }}>{role.toUpperCase()} SOURCE</span>
+      <button onClick={onPick} disabled={busy} type="button"
+        style={{
+          padding: '3px 8px', fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+          letterSpacing: '0.06em', textTransform: 'uppercase',
+          background: 'transparent', color: 'var(--ink-2)',
+          border: '1px solid var(--rule)', cursor: 'pointer', borderRadius: 2,
+        }}>Replace</button>
+      <button onClick={onClear} disabled={busy} type="button"
+        title="Clear this link"
+        style={{
+          padding: '3px 8px', fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+          letterSpacing: '0.06em', textTransform: 'uppercase',
+          background: 'transparent', color: '#b53e3e',
+          border: '1px solid rgba(181,62,62,0.35)', cursor: 'pointer', borderRadius: 2,
+        }}>Clear</button>
+    </div>
+  )
+}
+
+/* Modal-style picker. Loads all Hook OR Body rows, search-filters as
+   the operator types, click to commit. Used by SourceSlot when the
+   operator wants to override the transcript matcher's guess. */
+function SourcePickerModal({ role, currentId, onClose, onPick }) {
+  const [q, setQ] = useState('')
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let mounted = true
+    const targetType = role === 'hook' ? 'Hook' : 'Body'
+    supabase.from('lib_creative_library')
+      .select('id, name, canonical_name, thumbnail_url, status, creator')
+      .eq('type', targetType)
+      .eq('exclude_from_library', false)
+      .order('canonical_name', { ascending: true })
+      .then(({ data }) => {
+        if (!mounted) return
+        setRows(data || [])
+        setLoading(false)
+      })
+    return () => { mounted = false }
+  }, [role])
+  const filtered = useMemo(() => {
+    const search = q.trim().toLowerCase()
+    if (!search) return rows
+    return rows.filter(r => {
+      const blob = `${r.name} ${r.canonical_name || ''} ${r.creator || ''}`.toLowerCase()
+      return blob.includes(search)
+    })
+  }, [rows, q])
+  return (
+    <Modal open={true} onClose={onClose} size="md"
+      eyebrow={`Link ${role}`}
+      title={`Pick the ${role} this composite was built from`}
+      subtitle="The transcript matcher's guess is shown highlighted. Type to filter, click any row to commit."
+      footer={<button onClick={onClose} style={ghostBtn}>Cancel</button>}>
+      <div style={{ padding: '14px 20px', display: 'grid', gap: 10 }}>
+        <input type="text" value={q} onChange={e => setQ(e.target.value)}
+          placeholder={`Search ${role}s by name, canonical name, creator…`}
+          autoFocus
+          style={{
+            padding: '8px 12px',
+            fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)',
+            border: '1px solid var(--rule)', borderRadius: 2,
+            background: 'white', outline: 'none',
+          }} />
+        {loading ? (
+          <div style={{ padding: 20, textAlign: 'center', fontStyle: 'italic', color: 'var(--ink-3)' }}>
+            Loading…
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', fontStyle: 'italic', color: 'var(--ink-3)' }}>
+            No matching {role}s
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 4, maxHeight: 420, overflowY: 'auto' }}>
+            {filtered.map(r => {
+              const isCurrent = r.id === currentId
+              return (
+                <button key={r.id} type="button"
+                  onClick={() => onPick(r.id)}
+                  style={{
+                    display: 'grid', gridTemplateColumns: '44px 1fr auto',
+                    gap: 10, alignItems: 'center',
+                    padding: '6px 10px', textAlign: 'left',
+                    background: isCurrent ? 'rgba(244,225,74,0.15)' : 'white',
+                    border: '1px solid ' + (isCurrent ? 'var(--accent)' : 'var(--rule)'),
+                    cursor: 'pointer', borderRadius: 2,
+                  }}>
+                  <div style={{ width: 44, height: 28, background: '#000', overflow: 'hidden' }}>
+                    {r.thumbnail_url && (
+                      <img src={r.thumbnail_url} alt="" loading="lazy"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    )}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 600,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {r.canonical_name || r.name}
+                    </div>
+                    <div style={{ fontFamily: 'var(--sans)', fontSize: 10.5, color: 'var(--ink-4)' }}>
+                      {r.creator || '—'} · {r.status}
+                    </div>
+                  </div>
+                  {isCurrent && (
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+                      letterSpacing: '0.08em', color: 'var(--ink)',
+                      background: 'var(--accent)', padding: '2px 6px', borderRadius: 2,
+                    }}>CURRENT</span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }
 
@@ -3967,7 +4175,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
 
         {/* Hook/Body history — when viewing a source clip, show which
             Joined composites have used it. */}
-        <UsageHistory row={row} onOpenRow={onOpenRow} />
+        <UsageHistory row={row} onOpenRow={onOpenRow} onRowPatched={onRowPatched} />
 
         {/* Existing tasks */}
         {existingTasks.length > 0 && (
