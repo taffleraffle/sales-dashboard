@@ -4037,7 +4037,13 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
   const safeSetProgress = (updater) => { if (mountedRef.current) setProgress(updater) }
 
   const acceptFiles = (incoming) => {
-    const added = Array.from(incoming || []).filter(f => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name))
+    // Accept videos AND images. Static image ads (banners, carousel
+    // creatives) live in the same bucket — widened the bucket's
+    // allowed_mime_types to match. Editor uploads from the queue still
+    // expect videos, but bulk-add from the Library can be either.
+    const isVideo = (f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name)
+    const isImage = (f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(f.name)
+    const added = Array.from(incoming || []).filter(f => isVideo(f) || isImage(f))
     if (added.length) setFiles(prev => [...prev, ...added])
   }
 
@@ -4086,22 +4092,40 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
 
         // 2. Upload file to creative-uploads bucket. Skip massive files
         //    (>900MB) — bucket limit is 1GB and we leave headroom.
+        //    Images: also patch the row's thumbnail_url to the image
+        //    itself so it shows immediately in the grid (no Whisper /
+        //    ffmpeg thumbnail-extract pipeline needed for static creatives).
         const tooLarge = file.size > 900 * 1024 * 1024
+        const isImageFile = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
         let storagePath = null
         if (!tooLarge) {
           setProgress(p => ({ ...p, [file.name]: 'uploading' }))
           storagePath = `incoming/${libraryId}_${file.name.replace(/[^A-Za-z0-9._-]/g, '_')}`
+          // Content-type defaults to video/mp4 only when no file.type is
+          // detected — for images we send the actual MIME so the bucket
+          // accepts it.
+          const contentType = file.type || (isImageFile ? 'image/jpeg' : 'video/mp4')
           const { error: upErr } = await supabase.storage
             .from('creative-uploads')
-            .upload(storagePath, file, { upsert: false, contentType: file.type || 'video/mp4' })
+            .upload(storagePath, file, { upsert: false, contentType })
           if (upErr) throw upErr
+          // For images, the file itself IS the thumbnail. Patch the row
+          // so the grid shows it immediately without waiting for a
+          // separate ffmpeg-thumbnail step.
+          if (isImageFile) {
+            const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+            await supabase.from('lib_creative_library')
+              .update({ thumbnail_url: publicUrl, preview_url: publicUrl })
+              .eq('id', libraryId)
+          }
         }
 
-        // 3. Kick off transcription (only if we successfully uploaded the file).
-        //    Don't await the response strictly — it can take 30s+ for long
-        //    files. Fire-and-forget with a status check; UI will pick up the
-        //    transcript on next page refresh.
-        if (storagePath) {
+        // 3. Kick off transcription — ONLY for video files. Images
+        //    have no audio so Whisper would error out. Fire-and-forget;
+        //    transcripts arrive seconds later, UI picks them up on the
+        //    next refresh.
+        const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
+        if (storagePath && isVideo) {
           safeSetProgress(p => ({ ...p, [file.name]: 'transcribing' }))
           supabase.functions.invoke('transcribe-library-clip', {
             body: { library_id: libraryId, storage_path: storagePath },
@@ -4115,8 +4139,9 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
               safeSetProgress(p => ({ ...p, [file.name]: 'done (transcribed)' }))
             }
           })
-          // Mark "uploaded" right away — transcript arrives later
           safeSetProgress(p => ({ ...p, [file.name]: 'uploaded · transcribing in background' }))
+        } else if (storagePath) {
+          safeSetProgress(p => ({ ...p, [file.name]: 'uploaded (image — no transcription)' }))
         } else {
           safeSetProgress(p => ({ ...p, [file.name]: 'row created (file too large to upload)' }))
         }
@@ -4202,11 +4227,11 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
           }}
           onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ink)'}
           onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--rule)'}>
-          <input ref={inputRef} type="file" accept="video/*" multiple
+          <input ref={inputRef} type="file" accept="video/*,image/*" multiple
             style={{ display: 'none' }}
             onChange={e => acceptFiles(e.target.files)} />
           <div style={{ fontFamily: 'var(--serif)', fontSize: 16, color: 'var(--ink-2)', marginBottom: 4 }}>
-            Drop video files here
+            Drop video or image files here
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
             or click to select (multi-select allowed)
