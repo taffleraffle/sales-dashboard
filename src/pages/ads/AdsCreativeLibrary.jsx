@@ -1,8 +1,59 @@
 import { useEffect, useMemo, useState, useCallback, useRef, memo, useDeferredValue } from 'react'
 import { createPortal } from 'react-dom'
+import * as tus from 'tus-js-client'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Icon } from '../../components/editorial/atoms'
 import Modal from '../../components/editorial/Modal'
+
+const SUPABASE_URL = 'https://kjfaqhmllagbxjdxlopm.supabase.co'
+
+/* Resumable upload via TUS. Supabase's standard storage `.upload()` is a
+   single-shot POST that buffers the whole file in memory — it falls over
+   at the project's per-request limit (was 50MB until we bumped it to 5GB
+   yesterday) and gives zero progress feedback for the multi-minute uploads
+   needed for raw camera MP4s.
+
+   This helper streams the file in 6MB chunks (Supabase TUS requirement),
+   reports progress as 0-1, retries on transient failures, and survives
+   browser tab switches. Use for ANY file larger than ~6MB; the small-file
+   `.upload()` path is fine for thumbnails.
+
+   `onProgress(fraction)` is called frequently — debounce in the caller
+   if it's wired straight into setState. */
+async function uploadWithResume(file, { bucket, path, contentType, onProgress, upsert = false }) {
+  const session = (await supabase.auth.getSession()).data.session
+  const accessToken = session?.access_token
+  if (!accessToken) throw new Error('Not signed in — cannot upload')
+  return new Promise((resolve, reject) => {
+    const upload = new tus.Upload(file, {
+      endpoint: `${SUPABASE_URL}/storage/v1/upload/resumable`,
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'x-upsert': upsert ? 'true' : 'false',
+      },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      metadata: {
+        bucketName: bucket,
+        objectName: path,
+        contentType: contentType || file.type || 'application/octet-stream',
+        cacheControl: '3600',
+      },
+      chunkSize: 6 * 1024 * 1024,
+      onError: (err) => reject(err),
+      onProgress: (bytesUploaded, bytesTotal) => {
+        if (onProgress) onProgress(bytesTotal > 0 ? bytesUploaded / bytesTotal : 0)
+      },
+      onSuccess: () => resolve({ path }),
+    })
+    // Resume if we have a prior attempt for this exact file fingerprint.
+    upload.findPreviousUploads().then((prev) => {
+      if (prev.length > 0) upload.resumeFromPreviousUpload(prev[0])
+      upload.start()
+    }).catch(() => upload.start())
+  })
+}
 
 /*
   /sales/ads/creative/library — two-tab surface for the creative library:
@@ -127,7 +178,13 @@ function editorColor(slugOrEditorOrTask) {
    (skips the typical black opening frame), draws to a <canvas>, and
    returns a JPEG Blob ready to upload alongside the video. Returns null
    on any failure so the upload can continue without blocking on it. */
-async function captureVideoThumbnail(file, { seekSeconds = 1, maxWidth = 720 } = {}) {
+async function captureVideoThumbnail(file, { seekSeconds = 1, maxWidth = 720, maxBytes = 500 * 1024 * 1024 } = {}) {
+  // Hard guard: phone-camera MP4s often have the moov atom at the end,
+  // which forces the browser to download the WHOLE file before it can
+  // seek. For multi-hundred-MB files that stalls the entire upload queue
+  // before a single byte is sent. We skip thumbnail capture above this
+  // threshold and let an offline backfill job extract thumbnails later.
+  if (file.size > maxBytes) return null
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file)
     const video = document.createElement('video')
@@ -143,8 +200,6 @@ async function captureVideoThumbnail(file, { seekSeconds = 1, maxWidth = 720 } =
       resolve(blob)
     }
     video.onloadedmetadata = () => {
-      // Pick the smaller of seekSeconds vs slightly-before-end (some
-      // short clips are <1s long).
       const target = Math.min(seekSeconds, Math.max(0, (video.duration || 0) - 0.1))
       video.currentTime = target
     }
@@ -2554,27 +2609,33 @@ function VersionsPanel({ row, onReload }) {
       const nextVersion = Math.max(0, ...versions.map(v => v.version_number || 1)) + 1
       const sanitized = file.name.replace(/[^A-Za-z0-9._-]+/g, '_')
       const storagePath = `ingest/${Date.now()}_v${nextVersion}_${sanitized}`
-      // 1. Upload to creative-uploads (full file for preview)
-      const { error: upErr } = await supabase.storage
-        .from('creative-uploads')
-        .upload(storagePath, file, { upsert: false, contentType: file.type || 'video/mp4' })
-      if (upErr) throw upErr
-      const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+      // 1. Upload via TUS resumable (handles multi-GB files + progress).
+      await uploadWithResume(file, {
+        bucket: 'creative-uploads',
+        path: storagePath,
+        contentType: file.type || 'video/mp4',
+        onProgress: (frac) => setProgress(`Uploading ${Math.round(frac * 100)}%…`),
+      })
+      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
 
       // 2. Browser-side first-frame capture — gives identify-actor a real
       //    image to face-match against. Best-effort; null result just means
       //    the row has no thumbnail and identify-actor will skip it.
+      //    captureVideoThumbnail self-guards on files >500MB.
       setProgress('Capturing thumbnail…')
       let thumbnailUrl = null
       const thumbBlob = await captureVideoThumbnail(file)
       if (thumbBlob) {
         const thumbPath = `ingest/${Date.now()}_v${nextVersion}_${sanitized}_thumb.jpg`
-        const { error: thumbErr } = await supabase.storage
-          .from('creative-uploads')
-          .upload(thumbPath, thumbBlob, { upsert: true, contentType: 'image/jpeg' })
-        if (!thumbErr) {
-          thumbnailUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${thumbPath}`
-        }
+        try {
+          await uploadWithResume(thumbBlob, {
+            bucket: 'creative-uploads',
+            path: thumbPath,
+            contentType: 'image/jpeg',
+            upsert: true,
+          })
+          thumbnailUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${thumbPath}`
+        } catch { /* thumbnail best-effort */ }
       }
 
       // 3. Insert new library row inheriting metadata + thumbnail
@@ -4391,26 +4452,40 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
         if (insErr) throw insErr
         const libraryId = inserted.id
 
-        // 2. Upload file to creative-uploads bucket. Skip massive files
-        //    (>900MB) — bucket limit is 1GB and we leave headroom.
-        //    Images: also patch the row's thumbnail_url to the image
-        //    itself so it shows immediately in the grid (no Whisper /
-        //    ffmpeg thumbnail-extract pipeline needed for static creatives).
-        const tooLarge = file.size > 900 * 1024 * 1024
+        // 2. Upload file to creative-uploads bucket via TUS resumable.
+        //    Bucket + project file_size_limit are both at 5GB. TUS streams
+        //    the file in 6MB chunks with retry + progress so multi-GB
+        //    uploads survive network blips and the user actually sees
+        //    progress as it climbs. Files larger than 5GB skip the upload
+        //    and create a stub row (operator can re-upload after compress).
+        const HARD_LIMIT = 5 * 1024 * 1024 * 1024
+        const tooLarge = file.size > HARD_LIMIT
         const isImageFile = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
         let storagePath = null
         if (!tooLarge) {
-          setProgress(p => ({ ...p, [file.name]: 'uploading' }))
           storagePath = `incoming/${libraryId}_${file.name.replace(/[^A-Za-z0-9._-]/g, '_')}`
-          // Content-type defaults to video/mp4 only when no file.type is
-          // detected — for images we send the actual MIME so the bucket
-          // accepts it.
           const contentType = file.type || (isImageFile ? 'image/jpeg' : 'video/mp4')
-          const { error: upErr } = await supabase.storage
-            .from('creative-uploads')
-            .upload(storagePath, file, { upsert: false, contentType })
-          if (upErr) throw upErr
-          const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+          // Throttle progress paints to 5%-step buckets so we don't spam
+          // setState 1000+ times per file.
+          let lastPct = -1
+          try {
+            await uploadWithResume(file, {
+              bucket: 'creative-uploads',
+              path: storagePath,
+              contentType,
+              onProgress: (frac) => {
+                const pct = Math.floor(frac * 20) * 5
+                if (pct !== lastPct) {
+                  lastPct = pct
+                  safeSetProgress(p => ({ ...p, [file.name]: `uploading ${pct}%` }))
+                }
+              },
+            })
+          } catch (e) {
+            // Bubble up to the per-file catch so fail++ and the loop moves on.
+            throw new Error(e?.message || 'upload failed')
+          }
+          const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
           // Build the post-upload patch — only fields we want to change.
           const postPatch = { preview_url: publicUrl }
           // For images, the file itself IS the thumbnail.
@@ -4418,19 +4493,22 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
             postPatch.thumbnail_url = publicUrl
           } else {
             // For videos: capture the first frame in the browser and
-            // upload it as a separate JPEG. This unblocks identify-actor
-            // (it needs a real image to send to Claude Vision) and
-            // populates the matrix thumbnail right away.
+            // upload it as a separate JPEG. Skips files >500MB (moov-atom
+            // stall) — those land without a thumbnail and a backfill job
+            // can extract one later.
             safeSetProgress(p => ({ ...p, [file.name]: 'capturing thumbnail' }))
             const thumbBlob = await captureVideoThumbnail(file)
             if (thumbBlob) {
               const thumbPath = `incoming/${libraryId}_thumb.jpg`
-              const { error: thumbErr } = await supabase.storage
-                .from('creative-uploads')
-                .upload(thumbPath, thumbBlob, { upsert: true, contentType: 'image/jpeg' })
-              if (!thumbErr) {
-                postPatch.thumbnail_url = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${thumbPath}`
-              }
+              try {
+                await uploadWithResume(thumbBlob, {
+                  bucket: 'creative-uploads',
+                  path: thumbPath,
+                  contentType: 'image/jpeg',
+                  upsert: true,
+                })
+                postPatch.thumbnail_url = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${thumbPath}`
+              } catch { /* thumbnail upload best-effort */ }
             }
           }
           // When the operator marked the batch as 'edited', the uploaded
@@ -4529,7 +4607,14 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
     <Modal open={true} onClose={busy ? () => {} : onClose} size="md"
       eyebrow="Upload"
       title={`Add ${files.length || ''} new creative${files.length === 1 ? '' : 's'}`}
-      subtitle="Drop video files (up to 900MB each). We upload to the library bucket and auto-transcribe via Whisper. Transcripts appear in the row's detail modal once ready (usually <60s)."
+      subtitle={(() => {
+        const totalBytes = files.reduce((s, f) => s + (f?.size || 0), 0)
+        const gb = totalBytes / (1024 * 1024 * 1024)
+        const sizeLabel = totalBytes > 0
+          ? (gb >= 1 ? `${gb.toFixed(2)} GB total` : `${(totalBytes / (1024 * 1024)).toFixed(1)} MB total`)
+          : ''
+        return `Drop video or image files — up to 5 GB each. Resumable uploads survive multi-GB clips. Transcripts + auto-tag fire in the background once the file lands.${sizeLabel ? ` · ${sizeLabel}` : ''}`
+      })()}
       footer={
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
