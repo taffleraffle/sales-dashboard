@@ -2525,10 +2525,17 @@ function VersionsPanel({ row, onReload }) {
         .select()
         .single()
       if (insErr) throw insErr
-      // 3. Fire transcribe + describe asynchronously (don't block UI)
+      // 3. Fire transcribe → identify-actor → describe asynchronously
+      //    (don't block UI). The chain matters: identify-actor writes
+      //    the creator column, then describe regenerates canonical_name
+      //    from the now-correct creator + transcript.
       setProgress('Transcribing in background…')
       supabase.functions.invoke('transcribe-library-clip', {
         body: { library_id: inserted.id, storage_path: storagePath },
+      }).then(() => {
+        return supabase.functions.invoke('identify-actor', {
+          body: { library_ids: [inserted.id] },
+        })
       }).then(() => {
         supabase.functions.invoke('creative-library-describe', {
           body: { library_ids: [inserted.id] },
@@ -4345,11 +4352,27 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
           }
         }
 
-        // 3. Kick off transcription — ONLY for video files. Images
-        //    have no audio so Whisper would error out. Fire-and-forget;
-        //    transcripts arrive seconds later, UI picks them up on the
-        //    next refresh.
+        // 3. Kick off transcription + actor ID + canonical-name pipeline.
+        //    Videos: transcribe → identify-actor → describe.
+        //    Images: skip transcription (no audio), but still run identify-actor
+        //            (thumbnail_url was set to the image itself on upload) →
+        //            describe. The chain matters: identify-actor sets the
+        //            creator column, then describe regenerates canonical_name
+        //            using the correct creator + transcript (if any) following
+        //            Turner's naming convention.
         const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
+        const runActorAndDescribe = async () => {
+          try {
+            await supabase.functions.invoke('identify-actor', {
+              body: { library_ids: [libraryId] },
+            })
+          } catch (_) { /* identify-actor is best-effort */ }
+          try {
+            await supabase.functions.invoke('creative-library-describe', {
+              body: { library_ids: [libraryId] },
+            })
+          } catch (_) { /* describe is best-effort */ }
+        }
         if (storagePath && isVideo) {
           safeSetProgress(p => ({ ...p, [file.name]: 'transcribing' }))
           supabase.functions.invoke('transcribe-library-clip', {
@@ -4361,12 +4384,23 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
               // Function returned 4xx/5xx body (e.g. Whisper 25MB limit)
               safeSetProgress(p => ({ ...p, [file.name]: 'transcribe failed: ' + data.error }))
             } else {
-              safeSetProgress(p => ({ ...p, [file.name]: 'done (transcribed)' }))
+              safeSetProgress(p => ({ ...p, [file.name]: 'identifying actor…' }))
             }
+            // Run actor-ID + describe regardless of transcribe outcome —
+            // canonical_name still benefits from a thumbnail-based match
+            // even when transcription failed.
+            runActorAndDescribe().then(() => {
+              safeSetProgress(p => ({ ...p, [file.name]: 'done' }))
+            })
           })
           safeSetProgress(p => ({ ...p, [file.name]: 'uploaded · transcribing in background' }))
         } else if (storagePath) {
-          safeSetProgress(p => ({ ...p, [file.name]: 'uploaded (image — no transcription)' }))
+          // Image path: no transcription, but thumbnail_url is set so
+          // actor-ID + canonical-name regeneration still work.
+          safeSetProgress(p => ({ ...p, [file.name]: 'uploaded · identifying actor…' }))
+          runActorAndDescribe().then(() => {
+            safeSetProgress(p => ({ ...p, [file.name]: 'done (image)' }))
+          })
         } else {
           safeSetProgress(p => ({ ...p, [file.name]: 'row created (file too large to upload)' }))
         }
