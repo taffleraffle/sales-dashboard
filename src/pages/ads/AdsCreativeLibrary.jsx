@@ -4453,12 +4453,12 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
         const libraryId = inserted.id
 
         // 2. Upload file to creative-uploads bucket via TUS resumable.
-        //    Bucket + project file_size_limit are both at 5GB. TUS streams
+        //    Bucket + project file_size_limit are both at 10GB. TUS streams
         //    the file in 6MB chunks with retry + progress so multi-GB
         //    uploads survive network blips and the user actually sees
-        //    progress as it climbs. Files larger than 5GB skip the upload
+        //    progress as it climbs. Files larger than 10GB skip the upload
         //    and create a stub row (operator can re-upload after compress).
-        const HARD_LIMIT = 5 * 1024 * 1024 * 1024
+        const HARD_LIMIT = 10 * 1024 * 1024 * 1024
         const tooLarge = file.size > HARD_LIMIT
         const isImageFile = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
         let storagePath = null
@@ -4613,7 +4613,7 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
         const sizeLabel = totalBytes > 0
           ? (gb >= 1 ? `${gb.toFixed(2)} GB total` : `${(totalBytes / (1024 * 1024)).toFixed(1)} MB total`)
           : ''
-        return `Drop video or image files — up to 5 GB each. Resumable uploads survive multi-GB clips. Transcripts + auto-tag fire in the background once the file lands.${sizeLabel ? ` · ${sizeLabel}` : ''}`
+        return `Drop video or image files — up to 10 GB each. Resumable uploads survive multi-GB clips. Transcripts + auto-tag fire in the background once the file lands.${sizeLabel ? ` · ${sizeLabel}` : ''}`
       })()}
       footer={
         <>
