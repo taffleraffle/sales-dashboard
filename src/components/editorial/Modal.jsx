@@ -80,11 +80,14 @@ export default function Modal({
         onClick={onClose}
         style={{
           position: 'fixed', inset: 0,
-          // Stronger fill for nested modals so the outer modal doesn't bleed through
-          background: depth > 1 ? 'rgba(10,10,10,0.55)' : 'rgba(10,10,10,0.32)',
-          backdropFilter: 'blur(2px)',
+          // Stronger fill for nested modals so the outer modal doesn't bleed through.
+          // backdropFilter dropped 2026-05-22: each opening modal forced the GPU to
+          // re-rasterise the entire viewport behind it, which on the heavy library
+          // page (200+ matrix rows + inline styles) added 150-300ms of paint cost
+          // per open/close. Visual difference is minimal; perf difference is huge.
+          background: depth > 1 ? 'rgba(10,10,10,0.55)' : 'rgba(10,10,10,0.40)',
           zIndex: zBackdrop,
-          animation: 'modalFadeIn 0.18s cubic-bezier(0.2,0.7,0.2,1)',
+          animation: 'modalFadeIn 80ms ease-out',
         }} />
 
       <div
@@ -104,7 +107,11 @@ export default function Modal({
           boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
           zIndex: zDialog,
           display: 'flex', flexDirection: 'column',
-          animation: 'modalSlideIn 0.22s cubic-bezier(0.2,0.7,0.2,1)',
+          // Animation shortened from 220ms -> 100ms (2026-05-22). The
+          // longer ease felt premium but ate 100+ms of perceived click latency
+          // on every modal open. 100ms is fast enough that the eye registers
+          // motion but not a wait.
+          animation: 'modalSlideIn 100ms cubic-bezier(0.2,0.7,0.2,1)',
         }}>
         {/* Header — sticky inside the modal */}
         <div style={{

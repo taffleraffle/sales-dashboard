@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef, memo, useDeferredValue } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef, memo, useDeferredValue, startTransition } from 'react'
 import { createPortal } from 'react-dom'
 import * as tus from 'tus-js-client'
 import { supabase } from '../../lib/supabase'
@@ -671,7 +671,7 @@ function NotificationBell({ submissions }) {
           <div onClick={() => setOpen(false)}
             style={{
               position: 'fixed', inset: 0, zIndex: 200,
-              background: 'rgba(10,10,10,0.32)', backdropFilter: 'blur(2px)',
+              background: 'rgba(10,10,10,0.40)',
             }} />
           <div style={{
             position: 'fixed', top: 0, right: 0, bottom: 0,
@@ -1039,7 +1039,19 @@ export default function AdsCreativeLibrary({ editorScope }) {
         </div>
       </div>
 
-      {tab === 'library' ? <LibraryTab scope={scope} /> : <EditingQueueTab scope={scope} />}
+      {/* Both tabs stay mounted — toggle visibility instead of mount/unmount.
+          Why: unmounting a tab destroys all of its state (filters, scroll
+          position, expanded rows, in-flight fetches) and the next switch
+          back has to re-mount and re-fetch from scratch. With 200+ library
+          rows + a dozen useMemo computations, that re-mount alone is ~400ms
+          of paint time. Keeping both mounted means switching is a
+          near-instant visibility flip and the user's filters survive. */}
+      <div style={{ display: tab === 'library' ? 'block' : 'none' }}>
+        <LibraryTab scope={scope} />
+      </div>
+      <div style={{ display: tab === 'queue' ? 'block' : 'none' }}>
+        <EditingQueueTab scope={scope} />
+      </div>
     </div>
   )
 }
@@ -1120,7 +1132,15 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const clearSelection = useCallback(() => setSelected(new Set()), [])
   // Stable reference for the row-click handler — MatrixRow uses React.memo
   // so passing a fresh inline lambda each render would defeat the memo.
-  const openDrawer = useCallback((row) => setDrawerRow(row), [])
+  // Open the detail modal. Wrapped in startTransition so React marks the
+  // modal mount as a low-priority update — the matrix row's hover/press
+  // feedback paints first, then the modal slides in. Without this, the
+  // entire modal subtree (form fields + type pills + editor pickers + the
+  // tasks fetch effect) blocks the next paint, which is why row clicks
+  // used to feel like a 200-400ms freeze before anything happened.
+  const openDrawer = useCallback((row) => {
+    startTransition(() => setDrawerRow(row))
+  }, [])
 
   // Cross-modal navigation: when a user clicks a "Used in" or "Made from"
   // link inside the detail modal, jump the modal to that row. Looks up the
@@ -1832,8 +1852,8 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           offers={offers}
           knownCreators={knownCreators}
           onOpenRow={openRowById}
-          onClose={() => setDrawerRow(null)}
-          onSaved={() => { setDrawerRow(null); load() }}
+          onClose={() => startTransition(() => setDrawerRow(null))}
+          onSaved={() => { startTransition(() => setDrawerRow(null)); load() }}
           onRowPatched={(id, patch) => {
             // Merge changed fields into the parent's rows state.
             // No full DB reload — DB is already updated by the modal's
