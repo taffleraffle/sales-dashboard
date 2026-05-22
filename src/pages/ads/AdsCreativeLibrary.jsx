@@ -7,6 +7,30 @@ import Modal from '../../components/editorial/Modal'
 
 const SUPABASE_URL = 'https://kjfaqhmllagbxjdxlopm.supabase.co'
 
+/* Force a true binary download instead of an in-tab video stream.
+   Supabase public-object URLs serve files with NO Content-Disposition
+   header by default. When the browser sees that, it IGNORES the `<a
+   download>` attribute on cross-origin links and just navigates to the
+   URL — meaning the video opens in a tab and plays, instead of saving
+   to disk. Operators then resort to right-clicking the playing video
+   or screen-recording it, both of which murder the quality.
+
+   Supabase storage accepts a `?download=<filename>` query param that
+   makes the response include `Content-Disposition: attachment;
+   filename=<filename>`. With that header present the browser saves
+   the raw bytes to disk — the original full-quality file. Use this
+   wrapper on every download link so the operator gets the actual
+   uploaded bytes, never a screen-recorded re-encode. */
+function toDownloadUrl(url, filename) {
+  if (!url) return url
+  // Only rewrite Supabase storage URLs — leave Drive / external links
+  // alone (Drive has its own download UX).
+  if (!url.includes('/storage/v1/object/public/')) return url
+  const fname = (filename || 'creative.mp4').replace(/[^A-Za-z0-9._-]+/g, '_')
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}download=${encodeURIComponent(fname)}`
+}
+
 /* Resumable upload via TUS. Supabase's standard storage `.upload()` is a
    single-shot POST that buffers the whole file in memory — it falls over
    at the project's per-request limit (was 50MB until we bumped it to 5GB
@@ -1526,9 +1550,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     targets.forEach((t, i) => {
       setTimeout(() => {
         const a = document.createElement('a')
-        a.href = t.url
+        // Rewrite to ?download=<filename> so Supabase serves with
+        // Content-Disposition: attachment and the browser saves the
+        // raw bytes to disk instead of streaming the video in a tab.
+        a.href = toDownloadUrl(t.url, t.name || 'creative.mp4')
         a.download = t.name || 'creative.mp4'
-        a.target = '_blank'
         a.rel = 'noopener noreferrer'
         document.body.appendChild(a)
         a.click()
@@ -4542,8 +4568,9 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
             }}>
               <span>Original file</span>
-              <a href={dl} download={row.canonical_name || row.name || 'creative.mp4'}
-                target="_blank" rel="noreferrer"
+              <a href={toDownloadUrl(dl, row.canonical_name || row.name)}
+                download={row.canonical_name || row.name || 'creative.mp4'}
+                rel="noreferrer"
                 title="Download the highest-quality version of this creative"
                 style={{
                   padding: '4px 10px', fontWeight: 600,
@@ -6124,9 +6151,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                 )}
                 {(task.drive_url || task.preview_url) && (
                   <a
-                    href={task.drive_url || task.preview_url}
+                    href={toDownloadUrl(task.drive_url || task.preview_url, task.creative_name)}
                     download={task.creative_name || 'creative.mp4'}
-                    target="_blank" rel="noreferrer"
+                    rel="noreferrer"
                     title="Download the original full-quality file"
                     style={{
                       padding: '4px 10px',
@@ -6499,9 +6526,9 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove,
                     borderTop: '1px solid var(--rule)',
                     display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
                   }}>
-                    <a href={sub.file_url}
+                    <a href={toDownloadUrl(sub.file_url, `v${sub.version_number || 1}.mp4`)}
                       download={`v${sub.version_number || 1}.mp4`}
-                      target="_blank" rel="noreferrer"
+                      rel="noreferrer"
                       title="Download this submitted cut"
                       style={{
                         padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
