@@ -223,6 +223,354 @@ async function captureVideoThumbnail(file, { seekSeconds = 1, maxWidth = 720, ma
   })
 }
 
+/* ──────────────────── BACKGROUND UPLOAD QUEUE ──────────────────── */
+/* Module-level singleton. Outlives any modal mount/unmount, so the
+   operator can hit Upload, close the modal, navigate around the tab,
+   and the uploads keep going. The floating UploadDock at the page
+   root subscribes for progress. Any component can subscribe via the
+   useUploadQueue() hook below.
+
+   Why a singleton instead of context: contexts re-mount with the
+   component tree, and the UploadModal is conditionally rendered
+   (uploadOpen toggles it). The instant the modal unmounts, any state
+   it owned would die. We need state that survives.
+
+   Items live in `uploadQueue.items` and get notified on every change.
+   Completed/failed items stick around until the operator dismisses
+   them so the dock shows the final state. */
+const uploadQueue = {
+  items: [],
+  listeners: new Set(),
+  isProcessing: false,
+  subscribe(fn) {
+    this.listeners.add(fn)
+    return () => this.listeners.delete(fn)
+  },
+  notify() {
+    const snapshot = [...this.items]
+    this.listeners.forEach((fn) => { try { fn(snapshot) } catch {} })
+  },
+  updateItem(id, patch) {
+    const idx = this.items.findIndex((i) => i.id === id)
+    if (idx >= 0) {
+      this.items[idx] = { ...this.items[idx], ...patch }
+      this.notify()
+    }
+  },
+  enqueue(files, config) {
+    const stamp = new Date().toISOString().slice(0, 10)
+    const newItems = files.map((file) => ({
+      id: (crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`),
+      file,
+      config: { ...config, stamp },
+      status: 'queued',
+      progress: 0,
+      message: 'queued',
+      error: null,
+      libraryId: null,
+      addedAt: Date.now(),
+    }))
+    this.items.push(...newItems)
+    this.notify()
+    if (!this.isProcessing) this.processNext()
+  },
+  async processNext() {
+    const next = this.items.find((i) => i.status === 'queued')
+    if (!next) {
+      this.isProcessing = false
+      window.dispatchEvent(new CustomEvent('upload-queue-idle'))
+      return
+    }
+    this.isProcessing = true
+    try {
+      await runUploadPipeline(next, (patch) => this.updateItem(next.id, patch))
+    } catch (e) {
+      this.updateItem(next.id, { status: 'error', message: e?.message || 'failed', error: e?.message || 'failed' })
+    }
+    // Yield to event loop so React can paint, then move on.
+    setTimeout(() => this.processNext(), 50)
+  },
+  clearCompleted() {
+    this.items = this.items.filter((i) => i.status !== 'done' && i.status !== 'error')
+    this.notify()
+  },
+  dismiss(id) {
+    this.items = this.items.filter((i) => i.id !== id)
+    this.notify()
+  },
+}
+
+/* Per-file pipeline. Was inline in UploadModal.submit; extracted so the
+   queue can drive it independent of any component. Mirrors the old
+   bulk-upload submit() logic: create row → TUS upload → patch thumbnail
+   → transcribe (video) → identify-actor → describe. `update(patch)`
+   merges into the queue item so subscribers see live progress. */
+async function runUploadPipeline(item, update) {
+  const { file, config } = item
+  const { batchType, batchStatus, batchEditorId, batchOfferSlug, stamp } = config
+  update({ status: 'creating', message: 'creating row' })
+
+  // 1. Insert library row
+  const { data: inserted, error: insErr } = await supabase
+    .from('lib_creative_library')
+    .insert({
+      name: file.name,
+      type: batchType || 'Joined',
+      size_mb: Math.round((file.size / 1024 / 1024) * 10) / 10,
+      status: batchStatus,
+      assigned_editor_id: batchEditorId || null,
+      offer_slug: batchOfferSlug || null,
+      source_bucket: 'Manual upload',
+      notes: `Uploaded via /sales/ads/creative/library on ${stamp}.`,
+    })
+    .select('id')
+    .single()
+  if (insErr) throw new Error(insErr.message)
+  const libraryId = inserted.id
+  update({ libraryId })
+
+  // 2. TUS upload
+  const HARD_LIMIT = 10 * 1024 * 1024 * 1024
+  const tooLarge = file.size > HARD_LIMIT
+  const isImageFile = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
+  let storagePath = null
+  if (!tooLarge) {
+    storagePath = `incoming/${libraryId}_${file.name.replace(/[^A-Za-z0-9._-]/g, '_')}`
+    const contentType = file.type || (isImageFile ? 'image/jpeg' : 'video/mp4')
+    let lastPct = -1
+    await uploadWithResume(file, {
+      bucket: 'creative-uploads',
+      path: storagePath,
+      contentType,
+      onProgress: (frac) => {
+        const pct = Math.floor(frac * 20) * 5
+        if (pct !== lastPct) {
+          lastPct = pct
+          update({ status: 'uploading', progress: frac, message: `uploading ${pct}%` })
+        }
+      },
+    })
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
+    const postPatch = { preview_url: publicUrl }
+    if (isImageFile) {
+      postPatch.thumbnail_url = publicUrl
+    } else {
+      update({ status: 'thumbnailing', message: 'capturing thumbnail' })
+      const thumbBlob = await captureVideoThumbnail(file)
+      if (thumbBlob) {
+        const thumbPath = `incoming/${libraryId}_thumb.jpg`
+        try {
+          await uploadWithResume(thumbBlob, {
+            bucket: 'creative-uploads',
+            path: thumbPath,
+            contentType: 'image/jpeg',
+            upsert: true,
+          })
+          postPatch.thumbnail_url = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${thumbPath}`
+        } catch { /* thumbnail best-effort */ }
+      }
+    }
+    if (batchStatus === 'edited') {
+      postPatch.final_cut_url = publicUrl
+      postPatch.stage_final_cut = 'done'
+    }
+    await supabase.from('lib_creative_library').update(postPatch).eq('id', libraryId)
+  } else {
+    update({ status: 'too-large', message: 'file >10GB · row created without upload' })
+    return
+  }
+
+  // 3. Transcribe → identify-actor → describe (background, but we still
+  //    surface failures into the queue item's message).
+  const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
+  let pipelineErr = null
+  if (isVideo) {
+    update({ status: 'transcribing', message: 'transcribing' })
+    try {
+      const { data, error } = await supabase.functions.invoke('transcribe-library-clip', {
+        body: { library_id: libraryId, storage_path: storagePath },
+      })
+      if (error) pipelineErr = `transcribe: ${error.message}`
+      else if (data?.error) pipelineErr = `transcribe: ${data.error}`
+    } catch (e) { pipelineErr = `transcribe threw: ${e.message}` }
+  }
+  update({ status: 'identifying', message: 'identifying actor' })
+  try {
+    const { data, error } = await supabase.functions.invoke('identify-actor', {
+      body: { library_ids: [libraryId] },
+    })
+    if (error) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `actor-id: ${error.message}`
+    else if (data?.errors?.length > 0) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `actor-id: ${data.errors[0].error || 'unknown'}`
+  } catch (e) { pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `actor-id threw: ${e.message}` }
+  update({ status: 'describing', message: 'naming' })
+  try {
+    const { data, error } = await supabase.functions.invoke('creative-library-describe', {
+      body: { library_ids: [libraryId] },
+    })
+    if (error) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe: ${error.message}`
+    else if (data?.errors?.length > 0) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe: ${data.errors[0].error || 'unknown'}`
+  } catch (e) { pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe threw: ${e.message}` }
+
+  update({
+    status: 'done',
+    progress: 1,
+    message: pipelineErr ? `done · ${pipelineErr}` : 'done',
+    error: pipelineErr,
+  })
+}
+
+/* React hook: subscribe a component to the queue. Re-renders on any
+   item-level change. Returns the current snapshot. */
+function useUploadQueue() {
+  const [items, setItems] = useState(() => [...uploadQueue.items])
+  useEffect(() => uploadQueue.subscribe(setItems), [])
+  return items
+}
+
+/* Floating dock — bottom-right of the viewport whenever there's at
+   least one upload in the queue. Compact pill by default; click to
+   expand into a list. Auto-fires onRefresh when the queue empties so
+   the parent library list picks up the new rows. */
+function UploadDock({ onRefresh }) {
+  const items = useUploadQueue()
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    const onIdle = () => onRefresh?.()
+    window.addEventListener('upload-queue-idle', onIdle)
+    return () => window.removeEventListener('upload-queue-idle', onIdle)
+  }, [onRefresh])
+  if (items.length === 0) return null
+
+  const inFlight = items.filter((i) => i.status !== 'done' && i.status !== 'error' && i.status !== 'too-large')
+  const failed   = items.filter((i) => i.status === 'error')
+  const done     = items.filter((i) => i.status === 'done')
+  const tooBig   = items.filter((i) => i.status === 'too-large')
+  const totalProg = items.reduce((s, i) => s + (i.progress || 0), 0) / items.length
+
+  // Compact summary pill
+  if (!expanded) {
+    return (
+      <button onClick={() => setExpanded(true)} title="Upload progress"
+        style={{
+          position: 'fixed', bottom: 16, right: 16, zIndex: 95,
+          padding: '10px 14px', minWidth: 220,
+          background: 'var(--paper)', border: '1px solid var(--rule)',
+          borderLeft: failed.length > 0 ? '3px solid #b53e3e' : '3px solid var(--accent, #e8b408)',
+          boxShadow: '0 8px 24px rgba(10,10,10,0.12)',
+          fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink)',
+          cursor: 'pointer', textAlign: 'left',
+          display: 'flex', flexDirection: 'column', gap: 6,
+        }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+          <span style={{ fontWeight: 600 }}>
+            {inFlight.length > 0
+              ? `Uploading ${inFlight.length}/${items.length}`
+              : failed.length > 0
+                ? `${done.length} done · ${failed.length} failed`
+                : `${done.length} uploaded`}
+          </span>
+          <span style={{ color: 'var(--ink-3)' }}>▴</span>
+        </div>
+        {/* Aggregate bar */}
+        <div style={{ height: 3, background: 'var(--paper-2)', position: 'relative' }}>
+          <div style={{
+            position: 'absolute', inset: 0, right: 'auto',
+            width: `${Math.round(totalProg * 100)}%`,
+            background: failed.length > 0 ? '#b53e3e' : 'var(--ink)',
+            transition: 'width 0.2s',
+          }} />
+        </div>
+      </button>
+    )
+  }
+
+  // Expanded list
+  return createPortal(
+    <>
+      <div onClick={() => setExpanded(false)}
+        style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(10,10,10,0.20)' }} />
+      <div style={{
+        position: 'fixed', bottom: 16, right: 16, zIndex: 201,
+        width: 'min(440px, 92vw)', maxHeight: '70vh',
+        background: 'var(--paper)', border: '1px solid var(--rule)',
+        borderLeft: '3px solid var(--accent, #e8b408)',
+        boxShadow: '0 12px 32px rgba(10,10,10,0.16)',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{
+          padding: '12px 16px', borderBottom: '1px solid var(--rule)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: 'var(--paper-2)',
+        }}>
+          <div>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
+            }}>Upload queue</div>
+            <div style={{ fontFamily: 'var(--serif)', fontSize: 15, marginTop: 2 }}>
+              {inFlight.length > 0
+                ? `${inFlight.length} in flight · ${done.length} done${failed.length > 0 ? ` · ${failed.length} failed` : ''}`
+                : `${done.length} uploaded${failed.length > 0 ? ` · ${failed.length} failed` : ''}`}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(done.length + failed.length + tooBig.length) > 0 && inFlight.length === 0 && (
+              <button onClick={() => uploadQueue.clearCompleted()} style={{
+                background: 'transparent', border: '1px solid var(--rule)', padding: '4px 8px',
+                fontFamily: 'var(--mono)', fontSize: 10, cursor: 'pointer', color: 'var(--ink-3)',
+              }}>Clear done</button>
+            )}
+            <button onClick={() => setExpanded(false)} style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              fontSize: 22, lineHeight: 1, padding: 4, color: 'var(--ink-3)',
+            }}>×</button>
+          </div>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          {items.map((it) => {
+            const isErr = it.status === 'error'
+            const isDone = it.status === 'done'
+            const color = isErr ? '#b53e3e' : isDone ? '#3e8a5e' : 'var(--ink-3)'
+            return (
+              <div key={it.id} style={{
+                padding: '10px 14px', borderBottom: '1px solid var(--rule)',
+                display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center',
+              }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{
+                    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }} title={it.file.name}>{it.file.name}</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color, marginTop: 2 }}>
+                    {it.message}
+                  </div>
+                  {it.status === 'uploading' && (
+                    <div style={{ height: 2, background: 'var(--paper-2)', marginTop: 4, position: 'relative' }}>
+                      <div style={{
+                        position: 'absolute', inset: 0, right: 'auto',
+                        width: `${Math.round((it.progress || 0) * 100)}%`,
+                        background: 'var(--ink)',
+                        transition: 'width 0.2s',
+                      }} />
+                    </div>
+                  )}
+                </div>
+                {(isDone || isErr || it.status === 'too-large') && (
+                  <button onClick={() => uploadQueue.dismiss(it.id)} title="Dismiss" style={{
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    color: 'var(--ink-4)', fontSize: 16, padding: 0,
+                  }}>×</button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </>,
+    document.body,
+  )
+}
+
 /* Notification bell — floating button in the top-right of the Library
    tab. Click to open a right-side slider with the recent submissions
    feed. Unseen count (anything created since last open) shows as a
@@ -1210,6 +1558,12 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           the recent submissions feed. No banner space wasted at the
           top; ping shows the unseen count. */}
       <NotificationBell submissions={recentSubmissions} />
+
+      {/* Upload dock — floating bottom-right indicator showing the
+          background upload queue. Survives modal close + tab navigation.
+          Refreshes the library list whenever the queue empties so new
+          rows surface without a manual refresh. */}
+      <UploadDock onRefresh={() => load(true)} />
 
       {/* Toolbar — compact, single block. No more 5-row chip stack. */}
       <div style={{
@@ -4373,15 +4727,12 @@ function driveEmbedUrl(url) {
 /* ─────────────────────────── UPLOAD MODAL ─────────────────────────── */
 
 function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
+  // The modal is now a thin shell: it collects files + batch config,
+  // hands them off to the module-level upload queue, and closes. The
+  // queue owns all upload state, runs in the background regardless of
+  // whether this modal is mounted, and surfaces progress via UploadDock.
   const [files, setFiles] = useState([])
-  const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-  const [progress, setProgress] = useState({})  // filename -> 'uploading'|'done'|err msg
-  // Bulk-assign fields — apply to EVERY file in this batch. Saves the
-  // "upload, find rows, select rows, bulk edit, set editor" four-step
-  // dance Ben described. Defaults to 'Joined' type / 'raw' status /
-  // no editor / no offer so existing behaviour is unchanged when
-  // fields are left blank.
   const [batchType, setBatchType] = useState('Joined')
   // batchStatus: 'raw' = needs editing (default), 'edited' = the file
   // is already a finished cut. Edited uploads also get final_cut_url +
@@ -4391,12 +4742,9 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
   const [batchEditorId, setBatchEditorId] = useState('')
   const [batchOfferSlug, setBatchOfferSlug] = useState('')
   const inputRef = useRef(null)
-  // Transcription is fire-and-forget — the modal can close before Whisper
-  // returns. Gate setProgress calls so we don't try to setState on an
-  // unmounted component.
-  const mountedRef = useRef(true)
-  useEffect(() => () => { mountedRef.current = false }, [])
-  const safeSetProgress = (updater) => { if (mountedRef.current) setProgress(updater) }
+  // No `busy` state — the modal is never blocked once Upload is clicked
+  // because the queue takes over. The button just dispatches + closes.
+  const busy = false
 
   const acceptFiles = (incoming) => {
     // Accept videos AND images. Static image ads (banners, carousel
@@ -4414,193 +4762,24 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
     acceptFiles(e.dataTransfer.files)
   }
 
-  // Per-file pipeline:
-  //   1. Insert library row (status='raw', type='Joined' as default)
-  //   2. Upload file to creative-uploads bucket (skips files >900MB — bucket limit)
-  //   3. Call transcribe-library-clip Edge Function → writes transcript
-  //      onto the library row.
-  // Each step updates the progress map so the user sees what's happening.
-  const submit = async () => {
+  // Hand the batch to the module-level queue and close. The queue
+  // owns the per-file pipeline (TUS upload → thumbnail → transcribe →
+  // identify-actor → describe) and survives modal unmount, so the
+  // operator can close this modal, navigate around, and uploads
+  // continue with progress shown in the floating UploadDock.
+  const submit = () => {
     if (!files.length) return
-    setBusy(true); setErr(null)
-    const stamp = new Date().toISOString().slice(0,10)
-    let ok = 0, fail = 0
-    for (const file of files) {
-      setProgress(p => ({ ...p, [file.name]: 'creating row' }))
-      try {
-        // 1. Insert library row first so we get an ID to associate the upload with.
-        // Bulk-assign fields (type / editor / offer) apply to EVERY file
-        // in this batch — operator sets them once at the top of the modal
-        // and gets a fully-assigned roster in one shot. Migration 087's
-        // trigger auto-creates a task whenever assigned_editor_id is set
-        // on a raw clip, so picking an editor here means the file lands
-        // in their queue without any further action.
-        const { data: inserted, error: insErr } = await supabase
-          .from('lib_creative_library')
-          .insert({
-            name: file.name,
-            type: batchType || 'Joined',
-            size_mb: Math.round(file.size / 1024 / 1024 * 10) / 10,
-            status: batchStatus,
-            assigned_editor_id: batchEditorId || null,
-            offer_slug: batchOfferSlug || null,
-            source_bucket: 'Manual upload',
-            notes: `Uploaded via /sales/ads/creative/library on ${stamp}.`,
-          })
-          .select('id')
-          .single()
-        if (insErr) throw insErr
-        const libraryId = inserted.id
-
-        // 2. Upload file to creative-uploads bucket via TUS resumable.
-        //    Bucket + project file_size_limit are both at 10GB. TUS streams
-        //    the file in 6MB chunks with retry + progress so multi-GB
-        //    uploads survive network blips and the user actually sees
-        //    progress as it climbs. Files larger than 10GB skip the upload
-        //    and create a stub row (operator can re-upload after compress).
-        const HARD_LIMIT = 10 * 1024 * 1024 * 1024
-        const tooLarge = file.size > HARD_LIMIT
-        const isImageFile = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
-        let storagePath = null
-        if (!tooLarge) {
-          storagePath = `incoming/${libraryId}_${file.name.replace(/[^A-Za-z0-9._-]/g, '_')}`
-          const contentType = file.type || (isImageFile ? 'image/jpeg' : 'video/mp4')
-          // Throttle progress paints to 5%-step buckets so we don't spam
-          // setState 1000+ times per file.
-          let lastPct = -1
-          try {
-            await uploadWithResume(file, {
-              bucket: 'creative-uploads',
-              path: storagePath,
-              contentType,
-              onProgress: (frac) => {
-                const pct = Math.floor(frac * 20) * 5
-                if (pct !== lastPct) {
-                  lastPct = pct
-                  safeSetProgress(p => ({ ...p, [file.name]: `uploading ${pct}%` }))
-                }
-              },
-            })
-          } catch (e) {
-            // Bubble up to the per-file catch so fail++ and the loop moves on.
-            throw new Error(e?.message || 'upload failed')
-          }
-          const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
-          // Build the post-upload patch — only fields we want to change.
-          const postPatch = { preview_url: publicUrl }
-          // For images, the file itself IS the thumbnail.
-          if (isImageFile) {
-            postPatch.thumbnail_url = publicUrl
-          } else {
-            // For videos: capture the first frame in the browser and
-            // upload it as a separate JPEG. Skips files >500MB (moov-atom
-            // stall) — those land without a thumbnail and a backfill job
-            // can extract one later.
-            safeSetProgress(p => ({ ...p, [file.name]: 'capturing thumbnail' }))
-            const thumbBlob = await captureVideoThumbnail(file)
-            if (thumbBlob) {
-              const thumbPath = `incoming/${libraryId}_thumb.jpg`
-              try {
-                await uploadWithResume(thumbBlob, {
-                  bucket: 'creative-uploads',
-                  path: thumbPath,
-                  contentType: 'image/jpeg',
-                  upsert: true,
-                })
-                postPatch.thumbnail_url = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${thumbPath}`
-              } catch { /* thumbnail upload best-effort */ }
-            }
-          }
-          // When the operator marked the batch as 'edited', the uploaded
-          // file is the finished cut. Wire it into the stage columns
-          // so the library matrix shows it as done + migration 087's
-          // trigger keeps its 'no task for non-raw rows' invariant.
-          if (batchStatus === 'edited') {
-            postPatch.final_cut_url = publicUrl
-            postPatch.stage_final_cut = 'done'
-          }
-          if (Object.keys(postPatch).length > 0) {
-            await supabase.from('lib_creative_library')
-              .update(postPatch).eq('id', libraryId)
-          }
-        }
-
-        // 3. Kick off transcription + actor ID + canonical-name pipeline.
-        //    Videos: transcribe → identify-actor → describe.
-        //    Images: skip transcription (no audio), but still run identify-actor
-        //            (thumbnail_url was set to the image itself on upload) →
-        //            describe. The chain matters: identify-actor sets the
-        //            creator column, then describe regenerates canonical_name
-        //            using the correct creator + transcript (if any) following
-        //            Turner's naming convention.
-        const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
-        const runActorAndDescribe = async () => {
-          // identify-actor + describe — both best-effort, but failures
-          // are now SURFACED in the per-file progress map instead of
-          // silently swallowed. supabase.functions.invoke doesn't throw
-          // on 4xx/5xx (it returns { data, error }) — check both.
-          let pipelineErr = null
-          try {
-            const { data, error } = await supabase.functions.invoke('identify-actor', {
-              body: { library_ids: [libraryId] },
-            })
-            if (error) pipelineErr = `actor-id: ${error.message}`
-            else if (data?.errors?.length > 0) pipelineErr = `actor-id: ${data.errors[0].error || 'unknown'}`
-          } catch (e) { pipelineErr = `actor-id threw: ${e.message}` }
-          try {
-            const { data, error } = await supabase.functions.invoke('creative-library-describe', {
-              body: { library_ids: [libraryId] },
-            })
-            if (error) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe: ${error.message}`
-            else if (data?.errors?.length > 0) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe: ${data.errors[0].error || 'unknown'}`
-          } catch (e) { pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe threw: ${e.message}` }
-          return pipelineErr
-        }
-        if (storagePath && isVideo) {
-          safeSetProgress(p => ({ ...p, [file.name]: 'transcribing' }))
-          supabase.functions.invoke('transcribe-library-clip', {
-            body: { library_id: libraryId, storage_path: storagePath },
-          }).then(({ data, error: fnErr }) => {
-            if (fnErr) {
-              safeSetProgress(p => ({ ...p, [file.name]: 'transcribe failed: ' + fnErr.message }))
-            } else if (data?.error) {
-              // Function returned 4xx/5xx body (e.g. Whisper 25MB limit)
-              safeSetProgress(p => ({ ...p, [file.name]: 'transcribe failed: ' + data.error }))
-            } else {
-              safeSetProgress(p => ({ ...p, [file.name]: 'identifying actor…' }))
-            }
-            // Run actor-ID + describe regardless of transcribe outcome —
-            // canonical_name still benefits from a thumbnail-based match
-            // even when transcription failed.
-            runActorAndDescribe().then((pipeErr) => {
-              safeSetProgress(p => ({ ...p, [file.name]: pipeErr ? `done · ${pipeErr}` : 'done' }))
-            })
-          })
-          safeSetProgress(p => ({ ...p, [file.name]: 'uploaded · transcribing in background' }))
-        } else if (storagePath) {
-          // Image path: no transcription, but thumbnail_url is set so
-          // actor-ID + canonical-name regeneration still work.
-          safeSetProgress(p => ({ ...p, [file.name]: 'uploaded · identifying actor…' }))
-          runActorAndDescribe().then((pipeErr) => {
-            safeSetProgress(p => ({ ...p, [file.name]: pipeErr ? `done (image) · ${pipeErr}` : 'done (image)' }))
-          })
-        } else {
-          safeSetProgress(p => ({ ...p, [file.name]: 'row created (file too large to upload)' }))
-        }
-        ok++
-      } catch (e) {
-        setProgress(p => ({ ...p, [file.name]: 'error: ' + (e.message || 'failed') }))
-        fail++
-      }
-    }
-    setBusy(false)
-    if (fail === 0) {
-      // Refresh list immediately so new rows appear; transcripts fill in
-      // a few seconds later (next manual refresh picks them up).
-      setTimeout(() => onSaved?.(), 800)
-    } else {
-      setErr(`${ok} uploaded, ${fail} failed — see list below`)
-    }
+    setErr(null)
+    uploadQueue.enqueue(files, {
+      batchType,
+      batchStatus,
+      batchEditorId,
+      batchOfferSlug,
+    })
+    // Clear the modal's local file list so re-opening doesn't show
+    // the same files queued again, and close immediately.
+    setFiles([])
+    onClose?.()
   }
 
   return (
@@ -4618,9 +4797,9 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
       footer={
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
-          <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
-          <button onClick={submit} disabled={!files.length || busy} style={primaryBtn}>
-            {busy ? 'Uploading…' : `Upload ${files.length || ''}`}
+          <button onClick={onClose} style={ghostBtn}>Cancel</button>
+          <button onClick={submit} disabled={!files.length} style={primaryBtn}>
+            {`Queue ${files.length || ''} for upload`}
           </button>
         </>
       }>
@@ -4698,38 +4877,37 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
           <div style={{
             marginTop: 14, border: '1px solid var(--rule)', maxHeight: 280, overflowY: 'auto',
           }}>
-            {files.map((f, i) => {
-              const p = progress[f.name]
-              const color = p === 'done' ? '#3e8a5e' : p?.startsWith('error') ? '#b53e3e' : p === 'uploading' ? '#b86a0c' : 'var(--ink-3)'
-              return (
-                <div key={i} style={{
-                  display: 'grid', gridTemplateColumns: '1fr 90px 90px 30px',
-                  gap: 10, alignItems: 'center',
-                  padding: '8px 12px',
-                  borderBottom: i === files.length - 1 ? 'none' : '1px solid var(--rule)',
-                  background: i % 2 === 0 ? 'transparent' : 'var(--paper-2)',
-                }}>
-                  <div style={{
-                    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }} title={f.name}>{f.name}</div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>
-                    {(f.size / 1024 / 1024).toFixed(1)} MB
-                  </div>
-                  <div style={{
-                    fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
-                    letterSpacing: '0.06em', textTransform: 'uppercase',
-                    color,
-                  }}>{p || 'queued'}</div>
-                  <button onClick={() => setFiles(files.filter((_, j) => j !== i))} disabled={busy} style={{
-                    background: 'transparent', border: 'none', cursor: 'pointer',
-                    color: 'var(--ink-4)', fontSize: 16, padding: 0,
-                  }}>×</button>
+            {files.map((f, i) => (
+              <div key={i} style={{
+                display: 'grid', gridTemplateColumns: '1fr 90px 30px',
+                gap: 10, alignItems: 'center',
+                padding: '8px 12px',
+                borderBottom: i === files.length - 1 ? 'none' : '1px solid var(--rule)',
+                background: i % 2 === 0 ? 'transparent' : 'var(--paper-2)',
+              }}>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }} title={f.name}>{f.name}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>
+                  {(f.size / 1024 / 1024).toFixed(1)} MB
                 </div>
-              )
-            })}
+                <button onClick={() => setFiles(files.filter((_, j) => j !== i))} style={{
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  color: 'var(--ink-4)', fontSize: 16, padding: 0,
+                }}>×</button>
+              </div>
+            ))}
           </div>
         )}
+        <div style={{
+          marginTop: 12, padding: '8px 12px',
+          background: 'var(--paper-2)', border: '1px solid var(--rule)',
+          fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
+          letterSpacing: '0.04em',
+        }}>
+          Uploads run in the background — close this modal once you hit Upload. Progress shows in the floating dock (bottom-right).
+        </div>
       </div>
     </Modal>
   )
