@@ -1089,6 +1089,15 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [runFilter, setRunFilter]     = useState(() => new Set())  // values: 'yes' | 'no'
   const [stageFilter, setStageFilter] = useState(() => new Set())  // values: 'raw_unused' | 'raw_used' | 'edited_seg' | 'merged'
   const [latestOnly, setLatestOnly] = useState(false)  // when true, hide non-latest versions
+  // Hide low-quality (corrupted-on-ingest) clips by default. The 2026-05-20
+  // Drive-import batch left 81 rows pointing at 1-3 MB placeholder files
+  // pretending to be 60-100 MB videos — they look pixelated when played
+  // because the original ingest only stored partial bytes. Operator can
+  // toggle these back on via the filter chip to see/triage them.
+  const [hideLowQuality, setHideLowQuality] = useState(() => {
+    try { return localStorage.getItem('lib.hideLowQuality') !== 'false' } catch { return true }
+  })
+  useEffect(() => { try { localStorage.setItem('lib.hideLowQuality', String(hideLowQuality)) } catch {} }, [hideLowQuality])
   // Column sort for the Matrix view. sortKey = '' means default order
   // (insertion / added_at desc). Clicking a header sets the key; clicking
   // the same key again toggles direction.
@@ -1189,7 +1198,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // of transcript = 600KB+ wasted on the first paint. Pulling without it
   // cuts the initial payload roughly in half. Transcripts get lazy-loaded
   // in a follow-up query after first paint so library search still works.
-  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id'
+  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb'
 
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true)
@@ -1385,8 +1394,13 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     return used
   }, [rows])
 
+  const lowQualityCount = useMemo(() => rows.filter(r => r.is_low_quality).length, [rows])
+
   const filtered = useMemo(() => {
     let list = rows
+    // Hide rows whose stored file is broken / sub-par. Default ON. Operator
+    // toggles via the chip in the toolbar when they want to see/triage them.
+    if (hideLowQuality) list = list.filter(r => !r.is_low_quality)
     const search = deferredQ.trim().toLowerCase()
     if (search) list = list.filter(r => {
       const blob = `${r.name} ${r.canonical_name || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
@@ -1449,7 +1463,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       })
     }
     return list
-  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, latestOnly, sortKey, sortDir, usedRawIds])
+  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, latestOnly, hideLowQuality, sortKey, sortDir, usedRawIds])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -1708,6 +1722,24 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
               border: '1px solid ' + (latestOnly ? 'var(--ink)' : 'var(--rule)'),
               borderRadius: 2, cursor: 'pointer',
             }}>{latestOnly ? '☑ Latest only' : 'Latest only'}</button>
+          {lowQualityCount > 0 && (
+            <button type="button"
+              onClick={() => setHideLowQuality(v => !v)}
+              title={hideLowQuality
+                ? `${lowQualityCount} clips have damaged source files (1-3 MB placeholders, sub-par bitrate). Click to show them.`
+                : `Currently SHOWING ${lowQualityCount} damaged-source clips. Click to hide.`}
+              style={{
+                padding: '5px 9px',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: hideLowQuality ? '#fff3e0' : '#b53e3e',
+                color: hideLowQuality ? '#a86a08' : 'white',
+                border: '1px solid ' + (hideLowQuality ? '#e8b408' : '#b53e3e'),
+                borderRadius: 2, cursor: 'pointer',
+              }}>
+              {hideLowQuality ? `Hiding ${lowQualityCount} low-quality` : `⚠ Showing ${lowQualityCount} low-quality`}
+            </button>
+          )}
           {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size > 0 || latestOnly) && (
             <button type="button"
               onClick={() => {
@@ -2455,8 +2487,22 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
       <div style={{
         minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         fontFamily: 'var(--sans)', fontSize: 11.5, color: 'var(--ink-2)',
+        display: 'flex', alignItems: 'center', gap: 6,
       }} title={r.description || r.name}>
-        {r.description || r.name}
+        {r.is_low_quality && (
+          <span title={`Source file is ${r.low_quality_reason === 'placeholder' ? 'a truncated placeholder' : 'sub-par bitrate'} (only ${r.low_quality_actual_mb ?? '?'} MB stored). Re-upload from source to fix.`}
+            style={{
+              flexShrink: 0,
+              padding: '1px 5px',
+              background: '#b53e3e', color: 'white',
+              fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              borderRadius: 2,
+            }}>LOW-Q</span>
+        )}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {r.description || r.name}
+        </span>
       </div>
       {/* Type — inline select, rendered as colored pill */}
       <div onClick={stop} style={{ position: 'relative' }}>
