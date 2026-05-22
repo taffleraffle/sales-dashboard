@@ -4374,6 +4374,77 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle') // idle | saving | saved | error
+  // Replace-source-file state. Only used when the row is is_low_quality:
+  // operator clicks "Replace original" → file picker → TUS upload → patch
+  // the SAME row's preview_url (preserves editor task links). is_low_quality
+  // flag clears automatically because the new file's size_mb will be > the
+  // bad threshold next audit run.
+  const [replaceProgress, setReplaceProgress] = useState(null) // null | 'uploading 35%' | 'done' | 'error: ...'
+  const replaceInputRef = useRef(null)
+  const handleReplaceFile = async (file) => {
+    if (!file) return
+    try {
+      setReplaceProgress('uploading 0%')
+      const sanitized = file.name.replace(/[^A-Za-z0-9._-]+/g, '_')
+      // Stamp the path with a timestamp so the new URL differs from the
+      // old (browsers cache aggressively by URL). Keeps the SAME library id.
+      const storagePath = `incoming/${row.id}_replaced_${Date.now()}_${sanitized}`
+      let lastPct = -1
+      await uploadWithResume(file, {
+        bucket: 'creative-uploads',
+        path: storagePath,
+        contentType: file.type || 'video/mp4',
+        onProgress: (frac) => {
+          const pct = Math.floor(frac * 20) * 5
+          if (pct !== lastPct) { lastPct = pct; setReplaceProgress(`uploading ${pct}%`) }
+        },
+      })
+      const newUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
+      const sizeMB = Math.round(file.size / 1024 / 1024 * 10) / 10
+      setReplaceProgress('saving')
+      // Single PATCH: update URL + size + clear all low-quality flag fields
+      // so the row stops appearing in the "hidden" bucket and the LOW-Q
+      // badge disappears immediately. We do NOT touch transcript / creator /
+      // canonical_name — those derived fields still apply since the source
+      // content is the same clip, just at higher quality.
+      const { error: upErr } = await supabase.from('lib_creative_library').update({
+        preview_url: newUrl,
+        size_mb: sizeMB,
+        is_low_quality: false,
+        low_quality_reason: null,
+        low_quality_actual_mb: null,
+        low_quality_detected_at: null,
+        source_bucket: 'Source file replaced',
+        notes: `Source file replaced on ${new Date().toISOString().slice(0,10)} (was ${row.low_quality_reason || 'damaged'}, ${row.low_quality_actual_mb || '?'} MB).\n\n${row.notes || ''}`.trim(),
+      }).eq('id', row.id)
+      if (upErr) throw new Error(upErr.message)
+      // Surface the updated row to the parent matrix so it disappears from
+      // the low-quality filter immediately.
+      onRowPatched?.(row.id, {
+        preview_url: newUrl,
+        size_mb: sizeMB,
+        is_low_quality: false,
+        low_quality_reason: null,
+        low_quality_actual_mb: null,
+      })
+      // Fire transcribe pipeline so transcript + actor + canonical_name
+      // get regenerated from the new HQ file (the old transcript was from
+      // a 0.3 Mbps audio track, probably garbage).
+      const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
+      if (isVideo) {
+        supabase.functions.invoke('transcribe-library-clip', {
+          body: { library_id: row.id, storage_path: storagePath },
+        }).then(() => {
+          supabase.functions.invoke('identify-actor', { body: { library_ids: [row.id] } })
+            .then(() => supabase.functions.invoke('creative-library-describe', { body: { library_ids: [row.id] } }))
+        }).catch(() => { /* best-effort */ })
+      }
+      setReplaceProgress('done')
+      setTimeout(() => setReplaceProgress(null), 2500)
+    } catch (e) {
+      setReplaceProgress(`error: ${e?.message || 'failed'}`)
+    }
+  }
   // Prefer props from the parent (avoid 3 extra network roundtrips
   // each time the modal opens). Fall back to local fetch if the
   // parent didn't pass them (e.g. modal opened standalone somewhere).
@@ -4586,6 +4657,57 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         )
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 16 }}>
+        {/* Low-quality banner — surfaces WHY playback is dog-shit (file
+            was ingested at tiny bitrate, no Drive backup) and gives a
+            one-click Replace Original button that runs a TUS upload
+            against the SAME row id, preserving editor task assignments. */}
+        {row.is_low_quality && (
+          <div style={{
+            padding: '12px 14px',
+            background: '#fff1f1', border: '1px solid #b53e3e',
+            borderLeft: '3px solid #b53e3e',
+            display: 'flex', flexDirection: 'column', gap: 8,
+          }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+              letterSpacing: '0.14em', textTransform: 'uppercase', color: '#b53e3e',
+            }}>Source file is damaged</div>
+            <div style={{ fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+              Only <strong>{row.low_quality_actual_mb ?? '?'} MB</strong> stored on disk
+              {row.duration_seconds ? ` for a ${row.duration_seconds}-second clip` : ''} —
+              this works out to roughly{' '}
+              <strong>{
+                row.duration_seconds && row.low_quality_actual_mb
+                  ? `${((row.low_quality_actual_mb * 1024 * 1024 * 8) / row.duration_seconds / 1000000).toFixed(1)} Mbps`
+                  : 'sub-par bitrate'
+              }</strong>
+              {' '}({row.low_quality_reason === 'placeholder' ? 'truncated during ingest' : 'ingested at low bitrate'}).
+              No Drive backup exists. Re-upload the original from source to fix — the row id stays
+              the same so any editor task assignments are preserved.
+            </div>
+            {replaceProgress ? (
+              <div style={{
+                padding: '6px 10px', background: 'white', border: '1px solid var(--rule)',
+                fontFamily: 'var(--mono)', fontSize: 11, color: replaceProgress.startsWith('error') ? '#b53e3e' : 'var(--ink-2)',
+              }}>{replaceProgress}</div>
+            ) : (
+              <div>
+                <input type="file" ref={replaceInputRef} accept="video/*,image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReplaceFile(f) }} />
+                <button type="button" onClick={() => replaceInputRef.current?.click()}
+                  style={{
+                    padding: '8px 14px',
+                    fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                    background: 'var(--ink)', color: 'var(--paper)',
+                    border: 'none', cursor: 'pointer', borderRadius: 2,
+                  }}>↑ Replace original</button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Video preview — explicit pause + src clear on unmount so the
             browser doesn't stall when the modal closes mid-stream (Ben
             flagged "click out of pop-up is super slow"). */}
