@@ -1501,9 +1501,17 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   }, [])
 
   // Bulk download — for each selected row, kicks off a browser download
-  // of its best available video URL (final_cut_url ▸ preview_url ▸
-  // drive_url fallback). Sequential with a small stagger so the
-  // browser doesn't dedupe simultaneous downloads to the same origin.
+  // of its best available HIGH-QUALITY video URL. Priority matters:
+  //   final_cut_url -- editor's approved final cut, always full quality
+  //   drive_url     -- original ingest from Google Drive (older rows)
+  //   preview_url   -- LAST resort; for older Drive-imported rows this
+  //                    is a 720p transcode (looks dog shit on download),
+  //                    but for new TUS-uploaded rows it IS the original.
+  // Putting drive_url before preview_url means the old Drive-imported
+  // rows download the original Drive file instead of the compressed
+  // preview, which is the source of the "quality is terrible" complaint.
+  // Sequential with a small stagger so the browser doesn't dedupe
+  // simultaneous downloads to the same origin.
   const bulkDownload = useCallback(() => {
     const ids = Array.from(selected)
     const targets = ids
@@ -1511,7 +1519,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       .filter(Boolean)
       .map(r => ({
         name: r.canonical_name || r.name,
-        url: r.final_cut_url || r.preview_url || r.drive_url,
+        url: r.final_cut_url || r.drive_url || r.preview_url,
       }))
       .filter(t => t.url)
     if (targets.length === 0) return
@@ -4520,6 +4528,33 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
           </div>
         )}
 
+        {/* Download bar — points at the highest-quality URL available.
+            final_cut_url > drive_url > preview_url. Important: drive_url
+            comes BEFORE preview_url because for old Drive-imported rows
+            preview_url is a 720p transcode (looks dog shit on download). */}
+        {(() => {
+          const dl = row.final_cut_url || row.drive_url || row.preview_url
+          if (!dl) return null
+          return (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+              padding: '8px 12px', background: 'var(--paper-2)', border: '1px solid var(--rule)',
+              fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
+            }}>
+              <span>Original file</span>
+              <a href={dl} download={row.canonical_name || row.name || 'creative.mp4'}
+                target="_blank" rel="noreferrer"
+                title="Download the highest-quality version of this creative"
+                style={{
+                  padding: '4px 10px', fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  background: 'var(--ink)', color: 'var(--paper)',
+                  textDecoration: 'none', borderRadius: 2,
+                }}>↓ Download original</a>
+            </div>
+          )
+        })()}
+
         {/* Slim form — only the fields Ben actually uses to organise creatives.
             Notes, v21 script, and original filename are tucked into the
             'Advanced' disclosure below. */}
@@ -6064,27 +6099,44 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
         {/* Inline video preview — playable in the modal so the editor
-            can watch the source without bouncing to Drive. preview_url
-            is the compressed 720p mp4 from creative-uploads; falls back
-            to a thumbnail-only placeholder + Drive link when no preview
-            has been encoded yet. */}
+            can watch the source without bouncing elsewhere. preview_url
+            is the compressed 720p mp4 for OLD Drive-imported rows; for
+            new TUS-uploaded rows it's the ORIGINAL full-quality file.
+            The Download Original button always points at the highest-
+            quality source we have: drive_url first (always original for
+            old rows), then preview_url (only full-quality for new rows). */}
         {task.preview_url ? (
           <div style={{ background: '#000', border: '1px solid var(--rule)' }}>
             <PreviewVideo src={task.preview_url} poster={task.thumbnail_url}
               style={{ display: 'block', width: '100%', maxHeight: 360, objectFit: 'contain', background: '#000' }} />
-            {task.drive_url && (
-              <div style={{
-                padding: '8px 12px', background: 'var(--paper-2)',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
-              }}>
-                <span>Source file</span>
-                <a href={task.drive_url} target="_blank" rel="noreferrer"
-                  style={{ color: 'var(--ink-2)', textDecoration: 'underline' }}>
-                  Open original in Drive ↗
-                </a>
+            <div style={{
+              padding: '8px 12px', background: 'var(--paper-2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+              fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
+            }}>
+              <span>Source file</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {task.drive_url && (
+                  <a href={task.drive_url} target="_blank" rel="noreferrer"
+                    style={{ color: 'var(--ink-2)', textDecoration: 'underline' }}>
+                    Open in Drive ↗
+                  </a>
+                )}
+                {(task.drive_url || task.preview_url) && (
+                  <a
+                    href={task.drive_url || task.preview_url}
+                    download={task.creative_name || 'creative.mp4'}
+                    target="_blank" rel="noreferrer"
+                    title="Download the original full-quality file"
+                    style={{
+                      padding: '4px 10px',
+                      fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                      background: 'var(--ink)', color: 'var(--paper)',
+                      textDecoration: 'none', borderRadius: 2,
+                    }}>↓ Download original</a>
+                )}
               </div>
-            )}
+            </div>
           </div>
         ) : task.drive_url ? (
           <div style={{
@@ -6439,8 +6491,26 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove,
                   N video <video> elements + N decoders just to show a
                   revision history. */}
               {isExpanded && sub.file_url && (
-                <PreviewVideo src={sub.file_url} poster={sub.thumbnail_url}
-                  style={{ display: 'block', width: '100%', maxHeight: 280, background: '#000', objectFit: 'contain' }} />
+                <>
+                  <PreviewVideo src={sub.file_url} poster={sub.thumbnail_url}
+                    style={{ display: 'block', width: '100%', maxHeight: 280, background: '#000', objectFit: 'contain' }} />
+                  <div style={{
+                    padding: '6px 12px', background: 'var(--paper-2)',
+                    borderTop: '1px solid var(--rule)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
+                  }}>
+                    <a href={sub.file_url}
+                      download={`v${sub.version_number || 1}.mp4`}
+                      target="_blank" rel="noreferrer"
+                      title="Download this submitted cut"
+                      style={{
+                        padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                        fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'var(--ink)', color: 'var(--paper)',
+                        textDecoration: 'none', borderRadius: 2,
+                      }}>↓ Download</a>
+                  </div>
+                </>
               )}
               {isExpanded && sub.external_url && !sub.file_url && (
                 <div style={{ padding: 14, fontFamily: 'var(--mono)', fontSize: 11.5 }}>
