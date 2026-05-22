@@ -20,6 +20,9 @@ dist/
 .env.*
 !.env.example
 
+# MCP server configs — reference local PAT envs; never commit
+.mcp.json
+
 # IDE
 .vscode/
 .idea/

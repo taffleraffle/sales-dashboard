@@ -101,3 +101,39 @@ Edge Functions use Supabase-managed secrets (SUPABASE_URL, SUPABASE_SERVICE_ROLE
 - **SEO Dashboard** (`C:\Users\Ben\seo-dashboard\`) — main Nexus platform
 - **Engagement Agent** (`C:\Users\Ben\engagement-agent\`) — setter bot backend on Render
 - **Content Pipeline** (`C:\Users\Ben\content-pipeline\`) — Optimus content engine
+
+## OPT Domain Vocabulary
+
+Ben uses business terms, not React/code terms. When you see one of these words in a request, it means the Supabase entity — NOT a file named after it. Reach for the `mcp__supabase__execute_sql` tool, not Grep/Read.
+
+| Term Ben says | What it means |
+|---|---|
+| **library** / **the library** | The `lib_creative_library` table at `/sales/ads/creative/library`. Every ad clip + image + edited cut. |
+| **hook** (in library context) | A row in `lib_creative_library` with `type='Hook'`. NOT a React hook (useFoo.jsx). |
+| **body** | `lib_creative_library` row with `type='Body'`. |
+| **joined** | `type='Joined'` — a merged hook+body composite. |
+| **full video** | `type='Full Video'` — single-clip script. |
+| **testimony** / **testimonial** | `type='Testimony'`. |
+| **retargeting** | `type='Retargeting'`. |
+| **raw** (creative status) | `lib_creative_library.status='raw'` — needs editing. |
+| **edited** (creative status) | `lib_creative_library.status='edited'` — finished cut. |
+| **the queue** / **editing queue** | The `lib_editing_queue` view + `lib_editing_tasks` table. |
+| **task** | A row in `lib_editing_tasks` — one editor assignment per creative. |
+| **editor** | A row in `lib_creative_editors` — Ahmed, Mohamed, Dean, etc. |
+| **submission** / **version** | A row in `lib_task_submissions` — versioned uploads (v1/v2/v3) per task. |
+| **download link** / **send me the video** | A URL the operator can click that downloads the original file. Use `COALESCE(final_cut_url, drive_url, preview_url)` and append `?download=<filename>` so Supabase serves `Content-Disposition: attachment`. Without the query param the browser opens it in a tab instead of saving. |
+| **canonical name** | The auto-generated name like `RAW-ADAM-TPA-SCAM-T01.mp4` in `canonical_name`. Fall back to `name` when null. |
+| **creator** / **actor** | `lib_creative_library.creator` — set by the `identify-actor` Edge Function via Claude Vision. |
+| **offer** | A row in `offers` linked via `lib_creative_library.offer_slug`. |
+
+**Common request patterns and how to handle them:**
+
+- "Open up library and find me an [edited/raw] [hook/body/joined]" → `SELECT id, COALESCE(canonical_name, name) AS name, COALESCE(final_cut_url, drive_url, preview_url) AS url FROM lib_creative_library WHERE type='Hook' AND status='edited' AND COALESCE(final_cut_url, drive_url, preview_url) IS NOT NULL ORDER BY added_at DESC LIMIT 1` then reply with the URL + `?download=<filename>` appended.
+- "Send me a video / send it here" → resolve the URL via the priority above + append the download query param. Paste the URL into the reply.
+- "How many [unassigned raws / overdue tasks / pending submissions]" → query the relevant table; don't grep the codebase.
+- "Who's working on X" / "what's [editor name] up to" → query `lib_editing_queue` filtered by `editor_name`.
+
+**When to grep / read code instead of Supabase**: only when Ben is asking about the implementation (component names, where logic lives, why something is broken) — NOT when he's asking about content / data.
+
+## MCP Server
+Project-scoped Supabase MCP server is wired via `.mcp.json` (gitignored). Requires `SUPABASE_ACCESS_TOKEN` env var set in the parent process. Available tools include `execute_sql`, `list_tables`, `get_logs`, `list_edge_functions`, `get_advisors`. Defaults to read-only — write operations are blocked.
