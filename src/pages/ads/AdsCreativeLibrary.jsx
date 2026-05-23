@@ -1100,7 +1100,13 @@ function NotificationBell({ submissions, onOpenCreative }) {
                             color: s.approved_at ? '#3e8a5e' : '#3e7eba',
                           }}>{s.approved_at ? 'Approved' : 'In review'}</span>
                           {(s.file_url || s.external_url) && (
-                            <a href={s.file_url || s.external_url} target="_blank" rel="noreferrer"
+                            // toDownloadUrl wraps Supabase storage URLs with
+                            // ?download=<filename> so the browser actually
+                            // saves the bytes instead of streaming in a tab.
+                            // External (Drive/Frame.io) URLs pass through
+                            // unchanged — they have their own download UX.
+                            <a href={s.file_url ? toDownloadUrl(s.file_url, `v${s.version_number || 1}.mp4`) : s.external_url}
+                              target="_blank" rel="noreferrer"
                               onClick={(e) => e.stopPropagation()}
                               style={{ color: 'var(--ink-2)', textDecoration: 'underline' }}>
                               Open submission ↗
@@ -6868,15 +6874,20 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     }
   }, [reloadSubmissions])
 
-  // Close handler — aborts the in-flight upload (if any) so the editor
-  // can bail out of a stuck or unwanted upload. uploadXhrRef now holds
-  // a tus.Upload instance (post the XHR -> TUS swap); tus.abort() halts
-  // the chunked upload and fires onError which rejects startUpload's
-  // promise so the busy state unsets cleanly.
+  // Close handler — aborts the in-flight upload (if any). uploadXhrRef
+  // now holds a tus.Upload instance. tus-js-client's abort() halts the
+  // chunked upload but does NOT fire onError (it guards on _aborted=true
+  // inside _performUpload + _emitError), so startUpload's catch/finally
+  // never runs and busy/progress would get stuck. Reset them explicitly
+  // here so the modal returns to a clean state whether the editor stays
+  // open or fully closes.
   const handleCloseModal = useCallback(() => {
     if (uploadXhrRef.current) {
       try { uploadXhrRef.current.abort() } catch {}
       uploadXhrRef.current = null
+      setBusy(false)
+      setUploadProgress(null)
+      setUploadFile(null)
     }
     onClose?.()
   }, [onClose])
@@ -7068,25 +7079,29 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           }}
           onRequestRevision={async (sub, feedbackText) => {
             // Admin clicked "Save + Request revision" on a submission's
-            // feedback. Flip task status to needs_revision + notify the
-            // editor with the feedback preview so they immediately know
-            // what to fix.
+            // feedback. The feedback was already saved by SubmissionsPanel
+            // before this fires. Here we flip the task status + notify the
+            // editor. If the task update fails, surface the error to the
+            // operator so they know the feedback saved but the status
+            // change didn't land (editor won't see "needs revision").
             const { error } = await supabase.from('lib_editing_tasks')
               .update({ status: 'needs_revision' }).eq('id', task.task_id)
-            if (!error) {
-              setStatus('needs_revision')
-              if (task.editor_id) {
-                notifyEditor({
-                  editor_id: task.editor_id,
-                  kind: 'revision_requested',
-                  task_id: task.task_id,
-                  submission_id: sub.id,
-                  creative_id: task.creative_id,
-                  title: `Revision requested on v${sub.version_number || 1} — ${task.creative_canonical_name || task.creative_name}`,
-                  body: feedbackText.length > 180 ? feedbackText.slice(0, 177) + '…' : feedbackText,
-                  link_path: `/editor-view?task=${task.task_id}`,
-                })
-              }
+            if (error) {
+              setErr(`Feedback saved but task status update failed: ${error.message}. The editor will see your feedback, but won't see the task marked as needing revision. Try again from the Status row above.`)
+              return
+            }
+            setStatus('needs_revision')
+            if (task.editor_id) {
+              notifyEditor({
+                editor_id: task.editor_id,
+                kind: 'revision_requested',
+                task_id: task.task_id,
+                submission_id: sub.id,
+                creative_id: task.creative_id,
+                title: `Revision requested on v${sub.version_number || 1} — ${task.creative_canonical_name || task.creative_name}`,
+                body: feedbackText.length > 180 ? feedbackText.slice(0, 177) + '…' : feedbackText,
+                link_path: `/editor-view?task=${task.task_id}`,
+              })
             }
           }}
         />
@@ -7231,12 +7246,12 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
   const [feedbackSavingId, setFeedbackSavingId] = useState(null)
   // Strip the legacy "(role)" suffix from feedback_by_name when
   // displaying. Older rows have "Admin (admin)" or "Dean (editor)"
-  // baked in. Ben (2026-05-23) called this confusing on /editor-view
-  // where authenticated admins were getting tagged "Admin (editor)"
-  // because scope.isEditorView=true.
+  // baked in. Match ONLY the known role tokens — a broad \w+ pattern
+  // would also strip legitimate trailing parens from a name like
+  // "John Smith (Sr.)".
   const displayAuthor = (name) => {
     if (!name) return 'Anonymous'
-    return name.replace(/\s*\(\w+\)\s*$/, '').trim() || name
+    return name.replace(/\s*\((?:admin|editor|viewer)\)\s*$/i, '').trim() || name
   }
   const saveFeedback = async (sub, { alsoRequestRevision = false } = {}) => {
     setFeedbackSavingId(sub.id)
@@ -7258,8 +7273,12 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
     if (!error) {
       setFeedbackEditingId(null)
       onFeedbackSaved?.(sub.id, patch)
-      // Notify the OTHER side. If admin wrote, notify the task's editor.
-      if (text && currentUserRole === 'admin' && taskEditorId) {
+      // Notify the OTHER side. If admin wrote feedback ONLY, notify the
+      // task's editor with kind='feedback'. If they ALSO requested revision,
+      // skip this notify — the revision_requested notification fired by
+      // onRequestRevision carries the same feedback preview and is more
+      // informative. Two pings for one action is just noise.
+      if (text && currentUserRole === 'admin' && taskEditorId && !alsoRequestRevision) {
         notifyEditor({
           editor_id: taskEditorId,
           kind: 'feedback',
@@ -7271,10 +7290,11 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
         })
       }
       // "Save + Request revision" flow — admin wants the task status to
-      // flip to needs_revision so the editor knows they need to redo it.
-      // Parent (EditTaskModal) handles the actual status update + notify.
+      // flip to needs_revision. Await so any DB error from the status
+      // update surfaces back to the caller's UI instead of silently
+      // dropping after the feedback was already saved.
       if (alsoRequestRevision && text) {
-        onRequestRevision?.(sub, text)
+        try { await onRequestRevision?.(sub, text) } catch { /* surfaced via setErr in parent */ }
       }
     }
   }
@@ -7352,7 +7372,12 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                 </div>
                 <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
                   {(sub.file_url || sub.external_url) && (
-                    <a href={sub.file_url || sub.external_url} target="_blank" rel="noreferrer"
+                    // toDownloadUrl wraps the Supabase URL with ?download=
+                    // per the quality contract — without it, browsers
+                    // ignore the download attribute and play in-tab.
+                    // External (Drive) URLs pass through unchanged.
+                    <a href={sub.file_url ? toDownloadUrl(sub.file_url, `v${sub.version_number || 1}.mp4`) : sub.external_url}
+                      target="_blank" rel="noreferrer"
                       style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)', textDecoration: 'underline' }}>
                       Open ↗
                     </a>
