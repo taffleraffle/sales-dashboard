@@ -153,18 +153,23 @@ const STATUS_COLOR = {
 // Friendly labels — no underscores in display — paired with colors used
 // in pill buttons, timeline badges, and the queue's status filter.
 const TASK_STATUS_LABEL = {
-  queued:      'Queued',
-  in_progress: 'In progress',
-  review:      'In review',
-  done:        'Done',
-  blocked:     'Blocked',
+  queued:          'Queued',
+  in_progress:     'In progress',
+  review:          'In review',
+  needs_revision:  'Needs revision',
+  done:            'Done',
+  blocked:         'Blocked',
 }
 const TASK_STATUS_COLOR = {
-  queued:      'var(--ink-3)',
-  in_progress: '#e0853e',
-  review:      '#3e7eba',
-  done:        '#3e8a5e',
-  blocked:     '#b53e3e',
+  queued:          'var(--ink-3)',
+  in_progress:     '#e0853e',
+  review:          '#3e7eba',
+  // needs_revision = bright yellow/amber — visually distinct from
+  // in_progress (orange) so admin can tell "editor is working" from
+  // "editor needs to rework v_n based on my feedback" at a glance.
+  needs_revision:  '#d09c08',
+  done:            '#3e8a5e',
+  blocked:         '#b53e3e',
 }
 
 // Known offer slugs surface as filter chips + pill colors. Source of truth
@@ -726,12 +731,13 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
   // assignments (blue) vs approvals (green) at a glance.
   const kindStyle = (kind) => {
     switch (kind) {
-      case 'feedback':         return { icon: '💬', color: '#e8b408' }
-      case 'assignment':       return { icon: '📋', color: '#3e7eba' }
-      case 'reassignment':     return { icon: '↻',  color: '#3e7eba' }
-      case 'source_replaced':  return { icon: '↑',  color: '#a05810' }
-      case 'approved':         return { icon: '✓',  color: '#3e8a5e' }
-      default:                 return { icon: '·',  color: 'var(--ink-3)' }
+      case 'feedback':            return { icon: '💬', color: '#e8b408' }
+      case 'revision_requested':  return { icon: '⟲',  color: '#d09c08' }
+      case 'assignment':          return { icon: '📋', color: '#3e7eba' }
+      case 'reassignment':        return { icon: '↻',  color: '#3e7eba' }
+      case 'source_replaced':     return { icon: '↑',  color: '#a05810' }
+      case 'approved':            return { icon: '✓',  color: '#3e8a5e' }
+      default:                    return { icon: '·',  color: 'var(--ink-3)' }
     }
   }
 
@@ -5983,11 +5989,12 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           <FilterDropdown
             label="Status"
             options={[
-              { value: 'queued',      label: 'Queued',      dot: TASK_STATUS_COLOR.queued,      count: tasks.filter(t => t.status === 'queued').length },
-              { value: 'in_progress', label: 'In progress', dot: TASK_STATUS_COLOR.in_progress, count: tasks.filter(t => t.status === 'in_progress').length },
-              { value: 'review',      label: 'In review',   dot: TASK_STATUS_COLOR.review,      count: tasks.filter(t => t.status === 'review').length },
-              { value: 'done',        label: 'Done',        dot: TASK_STATUS_COLOR.done,        count: tasks.filter(t => t.status === 'done').length },
-              { value: 'blocked',     label: 'Blocked',     dot: TASK_STATUS_COLOR.blocked,     count: tasks.filter(t => t.status === 'blocked').length },
+              { value: 'queued',         label: 'Queued',         dot: TASK_STATUS_COLOR.queued,         count: tasks.filter(t => t.status === 'queued').length },
+              { value: 'in_progress',    label: 'In progress',    dot: TASK_STATUS_COLOR.in_progress,    count: tasks.filter(t => t.status === 'in_progress').length },
+              { value: 'review',         label: 'In review',      dot: TASK_STATUS_COLOR.review,         count: tasks.filter(t => t.status === 'review').length },
+              { value: 'needs_revision', label: 'Needs revision', dot: TASK_STATUS_COLOR.needs_revision, count: tasks.filter(t => t.status === 'needs_revision').length },
+              { value: 'done',           label: 'Done',           dot: TASK_STATUS_COLOR.done,           count: tasks.filter(t => t.status === 'done').length },
+              { value: 'blocked',        label: 'Blocked',        dot: TASK_STATUS_COLOR.blocked,        count: tasks.filter(t => t.status === 'blocked').length },
             ]}
             selected={selectedStatuses}
             allCount={tasks.length}
@@ -6981,7 +6988,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         <div>
           <div style={chipLabelStyle}>Status</div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-            {['queued', 'in_progress', 'review', 'done', 'blocked'].map(s => {
+            {['queued', 'in_progress', 'review', 'needs_revision', 'done', 'blocked'].map(s => {
               const isOn = status === s
               const c = TASK_STATUS_COLOR[s] || 'var(--ink)'
               return (
@@ -7040,7 +7047,12 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           // the conversation clear + drives notifyEditor() routing.
           canFeedback={true}
           currentUserName={scope.editorName || 'Admin'}
-          currentUserRole={scope.isEditorView ? 'editor' : 'admin'}
+          // Detect role from the scope. isEditorView=true means we're
+          // on /editor-view OR a token-share link. But an authenticated
+          // admin browsing /editor-view shouldn't be tagged 'editor' —
+          // detect by whether scope.editorId resolves to a real editor
+          // row (admin-on-editor-view has no editor row).
+          currentUserRole={(scope.isEditorView && scope.editorId) ? 'editor' : 'admin'}
           // SubmissionsPanel uses these to dispatch the notification
           // when an admin saves feedback — the assigned editor of the
           // task gets a notification + email (once Resend is wired).
@@ -7053,6 +7065,29 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             // Optimistic local update so the card flips to the new
             // feedback text without a refetch.
             setSubmissions(curr => curr.map(s => s.id === subId ? { ...s, ...patch } : s))
+          }}
+          onRequestRevision={async (sub, feedbackText) => {
+            // Admin clicked "Save + Request revision" on a submission's
+            // feedback. Flip task status to needs_revision + notify the
+            // editor with the feedback preview so they immediately know
+            // what to fix.
+            const { error } = await supabase.from('lib_editing_tasks')
+              .update({ status: 'needs_revision' }).eq('id', task.task_id)
+            if (!error) {
+              setStatus('needs_revision')
+              if (task.editor_id) {
+                notifyEditor({
+                  editor_id: task.editor_id,
+                  kind: 'revision_requested',
+                  task_id: task.task_id,
+                  submission_id: sub.id,
+                  creative_id: task.creative_id,
+                  title: `Revision requested on v${sub.version_number || 1} — ${task.creative_canonical_name || task.creative_name}`,
+                  body: feedbackText.length > 180 ? feedbackText.slice(0, 177) + '…' : feedbackText,
+                  link_path: `/editor-view?task=${task.task_id}`,
+                })
+              }
+            }
           }}
         />
 
@@ -7178,7 +7213,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
    lib_task_submissions, newest first. Each card has its own inline
    playable preview + per-version Approve / Delete buttons. Replaces
    the old single-slot SubmittedWorkPanel. */
-function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onFeedbackSaved, currentUserName, currentUserRole = 'admin', taskEditorId, taskName }) {
+function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onFeedbackSaved, onRequestRevision, currentUserName, currentUserRole = 'admin', taskEditorId, taskName }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   // Per-card expand/collapse state. Default: only the LATEST (first
   // in the list) is expanded, older versions are collapsed so the
@@ -7194,18 +7229,24 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
   const [feedbackDrafts, setFeedbackDrafts] = useState({})
   const [feedbackEditingId, setFeedbackEditingId] = useState(null)
   const [feedbackSavingId, setFeedbackSavingId] = useState(null)
-  const saveFeedback = async (sub) => {
+  // Strip the legacy "(role)" suffix from feedback_by_name when
+  // displaying. Older rows have "Admin (admin)" or "Dean (editor)"
+  // baked in. Ben (2026-05-23) called this confusing on /editor-view
+  // where authenticated admins were getting tagged "Admin (editor)"
+  // because scope.isEditorView=true.
+  const displayAuthor = (name) => {
+    if (!name) return 'Anonymous'
+    return name.replace(/\s*\(\w+\)\s*$/, '').trim() || name
+  }
+  const saveFeedback = async (sub, { alsoRequestRevision = false } = {}) => {
     setFeedbackSavingId(sub.id)
     const text = (feedbackDrafts[sub.id] ?? sub.feedback_text ?? '').trim()
-    // Stamp who-and-role so the conversation reads clearly. When
-    // clearing (text=''), null everything out so the empty CTA returns.
-    const stampedName = text
-      ? `${currentUserName || (currentUserRole === 'editor' ? 'Editor' : 'Admin')} (${currentUserRole})`
-      : null
     const patch = {
       feedback_text: text || null,
       feedback_at: text ? new Date().toISOString() : null,
-      feedback_by_name: stampedName,
+      // Plain display name — no "(role)" suffix. Role info is implicit
+      // via who's logged in; we don't bake it into every display string.
+      feedback_by_name: text ? (currentUserName || (currentUserRole === 'editor' ? 'Editor' : 'Admin')) : null,
       // Reset read state whenever feedback changes — the OTHER side
       // sees it as new again until they open the task. Editor opening
       // the task auto-marks read (EditTaskModal.reloadSubmissions).
@@ -7218,11 +7259,6 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
       setFeedbackEditingId(null)
       onFeedbackSaved?.(sub.id, patch)
       // Notify the OTHER side. If admin wrote, notify the task's editor.
-      // If editor wrote (reply), we currently only have an admin bell
-      // showing submissions, so the in-app notification for editor->admin
-      // is implicit (the bell already picks up the updated feedback row
-      // on next refresh). Future: add a separate admin-notifications
-      // surface for editor replies.
       if (text && currentUserRole === 'admin' && taskEditorId) {
         notifyEditor({
           editor_id: taskEditorId,
@@ -7233,6 +7269,12 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
           body: text.length > 140 ? text.slice(0, 137) + '…' : text,
           link_path: `/editor-view?task=${sub.task_id}`,
         })
+      }
+      // "Save + Request revision" flow — admin wants the task status to
+      // flip to needs_revision so the editor knows they need to redo it.
+      // Parent (EditTaskModal) handles the actual status update + notify.
+      if (alsoRequestRevision && text) {
+        onRequestRevision?.(sub, text)
       }
     }
   }
@@ -7438,7 +7480,7 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                       </span>
                       {hasFeedback && sub.feedback_at && (
                         <span style={{ color: 'var(--ink-3)', fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'none', fontWeight: 500 }}>
-                          {sub.feedback_by_name || 'Anonymous'} · {new Date(sub.feedback_at).toLocaleString()}
+                          {displayAuthor(sub.feedback_by_name)} · {new Date(sub.feedback_at).toLocaleString()}
                         </span>
                       )}
                     </div>
@@ -7469,7 +7511,7 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                             borderRadius: 2, resize: 'vertical',
                           }}
                         />
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                           <button type="button"
                             onClick={() => { setFeedbackEditingId(null); setFeedbackDrafts(d => { const n = { ...d }; delete n[sub.id]; return n }) }}
                             disabled={feedbackSavingId === sub.id}
@@ -7488,6 +7530,25 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                               background: 'var(--ink)', color: 'var(--paper)',
                               border: 'none', cursor: 'pointer', borderRadius: 2,
                             }}>{feedbackSavingId === sub.id ? 'Saving…' : 'Save feedback'}</button>
+                          {/* Save + Request revision: admin only, the
+                              90%-case "here's what to fix, now redo it"
+                              workflow. Saves the feedback AND flips the
+                              task status to needs_revision so the editor
+                              knows they own it again. Hidden for editor
+                              role since editors don't request revision
+                              of their own work. */}
+                          {currentUserRole === 'admin' && (
+                            <button type="button"
+                              onClick={() => saveFeedback(sub, { alsoRequestRevision: true })}
+                              disabled={feedbackSavingId === sub.id || !(feedbackDrafts[sub.id] ?? sub.feedback_text ?? '').trim()}
+                              title="Save the feedback AND mark the task as needs_revision so the editor knows to redo it"
+                              style={{
+                                padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                                fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+                                background: '#d09c08', color: '#3a2904',
+                                border: '1px solid #b08605', cursor: 'pointer', borderRadius: 2,
+                              }}>⟲ Save + request revision</button>
+                          )}
                         </div>
                       </>
                     )}
