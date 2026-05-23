@@ -90,6 +90,14 @@ https://sales-dashboard-ftct.onrender.com/editor-login
 async function generateActionLink(email: string, redirectTo: string): Promise<{ link: string, token?: string }> {
   // Try magiclink first (works for existing auth.users), fall back to
   // signup for editors who haven't logged in before.
+  //
+  // IMPORTANT: redirect_to goes at the TOP LEVEL of the request body,
+  // not nested under `options`. Nesting it under options silently
+  // makes Supabase ignore the value and fall back to the project's
+  // Site URL — which lands editors on `/` instead of `/editor-view`,
+  // which routes them through ProtectedRoute before the auth-fragment
+  // session is established, which dumps them on `/login`. Caught
+  // 2026-05-23 after a single editor click reproduced the issue.
   const tryType = async (type: 'magiclink' | 'signup') => {
     const r = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
       method: 'POST',
@@ -98,7 +106,7 @@ async function generateActionLink(email: string, redirectTo: string): Promise<{ 
         Authorization: `Bearer ${SERVICE_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ type, email, options: { redirect_to: redirectTo } }),
+      body: JSON.stringify({ type, email, redirect_to: redirectTo }),
     })
     const body = await r.json().catch(() => ({}))
     if (r.ok && body.action_link) {
@@ -131,16 +139,40 @@ serve(async (req) => {
   const redirectTo = body?.redirect_to || PORTAL_URL
 
   // Look up the editor. Only allow login for emails actually on the
-  // active editor roster — keeps the function from being a free relay
-  // anyone can use to send mail from our verified domain.
+  // active editor roster OR on user_profiles with admin/manager role
+  // (so the admin can test /editor-login as themselves without being
+  // added to lib_creative_editors). Keeps the function from being a
+  // free relay anyone can use to send mail from our verified domain.
   const editorRes = await fetch(
     `${SUPABASE_URL}/rest/v1/lib_creative_editors?select=id,name,email,active&email=ilike.${encodeURIComponent(email)}`,
     { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
   )
   const editors = await editorRes.json().catch(() => [])
-  const editor = Array.isArray(editors) ? editors.find((e: any) => e.active) : null
+  let editor = Array.isArray(editors) ? editors.find((e: any) => e.active) : null
   if (!editor) {
-    // Don't leak whether the email exists — just say it's not on the roster.
+    // Fallback: check user_profiles for admin/manager. Their email
+    // sits on auth.users, not user_profiles directly, so we join
+    // through the auth schema.
+    const adminRes = await fetch(
+      `${SUPABASE_URL}/auth/v1/admin/users?filter=${encodeURIComponent(email)}`,
+      { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
+    )
+    const adminData = await adminRes.json().catch(() => ({}))
+    const adminUser = (adminData?.users || []).find((u: any) => (u.email || '').toLowerCase() === email)
+    if (adminUser) {
+      // Check user_profiles for an admin/manager role
+      const upRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/user_profiles?select=id,role,display_name&auth_user_id=eq.${adminUser.id}`,
+        { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
+      )
+      const ups = await upRes.json().catch(() => [])
+      const up = Array.isArray(ups) ? ups.find((u: any) => u.role === 'admin' || u.role === 'manager') : null
+      if (up) {
+        editor = { id: up.id, name: up.display_name || email.split('@')[0], email, active: true }
+      }
+    }
+  }
+  if (!editor) {
     return json({ ok: false, error: 'Email not found on the active editor roster. Ask your admin to add it.' }, 403)
   }
 
