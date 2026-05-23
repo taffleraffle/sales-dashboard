@@ -6105,7 +6105,18 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           prefillDue={addTaskPrefill.due}
           prefillStart={addTaskPrefill.start}
           onClose={() => { setAddTaskOpen(false); setAddTaskPrefill({ editorId: '', due: '', start: '' }) }}
-          onSaved={() => { setAddTaskOpen(false); setAddTaskPrefill({ editorId: '', due: '', start: '' }); load() }} />
+          onSaved={(newQueueRows) => {
+            setAddTaskOpen(false)
+            setAddTaskPrefill({ editorId: '', due: '', start: '' })
+            // Optimistic prepend so the new task lands immediately,
+            // without waiting for the background refetch to return.
+            if (newQueueRows && newQueueRows.length) {
+              setTasks(curr => [...newQueueRows, ...curr])
+            }
+            // Background refresh to reconcile with any joins (editor
+            // name lookups, creative thumbs, etc.) the view returns.
+            load(true)
+          }} />
       )}
       {editingTask && (
         <EditTaskModal
@@ -6906,6 +6917,55 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         </>
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
+        {/* Prominent status banner — shown when the task is in a state
+            that's NOT the default "in progress" flow, so the operator
+            sees at a glance that something changed (especially after
+            clicking Request revision / Approve / marking blocked).
+            Ben flagged that status changes were "difficult to see"
+            after Request revision fired. */}
+        {(status === 'needs_revision' || status === 'blocked' || status === 'done' || status === 'review') && (
+          <div style={{
+            padding: '12px 14px',
+            background: status === 'needs_revision' ? '#fffaea'
+              : status === 'blocked' ? 'rgba(181,62,62,0.08)'
+              : status === 'done' ? 'rgba(62,138,94,0.08)'
+              : '#f0f7fc',
+            border: '1px solid ' + (
+              status === 'needs_revision' ? '#e8b408'
+              : status === 'blocked' ? 'rgba(181,62,62,0.35)'
+              : status === 'done' ? 'rgba(62,138,94,0.35)'
+              : 'rgba(62,126,186,0.35)'
+            ),
+            borderLeft: '3px solid ' + (
+              status === 'needs_revision' ? '#d09c08'
+              : status === 'blocked' ? '#b53e3e'
+              : status === 'done' ? '#3e8a5e'
+              : '#3e7eba'
+            ),
+            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          }}>
+            <span style={{
+              padding: '4px 10px',
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+              letterSpacing: '0.12em', textTransform: 'uppercase',
+              color: 'white',
+              background: status === 'needs_revision' ? '#d09c08'
+                : status === 'blocked' ? '#b53e3e'
+                : status === 'done' ? '#3e8a5e'
+                : '#3e7eba',
+              borderRadius: 2,
+            }}>{TASK_STATUS_LABEL[status] || status}</span>
+            <span style={{
+              fontFamily: 'var(--serif)', fontSize: 13.5, color: 'var(--ink-2)',
+              lineHeight: 1.4,
+            }}>
+              {status === 'needs_revision' && 'Editor has been notified. The task moves back to in-progress when they upload a new version.'}
+              {status === 'blocked' && 'Task is blocked. Update the status when the blocker clears.'}
+              {status === 'done' && 'Task complete. Final cut is approved.'}
+              {status === 'review' && 'Editor submitted a version. Review it below and Approve, Request revision, or Delete.'}
+            </span>
+          </div>
+        )}
         {/* Inline video preview — playable in the modal so the editor
             can watch the source without bouncing elsewhere. preview_url
             is the compressed 720p mp4 for OLD Drive-imported rows; for
@@ -7230,6 +7290,17 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
   const [feedbackDrafts, setFeedbackDrafts] = useState({})
   const [feedbackEditingId, setFeedbackEditingId] = useState(null)
   const [feedbackSavingId, setFeedbackSavingId] = useState(null)
+  // Dedicated state for the "Request revision" popup. When set,
+  // renders a focused modal-over-modal that lets the admin type
+  // feedback specifically for THIS revision request without having
+  // to first scroll/click into the inline feedback editor below.
+  // Previously the button just fired with whatever was in the inline
+  // textarea (often empty) and the editor got a revision request
+  // with no actual feedback. Ben flagged this as "real messy".
+  const [revisionSub, setRevisionSub] = useState(null)
+  const [revisionDraft, setRevisionDraft] = useState('')
+  const [revisionSending, setRevisionSending] = useState(false)
+  const [revisionErr, setRevisionErr] = useState(null)
   // Strip the legacy "(role)" suffix from feedback_by_name when
   // displaying. Older rows have "Admin (admin)" or "Dean (editor)"
   // baked in. Match ONLY the known role tokens — a broad \w+ pattern
@@ -7239,20 +7310,53 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
     if (!name) return 'Anonymous'
     return name.replace(/\s*\((?:admin|editor|viewer)\)\s*$/i, '').trim() || name
   }
-  // Wrapper for the "Request revision" button — if there's a pending
-  // feedback draft for this version, save it first so the editor sees
-  // what to fix; then flip the task status via the parent callback.
-  const requestRevisionForVersion = async (sub) => {
+  // Open the dedicated revision-request popup. Pre-fills with any
+  // existing feedback (or pending draft) so the admin can edit-in-place
+  // rather than starting from scratch.
+  const openRevisionPopup = (sub) => {
     const draft = (feedbackDrafts[sub.id] ?? '').trim()
     const existing = (sub.feedback_text || '').trim()
-    // Save the draft first if it's new content the admin hasn't saved yet.
-    if (draft && draft !== existing) {
-      await saveFeedback(sub)
+    setRevisionDraft(draft || existing)
+    setRevisionErr(null)
+    setRevisionSub(sub)
+  }
+  // Submit the popup: save the typed feedback to the submission row,
+  // fire the parent's onRequestRevision to flip the task to
+  // needs_revision + notify the editor, then close the popup.
+  const submitRevisionPopup = async () => {
+    if (!revisionSub) return
+    const text = revisionDraft.trim()
+    if (!text) {
+      setRevisionErr('Add at least a line of feedback before requesting revision.')
+      return
     }
-    // Pass the latest feedback text (post-save) to the parent so the
-    // revision_requested notification email carries the body.
-    const finalText = draft || existing
-    try { await onRequestRevision?.(sub, finalText) } catch { /* parent surfaces via setErr */ }
+    setRevisionSending(true); setRevisionErr(null)
+    try {
+      const sub = revisionSub
+      const patch = {
+        feedback_text: text,
+        feedback_at: new Date().toISOString(),
+        feedback_by_name: currentUserName || 'Admin',
+        feedback_read_at: null,
+      }
+      const { error } = await supabase.from('lib_task_submissions')
+        .update(patch).eq('id', sub.id)
+      if (error) throw error
+      // Optimistic local update so the version card reflects the new
+      // feedback text the instant the popup closes — parent then
+      // refetches via onRequestRevision -> onSaved.
+      onFeedbackSaved?.(sub.id, patch)
+      // Parent flips task.status to 'needs_revision' + fires the
+      // revision_requested notification (with the feedback body in
+      // the email preview).
+      await onRequestRevision?.(sub, text)
+      setRevisionSub(null)
+      setRevisionDraft('')
+    } catch (e) {
+      setRevisionErr(e.message || 'Failed to save feedback')
+    } finally {
+      setRevisionSending(false)
+    }
   }
   // Save feedback ONLY — no longer does the combined "save + flip status"
   // dance. Status changes (Approve / Request revision / Delete) live on
@@ -7396,8 +7500,8 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                       flipping status — Ben's workflow ask. */}
                   {canFeedback && currentUserRole === 'admin' && !isApproved && (
                     <button type="button" disabled={busy || feedbackSavingId === sub.id}
-                      onClick={() => requestRevisionForVersion(sub)}
-                      title="Mark the task as needs_revision and notify the editor. Saves any pending feedback text on this version first."
+                      onClick={() => openRevisionPopup(sub)}
+                      title="Open a popup to write the revision feedback, then send it. Flips the task to needs_revision + notifies the editor."
                       style={{
                         padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
                         fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
@@ -7601,6 +7705,90 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
           )
         })}
       </div>
+      {/* Request-revision popup. Renders over the EditTaskModal when
+          the admin clicks "Request revision" on a submission row.
+          Forces them to write the actual feedback before the task
+          status flips, instead of the old behaviour of firing the
+          revision request with whatever empty / stale text was sitting
+          in the inline textarea. */}
+      {revisionSub && createPortal(
+        <div
+          onClick={() => !revisionSending && setRevisionSub(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 250,
+            background: 'rgba(10,10,10,0.55)', backdropFilter: 'blur(2px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+          }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            maxWidth: 520, width: '100%',
+            background: 'var(--paper)', border: '1px solid var(--rule)',
+            borderTop: '3px solid #d09c08',
+            boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
+            padding: '24px 26px',
+          }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
+              textTransform: 'uppercase', color: '#a8650f', marginBottom: 6,
+            }}>Request revision · v{revisionSub.version_number || 1}</div>
+            <h2 style={{
+              margin: '0 0 12px', fontFamily: 'var(--serif)', fontSize: 20, fontWeight: 500,
+              lineHeight: 1.25, color: 'var(--ink)',
+            }}>What needs to change?</h2>
+            <p style={{
+              margin: '0 0 12px', fontFamily: 'var(--serif)', fontSize: 13,
+              color: 'var(--ink-3)', lineHeight: 1.5,
+            }}>
+              This message goes to the editor as a notification + email. The task moves to <strong>Needs revision</strong> when you send.
+            </p>
+            <textarea
+              autoFocus
+              value={revisionDraft}
+              onChange={(e) => setRevisionDraft(e.target.value)}
+              disabled={revisionSending}
+              placeholder="e.g. Tighten the opening to under 4s — cut the wave-at-the-camera. Lower-third needs a bigger font."
+              rows={6}
+              style={{
+                width: '100%', padding: '10px 12px',
+                fontFamily: 'var(--serif)', fontSize: 14,
+                background: 'white', border: '1px solid var(--rule)',
+                borderRadius: 2, resize: 'vertical', boxSizing: 'border-box',
+              }}
+            />
+            {revisionErr && (
+              <div style={{
+                marginTop: 10, padding: '8px 12px',
+                background: 'rgba(181,62,62,0.08)', border: '1px solid rgba(181,62,62,0.3)',
+                color: '#b53e3e', fontFamily: 'var(--mono)', fontSize: 11.5,
+              }}>{revisionErr}</div>
+            )}
+            <div style={{
+              marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end',
+            }}>
+              <button type="button"
+                onClick={() => setRevisionSub(null)}
+                disabled={revisionSending}
+                style={{
+                  padding: '8px 14px',
+                  fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  background: 'transparent', color: 'var(--ink-2)',
+                  border: '1px solid var(--rule)', cursor: 'pointer', borderRadius: 2,
+                }}>Cancel</button>
+              <button type="button"
+                onClick={submitRevisionPopup}
+                disabled={revisionSending || !revisionDraft.trim()}
+                style={{
+                  padding: '8px 14px',
+                  fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  background: '#d09c08', color: '#3a2904',
+                  border: 'none', cursor: revisionSending ? 'wait' : 'pointer', borderRadius: 2,
+                }}>{revisionSending ? 'Sending…' : 'Send revision request'}</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
@@ -8511,10 +8699,19 @@ function AddEditorModal({ onClose, onSaved }) {
   )
 }
 
-function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefillDue = '', prefillStart = '' }) {
+function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefillDue = '', prefillStart = '', existingTaskCreativeIds = null }) {
   const [mode, setMode] = useState('pick')   // 'pick' or 'upload'
   const [creatives, setCreatives] = useState([])
   const [search, setSearch] = useState('')
+  // Default: only show creatives that need editing (status='raw'),
+  // hide stuff that's already been edited (Body/Hook/Joined-edited
+  // sitting in the library as finished outputs). Ben asked for this
+  // because the modal was firehosing 50 already-edited Body files
+  // before the operator could find a raw clip to assign.
+  const [statusFilter, setStatusFilter] = useState('raw')  // 'raw' | 'all'
+  // Default: hide creatives that already have an open editing task —
+  // no point re-assigning something that's already in someone's queue.
+  const [hideAssigned, setHideAssigned] = useState(true)
   // Selected creative(s) — Set of ids. UI toggles between single and multi:
   // checkbox per row + a "Select all visible" affordance.
   const [creativeIds, setCreativeIds] = useState(() => new Set())
@@ -8633,10 +8830,30 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
         ...(assignedAt ? { assigned_at: assignedAt } : {}),
         status: editorId ? 'queued' : 'review',
       }))
-      const { error: taskErr } = await supabase.from('lib_editing_tasks').insert(rows)
+      // Insert + return the new rows joined as they appear in
+      // lib_editing_queue so the parent can optimistically prepend
+      // them to its state. Without this, the parent has to refetch
+      // and the new task doesn't visibly land in the queue until the
+      // refetch returns (or the user reloads). Ben flagged this as
+      // "kind of annoying" 2026-05-23.
+      const { data: insertedIds, error: taskErr } = await supabase
+        .from('lib_editing_tasks')
+        .insert(rows)
+        .select('id')
       if (taskErr) throw taskErr
+      // Pull the queue-view rows for the just-inserted task ids so the
+      // shape matches what the parent already has in state.
+      let newQueueRows = []
+      if (insertedIds && insertedIds.length) {
+        const ids = insertedIds.map(r => r.id)
+        const { data: viewRows } = await supabase
+          .from('lib_editing_queue')
+          .select('*')
+          .in('task_id', ids)
+        if (viewRows) newQueueRows = viewRows
+      }
       setUploadProgress(100)
-      onSaved?.()
+      onSaved?.(newQueueRows)
     } catch (e) {
       setErr(e.message || 'failed')
     } finally {
