@@ -144,7 +144,7 @@ function PageSkeleton() {
 }
 
 function ProtectedRoute({ children }) {
-  const { isAuthenticated, isLoading, needsPasswordSetup } = useAuth()
+  const { isAuthenticated, isLoading, needsPasswordSetup, isEditor } = useAuth()
 
   if (isLoading) {
     return (
@@ -156,6 +156,14 @@ function ProtectedRoute({ children }) {
 
   if (!isAuthenticated) return <Navigate to="/login" replace />
   if (needsPasswordSetup) return <SetPasswordPage />
+  // Creative-team editors are scoped to /editor-view only. If they land
+  // on a /sales/* route (typed directly, bookmarked, or accidentally
+  // clicked) we boot them back to the editor portal so they don't see
+  // sales / commission / call-data screens. AuthContext sets isEditor
+  // when the session's user matches a lib_creative_editors row with
+  // tier='editor'. tier='admin' editors fall under isAdmin and get
+  // full access.
+  if (isEditor) return <Navigate to="/editor-view" replace />
   return children
 }
 

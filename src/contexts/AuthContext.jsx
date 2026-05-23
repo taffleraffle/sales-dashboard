@@ -74,6 +74,59 @@ export function AuthProvider({ children }) {
       return
     }
 
+    // Try lib_creative_editors — magic-link editor accounts.
+    // First by auth_user_id (fast path for editors who've logged in
+    // before), then by email (first-login path — claim auth_user_id
+    // so future loads short-circuit on the first query). Without this
+    // editors would fall through to `viewer` below and could navigate
+    // the whole sales dashboard.
+    let editor = null
+    {
+      const { data } = await supabase
+        .from('lib_creative_editors')
+        .select('id, name, email, tier, format, auth_user_id, active')
+        .eq('auth_user_id', authUserId)
+        .maybeSingle()
+      if (data) editor = data
+    }
+    if (!editor) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.email) {
+        const { data } = await supabase
+          .from('lib_creative_editors')
+          .select('id, name, email, tier, format, auth_user_id, active')
+          .ilike('email', user.email)
+          .maybeSingle()
+        if (data) {
+          editor = data
+          // Claim the row by writing auth_user_id so future page loads
+          // hit the fast path above. Fire-and-forget — non-blocking.
+          supabase.from('lib_creative_editors')
+            .update({ auth_user_id: authUserId })
+            .eq('id', data.id)
+            .then(() => {})
+        }
+      }
+    }
+    if (editor) {
+      // tier='admin' creative editors get full admin access (none today
+      // but future-proofs the schema). tier='editor' get appRole='editor'
+      // which the ProtectedRoute gate redirects out of /sales/* into
+      // /editor-view.
+      const isAdminEditor = editor.tier === 'admin'
+      setProfile({
+        id: editor.id,
+        name: editor.name,
+        role: null,
+        appRole: isAdminEditor ? 'admin' : 'editor',
+        teamMemberId: null,
+        email: editor.email,
+        editorFormat: editor.format,
+        editorTier: editor.tier,
+      })
+      return
+    }
+
     // No profile found — user exists in auth but not linked
     const { data: { user } } = await supabase.auth.getUser()
     setProfile({
@@ -109,6 +162,7 @@ export function AuthProvider({ children }) {
   const isLoading = session === undefined
   const isAuthenticated = !!session
   const isAdmin = profile?.appRole === 'admin' || profile?.appRole === 'manager'
+  const isEditor = profile?.appRole === 'editor'
   const isCloser = profile?.role === 'closer'
   const isSetter = profile?.role === 'setter'
 
@@ -128,7 +182,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      session, profile, isLoading, isAuthenticated, isAdmin, isCloser, isSetter,
+      session, profile, isLoading, isAuthenticated, isAdmin, isEditor, isCloser, isSetter,
       needsPasswordSetup, signIn, signOut, setPassword, canFileEOD, getEODMemberId,
     }}>
       {children}
