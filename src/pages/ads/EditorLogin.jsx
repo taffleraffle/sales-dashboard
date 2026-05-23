@@ -61,13 +61,14 @@ export default function EditorLogin() {
     })
     setSending(false)
     if (error) {
-      // Surface the actual server-side error message when present so
-      // the user sees "not on the editor roster" vs network errors etc.
-      const detail = data?.error || error.message || 'Unknown error'
-      setErr(detail)
-    } else if (data?.ok === false) {
-      setErr(data.error || 'Send failed')
+      setErr(error.message || 'Unknown error')
     } else {
+      // Always show the "check your inbox" state on a 200, regardless
+      // of whether the email was actually on the roster. This prevents
+      // an attacker from enumerating who's on the editor roster by
+      // submitting emails and reading distinct success-vs-not-found
+      // responses. If the email is bogus, no email is sent and they
+      // wonder forever. If it's real, they get a magic link.
       setSent(true)
     }
   }

@@ -141,26 +141,33 @@ serve(async (req) => {
   // Look up the editor. Only allow login for emails actually on the
   // active editor roster OR on user_profiles with admin/manager role
   // (so the admin can test /editor-login as themselves without being
-  // added to lib_creative_editors). Keeps the function from being a
-  // free relay anyone can use to send mail from our verified domain.
+  // added to lib_creative_editors).
+  //
+  // Use `eq.` not `ilike.` — ilike treats `%` and `_` as wildcards and
+  // an attacker passing `%@opt.co.nz` could match the first matching
+  // editor and send mail to whatever inbox is on that row. Lowercase
+  // happens upstream so eq is case-sensitive but safe since editor
+  // emails are stored lowercased.
   const editorRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/lib_creative_editors?select=id,name,email,active&email=ilike.${encodeURIComponent(email)}`,
+    `${SUPABASE_URL}/rest/v1/lib_creative_editors?select=id,name,email,active&email=eq.${encodeURIComponent(email)}`,
     { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
   )
   const editors = await editorRes.json().catch(() => [])
   let editor = Array.isArray(editors) ? editors.find((e: any) => e.active) : null
   if (!editor) {
-    // Fallback: check user_profiles for admin/manager. Their email
-    // sits on auth.users, not user_profiles directly, so we join
-    // through the auth schema.
+    // Fallback: check user_profiles for admin/manager. GoTrue's admin
+    // users endpoint doesn't accept a `filter` query param the way the
+    // older docs suggest — use the supported `email` param so we don't
+    // fall through pages and miss admins whose auth user is past
+    // page 1. (Caught by code review 2026-05-23 — my first version
+    // worked by accident because Ben was on page 1.)
     const adminRes = await fetch(
-      `${SUPABASE_URL}/auth/v1/admin/users?filter=${encodeURIComponent(email)}`,
+      `${SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(email)}`,
       { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
     )
     const adminData = await adminRes.json().catch(() => ({}))
     const adminUser = (adminData?.users || []).find((u: any) => (u.email || '').toLowerCase() === email)
     if (adminUser) {
-      // Check user_profiles for an admin/manager role
       const upRes = await fetch(
         `${SUPABASE_URL}/rest/v1/user_profiles?select=id,role,display_name&auth_user_id=eq.${adminUser.id}`,
         { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
@@ -173,7 +180,12 @@ serve(async (req) => {
     }
   }
   if (!editor) {
-    return json({ ok: false, error: 'Email not found on the active editor roster. Ask your admin to add it.' }, 403)
+    // Always return 200 + the same shape on success-vs-not-found to
+    // prevent email enumeration. The UI tells the user "if your email
+    // is on the roster, you'll get a link" regardless. (Caught by code
+    // review 2026-05-23 — distinct 403 / 200 leaked which emails are
+    // on the editor roster.)
+    return json({ ok: true, sent: false, ambiguous: true })
   }
 
   let link: string, token: string | undefined
