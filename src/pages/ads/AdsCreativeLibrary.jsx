@@ -247,16 +247,26 @@ function editorColor(slugOrEditorOrTask) {
    identify-actor Edge Function silently no-ops because it has no image to
    send to Claude Vision.
 
-   This helper loads the file into an off-DOM <video>, seeks to ~1s
-   (skips the typical black opening frame), draws to a <canvas>, and
-   returns a JPEG Blob ready to upload alongside the video. Returns null
-   on any failure so the upload can continue without blocking on it. */
+   Two flavours:
+     captureVideoThumbnail(File)   — local File-object path, runs PRE
+       upload. Limited to 500 MB because the browser would have to read
+       the whole File to seek, stalling the TUS upload before a byte
+       lands.
+     captureVideoThumbnailFromUrl(url) — server-URL path, runs POST
+       upload. Browser issues HTTP range requests, only downloads the
+       few MB it needs to find a keyframe — works for any size. Use
+       this as the post-upload backfill so big Sony XAVC files no
+       longer ship without a thumbnail.
+
+   Both return a JPEG Blob ready to upload, or null on any failure so
+   the pipeline can continue without blocking. */
 async function captureVideoThumbnail(file, { seekSeconds = 1, maxWidth = 720, maxBytes = 500 * 1024 * 1024 } = {}) {
   // Hard guard: phone-camera MP4s often have the moov atom at the end,
   // which forces the browser to download the WHOLE file before it can
   // seek. For multi-hundred-MB files that stalls the entire upload queue
   // before a single byte is sent. We skip thumbnail capture above this
-  // threshold and let an offline backfill job extract thumbnails later.
+  // threshold and let the post-upload URL path (captureVideoThumbnailFromUrl)
+  // handle it once TUS completes.
   if (file.size > maxBytes) return null
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file)
@@ -292,6 +302,55 @@ async function captureVideoThumbnail(file, { seekSeconds = 1, maxWidth = 720, ma
     video.onerror = () => finish(null)
     // Safety net — never hang the upload more than 8s on thumbnail capture
     setTimeout(() => finish(null), 8000)
+    video.src = url
+  })
+}
+
+/* Post-upload thumbnail extraction. Uses the just-uploaded server URL
+   (not the local File) so the browser can HTTP-range-request just the
+   metadata + first keyframe instead of reading the whole 600 MB+ File
+   off disk. No size cap. Used in the upload pipeline as a fallback
+   when the pre-upload File-based capture was skipped. */
+async function captureVideoThumbnailFromUrl(url, { seekSeconds = 1, maxWidth = 720, timeoutMs = 30000 } = {}) {
+  if (!url) return null
+  return new Promise((resolve) => {
+    const video = document.createElement('video')
+    video.muted = true
+    video.playsInline = true
+    // 'metadata' preload + crossOrigin='anonymous' lets the browser
+    // issue range requests against the public Supabase bucket without
+    // tainting the canvas. Without crossOrigin set, canvas.toBlob
+    // throws SecurityError when the source is a different origin.
+    video.preload = 'metadata'
+    video.crossOrigin = 'anonymous'
+    let settled = false
+    const finish = (blob) => {
+      if (settled) return
+      settled = true
+      resolve(blob)
+    }
+    video.onloadedmetadata = () => {
+      const target = Math.min(seekSeconds, Math.max(0, (video.duration || 0) - 0.1))
+      video.currentTime = target
+    }
+    video.onseeked = () => {
+      try {
+        const w = Math.min(maxWidth, video.videoWidth || maxWidth)
+        const scale = w / (video.videoWidth || w)
+        const h = Math.round((video.videoHeight || 405) * scale)
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(video, 0, 0, w, h)
+        canvas.toBlob((blob) => finish(blob), 'image/jpeg', 0.82)
+      } catch { finish(null) }
+    }
+    video.onerror = () => finish(null)
+    // Generous timeout — moov-at-end files can take a while as the
+    // browser scans for the moov atom via range requests. 30s is the
+    // cap before we give up and let the cron backfill catch it.
+    setTimeout(() => finish(null), timeoutMs)
     video.src = url
   })
 }
@@ -429,7 +488,17 @@ async function runUploadPipeline(item, update) {
       postPatch.thumbnail_url = publicUrl
     } else {
       update({ status: 'thumbnailing', message: 'capturing thumbnail' })
-      const thumbBlob = await captureVideoThumbnail(file)
+      // Try pre-upload File-based capture first (fast path for files
+      // under 500 MB). If it skips because of the size guard OR fails,
+      // fall back to the post-upload URL-based capture which uses HTTP
+      // range requests against the just-uploaded file — works for any
+      // size without stalling the upload. This is the path Sony XAVC
+      // files (600 MB - 1 GB) take, and is why they used to land
+      // without a thumbnail before today.
+      let thumbBlob = await captureVideoThumbnail(file)
+      if (!thumbBlob) {
+        thumbBlob = await captureVideoThumbnailFromUrl(publicUrl)
+      }
       if (thumbBlob) {
         const thumbPath = `incoming/${libraryId}_thumb.jpg`
         try {
@@ -3512,10 +3581,16 @@ function VersionsPanel({ row, onReload }) {
       // 2. Browser-side first-frame capture — gives identify-actor a real
       //    image to face-match against. Best-effort; null result just means
       //    the row has no thumbnail and identify-actor will skip it.
-      //    captureVideoThumbnail self-guards on files >500MB.
+      //    Pre-upload File-based capture skips files > 500 MB to avoid
+      //    stalling the upload reading the whole File off disk. Big files
+      //    fall through to the post-upload URL path which uses HTTP range
+      //    requests against the just-uploaded URL — no stall, no size cap.
       setProgress('Capturing thumbnail…')
       let thumbnailUrl = null
-      const thumbBlob = await captureVideoThumbnail(file)
+      let thumbBlob = await captureVideoThumbnail(file)
+      if (!thumbBlob) {
+        thumbBlob = await captureVideoThumbnailFromUrl(publicUrl)
+      }
       if (thumbBlob) {
         const thumbPath = `ingest/${Date.now()}_v${nextVersion}_${sanitized}_thumb.jpg`
         try {
