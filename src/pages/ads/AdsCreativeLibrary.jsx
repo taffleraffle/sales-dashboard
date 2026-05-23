@@ -44,7 +44,7 @@ function toDownloadUrl(url, filename) {
 
    `onProgress(fraction)` is called frequently — debounce in the caller
    if it's wired straight into setState. */
-async function uploadWithResume(file, { bucket, path, contentType, onProgress, upsert = false }) {
+async function uploadWithResume(file, { bucket, path, contentType, onProgress, upsert = false, registerHandle }) {
   const session = (await supabase.auth.getSession()).data.session
   const accessToken = session?.access_token
   if (!accessToken) throw new Error('Not signed in — cannot upload')
@@ -71,6 +71,9 @@ async function uploadWithResume(file, { bucket, path, contentType, onProgress, u
       },
       onSuccess: () => resolve({ path }),
     })
+    // Hand the tus instance back to the caller so it can call
+    // upload.abort() if the user closes the modal mid-transfer.
+    if (registerHandle) registerHandle(upload)
     // Resume if we have a prior attempt for this exact file fingerprint.
     upload.findPreviousUploads().then((prev) => {
       if (prev.length > 0) upload.resumeFromPreviousUpload(prev[0])
@@ -6375,10 +6378,11 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   // Upload an edited version of the SAME creative — file → creative-uploads
   // bucket → write the URL into the appropriate stage on the SOURCE creative
   // → auto-advance task status to 'review' so admin sees there's a new
-  // version. One-step flow now: dropping or selecting a file kicks this
-  // off immediately, no separate "Mark for review" button. Status moves to
-  // 'review' in local state so the modal reflects the new state without
-  // needing to close + reopen.
+  // version. One-step flow: dropping or selecting a file kicks this off
+  // immediately. Now uses TUS resumable (same as the admin upload paths)
+  // so multi-GB camera-original cuts survive network blips and we keep
+  // full quality bytes end-to-end. Was previously a raw XHR POST with
+  // a 10-min timeout, which lost large files mid-flight.
   const startUpload = useCallback(async (file) => {
     if (!file) return
     setUploadFile(file)
@@ -6386,45 +6390,26 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     try {
       const sanitized = file.name.replace(/[^A-Za-z0-9._-]+/g, '_')
       const storagePath = `edited/${Date.now()}_${sanitized}`
-      // Direct XHR upload to Supabase Storage REST API. The supabase-js
-      // SDK's storage.upload() routes through fetch which doesn't expose
-      // per-byte progress, so we'd be stuck showing a frozen 20% bar
-      // until the whole file landed. XHR gives us real onprogress events
-      // AND an abort() handle for the close-during-upload path.
-      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
-      const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        uploadXhrRef.current = xhr
-        const url = `${SUPABASE_URL}/storage/v1/object/creative-uploads/${storagePath}`
-        xhr.open('POST', url)
-        xhr.setRequestHeader('Authorization', `Bearer ${SUPABASE_KEY}`)
-        xhr.setRequestHeader('apikey', SUPABASE_KEY)
-        xhr.setRequestHeader('Content-Type', file.type || 'video/mp4')
-        xhr.setRequestHeader('x-upsert', 'false')
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            // Reserve 0-70% for the actual byte upload, 70-100% for the
-            // DB-row patches that follow.
-            setUploadProgress(Math.round((e.loaded / e.total) * 70))
-          }
-        }
-        xhr.onload = () => {
-          uploadXhrRef.current = null
-          if (xhr.status >= 200 && xhr.status < 300) return resolve()
-          let msg = `HTTP ${xhr.status}`
-          try {
-            const body = JSON.parse(xhr.responseText)
-            if (body.error || body.message) msg = body.error || body.message
-          } catch {}
-          reject(new Error(msg))
-        }
-        xhr.onerror = () => { uploadXhrRef.current = null; reject(new Error('Network error during upload')) }
-        xhr.onabort = () => { uploadXhrRef.current = null; reject(new Error('Upload cancelled')) }
-        xhr.ontimeout = () => { uploadXhrRef.current = null; reject(new Error('Upload timed out (10 min)')) }
-        xhr.timeout = 10 * 60 * 1000
-        xhr.send(file)
+      // tus-js-client gives us proper progress events + resume on
+      // network blips + no in-memory single-POST cap. uploadXhrRef is
+      // repurposed to hold the tus.Upload instance so handleCloseModal
+      // can still abort an in-flight upload if the editor closes the
+      // modal mid-transfer.
+      const tusUpload = await uploadWithResume(file, {
+        bucket: 'creative-uploads',
+        path: storagePath,
+        contentType: file.type || 'video/mp4',
+        onProgress: (frac) => {
+          // Reserve 0-70% for the actual byte upload, 70-100% for the
+          // DB-row patches that follow.
+          setUploadProgress(Math.round(frac * 70))
+        },
+        // Pass back a handle so handleCloseModal can call .abort()
+        // on the underlying tus instance.
+        registerHandle: (instance) => { uploadXhrRef.current = instance },
       })
+      uploadXhrRef.current = null
+      void tusUpload
       setUploadProgress(75)
       const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
 
@@ -6520,9 +6505,10 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   }, [reloadSubmissions])
 
   // Close handler — aborts the in-flight upload (if any) so the editor
-  // can bail out of a stuck or unwanted upload. The XHR's onabort path
-  // fires reject('Upload cancelled') and the cleanup branch in startUpload
-  // unsets busy.
+  // can bail out of a stuck or unwanted upload. uploadXhrRef now holds
+  // a tus.Upload instance (post the XHR -> TUS swap); tus.abort() halts
+  // the chunked upload and fires onError which rejects startUpload's
+  // promise so the busy state unsets cleanly.
   const handleCloseModal = useCallback(() => {
     if (uploadXhrRef.current) {
       try { uploadXhrRef.current.abort() } catch {}

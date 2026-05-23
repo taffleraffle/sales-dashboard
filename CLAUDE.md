@@ -102,6 +102,45 @@ Edge Functions use Supabase-managed secrets (SUPABASE_URL, SUPABASE_SERVICE_ROLE
 - **Engagement Agent** (`C:\Users\Ben\engagement-agent\`) — setter bot backend on Render
 - **Content Pipeline** (`C:\Users\Ben\content-pipeline\`) — Optimus content engine
 
+## Video Quality Contract (DO NOT BREAK)
+
+**Every video that enters the system must be stored, served, and downloaded at native resolution.** Lower-quality copies anywhere in the pipeline are a bug, not an optimization. The 2026-05-22 Drive-import batch left 81 rows pointing at 1-3 MB placeholder files — that incident is why the rules below exist.
+
+### Upload — must be TUS resumable
+- **Every** path that writes video bytes into `creative-uploads/` MUST go through `uploadWithResume()` in `src/pages/ads/AdsCreativeLibrary.jsx`.
+- `uploadWithResume` uses `tus-js-client` with 6 MB chunks, retry on network blips, no in-memory single-POST cap.
+- **NEVER** use `supabase.storage.from(...).upload(file, ...)` for video — that's a single-POST that fails over 2 GB and has no progress events.
+- **NEVER** use raw `XMLHttpRequest` POST to `/storage/v1/object/...` for video — same single-POST problem.
+- The CLI batch script `scripts/replace-from-local-files.mjs` uses `tus.Upload` directly for the same reasons.
+
+### Storage — bucket + project limits both at 10 GB
+- Bucket `creative-uploads.file_size_limit = 10737418240` (10 GB).
+- Project-wide `fileSizeLimit = 10737418240`. The project cap shadows the bucket cap — both must be set.
+- If you need to raise it: PATCH `/v1/projects/{ref}/config/storage` AND PUT `/storage/v1/bucket/<name>` (both via Supabase service-role).
+- **Supabase does NOT transcode video.** Bytes are stored exactly as uploaded.
+
+### Download — must use `?download=<filename>`
+- Cross-origin `<a download>` is **ignored by browsers** when the response lacks `Content-Disposition`. Without the header, clicking "download" opens the video in a tab — the user then resorts to right-click-save or screen-recording, which murders quality.
+- Use `toDownloadUrl(url, filename)` in `AdsCreativeLibrary.jsx`. It appends `?download=<filename>` to any Supabase storage URL, which makes Supabase respond with `Content-Disposition: attachment` and forces a real binary download.
+- Download URL priority: `final_cut_url → drive_url → preview_url`. Old Drive-imported rows have a 720p transcode at `preview_url` but the full original at `drive_url`, so drive_url ranks higher.
+
+### Display — `<video>` plays bytes as-is
+- The native `<video>` element renders at file-native resolution. CSS `max-height` limits display size, NOT file quality.
+- `captureVideoThumbnail()` produces a 720px JPEG for the matrix tile **only**. That's the thumbnail, not the main file. It's stored at `thumbnail_url`, not `preview_url`.
+
+### Quality auditing — `is_low_quality` flag
+- Migration 093 added `is_low_quality` + `low_quality_reason` + `low_quality_actual_mb` + `low_quality_detected_at` to `lib_creative_library`.
+- `scripts/audit-preview-file-sizes.mjs` probes HEAD content-length, compares to declared `size_mb`, flags rows where actual < 3 MB (placeholder) or bitrate < 4 Mbps (sub-par).
+- Re-run after any bulk import or migration touching `preview_url`. Flag clears automatically when a Replace Original upload lands a full-quality file.
+- UI: red `LOW-Q` badge on matrix rows, "Hiding N low-quality" filter chip in toolbar (default ON), `Replace original` button in the detail modal.
+
+### The `?download=` mechanism — verified working
+```
+Plain URL:      no Content-Disposition  -> browser opens in tab
+?download=foo:  Content-Disposition: attachment; filename=foo  -> browser saves
+Bytes returned: IDENTICAL in both cases (just the response header differs)
+```
+
 ## OPT Domain Vocabulary
 
 Ben uses business terms, not React/code terms. When you see one of these words in a request, it means the Supabase entity — NOT a file named after it. Reach for the `mcp__supabase__execute_sql` tool, not Grep/Read.
