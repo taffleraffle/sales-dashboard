@@ -136,6 +136,13 @@ export default function EditorView() {
     const next = sessionPref === 'forever' ? '14d' : 'forever'
     setPreference(next)
     setSessionPref(next)
+    // The header toggle is a "choice" too. Without these calls a
+    // bookmark-into-editor-view user who never saw the modal could
+    // flip to "14d" and the clock would never start (no stamp), so
+    // their session would silently behave like "forever". Treat any
+    // explicit toggle as a deliberate choice with a fresh clock.
+    markChoiceMade()
+    ensureSignedInAt()
   }
   const expiry = sessionPref === '14d' ? expiresAt() : null
   const expiryLabel = expiry

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { isLifetimeExpired, clearSessionState } from '../lib/editorSession'
+import { isLifetimeExpired, clearSessionState, syncSessionOwner } from '../lib/editorSession'
 
 const AuthContext = createContext(null)
 
@@ -173,13 +173,19 @@ export function AuthProvider({ children }) {
   // silently auto-logging an editor out 14 days after a magic link
   // they never opted into is the bug Ben flagged. Once they pick,
   // isLifetimeExpired() respects their choice. Admins are exempt.
+  //
+  // syncSessionOwner runs first to wipe any stale editor_session keys
+  // left by a different user on this browser (shared device, admin
+  // tested then editor logged in, etc). signOut first then
+  // clearSessionState so a network blip during signOut doesn't leave
+  // the editor without the keys they need to re-prompt cleanly.
   useEffect(() => {
-    if (!isEditor) return
+    if (!isEditor || !session?.user?.id) return
+    syncSessionOwner(session.user.id)
     if (isLifetimeExpired()) {
-      clearSessionState()
-      supabase.auth.signOut()
+      supabase.auth.signOut().finally(() => clearSessionState())
     }
-  }, [isEditor])
+  }, [isEditor, session?.user?.id])
 
   // Can this user file an EOD for the given tab?
   function canFileEOD(tab) {

@@ -18,10 +18,31 @@
 
 import { supabase } from './supabase'
 
-const KEY_PREFERENCE  = 'editor_session.preference'     // '14d' | 'forever'
+const KEY_PREFERENCE   = 'editor_session.preference'    // '14d' | 'forever'
 const KEY_SIGNED_IN_AT = 'editor_session.signed_in_at'  // ms epoch
 const KEY_CHOICE_MADE  = 'editor_session.choice_made'   // '1' once editor has explicitly picked
+const KEY_LAST_USER_ID = 'editor_session.last_user_id'  // supabase auth user id of the owner of these keys
 const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000
+
+// Cross-account guard. Two editors sharing a browser (or Ben testing
+// followed by an editor logging in on the same machine) would
+// otherwise inherit the previous user's preference / signed-in-at /
+// choice-made state. Call this on every authenticated session detect
+// — if the supabase user.id has changed since these keys were last
+// written, wipe everything and start fresh.
+export function syncSessionOwner(authUserId) {
+  if (!authUserId) return
+  try {
+    const last = localStorage.getItem(KEY_LAST_USER_ID)
+    if (last && last !== authUserId) {
+      // Different user owns these keys — wipe before re-claiming.
+      localStorage.removeItem(KEY_PREFERENCE)
+      localStorage.removeItem(KEY_SIGNED_IN_AT)
+      localStorage.removeItem(KEY_CHOICE_MADE)
+    }
+    localStorage.setItem(KEY_LAST_USER_ID, authUserId)
+  } catch {}
+}
 
 // True once the editor has been shown the prompt + clicked a choice.
 // Until then we don't enforce ANY lifetime — silently auto-logging an
@@ -67,6 +88,7 @@ export function clearSessionState() {
     localStorage.removeItem(KEY_PREFERENCE)
     localStorage.removeItem(KEY_SIGNED_IN_AT)
     localStorage.removeItem(KEY_CHOICE_MADE)
+    localStorage.removeItem(KEY_LAST_USER_ID)
   } catch {}
 }
 

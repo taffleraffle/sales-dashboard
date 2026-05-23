@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
-import { setPreference, markChoiceMade, requestPersistentStorage } from '../../lib/editorSession'
+import {
+  setPreference, markChoiceMade, ensureSignedInAt, requestPersistentStorage,
+} from '../../lib/editorSession'
 
 /*
   /editor-login — magic-link login page for editors.
@@ -60,6 +62,13 @@ export default function EditorLogin() {
     // Editor picked deliberately — skip the on-arrival prompt on
     // /editor-view so we don't double-ask the same question.
     markChoiceMade()
+    // Start the 14-day clock NOW. Without this, isLifetimeExpired's
+    // null-stamp short-circuit means the clock never starts and "14
+    // days" silently behaves like "forever" for editors who picked
+    // via the login radio. (Code review caught it 2026-05-23 —
+    // editor portal's most-common entry path was a no-op for this
+    // feature.)
+    ensureSignedInAt()
     // Ask the browser to mark our localStorage persistent so iOS
     // Safari ITP can't auto-clear it after 7 days of inactivity.
     // Fire-and-forget — best effort.
