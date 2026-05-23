@@ -6845,8 +6845,33 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       })
       uploadXhrRef.current = null
       void tusUpload
-      setUploadProgress(75)
+      setUploadProgress(72)
       const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+
+      // Thumbnail extraction for the new submission row. Pre-upload
+      // File path first (< 500 MB fast path) then post-upload URL path
+      // (HTTP-range, any size). Without this the submission card on
+      // the EditTaskModal would render an empty preview box for the
+      // editor's just-uploaded cut. Best-effort — null result is fine,
+      // submission still saves.
+      let submissionThumbUrl = null
+      let thumbBlob = await captureVideoThumbnail(file)
+      if (!thumbBlob) {
+        thumbBlob = await captureVideoThumbnailFromUrl(publicUrl)
+      }
+      if (thumbBlob) {
+        const thumbPath = `edited/${Date.now()}_${sanitized}_thumb.jpg`
+        try {
+          await uploadWithResume(thumbBlob, {
+            bucket: 'creative-uploads',
+            path: thumbPath,
+            contentType: 'image/jpeg',
+            upsert: true,
+          })
+          submissionThumbUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${thumbPath}`
+        } catch { /* best-effort */ }
+      }
+      setUploadProgress(78)
 
       // Insert a NEW submission row (v1, v2, v3, …). version_number is
       // computed as (count of existing non-deleted submissions) + 1 so
@@ -6858,6 +6883,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         submitted_by_name: task.editor_name || null,
         file_url: publicUrl,
         file_storage_path: storagePath,
+        thumbnail_url: submissionThumbUrl,
         version_number: nextVersion,
       })
       if (sErr) throw sErr
@@ -8887,8 +8913,31 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
           .from('creative-uploads')
           .upload(storagePath, uploadFile, { upsert: false })
         if (upErr) throw upErr
-        setUploadProgress(60)
+        setUploadProgress(50)
         const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+
+        // Extract thumbnail. Pre-upload File path first (fast path,
+        // < 500 MB) then post-upload URL path (HTTP-range, any size).
+        // Without this the brand-new library row would land with no
+        // thumbnail and the task card on the kanban would show a
+        // black square until a backfill ran. (Ben caught this on a
+        // Sky-assigned Sony XAVC clip 2026-05-23.)
+        let thumbnailUrl = null
+        let thumbBlob = await captureVideoThumbnail(uploadFile)
+        if (!thumbBlob) {
+          thumbBlob = await captureVideoThumbnailFromUrl(publicUrl)
+        }
+        if (thumbBlob) {
+          const thumbPath = `edited/${Date.now()}_${sanitized}_thumb.jpg`
+          const { error: thumbErr } = await supabase.storage
+            .from('creative-uploads')
+            .upload(thumbPath, thumbBlob, { upsert: true, contentType: 'image/jpeg' })
+          if (!thumbErr) {
+            thumbnailUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${thumbPath}`
+          }
+        }
+        setUploadProgress(70)
+
         const { data: newRow, error: insErr } = await supabase.from('lib_creative_library')
           .insert({
             name: uploadName.trim() + (uploadFile.name.match(/\.[^.]+$/) || [''])[0],
@@ -8898,6 +8947,7 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
             source_bucket: 'Editor upload (via Add task)',
             preview_url: publicUrl,
             drive_url: publicUrl,
+            thumbnail_url: thumbnailUrl,
             notes: `Uploaded ${new Date().toISOString().slice(0,10)} alongside a new task. Pending review + assignment.`,
           })
           .select()
