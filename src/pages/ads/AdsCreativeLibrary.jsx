@@ -599,7 +599,7 @@ function UploadDock({ onRefresh }) {
    tab. Click to open a right-side slider with the recent submissions
    feed. Unseen count (anything created since last open) shows as a
    red dot on the bell. */
-function NotificationBell({ submissions }) {
+function NotificationBell({ submissions, onOpenCreative }) {
   const [open, setOpen] = useState(false)
   // "Seen" timestamp — anything created AFTER this counts as new.
   // Persists in localStorage so the bell remembers across reloads.
@@ -699,6 +699,36 @@ function NotificationBell({ submissions }) {
                     </span>
                   )}
                 </div>
+                {/* Per-editor breakdown — shows at a glance which editors
+                    have stuff in flight without scrolling the full list. */}
+                {(() => {
+                  const byEditor = {}
+                  for (const s of submissions) {
+                    const name = s.submitted_by_name || 'Unknown'
+                    if (!byEditor[name]) byEditor[name] = { total: 0, pending: 0 }
+                    byEditor[name].total++
+                    if (!s.approved_at) byEditor[name].pending++
+                  }
+                  const editors = Object.entries(byEditor)
+                  if (editors.length === 0) return null
+                  return (
+                    <div style={{
+                      marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap',
+                    }}>
+                      {editors.map(([name, c]) => (
+                        <span key={name} style={{
+                          padding: '2px 8px',
+                          background: c.pending > 0 ? 'rgba(232,180,8,0.15)' : 'var(--paper)',
+                          border: '1px solid ' + (c.pending > 0 ? '#e8b408' : 'var(--rule)'),
+                          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
+                          borderRadius: 2,
+                        }}>
+                          {name} · <strong>{c.total}</strong>{c.pending > 0 ? ` (${c.pending} pending)` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )
+                })()}
               </div>
               <button onClick={() => setOpen(false)}
                 style={{
@@ -718,31 +748,70 @@ function NotificationBell({ submissions }) {
               <div style={{ display: 'grid', gap: 8 }}>
                 {submissions.map(s => {
                   const isNew = !seenAt || s.created_at > seenAt
+                  // Pull the joined creative info — that's what tells you
+                  // WHICH video the editor finished. Without this, all the
+                  // bell shows is editor name + version number, which is
+                  // useless context.
+                  const creative = s.task?.creative
+                  const creativeId = creative?.id
+                  const creativeName = creative?.canonical_name || creative?.name || '(unknown creative)'
+                  const creativeType = creative?.type
+                  const creativeCreator = creative?.creator
+                  // Thumbnail priority: submission's own thumb (preferred,
+                  // since it's the actual submitted cut), then the creative's
+                  // current thumb (for the typical case where the editor
+                  // pasted a Frame.io / Drive link with no thumb of its own).
+                  const thumb = s.thumbnail_url || creative?.thumbnail_url
                   return (
-                    <div key={s.id} style={{
-                      display: 'grid', gridTemplateColumns: '52px 1fr',
-                      gap: 12, alignItems: 'center',
-                      padding: '8px 10px',
-                      background: s.approved_at ? 'rgba(62,138,94,0.05)' : 'var(--paper)',
-                      border: '1px solid ' + (isNew ? '#3e7eba' : 'var(--rule)'),
-                      borderLeft: '3px solid ' + (s.approved_at ? '#3e8a5e' : '#3e7eba'),
-                    }}>
-                      <div style={{
-                        width: 52, height: 34, background: '#000', overflow: 'hidden',
+                    <button key={s.id}
+                      onClick={() => creativeId && onOpenCreative?.(creativeId)}
+                      disabled={!creativeId}
+                      title={creativeId ? `Open ${creativeName}` : 'Creative not found'}
+                      style={{
+                        display: 'grid', gridTemplateColumns: '64px 1fr',
+                        gap: 12, alignItems: 'center',
+                        padding: '8px 10px',
+                        background: s.approved_at ? 'rgba(62,138,94,0.05)' : 'var(--paper)',
+                        border: '1px solid ' + (isNew ? '#3e7eba' : 'var(--rule)'),
+                        borderLeft: '3px solid ' + (s.approved_at ? '#3e8a5e' : '#3e7eba'),
+                        cursor: creativeId ? 'pointer' : 'default',
+                        textAlign: 'left', font: 'inherit', color: 'inherit',
                       }}>
-                        {s.thumbnail_url && (
-                          <img src={s.thumbnail_url} alt="" loading="lazy"
+                      <div style={{
+                        width: 64, height: 40, background: '#000', overflow: 'hidden',
+                        flexShrink: 0,
+                      }}>
+                        {thumb ? (
+                          <img src={thumb} alt="" loading="lazy"
                             style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <div style={{
+                            width: '100%', height: '100%',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: 'var(--mono)', fontSize: 9, color: 'rgba(255,255,255,0.4)',
+                          }}>{creativeType || 'VIDEO'}</div>
                         )}
                       </div>
                       <div style={{ minWidth: 0, fontFamily: 'var(--mono)', fontSize: 11 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        {/* Row 1: creative name (the thing Ben actually wants to know) */}
+                        <div style={{
+                          fontWeight: 600, fontSize: 11.5,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          color: 'var(--ink)',
+                        }} title={creativeName}>
+                          {creativeName}
+                        </div>
+                        {/* Row 2: editor + version + time + NEW pill */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
                           <span style={{
-                            padding: '1px 6px', background: 'var(--ink-3)', color: 'white',
-                            borderRadius: 2, fontSize: 9.5, fontWeight: 700,
+                            padding: '1px 5px', background: 'var(--ink-3)', color: 'white',
+                            borderRadius: 2, fontSize: 9, fontWeight: 700,
                           }}>v{s.version_number}</span>
-                          <span style={{ fontWeight: 600 }}>{s.submitted_by_name || 'Unknown'}</span>
-                          <span style={{ color: 'var(--ink-4)' }}>· {relTime(s.created_at)}</span>
+                          <span style={{ fontWeight: 600, fontSize: 10.5, color: 'var(--ink-2)' }}>{s.submitted_by_name || 'Unknown'}</span>
+                          <span style={{ color: 'var(--ink-4)', fontSize: 10 }}>· {relTime(s.created_at)}</span>
+                          {creativeCreator && (
+                            <span style={{ color: 'var(--ink-4)', fontSize: 10 }}>· {creativeCreator}</span>
+                          )}
                           {isNew && (
                             <span style={{
                               padding: '1px 5px', background: '#3e7eba', color: 'white',
@@ -751,9 +820,10 @@ function NotificationBell({ submissions }) {
                             }}>NEW</span>
                           )}
                         </div>
+                        {/* Row 3: status + open-external link */}
                         <div style={{
-                          marginTop: 4, display: 'flex', alignItems: 'center', gap: 10,
-                          fontSize: 10.5, color: 'var(--ink-3)',
+                          marginTop: 3, display: 'flex', alignItems: 'center', gap: 10,
+                          fontSize: 10, color: 'var(--ink-3)',
                         }}>
                           <span style={{
                             fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
@@ -761,13 +831,14 @@ function NotificationBell({ submissions }) {
                           }}>{s.approved_at ? 'Approved' : 'In review'}</span>
                           {(s.file_url || s.external_url) && (
                             <a href={s.file_url || s.external_url} target="_blank" rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
                               style={{ color: 'var(--ink-2)', textDecoration: 'underline' }}>
-                              Open ↗
+                              Open submission ↗
                             </a>
                           )}
                         </div>
                       </div>
-                    </div>
+                    </button>
                   )
                 })}
               </div>
@@ -1536,12 +1607,45 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   // Recent submissions for the activity feed. Loads in the background
   // after first paint so the initial library render isn't blocked.
+  // Joins through task -> creative so the bell card can show WHICH
+  // video each editor finished (was just showing editor name + version,
+  // useless without the creative context). Falls back to the creative's
+  // thumbnail when the submission itself is a Drive/Frame.io link with
+  // no inline thumbnail of its own.
   const [recentSubmissions, setRecentSubmissions] = useState([])
+  const reloadSubmissions = useCallback(() => {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    return supabase.from('lib_task_submissions')
+      .select(`
+        id, task_id, version_number, submitted_by_name, file_url, external_url,
+        thumbnail_url, approved_at, created_at,
+        task:lib_editing_tasks (
+          id, creative_id,
+          creative:lib_creative_library (
+            id, canonical_name, name, type, creator, thumbnail_url, preview_url
+          )
+        )
+      `)
+      .gte('created_at', sevenDaysAgo)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(20)
+      .then(({ data }) => setRecentSubmissions(data || []))
+  }, [])
   useEffect(() => {
     let mounted = true
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
     supabase.from('lib_task_submissions')
-      .select('id, task_id, version_number, submitted_by_name, file_url, external_url, thumbnail_url, approved_at, created_at')
+      .select(`
+        id, task_id, version_number, submitted_by_name, file_url, external_url,
+        thumbnail_url, approved_at, created_at,
+        task:lib_editing_tasks (
+          id, creative_id,
+          creative:lib_creative_library (
+            id, canonical_name, name, type, creator, thumbnail_url, preview_url
+          )
+        )
+      `)
       .gte('created_at', sevenDaysAgo)
       .is('deleted_at', null)
       .order('created_at', { ascending: false })
@@ -1625,7 +1729,24 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       {/* Notification bell — small icon, opens a right-side slider with
           the recent submissions feed. No banner space wasted at the
           top; ping shows the unseen count. */}
-      <NotificationBell submissions={recentSubmissions} />
+      <NotificationBell
+        submissions={recentSubmissions}
+        onOpenCreative={(creativeId) => {
+          // Find the creative in rows + open the detail modal. If it's not
+          // in the current filter (e.g. low-quality hidden), pull it
+          // directly from the DB by id so we can still open the drawer.
+          const local = rows.find(r => r.id === creativeId)
+          if (local) {
+            openDrawer(local)
+          } else {
+            supabase.from('lib_creative_library')
+              .select('*')
+              .eq('id', creativeId)
+              .maybeSingle()
+              .then(({ data }) => { if (data) openDrawer(data) })
+          }
+        }}
+      />
 
       {/* Upload dock — floating bottom-right indicator showing the
           background upload queue. Survives modal close + tab navigation.
