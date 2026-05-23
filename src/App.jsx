@@ -74,6 +74,7 @@ const AdsInsights = lazyWithReload(() => import('./pages/ads/AdsInsights'))
 const AdsCreativesLibrary = lazyWithReload(() => import('./pages/ads/AdsCreativesLibrary'))
 const AdsCreativeLibrary = lazyWithReload(() => import('./pages/ads/AdsCreativeLibrary'))
 const EditorView = lazyWithReload(() => import('./pages/ads/EditorView'))
+const EditorLogin = lazyWithReload(() => import('./pages/ads/EditorLogin'))
 const AdsAttributesPage = lazyWithReload(() => import('./pages/ads/AdsAttributesPage'))
 const AdsExplorations = lazyWithReload(() => import('./pages/ads/AdsExplorations'))
 const AdsTestScope = lazyWithReload(() => import('./pages/ads/AdsTestScope'))
@@ -179,8 +180,13 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
-            {/* Public editor-view: no login required, token in the URL grants
-                scoped access to /sales/ads/creative/library only. */}
+            {/* Editor portal — magic-link login + auth-gated view. The
+                /editor-view/:token route still works during rollout so
+                already-shared share-links don't break; once every editor
+                has logged in with their email, the token route gets
+                removed and the cutover is complete. */}
+            <Route path="/editor-login" element={<Suspense fallback={<PageSkeleton />}><EditorLogin /></Suspense>} />
+            <Route path="/editor-view" element={<Suspense fallback={<PageSkeleton />}><EditorView /></Suspense>} />
             <Route path="/editor-view/:token" element={<Suspense fallback={<PageSkeleton />}><EditorView /></Suspense>} />
             <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route path="/" element={<Navigate to="/sales" replace />} />

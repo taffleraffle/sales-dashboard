@@ -1,56 +1,125 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import AdsCreativeLibrary from './AdsCreativeLibrary'
 
 /*
-  /editor-view/:token — public, no-login surface for editors to see
-  their tasks, the creative library, and update task status.
+  /editor-view              — auth-gated. Magic-link login required.
+                              Editor resolved by auth.user.email matching
+                              lib_creative_editors.email.
+  /editor-view/:token       — legacy token route. No login required.
+                              Still working during rollout so already-
+                              shared share links don't break overnight.
+                              Removed once every editor has logged in
+                              via the new flow.
+
+  Both routes resolve to an `editor` (or null = team-wide view) and pass
+  it via editorScope to AdsCreativeLibrary. The library renders the same
+  surface; the scope flags lock down admin-only bits.
 
   Permissions threaded through:
     canDelete:       false  — editor can't delete creatives
-    canUpload:       false  — editor can't add new creatives
+    canUpload:       depends on auth + per-editor token vs team-wide
     canEditCreative: false  — editor can't change canonical_name/type/etc
-    canEditTask:     true   — editor can update status/notes/due
-    canAssignTask:   true   — only for self-assign from unassigned pile
+    canEditTask:     true   — editor can update status/notes/due + feedback
+    canAssignSelf:   true   — only for self-assign from unassigned pile
+    canAssignEditor: depends on auth (team-wide get true)
     canDeleteTask:   false  — editor can't delete tasks
-    defaultEditorFilter: editor.id (if token bound to an editor)
 */
 
 export default function EditorView() {
   const { token } = useParams()
-  const [link, setLink] = useState(null)
-  const [editor, setEditor] = useState(null)
+  const nav = useNavigate()
+  const [editor, setEditor] = useState(null)   // resolved editor row, or null = team-wide
+  const [isTeamWide, setIsTeamWide] = useState(false)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
+  const [authMode, setAuthMode] = useState(null)   // 'token' | 'auth' — drives the deprecation banner
 
   useEffect(() => {
     let mounted = true
     const init = async () => {
-      const { data: linkData, error: linkErr } = await supabase
-        .from('lib_editor_share_links')
-        .select('*, editor:lib_creative_editors(*)')
-        .eq('token', token)
-        .is('revoked_at', null)
-        .maybeSingle()
+      // ROUTE A: token-based legacy access. No login needed.
+      if (token) {
+        setAuthMode('token')
+        const { data: linkData, error: linkErr } = await supabase
+          .from('lib_editor_share_links')
+          .select('*, editor:lib_creative_editors(*)')
+          .eq('token', token)
+          .is('revoked_at', null)
+          .maybeSingle()
+        if (!mounted) return
+        if (linkErr || !linkData) {
+          setErr('Invalid or revoked share link. Use the new login at /editor-login.')
+          setLoading(false)
+          return
+        }
+        setEditor(linkData.editor || null)
+        setIsTeamWide(!linkData.editor)
+        setLoading(false)
+        // Touch last_used_at (fire and forget)
+        supabase.from('lib_editor_share_links')
+          .update({ last_used_at: new Date().toISOString() })
+          .eq('id', linkData.id)
+          .then(() => {})
+        return
+      }
+
+      // ROUTE B: auth-based. Resolve session → match editor by email.
+      setAuthMode('auth')
+      const { data: { session } } = await supabase.auth.getSession()
       if (!mounted) return
-      if (linkErr || !linkData) {
-        setErr('Invalid or revoked share link')
+      if (!session) {
+        nav('/editor-login', { replace: true })
+        return
+      }
+      const userEmail = session.user.email?.toLowerCase()
+      if (!userEmail) {
+        setErr('Logged in but your account has no email address. Contact your admin.')
         setLoading(false)
         return
       }
-      setLink(linkData)
-      setEditor(linkData.editor || null)
+      // Try matching by auth_user_id first (fast path for editors who've
+      // logged in before), then by email (first-login path — claim the
+      // editor row by populating auth_user_id).
+      let editorRow = null
+      const byAuth = await supabase.from('lib_creative_editors')
+        .select('*').eq('auth_user_id', session.user.id).maybeSingle()
+      if (byAuth.data) editorRow = byAuth.data
+      if (!editorRow) {
+        const byEmail = await supabase.from('lib_creative_editors')
+          .select('*').ilike('email', userEmail).maybeSingle()
+        if (byEmail.data) {
+          // Claim the row by writing auth_user_id so future logins are O(1).
+          await supabase.from('lib_creative_editors')
+            .update({ auth_user_id: session.user.id })
+            .eq('id', byEmail.data.id)
+          editorRow = { ...byEmail.data, auth_user_id: session.user.id }
+        }
+      }
+      if (!mounted) return
+      if (!editorRow) {
+        setErr(`You're logged in as ${userEmail} but your admin hasn't added you to the editor roster yet. Ask them to add your email in Manage Editors.`)
+        setLoading(false)
+        return
+      }
+      // Authenticated editors get team-wide visibility by default per
+      // Ben (2026-05-23): "everyone on the team can see everyone else's
+      // projects". The editor's own work is still highlighted (their
+      // editor_id is the default filter chip; they can switch to 'all'
+      // anytime via the existing editor multi-select).
+      setEditor(editorRow)
+      setIsTeamWide(true)
       setLoading(false)
-      // Touch last_used_at (fire and forget)
-      supabase.from('lib_editor_share_links')
-        .update({ last_used_at: new Date().toISOString() })
-        .eq('id', linkData.id)
-        .then(() => {})
     }
     init()
     return () => { mounted = false }
-  }, [token])
+  }, [token, nav])
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    nav('/editor-login', { replace: true })
+  }
 
   if (loading) {
     return (
@@ -69,18 +138,24 @@ export default function EditorView() {
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         padding: 40,
       }}>
-        <div style={{ maxWidth: 480, textAlign: 'center' }}>
+        <div style={{ maxWidth: 520, textAlign: 'center' }}>
           <div style={{
             fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.14em',
             textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 10,
-          }}>Access denied</div>
+          }}>Access</div>
           <h1 style={{
-            margin: 0, fontFamily: 'var(--serif)', fontSize: 28, fontWeight: 500,
-            color: 'var(--ink)', marginBottom: 12,
+            margin: 0, fontFamily: 'var(--serif)', fontSize: 24, fontWeight: 500,
+            lineHeight: 1.3, color: 'var(--ink)', marginBottom: 16,
           }}>{err}</h1>
-          <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-3)' }}>
-            Ask whoever shared this link to send you a fresh one, or to check that it hasn't been revoked.
-          </p>
+          {authMode === 'auth' && (
+            <button onClick={handleLogout} style={{
+              marginTop: 8, padding: '10px 16px',
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: 'transparent', color: 'var(--ink-2)',
+              border: '1px solid var(--rule)', cursor: 'pointer',
+            }}>Sign out + try a different email</button>
+          )}
         </div>
       </div>
     )
@@ -88,7 +163,6 @@ export default function EditorView() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--paper)' }}>
-      {/* Editor view header — replaces the normal dashboard chrome */}
       <header style={{
         padding: '14px 32px', borderBottom: '1px solid var(--rule)',
         background: 'var(--paper-2)',
@@ -104,56 +178,78 @@ export default function EditorView() {
             margin: '4px 0 0', fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500,
             color: 'var(--ink)',
           }}>
-            {editor ? `${editor.name}'s queue` : 'Editing team portal'}
+            {editor ? `${editor.name}'s view` : 'Editing team portal'}
           </h1>
         </div>
-        {editor ? (
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            padding: '6px 12px', background: 'white', border: '1px solid var(--rule)',
-            fontFamily: 'var(--mono)', fontSize: 11,
-          }}>
-            <span style={{
-              width: 9, height: 9, borderRadius: 2,
-              background: '#3e7eba',
-            }} />
-            <span style={{ color: 'var(--ink-3)' }}>Logged in as</span>
-            <span style={{ fontWeight: 600 }}>{editor.name}</span>
-          </div>
-        ) : (
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            padding: '6px 12px', background: '#fffaea', border: '1px solid #e8b408',
-            fontFamily: 'var(--mono)', fontSize: 11,
-          }}>
-            <span style={{ width: 9, height: 9, borderRadius: 2, background: '#e8b408' }} />
-            <span style={{ color: '#7a4e08' }}>Team-wide view · all editors</span>
-          </div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {editor ? (
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '6px 12px', background: 'white', border: '1px solid var(--rule)',
+              fontFamily: 'var(--mono)', fontSize: 11,
+            }}>
+              <span style={{
+                width: 9, height: 9, borderRadius: 2,
+                background: '#3e7eba',
+              }} />
+              <span style={{ color: 'var(--ink-3)' }}>Logged in as</span>
+              <span style={{ fontWeight: 600 }}>{editor.name}</span>
+            </div>
+          ) : (
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '6px 12px', background: '#fffaea', border: '1px solid #e8b408',
+              fontFamily: 'var(--mono)', fontSize: 11,
+            }}>
+              <span style={{ width: 9, height: 9, borderRadius: 2, background: '#e8b408' }} />
+              <span style={{ color: '#7a4e08' }}>Team-wide view · all editors</span>
+            </div>
+          )}
+          {authMode === 'auth' && (
+            <button onClick={handleLogout} style={{
+              padding: '6px 12px',
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              background: 'transparent', color: 'var(--ink-3)',
+              border: '1px solid var(--rule)', cursor: 'pointer',
+            }}>Sign out</button>
+          )}
+        </div>
       </header>
 
-      {/* Wrapper — main content uses the existing AdsCreativeLibrary with
-          a permissions object so it knows to lock down the admin-only bits.
-          Team-wide links (no editor binding) get a manager-like scope:
-          they see everything, can upload finished work, can update any task. */}
+      {/* Deprecation banner — visible only on the legacy token route to
+          nudge editors toward the new login. Stays up until Ben flips
+          the cutover and removes the /editor-view/:token route. */}
+      {authMode === 'token' && (
+        <div style={{
+          padding: '8px 32px', background: '#fffaea',
+          borderBottom: '1px solid #e8b408',
+          fontFamily: 'var(--mono)', fontSize: 11, color: '#7a4e08',
+        }}>
+          You're using a legacy share link. Ask your admin for your account
+          email and log in at <a href="/editor-login" style={{ color: '#7a4e08', textDecoration: 'underline' }}>/editor-login</a> to
+          get notifications + your own login that survives across devices.
+        </div>
+      )}
+
       <div style={{
         maxWidth: 1400, margin: '0 auto', padding: '0 32px',
       }}>
         <AdsCreativeLibrary editorScope={{
           isEditorView: true,
-          isTeamWide: !editor,
+          isTeamWide,
           editorId: editor?.id || null,
           editorName: editor?.name || null,
+          editorEmail: editor?.email || null,
           canDelete: false,
-          // Team-wide links can upload finished work (admin reviews + assigns).
-          // Per-editor links can only upload inside an assigned task.
-          canUpload: !editor,
+          // Authenticated editors can upload anywhere (team-wide). Per-editor
+          // token links can only upload inside an assigned task. Team-wide
+          // tokens (no editor) can upload finished work for admin review.
+          canUpload: authMode === 'auth' ? true : !editor,
           canEditCreative: false,
-          // Team-wide links can ALSO reassign editors from the matrix —
-          // that's the whole point of the team view, otherwise the
-          // editor column is just a read-only label. Per-editor links
-          // still can't (they only see their own tasks).
-          canAssignEditor: !editor,
+          // Authenticated editors AND team-wide tokens can reassign from
+          // the matrix. Per-editor tokens cannot.
+          canAssignEditor: authMode === 'auth' ? true : !editor,
           canEditTask: true,
           canAssignSelf: true,
           canDeleteTask: false,

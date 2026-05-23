@@ -7650,6 +7650,7 @@ function ShareLinksModal({ editors, onClose }) {
 
 function EditEditorModal({ editor, onClose, onSavedPatch, onDeleted }) {
   const [name, setName] = useState(editor.name || '')
+  const [email, setEmail] = useState(editor.email || '')
   const [active, setActive] = useState(editor.active !== false)
   const [notes, setNotes] = useState(editor.notes || '')
   const [color, setColor] = useState(editor.color || '')
@@ -7717,7 +7718,13 @@ function EditEditorModal({ editor, onClose, onSavedPatch, onDeleted }) {
 
   const save = async () => {
     setBusy(true); setErr(null)
-    const patch = { name: name.trim(), active, notes: notes || null, color: color || null }
+    const patch = {
+      name: name.trim(),
+      // email enables magic-link login on /editor-login. Store lowercased
+      // for case-insensitive matching against auth.user.email.
+      email: email.trim() ? email.trim().toLowerCase() : null,
+      active, notes: notes || null, color: color || null,
+    }
     const { error } = await supabase.from('lib_creative_editors')
       .update(patch).eq('id', editor.id)
     setBusy(false)
@@ -7786,6 +7793,23 @@ function EditEditorModal({ editor, onClose, onSavedPatch, onDeleted }) {
       <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
         <Field label="Name">
           <input type="text" value={name} onChange={e => setName(e.target.value)} style={inputStyle} />
+        </Field>
+        <Field label="Email — enables magic-link login at /editor-login">
+          <input type="email" value={email}
+            placeholder="dean@opt.co.nz"
+            onChange={e => setEmail(e.target.value)}
+            style={inputStyle} />
+          <div style={{
+            marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10,
+            color: editor.auth_user_id ? '#3e8a5e' : 'var(--ink-4)',
+            letterSpacing: '0.04em',
+          }}>
+            {editor.auth_user_id
+              ? '✓ This editor has logged in at least once'
+              : email.trim()
+                ? 'Send them /editor-login — they enter this email + get a magic link'
+                : 'Without an email, this editor can only access via legacy share-link token'}
+          </div>
         </Field>
         <Field label="Color">
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -7892,13 +7916,21 @@ function EditEditorModal({ editor, onClose, onSavedPatch, onDeleted }) {
 
 function AddEditorModal({ onClose, onSaved }) {
   const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const submit = async () => {
     if (!name.trim()) return
     setBusy(true); setErr(null)
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-    const { error } = await supabase.from('lib_creative_editors').insert({ name: name.trim(), slug })
+    const { error } = await supabase.from('lib_creative_editors').insert({
+      name: name.trim(),
+      slug,
+      // Email enables magic-link login. Lowercased for case-insensitive
+      // matching against auth.user.email. Optional — editor can be
+      // added without one and gets onboarded via legacy share-link.
+      email: email.trim() ? email.trim().toLowerCase() : null,
+    })
     setBusy(false)
     if (error) setErr(error.message)
     else onSaved?.()
@@ -7916,10 +7948,15 @@ function AddEditorModal({ onClose, onSaved }) {
           </button>
         </>
       }>
-      <div style={{ padding: '20px 28px' }}>
+      <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
         <Field label="Name">
           <input type="text" autoFocus value={name} onChange={e => setName(e.target.value)}
             placeholder="e.g. Sarah" style={inputStyle}
+            onKeyDown={e => { if (e.key === 'Enter') submit() }} />
+        </Field>
+        <Field label="Email — enables magic-link login (optional)">
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+            placeholder="sarah@opt.co.nz" style={inputStyle}
             onKeyDown={e => { if (e.key === 'Enter') submit() }} />
         </Field>
       </div>
