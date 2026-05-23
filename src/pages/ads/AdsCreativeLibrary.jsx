@@ -6692,10 +6692,12 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           submissions={submissions}
           canApprove={scope.canEditTask}
           canDelete={scope.canEditTask}
-          // Only admins (not editors) can leave feedback. Editors see
-          // it read-only and we mark it read when they open the task.
-          canFeedback={scope.canEditTask && !scope.isEditorView}
+          // Anyone with access to the task modal can leave feedback —
+          // admins comment, editors reply. Tracking who-by-role keeps
+          // the conversation clear.
+          canFeedback={true}
           currentUserName={scope.editorName || 'Admin'}
+          currentUserRole={scope.isEditorView ? 'editor' : 'admin'}
           busy={busy}
           onApprove={approveSubmission}
           onDelete={deleteSubmission}
@@ -6828,7 +6830,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
    lib_task_submissions, newest first. Each card has its own inline
    playable preview + per-version Approve / Delete buttons. Replaces
    the old single-slot SubmittedWorkPanel. */
-function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = false, busy, onApprove, onDelete, onFeedbackSaved, currentUserName }) {
+function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onFeedbackSaved, currentUserName, currentUserRole = 'admin' }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   // Per-card expand/collapse state. Default: only the LATEST (first
   // in the list) is expanded, older versions are collapsed so the
@@ -6847,13 +6849,18 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = fa
   const saveFeedback = async (sub) => {
     setFeedbackSavingId(sub.id)
     const text = (feedbackDrafts[sub.id] ?? sub.feedback_text ?? '').trim()
+    // Stamp who-and-role so the conversation reads clearly. When
+    // clearing (text=''), null everything out so the empty CTA returns.
+    const stampedName = text
+      ? `${currentUserName || (currentUserRole === 'editor' ? 'Editor' : 'Admin')} (${currentUserRole})`
+      : null
     const patch = {
       feedback_text: text || null,
       feedback_at: text ? new Date().toISOString() : null,
-      feedback_by_name: text ? (currentUserName || 'Admin') : null,
-      // Reset read state whenever feedback changes — editor sees it as
-      // new again until they open the task. Clearing feedback (empty
-      // string) also clears read_at since there's nothing to read.
+      feedback_by_name: stampedName,
+      // Reset read state whenever feedback changes — the OTHER side
+      // sees it as new again until they open the task. Editor opening
+      // the task auto-marks read (EditTaskModal.reloadSubmissions).
       feedback_read_at: null,
     }
     const { error } = await supabase.from('lib_task_submissions')
@@ -7027,92 +7034,120 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = fa
                   fontStyle: 'italic',
                 }}>Editor note: {sub.notes}</div>
               )}
-              {/* Feedback section — admins (canFeedback) edit, editors
-                  see read-only. When the editor opens the task, the
-                  parent marks feedback_read_at; here we just render. */}
-              {isExpanded && (
-                <div style={{
-                  padding: '10px 12px',
-                  borderTop: '1px solid var(--rule)',
-                  background: sub.feedback_text ? '#fffaea' : 'var(--paper-2)',
-                  borderLeft: sub.feedback_text ? '3px solid #e8b408' : 'none',
-                  marginLeft: sub.feedback_text ? -3 : 0,
-                }}>
+              {/* Feedback section. Anyone with task access can leave
+                  feedback (admins comment, editors reply). When the
+                  recipient opens the task we auto-mark read so the
+                  status flips from "waiting" to "seen". The empty
+                  state is a big yellow "Leave feedback" call-to-action,
+                  not a passive label, so it's impossible to miss. */}
+              {isExpanded && (() => {
+                const hasFeedback = !!sub.feedback_text
+                const isEditing = feedbackEditingId === sub.id
+                const isUnread = hasFeedback && !sub.feedback_read_at
+                // Color the whole section by status:
+                //   unread feedback -> red border (action needed)
+                //   read feedback   -> green border (closed)
+                //   empty           -> yellow border (waiting for input)
+                const accent = isUnread ? '#b53e3e' : hasFeedback ? '#3e8a5e' : '#e8b408'
+                const bg = isUnread ? '#fff1f1' : hasFeedback ? 'rgba(62,138,94,0.05)' : '#fffaea'
+                const labelColor = isUnread ? '#8b1f1f' : hasFeedback ? '#1f5a2f' : '#7a4e08'
+                return (
                   <div style={{
-                    fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                    letterSpacing: '0.12em', textTransform: 'uppercase',
-                    color: sub.feedback_text ? '#7a4e08' : 'var(--ink-3)',
-                    marginBottom: 6,
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '10px 12px',
+                    borderTop: '1px solid var(--rule)',
+                    background: bg,
+                    borderLeft: `3px solid ${accent}`,
+                    marginLeft: -3,
                   }}>
-                    <span>{sub.feedback_text ? 'Feedback' : 'No feedback yet'}</span>
-                    {sub.feedback_text && sub.feedback_at && (
-                      <span style={{ color: 'var(--ink-3)', fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'none' }}>
-                        {sub.feedback_by_name || 'Admin'} · {new Date(sub.feedback_at).toLocaleString()}
-                        {sub.feedback_read_at ? ' · seen by editor' : ' · unread'}
+                    <div style={{
+                      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                      letterSpacing: '0.12em', textTransform: 'uppercase',
+                      color: labelColor,
+                      marginBottom: hasFeedback ? 6 : 8,
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                    }}>
+                      <span>
+                        {!hasFeedback && '💬 No feedback yet'}
+                        {hasFeedback && isUnread && '💬 Feedback waiting'}
+                        {hasFeedback && !isUnread && '✓ Feedback (seen)'}
                       </span>
+                      {hasFeedback && sub.feedback_at && (
+                        <span style={{ color: 'var(--ink-3)', fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'none', fontWeight: 500 }}>
+                          {sub.feedback_by_name || 'Anonymous'} · {new Date(sub.feedback_at).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    {/* Display mode */}
+                    {hasFeedback && !isEditing && (
+                      <div style={{
+                        fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink)',
+                        lineHeight: 1.5, whiteSpace: 'pre-wrap', marginBottom: canFeedback ? 8 : 0,
+                        padding: '8px 10px', background: 'white', border: '1px solid var(--rule)',
+                        borderRadius: 2,
+                      }}>{sub.feedback_text}</div>
+                    )}
+                    {/* Edit mode */}
+                    {canFeedback && isEditing && (
+                      <>
+                        <textarea
+                          autoFocus
+                          value={feedbackDrafts[sub.id] ?? sub.feedback_text ?? ''}
+                          onChange={(e) => setFeedbackDrafts(d => ({ ...d, [sub.id]: e.target.value }))}
+                          placeholder={currentUserRole === 'editor'
+                            ? 'Reply to the feedback. Anything you write here is visible to the admin.'
+                            : 'Feedback for this version — what\'s working, what needs to change, timestamps. The editor sees this exactly as written.'}
+                          rows={4}
+                          style={{
+                            width: '100%', padding: '8px 10px',
+                            fontFamily: 'var(--serif)', fontSize: 13,
+                            background: 'white', border: '1px solid var(--rule)',
+                            borderRadius: 2, resize: 'vertical',
+                          }}
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
+                          <button type="button"
+                            onClick={() => { setFeedbackEditingId(null); setFeedbackDrafts(d => { const n = { ...d }; delete n[sub.id]; return n }) }}
+                            disabled={feedbackSavingId === sub.id}
+                            style={{
+                              padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                              fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                              background: 'transparent', color: 'var(--ink-3)',
+                              border: '1px solid var(--rule)', cursor: 'pointer', borderRadius: 2,
+                            }}>Cancel</button>
+                          <button type="button"
+                            onClick={() => saveFeedback(sub)}
+                            disabled={feedbackSavingId === sub.id}
+                            style={{
+                              padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                              fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                              background: 'var(--ink)', color: 'var(--paper)',
+                              border: 'none', cursor: 'pointer', borderRadius: 2,
+                            }}>{feedbackSavingId === sub.id ? 'Saving…' : 'Save feedback'}</button>
+                        </div>
+                      </>
+                    )}
+                    {/* Trigger button */}
+                    {canFeedback && !isEditing && (
+                      <button type="button"
+                        onClick={() => setFeedbackEditingId(sub.id)}
+                        style={{
+                          padding: hasFeedback ? '4px 10px' : '8px 14px',
+                          fontFamily: 'var(--mono)',
+                          fontSize: hasFeedback ? 10 : 11,
+                          fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+                          background: hasFeedback ? 'transparent' : '#e8b408',
+                          color: hasFeedback ? 'var(--ink-2)' : '#3a2904',
+                          border: hasFeedback ? '1px solid var(--rule)' : '1px solid #d09c08',
+                          cursor: 'pointer', borderRadius: 2,
+                        }}>
+                        {hasFeedback
+                          ? (currentUserRole === 'editor' ? '✎ Edit reply' : '✎ Edit feedback')
+                          : (currentUserRole === 'editor' ? '+ Reply with feedback' : '+ Leave feedback')}
+                      </button>
                     )}
                   </div>
-                  {/* Display mode */}
-                  {sub.feedback_text && feedbackEditingId !== sub.id && (
-                    <div style={{
-                      fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink)',
-                      lineHeight: 1.5, whiteSpace: 'pre-wrap', marginBottom: canFeedback ? 8 : 0,
-                    }}>{sub.feedback_text}</div>
-                  )}
-                  {/* Edit mode (admin only) */}
-                  {canFeedback && feedbackEditingId === sub.id && (
-                    <>
-                      <textarea
-                        autoFocus
-                        value={feedbackDrafts[sub.id] ?? sub.feedback_text ?? ''}
-                        onChange={(e) => setFeedbackDrafts(d => ({ ...d, [sub.id]: e.target.value }))}
-                        placeholder="Specific feedback for this version — what's working, what needs to change, any timestamps. The editor sees this exactly as written."
-                        rows={4}
-                        style={{
-                          width: '100%', padding: '8px 10px',
-                          fontFamily: 'var(--serif)', fontSize: 13,
-                          background: 'white', border: '1px solid var(--rule)',
-                          borderRadius: 2, resize: 'vertical',
-                        }}
-                      />
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
-                        <button type="button"
-                          onClick={() => { setFeedbackEditingId(null); setFeedbackDrafts(d => { const n = { ...d }; delete n[sub.id]; return n }) }}
-                          disabled={feedbackSavingId === sub.id}
-                          style={{
-                            padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
-                            fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                            background: 'transparent', color: 'var(--ink-3)',
-                            border: '1px solid var(--rule)', cursor: 'pointer', borderRadius: 2,
-                          }}>Cancel</button>
-                        <button type="button"
-                          onClick={() => saveFeedback(sub)}
-                          disabled={feedbackSavingId === sub.id}
-                          style={{
-                            padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
-                            fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                            background: 'var(--ink)', color: 'var(--paper)',
-                            border: 'none', cursor: 'pointer', borderRadius: 2,
-                          }}>{feedbackSavingId === sub.id ? 'Saving…' : 'Save feedback'}</button>
-                      </div>
-                    </>
-                  )}
-                  {/* Trigger to enter edit mode (admin only) */}
-                  {canFeedback && feedbackEditingId !== sub.id && (
-                    <button type="button"
-                      onClick={() => setFeedbackEditingId(sub.id)}
-                      style={{
-                        padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
-                        fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: sub.feedback_text ? 'transparent' : 'var(--ink)',
-                        color: sub.feedback_text ? 'var(--ink-2)' : 'var(--paper)',
-                        border: sub.feedback_text ? '1px solid var(--rule)' : 'none',
-                        cursor: 'pointer', borderRadius: 2,
-                      }}>{sub.feedback_text ? '✎ Edit feedback' : '+ Give feedback'}</button>
-                  )}
-                </div>
-              )}
+                )
+              })()}
             </div>
           )
         })}
