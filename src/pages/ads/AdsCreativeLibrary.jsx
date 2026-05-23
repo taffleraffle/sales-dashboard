@@ -6104,6 +6104,16 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           prefillEditorId={addTaskPrefill.editorId}
           prefillDue={addTaskPrefill.due}
           prefillStart={addTaskPrefill.start}
+          // Set of creative ids that already have an open editing task,
+          // so the modal's "hide creatives already in an open task" toggle
+          // can filter them out. Done/blocked don't count — those are
+          // closed and can be re-assigned if needed.
+          existingTaskCreativeIds={new Set(
+            tasks
+              .filter(t => t.status && !['done', 'blocked'].includes(t.status))
+              .map(t => t.creative_id)
+              .filter(Boolean)
+          )}
           onClose={() => { setAddTaskOpen(false); setAddTaskPrefill({ editorId: '', due: '', start: '' }) }}
           onSaved={(newQueueRows) => {
             setAddTaskOpen(false)
@@ -8737,8 +8747,11 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
   const [err, setErr] = useState(null)
 
   useEffect(() => {
+    // Pull status + manually_marked_used too so we can client-side
+    // filter to "raw / needs editing" without a second query when the
+    // operator flips the toggle.
     supabase.from('lib_creative_library')
-      .select('id,name,canonical_name,type,creator,thumbnail_url,description')
+      .select('id,name,canonical_name,type,creator,thumbnail_url,description,status,manually_marked_used')
       .eq('exclude_from_library', false)
       .order('canonical_name', { ascending: true })
       .limit(500)
@@ -8747,12 +8760,34 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return creatives.slice(0, 50)
-    return creatives.filter(c =>
-      (c.canonical_name || c.name).toLowerCase().includes(q) ||
-      (c.name || '').toLowerCase().includes(q)
-    ).slice(0, 50)
-  }, [creatives, search])
+    const assignedSet = existingTaskCreativeIds instanceof Set
+      ? existingTaskCreativeIds
+      : new Set(existingTaskCreativeIds || [])
+    const matchesStatus = (c) => {
+      if (statusFilter === 'all') return true
+      // 'raw' = needs editing. Library uses status='raw' to mark the
+      // pre-edited source, status='edited' for finished outputs.
+      // manually_marked_used=true means the operator has flagged an
+      // otherwise-raw clip as already-used elsewhere (don't reassign).
+      return c.status === 'raw' && c.manually_marked_used !== true
+    }
+    const matchesSearch = (c) => {
+      if (!q) return true
+      return (c.canonical_name || c.name || '').toLowerCase().includes(q)
+          || (c.name || '').toLowerCase().includes(q)
+    }
+    const matchesAssigned = (c) => {
+      if (!hideAssigned) return true
+      return !assignedSet.has(c.id)
+    }
+    return creatives
+      .filter(c => matchesStatus(c) && matchesAssigned(c) && matchesSearch(c))
+      .slice(0, 50)
+  }, [creatives, search, statusFilter, hideAssigned, existingTaskCreativeIds])
+
+  // Counts so the operator sees what each filter is doing.
+  const rawCount     = useMemo(() => creatives.filter(c => c.status === 'raw' && c.manually_marked_used !== true).length, [creatives])
+  const editedCount  = useMemo(() => creatives.length - rawCount, [creatives, rawCount])
 
   const onFilePick = (file) => {
     if (!file) return
@@ -8914,6 +8949,44 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
             <Field label={`Creatives ${creativeIds.size > 0 ? `· ${creativeIds.size} selected` : ''}`}>
               <input type="text" value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search by name…" style={{ ...inputStyle, marginBottom: 8 }} />
+              {/* Two-tab status filter: default to RAW (needs editing).
+                  Without this the modal firehoses 50 already-edited Body
+                  files at the top and the operator has to scroll to find
+                  a raw clip. Ben's ask 2026-05-23. */}
+              <div style={{
+                display: 'flex', gap: 4, marginBottom: 8,
+                border: '1px solid var(--rule)', padding: 3,
+              }}>
+                {[
+                  { value: 'raw', label: `Needs editing · ${rawCount}` },
+                  { value: 'all', label: `All · ${rawCount + editedCount}` },
+                ].map(opt => {
+                  const selected = statusFilter === opt.value
+                  return (
+                    <button key={opt.value} type="button"
+                      onClick={() => setStatusFilter(opt.value)}
+                      style={{
+                        flex: 1, padding: '6px 8px', cursor: 'pointer',
+                        fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: selected ? 'var(--ink)' : 'transparent',
+                        color: selected ? 'var(--paper)' : 'var(--ink-3)',
+                        border: 'none',
+                      }}>{opt.label}</button>
+                  )
+                })}
+              </div>
+              {/* Hide-assigned toggle. Prevents the operator from picking
+                  a creative that's already in someone else's task queue. */}
+              <label style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                marginBottom: 8, cursor: 'pointer',
+                fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
+              }}>
+                <input type="checkbox" checked={hideAssigned}
+                  onChange={e => setHideAssigned(e.target.checked)} />
+                Hide creatives already in an open task
+              </label>
               <div style={{
                 display: 'flex', justifyContent: 'space-between',
                 marginBottom: 6, gap: 8,
