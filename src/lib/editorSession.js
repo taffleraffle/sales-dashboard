@@ -18,9 +18,22 @@
 
 import { supabase } from './supabase'
 
-const KEY_PREFERENCE  = 'editor_session.preference'    // '14d' | 'forever'
-const KEY_SIGNED_IN_AT = 'editor_session.signed_in_at' // ms epoch
+const KEY_PREFERENCE  = 'editor_session.preference'     // '14d' | 'forever'
+const KEY_SIGNED_IN_AT = 'editor_session.signed_in_at'  // ms epoch
+const KEY_CHOICE_MADE  = 'editor_session.choice_made'   // '1' once editor has explicitly picked
 const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000
+
+// True once the editor has been shown the prompt + clicked a choice.
+// Until then we don't enforce ANY lifetime — silently auto-logging an
+// editor out 14 days after they got a magic link they never had a
+// chance to opt out of is exactly the bug Ben flagged.
+export function hasChosenLifetime() {
+  try { return localStorage.getItem(KEY_CHOICE_MADE) === '1' } catch { return false }
+}
+
+export function markChoiceMade() {
+  try { localStorage.setItem(KEY_CHOICE_MADE, '1') } catch {}
+}
 
 export function getPreference() {
   try {
@@ -53,13 +66,17 @@ export function clearSessionState() {
   try {
     localStorage.removeItem(KEY_PREFERENCE)
     localStorage.removeItem(KEY_SIGNED_IN_AT)
+    localStorage.removeItem(KEY_CHOICE_MADE)
   } catch {}
 }
 
 // Returns true if the user-selected lifetime has elapsed since their
 // session started, false otherwise. 'forever' preference never expires.
+// Also returns false if the editor hasn't made a choice yet — that
+// case is handled by the on-mount prompt, not silent enforcement.
 export function isLifetimeExpired() {
   try {
+    if (!hasChosenLifetime()) return false
     const pref = getPreference()
     if (pref === 'forever') return false
     const at = parseInt(localStorage.getItem(KEY_SIGNED_IN_AT) || '0', 10)

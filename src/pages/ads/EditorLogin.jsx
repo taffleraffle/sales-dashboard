@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
-import { setPreference, requestPersistentStorage } from '../../lib/editorSession'
+import { setPreference, markChoiceMade, requestPersistentStorage } from '../../lib/editorSession'
 
 /*
   /editor-login — magic-link login page for editors.
@@ -57,6 +57,9 @@ export default function EditorLogin() {
     // they request on phone + click on desktop, the desktop just
     // defaults to '14d' which is the safe default.
     setPreference(rememberMe)
+    // Editor picked deliberately — skip the on-arrival prompt on
+    // /editor-view so we don't double-ask the same question.
+    markChoiceMade()
     // Ask the browser to mark our localStorage persistent so iOS
     // Safari ITP can't auto-clear it after 7 days of inactivity.
     // Fire-and-forget — best effort.

@@ -1,9 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import {
-  isLifetimeExpired, ensureSignedInAt, clearSessionState,
-  getPreference, setPreference, expiresAt,
-} from '../lib/editorSession'
+import { isLifetimeExpired, clearSessionState } from '../lib/editorSession'
 
 const AuthContext = createContext(null)
 
@@ -170,17 +167,14 @@ export function AuthProvider({ children }) {
   const isCloser = profile?.role === 'closer'
   const isSetter = profile?.role === 'setter'
 
-  // Enforce the editor session lifetime. When an editor logs in via
-  // /editor-login, they pick "14 days" (default) or "indefinitely".
-  // If the 14-day window has elapsed since their first login on this
-  // device, sign them out so they have to re-magic-link. Admins are
-  // exempt — they're using user_profiles auth and their session is
-  // governed by Supabase's defaults (which we keep as indefinite).
+  // Enforce the editor session lifetime IF the editor has explicitly
+  // chosen one. Until they pick (via the /editor-login radio OR the
+  // on-arrival /editor-view prompt) we don't enforce any expiry —
+  // silently auto-logging an editor out 14 days after a magic link
+  // they never opted into is the bug Ben flagged. Once they pick,
+  // isLifetimeExpired() respects their choice. Admins are exempt.
   useEffect(() => {
     if (!isEditor) return
-    // Stamp the first-login time if it's not already set. ensureSignedInAt
-    // is idempotent so this doesn't reset on every page load.
-    ensureSignedInAt()
     if (isLifetimeExpired()) {
       clearSessionState()
       supabase.auth.signOut()

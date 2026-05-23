@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase'
 import AdsCreativeLibrary from './AdsCreativeLibrary'
 import {
   getPreference, setPreference, expiresAt, signOutEditor,
+  hasChosenLifetime, markChoiceMade, ensureSignedInAt,
+  requestPersistentStorage,
 } from '../../lib/editorSession'
 
 /*
@@ -140,6 +142,29 @@ export default function EditorView() {
     ? new Date(expiry).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
     : null
 
+  // First-visit "Stay signed in?" prompt. Editors who clicked the
+  // magic link directly from their inbox (skipping /editor-login)
+  // never got to pick. Show a one-time modal asking them — once they
+  // pick, we stamp choice_made + signed_in_at and the lifetime guard
+  // in AuthContext starts enforcing the choice.
+  const [needsLifetimeChoice, setNeedsLifetimeChoice] = useState(false)
+  useEffect(() => {
+    // Only prompt for editors authenticated via the magic-link route.
+    // Token-share legacy users + admin-on-editor-view shouldn't see it.
+    if (authMode !== 'auth') return
+    if (!editor) return
+    if (hasChosenLifetime()) return
+    setNeedsLifetimeChoice(true)
+  }, [authMode, editor])
+  const acceptLifetime = (choice) => {
+    setPreference(choice)
+    setSessionPref(choice)
+    markChoiceMade()
+    ensureSignedInAt()
+    requestPersistentStorage()
+    setNeedsLifetimeChoice(false)
+  }
+
   if (loading) {
     return (
       <div style={{
@@ -182,6 +207,78 @@ export default function EditorView() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--paper)' }}>
+      {/* First-visit prompt — blocks the portal until the editor picks
+          how long they want to stay signed in. Skipped automatically
+          for editors who came through /editor-login (which sets the
+          choice via markChoiceMade) and for legacy token-share users
+          and admin sessions. */}
+      {needsLifetimeChoice && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(10,10,10,0.55)', backdropFilter: 'blur(2px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div style={{
+            maxWidth: 460, width: '100%',
+            background: 'var(--paper)', border: '1px solid var(--rule)',
+            borderTop: '3px solid var(--accent)',
+            boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
+            padding: '32px 28px',
+          }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
+              textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8,
+            }}>One quick question</div>
+            <h2 style={{
+              margin: '0 0 8px', fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500,
+              lineHeight: 1.25, color: 'var(--ink)',
+            }}>Stay signed in?</h2>
+            <p style={{
+              margin: '0 0 20px', fontFamily: 'var(--serif)', fontSize: 14,
+              color: 'var(--ink-3)', lineHeight: 1.55,
+            }}>
+              We'll keep you logged in on this device so you don't have to request
+              a new magic link every time. Pick how long.
+            </p>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <button type="button"
+                onClick={() => acceptLifetime('14d')}
+                style={{
+                  padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
+                  background: 'white', border: '1px solid var(--rule)',
+                  borderLeft: '3px solid var(--accent)', borderRadius: 2,
+                }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 700, color: 'var(--ink)' }}>
+                  For 14 days
+                </div>
+                <div style={{ fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink-3)', marginTop: 4 }}>
+                  Recommended for shared devices. We'll ask you to log in again on {new Date(Date.now() + 14*24*60*60*1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.
+                </div>
+              </button>
+              <button type="button"
+                onClick={() => acceptLifetime('forever')}
+                style={{
+                  padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
+                  background: 'white', border: '1px solid var(--rule)',
+                  borderLeft: '3px solid transparent', borderRadius: 2,
+                }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 700, color: 'var(--ink)' }}>
+                  Indefinitely
+                </div>
+                <div style={{ fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink-3)', marginTop: 4 }}>
+                  For personal devices only. Stay signed in until you explicitly sign out.
+                </div>
+              </button>
+            </div>
+            <div style={{
+              marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--rule)',
+              fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', lineHeight: 1.55,
+            }}>
+              You can change this anytime from the header — just click the "Signed in" button.
+            </div>
+          </div>
+        </div>
+      )}
       <header style={{
         padding: '14px 32px', borderBottom: '1px solid var(--rule)',
         background: 'var(--paper-2)',
