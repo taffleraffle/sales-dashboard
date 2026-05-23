@@ -726,18 +726,20 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
-  // Kind -> icon + accent color. Drives the per-card left border so
-  // the editor can scan the list and pick out feedback (yellow) vs
-  // assignments (blue) vs approvals (green) at a glance.
+  // Kind -> short text label + accent color. Drives the per-card left
+  // border so the editor can scan the list and pick out feedback (yellow)
+  // vs assignments (blue) vs approvals (green) at a glance. Per Ben's
+  // OPT design system: no emojis or icon glyphs; the eyebrow text + the
+  // colored left border do the visual sorting.
   const kindStyle = (kind) => {
     switch (kind) {
-      case 'feedback':            return { icon: '💬', color: '#e8b408' }
-      case 'revision_requested':  return { icon: '⟲',  color: '#d09c08' }
-      case 'assignment':          return { icon: '📋', color: '#3e7eba' }
-      case 'reassignment':        return { icon: '↻',  color: '#3e7eba' }
-      case 'source_replaced':     return { icon: '↑',  color: '#a05810' }
-      case 'approved':            return { icon: '✓',  color: '#3e8a5e' }
-      default:                    return { icon: '·',  color: 'var(--ink-3)' }
+      case 'feedback':            return { label: 'Feedback',     color: '#e8b408' }
+      case 'revision_requested':  return { label: 'Revision',     color: '#d09c08' }
+      case 'assignment':          return { label: 'New task',     color: '#3e7eba' }
+      case 'reassignment':        return { label: 'Reassigned',   color: '#3e7eba' }
+      case 'source_replaced':     return { label: 'Source updated', color: '#a05810' }
+      case 'approved':            return { label: 'Approved',     color: '#3e8a5e' }
+      default:                    return { label: 'Update',       color: 'var(--ink-3)' }
     }
   }
 
@@ -747,12 +749,16 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
       <button onClick={handleOpen} title="Notifications"
         style={{
           position: 'fixed', top: 12, right: 16, zIndex: 90,
-          width: 38, height: 38, borderRadius: 999,
+          height: 38, padding: '0 14px', borderRadius: 2,
           background: 'var(--paper)', border: '1px solid var(--rule)',
           cursor: 'pointer', boxShadow: '0 2px 6px rgba(10,10,10,0.10)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-        <span style={{ fontSize: 16, lineHeight: 1 }}>🔔</span>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          color: 'var(--ink-2)', lineHeight: 1,
+        }}>Inbox</span>
         {unseenCount > 0 && (
           <span style={{
             position: 'absolute', top: -2, right: -2,
@@ -813,16 +819,20 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
                     <button key={n.id}
                       onClick={() => handleNotificationClick(n)}
                       style={{
-                        display: 'grid', gridTemplateColumns: '28px 1fr',
-                        gap: 10, alignItems: 'start',
+                        display: 'block',
                         padding: '10px 12px',
                         background: n.read_at ? 'var(--paper)' : '#fffaea',
                         border: '1px solid ' + (isNew ? '#3e7eba' : 'var(--rule)'),
                         borderLeft: `3px solid ${k.color}`,
                         cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit',
+                        width: '100%',
                       }}>
-                      <span style={{ fontSize: 16, lineHeight: 1.4 }}>{k.icon}</span>
                       <div style={{ minWidth: 0 }}>
+                        <div style={{
+                          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+                          letterSpacing: '0.12em', textTransform: 'uppercase',
+                          color: k.color, marginBottom: 4,
+                        }}>{k.label}</div>
                         <div style={{
                           fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 600,
                           color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -918,12 +928,16 @@ function NotificationBell({ submissions, onOpenCreative }) {
       <button onClick={handleOpen} title="Recent activity"
         style={{
           position: 'fixed', top: 12, right: 16, zIndex: 90,
-          width: 38, height: 38, borderRadius: 999,
+          height: 38, padding: '0 14px', borderRadius: 2,
           background: 'var(--paper)', border: '1px solid var(--rule)',
           cursor: 'pointer', boxShadow: '0 2px 6px rgba(10,10,10,0.10)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-        <span style={{ fontSize: 16, lineHeight: 1 }}>🔔</span>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          color: 'var(--ink-2)', lineHeight: 1,
+        }}>Activity</span>
         {unseenCount > 0 && (
           <span style={{
             position: 'absolute', top: -2, right: -2,
@@ -5622,7 +5636,14 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   const [loading, setLoading] = useState(() => !cached?.tasks)
   const [err, setErr] = useState(null)
   const [view, setView] = useState(() => {
-    try { return localStorage.getItem('queue.view') || 'list' } catch { return 'list' }
+    try {
+      const saved = localStorage.getItem('queue.view')
+      // 'lanes' was the old "Editor lanes" view; it's been removed. Map
+      // stale localStorage values to 'kanban' so returning users land
+      // somewhere sensible.
+      if (saved === 'lanes') return 'kanban'
+      return saved || 'list'
+    } catch { return 'list' }
   })
   useEffect(() => { try { localStorage.setItem('queue.view', view) } catch {} }, [view])
   const [addEditorOpen, setAddEditorOpen] = useState(false)
@@ -5764,25 +5785,6 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     return out
   }, [tasks, selectedEditors, selectedStatuses])
 
-  // Group by editor (on filtered tasks). We also seed an entry for every
-  // active editor — even if they have zero tasks — so they appear as a
-  // drop target. Otherwise you couldn't drag a task TO an editor who
-  // currently has no work.
-  const byEditor = useMemo(() => {
-    const m = new Map()
-    // Always include "Unassigned" as a drop target
-    m.set('unassigned', { editor_id: null, editor_name: 'Unassigned', tasks: [] })
-    for (const e of editors.filter(e => e.active)) {
-      m.set(e.slug || e.id, { editor_id: e.id, editor_name: e.name, tasks: [] })
-    }
-    for (const t of filteredTasks) {
-      const key = t.editor_slug || 'unassigned'
-      if (!m.has(key)) m.set(key, { editor_id: t.editor_id || null, editor_name: t.editor_name || 'Unassigned', tasks: [] })
-      m.get(key).tasks.push(t)
-    }
-    return Array.from(m.entries()).map(([slug, v]) => ({ slug, ...v }))
-  }, [filteredTasks, editors])
-
   const overdue = filteredTasks.filter(t => t.is_overdue).length
   const inProg  = filteredTasks.filter(t => t.status === 'in_progress').length
   const queued  = filteredTasks.filter(t => t.status === 'queued').length
@@ -5865,15 +5867,9 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     }
   }, [editors])
 
-  // Compatibility wrapper — existing callers (Editor Lanes view, etc.)
-  // still call moveTaskToEditor(task, editorId).
-  //
-  // The caller (EditorLane) may pass a stub `{task_id, editor_id: null}`
-  // when the task being dragged isn't in the destination lane's scoped
-  // task list. Resolve to the full task from our complete tasks state
-  // before checking the no-op guard, otherwise drag-to-Unassigned from
-  // a populated lane is silently dropped (stub.editor_id === null ===
-  // target null).
+  // Reassign callback used by the List view + Kanban card editor-picker.
+  // Resolves to the full task from state before the no-op guard since
+  // some callers pass {task_id, editor_id: null} stubs from drag payloads.
   const moveTaskToEditor = useCallback((taskOrStub, nextEditorId) => {
     if (!taskOrStub?.task_id) return
     const fullTask = tasks.find(t => t.task_id === taskOrStub.task_id) || taskOrStub
@@ -5914,7 +5910,6 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
             letterSpacing: '0.04em', color: '#7a4e08',
           }}
           title="Click to see which tasks have feedback waiting">
-          <span style={{ fontSize: 16 }}>💬</span>
           <span>
             <strong>{pendingFeedback.submissions.length} submission{pendingFeedback.submissions.length === 1 ? ' has' : 's have'} feedback</strong> waiting
             {scope.isEditorView ? ' for you' : ' that the editor hasn\'t seen yet'}
@@ -5958,7 +5953,6 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'white' }}>
           <ViewBtn active={view === 'inbox'}    onClick={() => setView('inbox')}>Inbox</ViewBtn>
           <ViewBtn active={view === 'list'}     onClick={() => setView('list')}>List</ViewBtn>
-          <ViewBtn active={view === 'lanes'}    onClick={() => setView('lanes')}>Editor lanes</ViewBtn>
           <ViewBtn active={view === 'timeline'} onClick={() => setView('timeline')}>Timeline</ViewBtn>
           <ViewBtn active={view === 'kanban'}   onClick={() => setView('kanban')}>Kanban</ViewBtn>
         </div>
@@ -6048,18 +6042,6 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
             }
             if (errors.length) setErr(errors.join(' · '))
           }} />
-      ) : view === 'lanes' ? (
-        <div style={{ display: 'grid', gap: 18 }}>
-          {byEditor.map(({ slug, editor_id, editor_name, tasks: t }) => (
-            <EditorLane key={slug}
-              editor={editor_name}
-              editorId={editor_id}
-              editorRecord={editors.find(e => e.id === editor_id)}
-              tasks={t}
-              onEdit={setEditingTask}
-              onMoveEditor={moveTaskToEditor} />
-          ))}
-        </div>
       ) : view === 'timeline' ? (
         <TimelineView tasks={filteredTasks} editors={editors.filter(e => e.active)}
           onEdit={setEditingTask} onMoveEditor={moveTaskToEditor}
@@ -6476,7 +6458,7 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds }) {
                       fontSize: 8.5, fontWeight: 700,
                       letterSpacing: '0.08em', textTransform: 'uppercase',
                       borderRadius: 2,
-                    }}>💬 Feedback</span>
+                    }}>Feedback</span>
                 )}
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {t.creative_canonical_name || t.creative_name}
@@ -7078,11 +7060,11 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             setSubmissions(curr => curr.map(s => s.id === subId ? { ...s, ...patch } : s))
           }}
           onRequestRevision={async (sub, feedbackText) => {
-            // Admin clicked "Save + Request revision" on a submission's
-            // feedback. The feedback was already saved by SubmissionsPanel
-            // before this fires. Here we flip the task status + notify the
-            // editor. If the task update fails, surface the error to the
-            // operator so they know the feedback saved but the status
+            // Admin clicked the per-version "Request revision" button.
+            // SubmissionsPanel already saved any pending feedback draft
+            // before invoking us. Here we flip the task status + notify
+            // the editor. If the task update fails, surface the error to
+            // the operator so they know the feedback saved but the status
             // change didn't land (editor won't see "needs revision").
             const { error } = await supabase.from('lib_editing_tasks')
               .update({ status: 'needs_revision' }).eq('id', task.task_id)
@@ -7103,6 +7085,10 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                 link_path: `/editor-view?task=${task.task_id}`,
               })
             }
+            // Tell the parent (QueueDashboard) to refresh — otherwise the
+            // status pill in the Kanban / list view stays stale until the
+            // modal closes + reopens. Same pattern as approveSubmission.
+            onSaved?.()
           }}
         />
 
@@ -7253,7 +7239,25 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
     if (!name) return 'Anonymous'
     return name.replace(/\s*\((?:admin|editor|viewer)\)\s*$/i, '').trim() || name
   }
-  const saveFeedback = async (sub, { alsoRequestRevision = false } = {}) => {
+  // Wrapper for the "Request revision" button — if there's a pending
+  // feedback draft for this version, save it first so the editor sees
+  // what to fix; then flip the task status via the parent callback.
+  const requestRevisionForVersion = async (sub) => {
+    const draft = (feedbackDrafts[sub.id] ?? '').trim()
+    const existing = (sub.feedback_text || '').trim()
+    // Save the draft first if it's new content the admin hasn't saved yet.
+    if (draft && draft !== existing) {
+      await saveFeedback(sub)
+    }
+    // Pass the latest feedback text (post-save) to the parent so the
+    // revision_requested notification email carries the body.
+    const finalText = draft || existing
+    try { await onRequestRevision?.(sub, finalText) } catch { /* parent surfaces via setErr */ }
+  }
+  // Save feedback ONLY — no longer does the combined "save + flip status"
+  // dance. Status changes (Approve / Request revision / Delete) live on
+  // the version action row as separate buttons.
+  const saveFeedback = async (sub) => {
     setFeedbackSavingId(sub.id)
     const text = (feedbackDrafts[sub.id] ?? sub.feedback_text ?? '').trim()
     const patch = {
@@ -7273,12 +7277,10 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
     if (!error) {
       setFeedbackEditingId(null)
       onFeedbackSaved?.(sub.id, patch)
-      // Notify the OTHER side. If admin wrote feedback ONLY, notify the
-      // task's editor with kind='feedback'. If they ALSO requested revision,
-      // skip this notify — the revision_requested notification fired by
-      // onRequestRevision carries the same feedback preview and is more
-      // informative. Two pings for one action is just noise.
-      if (text && currentUserRole === 'admin' && taskEditorId && !alsoRequestRevision) {
+      // Notify the editor whenever admin writes feedback. Editor-side
+      // feedback (replies) doesn't ping admin — admin sees it via the
+      // bell on next refresh.
+      if (text && currentUserRole === 'admin' && taskEditorId) {
         notifyEditor({
           editor_id: taskEditorId,
           kind: 'feedback',
@@ -7288,13 +7290,6 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
           body: text.length > 140 ? text.slice(0, 137) + '…' : text,
           link_path: `/editor-view?task=${sub.task_id}`,
         })
-      }
-      // "Save + Request revision" flow — admin wants the task status to
-      // flip to needs_revision. Await so any DB error from the status
-      // update surfaces back to the caller's UI instead of silently
-      // dropping after the feedback was already saved.
-      if (alsoRequestRevision && text) {
-        try { await onRequestRevision?.(sub, text) } catch { /* surfaced via setErr in parent */ }
       }
     }
   }
@@ -7379,7 +7374,7 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                     <a href={sub.file_url ? toDownloadUrl(sub.file_url, `v${sub.version_number || 1}.mp4`) : sub.external_url}
                       target="_blank" rel="noreferrer"
                       style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)', textDecoration: 'underline' }}>
-                      Open ↗
+                      Open
                     </a>
                   )}
                   {canApprove && !isApproved && (
@@ -7391,6 +7386,24 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                         background: '#3e8a5e', color: 'white',
                         border: 'none', borderRadius: 2, cursor: busy ? 'not-allowed' : 'pointer',
                       }}>Approve</button>
+                  )}
+                  {/* Request revision — admin-only, per-submission. Flips
+                      the task to needs_revision and pings the editor. The
+                      feedback text on this version (if any) is included in
+                      the notification body. Decoupled from the Save
+                      feedback button so admins can request revision
+                      without re-typing feedback, OR save feedback without
+                      flipping status — Ben's workflow ask. */}
+                  {canFeedback && currentUserRole === 'admin' && !isApproved && (
+                    <button type="button" disabled={busy || feedbackSavingId === sub.id}
+                      onClick={() => requestRevisionForVersion(sub)}
+                      title="Mark the task as needs_revision and notify the editor. Saves any pending feedback text on this version first."
+                      style={{
+                        padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                        fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: '#d09c08', color: '#3a2904',
+                        border: 'none', borderRadius: 2, cursor: busy ? 'not-allowed' : 'pointer',
+                      }}>Request revision</button>
                   )}
                   {canDelete && confirmDeleteId !== sub.id && (
                     <button type="button" disabled={busy}
@@ -7446,7 +7459,7 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                         fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
                         background: 'var(--ink)', color: 'var(--paper)',
                         textDecoration: 'none', borderRadius: 2,
-                      }}>↓ Download</a>
+                      }}>Download</a>
                   </div>
                 </>
               )}
@@ -7499,9 +7512,9 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                     }}>
                       <span>
-                        {!hasFeedback && '💬 No feedback yet'}
-                        {hasFeedback && isUnread && '💬 Feedback waiting'}
-                        {hasFeedback && !isUnread && '✓ Feedback (seen)'}
+                        {!hasFeedback && 'No feedback yet'}
+                        {hasFeedback && isUnread && 'Feedback waiting'}
+                        {hasFeedback && !isUnread && 'Feedback (seen)'}
                       </span>
                       {hasFeedback && sub.feedback_at && (
                         <span style={{ color: 'var(--ink-3)', fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'none', fontWeight: 500 }}>
@@ -7555,25 +7568,10 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                               background: 'var(--ink)', color: 'var(--paper)',
                               border: 'none', cursor: 'pointer', borderRadius: 2,
                             }}>{feedbackSavingId === sub.id ? 'Saving…' : 'Save feedback'}</button>
-                          {/* Save + Request revision: admin only, the
-                              90%-case "here's what to fix, now redo it"
-                              workflow. Saves the feedback AND flips the
-                              task status to needs_revision so the editor
-                              knows they own it again. Hidden for editor
-                              role since editors don't request revision
-                              of their own work. */}
-                          {currentUserRole === 'admin' && (
-                            <button type="button"
-                              onClick={() => saveFeedback(sub, { alsoRequestRevision: true })}
-                              disabled={feedbackSavingId === sub.id || !(feedbackDrafts[sub.id] ?? sub.feedback_text ?? '').trim()}
-                              title="Save the feedback AND mark the task as needs_revision so the editor knows to redo it"
-                              style={{
-                                padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
-                                fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
-                                background: '#d09c08', color: '#3a2904',
-                                border: '1px solid #b08605', cursor: 'pointer', borderRadius: 2,
-                              }}>⟲ Save + request revision</button>
-                          )}
+                          {/* Request revision lives in the version action
+                              row (next to Approve / Delete) per Ben's
+                              workflow — saving feedback and flipping task
+                              status are now two distinct actions. */}
                         </div>
                       </>
                     )}
@@ -7592,8 +7590,8 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                           cursor: 'pointer', borderRadius: 2,
                         }}>
                         {hasFeedback
-                          ? (currentUserRole === 'editor' ? '✎ Edit reply' : '✎ Edit feedback')
-                          : (currentUserRole === 'editor' ? '+ Reply with feedback' : '+ Leave feedback')}
+                          ? (currentUserRole === 'editor' ? 'Edit reply' : 'Edit feedback')
+                          : (currentUserRole === 'editor' ? 'Reply with feedback' : 'Leave feedback')}
                       </button>
                     )}
                   </div>
@@ -9570,9 +9568,12 @@ function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInC
   }
 
   return (
+    // alignItems defaults to `stretch` so columns equal-height regardless
+    // of card count. Without this, a column with 1 card was visually
+    // truncated next to a column with 5+ cards.
     <div style={{
       display: 'grid', gridTemplateColumns: `repeat(${cols.length}, 1fr)`,
-      gap: 10, alignItems: 'flex-start',
+      gap: 10,
     }}>
       {cols.map(c => (
         <div key={c}
@@ -9583,6 +9584,7 @@ function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInC
             background: 'var(--paper)',
             border: dragOver === c ? `2px dashed ${TASK_STATUS_COLOR[c]}` : '1px solid var(--rule)',
             minHeight: 200, transition: 'border-color 0.12s',
+            display: 'flex', flexDirection: 'column',
           }}>
           <div style={{
             padding: '10px 14px', background: 'var(--paper-2)',
@@ -9607,7 +9609,7 @@ function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInC
               )}
             </div>
           </div>
-          <div style={{ padding: 8, display: 'grid', gap: 8 }}>
+          <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
             {byCol[c].map(t => (
               <QueueCard key={t.task_id} task={t}
                 editors={editors}
@@ -9616,15 +9618,19 @@ function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInC
                 draggable={!!onMove}
                 onDragStart={e => handleDragStart(e, t)} />
             ))}
-            {byCol[c].length === 0 && (
-              <div style={{
-                padding: '20px 12px', textAlign: 'center',
-                fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
-                letterSpacing: '0.08em', textTransform: 'uppercase',
-                border: dragOver === c ? '2px dashed var(--ink-4)' : '2px dashed transparent',
-                fontStyle: 'italic', transition: 'border-color 0.12s',
-              }}>{dragOver === c ? 'Drop to move' : 'Empty'}</div>
-            )}
+            {/* Spacer absorbs leftover column height in shorter columns so
+                the dashed drop-zone stays at the bottom and the column
+                background fills evenly. */}
+            <div style={{
+              flex: 1, minHeight: 60, marginTop: byCol[c].length === 0 ? 0 : 4,
+              border: dragOver === c ? '2px dashed var(--ink-4)' : '2px dashed transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              fontStyle: 'italic', transition: 'border-color 0.12s',
+            }}>
+              {dragOver === c ? 'Drop to move' : (byCol[c].length === 0 ? 'Empty' : '')}
+            </div>
           </div>
         </div>
       ))}
@@ -9632,98 +9638,7 @@ function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInC
   )
 }
 
-function EditorLane({ editor, editorId, editorRecord, tasks, onEdit, onMoveEditor }) {
-  const [dragOver, setDragOver] = useState(false)
-  // Prefer the operator's saved color override (editorRecord.color),
-  // fall back to slug-hash from the editor name when no record is wired.
-  const eColor = editorId
-    ? (editorRecord?.color || editorColor(editor?.toLowerCase().replace(/\s+/g, '-') || ''))
-    : '#999'
-
-  // Cache the task lookup once per render via a tasks-map on the parent
-  // would be cleaner, but parsing the drag payload here is fine — it's
-  // just an id roundtrip. We use a custom payload prefix so we don't
-  // accidentally accept drops from the Kanban view.
-  const handleDragStart = (e, task) => {
-    e.dataTransfer.setData('text/plain', `lane:${task.task_id}`)
-    e.dataTransfer.setData('application/x-task-id', task.task_id)
-    e.dataTransfer.effectAllowed = 'move'
-  }
-  const handleDragOver = (e) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    if (!dragOver) setDragOver(true)
-  }
-  const handleDragLeave = (e) => {
-    if (e.currentTarget.contains(e.relatedTarget)) return
-    if (dragOver) setDragOver(false)
-  }
-  const handleDrop = (e) => {
-    e.preventDefault()
-    setDragOver(false)
-    const raw = e.dataTransfer.getData('application/x-task-id') || e.dataTransfer.getData('text/plain')
-    if (!raw) return
-    const taskId = raw.startsWith('lane:') ? raw.slice(5) : raw
-    // Find the task across ALL lanes by searching props.tasks first; if
-    // not in this lane, parent's onMoveEditor will still work because we
-    // pass a task-shaped object with editor_id for diff.
-    const task = tasks.find(t => t.task_id === taskId)
-      || { task_id: taskId, editor_id: null }  // shallow stub — parent has full state
-    onMoveEditor?.(task, editorId)
-  }
-
-  return (
-    <div
-      onDragOver={onMoveEditor ? handleDragOver : undefined}
-      onDragLeave={onMoveEditor ? handleDragLeave : undefined}
-      onDrop={onMoveEditor ? handleDrop : undefined}
-      style={{
-        background: 'var(--paper)',
-        border: dragOver ? `2px dashed ${eColor}` : '1px solid var(--rule)',
-        transition: 'border-color 0.1s',
-      }}>
-      <div style={{
-        padding: '12px 16px', borderBottom: '1px solid var(--rule)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: 'var(--paper-2)',
-      }}>
-        <div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
-            Editor
-          </div>
-          <div style={{ fontFamily: 'var(--serif)', fontSize: 18, fontWeight: 500, marginTop: 2 }}>{editor}</div>
-        </div>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
-          {tasks.length} task{tasks.length === 1 ? '' : 's'}
-        </div>
-      </div>
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-        gap: 10, padding: 12, minHeight: 80,
-      }}>
-        {tasks.map(t => (
-          <QueueCard key={t.task_id} task={t}
-            onClick={() => onEdit?.(t)}
-            draggable={!!onMoveEditor}
-            onDragStart={e => handleDragStart(e, t)} />
-        ))}
-        {tasks.length === 0 && (
-          <div style={{
-            gridColumn: '1 / -1',
-            padding: '12px', textAlign: 'center',
-            fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
-            letterSpacing: '0.08em', textTransform: 'uppercase',
-            fontStyle: 'italic',
-          }}>
-            {dragOver ? 'Drop to assign' : 'No tasks · drag a card here to assign'}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/* QueueCard — fixed-shape card used by EditorLane + Kanban.
+/* QueueCard — fixed-shape card used by the Kanban view.
    Layout (locked so every card is the same size regardless of content):
      - 96px thumbnail strip (object-fit: cover, no aspect drift)
      - Title line (mono, truncated to one line)
