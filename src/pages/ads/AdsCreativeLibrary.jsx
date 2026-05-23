@@ -7,6 +7,47 @@ import Modal from '../../components/editorial/Modal'
 
 const SUPABASE_URL = 'https://kjfaqhmllagbxjdxlopm.supabase.co'
 
+/* Insert a notification for an editor. Used everywhere a write happens
+   that the editor needs to find out about: feedback saved on one of
+   their submissions, task assigned/reassigned to them, source video
+   replaced on a creative they're working on, submission approved.
+
+   Fire-and-forget — never blocks the calling write path. If the
+   notification fails to insert (RLS, network, etc.) we swallow it
+   because the underlying action (the feedback save / approval / etc.)
+   already succeeded and is the source of truth. The bell will catch up
+   next time the editor refreshes.
+
+   kind values (see migration 095):
+     feedback         - admin left feedback on a submission
+     reply            - editor replied to feedback (admin notification)
+     assignment       - new task assigned
+     reassignment     - existing task moved to this editor
+     source_replaced  - source video for one of their tasks was replaced
+     approved         - one of their submissions was approved
+
+   The link_path is what the bell uses to deep-link the click. Format:
+   '/editor-view?task=<task_id>' so the portal can pop the right task modal.
+
+   We also fire the notify-editor-email Edge Function (best-effort) so
+   the editor gets an email via Resend once that's configured. Skip
+   silently if the function isn't deployed yet.
+*/
+async function notifyEditor({ editor_id, kind, task_id, creative_id, submission_id, title, body, link_path }) {
+  if (!editor_id) return
+  try {
+    const { data: inserted } = await supabase.from('lib_editor_notifications').insert({
+      editor_id, kind, task_id, creative_id, submission_id, title, body, link_path,
+    }).select('id').single()
+    // Fire the email-dispatch edge function in the background. Best-effort.
+    if (inserted?.id) {
+      supabase.functions.invoke('notify-editor-email', {
+        body: { notification_id: inserted.id },
+      }).catch(() => { /* email is best-effort; in-app already saved */ })
+    }
+  } catch { /* in-app notification is best-effort */ }
+}
+
 /* Force a true binary download instead of an in-tab video stream.
    Supabase public-object URLs serve files with NO Content-Disposition
    header by default. When the browser sees that, it IGNORES the `<a
@@ -595,6 +636,226 @@ function UploadDock({ onRefresh }) {
       </div>
     </>,
     document.body,
+  )
+}
+
+/* Editor-side notification bell. Distinct from the admin
+   NotificationBell which reads from lib_task_submissions. This one
+   reads from lib_editor_notifications (migration 095) — the editor
+   sees their personal feed: "Ben left feedback on v1", "New task
+   assigned", "Source video replaced", etc.
+
+   Auto-mark-read on bell open. Click a notification card to open the
+   corresponding task modal in the parent. Persists last-open timestamp
+   in localStorage so unread-count survives reloads even if the editor
+   hasn't actually clicked into anything yet. */
+function EditorNotificationBell({ editorId, onOpenTask }) {
+  const [notifications, setNotifications] = useState([])
+  const [open, setOpen] = useState(false)
+  const [seenAt, setSeenAt] = useState(() => {
+    try { return localStorage.getItem(`editor.notifSeenAt.${editorId}`) || '' } catch { return '' }
+  })
+  // Pull notifications for this editor. Limit to last 30 days + 50 rows
+  // so the bell doesn't grow unbounded. Reload every 60s while the
+  // portal is open so newly-dispatched notifications appear without
+  // a page refresh.
+  useEffect(() => {
+    if (!editorId) return
+    let mounted = true
+    const load = () => {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      supabase.from('lib_editor_notifications')
+        .select('*')
+        .eq('editor_id', editorId)
+        .gte('created_at', thirtyDaysAgo)
+        .order('created_at', { ascending: false })
+        .limit(50)
+        .then(({ data }) => { if (mounted) setNotifications(data || []) })
+    }
+    load()
+    const interval = setInterval(load, 60000)
+    return () => { mounted = false; clearInterval(interval) }
+  }, [editorId])
+
+  const unseenCount = notifications.filter(n => !seenAt || n.created_at > seenAt).length
+  // Pending = unread (read_at is null) AND created since last bell open.
+  // We mark them read via the bell-open path; reading happens implicitly
+  // when the editor clicks a notification card or opens the related task.
+  const markSeen = () => {
+    const ts = new Date().toISOString()
+    try { localStorage.setItem(`editor.notifSeenAt.${editorId}`, ts) } catch {}
+    setSeenAt(ts)
+  }
+  const handleOpen = () => {
+    setOpen(true)
+    setTimeout(markSeen, 300)
+  }
+  const handleNotificationClick = async (n) => {
+    // Mark this specific notification read in the DB so future bell
+    // opens don't show it as unseen.
+    if (!n.read_at) {
+      await supabase.from('lib_editor_notifications')
+        .update({ read_at: new Date().toISOString() }).eq('id', n.id)
+      setNotifications(curr => curr.map(x => x.id === n.id
+        ? { ...x, read_at: new Date().toISOString() } : x))
+    }
+    setOpen(false)
+    // Open the related task in the portal's task modal.
+    if (n.task_id) onOpenTask?.(n.task_id)
+  }
+  const relTime = (iso) => {
+    const t = new Date(iso).getTime()
+    const diff = Date.now() - t
+    const mins = Math.round(diff / 60000)
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.round(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    const days = Math.round(hrs / 24)
+    return `${days}d ago`
+  }
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  // Kind -> icon + accent color. Drives the per-card left border so
+  // the editor can scan the list and pick out feedback (yellow) vs
+  // assignments (blue) vs approvals (green) at a glance.
+  const kindStyle = (kind) => {
+    switch (kind) {
+      case 'feedback':         return { icon: '💬', color: '#e8b408' }
+      case 'assignment':       return { icon: '📋', color: '#3e7eba' }
+      case 'reassignment':     return { icon: '↻',  color: '#3e7eba' }
+      case 'source_replaced':  return { icon: '↑',  color: '#a05810' }
+      case 'approved':         return { icon: '✓',  color: '#3e8a5e' }
+      default:                 return { icon: '·',  color: 'var(--ink-3)' }
+    }
+  }
+
+  if (!editorId) return null
+  return (
+    <>
+      <button onClick={handleOpen} title="Notifications"
+        style={{
+          position: 'fixed', top: 12, right: 16, zIndex: 90,
+          width: 38, height: 38, borderRadius: 999,
+          background: 'var(--paper)', border: '1px solid var(--rule)',
+          cursor: 'pointer', boxShadow: '0 2px 6px rgba(10,10,10,0.10)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+        <span style={{ fontSize: 16, lineHeight: 1 }}>🔔</span>
+        {unseenCount > 0 && (
+          <span style={{
+            position: 'absolute', top: -2, right: -2,
+            minWidth: 18, height: 18, borderRadius: 999,
+            background: '#b53e3e', color: 'white',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+            padding: '0 5px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+          }}>{unseenCount > 99 ? '99+' : unseenCount}</span>
+        )}
+      </button>
+      {open && createPortal(
+        <>
+          <div onClick={() => setOpen(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(10,10,10,0.40)' }} />
+          <div style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0,
+            width: 'min(420px, 92vw)', zIndex: 201,
+            background: 'var(--paper)',
+            borderLeft: '1px solid var(--rule)',
+            boxShadow: '-12px 0 32px rgba(10,10,10,0.15)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{
+              padding: '16px 20px', borderBottom: '1px solid var(--rule)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              background: 'var(--paper-2)',
+            }}>
+              <div>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                  letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
+                }}>Notifications</div>
+                <div style={{ fontFamily: 'var(--serif)', fontSize: 18, fontWeight: 500, marginTop: 4 }}>
+                  {notifications.length === 0
+                    ? 'Nothing yet'
+                    : `${notifications.length} this month` + (unseenCount > 0 ? ` · ${unseenCount} new` : '')}
+                </div>
+              </div>
+              <button onClick={() => setOpen(false)} style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: 'var(--ink-3)', fontSize: 22, padding: 4, lineHeight: 1,
+              }}>×</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12 }}>
+              {notifications.length === 0 && (
+                <div style={{
+                  padding: 40, textAlign: 'center',
+                  fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+                }}>You're all caught up. Notifications about feedback, new tasks, source updates, and approvals show up here.</div>
+              )}
+              <div style={{ display: 'grid', gap: 8 }}>
+                {notifications.map(n => {
+                  const k = kindStyle(n.kind)
+                  const isNew = !seenAt || n.created_at > seenAt
+                  return (
+                    <button key={n.id}
+                      onClick={() => handleNotificationClick(n)}
+                      style={{
+                        display: 'grid', gridTemplateColumns: '28px 1fr',
+                        gap: 10, alignItems: 'start',
+                        padding: '10px 12px',
+                        background: n.read_at ? 'var(--paper)' : '#fffaea',
+                        border: '1px solid ' + (isNew ? '#3e7eba' : 'var(--rule)'),
+                        borderLeft: `3px solid ${k.color}`,
+                        cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit',
+                      }}>
+                      <span style={{ fontSize: 16, lineHeight: 1.4 }}>{k.icon}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{
+                          fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 600,
+                          color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis',
+                          display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+                        }}>
+                          <span style={{
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            maxWidth: 280,
+                          }}>{n.title}</span>
+                          {isNew && (
+                            <span style={{
+                              padding: '1px 5px', background: '#3e7eba', color: 'white',
+                              borderRadius: 2, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
+                            }}>NEW</span>
+                          )}
+                        </div>
+                        {n.body && (
+                          <div style={{
+                            marginTop: 3, fontFamily: 'var(--serif)', fontSize: 12,
+                            color: 'var(--ink-2)', lineHeight: 1.45,
+                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}>{n.body}</div>
+                        )}
+                        <div style={{
+                          marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10,
+                          color: 'var(--ink-4)', letterSpacing: '0.04em',
+                        }}>{relTime(n.created_at)}</div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
   )
 }
 
@@ -1729,9 +1990,34 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         </div>
       )}
 
-      {/* Notification bell — small icon, opens a right-side slider with
-          the recent submissions feed. No banner space wasted at the
-          top; ping shows the unseen count. */}
+      {/* Notification surface — editors get the editor-side bell
+          (personal feed of feedback / assignments / source updates /
+          approvals), admins get the recent-submissions bell. Two
+          different bells reading two different tables. */}
+      {scope.isEditorView && scope.editorId && (
+        <EditorNotificationBell
+          editorId={scope.editorId}
+          onOpenTask={(taskId) => {
+            // We need to find the matching task row to open the modal.
+            // The editor portal renders EditingQueueTab; the task open
+            // happens via tab.setEditingTask. But this bell lives in
+            // LibraryTab. Easiest: navigate the URL with ?task=<id>
+            // and let the queue tab pick it up.
+            try {
+              const url = new URL(window.location.href)
+              url.searchParams.set('task', taskId)
+              window.history.replaceState({}, '', url.toString())
+              // Force the editor portal to switch to the queue tab
+              // where the editing task modals live.
+              try { localStorage.setItem('lib.tab', 'queue') } catch {}
+              // Round-trip reload so EditingQueueTab picks up the
+              // ?task= param and pops the modal cleanly.
+              window.location.reload()
+            } catch {}
+          }}
+        />
+      )}
+      {!scope.isEditorView && (
       <NotificationBell
         submissions={recentSubmissions}
         onOpenCreative={(creativeId) => {
@@ -1750,6 +2036,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           }
         }}
       />
+      )}
 
       {/* Upload dock — floating bottom-right indicator showing the
           background upload queue. Survives modal close + tab navigation.
@@ -4551,6 +4838,30 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         low_quality_reason: null,
         low_quality_actual_mb: null,
       })
+      // Notify any editor currently assigned to a task on this creative —
+      // their source video just changed and any cut they were working on
+      // may be out of sync. Lookup tasks for this creative + dispatch.
+      try {
+        const { data: tasksForCreative } = await supabase.from('lib_editing_tasks')
+          .select('id, editor_id')
+          .eq('creative_id', row.id)
+          .not('editor_id', 'is', null)
+          .neq('status', 'done')
+        const seen = new Set()
+        for (const t of tasksForCreative || []) {
+          if (seen.has(t.editor_id)) continue
+          seen.add(t.editor_id)
+          notifyEditor({
+            editor_id: t.editor_id,
+            kind: 'source_replaced',
+            task_id: t.id,
+            creative_id: row.id,
+            title: `Source video replaced — ${row.canonical_name || row.name}`,
+            body: 'Admin replaced the source clip with a higher-quality version. Re-download before continuing your edit.',
+            link_path: `/editor-view?task=${t.id}`,
+          })
+        }
+      } catch { /* notification dispatch is best-effort */ }
       // Fire transcribe pipeline so transcript + actor + canonical_name
       // get regenerated from the new HQ file (the old transcript was from
       // a 0.3 Mbps audio track, probably garbage).
@@ -5410,6 +5721,24 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Deep-link: ?task=<id> in the URL auto-opens the EditTaskModal for
+  // that task once tasks are loaded. Used by the editor notification
+  // bell — clicking a notification card hops the user into the right
+  // task without manually scrolling/searching.
+  useEffect(() => {
+    if (!tasks.length) return
+    const url = new URL(window.location.href)
+    const taskId = url.searchParams.get('task')
+    if (!taskId) return
+    const found = tasks.find(t => t.task_id === taskId)
+    if (found) {
+      setEditingTask(found)
+      // Strip the param so refreshing doesn't re-pop the modal forever.
+      url.searchParams.delete('task')
+      window.history.replaceState({}, '', url.toString())
+    }
+  }, [tasks])
+
   // Filter tasks by selected editors + selected statuses. Empty sets =
   // no filter on that dimension. Both filters are AND-combined.
   const filteredTasks = useMemo(() => {
@@ -5506,6 +5835,21 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     if (error) {
       setTasks(curr => curr.map(t => t.task_id === task.task_id ? { ...t, ...prevState } : t))
       setErr(error.message)
+    } else if (editorId !== undefined && editorId && editorId !== prevState.editor_id) {
+      // Editor was reassigned — notify the NEW editor that they own this
+      // task now. Use 'assignment' kind for first-time assignment (prev
+      // was null) and 'reassignment' for editor-to-editor handoff.
+      notifyEditor({
+        editor_id: editorId,
+        kind: prevState.editor_id ? 'reassignment' : 'assignment',
+        task_id: task.task_id,
+        creative_id: task.creative_id,
+        title: prevState.editor_id
+          ? `Reassigned to you — ${task.creative_canonical_name || task.creative_name || 'task'}`
+          : `New assignment — ${task.creative_canonical_name || task.creative_name || 'task'}`,
+        body: task.due_date ? `Due ${task.due_date}.` : 'No due date set.',
+        link_path: `/editor-view?task=${task.task_id}`,
+      })
     }
   }, [editors])
 
@@ -6476,6 +6820,19 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         .update({ status: 'done', completed_at: new Date().toISOString() })
         .eq('id', task.task_id)
       setStatus('done')
+      // Notify the editor — they just got the green light on a submission.
+      if (task.editor_id) {
+        notifyEditor({
+          editor_id: task.editor_id,
+          kind: 'approved',
+          task_id: task.task_id,
+          submission_id: sub.id,
+          creative_id: task.creative_id,
+          title: `v${sub.version_number || 1} approved — ${task.creative_canonical_name || task.creative_name}`,
+          body: 'Admin approved your cut. Task moved to done.',
+          link_path: `/editor-view?task=${task.task_id}`,
+        })
+      }
       await reloadSubmissions()
       onSaved?.()
     } catch (e) {
@@ -6483,7 +6840,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     } finally {
       setBusy(false)
     }
-  }, [task.task_id, task.creative_id, reloadSubmissions, onSaved])
+  }, [task.task_id, task.creative_id, task.editor_id, task.creative_canonical_name, task.creative_name, reloadSubmissions, onSaved])
 
   // Soft-delete a submission. File in storage is left alone (cheap;
   // operator can remove from the bucket via Supabase Studio if it
@@ -6680,10 +7037,15 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           canDelete={scope.canEditTask}
           // Anyone with access to the task modal can leave feedback —
           // admins comment, editors reply. Tracking who-by-role keeps
-          // the conversation clear.
+          // the conversation clear + drives notifyEditor() routing.
           canFeedback={true}
           currentUserName={scope.editorName || 'Admin'}
           currentUserRole={scope.isEditorView ? 'editor' : 'admin'}
+          // SubmissionsPanel uses these to dispatch the notification
+          // when an admin saves feedback — the assigned editor of the
+          // task gets a notification + email (once Resend is wired).
+          taskEditorId={task.editor_id}
+          taskName={task.creative_canonical_name || task.creative_name}
           busy={busy}
           onApprove={approveSubmission}
           onDelete={deleteSubmission}
@@ -6816,7 +7178,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
    lib_task_submissions, newest first. Each card has its own inline
    playable preview + per-version Approve / Delete buttons. Replaces
    the old single-slot SubmittedWorkPanel. */
-function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onFeedbackSaved, currentUserName, currentUserRole = 'admin' }) {
+function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onFeedbackSaved, currentUserName, currentUserRole = 'admin', taskEditorId, taskName }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   // Per-card expand/collapse state. Default: only the LATEST (first
   // in the list) is expanded, older versions are collapsed so the
@@ -6855,6 +7217,23 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
     if (!error) {
       setFeedbackEditingId(null)
       onFeedbackSaved?.(sub.id, patch)
+      // Notify the OTHER side. If admin wrote, notify the task's editor.
+      // If editor wrote (reply), we currently only have an admin bell
+      // showing submissions, so the in-app notification for editor->admin
+      // is implicit (the bell already picks up the updated feedback row
+      // on next refresh). Future: add a separate admin-notifications
+      // surface for editor replies.
+      if (text && currentUserRole === 'admin' && taskEditorId) {
+        notifyEditor({
+          editor_id: taskEditorId,
+          kind: 'feedback',
+          task_id: sub.task_id,
+          submission_id: sub.id,
+          title: `${currentUserName || 'Admin'} left feedback on v${sub.version_number || 1}`,
+          body: text.length > 140 ? text.slice(0, 137) + '…' : text,
+          link_path: `/editor-view?task=${sub.task_id}`,
+        })
+      }
     }
   }
   const toggleExpanded = (id) => {
