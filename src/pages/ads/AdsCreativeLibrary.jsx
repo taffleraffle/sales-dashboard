@@ -7605,8 +7605,41 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
   )
 }
 
+/* Small badges for editor format (shorts / long / both) and tier
+   (admin / editor). Used in the Manage Editors roster + anywhere else
+   we want to show at a glance which editors do what. */
+function FormatBadge({ format }) {
+  const f = format || 'both'
+  const label = f === 'shorts' ? 'Shorts' : f === 'long' ? 'Long' : 'Both'
+  const color = f === 'shorts' ? '#7a4eb3' : f === 'long' ? '#0f7a8c' : 'var(--ink-3)'
+  const bg    = f === 'shorts' ? 'rgba(122,78,179,0.10)' : f === 'long' ? 'rgba(15,122,140,0.10)' : 'var(--paper-2)'
+  return (
+    <span style={{
+      padding: '2px 8px', display: 'inline-block',
+      fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+      letterSpacing: '0.1em', textTransform: 'uppercase',
+      color, background: bg, border: `1px solid ${color}`, borderRadius: 2,
+    }}>{label}</span>
+  )
+}
+function TierBadge({ tier }) {
+  const t = tier || 'editor'
+  const isAdmin = t === 'admin'
+  return (
+    <span style={{
+      padding: '2px 8px', display: 'inline-block',
+      fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+      letterSpacing: '0.1em', textTransform: 'uppercase',
+      color: isAdmin ? '#a8650f' : 'var(--ink-3)',
+      background: isAdmin ? '#fffaea' : 'var(--paper-2)',
+      border: `1px solid ${isAdmin ? '#d09c08' : 'var(--rule)'}`,
+      borderRadius: 2,
+    }}>{isAdmin ? 'Admin' : 'Editor'}</span>
+  )
+}
+
 /* Dedicated Manage Editors modal — centralized roster view + add new +
-   row-level edit click-through. Replaces the inline ✎ chip pattern. */
+   row-level edit click-through. */
 function ManageEditorsModal({ editors, tasks, onClose, onEditorAdded, onEditorPatched, onEditorsRemoved, onOpenEditor }) {
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -7672,7 +7705,7 @@ function ManageEditorsModal({ editors, tasks, onClose, onEditorAdded, onEditorPa
     <Modal open={true} onClose={busy ? () => {} : onClose} size="lg"
       eyebrow="Settings"
       title="Manage editors"
-      subtitle="Roster of short-form editors. Add new ones, deactivate inactive ones, click any row to edit details + share links."
+      subtitle="Roster of editors. Add new ones, set their format + tier, deactivate inactive ones, click any row to edit details + share links."
       footer={
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
@@ -7749,7 +7782,7 @@ function ManageEditorsModal({ editors, tasks, onClose, onEditorAdded, onEditorPa
         <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '24px 32px minmax(160px, 1fr) 90px 90px 100px 80px',
+            gridTemplateColumns: '24px 32px minmax(140px, 1fr) 70px 70px 70px 70px 80px 60px',
             gap: 10, padding: '10px 14px',
             background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
             fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
@@ -7758,6 +7791,8 @@ function ManageEditorsModal({ editors, tasks, onClose, onEditorAdded, onEditorPa
             <div></div>
             <div></div>
             <div>Name</div>
+            <div>Format</div>
+            <div>Tier</div>
             <div style={{ textAlign: 'right' }}>Open</div>
             <div style={{ textAlign: 'right' }}>Done</div>
             <div>Active</div>
@@ -7775,7 +7810,7 @@ function ManageEditorsModal({ editors, tasks, onClose, onEditorAdded, onEditorPa
             return (
               <div key={e.id} onClick={() => onOpenEditor(e)} style={{
                 display: 'grid',
-                gridTemplateColumns: '24px 32px minmax(160px, 1fr) 90px 90px 100px 80px',
+                gridTemplateColumns: '24px 32px minmax(140px, 1fr) 70px 70px 70px 70px 80px 60px',
                 gap: 10, padding: '10px 14px', alignItems: 'center',
                 borderBottom: i === editors.length - 1 ? 'none' : '1px solid var(--rule)',
                 cursor: 'pointer', transition: 'background 0.12s',
@@ -7804,6 +7839,12 @@ function ManageEditorsModal({ editors, tasks, onClose, onEditorAdded, onEditorPa
                   {e.name}
                   {!e.active && <span style={{ marginLeft: 8, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>(inactive)</span>}
                 </div>
+                <div>
+                  <FormatBadge format={e.format} />
+                </div>
+                <div>
+                  <TierBadge tier={e.tier} />
+                </div>
                 <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12 }}>{c.open}</div>
                 <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)' }}>{c.done}</div>
                 <div>
@@ -7816,7 +7857,7 @@ function ManageEditorsModal({ editors, tasks, onClose, onEditorAdded, onEditorPa
                   </label>
                 </div>
                 <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
-                  Edit ↗
+                  Edit
                 </div>
               </div>
             )
@@ -8117,6 +8158,8 @@ function EditEditorModal({ editor, onClose, onSavedPatch, onDeleted }) {
   const [active, setActive] = useState(editor.active !== false)
   const [notes, setNotes] = useState(editor.notes || '')
   const [color, setColor] = useState(editor.color || '')
+  const [format, setFormat] = useState(editor.format || 'both')
+  const [tier, setTier] = useState(editor.tier || 'editor')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [confirmDeactivate, setConfirmDeactivate] = useState(false)
@@ -8187,6 +8230,7 @@ function EditEditorModal({ editor, onClose, onSavedPatch, onDeleted }) {
       // for case-insensitive matching against auth.user.email.
       email: email.trim() ? email.trim().toLowerCase() : null,
       active, notes: notes || null, color: color || null,
+      format, tier,
     }
     const { error } = await supabase.from('lib_creative_editors')
       .update(patch).eq('id', editor.id)
@@ -8268,12 +8312,33 @@ function EditEditorModal({ editor, onClose, onSavedPatch, onDeleted }) {
             letterSpacing: '0.04em',
           }}>
             {editor.auth_user_id
-              ? '✓ This editor has logged in at least once'
+              ? 'This editor has logged in at least once'
               : email.trim()
                 ? 'Send them /editor-login — they enter this email + get a magic link'
                 : 'Without an email, this editor can only access via legacy share-link token'}
           </div>
         </Field>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Format">
+            <select value={format} onChange={e => setFormat(e.target.value)} style={inputStyle}>
+              <option value="shorts">Shorts</option>
+              <option value="long">Long-form</option>
+              <option value="both">Both</option>
+            </select>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 6 }}>
+              What this editor primarily cuts. Used to filter assignment pickers.
+            </div>
+          </Field>
+          <Field label="Tier">
+            <select value={tier} onChange={e => setTier(e.target.value)} style={inputStyle}>
+              <option value="editor">Editor</option>
+              <option value="admin">Admin</option>
+            </select>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 6 }}>
+              Admins can manage the roster + see all editor views.
+            </div>
+          </Field>
+        </div>
         <Field label="Color">
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             {/* Reset to auto (hash-derived) */}
@@ -8380,6 +8445,8 @@ function EditEditorModal({ editor, onClose, onSavedPatch, onDeleted }) {
 function AddEditorModal({ onClose, onSaved }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [format, setFormat] = useState('both')  // shorts | long | both
+  const [tier, setTier] = useState('editor')    // editor | admin
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const submit = async () => {
@@ -8393,6 +8460,8 @@ function AddEditorModal({ onClose, onSaved }) {
       // matching against auth.user.email. Optional — editor can be
       // added without one and gets onboarded via legacy share-link.
       email: email.trim() ? email.trim().toLowerCase() : null,
+      format,
+      tier,
     })
     setBusy(false)
     if (error) setErr(error.message)
@@ -8422,6 +8491,21 @@ function AddEditorModal({ onClose, onSaved }) {
             placeholder="sarah@opt.co.nz" style={inputStyle}
             onKeyDown={e => { if (e.key === 'Enter') submit() }} />
         </Field>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Format">
+            <select value={format} onChange={e => setFormat(e.target.value)} style={inputStyle}>
+              <option value="shorts">Shorts</option>
+              <option value="long">Long-form</option>
+              <option value="both">Both</option>
+            </select>
+          </Field>
+          <Field label="Tier">
+            <select value={tier} onChange={e => setTier(e.target.value)} style={inputStyle}>
+              <option value="editor">Editor</option>
+              <option value="admin">Admin</option>
+            </select>
+          </Field>
+        </div>
       </div>
     </Modal>
   )
