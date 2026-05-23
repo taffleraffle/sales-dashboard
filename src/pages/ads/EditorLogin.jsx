@@ -46,16 +46,27 @@ export default function EditorLogin() {
       return
     }
     setErr(null); setSending(true)
-    const { error } = await supabase.auth.signInWithOtp({
-      email: trimmed,
-      options: {
-        emailRedirectTo: `${window.location.origin}/editor-view`,
-        shouldCreateUser: true,
-      },
+    // Use the send-editor-magic-link Edge Function instead of
+    // supabase.auth.signInWithOtp directly. Reasons:
+    //   1. Supabase's runtime mailer ignores email-template patches set
+    //      via the management API, so the default ugly Supabase HTML
+    //      gets sent. The Edge Function bypasses this by generating the
+    //      action_link server-side + delivering via Resend with our own
+    //      OPT-branded HTML.
+    //   2. The function validates the email exists on the active editor
+    //      roster before generating the link — random people can't use
+    //      /editor-login to request mail to arbitrary inboxes.
+    const { data, error } = await supabase.functions.invoke('send-editor-magic-link', {
+      body: { email: trimmed, redirect_to: `${window.location.origin}/editor-view` },
     })
     setSending(false)
     if (error) {
-      setErr(error.message)
+      // Surface the actual server-side error message when present so
+      // the user sees "not on the editor roster" vs network errors etc.
+      const detail = data?.error || error.message || 'Unknown error'
+      setErr(detail)
+    } else if (data?.ok === false) {
+      setErr(data.error || 'Send failed')
     } else {
       setSent(true)
     }
