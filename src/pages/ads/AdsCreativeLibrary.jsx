@@ -5318,6 +5318,52 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   // Status multi-select for filtering — empty = show all.
   const [selectedStatuses, setSelectedStatuses] = useState(() => new Set())
 
+  // Submissions with unread feedback. Used for the editor-portal banner
+  // ("You have feedback on N submissions") and the per-task FEEDBACK
+  // badge. Keyed by task_id for fast lookup during the task-card render.
+  // We pull a flat list of {id, task_id, version_number} so the banner
+  // can show counts + a Set of task_ids so the badge render is O(1).
+  const [pendingFeedback, setPendingFeedback] = useState({ tasks: new Set(), submissions: [] })
+  useEffect(() => {
+    let mounted = true
+    // Editor view sees their own tasks. Admin view sees everyone's so
+    // they can spot any unread feedback they themselves wrote.
+    let q = supabase.from('lib_task_submissions')
+      .select('id, task_id, version_number, feedback_text, feedback_at, feedback_by_name')
+      .not('feedback_text', 'is', null)
+      .is('feedback_read_at', null)
+      .is('deleted_at', null)
+      .order('feedback_at', { ascending: false })
+    q.then(({ data }) => {
+      if (!mounted) return
+      let rows = data || []
+      // Filter to this editor's tasks if we're on a per-editor share link.
+      // For team-wide editor links or admins we keep the full list.
+      if (scope.isEditorView && scope.editorId && tasks.length > 0) {
+        const myTaskIds = new Set(tasks.filter(t => t.editor_id === scope.editorId).map(t => t.task_id))
+        rows = rows.filter(s => myTaskIds.has(s.task_id))
+      }
+      setPendingFeedback({
+        tasks: new Set(rows.map(s => s.task_id)),
+        submissions: rows,
+      })
+    })
+    return () => { mounted = false }
+  }, [tasks, scope.isEditorView, scope.editorId])
+  // Clear local pending state when a task modal closes — the modal
+  // marked feedback_read_at, so next render of the badge/banner should
+  // reflect that immediately without re-querying.
+  const clearPendingForTask = useCallback((taskId) => {
+    setPendingFeedback(prev => {
+      if (!prev.tasks.has(taskId)) return prev
+      const nextTasks = new Set(prev.tasks); nextTasks.delete(taskId)
+      return {
+        tasks: nextTasks,
+        submissions: prev.submissions.filter(s => s.task_id !== taskId),
+      }
+    })
+  }, [])
+
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true)
     setErr(null)
@@ -5481,6 +5527,45 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
 
   return (
     <>
+      {/* Feedback-waiting banner — visible to editors AND admins. For
+          editors it answers "do I have feedback to address". For admins
+          it answers "did the editors actually see my notes yet". Click
+          to filter the queue to those tasks. Hidden when zero. */}
+      {pendingFeedback.tasks.size > 0 && (
+        <div
+          onClick={() => {
+            // Filter to the tasks that have unread feedback.
+            const taskIds = pendingFeedback.tasks
+            const matchingTaskRows = tasks.filter(t => taskIds.has(t.task_id))
+            // Set editor filter to the editors whose tasks have feedback,
+            // so the editor sees a focused list. (No-op for editor-view
+            // since they already only see their own tasks.)
+            if (!scope.isEditorView) {
+              const eds = new Set(matchingTaskRows.map(t => t.editor_id).filter(Boolean))
+              if (eds.size > 0) setSelectedEditors(eds)
+            }
+          }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            padding: '12px 16px', marginBottom: 14,
+            background: '#fffaea', border: '1px solid #e8b408',
+            borderLeft: '3px solid #e8b408',
+            cursor: 'pointer',
+            fontFamily: 'var(--mono)', fontSize: 12,
+            letterSpacing: '0.04em', color: '#7a4e08',
+          }}
+          title="Click to see which tasks have feedback waiting">
+          <span style={{ fontSize: 16 }}>💬</span>
+          <span>
+            <strong>{pendingFeedback.submissions.length} submission{pendingFeedback.submissions.length === 1 ? ' has' : 's have'} feedback</strong> waiting
+            {scope.isEditorView ? ' for you' : ' that the editor hasn\'t seen yet'}
+            {' · across ' + pendingFeedback.tasks.size + ' task' + (pendingFeedback.tasks.size === 1 ? '' : 's')}
+          </span>
+          <span style={{ flex: 1 }} />
+          <span style={{ textDecoration: 'underline' }}>Open the tasks →</span>
+        </div>
+      )}
+
       {/* KPI bar */}
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 18,
@@ -5584,7 +5669,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           </div>
         </div>
       ) : view === 'list' ? (
-        <QueueListView tasks={filteredTasks} editors={editors} onEdit={setEditingTask}
+        <QueueListView tasks={filteredTasks} editors={editors} onEdit={setEditingTask} feedbackTaskIds={pendingFeedback.tasks}
           onReorder={async (orderedIds) => {
             // Optimistic local update — assign sequential sort_order to
             // the open tasks in their new order. Tasks not in the
@@ -5685,8 +5770,18 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           task={editingTask}
           editors={editors}
           scope={scope}
-          onClose={() => setEditingTask(null)}
-          onSaved={() => { setEditingTask(null); load() }}
+          onClose={() => {
+            // Mark this task's feedback as locally-read so the banner +
+            // task-card badge update instantly. The DB write already
+            // happened inside the modal's reloadSubmissions when the
+            // editor opened it.
+            if (scope.isEditorView) clearPendingForTask(editingTask.task_id)
+            setEditingTask(null)
+          }}
+          onSaved={() => {
+            if (scope.isEditorView) clearPendingForTask(editingTask.task_id)
+            setEditingTask(null); load()
+          }}
           onDeleted={() => { setEditingTask(null); load() }} />
       )}
       {editingEditor && (
@@ -5869,7 +5964,7 @@ function priorityOrder(p) {
   if (p && Object.prototype.hasOwnProperty.call(PRIORITY_RANK, p)) return PRIORITY_RANK[p]
   return 99
 }
-function QueueListView({ tasks, editors, onEdit, onReorder }) {
+function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds }) {
   // Sort by manual sort_order first (when any open task carries one), else
   // by priority + due date. Done tasks always sink to the bottom.
   const ordered = useMemo(() => {
@@ -6010,7 +6105,23 @@ function QueueListView({ tasks, editors, onEdit, onReorder }) {
               <div style={{
                 fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 500, color: 'var(--ink)',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>{t.creative_canonical_name || t.creative_name}</div>
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                {feedbackTaskIds?.has(t.task_id) && (
+                  <span title="Unread feedback waiting on a submission"
+                    style={{
+                      flexShrink: 0,
+                      padding: '1px 5px',
+                      background: '#e8b408', color: '#5a3a08',
+                      fontSize: 8.5, fontWeight: 700,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                      borderRadius: 2,
+                    }}>💬 Feedback</span>
+                )}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {t.creative_canonical_name || t.creative_name}
+                </span>
+              </div>
               <div style={{
                 fontFamily: 'var(--sans)', fontSize: 10.5, color: 'var(--ink-4)', marginTop: 2,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -6216,7 +6327,25 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       .is('deleted_at', null)
       .order('version_number', { ascending: false })
     setSubmissions(data || [])
-  }, [task.task_id])
+    // Auto-mark feedback as read when an editor opens the task. We do
+    // this on the editor portal only — admin viewing doesn't count as
+    // "seen by editor". This clears the FEEDBACK badge + portal banner
+    // automatically once the editor has loaded the task.
+    if (scope.isEditorView && data && data.length > 0) {
+      const unreadIds = data
+        .filter(s => s.feedback_text && !s.feedback_read_at)
+        .map(s => s.id)
+      if (unreadIds.length > 0) {
+        const readAt = new Date().toISOString()
+        await supabase.from('lib_task_submissions')
+          .update({ feedback_read_at: readAt })
+          .in('id', unreadIds)
+        // Local update so the "unread" label in the SubmissionsPanel
+        // flips to "seen by editor" without a refetch.
+        setSubmissions(curr => curr.map(s => unreadIds.includes(s.id) ? { ...s, feedback_read_at: readAt } : s))
+      }
+    }
+  }, [task.task_id, scope.isEditorView])
   useEffect(() => { reloadSubmissions() }, [reloadSubmissions])
 
   const save = async () => {
@@ -6563,9 +6692,18 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           submissions={submissions}
           canApprove={scope.canEditTask}
           canDelete={scope.canEditTask}
+          // Only admins (not editors) can leave feedback. Editors see
+          // it read-only and we mark it read when they open the task.
+          canFeedback={scope.canEditTask && !scope.isEditorView}
+          currentUserName={scope.editorName || 'Admin'}
           busy={busy}
           onApprove={approveSubmission}
           onDelete={deleteSubmission}
+          onFeedbackSaved={(subId, patch) => {
+            // Optimistic local update so the card flips to the new
+            // feedback text without a refetch.
+            setSubmissions(curr => curr.map(s => s.id === subId ? { ...s, ...patch } : s))
+          }}
         />
 
         {/* Upload edited version — editors drop their cut here. Upload
@@ -6690,7 +6828,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
    lib_task_submissions, newest first. Each card has its own inline
    playable preview + per-version Approve / Delete buttons. Replaces
    the old single-slot SubmittedWorkPanel. */
-function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove, onDelete }) {
+function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = false, busy, onApprove, onDelete, onFeedbackSaved, currentUserName }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   // Per-card expand/collapse state. Default: only the LATEST (first
   // in the list) is expanded, older versions are collapsed so the
@@ -6701,6 +6839,31 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove,
     if (submissions && submissions[0]) set.add(submissions[0].id)
     return set
   })
+  // Local draft state per submission for the feedback textarea. Stored
+  // per-id so editing v1's feedback doesn't bleed into v2's editor.
+  const [feedbackDrafts, setFeedbackDrafts] = useState({})
+  const [feedbackEditingId, setFeedbackEditingId] = useState(null)
+  const [feedbackSavingId, setFeedbackSavingId] = useState(null)
+  const saveFeedback = async (sub) => {
+    setFeedbackSavingId(sub.id)
+    const text = (feedbackDrafts[sub.id] ?? sub.feedback_text ?? '').trim()
+    const patch = {
+      feedback_text: text || null,
+      feedback_at: text ? new Date().toISOString() : null,
+      feedback_by_name: text ? (currentUserName || 'Admin') : null,
+      // Reset read state whenever feedback changes — editor sees it as
+      // new again until they open the task. Clearing feedback (empty
+      // string) also clears read_at since there's nothing to read.
+      feedback_read_at: null,
+    }
+    const { error } = await supabase.from('lib_task_submissions')
+      .update(patch).eq('id', sub.id)
+    setFeedbackSavingId(null)
+    if (!error) {
+      setFeedbackEditingId(null)
+      onFeedbackSaved?.(sub.id, patch)
+    }
+  }
   const toggleExpanded = (id) => {
     setExpanded(prev => {
       const next = new Set(prev)
@@ -6862,7 +7025,93 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, busy, onApprove,
                   borderTop: '1px solid var(--rule)',
                   fontFamily: 'var(--serif)', fontSize: 12.5, color: 'var(--ink-2)',
                   fontStyle: 'italic',
-                }}>{sub.notes}</div>
+                }}>Editor note: {sub.notes}</div>
+              )}
+              {/* Feedback section — admins (canFeedback) edit, editors
+                  see read-only. When the editor opens the task, the
+                  parent marks feedback_read_at; here we just render. */}
+              {isExpanded && (
+                <div style={{
+                  padding: '10px 12px',
+                  borderTop: '1px solid var(--rule)',
+                  background: sub.feedback_text ? '#fffaea' : 'var(--paper-2)',
+                  borderLeft: sub.feedback_text ? '3px solid #e8b408' : 'none',
+                  marginLeft: sub.feedback_text ? -3 : 0,
+                }}>
+                  <div style={{
+                    fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.12em', textTransform: 'uppercase',
+                    color: sub.feedback_text ? '#7a4e08' : 'var(--ink-3)',
+                    marginBottom: 6,
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
+                    <span>{sub.feedback_text ? 'Feedback' : 'No feedback yet'}</span>
+                    {sub.feedback_text && sub.feedback_at && (
+                      <span style={{ color: 'var(--ink-3)', fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'none' }}>
+                        {sub.feedback_by_name || 'Admin'} · {new Date(sub.feedback_at).toLocaleString()}
+                        {sub.feedback_read_at ? ' · seen by editor' : ' · unread'}
+                      </span>
+                    )}
+                  </div>
+                  {/* Display mode */}
+                  {sub.feedback_text && feedbackEditingId !== sub.id && (
+                    <div style={{
+                      fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink)',
+                      lineHeight: 1.5, whiteSpace: 'pre-wrap', marginBottom: canFeedback ? 8 : 0,
+                    }}>{sub.feedback_text}</div>
+                  )}
+                  {/* Edit mode (admin only) */}
+                  {canFeedback && feedbackEditingId === sub.id && (
+                    <>
+                      <textarea
+                        autoFocus
+                        value={feedbackDrafts[sub.id] ?? sub.feedback_text ?? ''}
+                        onChange={(e) => setFeedbackDrafts(d => ({ ...d, [sub.id]: e.target.value }))}
+                        placeholder="Specific feedback for this version — what's working, what needs to change, any timestamps. The editor sees this exactly as written."
+                        rows={4}
+                        style={{
+                          width: '100%', padding: '8px 10px',
+                          fontFamily: 'var(--serif)', fontSize: 13,
+                          background: 'white', border: '1px solid var(--rule)',
+                          borderRadius: 2, resize: 'vertical',
+                        }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
+                        <button type="button"
+                          onClick={() => { setFeedbackEditingId(null); setFeedbackDrafts(d => { const n = { ...d }; delete n[sub.id]; return n }) }}
+                          disabled={feedbackSavingId === sub.id}
+                          style={{
+                            padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                            fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                            background: 'transparent', color: 'var(--ink-3)',
+                            border: '1px solid var(--rule)', cursor: 'pointer', borderRadius: 2,
+                          }}>Cancel</button>
+                        <button type="button"
+                          onClick={() => saveFeedback(sub)}
+                          disabled={feedbackSavingId === sub.id}
+                          style={{
+                            padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                            fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                            background: 'var(--ink)', color: 'var(--paper)',
+                            border: 'none', cursor: 'pointer', borderRadius: 2,
+                          }}>{feedbackSavingId === sub.id ? 'Saving…' : 'Save feedback'}</button>
+                      </div>
+                    </>
+                  )}
+                  {/* Trigger to enter edit mode (admin only) */}
+                  {canFeedback && feedbackEditingId !== sub.id && (
+                    <button type="button"
+                      onClick={() => setFeedbackEditingId(sub.id)}
+                      style={{
+                        padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                        fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: sub.feedback_text ? 'transparent' : 'var(--ink)',
+                        color: sub.feedback_text ? 'var(--ink-2)' : 'var(--paper)',
+                        border: sub.feedback_text ? '1px solid var(--rule)' : 'none',
+                        cursor: 'pointer', borderRadius: 2,
+                      }}>{sub.feedback_text ? '✎ Edit feedback' : '+ Give feedback'}</button>
+                  )}
+                </div>
               )}
             </div>
           )
