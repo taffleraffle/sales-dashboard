@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
+import { setPreference, requestPersistentStorage } from '../../lib/editorSession'
 
 /*
   /editor-login — magic-link login page for editors.
@@ -26,6 +27,10 @@ export default function EditorLogin() {
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [err, setErr] = useState(null)
+  // Default: stay signed in for 14 days. Editor can opt up to
+  // "indefinitely" if they're on their own device. See lib/editorSession.js
+  // for how the choice is enforced after login.
+  const [rememberMe, setRememberMe] = useState('14d')  // '14d' | 'forever'
 
   // If already authenticated, jump straight to /editor-view — no point
   // sitting on a login page if we already have a session.
@@ -46,6 +51,16 @@ export default function EditorLogin() {
       return
     }
     setErr(null); setSending(true)
+    // Persist the "Stay signed in" preference BEFORE sending the link
+    // so it's already in localStorage when the user clicks back into
+    // this device. Same-device click-through is the common case; if
+    // they request on phone + click on desktop, the desktop just
+    // defaults to '14d' which is the safe default.
+    setPreference(rememberMe)
+    // Ask the browser to mark our localStorage persistent so iOS
+    // Safari ITP can't auto-clear it after 7 days of inactivity.
+    // Fire-and-forget — best effort.
+    requestPersistentStorage()
     // Use the send-editor-magic-link Edge Function instead of
     // supabase.auth.signInWithOtp directly. Reasons:
     //   1. Supabase's runtime mailer ignores email-template patches set
@@ -123,6 +138,47 @@ export default function EditorLogin() {
                 borderRadius: 2, marginBottom: 16,
               }}
             />
+            {/* Stay-signed-in preference. Default 14 days. Editors on
+                personal devices can opt into 'indefinitely' to skip
+                re-login. Browser session-cleanup (private mode, ITP)
+                can still log them out earlier; this only enforces the
+                ceiling. */}
+            <label style={{
+              display: 'block', fontFamily: 'var(--mono)', fontSize: 10,
+              fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase',
+              color: 'var(--ink-3)', marginBottom: 6,
+            }}>Stay signed in</label>
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 16,
+            }}>
+              {[
+                { value: '14d',     label: 'For 14 days', sub: 'Recommended for shared devices' },
+                { value: 'forever', label: 'Indefinitely', sub: 'Personal device only' },
+              ].map(opt => {
+                const selected = rememberMe === opt.value
+                return (
+                  <button key={opt.value} type="button"
+                    onClick={() => setRememberMe(opt.value)}
+                    disabled={sending}
+                    style={{
+                      padding: '10px 12px', cursor: sending ? 'not-allowed' : 'pointer',
+                      textAlign: 'left',
+                      background: selected ? 'var(--paper-2)' : 'white',
+                      border: `1px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
+                      borderLeft: `3px solid ${selected ? 'var(--accent)' : 'transparent'}`,
+                      borderRadius: 2,
+                    }}>
+                    <div style={{
+                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                      color: 'var(--ink)', marginBottom: 2,
+                    }}>{opt.label}</div>
+                    <div style={{
+                      fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)',
+                    }}>{opt.sub}</div>
+                  </button>
+                )
+              })}
+            </div>
             {err && (
               <div style={{
                 padding: '8px 12px', marginBottom: 12,

@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import AdsCreativeLibrary from './AdsCreativeLibrary'
+import {
+  getPreference, setPreference, expiresAt, signOutEditor,
+} from '../../lib/editorSession'
 
 /*
   /editor-view              — auth-gated. Magic-link login required.
@@ -117,9 +120,25 @@ export default function EditorView() {
   }, [token, nav])
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    // signOutEditor clears the lifetime-preference state in
+    // localStorage too, so a fresh login on the same device starts
+    // with a clean 14-day clock.
+    await signOutEditor()
     nav('/editor-login', { replace: true })
   }
+
+  // Local UI state for the "Stay signed in" toggle in the header.
+  // Read once on mount; user can flip it without re-logging-in.
+  const [sessionPref, setSessionPref] = useState(() => getPreference())
+  const togglePref = () => {
+    const next = sessionPref === 'forever' ? '14d' : 'forever'
+    setPreference(next)
+    setSessionPref(next)
+  }
+  const expiry = sessionPref === '14d' ? expiresAt() : null
+  const expiryLabel = expiry
+    ? new Date(expiry).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : null
 
   if (loading) {
     return (
@@ -206,13 +225,33 @@ export default function EditorView() {
             </div>
           )}
           {authMode === 'auth' && (
-            <button onClick={handleLogout} style={{
-              padding: '6px 12px',
-              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-              letterSpacing: '0.06em', textTransform: 'uppercase',
-              background: 'transparent', color: 'var(--ink-3)',
-              border: '1px solid var(--rule)', cursor: 'pointer',
-            }}>Sign out</button>
+            <>
+              {/* Stay-signed-in indicator + toggle. Editors who picked
+                  "14 days" at login see when the window expires; click
+                  to flip to "indefinitely" without re-logging-in. */}
+              <button onClick={togglePref}
+                title={sessionPref === 'forever'
+                  ? 'Currently signed in indefinitely. Click to switch to 14-day auto-logout.'
+                  : `Auto-logout on ${expiryLabel || 'soon'}. Click to stay signed in indefinitely instead.`}
+                style={{
+                  padding: '6px 12px',
+                  fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  background: 'transparent', color: 'var(--ink-3)',
+                  border: '1px solid var(--rule)', cursor: 'pointer',
+                }}>
+                {sessionPref === 'forever'
+                  ? 'Signed in: indefinitely'
+                  : `Signed in until ${expiryLabel || '…'}`}
+              </button>
+              <button onClick={handleLogout} style={{
+                padding: '6px 12px',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: 'transparent', color: 'var(--ink-3)',
+                border: '1px solid var(--rule)', cursor: 'pointer',
+              }}>Sign out</button>
+            </>
           )}
         </div>
       </header>
