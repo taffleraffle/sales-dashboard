@@ -9652,12 +9652,18 @@ function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInC
   }
 
   return (
+    // Each column has a minimum width — once the parent can't fit them
+    // all at the minimum, the container scrolls horizontally instead of
+    // clipping the rightmost column off the screen edge (the bug Ben
+    // flagged where DONE slid off-screen when everything was populated).
     // alignItems defaults to `stretch` so columns equal-height regardless
-    // of card count. Without this, a column with 1 card was visually
-    // truncated next to a column with 5+ cards.
+    // of card count.
     <div style={{
-      display: 'grid', gridTemplateColumns: `repeat(${cols.length}, 1fr)`,
-      gap: 10,
+      display: 'grid',
+      gridTemplateColumns: `repeat(${cols.length}, minmax(240px, 1fr))`,
+      gap: 10, overflowX: 'auto',
+      // pb keeps the horizontal scrollbar from overlapping the last row
+      paddingBottom: 4,
     }}>
       {cols.map(c => (
         <div key={c}
