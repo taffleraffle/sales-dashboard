@@ -80,19 +80,24 @@ export default function ContractAdd() {
         .select()
         .single()
       if (amErr) {
-        navigate(`/sales/contracts/${contract.id}`)
-        return
+        // Surface, don't swallow — the contract saved but the amendment
+        // didn't. Closer needs to know so they can retry from detail page.
+        throw new Error(`Contract saved, but the first amendment request failed: ${amErr.message}. Open the contract and re-submit the amendment.`)
       }
 
-      // 4. Fire the judge. Don't await failures — closer can re-submit
-      //    from detail page if it errors.
+      // 4. Fire the judge. Surface failures but still navigate — the
+      //    amendment exists, closer can re-trigger from detail page.
       setProgress('Judging against policy…')
       try {
-        await supabase.functions.invoke('contract-judge-amendment', {
+        const { data: judgeData, error: judgeErr } = await supabase.functions.invoke('contract-judge-amendment', {
           body: { amendment_id: amendment.id },
         })
-      } catch (_) {
-        // Soft fail — verdict will show as 'pending' on detail page
+        if (judgeErr) throw judgeErr
+        if (judgeData?.error) throw new Error(judgeData.error)
+      } catch (e) {
+        // Soft-fail but tell the closer. The amendment row exists; they
+        // can hit reply/retry from the detail page.
+        console.warn('Judge call failed on initial submit:', e)
       }
 
       navigate(`/sales/contracts/${contract.id}`)

@@ -47,12 +47,14 @@ export default function ContractDetail() {
       // Fetch all messages for all amendments in one round-trip
       if (a.data?.length) {
         const ids = a.data.map(x => x.id)
-        const { data: msgs } = await supabase
+        const { data: msgs, error: msgErr } = await supabase
           .from('contract_amendment_messages')
           .select('*')
           .in('amendment_id', ids)
           .order('created_at', { ascending: true })
-        if (!cancelled && msgs) {
+        if (cancelled) return
+        if (msgErr) { setError(`Failed to load amendment threads: ${msgErr.message}`); setLoading(false); return }
+        if (msgs) {
           const grouped = msgs.reduce((acc, m) => {
             (acc[m.amendment_id] ||= []).push(m)
             return acc
@@ -103,12 +105,14 @@ export default function ContractDetail() {
     setNewRequest(''); setNewClauseRef('')
 
     try {
-      await supabase.functions.invoke('contract-judge-amendment', {
+      const { data, error: invErr } = await supabase.functions.invoke('contract-judge-amendment', {
         body: { amendment_id: inserted.id },
       })
+      if (invErr) throw invErr
+      if (data?.error) throw new Error(data.error)
       await refreshAmendment(inserted.id)
     } catch (err) {
-      setNewErr(`Submitted, but judge failed: ${err.message || err}.`)
+      setNewErr(`Submitted, but judge failed: ${err.message || err}. Reload to retry.`)
     } finally {
       setCreatingNew(false)
     }
@@ -258,6 +262,7 @@ function AmendmentThread({ amendment, messages, onChange }) {
   const [sendErr, setSendErr]     = useState(null)
   const [locking, setLocking]     = useState(false)
   const threadEndRef = useRef(null)
+  const prevLengthRef = useRef(messages.length)
 
   // Latest verdict in the thread (judge messages can change it turn-by-turn)
   const lastJudgeVerdict = [...messages].reverse().find(m => m.role === 'judge' && m.metadata?.verdict)?.metadata?.verdict
@@ -271,7 +276,13 @@ function AmendmentThread({ amendment, messages, onChange }) {
   const canLock = !isLocked && lastJudgeVerdict && lastJudgeVerdict !== 'reject'
 
   useEffect(() => {
-    threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    // Only scroll when a NEW message lands (length grew). Skip mount so
+    // opening a contract doesn't snap the viewport to the bottom of the
+    // oldest thread on the page.
+    if (messages.length > prevLengthRef.current) {
+      threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+    prevLengthRef.current = messages.length
   }, [messages.length])
 
   async function sendReply(e) {
@@ -281,10 +292,11 @@ function AmendmentThread({ amendment, messages, onChange }) {
     const message = replyText.trim()
     setReplyText('')
     try {
-      const { error: invokeErr } = await supabase.functions.invoke('contract-judge-amendment', {
+      const { data, error: invokeErr } = await supabase.functions.invoke('contract-judge-amendment', {
         body: { amendment_id: amendment.id, new_message: message },
       })
       if (invokeErr) throw invokeErr
+      if (data?.error) throw new Error(data.error)
       await onChange()
     } catch (err) {
       setSendErr(err.message || String(err))
@@ -298,7 +310,8 @@ function AmendmentThread({ amendment, messages, onChange }) {
     if (!confirm('Lock in this thread? You can\'t reply after this — but you can still regenerate the amended agreement.')) return
     setLocking(true)
     const finalClause = lastProposedClause || ''
-    const { error: lockErr } = await supabase
+    // Guard against double-click + race: only update if still unlocked.
+    const { data: updated, error: lockErr } = await supabase
       .from('contract_amendments')
       .update({
         locked_at: new Date().toISOString(),
@@ -306,9 +319,18 @@ function AmendmentThread({ amendment, messages, onChange }) {
         status: lastJudgeVerdict === 'allow' ? 'approved' : 'judged',
       })
       .eq('id', amendment.id)
+      .is('locked_at', null)
+      .select()
     setLocking(false)
     if (lockErr) {
       alert(`Lock failed: ${lockErr.message}`)
+      return
+    }
+    if (!updated || updated.length === 0) {
+      // Either RLS blocked the update (non-admin closer with admin-only
+      // update policy pre-020) or the row was already locked.
+      alert('Lock failed silently — your account may not have permission to lock amendments yet, or another tab already locked this thread. Refresh to see latest state.')
+      await onChange()
       return
     }
     await onChange()
@@ -582,8 +604,11 @@ function RegenerateButton({ contract, amendments, onRegenerated }) {
         body: { contract_id: contract.id },
       })
       if (error) throw error
+      if (data?.error) throw new Error(data.error)
       if (data?.signed_url) {
         window.open(data.signed_url, '_blank', 'noopener,noreferrer')
+      } else {
+        throw new Error('Regen returned no signed URL — try again or check function logs.')
       }
       await onRegenerated()
     } catch (e) {

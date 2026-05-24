@@ -98,11 +98,12 @@ serve(async (req) => {
     // 3. Ensure the opening closer message exists. On the very first call
     //    (initial submit flow) the dashboard doesn't pass new_message —
     //    the requested_change IS the opening message.
-    const { data: existingMessages } = await supa
+    const { data: existingMessages, error: existErr } = await supa
       .from('contract_amendment_messages')
       .select('id, role')
       .eq('amendment_id', amendment_id)
       .order('created_at', { ascending: true })
+    if (existErr) return json(500, { error: `messages fetch: ${existErr.message}` })
 
     if (!existingMessages?.some(m => m.role === 'closer')) {
       await supa.from('contract_amendment_messages').insert({
@@ -222,7 +223,7 @@ When you spot a bundle, separate the parts and tell the closer which half can su
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1024,
+        max_tokens: 2048,
         system: systemBlocks,
         tools: [DISCUSSION_TOOL],
         tool_choice: { type: 'tool', name: 'discussion_turn' },
@@ -244,6 +245,15 @@ When you spot a bundle, separate the parts and tell the closer which half can su
     const reply: string            = toolUse.input.reply
     const verdict: string | null   = toolUse.input.verdict || null
     const proposedClause: string   = toolUse.input.proposed_clause || ''
+    if (!reply || !reply.trim()) {
+      // Truncation in tool_use mode can hand back an input with missing
+      // fields. Bail loudly rather than insert NULL content (which fails
+      // the NOT NULL constraint and bubbles back as a Postgres error).
+      return json(502, {
+        error: 'judge returned empty reply',
+        stop_reason: claudeBody.stop_reason,
+      })
+    }
 
     // 9. Insert judge message with structured metadata
     const { error: insErr } = await supa
@@ -283,14 +293,17 @@ When you spot a bundle, separate the parts and tell the closer which half can su
       .filter(m => m.role === 'judge')
       .some(m => (m.metadata as any)?.verdict)
     if (verdict && verdict !== 'allow' && !priorVerdicts) {
-      await postToSlack({
+      // Fire-and-forget so the closer's response isn't blocked by a slow
+      // Slack webhook (Claude already took ~5-15s; gateway timeout is 60s).
+      // postToSlack catches its own errors internally.
+      postToSlack({
         verdict,
         reasoning: reply,
         clientName: contract.client_name,
         clauseRef: amendment.clause_reference,
         requestedChange: amendment.requested_change,
         amendmentId: amendment_id,
-      })
+      }).catch((e) => console.error('Slack post failed:', e))
     }
 
     return json(200, {

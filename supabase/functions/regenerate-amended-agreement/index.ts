@@ -46,6 +46,10 @@ serve(async (req) => {
   try {
     const { contract_id } = await req.json()
     if (!contract_id) return json(400, { error: 'contract_id required' })
+    if (typeof contract_id !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(contract_id)) {
+      return json(400, { error: 'contract_id must be a uuid' })
+    }
     const contract_id_used = contract_id
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
