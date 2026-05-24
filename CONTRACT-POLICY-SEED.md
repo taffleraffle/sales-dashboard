@@ -125,3 +125,31 @@ clause creates a trap (e.g. "weekly reports" + "missed report = refund" + "DD
 revoked"), block the bundle and escalate so we can decide which half to keep.
 The closer's job is to surface deal-shape questions early, not negotiate
 chip-by-chip.
+
+---
+
+## Retainer-specific: the offer/contract gap
+
+The retainer offer page is branded "Local Surge — Work For Free Until We Do."
+The implication is open-ended free work until ranking is achieved. The
+contract is more bounded:
+
+- Clause 4: 90-day guarantee window with eligibility (DBA, 10 photos/month,
+  2 reviews/week, 5-day response)
+- Clause 4(c): if eligibility met but ranking not hit, **30 additional days**
+  of free service (only if positive movement is visible)
+- Clause 4(d): after that, **mutually-agreed retainer or end the relationship**
+  with no further obligation either side
+
+When a closer asks to extend free work past the 30-day cap on a retainer
+contract, the judge should treat it as **REVIEW** (escalate), not auto-
+reject — it aligns with the offer pitch but exceeds the contract mechanic,
+and Ben decides whether to honour the offer-spirit on a per-deal basis.
+
+When a closer asks to remove the cap entirely (indefinite free work), the
+judge should **REJECT**. No unbounded commitments.
+
+When a closer asks to drop the eligibility requirements (DBA, photos,
+reviews), the judge should treat as **CONDITIONAL** — DBA stays (it's the
+GMB control mechanism); photos/reviews can flex. If the request strips the
+DBA, reject.

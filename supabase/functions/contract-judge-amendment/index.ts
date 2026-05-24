@@ -122,16 +122,19 @@ Always call the submit_verdict tool.`,
     ]
 
     const templateContext = contract.contract_type === 'retainer'
-      ? `RETAINER TEMPLATE ($9K / 90-day). Key clauses to reference:
+      ? `RETAINER TEMPLATE ($9K / 90-day, marketed as "Work For Free Until We Do"). Key clauses to reference:
 - Clause 4: Guarantee (top-3 ranking + DBA "Opt Digital Instructions" + 10 photos/month + 2 reviews/week + 5-day response). Eligibility-gated; failure to meet eligibility forfeits guarantee.
 - Clause 4(c): 30 additional days of free service if positive movement but ranking not hit
-- Clause 4(d): mutual decision after extension period — retainer or end relationship
+- Clause 4(d): mutual decision after extension period — retainer or end relationship with no further obligation
 - Clause 7.2: Direct Debit with $1.25/2.9% Stripe fee + $7 dishonour fee + 48h notice for cancel/change
 - Clause 14: 6-month liability cap, indemnity covers any negligent/fraudulent/criminal act
 - Clause 15: unilateral subcontracting consent
 - Clause 16: termination only on breach + 30-day cure
 - Clause 17: 14-day dispute resolution
-- Clause 19.1: NZ governing law`
+- Clause 19.1: NZ governing law
+
+OFFER vs CONTRACT GAP (important for retainer judgments):
+The marketing pitch ("Work For Free Until We Do") implies open-ended free work until ranking. The contract caps free continued service at 30 days past the 90-day guarantee, then requires a mutual decision. When a client requests extending free work beyond the 30-day cap, treat as REVIEW (not auto-reject) — it aligns with the offer pitch but exceeds the contract mechanic, and Ben decides whether to honour offer-spirit on a per-deal basis. Requests for INDEFINITE free work or removing the cap entirely → REJECT (no unbounded commitments).`
       : `TRIAL TEMPLATE ($997 / 14-day, auto-renews to recurring retainer). Key clauses to reference:
 - Clause 4: Continuation of Project — auto-renews to $997/month after 14-day trial unless cancelled in writing
 - Clause 4(g): 30-day cancellation notice required post-trial; fees remain payable during notice
