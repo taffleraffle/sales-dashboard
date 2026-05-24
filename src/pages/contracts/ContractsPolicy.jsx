@@ -54,7 +54,7 @@ export default function ContractsPolicy() {
       .insert({
         policy_text: policyText,
         active: true,
-        updated_by: profile?.team_member_id || null,
+        updated_by: profile?.teamMemberId || null,
       })
       .select()
       .single()

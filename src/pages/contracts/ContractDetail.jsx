@@ -63,7 +63,7 @@ export default function ContractDetail() {
       .from('contract_amendments')
       .insert({
         contract_id: id,
-        closer_id: profile?.team_member_id || null,
+        closer_id: profile?.teamMemberId || null,
         requested_change: requestText.trim(),
         clause_reference: clauseRef.trim() || null,
         original_excerpt: excerpt.trim() || null,
