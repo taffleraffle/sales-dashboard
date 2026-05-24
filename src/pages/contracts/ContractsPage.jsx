@@ -44,17 +44,17 @@ export default function ContractsPage() {
         <div>
           <span className="eyebrow eyebrow-accent">OPT Digital · Contracts</span>
           <h1 style={{ fontFamily: 'var(--serif)', fontSize: 28, color: 'var(--ink)', margin: '6px 0 0', lineHeight: 1.1 }}>
-            Tracked <em style={{ fontStyle: 'italic' }}>contracts</em>
+            Amendment <em style={{ fontStyle: 'italic' }}>reviews</em>
           </h1>
           <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>
-            Sent contracts you're tracking for amendment management. Continue creating new contracts in PandaDoc — add them here when a client asks to amend.
+            Client asking to change a contract? Upload the agreement, tell the judge what they want, and get back what we can approve plus a regenerated agreement to re-upload to PandaDoc.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {isAdmin && (
             <>
               <Link to="/sales/contracts/pending" className="editorial-btn-ghost">
-                Pending approvals
+                Pending
               </Link>
               <Link to="/sales/contracts/policy" className="editorial-btn-ghost">
                 Policy
@@ -63,7 +63,7 @@ export default function ContractsPage() {
           )}
           <Link to="/sales/contracts/add" className="editorial-btn-primary">
             <Plus size={ICON.sm} />
-            Add contract
+            New review
           </Link>
         </div>
       </div>
@@ -96,14 +96,14 @@ export default function ContractsPage() {
         <div className="tile tile-feedback flex flex-col items-center justify-center py-16 px-6 text-center">
           <FileText size={36} style={{ color: 'var(--ink-3)', marginBottom: 12 }} />
           <h2 style={{ fontFamily: 'var(--serif)', fontSize: 20, color: 'var(--ink)', margin: 0 }}>
-            No contracts tracked yet
+            No amendment reviews yet
           </h2>
           <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 8, maxWidth: 460 }}>
-            When a client asks to amend a contract you've already sent, drop the signed PDF here so the AI judge has context. The judge then handles each amendment request against your active policy.
+            Upload an agreement, tell the judge what the client wants changed, and it'll come back with what we can approve. Confirm, regenerate the agreement, re-upload to PandaDoc.
           </p>
           <Link to="/sales/contracts/add" className="editorial-btn-primary" style={{ marginTop: 20 }}>
             <Plus size={ICON.sm} />
-            Add first contract
+            Start first review
           </Link>
         </div>
       )}
