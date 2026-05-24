@@ -91,6 +91,11 @@ const CommissionDetail = lazyWithReload(() => import('./pages/CommissionDetail')
 const SetterBot = lazyWithReload(() => import('./pages/SetterBot'))
 const EmailFlows = lazyWithReload(() => import('./pages/EmailFlows'))
 const EmailFlowDetail = lazyWithReload(() => import('./pages/EmailFlowDetail'))
+const ContractsPage     = lazyWithReload(() => import('./pages/contracts/ContractsPage'))
+const ContractDetail    = lazyWithReload(() => import('./pages/contracts/ContractDetail'))
+const ContractNew       = lazyWithReload(() => import('./pages/contracts/ContractNew'))
+const ContractsPolicy   = lazyWithReload(() => import('./pages/contracts/ContractsPolicy'))
+const ContractsPending  = lazyWithReload(() => import('./pages/contracts/ContractsPending'))
 
 import SetPasswordPage from './pages/SetPasswordPage'
 import SplashScreen from './components/SplashScreen'
@@ -246,6 +251,11 @@ export default function App() {
               <Route path="/sales/eod/submit" element={<Suspense fallback={<PageSkeleton />}><EODReview /></Suspense>} />
               <Route path="/sales/eod-history" element={<Navigate to="/sales/eod" replace />} />
               <Route path="/sales/call-data" element={<CallData />} />
+              <Route path="/sales/contracts" element={<Suspense fallback={<PageSkeleton />}><ContractsPage /></Suspense>} />
+              <Route path="/sales/contracts/new" element={<Suspense fallback={<PageSkeleton />}><ContractNew /></Suspense>} />
+              <Route path="/sales/contracts/policy" element={<AdminRoute><Suspense fallback={<PageSkeleton />}><ContractsPolicy /></Suspense></AdminRoute>} />
+              <Route path="/sales/contracts/pending" element={<AdminRoute><Suspense fallback={<PageSkeleton />}><ContractsPending /></Suspense></AdminRoute>} />
+              <Route path="/sales/contracts/:id" element={<Suspense fallback={<PageSkeleton />}><ContractDetail /></Suspense>} />
               <Route path="/sales/commissions" element={<Suspense fallback={<PageSkeleton />}><CommissionPage /></Suspense>} />
               <Route path="/sales/commissions/:id" element={<Suspense fallback={<PageSkeleton />}><CommissionDetail /></Suspense>} />
               <Route path="/sales/setter-bot" element={<Suspense fallback={<PageSkeleton />}><SetterBot /></Suspense>} />

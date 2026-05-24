@@ -797,6 +797,60 @@ table.data.data-dense thead th { padding: 7px 10px; }
   color: var(--ink);
 }
 
+/* ── Editorial buttons — primary (ink fill) and ghost (hairline) ── */
+.editorial-btn-primary,
+.editorial-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  border-radius: 3px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+  border: 1px solid transparent;
+}
+.editorial-btn-primary {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.editorial-btn-primary:hover { background: #000; }
+.editorial-btn-primary:disabled {
+  background: var(--ink-3);
+  border-color: var(--ink-3);
+  cursor: not-allowed;
+}
+.editorial-btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--rule);
+}
+.editorial-btn-ghost:hover { background: var(--paper-2); border-color: var(--ink-3); }
+.editorial-btn-ghost:disabled { color: var(--ink-3); cursor: not-allowed; }
+
+/* ── Editorial text input — paper background, hairline border ── */
+.editorial-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  transition: border-color 160ms ease;
+}
+.editorial-input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+.editorial-input::placeholder { color: var(--ink-3); }
+
 /* ── Editorial KPI card — paper panel with responsive padding ── */
 .editorial-kpi-card {
   padding: 12px 14px;
