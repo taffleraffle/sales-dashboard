@@ -1551,6 +1551,16 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // alongside the main rows fetch — not chained, so we don't add latency.
   const [editors, setEditors] = useState(() => cached?.editors || [])
   const [offers, setOffers] = useState(() => cached?.offers || [])
+  // Admins are tracked in lib_creative_editors but should NOT appear in
+  // the "EDITORS" filter chip, the assignment dropdown, or the per-editor
+  // stats breakdown — they don't take queue work, they manage it.
+  // Keep `editors` full so id→name lookups still resolve historical
+  // assignments; derive `assignableEditors` for any user-facing list.
+  // Ben caught this 2026-05-24 (Kmamajevs showing as a queue editor).
+  const assignableEditors = useMemo(
+    () => (editors || []).filter(e => e.tier !== 'admin'),
+    [editors],
+  )
   // Distinct creators derived from current rows — used for the Creator
   // dropdown in matrix + detail modal. Recomputed when rows change so a
   // newly-added creator immediately appears in the picker.
@@ -1926,7 +1936,11 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const notRunCount = useMemo(() => rows.filter(r => !r.has_been_run).length, [rows])
   // Stable reference for MatrixRow's editor dropdown — same memo concern
   // as openDrawer: avoid re-creating this array each render.
-  const activeEditors = useMemo(() => editors.filter(e => e.active), [editors])
+  // Excludes admins so they don't show up in assignment dropdowns.
+  const activeEditors = useMemo(
+    () => editors.filter(e => e.active && e.tier !== 'admin'),
+    [editors],
+  )
   // Status counts. 'Edited' includes Joined (since Joined is a sub-state of
   // edited). 'Merged' is a narrower filter showing only Joined.
   const stageCounts = useMemo(() => ({
@@ -3067,7 +3081,7 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
             onChange={e => (onAssignEditor || onPatch)(r.id, { assigned_editor_id: e.target.value || null })}
             style={{ ...cellSelectStyle, color: r.assigned_editor_id ? 'var(--ink)' : 'var(--ink-4)' }}>
             <option value="">—</option>
-            {editors.filter(e => e.active).map(e => (
+            {editors.filter(e => e.active && e.tier !== 'admin').map(e => (
               <option key={e.id} value={e.id}>{e.name}</option>
             ))}
           </select>
@@ -3311,7 +3325,7 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
             <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--ink-4)', flexShrink: 0 }} />
             <span style={{ flex: 1 }}>Unassigned</span>
           </button>
-          {editors.filter(e => e.active !== false).map(e => {
+          {editors.filter(e => e.active !== false && e.tier !== 'admin').map(e => {
             const isOn = e.id === value
             return (
               <button key={e.id} type="button"
@@ -5620,7 +5634,7 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
               <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Assign to editor</div>
               <select value={batchEditorId} onChange={e => setBatchEditorId(e.target.value)} style={selectStyle} disabled={busy}>
                 <option value="">— Leave unassigned —</option>
-                {editors.filter(e => e.active !== false).map(e => (
+                {editors.filter(e => e.active !== false && e.tier !== 'admin').map(e => (
                   <option key={e.id} value={e.id}>{e.name}</option>
                 ))}
               </select>
@@ -5737,6 +5751,20 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     if (scope.isEditorView && scope.editorId) return new Set([scope.editorId])
     return new Set()
   })
+  // Auto-clear any admin IDs from the selectedEditors filter. The filter
+  // chip used to list everyone including admins; if a user had Kmamajevs
+  // selected from before this fix, drop it on first load with the editors
+  // data so the UI doesn't show a stale admin filter.
+  // Ben caught this 2026-05-24 — 'EDITORS: KMAMAJEVS' chip was active.
+  useEffect(() => {
+    if (!editors || editors.length === 0) return
+    const adminIds = new Set(editors.filter(e => e.tier === 'admin').map(e => e.id))
+    if (adminIds.size === 0) return
+    setSelectedEditors(prev => {
+      const next = new Set([...prev].filter(id => !adminIds.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [editors])
   // Status multi-select for filtering — empty = show all.
   const [selectedStatuses, setSelectedStatuses] = useState(() => new Set())
 
@@ -6023,7 +6051,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         )}
         <span style={{ flex: 1 }} />
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
-          {editors.filter(e => e.active).length} editor{editors.filter(e => e.active).length === 1 ? '' : 's'} · {filteredTasks.length} of {tasks.length} task{tasks.length === 1 ? '' : 's'}
+          {editors.filter(e => e.active && e.tier !== 'admin').length} editor{editors.filter(e => e.active && e.tier !== 'admin').length === 1 ? '' : 's'} · {filteredTasks.length} of {tasks.length} task{tasks.length === 1 ? '' : 's'}
         </span>
         <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'white' }}>
           <ViewBtn active={view === 'inbox'}    onClick={() => setView('inbox')}>Inbox</ViewBtn>
@@ -6052,7 +6080,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
             options={[
               { value: 'unassigned', label: 'Unassigned', dot: '#999',
                 count: tasks.filter(t => t.editor_id == null).length },
-              ...editors.filter(e => e.active).map(e => ({
+              ...editors.filter(e => e.active && e.tier !== 'admin').map(e => ({
                 value: e.id, label: e.name, dot: editorColor(e),
                 count: tasks.filter(t => t.editor_id === e.id).length,
               }))
@@ -6118,7 +6146,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
             if (errors.length) setErr(errors.join(' · '))
           }} />
       ) : view === 'timeline' ? (
-        <TimelineView tasks={filteredTasks} editors={editors.filter(e => e.active)}
+        <TimelineView tasks={filteredTasks} editors={editors.filter(e => e.active && e.tier !== 'admin')}
           onEdit={setEditingTask} onMoveEditor={moveTaskToEditor}
           onUpdateAssignment={updateTaskAssignment}
           onAddTask={(pre) => { setAddTaskPrefill(pre); setAddTaskOpen(true) }} />
@@ -6127,7 +6155,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       ) : (
         <KanbanView
           tasks={filteredTasks}
-          editors={editors.filter(e => e.active)}
+          editors={editors.filter(e => e.active && e.tier !== 'admin')}
           onEdit={setEditingTask}
           onMove={moveTaskStatus}
           onReassignEditor={moveTaskToEditor}
@@ -6169,13 +6197,13 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       )}
       {shareLinksOpen && (
         <ShareLinksModal
-          editors={editors.filter(e => e.active)}
+          editors={editors.filter(e => e.active && e.tier !== 'admin')}
           onClose={() => setShareLinksOpen(false)}
         />
       )}
       {addTaskOpen && (
         <AddTaskModal
-          editors={editors.filter(e => e.active)}
+          editors={editors.filter(e => e.active && e.tier !== 'admin')}
           prefillEditorId={addTaskPrefill.editorId}
           prefillDue={addTaskPrefill.due}
           prefillStart={addTaskPrefill.start}
@@ -6325,7 +6353,7 @@ function EditorSelector({ editors, selected, onToggle, onClearAll, onEditEditor,
     for (const t of tasks) m[t.editor_id || 'unassigned'] = (m[t.editor_id || 'unassigned'] || 0) + 1
     return m
   }, [tasks])
-  const sortedEditors = editors.filter(e => e.active)
+  const sortedEditors = editors.filter(e => e.active && e.tier !== 'admin')
 
   return (
     <div style={{
@@ -9274,7 +9302,7 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
           <Field label="Editor (optional)">
             <select value={editorId} onChange={e => setEditorId(e.target.value)} style={selectStyle}>
               <option value="">— Unassigned</option>
-              {editors.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+              {editors.filter(e => e.tier !== 'admin').map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
           </Field>
           <Field label="Task type">
