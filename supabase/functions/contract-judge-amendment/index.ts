@@ -1,11 +1,19 @@
 // contract-judge-amendment
-// Called from the dashboard right after a closer submits an amendment.
-// Loads the active policy doc + the parent contract + the amendment request,
-// calls Claude Sonnet 4.6 with a forced-tool response, persists the verdict,
-// and posts to Slack if the verdict needs Ben's call.
+// Conversational judge. Each amendment is a back-and-forth thread:
+//   - first call (no prior judge message): produces the initial verdict +
+//     inserts both the closer's opening message (idempotent) and the judge
+//     response into contract_amendment_messages
+//   - follow-up calls: includes full message history + new closer turn,
+//     Claude responds conversationally, can shift verdict mid-thread,
+//     can propose specific clause language for lock-in
 //
 // Invoked from ContractDetail.jsx via supabase.functions.invoke():
-//   supabase.functions.invoke('contract-judge-amendment', { body: { amendment_id } })
+//   supabase.functions.invoke('contract-judge-amendment',
+//     { body: { amendment_id, new_message? } })
+//
+// new_message is optional. When present, we insert it as a 'closer'
+// message before calling Claude. When absent (initial submit flow), we
+// assume the opening 'closer' message is already in the table.
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -13,27 +21,32 @@ import { handleCors, getCorsHeaders } from '../_shared/cors.ts'
 
 const MODEL = 'claude-sonnet-4-6'
 
-const JUDGE_TOOL = {
-  name: 'submit_verdict',
-  description: 'Submit your verdict on the amendment request',
+// Tool the judge calls every turn. `reply` is the conversational text
+// shown to the closer. `verdict` is optional — only set when the judge's
+// position changes this turn (allow / review / reject). `proposed_clause`
+// is optional — only set when the judge wants to suggest specific wording
+// that would resolve the request.
+const DISCUSSION_TOOL = {
+  name: 'discussion_turn',
+  description: 'Respond to the closer in the amendment thread',
   input_schema: {
     type: 'object',
     properties: {
+      reply: {
+        type: 'string',
+        description: 'Your conversational reply to the closer. 2-6 sentences. Cite the specific policy rule(s) in play. If the closer is asking about counter-options, walk through 2-3 things they could take back to the client.',
+      },
       verdict: {
         type: 'string',
         enum: ['allow', 'review', 'reject'],
-        description: 'allow = auto-apply per policy. review = grey-area, escalate to Ben. reject = clearly blocked by policy.',
+        description: "OPTIONAL. Only set when your position has CHANGED or this is the first turn. 'allow'=auto-applicable per policy, 'review'=grey-area or bundled-block, 'reject'=clearly blocked. Omit if you're still discussing options without committing.",
       },
-      reasoning: {
+      proposed_clause: {
         type: 'string',
-        description: 'Two to four sentences. Cite the specific policy rule by name. If it bundles a small reasonable ask with a toxic clause, flag the bundle explicitly.',
-      },
-      proposed_redline: {
-        type: 'string',
-        description: 'If verdict=allow, the exact text to add to or replace in the contract. If verdict=review or reject, leave empty string.',
+        description: 'OPTIONAL. If you can draft specific clause language that would resolve the request, put it here. The closer will see this as a quotable redline. Omit if discussion is exploratory.',
       },
     },
-    required: ['verdict', 'reasoning', 'proposed_redline'],
+    required: ['reply'],
   },
 }
 
@@ -47,11 +60,11 @@ serve(async (req) => {
   })
 
   try {
-    const { amendment_id } = await req.json()
+    const { amendment_id, new_message } = await req.json()
     if (!amendment_id) return json(400, { error: 'amendment_id required' })
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const supabaseUrl  = Deno.env.get('SUPABASE_URL')!
+    const serviceKey   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
     if (!anthropicKey) return json(500, { error: 'ANTHROPIC_API_KEY not configured' })
 
@@ -65,9 +78,7 @@ serve(async (req) => {
       .maybeSingle()
     if (aErr) return json(500, { error: `amendment fetch: ${aErr.message}` })
     if (!amendment) return json(404, { error: 'amendment not found' })
-    if (amendment.status !== 'pending') {
-      return json(409, { error: `amendment already ${amendment.status}`, verdict: amendment.ai_verdict })
-    }
+    if (amendment.locked_at) return json(409, { error: 'amendment is locked' })
 
     // 2. Fetch active policy
     const { data: policy, error: pErr } = await supa
@@ -84,89 +95,106 @@ serve(async (req) => {
 
     const contract = amendment.contracts
 
-    // 3. Build the prompt. Policy + contract context go in a cached system block
-    //    so repeat invocations within the cache TTL avoid re-billing those tokens.
+    // 3. Ensure the opening closer message exists. On the very first call
+    //    (initial submit flow) the dashboard doesn't pass new_message —
+    //    the requested_change IS the opening message.
+    const { data: existingMessages } = await supa
+      .from('contract_amendment_messages')
+      .select('id, role')
+      .eq('amendment_id', amendment_id)
+      .order('created_at', { ascending: true })
+
+    if (!existingMessages?.some(m => m.role === 'closer')) {
+      await supa.from('contract_amendment_messages').insert({
+        amendment_id,
+        role: 'closer',
+        content: amendment.requested_change,
+      })
+    }
+
+    // 4. If a follow-up new_message was sent, insert it now (after any
+    //    opening message backfill above) so it lands after the seed.
+    if (new_message && typeof new_message === 'string' && new_message.trim()) {
+      await supa.from('contract_amendment_messages').insert({
+        amendment_id,
+        role: 'closer',
+        content: new_message.trim(),
+      })
+    }
+
+    // 5. Re-fetch the full thread in chronological order
+    const { data: thread, error: tErr } = await supa
+      .from('contract_amendment_messages')
+      .select('role, content, metadata, created_at')
+      .eq('amendment_id', amendment_id)
+      .order('created_at', { ascending: true })
+    if (tErr) return json(500, { error: `thread fetch: ${tErr.message}` })
+
+    // 6. Build the prompt. Policy + template context are cached.
+    const templateContext = contract.contract_type === 'retainer'
+      ? RETAINER_CONTEXT
+      : TRIAL_CONTEXT
+
     const systemBlocks = [
       {
         type: 'text',
-        text:
-`You are the OPT Digital contract amendment judge. You evaluate client-requested changes to OPT Digital service agreements and return a structured verdict: allow, review, or reject.
+        text: `You are the OPT Digital contract amendment judge, in a chat with the closer (a salesperson at OPT Digital). The closer brings you client amendment requests and you help them negotiate within OPT's policy.
 
-# OPT Digital amendment policy (active version)
+Your job each turn:
+1. If the closer is asking a fresh question, judge it against policy and give a clear verdict.
+2. If they're pushing back ("what if we countered with X?"), walk through 2-3 counter-options they could take back to the client.
+3. If they're asking for specific wording, draft it.
+4. If they're proposing something close to lock-in-able, surface that and use the proposed_clause field.
 
-The following policy is your sole source of truth for what is allowed, what needs Ben's escalation, and what is blocked. Cite the relevant rule in your reasoning. If a request is not explicitly covered, default to 'review' rather than guessing.
+Be a collaborative negotiator, not a gatekeeper. The closer is on OPT's side trying to close a deal. Your job is to keep them inside the policy guardrails while finding ways to say yes.
+
+Always call the discussion_turn tool. Always cite the specific policy rule(s) in play.
+
+# OPT Digital amendment policy (active)
 
 ${policy.policy_text}`,
         cache_control: { type: 'ephemeral' },
       },
       {
         type: 'text',
-        text:
-`# Decision rubric
-
-- verdict='allow' = the request is clearly covered by an ALLOW rule and can be auto-applied. Closer applies without Ben's involvement. Provide the exact redline text in proposed_redline.
-- verdict='review' = the request is grey-area, partially covered, bundles an allowed ask with a blocked one, or requires human judgement. Ben decides manually. proposed_redline should be empty.
-- verdict='reject' = the request is clearly covered by a BLOCK rule. No escalation path. proposed_redline should be empty.
-
-# Bundle detection (important)
-
-Some requests look reasonable on the surface but bundle a blocked clause with an allowed one. Examples:
-- "Add monthly reports" (allowed-looking) + "missed report = refund" (blocked) → review or reject the bundle, don't auto-apply.
-- "14-day cancellation notice" (allowed) + "pro-rata refund of unused month" (blocked) → review.
-- "Termination for convenience" (allowed standalone) + "satisfaction trigger" or "full refund of paid fees" (blocked) → reject.
-
-If you detect a bundle where part is allowed and part is blocked, return 'review' and explain the bundle in reasoning so Ben knows which half to keep.
-
-Always call the submit_verdict tool.`,
-      },
-    ]
-
-    const templateContext = contract.contract_type === 'retainer'
-      ? `RETAINER TEMPLATE ($9K / 90-day, marketed as "Work For Free Until We Do"). Key clauses to reference:
-- Clause 4: Guarantee (top-3 ranking + DBA "Opt Digital Instructions" + 10 photos/month + 2 reviews/week + 5-day response). Eligibility-gated; failure to meet eligibility forfeits guarantee.
-- Clause 4(c): 30 additional days of free service if positive movement but ranking not hit
-- Clause 4(d): mutual decision after extension period — retainer or end relationship with no further obligation
-- Clause 7.2: Direct Debit with $1.25/2.9% Stripe fee + $7 dishonour fee + 48h notice for cancel/change
-- Clause 14: 6-month liability cap, indemnity covers any negligent/fraudulent/criminal act
-- Clause 15: unilateral subcontracting consent
-- Clause 16: termination only on breach + 30-day cure
-- Clause 17: 14-day dispute resolution
-- Clause 19.1: NZ governing law
-
-OFFER vs CONTRACT GAP (important for retainer judgments):
-The marketing pitch ("Work For Free Until We Do") implies open-ended free work until ranking. The contract caps free continued service at 30 days past the 90-day guarantee, then requires a mutual decision. When a client requests extending free work beyond the 30-day cap, treat as REVIEW (not auto-reject) — it aligns with the offer pitch but exceeds the contract mechanic, and Ben decides whether to honour offer-spirit on a per-deal basis. Requests for INDEFINITE free work or removing the cap entirely → REJECT (no unbounded commitments).`
-      : `TRIAL TEMPLATE ($997 / 14-day, auto-renews to recurring retainer). Key clauses to reference:
-- Clause 4: Continuation of Project — auto-renews to $997/month after 14-day trial unless cancelled in writing
-- Clause 4(g): 30-day cancellation notice required post-trial; fees remain payable during notice
-- Clause 7.2: Payment Authority — irrevocable continuing authority for Stripe DD; 48h notice for changes
-- Clause 7.6: 20% per annum late-payment interest
-- Clause 12.2(d)(e): Website is Developed IP, transfers on completion, hosting fees may apply if OPT continues hosting
-- Clause 14: 6-month liability cap, indemnity covers any negligent/fraudulent/criminal act
-- Clause 15: unilateral subcontracting consent
-- Clause 16.5: Cancellation Notice — 30 days, all fees payable during notice, no pro-rata refund
-- Clause 17: 14-day dispute resolution
-- Clause 19.1: NZ governing law
-(No guarantee clause in this template.)`
-
-    const userPrompt =
-`## Contract
+        text: `# Contract under discussion
 - Client: ${contract.client_name}${contract.client_company ? ` (${contract.client_company})` : ''}
 - Template: ${contract.contract_type === 'retainer' ? 'Retainer ($9K / 90-day)' : 'Trial ($997 / 14-day)'}
 - Fee: ${contract.fee_amount_usd ? '$' + contract.fee_amount_usd : 'unset'}
 - Project period: ${contract.project_period_days ? contract.project_period_days + ' days' : 'unset'}
-- Current version: v${contract.version}
-- Scope: ${contract.scope_summary || 'standard OPT Digital local SEO services'}
 
-## Template clause map (reference when citing clauses in reasoning)
-
+# Template clause map (cite these when reasoning)
 ${templateContext}
 
-## Closer's amendment request
+# Bundle detection
+Some requests look reasonable on the surface but bundle a blocked clause with an allowed one. Examples:
+- "Add monthly reports" (allowed-looking) + "missed report = refund" (blocked) -> review the bundle.
+- "14-day cancellation notice" (allowed) + "pro-rata refund of unused month" (blocked) -> review.
+- "Termination for convenience" (allowed standalone) + "satisfaction trigger" or "full refund of paid fees" (blocked) -> reject the bundle.
+When you spot a bundle, separate the parts and tell the closer which half can survive.`,
+      },
+    ]
 
-${amendment.clause_reference ? `Clause reference: ${amendment.clause_reference}\n` : ''}${amendment.original_excerpt ? `Original excerpt: "${amendment.original_excerpt}"\n` : ''}
-What the client wants: ${amendment.requested_change}`
+    // 7. Format thread as Claude messages. Closer = user. Judge = assistant.
+    const claudeMessages = thread!.map(m => {
+      if (m.role === 'closer') {
+        return { role: 'user', content: m.content }
+      }
+      // Judge's prior turns: replay as assistant text. We don't replay the
+      // tool_use structure because that complicates multi-turn parsing —
+      // the text content is sufficient context for the next turn.
+      let txt = m.content
+      const md: any = m.metadata
+      if (md?.proposed_clause) {
+        txt += `\n\n[proposed clause: ${md.proposed_clause}]`
+      }
+      if (md?.verdict) {
+        txt += `\n\n[verdict at this turn: ${md.verdict}]`
+      }
+      return { role: 'assistant', content: txt }
+    })
 
-    // 4. Call Claude
+    // 8. Call Claude
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -178,9 +206,9 @@ What the client wants: ${amendment.requested_change}`
         model: MODEL,
         max_tokens: 1024,
         system: systemBlocks,
-        tools: [JUDGE_TOOL],
-        tool_choice: { type: 'tool', name: 'submit_verdict' },
-        messages: [{ role: 'user', content: userPrompt }],
+        tools: [DISCUSSION_TOOL],
+        tool_choice: { type: 'tool', name: 'discussion_turn' },
+        messages: claudeMessages,
       }),
     })
 
@@ -192,41 +220,54 @@ What the client wants: ${amendment.requested_change}`
     const claudeBody = await claudeRes.json()
     const toolUse = claudeBody.content?.find((c: any) => c.type === 'tool_use')
     if (!toolUse?.input) {
-      return json(502, { error: 'Claude did not call submit_verdict', raw: claudeBody })
+      return json(502, { error: 'Claude did not call discussion_turn', raw: claudeBody })
     }
 
-    const verdict: string  = toolUse.input.verdict
-    const reasoning: string = toolUse.input.reasoning
-    const proposedRedline: string = toolUse.input.proposed_redline || ''
+    const reply: string            = toolUse.input.reply
+    const verdict: string | null   = toolUse.input.verdict || null
+    const proposedClause: string   = toolUse.input.proposed_clause || ''
 
-    // 5. Persist verdict. Auto-progress status:
-    //    allow  → status='approved' (closer can mark applied)
-    //    review → status='judged'   (waiting for Ben in /pending)
-    //    reject → status='rejected'
-    const nextStatus =
-      verdict === 'allow'  ? 'approved' :
-      verdict === 'reject' ? 'rejected' :
-      'judged'
-
-    const { error: uErr } = await supa
-      .from('contract_amendments')
-      .update({
-        ai_verdict: verdict,
-        ai_reasoning: reasoning,
-        ai_proposed_redline: proposedRedline,
-        ai_judged_at: new Date().toISOString(),
-        status: nextStatus,
+    // 9. Insert judge message with structured metadata
+    const { error: insErr } = await supa
+      .from('contract_amendment_messages')
+      .insert({
+        amendment_id,
+        role: 'judge',
+        content: reply,
+        metadata: {
+          verdict,
+          proposed_clause: proposedClause,
+        },
       })
-      .eq('id', amendment_id)
-    if (uErr) return json(500, { error: `amendment update: ${uErr.message}` })
+    if (insErr) return json(500, { error: `message insert: ${insErr.message}` })
 
-    // 6. Slack escalation for grey-area or rejected requests. Reject still
-    //    notifies because Ben likely wants visibility on every blocked ask
-    //    so he can sense-check whether his policy is too strict.
-    if (verdict !== 'allow') {
+    // 10. Update parent amendment fields when the judge gives a verdict
+    //     this turn. We always update ai_judged_at; we update verdict
+    //     fields only when the judge committed one.
+    const update: Record<string, unknown> = {
+      ai_judged_at: new Date().toISOString(),
+    }
+    if (verdict) {
+      update.ai_verdict        = verdict
+      update.ai_reasoning      = reply
+      update.ai_proposed_redline = proposedClause
+      update.status =
+        verdict === 'allow'  ? 'approved' :
+        verdict === 'reject' ? 'rejected' :
+        'judged'
+    }
+    await supa.from('contract_amendments').update(update).eq('id', amendment_id)
+
+    // 11. Slack: only on first verdict per amendment, only when not 'allow'.
+    //     We detect "first verdict" by checking whether any prior judge
+    //     message had a verdict in its metadata.
+    const priorVerdicts = thread!
+      .filter(m => m.role === 'judge')
+      .some(m => (m.metadata as any)?.verdict)
+    if (verdict && verdict !== 'allow' && !priorVerdicts) {
       await postToSlack({
         verdict,
-        reasoning,
+        reasoning: reply,
         clientName: contract.client_name,
         clauseRef: amendment.clause_reference,
         requestedChange: amendment.requested_change,
@@ -235,15 +276,41 @@ What the client wants: ${amendment.requested_change}`
     }
 
     return json(200, {
+      reply,
       verdict,
-      reasoning,
-      proposed_redline: proposedRedline,
-      status: nextStatus,
+      proposed_clause: proposedClause,
     })
   } catch (err) {
     return json(500, { error: (err as Error).message })
   }
 })
+
+const RETAINER_CONTEXT = `RETAINER TEMPLATE ($9K / 90-day, marketed as "Work For Free Until We Do"). Key clauses:
+- Clause 4: Guarantee (top-3 ranking + DBA "Opt Digital Instructions" + 10 photos/month + 2 reviews/week + 5-day response). Eligibility-gated.
+- Clause 4(c): 30 additional days of free service if positive movement but ranking not hit.
+- Clause 4(d): mutual decision after extension — retainer or end with no further obligation.
+- Clause 7.2: Direct Debit + $1.25/2.9% Stripe fee + $7 dishonour fee + 48h notice for cancel/change.
+- Clause 14: 6-month liability cap, indemnity covers negligent/fraudulent/criminal acts.
+- Clause 15: unilateral subcontracting consent.
+- Clause 16: termination only on breach + 30-day cure.
+- Clause 17: 14-day dispute resolution.
+- Clause 19.1: NZ governing law.
+
+OFFER vs CONTRACT GAP (important for retainer judgments):
+The marketing pitch ("Work For Free Until We Do") implies open-ended free work until ranking. The contract caps free continued service at 30 days past the 90-day guarantee, then requires mutual decision. When client requests extending free work beyond the 30-day cap, treat as REVIEW (not auto-reject) — aligns with offer pitch but exceeds contract mechanic, Ben decides per-deal. Requests for INDEFINITE free work or removing the cap entirely -> REJECT.`
+
+const TRIAL_CONTEXT = `TRIAL TEMPLATE ($997 / 14-day, auto-renews to recurring retainer). Key clauses:
+- Clause 4: Continuation of Project — auto-renews to $997/month after 14-day trial unless cancelled in writing.
+- Clause 4(g): 30-day cancellation notice required post-trial; fees remain payable during notice.
+- Clause 7.2: Payment Authority — irrevocable continuing authority for Stripe DD; 48h notice for changes.
+- Clause 7.6: 20% per annum late-payment interest.
+- Clause 12.2(d)(e): Website is Developed IP, transfers on completion, hosting fees may apply if OPT continues hosting.
+- Clause 14: 6-month liability cap, indemnity covers negligent/fraudulent/criminal acts.
+- Clause 15: unilateral subcontracting consent.
+- Clause 16.5: Cancellation Notice — 30 days, all fees payable during notice, no pro-rata refund.
+- Clause 17: 14-day dispute resolution.
+- Clause 19.1: NZ governing law.
+(No guarantee clause in this template.)`
 
 async function postToSlack(args: {
   verdict: string
@@ -254,7 +321,7 @@ async function postToSlack(args: {
   amendmentId: string
 }) {
   const webhook = Deno.env.get('SLACK_CONTRACTS_WEBHOOK_URL')
-  if (!webhook) return  // silently no-op; Slack is optional
+  if (!webhook) return
 
   const dashboardBase = Deno.env.get('DASHBOARD_BASE_URL')
     || 'https://sales-dashboard-ftct.onrender.com'
