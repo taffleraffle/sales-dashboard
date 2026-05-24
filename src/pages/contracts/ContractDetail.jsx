@@ -148,6 +148,7 @@ export default function ContractDetail() {
           <div>
             <span className="eyebrow eyebrow-accent">
               {contract.contract_type === 'retainer' ? 'Retainer template' : 'Trial template'}
+              {' · v'}{contract.version || 1}
             </span>
             <h1 style={{ fontFamily: 'var(--serif)', fontSize: 26, color: 'var(--ink)', margin: '8px 0 0' }}>
               {contract.client_name}
@@ -156,7 +157,21 @@ export default function ContractDetail() {
               <p style={{ fontSize: 14, color: 'var(--ink-3)', margin: '4px 0 0' }}>{contract.client_company}</p>
             )}
           </div>
-          <SignedPdfLink path={contract.agreement_pdf_path} />
+          <div className="flex flex-col items-end gap-2">
+            <SignedPdfLink path={contract.agreement_pdf_path} label="Open original" />
+            {contract.amended_pdf_path && (
+              <SignedPdfLink path={contract.amended_pdf_path} label={`Open amended v${contract.version}`} primary />
+            )}
+            <RegenerateButton
+              contract={contract}
+              amendments={amendments}
+              onRegenerated={async () => {
+                // Refresh contract row so amended_pdf_path + version update
+                const { data } = await supabase.from('contracts').select('*').eq('id', id).maybeSingle()
+                if (data) setContract(data)
+              }}
+            />
+          </div>
         </div>
         <div className="grid grid-cols-3 gap-6 mt-6 pt-4" style={{ borderTop: '1px solid var(--rule)' }}>
           <Stat label="Fee" value={contract.fee_amount_usd ? `$${Number(contract.fee_amount_usd).toLocaleString()}` : '—'} />
@@ -402,15 +417,6 @@ function LockedPanel({ amendment, fallbackClause }) {
             Agreed position frozen{lockedAt ? ` ${lockedAt.toLocaleString()}` : ''}
           </p>
         </div>
-        <button
-          type="button"
-          disabled
-          className="editorial-btn-primary"
-          title="Regen pipeline needs your trial.docx + retainer.docx templates — see Phase 2 in the chat handoff"
-          style={{ opacity: 0.55, cursor: 'not-allowed' }}
-        >
-          <FileText size={ICON.sm} /> Generate amended .docx
-        </button>
       </div>
 
       {clauseText ? (
@@ -424,12 +430,12 @@ function LockedPanel({ amendment, fallbackClause }) {
         </div>
       ) : (
         <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: 0, fontStyle: 'italic' }}>
-          No specific clause text was committed in the thread. Refer to the conversation above for the agreed position. The regenerated agreement (once templates are wired) will splice in the discussion's resolution.
+          No specific clause text was committed in the thread. The regenerated agreement will splice this in from the discussion's resolution.
         </p>
       )}
 
       <p style={{ fontSize: 11, color: 'var(--ink-3)', margin: '12px 0 0', fontStyle: 'italic' }}>
-        DOCX regen status: <strong style={{ color: 'var(--down)', fontStyle: 'normal' }}>not yet generated</strong> — needs base trial + retainer templates to be wired into the pipeline.
+        Hit "Regenerate amended agreement" at the top of this page to produce the v{(amendment.contracts?.version || 1) + 1} PDF for PandaDoc.
       </p>
     </div>
   )
@@ -526,7 +532,7 @@ function Stat({ label, value }) {
 }
 
 // SignedPdfLink — generates a 5-minute signed URL for the uploaded agreement
-function SignedPdfLink({ path }) {
+function SignedPdfLink({ path, label = 'Open agreement PDF', primary = false }) {
   const [opening, setOpening] = useState(false)
   if (!path) return null
 
@@ -545,11 +551,63 @@ function SignedPdfLink({ path }) {
       type="button"
       onClick={open}
       disabled={opening}
-      className="editorial-btn-ghost"
+      className={primary ? 'editorial-btn-primary' : 'editorial-btn-ghost'}
       style={{ flexShrink: 0 }}
     >
       {opening ? <Loader size={ICON.sm} className="animate-spin" /> : <FileText size={ICON.sm} />}
-      Open agreement PDF
+      {label}
     </button>
+  )
+}
+
+// RegenerateButton — runs the regenerate-amended-agreement Edge fn.
+// Enabled only when there's at least one locked amendment on the contract.
+function RegenerateButton({ contract, amendments, onRegenerated }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr]   = useState(null)
+  const lockedCount = amendments.filter(a => a.locked_at).length
+
+  if (lockedCount === 0) {
+    return (
+      <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)', fontStyle: 'italic', textAlign: 'right', maxWidth: 220 }}>
+        Lock in at least one amendment thread to enable agreement regeneration.
+      </span>
+    )
+  }
+
+  async function regen() {
+    setBusy(true); setErr(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('regenerate-amended-agreement', {
+        body: { contract_id: contract.id },
+      })
+      if (error) throw error
+      if (data?.signed_url) {
+        window.open(data.signed_url, '_blank', 'noopener,noreferrer')
+      }
+      await onRegenerated()
+    } catch (e) {
+      setErr(e.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={regen}
+        disabled={busy}
+        className="editorial-btn-primary"
+        style={{ borderColor: 'var(--accent)', flexShrink: 0 }}
+      >
+        {busy ? <><Loader size={ICON.sm} className="animate-spin" /> Generating…</> : <><FileText size={ICON.sm} /> Regenerate amended agreement</>}
+      </button>
+      <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
+        Will splice in {lockedCount} locked amendment{lockedCount === 1 ? '' : 's'}
+      </span>
+      {err && <span style={{ fontSize: 10, color: 'var(--down)', fontFamily: 'var(--mono)', maxWidth: 240, textAlign: 'right' }}>{err}</span>}
+    </div>
   )
 }
