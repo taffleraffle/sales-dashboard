@@ -80,17 +80,20 @@ serve(async (req) => {
     if (!amendment) return json(404, { error: 'amendment not found' })
     if (amendment.locked_at) return json(409, { error: 'amendment is locked' })
 
-    // 2. Fetch active policy
+    // 2. Fetch active policy (scoped to amendment kind — migration 021 added
+    //    a parallel 'downsell' kind for the coach function. Without the
+    //    explicit filter we could match the wrong row when both are active.)
     const { data: policy, error: pErr } = await supa
       .from('contract_policy')
       .select('policy_text, created_at')
       .eq('active', true)
+      .eq('kind', 'amendment')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
     if (pErr) return json(500, { error: `policy fetch: ${pErr.message}` })
     if (!policy || !policy.policy_text?.trim()) {
-      return json(412, { error: 'no active policy doc — paste seed into /sales/contracts/policy first' })
+      return json(412, { error: 'no active amendment policy doc — paste seed into the Amendment tab at /sales/contracts/policy first' })
     }
 
     const contract = amendment.contracts

@@ -44,10 +44,10 @@ export default function ContractsPage() {
         <div>
           <span className="eyebrow eyebrow-accent">OPT Digital · Contracts</span>
           <h1 style={{ fontFamily: 'var(--serif)', fontSize: 28, color: 'var(--ink)', margin: '6px 0 0', lineHeight: 1.1 }}>
-            Amendment <em style={{ fontStyle: 'italic' }}>reviews</em>
+            Contract <em style={{ fontStyle: 'italic' }}>reviews</em>
           </h1>
-          <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>
-            Client asking to change a contract? Upload the agreement, tell the judge what they want, and get back what we can approve plus a regenerated agreement to re-upload to PandaDoc.
+          <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4, maxWidth: 720 }}>
+            Open a contract to work two things on the same page — downsell options to save a wobbling client, and contract negotiation for clause-by-clause amendment requests. The coach + judge both read live policy and quote it back to you.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">

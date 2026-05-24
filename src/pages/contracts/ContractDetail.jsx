@@ -7,6 +7,7 @@ import {
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { ICON } from '../../utils/constants'
+import DownsellCoach from './DownsellCoach'
 
 const VERDICT_STYLES = {
   allow:  { label: 'Approvable',  color: 'var(--up)' },
@@ -193,62 +194,86 @@ export default function ContractDetail() {
         </div>
       </div>
 
-      {/* Amendment threads */}
-      {amendments.length === 0 && (
-        <div className="tile tile-feedback p-6 text-center" style={{ marginBottom: 24 }}>
-          <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>
-            No amendment threads on this contract yet. Open one below.
-          </p>
+      {/* Two-part contract review page:
+            1. Downsell options  — save-the-deal coach (top, because save
+               attempts are higher priority than clause tweaks)
+            2. Contract negotiation  — amendment judge for clause changes
+          Each gets its own clearly-labelled section. */}
+
+      {/* ────────── Section 1: Downsell options ────────── */}
+      <DownsellCoach contractId={id} contract={contract} />
+
+      {/* ────────── Section 2: Contract negotiation ────────── */}
+      <div style={{ marginTop: 48 }}>
+        <div className="flex items-center gap-3 mb-4 pb-3" style={{ borderBottom: '1px solid var(--rule)' }}>
+          <MessageCircle size={18} style={{ color: 'var(--accent)' }} />
+          <div>
+            <span className="eyebrow eyebrow-accent">OPT Digital · Contract negotiation</span>
+            <h2 style={{ fontFamily: 'var(--serif)', fontSize: 22, color: 'var(--ink)', margin: '4px 0 0' }}>
+              Amend the <em style={{ fontStyle: 'italic' }}>agreement</em>
+            </h2>
+            <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4, maxWidth: 640 }}>
+              Client asking to change a specific clause? Open a thread per ask. The judge runs each through the amendment policy and tells you what you can lock in vs what needs Ben.
+            </p>
+          </div>
         </div>
-      )}
 
-      {amendments.map(a => (
-        <AmendmentThread
-          key={a.id}
-          amendment={a}
-          messages={messagesByAmendment[a.id] || []}
-          onChange={() => refreshAmendment(a.id)}
-        />
-      ))}
+        {amendments.length === 0 && (
+          <div className="tile tile-feedback p-6 text-center" style={{ marginBottom: 24 }}>
+            <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>
+              No amendment threads on this contract yet. Open one below.
+            </p>
+          </div>
+        )}
 
-      {/* Start a new amendment thread */}
-      <div className="tile tile-feedback p-6">
-        <span className="eyebrow eyebrow-bare">Start a new amendment thread</span>
-        <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '6px 0 16px' }}>
-          For a different clause or a separate ask. Each thread gets its own back-and-forth with the judge.
-        </p>
-        <form onSubmit={startNewAmendment} className="space-y-3">
-          <div>
-            <label style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>What the client wants changed</label>
-            <textarea
-              value={newRequest}
-              onChange={e => setNewRequest(e.target.value)}
-              placeholder="e.g. Client wants jurisdiction moved to Tennessee instead of New Zealand."
-              rows={3}
-              className="editorial-input w-full mt-1"
-              style={{ resize: 'vertical' }}
-              required
-            />
-          </div>
-          <div>
-            <label style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>Clause reference (optional)</label>
-            <input
-              type="text"
-              value={newClauseRef}
-              onChange={e => setNewClauseRef(e.target.value)}
-              placeholder="e.g. Clause 19.1"
-              className="editorial-input w-full mt-1"
-            />
-          </div>
-          {newErr && (
-            <p style={{ fontSize: 12, color: 'var(--down)', fontFamily: 'var(--mono)' }}>{newErr}</p>
-          )}
-          <div className="flex items-center justify-end">
-            <button type="submit" disabled={creatingNew || !newRequest.trim()} className="editorial-btn-primary">
-              {creatingNew ? <><Loader size={ICON.sm} className="animate-spin" /> Judging…</> : <><Plus size={ICON.sm} /> Start thread</>}
-            </button>
-          </div>
-        </form>
+        {amendments.map(a => (
+          <AmendmentThread
+            key={a.id}
+            amendment={a}
+            messages={messagesByAmendment[a.id] || []}
+            onChange={() => refreshAmendment(a.id)}
+          />
+        ))}
+
+        {/* Start a new amendment thread */}
+        <div className="tile tile-feedback p-6">
+          <span className="eyebrow eyebrow-bare">Start a new amendment thread</span>
+          <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '6px 0 16px' }}>
+            For a different clause or a separate ask. Each thread gets its own back-and-forth with the judge.
+          </p>
+          <form onSubmit={startNewAmendment} className="space-y-3">
+            <div>
+              <label style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>What the client wants changed</label>
+              <textarea
+                value={newRequest}
+                onChange={e => setNewRequest(e.target.value)}
+                placeholder="e.g. Client wants jurisdiction moved to Tennessee instead of New Zealand."
+                rows={3}
+                className="editorial-input w-full mt-1"
+                style={{ resize: 'vertical' }}
+                required
+              />
+            </div>
+            <div>
+              <label style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>Clause reference (optional)</label>
+              <input
+                type="text"
+                value={newClauseRef}
+                onChange={e => setNewClauseRef(e.target.value)}
+                placeholder="e.g. Clause 19.1"
+                className="editorial-input w-full mt-1"
+              />
+            </div>
+            {newErr && (
+              <p style={{ fontSize: 12, color: 'var(--down)', fontFamily: 'var(--mono)' }}>{newErr}</p>
+            )}
+            <div className="flex items-center justify-end">
+              <button type="submit" disabled={creatingNew || !newRequest.trim()} className="editorial-btn-primary">
+                {creatingNew ? <><Loader size={ICON.sm} className="animate-spin" /> Judging…</> : <><Plus size={ICON.sm} /> Start thread</>}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   )
