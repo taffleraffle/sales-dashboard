@@ -16,10 +16,22 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1'
 import { handleCors, getCorsHeaders } from '../_shared/cors.ts'
+import trialPdfB64    from './templates/trial.ts'
+import retainerPdfB64 from './templates/retainer.ts'
 
-const TEMPLATE_PATHS = {
-  trial:    new URL('./templates/trial.pdf',    import.meta.url),
-  retainer: new URL('./templates/retainer.pdf', import.meta.url),
+// Supabase CLI deploys only bundle .ts/.js files automatically — binary
+// assets next to index.ts are silently dropped. We base64-encode the PDFs
+// into .ts modules so they ride along with the code. b64ToBytes decodes
+// once at module load.
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const arr = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+  return arr
+}
+const TEMPLATE_BYTES: Record<string, Uint8Array> = {
+  trial:    b64ToBytes(trialPdfB64),
+  retainer: b64ToBytes(retainerPdfB64),
 }
 
 serve(async (req) => {
@@ -34,6 +46,7 @@ serve(async (req) => {
   try {
     const { contract_id } = await req.json()
     if (!contract_id) return json(400, { error: 'contract_id required' })
+    const contract_id_used = contract_id
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -43,19 +56,20 @@ serve(async (req) => {
     const { data: contract, error: cErr } = await supa
       .from('contracts')
       .select('*')
-      .eq('id', contract_id)
+      .eq('id', contract_id_used)
       .maybeSingle()
     if (cErr) return json(500, { error: `contract fetch: ${cErr.message}` })
     if (!contract) return json(404, { error: 'contract not found' })
 
     const templateKey = contract.contract_type === 'retainer' ? 'retainer' : 'trial'
-    const templateUrl = TEMPLATE_PATHS[templateKey]
+    const baseBytes = TEMPLATE_BYTES[templateKey]
+    if (!baseBytes) return json(500, { error: `no bundled template for ${templateKey}` })
 
     // 2. Fetch every locked amendment on this contract
     const { data: amendments, error: aErr } = await supa
       .from('contract_amendments')
       .select('id, clause_reference, requested_change, ai_verdict, final_clause_text, locked_at, ai_proposed_redline')
-      .eq('contract_id', contract_id)
+      .eq('contract_id', contract_id_used)
       .not('locked_at', 'is', null)
       .order('locked_at', { ascending: true })
     if (aErr) return json(500, { error: `amendments fetch: ${aErr.message}` })
@@ -63,8 +77,7 @@ serve(async (req) => {
       return json(409, { error: 'No locked amendments yet. Lock in at least one amendment thread before regenerating.' })
     }
 
-    // 3. Load base PDF
-    const baseBytes = await Deno.readFile(templateUrl)
+    // 3. Load base PDF (bundled as base64 module — see top of file)
     const base = await PDFDocument.load(baseBytes)
 
     // 4. Build addendum pages
@@ -78,6 +91,27 @@ serve(async (req) => {
     const MARGIN_T = 56
     const MARGIN_B = 56
     const BODY_W   = PAGE_W - MARGIN_X * 2
+
+    // pdf-lib's built-in Helvetica only supports WinAnsi. Claude's replies
+    // routinely include smart quotes / em dashes / ellipses that would
+    // crash drawText. Substitute the common Unicode glyphs with safe
+    // equivalents before drawing. Anything still non-WinAnsi gets dropped.
+    function sanitize(s: string): string {
+      if (!s) return ''
+      return s
+        .replace(/[‘’‚‛]/g, "'")  // single curly + low quotes
+        .replace(/[“”„‟]/g, '"')  // double curly + low quotes
+        .replace(/–/g, '-')                       // en dash
+        .replace(/—/g, '--')                      // em dash
+        .replace(/…/g, '...')                     // ellipsis
+        .replace(/•/g, '*')                       // bullet
+        .replace(/ /g, ' ')                       // nbsp
+        .replace(/[​-‍﻿]/g, '')         // zero-width
+        // Strip anything outside basic Latin-1 (WinAnsi covers 0x00-0xFF
+        // minus a handful). Replace with '?' so missing chars are visible
+        // rather than silently dropped.
+        .replace(/[^\x00-\xFF]/g, '?')
+    }
 
     type DrawState = { page: any; y: number }
     function newPage(): DrawState {
@@ -93,7 +127,7 @@ serve(async (req) => {
       const gap = opts.lineGap ?? 4
       const color = opts.color ?? rgb(0.08, 0.08, 0.08)
       const lineHeight = size + gap
-      const words = text.split(/\s+/)
+      const words = sanitize(text).split(/\s+/)
       let line = ''
       for (const w of words) {
         const test = line ? line + ' ' + w : w
@@ -123,7 +157,9 @@ serve(async (req) => {
     s.page.drawText('Opt Digital Limited', { x: MARGIN_X, y: s.y - 12, size: 11, font: regular, color: rgb(0.35, 0.35, 0.35) })
     s.y -= 24
 
-    const dateStr = new Date().toLocaleDateString('en-NZ', { year: 'numeric', month: 'long', day: 'numeric' })
+    const dateStr = new Date().toLocaleDateString('en-NZ', {
+      year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Pacific/Auckland',
+    })
     const introLines = [
       `This Amendment Addendum is incorporated into and forms part of the Client Form and Client Terms (the "Agreement") between Opt Digital Limited and ${contract.client_name}${contract.client_company ? ' (' + contract.client_company + ')' : ''}.`,
       `Template: ${templateKey === 'retainer' ? 'Local Surge — Work For Free Until We Do (90-day retainer)' : 'Local Surge Offer — 14-day Trial ($997)'}.`,
@@ -139,7 +175,7 @@ serve(async (req) => {
     amendments.forEach((a, idx) => {
       s.y -= 8
       s = ensureSpace(s, 60)
-      s.page.drawText(`Clause ${idx + 1}${a.clause_reference ? ' — ' + a.clause_reference : ''}`, {
+      s.page.drawText(sanitize(`Clause ${idx + 1}${a.clause_reference ? ' -- ' + a.clause_reference : ''}`), {
         x: MARGIN_X, y: s.y - 13, size: 13, font, color: rgb(0.08, 0.08, 0.08),
       })
       s.y -= 22
@@ -166,7 +202,7 @@ serve(async (req) => {
       }
       s.y -= 6
       if (a.locked_at) {
-        const lockStr = `Locked in on ${new Date(a.locked_at).toLocaleString('en-NZ')}.`
+        const lockStr = `Locked in on ${new Date(a.locked_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })}.`
         s = drawWrappedText(s, lockStr, { font: italic, size: 8, lineGap: 2, color: rgb(0.45, 0.45, 0.45) })
       }
     })
@@ -188,7 +224,7 @@ serve(async (req) => {
 
     // 6. Upload to storage
     const nextVersion = (contract.version || 1) + 1
-    const outPath = `${contract_id}/amended-v${nextVersion}.pdf`
+    const outPath = `${contract_id_used}/amended-v${nextVersion}.pdf`
     const { error: upErr } = await supa.storage
       .from('contract-uploads')
       .upload(outPath, outBytes, { contentType: 'application/pdf', upsert: true })
@@ -201,7 +237,7 @@ serve(async (req) => {
         version: nextVersion,
         amended_pdf_path: outPath,
       })
-      .eq('id', contract_id)
+      .eq('id', contract_id_used)
     if (bumpErr) return json(500, { error: `version bump: ${bumpErr.message}` })
 
     // 8. Signed URL (10-minute TTL — closer downloads immediately)
