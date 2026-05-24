@@ -301,16 +301,15 @@ function AmendmentThread({ amendment, messages, onChange }) {
 
   return (
     <div className="tile tile-feedback p-6 mb-6">
-      <div className="flex items-start justify-between gap-3 mb-3 pb-3" style={{ borderBottom: '1px solid var(--rule)' }}>
-        <div className="min-w-0 flex-1">
-          {amendment.clause_reference && (
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              {amendment.clause_reference}
-            </span>
-          )}
-          <p style={{ fontFamily: 'var(--serif)', fontSize: 18, color: 'var(--ink)', margin: '2px 0 0', lineHeight: 1.3 }}>
-            {amendment.requested_change}
-          </p>
+      {/* Slim header — just clause ref + status, no duplicated request text */}
+      <div className="flex items-center justify-between gap-3 mb-4 pb-3" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div className="flex items-center gap-3 min-w-0">
+          <MessageCircle size={14} style={{ color: 'var(--ink-3)', flexShrink: 0 }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.14em', textTransform: 'uppercase' }}>
+            {amendment.clause_reference || 'Amendment thread'}
+            {' · '}
+            {new Date(amendment.created_at).toLocaleDateString()}
+          </span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {isLocked && (
@@ -380,18 +379,80 @@ function AmendmentThread({ amendment, messages, onChange }) {
         </form>
       )}
 
-      {isLocked && amendment.final_clause_text && (
-        <div className="mt-3 p-3" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
-            Locked-in clause language
-          </span>
-          <pre style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)', whiteSpace: 'pre-wrap', margin: '6px 0 0' }}>
-            {amendment.final_clause_text}
-          </pre>
-        </div>
+      {isLocked && (
+        <LockedPanel amendment={amendment} fallbackClause={lastProposedClause} />
       )}
     </div>
   )
+}
+
+// ─── Locked-in confirmation + DOCX regen status ───────────────────────────
+function LockedPanel({ amendment, fallbackClause }) {
+  const clauseText = amendment.final_clause_text || fallbackClause || ''
+  const lockedAt = amendment.locked_at ? new Date(amendment.locked_at) : null
+
+  return (
+    <div className="mt-3 p-4" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Lock size={10} /> Locked in
+          </span>
+          <p style={{ fontFamily: 'var(--serif)', fontSize: 15, color: 'var(--ink)', margin: '4px 0 0' }}>
+            Agreed position frozen{lockedAt ? ` ${lockedAt.toLocaleString()}` : ''}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled
+          className="editorial-btn-primary"
+          title="Regen pipeline needs your trial.docx + retainer.docx templates — see Phase 2 in the chat handoff"
+          style={{ opacity: 0.55, cursor: 'not-allowed' }}
+        >
+          <FileText size={ICON.sm} /> Generate amended .docx
+        </button>
+      </div>
+
+      {clauseText ? (
+        <div className="mt-2">
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+            Final clause language captured
+          </span>
+          <pre style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)', whiteSpace: 'pre-wrap', margin: '6px 0 0', padding: 10, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3 }}>
+            {clauseText}
+          </pre>
+        </div>
+      ) : (
+        <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: 0, fontStyle: 'italic' }}>
+          No specific clause text was committed in the thread. Refer to the conversation above for the agreed position. The regenerated agreement (once templates are wired) will splice in the discussion's resolution.
+        </p>
+      )}
+
+      <p style={{ fontSize: 11, color: 'var(--ink-3)', margin: '12px 0 0', fontStyle: 'italic' }}>
+        DOCX regen status: <strong style={{ color: 'var(--down)', fontStyle: 'normal' }}>not yet generated</strong> — needs base trial + retainer templates to be wired into the pipeline.
+      </p>
+    </div>
+  )
+}
+
+// Normalize judge content: strip stray markdown that the prompt forbade
+// but Claude might still emit, and split into paragraph blocks for clean
+// rendering. Numbered list items get explicit blank-line separation so
+// each ask in a multi-part judge reply gets visual space.
+function formatJudgeContent(raw) {
+  if (!raw) return []
+  let txt = String(raw)
+    .replace(/\*\*(.+?)\*\*/g, '$1')     // **bold** -> bold
+    .replace(/(^|\s)\*(\S[^*]*?\S?)\*/g, '$1$2')  // *italic* -> italic (preserve standalone *)
+    .replace(/^#+\s+/gm, '')             // # headers -> plain
+    .replace(/^\s*[-•]\s+/gm, '- ')      // normalize bullet glyphs
+
+  // Force a paragraph break before "1." / "(1)" / "Ask 1:" style list items
+  // when they're inline with prior text
+  txt = txt.replace(/([.?!])\s+(\(?\d+\)?[.:)]\s+|Ask\s+\d+:|Option\s+[A-Z]:)/g, '$1\n\n$2')
+
+  // Split on blank lines into paragraph blocks
+  return txt.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean)
 }
 
 // ─── Single chat message bubble ────────────────────────────────────────────
@@ -399,6 +460,9 @@ function MessageBubble({ message }) {
   const isCloser = message.role === 'closer'
   const verdict  = message.metadata?.verdict
   const proposedClause = message.metadata?.proposed_clause
+  const blocks = isCloser
+    ? [message.content]                  // closer text rendered raw
+    : formatJudgeContent(message.content)
 
   return (
     <div className="flex" style={{ justifyContent: isCloser ? 'flex-end' : 'flex-start' }}>
@@ -420,10 +484,12 @@ function MessageBubble({ message }) {
           border: isCloser ? '1px solid var(--ink)' : '1px solid var(--rule)',
           borderRadius: 3,
           fontSize: 13,
-          lineHeight: 1.45,
+          lineHeight: 1.55,
           whiteSpace: 'pre-wrap',
         }}>
-          {message.content}
+          {blocks.map((b, i) => (
+            <p key={i} style={{ margin: i === 0 ? 0 : '10px 0 0' }}>{b}</p>
+          ))}
         </div>
         {proposedClause && !isCloser && (
           <div className="mt-2 p-3" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
