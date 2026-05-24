@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Loader, AlertCircle, ExternalLink, Send, Check, Copy } from 'lucide-react'
+import { ArrowLeft, Loader, AlertCircle, ExternalLink, Send, Check, Copy, FileText } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { ICON } from '../../utils/constants'
@@ -153,13 +153,21 @@ export default function ContractDetail() {
 
       {/* Contract header */}
       <div className="tile tile-feedback p-6 mb-6">
-        <span className="eyebrow eyebrow-accent">{contract.status?.toUpperCase()} · v{contract.version}</span>
-        <h1 style={{ fontFamily: 'var(--serif)', fontSize: 26, color: 'var(--ink)', margin: '8px 0 0' }}>
-          {contract.client_name}
-        </h1>
-        {contract.client_company && (
-          <p style={{ fontSize: 14, color: 'var(--ink-3)', margin: '4px 0 0' }}>{contract.client_company}</p>
-        )}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <span className="eyebrow eyebrow-accent">
+              {contract.contract_type === 'retainer' ? 'Retainer template' : 'Trial template'}
+              {' · '}{contract.status?.toUpperCase()}{' · '}v{contract.version}
+            </span>
+            <h1 style={{ fontFamily: 'var(--serif)', fontSize: 26, color: 'var(--ink)', margin: '8px 0 0' }}>
+              {contract.client_name}
+            </h1>
+            {contract.client_company && (
+              <p style={{ fontSize: 14, color: 'var(--ink-3)', margin: '4px 0 0' }}>{contract.client_company}</p>
+            )}
+          </div>
+          <SignedPdfLink path={contract.agreement_pdf_path} />
+        </div>
         <div className="grid grid-cols-3 gap-6 mt-6 pt-4" style={{ borderTop: '1px solid var(--rule)' }}>
           <div>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>Fee</span>
@@ -329,5 +337,36 @@ export default function ContractDetail() {
         </div>
       </div>
     </div>
+  )
+}
+
+// SignedPdfLink — generates a 5-minute signed URL for the uploaded agreement
+// PDF and opens it in a new tab. The bucket is private (see migration 016),
+// so direct paths won't work; signed URLs are the only way to view.
+function SignedPdfLink({ path }) {
+  const [opening, setOpening] = useState(false)
+  if (!path) return null
+
+  async function open() {
+    setOpening(true)
+    const { data, error } = await supabase.storage
+      .from('contract-uploads')
+      .createSignedUrl(path, 300)
+    setOpening(false)
+    if (error) return alert(`Could not open PDF: ${error.message}`)
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={open}
+      disabled={opening}
+      className="editorial-btn-ghost"
+      style={{ fontSize: 12, flexShrink: 0 }}
+    >
+      {opening ? <Loader size={ICON.sm} className="animate-spin" /> : <FileText size={ICON.sm} />}
+      Open signed PDF
+    </button>
   )
 }

@@ -26,7 +26,7 @@ export default function ContractsPage() {
       setLoading(true); setError(null)
       const { data, error } = await supabase
         .from('contracts')
-        .select('id, client_name, client_company, status, version, fee_amount_usd, updated_at, pandadoc_view_url')
+        .select('id, client_name, client_company, contract_type, status, version, fee_amount_usd, updated_at, pandadoc_view_url')
         .order('updated_at', { ascending: false })
       if (cancelled) return
       if (error) setError(error.message)
@@ -44,10 +44,10 @@ export default function ContractsPage() {
         <div>
           <span className="eyebrow eyebrow-accent">OPT Digital · Contracts</span>
           <h1 style={{ fontFamily: 'var(--serif)', fontSize: 28, color: 'var(--ink)', margin: '6px 0 0', lineHeight: 1.1 }}>
-            Client <em style={{ fontStyle: 'italic' }}>agreements</em>
+            Tracked <em style={{ fontStyle: 'italic' }}>contracts</em>
           </h1>
           <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>
-            Create, track, and amend signed agreements without leaving the dashboard.
+            Sent contracts you're tracking for amendment management. Continue creating new contracts in PandaDoc — add them here when a client asks to amend.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -61,9 +61,9 @@ export default function ContractsPage() {
               </Link>
             </>
           )}
-          <Link to="/sales/contracts/new" className="editorial-btn-primary">
+          <Link to="/sales/contracts/add" className="editorial-btn-primary">
             <Plus size={ICON.sm} />
-            New contract
+            Add contract
           </Link>
         </div>
       </div>
@@ -96,14 +96,14 @@ export default function ContractsPage() {
         <div className="tile tile-feedback flex flex-col items-center justify-center py-16 px-6 text-center">
           <FileText size={36} style={{ color: 'var(--ink-3)', marginBottom: 12 }} />
           <h2 style={{ fontFamily: 'var(--serif)', fontSize: 20, color: 'var(--ink)', margin: 0 }}>
-            No contracts yet
+            No contracts tracked yet
           </h2>
-          <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 8, maxWidth: 440 }}>
-            When you create a contract from a PandaDoc template, it'll show up here. Amendments and version history live on the contract's detail page.
+          <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 8, maxWidth: 460 }}>
+            When a client asks to amend a contract you've already sent, drop the signed PDF here so the AI judge has context. The judge then handles each amendment request against your active policy.
           </p>
-          <Link to="/sales/contracts/new" className="editorial-btn-primary" style={{ marginTop: 20 }}>
+          <Link to="/sales/contracts/add" className="editorial-btn-primary" style={{ marginTop: 20 }}>
             <Plus size={ICON.sm} />
-            Create first contract
+            Add first contract
           </Link>
         </div>
       )}
@@ -114,6 +114,7 @@ export default function ContractsPage() {
             <thead>
               <tr style={{ background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
                 <th className="text-left px-4 py-2" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600 }}>Client</th>
+                <th className="text-left px-4 py-2" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600 }}>Template</th>
                 <th className="text-left px-4 py-2" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600 }}>Status</th>
                 <th className="text-right px-4 py-2" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600 }}>Fee</th>
                 <th className="text-right px-4 py-2" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600 }}>Updated</th>
@@ -132,6 +133,11 @@ export default function ContractsPage() {
                     {c.client_company && (
                       <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{c.client_company}</div>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink)' }}>
+                      {c.contract_type === 'retainer' ? 'Retainer' : c.contract_type === 'trial' ? 'Trial' : '—'}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>

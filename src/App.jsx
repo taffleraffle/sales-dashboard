@@ -93,7 +93,7 @@ const EmailFlows = lazyWithReload(() => import('./pages/EmailFlows'))
 const EmailFlowDetail = lazyWithReload(() => import('./pages/EmailFlowDetail'))
 const ContractsPage     = lazyWithReload(() => import('./pages/contracts/ContractsPage'))
 const ContractDetail    = lazyWithReload(() => import('./pages/contracts/ContractDetail'))
-const ContractNew       = lazyWithReload(() => import('./pages/contracts/ContractNew'))
+const ContractAdd       = lazyWithReload(() => import('./pages/contracts/ContractAdd'))
 const ContractsPolicy   = lazyWithReload(() => import('./pages/contracts/ContractsPolicy'))
 const ContractsPending  = lazyWithReload(() => import('./pages/contracts/ContractsPending'))
 
@@ -252,7 +252,8 @@ export default function App() {
               <Route path="/sales/eod-history" element={<Navigate to="/sales/eod" replace />} />
               <Route path="/sales/call-data" element={<CallData />} />
               <Route path="/sales/contracts" element={<Suspense fallback={<PageSkeleton />}><ContractsPage /></Suspense>} />
-              <Route path="/sales/contracts/new" element={<Suspense fallback={<PageSkeleton />}><ContractNew /></Suspense>} />
+              <Route path="/sales/contracts/add" element={<Suspense fallback={<PageSkeleton />}><ContractAdd /></Suspense>} />
+              <Route path="/sales/contracts/new" element={<Navigate to="/sales/contracts/add" replace />} />
               <Route path="/sales/contracts/policy" element={<AdminRoute><Suspense fallback={<PageSkeleton />}><ContractsPolicy /></Suspense></AdminRoute>} />
               <Route path="/sales/contracts/pending" element={<AdminRoute><Suspense fallback={<PageSkeleton />}><ContractsPending /></Suspense></AdminRoute>} />
               <Route path="/sales/contracts/:id" element={<Suspense fallback={<PageSkeleton />}><ContractDetail /></Suspense>} />

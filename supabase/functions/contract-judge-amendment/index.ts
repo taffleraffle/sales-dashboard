@@ -121,13 +121,42 @@ Always call the submit_verdict tool.`,
       },
     ]
 
+    const templateContext = contract.contract_type === 'retainer'
+      ? `RETAINER TEMPLATE ($9K / 90-day). Key clauses to reference:
+- Clause 4: Guarantee (top-3 ranking + DBA "Opt Digital Instructions" + 10 photos/month + 2 reviews/week + 5-day response). Eligibility-gated; failure to meet eligibility forfeits guarantee.
+- Clause 4(c): 30 additional days of free service if positive movement but ranking not hit
+- Clause 4(d): mutual decision after extension period — retainer or end relationship
+- Clause 7.2: Direct Debit with $1.25/2.9% Stripe fee + $7 dishonour fee + 48h notice for cancel/change
+- Clause 14: 6-month liability cap, indemnity covers any negligent/fraudulent/criminal act
+- Clause 15: unilateral subcontracting consent
+- Clause 16: termination only on breach + 30-day cure
+- Clause 17: 14-day dispute resolution
+- Clause 19.1: NZ governing law`
+      : `TRIAL TEMPLATE ($997 / 14-day, auto-renews to recurring retainer). Key clauses to reference:
+- Clause 4: Continuation of Project — auto-renews to $997/month after 14-day trial unless cancelled in writing
+- Clause 4(g): 30-day cancellation notice required post-trial; fees remain payable during notice
+- Clause 7.2: Payment Authority — irrevocable continuing authority for Stripe DD; 48h notice for changes
+- Clause 7.6: 20% per annum late-payment interest
+- Clause 12.2(d)(e): Website is Developed IP, transfers on completion, hosting fees may apply if OPT continues hosting
+- Clause 14: 6-month liability cap, indemnity covers any negligent/fraudulent/criminal act
+- Clause 15: unilateral subcontracting consent
+- Clause 16.5: Cancellation Notice — 30 days, all fees payable during notice, no pro-rata refund
+- Clause 17: 14-day dispute resolution
+- Clause 19.1: NZ governing law
+(No guarantee clause in this template.)`
+
     const userPrompt =
 `## Contract
 - Client: ${contract.client_name}${contract.client_company ? ` (${contract.client_company})` : ''}
+- Template: ${contract.contract_type === 'retainer' ? 'Retainer ($9K / 90-day)' : 'Trial ($997 / 14-day)'}
 - Fee: ${contract.fee_amount_usd ? '$' + contract.fee_amount_usd : 'unset'}
 - Project period: ${contract.project_period_days ? contract.project_period_days + ' days' : 'unset'}
 - Current version: v${contract.version}
 - Scope: ${contract.scope_summary || 'standard OPT Digital local SEO services'}
+
+## Template clause map (reference when citing clauses in reasoning)
+
+${templateContext}
 
 ## Closer's amendment request
 
