@@ -1,7 +1,10 @@
-// CoachThread — minimum-viable chat. Bubbles + input + send. Nothing else.
-// No retry button (auto-retries on first failure), no flag button, no
-// lock-in button, no offer snapshot, no status pills. Anything beyond
-// "type, send, read the reply" was getting in the way.
+// CoachThread — bubbles + input in a bounded container.
+// - Enter sends, Shift+Enter newline (standard chat behaviour).
+// - Closer's message appears INSTANTLY via optimistic state; the
+//   "Thinking…" bubble sits below it while the Edge fn is running.
+//   Without the optimistic step the input would clear and nothing
+//   visible would happen for 5-15s while Claude responded — felt like
+//   the app froze.
 
 import { useState, useEffect, useRef } from 'react'
 import { Loader, Send, AlertCircle } from 'lucide-react'
@@ -12,19 +15,18 @@ export function CoachThread({ thread, messages, onChange }) {
   const [replyText, setReplyText] = useState('')
   const [sending, setSending]     = useState(false)
   const [err, setErr]             = useState(null)
+  // pendingMessage holds the closer's just-sent text so it renders
+  // immediately as a chat bubble. Cleared after onChange() refreshes
+  // the real message list from the DB.
+  const [pendingMessage, setPendingMessage] = useState(null)
   const threadEndRef = useRef(null)
   const prevLengthRef = useRef(messages.length)
 
-  // If the only message is the closer's opener and there's no coach reply
-  // yet (initial coach call failed silently), auto-retry on mount once.
   const needsAutoRetry = !thread.locked_at
     && messages.length === 1
     && messages[0].role === 'closer'
   const retriedRef = useRef(false)
 
-  // Manual retry — invoke the coach with no new_message so it reads the
-  // existing thread + responds. Used by the auto-retry on mount AND the
-  // "Try again" link in the error banner when something failed.
   async function callCoach() {
     setSending(true); setErr(null)
     try {
@@ -49,18 +51,21 @@ export function CoachThread({ thread, messages, onChange }) {
   }, [needsAutoRetry, thread.id])
 
   useEffect(() => {
-    if (messages.length > prevLengthRef.current) {
+    if (messages.length > prevLengthRef.current || pendingMessage) {
       threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
     prevLengthRef.current = messages.length
-  }, [messages.length])
+  }, [messages.length, pendingMessage])
 
   async function sendReply(e) {
     e?.preventDefault()
     if (!replyText.trim() || sending) return
-    setSending(true); setErr(null)
     const message = replyText.trim()
+    // Optimistic — show the closer's message AND clear the input
+    // immediately so the chat feels responsive while Claude runs.
+    setPendingMessage(message)
     setReplyText('')
+    setSending(true); setErr(null)
     try {
       const { data, error: invErr } = await supabase.functions.invoke('contract-downsell-coach', {
         body: { thread_id: thread.id, new_message: message },
@@ -68,32 +73,45 @@ export function CoachThread({ thread, messages, onChange }) {
       if (invErr) throw invErr
       if (data?.error) throw new Error(data.error)
       await onChange()
+      setPendingMessage(null)
     } catch (e) {
       setErr(e.message || String(e))
       setReplyText(message)
+      setPendingMessage(null)
     } finally {
       setSending(false)
     }
   }
 
   return (
-    <div>
+    <div className="tile tile-feedback" style={{ display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+      {/* Header strip — matches the right pane's "Coaching context" header
+          for visual rhythm */}
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
+        <span className="eyebrow eyebrow-bare" style={{ fontSize: 10 }}>Chat with coach</span>
+      </div>
+
       {/* Chat history */}
-      <div className="space-y-3 mb-4">
-        {messages.map(m => <Bubble key={m.id} message={m} />)}
-        {sending && messages[messages.length - 1]?.role === 'closer' && (
-          <div className="flex justify-start">
-            <div className="p-3" style={{ background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3, fontSize: 13, color: 'var(--ink-3)', fontStyle: 'italic' }}>
-              <Loader size={12} className="animate-spin inline-block mr-2" style={{ verticalAlign: 'middle' }} />
-              Thinking…
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', minHeight: 360 }}>
+        <div className="space-y-3">
+          {messages.map(m => <Bubble key={m.id} message={m} />)}
+          {pendingMessage && (
+            <Bubble message={{ role: 'closer', content: pendingMessage, created_at: new Date().toISOString() }} optimistic />
+          )}
+          {sending && (
+            <div className="flex justify-start">
+              <div className="p-3" style={{ background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3, fontSize: 13, color: 'var(--ink-3)', fontStyle: 'italic', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <Loader size={12} className="animate-spin" />
+                <span>Thinking…</span>
+              </div>
             </div>
-          </div>
-        )}
-        <div ref={threadEndRef} />
+          )}
+          <div ref={threadEndRef} />
+        </div>
       </div>
 
       {err && (
-        <div className="tile tile-feedback p-3 mb-3 flex items-start gap-3" style={{ borderLeft: '3px solid var(--down)' }}>
+        <div className="p-3 flex items-start gap-3" style={{ borderTop: '1px solid var(--rule)', borderLeft: '3px solid var(--down)', background: 'rgba(181,62,62,0.04)' }}>
           <AlertCircle size={14} style={{ color: 'var(--down)', flexShrink: 0, marginTop: 2 }} />
           <div className="flex-1">
             <p style={{ fontSize: 12, color: 'var(--ink)', margin: 0, fontFamily: 'var(--mono)' }}>{err}</p>
@@ -120,18 +138,21 @@ export function CoachThread({ thread, messages, onChange }) {
       )}
 
       {/* Input */}
-      <form onSubmit={sendReply}>
+      <form onSubmit={sendReply} style={{ borderTop: '1px solid var(--rule)', padding: '10px 12px', background: 'var(--paper)' }}>
         <div className="flex items-end gap-2">
           <textarea
             value={replyText}
             onChange={e => setReplyText(e.target.value)}
             onKeyDown={e => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              // Enter sends; Shift+Enter inserts a newline. Standard chat
+              // ergonomics — previously required Cmd/Ctrl+Enter which
+              // nobody discovered.
+              if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 sendReply()
               }
             }}
-            placeholder="Reply…"
+            placeholder="Reply… (Enter to send, Shift+Enter for newline)"
             rows={2}
             className="editorial-input flex-1"
             style={{ resize: 'vertical' }}
@@ -146,7 +167,7 @@ export function CoachThread({ thread, messages, onChange }) {
   )
 }
 
-function Bubble({ message }) {
+function Bubble({ message, optimistic }) {
   const isCloser = message.role === 'closer'
   return (
     <div className="flex" style={{ justifyContent: isCloser ? 'flex-end' : 'flex-start' }}>
@@ -159,6 +180,8 @@ function Bubble({ message }) {
         fontSize: 13,
         lineHeight: 1.55,
         whiteSpace: 'pre-wrap',
+        opacity: optimistic ? 0.75 : 1,
+        transition: 'opacity 200ms ease',
       }}>
         {message.content}
       </div>

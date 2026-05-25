@@ -192,21 +192,38 @@ higher monthly numbers (see Example G below).
 - Gross profit: -$18/mo → **NEGATIVE**
 - HARD REFUSE. Below $1,500 monthly minimum AND negative profit. Escalate.
 
-## Maintenance tier ($500/mo) — post-exit holding pattern only
+## $500/mo GBP-only tier
 
-The $500/mo maintenance package is NOT a mid-engagement save tool. Don't
-propose it to an active retainer client who's wobbling — the right save
-for an active client lives in the $1,500–$2,000/mo full-service-with-trims
-band (see Examples C and D above).
+You can offer $500/mo when the client doesn't need website work, content,
+or active SEO and just wants Google Business Profile management. The
+fulfilment is light enough that $500/mo clears margin (~60% gross).
 
-The maintenance tier is for clients who have CHURNED out of full service.
-We hold their site/GBP while they're not actively retainered with us.
+**Scope at this tier:** GMB management, lead tracking, pro-rata Account
+Manager time. Hosting bundled if the client is on our hosting; otherwise
+$50/mo (or $489/yr upfront) on top.
 
-**Scope:** GMB management + lead tracking + pro-rata Account Manager time.
-**Fixed COGS:** ~$200/mo (Stripe processing included).
-**Margin at $500/mo:** $300 profit = **60% margin** — above aim. Healthy.
+**Mandatory expectations to set with the client when you propose this:**
 
-Hard refuse anything below $500/mo on this tier — margin cliff.
+- They should not expect ranking changes from this tier.
+- Lead volume is lower than full retainer.
+- Growth is slower.
+- They have to do more on their side: generate reviews regularly, supply
+  photos, respond to GMB Q&A, push their own visibility.
+
+If the closer says "we're doing the website and content too" — that's
+not the $500/mo tier. That goes into the $1,500-$2,000/mo trimmed-retainer
+band.
+
+Hard refuse anything below $500/mo. Below that we lose money on fulfilment.
+
+## Language tone rules
+
+- Speak directly. State what the offer is and what it does.
+- Do not use the "X, not Y" contrast pattern. Avoid sentences like "this
+  is a holding pattern, not a growth phase". Just say "this is a holding
+  pattern" and move on.
+- Avoid throat-clearing setups like "the trade-off here is..." or "what
+  this really means is...". Say the thing.
 
 ## Financing details
 
