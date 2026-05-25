@@ -7,6 +7,7 @@ import {
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { ICON } from '../../utils/constants'
+import ContractPreview from './ContractPreview'
 
 const VERDICT_STYLES = {
   allow:  { label: 'Approvable',  color: 'var(--up)' },
@@ -293,120 +294,87 @@ export default function ContractDetail() {
 }
 
 // ─── ContractPreviewPane — right side of the workspace ────────────────────
-// Renders the contract PDF in an iframe with a toolbar that lets the
-// closer flip between the Original and the latest Amended version. The
-// iframe URLs are signed (10-minute TTL) and refreshed on mount + when
-// the contract's amended PDF path changes (i.e. after a regen). Phase 1
-// of the workspace redesign — Phase 2 will replace the iframe with
-// inline HTML rendering of the structured contract source.
+// Renders the contract INLINE as HTML, walking the structured template
+// for the contract_type and substituting locked amendments in their
+// natural clause position with a yellow highlighted block. Replaces
+// the iframe approach from Phase 1 — amended clauses sit IN PLACE
+// inside the contract body, not on a separate page.
+//
+// Toolbar lets the closer toggle "With amendments" (default) vs "Original"
+// to compare. "Download PDF" button renders the same structured source
+// to PDF via the regenerate-amended-agreement Edge fn.
 function ContractPreviewPane({ contract, amendments }) {
-  const [view, setView]           = useState('amended') // 'amended' | 'original'
-  const [originalUrl, setOriginalUrl] = useState(null)
-  const [amendedUrl, setAmendedUrl]   = useState(null)
-  const [loading, setLoading]     = useState(false)
-  const [err, setErr]             = useState(null)
+  const [view, setView] = useState('amended') // 'amended' | 'original'
+  const [downloading, setDownloading] = useState(false)
+  const [downloadErr, setDownloadErr] = useState(null)
+  const lockedCount = amendments.filter(a => a.locked_at && (a.final_clause_text || a.ai_proposed_redline)).length
 
-  const hasAmended  = !!contract?.amended_pdf_path
-  const hasOriginal = !!contract?.agreement_pdf_path
-  const lockedCount = amendments.filter(a => a.locked_at).length
-
-  // If there's no amended PDF, default to original tab
+  // No amendments yet → default to original view (cleaner first impression)
   useEffect(() => {
-    if (!hasAmended && hasOriginal) setView('original')
-  }, [hasAmended, hasOriginal])
+    if (lockedCount === 0) setView('original')
+  }, [lockedCount])
 
-  // Load signed URLs for whichever PDFs exist
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoading(true); setErr(null)
-      try {
-        const reqs = []
-        if (contract.agreement_pdf_path) {
-          reqs.push(
-            supabase.storage.from('contract-uploads')
-              .createSignedUrl(contract.agreement_pdf_path, 600)
-              .then(r => ({ kind: 'original', ...r }))
-          )
-        }
-        if (contract.amended_pdf_path) {
-          reqs.push(
-            supabase.storage.from('contract-uploads')
-              .createSignedUrl(contract.amended_pdf_path, 600)
-              .then(r => ({ kind: 'amended', ...r }))
-          )
-        }
-        const results = await Promise.all(reqs)
-        if (cancelled) return
-        for (const r of results) {
-          if (r.error) throw r.error
-          if (r.kind === 'original') setOriginalUrl(r.data.signedUrl)
-          if (r.kind === 'amended')  setAmendedUrl(r.data.signedUrl)
-        }
-      } catch (e) {
-        if (!cancelled) setErr(e.message || String(e))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
+  async function downloadPdf() {
+    if (downloading) return
+    setDownloading(true); setDownloadErr(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('regenerate-amended-agreement', {
+        body: { contract_id: contract.id },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      if (!data?.signed_url) throw new Error('No signed URL returned.')
+      window.open(data.signed_url, '_blank', 'noopener,noreferrer')
+    } catch (e) {
+      setDownloadErr(e.message || String(e))
+    } finally {
+      setDownloading(false)
     }
-    load()
-    return () => { cancelled = true }
-  }, [contract.agreement_pdf_path, contract.amended_pdf_path])
-
-  const activeUrl = view === 'amended' ? amendedUrl : originalUrl
-  const noPdfYet = !hasOriginal && !hasAmended
+  }
 
   return (
     <div className="tile tile-feedback" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
-      {/* Tabs */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', flexShrink: 0 }}>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '8px 12px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', flexShrink: 0 }}>
         <div className="flex items-center gap-1">
-          <PreviewTab label="Amended" active={view === 'amended'} disabled={!hasAmended} onClick={() => setView('amended')}>
-            {hasAmended && <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', marginLeft: 6 }}>v{contract.version}</span>}
+          <PreviewTab label="With amendments" active={view === 'amended'} disabled={lockedCount === 0} onClick={() => setView('amended')}>
+            {lockedCount > 0 && (
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', marginLeft: 6 }}>
+                {lockedCount}
+              </span>
+            )}
           </PreviewTab>
-          <PreviewTab label="Original" active={view === 'original'} disabled={!hasOriginal} onClick={() => setView('original')} />
+          <PreviewTab label="Original" active={view === 'original'} onClick={() => setView('original')} />
         </div>
-        {lockedCount > 0 && (
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
-            {lockedCount} amendment{lockedCount === 1 ? '' : 's'} applied
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {lockedCount > 0 && (
+            <button
+              type="button"
+              onClick={downloadPdf}
+              disabled={downloading}
+              className="editorial-btn-ghost"
+              style={{ fontSize: 11, padding: '4px 10px' }}
+              title="Download the amended contract as PDF"
+            >
+              {downloading ? <Loader size={11} className="animate-spin" /> : <FileText size={11} />}
+              Download PDF
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Body */}
-      <div style={{ flex: 1, minHeight: 600, background: 'var(--paper-2)', position: 'relative' }}>
-        {noPdfYet && (
-          <div className="flex flex-col items-center justify-center h-full py-12 px-6 text-center">
-            <FileText size={28} style={{ color: 'var(--ink-3)', marginBottom: 10 }} />
-            <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>No contract PDF uploaded yet.</p>
-          </div>
-        )}
-        {!noPdfYet && loading && (
-          <div className="flex items-center justify-center h-full">
-            <Loader className="animate-spin" size={20} style={{ color: 'var(--ink-3)' }} />
-          </div>
-        )}
-        {!noPdfYet && err && (
-          <div className="p-4">
-            <p style={{ fontSize: 12, color: 'var(--down)', fontFamily: 'var(--mono)' }}>{err}</p>
-          </div>
-        )}
-        {!noPdfYet && !loading && !err && activeUrl && (
-          <iframe
-            src={activeUrl}
-            title={view === 'amended' ? 'Amended contract' : 'Original contract'}
-            style={{ width: '100%', height: '100%', minHeight: 600, border: 'none', display: 'block' }}
-          />
-        )}
-        {!noPdfYet && !loading && !err && !activeUrl && view === 'amended' && (
-          <div className="flex flex-col items-center justify-center h-full py-12 px-6 text-center">
-            <FileText size={24} style={{ color: 'var(--ink-3)', marginBottom: 8 }} />
-            <p style={{ fontSize: 13, color: 'var(--ink)', margin: 0, fontWeight: 500 }}>No amended version yet</p>
-            <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6, maxWidth: 320 }}>
-              Lock in an amendment in the chat thread, then hit "Generate amended document" to produce v{(contract.version || 1) + 1}.
-            </p>
-          </div>
-        )}
+      {downloadErr && (
+        <div style={{ padding: '6px 12px', background: 'rgba(181,62,62,0.08)', borderBottom: '1px solid var(--rule)' }}>
+          <p style={{ margin: 0, fontSize: 11, color: 'var(--down)', fontFamily: 'var(--mono)' }}>{downloadErr}</p>
+        </div>
+      )}
+
+      {/* Body — scrollable contract */}
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 600, background: 'var(--paper)' }}>
+        <ContractPreview
+          contract={contract}
+          amendments={view === 'amended' ? amendments : []}
+        />
       </div>
     </div>
   )
