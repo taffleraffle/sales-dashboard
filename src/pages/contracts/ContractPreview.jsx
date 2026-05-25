@@ -85,19 +85,39 @@ function ClientFormSection({ template, contract }) {
 }
 
 function ClauseBlock({ clause, amendment, subAmendments }) {
+  // Section is "touched" by an amendment if either the top-level clause
+  // itself was amended OR any of its sub-sections were. We add a tinted
+  // background + yellow left rule to the whole section in that case so
+  // the closer's eye lands on it when scrolling.
+  const subAmendedIds = clause.sections
+    ? clause.sections.filter(sec => subAmendments[sec.id]).map(sec => sec.number)
+    : []
+  const isTouched = !!amendment || subAmendedIds.length > 0
+
   return (
-    <section id={`clause-${clause.id}`} style={{ marginBottom: 18, scrollMarginTop: 16 }}>
-      <h3 style={{ fontFamily: 'var(--mono)', fontSize: 12, letterSpacing: '0.16em', textTransform: 'uppercase', marginTop: 0, marginBottom: 8, color: 'var(--ink)' }}>
-        {clause.number}.&nbsp;&nbsp;{clause.title}
-      </h3>
+    <section
+      id={`clause-${clause.id}`}
+      style={{
+        marginBottom: 18,
+        scrollMarginTop: 16,
+        ...(isTouched && {
+          padding: '12px 14px',
+          background: 'rgba(244, 225, 74, 0.06)',
+          borderLeft: '3px solid var(--accent)',
+          borderRadius: 2,
+        }),
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8 }}>
+        <h3 style={{ fontFamily: 'var(--mono)', fontSize: 12, letterSpacing: '0.16em', textTransform: 'uppercase', margin: 0, color: 'var(--ink)' }}>
+          {clause.number}.&nbsp;&nbsp;{clause.title}
+        </h3>
+        {isTouched && <AmendedBadge count={amendment ? 1 : subAmendedIds.length} />}
+      </div>
 
       {amendment ? (
-        // Whole top-level clause amended — replace its body with the new
-        // agreed language in a yellow-highlighted block.
         <AmendedClauseBody amendment={amendment} originalClause={clause} />
       ) : clause.sections ? (
-        // Has sub-sections (e.g. 7.1, 7.2, 7.3) — render each, allowing
-        // per-sub-section amendment substitution.
         clause.sections.map(sec => {
           const subAmendment = subAmendments[sec.id]
           return (
@@ -111,12 +131,37 @@ function ClauseBlock({ clause, amendment, subAmendments }) {
   )
 }
 
+function AmendedBadge({ count }) {
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      padding: '2px 8px',
+      background: 'var(--accent)',
+      color: 'var(--ink)',
+      fontFamily: 'var(--mono)',
+      fontSize: 9,
+      fontWeight: 700,
+      letterSpacing: '0.12em',
+      textTransform: 'uppercase',
+      borderRadius: 2,
+      flexShrink: 0,
+    }}>
+      ★ Amended{count > 1 ? ` (${count})` : ''}
+    </span>
+  )
+}
+
 function SubSection({ section, amendment }) {
   return (
     <section id={`clause-${section.id}`} style={{ marginBottom: 14, marginLeft: 4, scrollMarginTop: 16 }}>
-      <h4 style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', marginTop: 8, marginBottom: 6, color: 'var(--ink-2)' }}>
-        {section.number}&nbsp;&nbsp;{section.title}
-      </h4>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8, marginBottom: 6 }}>
+        <h4 style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', margin: 0, color: amendment ? 'var(--ink)' : 'var(--ink-2)', fontWeight: amendment ? 700 : 500 }}>
+          {section.number}&nbsp;&nbsp;{section.title}
+        </h4>
+        {amendment && <AmendedBadge count={1} />}
+      </div>
       {amendment ? (
         <AmendedClauseBody amendment={amendment} originalClause={section} />
       ) : (

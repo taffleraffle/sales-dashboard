@@ -260,9 +260,14 @@ serve(async (req) => {
     }
 
     // Render an entire clause body — original text OR amended block.
+    // `amendment._finalText` is the per-clause segment (set by
+    // indexAmendments when it splits a bundled "CLAUSE X.X AMENDMENT"
+    // text). Falls back to final_clause_text for single-clause amendments
+    // where _finalText was set to the same value.
     function drawClauseBody(s: DrawState, clause: any, amendment: any): DrawState {
       if (amendment) {
-        s = drawAmendedBlock(s, amendment.final_clause_text || amendment.ai_proposed_redline)
+        const text = amendment._finalText || amendment.final_clause_text || amendment.ai_proposed_redline
+        s = drawAmendedBlock(s, text)
         if (amendment.locked_at) {
           s.y -= 4
           s = drawText(s, `(Agreed and locked on ${new Date(amendment.locked_at).toLocaleDateString('en-NZ', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Pacific/Auckland' })}.)`,

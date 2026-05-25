@@ -922,28 +922,32 @@ function DocumentMenu({ contract, amendments, onRegenerated }) {
       </button>
       {/* Secondary action: when an amended PDF exists, give a small link
           to view the original for comparison. Hidden when the contract
-          has never been amended (no need for a "original" button when
-          there's only an original). */}
+          has never been amended. Wrapped in a div with display:block to
+          force it to stack BELOW the primary button (previously it was
+          clipping inline-right of the primary button because the parent
+          uses text-align:right and links render inline by default). */}
       {hasLocked && contract.amended_pdf_path && !amendedStale && contract.agreement_pdf_path && (
-        <button
-          type="button"
-          onClick={async () => {
-            setBusy(true); setErr(null)
-            try {
-              const { data, error } = await supabase.storage.from('contract-uploads').createSignedUrl(contract.agreement_pdf_path, 300)
-              if (error) throw error
-              window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
-            } catch (e) { setErr(e.message || String(e)) }
-            finally { setBusy(false) }
-          }}
-          style={{
-            background: 'transparent', border: 'none', padding: 0,
-            marginTop: 4, fontSize: 11, color: 'var(--ink-3)',
-            textDecoration: 'underline', cursor: 'pointer',
-          }}
-        >
-          View original (v1)
-        </button>
+        <div style={{ marginTop: 4 }}>
+          <button
+            type="button"
+            onClick={async () => {
+              setBusy(true); setErr(null)
+              try {
+                const { data, error } = await supabase.storage.from('contract-uploads').createSignedUrl(contract.agreement_pdf_path, 300)
+                if (error) throw error
+                window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+              } catch (e) { setErr(e.message || String(e)) }
+              finally { setBusy(false) }
+            }}
+            style={{
+              background: 'transparent', border: 'none', padding: 0,
+              fontSize: 11, color: 'var(--ink-3)',
+              textDecoration: 'underline', cursor: 'pointer',
+            }}
+          >
+            View original (v1)
+          </button>
+        </div>
       )}
       {hasLocked && (
         <p style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)', margin: '4px 0 0' }}>

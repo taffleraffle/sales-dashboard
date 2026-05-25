@@ -29,20 +29,46 @@ export function fillPlaceholders(str, contract) {
     .replace(/\{\{project_period_days\}\}/g, period)
 }
 
-// Build a lookup of clause_id -> amendment for fast in-place substitution.
-// Only LOCKED amendments with final_clause_text qualify (consistent with
-// the PDF generator's quality gate).
+// Build a lookup of clause_id -> amendment. Supports both single-clause
+// amendments (one clause_reference field) and multi-clause amendments
+// where the closer bundled multiple clause changes inside a single
+// final_clause_text using "CLAUSE X.X AMENDMENT" headers as delimiters.
+// See src/data/contracts/index.js for the canonical comment.
+const MULTI_HEADER_RE = /^\s*CLAUSE\s+(\d+(?:\.\d+)?)\s+AMENDMENT\b[^\n]*/gim
+
 export function indexAmendments(amendments) {
   const byId = {}
   for (const a of amendments || []) {
     if (!a.locked_at) continue
     const text = (a.final_clause_text || a.ai_proposed_redline || '').trim()
     if (!text) continue
-    const refKey = normaliseClauseRef(a.clause_reference)
-    if (!refKey) continue
-    byId[refKey] = { ...a, _finalText: text }
+    const segments = splitByClauseHeaders(text)
+    if (segments.length > 0) {
+      for (const seg of segments) {
+        byId[seg.clauseId] = { ...a, _finalText: seg.text, _segment: true }
+      }
+    } else {
+      const refKey = normaliseClauseRef(a.clause_reference)
+      if (refKey) byId[refKey] = { ...a, _finalText: text }
+    }
   }
   return byId
+}
+
+export function splitByClauseHeaders(text) {
+  if (!text) return []
+  const matches = [...text.matchAll(MULTI_HEADER_RE)]
+  if (matches.length === 0) return []
+  const segments = []
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i]
+    const start = m.index
+    const end = i + 1 < matches.length ? matches[i + 1].index : text.length
+    const segText = text.slice(start, end).trim()
+    const body = segText.replace(MULTI_HEADER_RE, '').replace(/^\s*[-=_]{3,}\s*$/gm, '').trim()
+    if (body) segments.push({ clauseId: m[1], text: body })
+  }
+  return segments
 }
 
 // Normalise "Clause 7.2" / "clause 7.2(f)" / "7.2" → "7.2" so amendments
