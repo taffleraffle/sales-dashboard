@@ -19,6 +19,32 @@ import { getTemplateFor, fillPlaceholders, indexAmendments } from './templates/c
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+// sanitizeWinAnsi — pdf-lib's Helvetica only supports WinAnsi (Latin-1
+// + a handful). Smart quotes / em dashes / bullets / ellipses crash
+// drawText if passed unchanged. We map common Unicode glyphs to their
+// safest WinAnsi equivalent BEFORE the catch-all strip so they render
+// as readable characters rather than '?'.
+//
+// Lives at module scope so both the per-request handler AND wrapLines
+// (used by the Client Form 2-col table renderer) can call it. Before
+// hoisting, wrapLines did only the catch-all strip and killed every
+// bullet glyph in the services list to '?'.
+function sanitizeWinAnsi(s: string): string {
+  if (!s) return ''
+  return s
+    .replace(/[‘’‚‛]/g, "'")  // single curly + low quotes
+    .replace(/[“”„‟]/g, '"')  // double curly + low quotes
+    .replace(/–/g, '-')                       // en dash
+    .replace(/—/g, '--')                      // em dash
+    .replace(/…/g, '...')                     // ellipsis
+    .replace(/•/g, '*')                       // bullet
+    .replace(/ /g, ' ')                       // nbsp
+    .replace(/[​-‍﻿]/g, '')         // zero-width
+    // Strip anything still outside WinAnsi. Replace with '?' so missing
+    // chars are visible rather than silently dropped.
+    .replace(/[^\x00-\xff]/g, '?')
+}
+
 serve(async (req) => {
   const cors = handleCors(req)
   if (cors) return cors
@@ -79,9 +105,17 @@ serve(async (req) => {
     const MARGIN_B = 56
     const BODY_W   = PAGE_W - MARGIN_X * 2
 
-    // Sanitize for WinAnsi (pdf-lib Helvetica only supports WinAnsi).
-    // Smart quotes / em dashes / etc would crash drawText.
-    function sanitize(s: string): string {
+    // sanitize() delegates to the module-scope sanitizeWinAnsi() so
+    // wrapLines (used for the Client Form 2-col table where text gets
+    // split BEFORE drawing) shares the same WinAnsi conversion.
+    // Previously wrapLines did its own catch-all strip which killed
+    // bullets ("•" U+2022) and smart quotes to "?" because they live
+    // outside the \x00-\xff range and never got their proper WinAnsi
+    // mapping (• -> *, smart-quotes -> regular, etc).
+    const sanitize = sanitizeWinAnsi
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    function _unused_kept_to_avoid_unicode_edit_issues(s: string): string {
       if (!s) return ''
       return s
         .replace(/[‘’‚‛]/g, "'")
@@ -400,7 +434,11 @@ serve(async (req) => {
 // CLIENT FORM 2-column table where label column is fixed width).
 function wrapLines(text: string, maxW: number, font: any, size: number): string[] {
   if (!text) return ['']
-  const safe = String(text).replace(/[^\x00-\xff]/g, '?')
+  // Use the full WinAnsi sanitizer (not just the catch-all strip). The
+  // previous version killed bullets and smart quotes to '?' because they
+  // sit outside \x00-\xff and never got their proper Unicode-to-WinAnsi
+  // mapping (• -> *, smart-quotes -> ASCII, em-dash -> --, etc).
+  const safe = sanitizeWinAnsi(String(text))
   const out: string[] = []
   for (const rawLine of safe.split('\n')) {
     const words = rawLine.split(/\s+/)
