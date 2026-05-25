@@ -62,6 +62,11 @@ serve(async (req) => {
   try {
     const { amendment_id, new_message } = await req.json()
     if (!amendment_id) return json(400, { error: 'amendment_id required' })
+    // UUID guard — without this, a malformed amendment_id leaks the raw
+    // Postgres 'invalid input syntax for type uuid' as a 500. Same fix
+    // we applied to regenerate-amended-agreement in bc34f5a.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!UUID_RE.test(amendment_id)) return json(400, { error: 'amendment_id must be a uuid' })
 
     const supabaseUrl  = Deno.env.get('SUPABASE_URL')!
     const serviceKey   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!

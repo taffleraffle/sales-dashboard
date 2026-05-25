@@ -116,19 +116,46 @@ export default function DownsellCoach({ contractId, contract }) {
     }
   }
 
+  // Anchor numbers — the closer should see the current contract fee while
+  // talking through downsell options so the conversation has a starting
+  // reference. Pulled from the contract row passed in from ContractDetail.
+  const currentFeeLabel = contract?.fee_amount_usd
+    ? `$${Number(contract.fee_amount_usd).toLocaleString()}`
+    : null
+  const currentPeriodLabel = contract?.project_period_days
+    ? `${contract.project_period_days} days`
+    : null
+
   return (
     <div>
-      <div className="flex items-center gap-3 mb-4 pb-3" style={{ borderBottom: '1px solid var(--rule)' }}>
-        <TrendingDown size={18} style={{ color: 'var(--accent)' }} />
-        <div>
-          <span className="eyebrow eyebrow-accent">OPT Digital · Downsell options</span>
-          <h2 style={{ fontFamily: 'var(--serif)', fontSize: 22, color: 'var(--ink)', margin: '4px 0 0' }}>
-            Save the <em style={{ fontStyle: 'italic' }}>deal</em>
-          </h2>
-          <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4, maxWidth: 640 }}>
-            Talk through a downsell or churn-save. The coach reads your downsell policy + this contract's context and helps you land an offer that clears margin and meets the client.
-          </p>
+      <div className="flex items-start justify-between gap-4 mb-4 pb-3" style={{ borderBottom: '1px solid var(--rule)' }}>
+        <div className="flex items-center gap-3">
+          <TrendingDown size={18} style={{ color: 'var(--accent)' }} />
+          <div>
+            <span className="eyebrow eyebrow-accent">OPT Digital · Downsell options</span>
+            <h2 style={{ fontFamily: 'var(--serif)', fontSize: 22, color: 'var(--ink)', margin: '4px 0 0' }}>
+              Save the <em style={{ fontStyle: 'italic' }}>deal</em>
+            </h2>
+            <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4, maxWidth: 640 }}>
+              Talk through a downsell or churn-save. The coach reads your downsell policy + this contract's context and helps you land an offer that clears margin and meets the client.
+            </p>
+          </div>
         </div>
+        {currentFeeLabel && (
+          <div className="flex-shrink-0 text-right">
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+              Current fee
+            </span>
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 16, color: 'var(--ink)', margin: '4px 0 0' }}>
+              {currentFeeLabel}
+            </p>
+            {currentPeriodLabel && (
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+                over {currentPeriodLabel}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {loading && (
@@ -201,8 +228,19 @@ function CoachThread({ thread, messages, onChange }) {
   const [sendErr, setSendErr]     = useState(null)
   const [locking, setLocking]     = useState(false)
   const [flagging, setFlagging]   = useState(false)
+  const [retrying, setRetrying]   = useState(false)
+  const [retryErr, setRetryErr]   = useState(null)
   const threadEndRef = useRef(null)
   const prevLengthRef = useRef(messages.length)
+
+  // Initial-coach-call failed during startThread, OR the only message in
+  // the thread is the closer's opening: there's no coach reply yet but
+  // the thread row exists. Surface a "Retry coach" button instead of
+  // leaving the closer stuck on a "Waiting for first response…" message
+  // with no recovery path.
+  const isAwaitingFirstCoach = !thread.locked_at
+    && (messages.length === 0
+        || (messages.length === 1 && messages[0].role === 'closer'))
 
   // Latest status_signal in the thread (coach can shift turn-by-turn)
   const lastStatusSignal = [...messages].reverse()
@@ -220,6 +258,23 @@ function CoachThread({ thread, messages, onChange }) {
     }
     prevLengthRef.current = messages.length
   }, [messages.length])
+
+  async function retryCoach() {
+    if (retrying) return
+    setRetrying(true); setRetryErr(null)
+    try {
+      const { data, error: invErr } = await supabase.functions.invoke('contract-downsell-coach', {
+        body: { thread_id: thread.id },
+      })
+      if (invErr) throw invErr
+      if (data?.error) throw new Error(data.error)
+      await onChange()
+    } catch (err) {
+      setRetryErr(err.message || String(err))
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   async function sendReply(e) {
     e?.preventDefault()
@@ -315,12 +370,35 @@ function CoachThread({ thread, messages, onChange }) {
       <div className="space-y-3 mb-4">
         {messages.length === 0 && (
           <p style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
-            Waiting for the coach's first response…
+            Opening context saved. The coach hasn't replied yet — hit "Retry coach" below to kick it off.
           </p>
         )}
         {messages.map(m => <CoachMessageBubble key={m.id} message={m} />)}
         <div ref={threadEndRef} />
       </div>
+
+      {/* Retry coach — for threads where the initial coach call failed or
+          the closer sent the opening message but no coach reply landed yet.
+          Without this, the thread is stranded with no recovery path
+          (the policy not being seeded is the most common cause: 412). */}
+      {isAwaitingFirstCoach && (
+        <div className="mb-4 p-3 flex items-center justify-between gap-3" style={{ background: 'var(--paper-2)', border: '1px dashed var(--rule)', borderRadius: 3 }}>
+          <span style={{ fontSize: 12, color: 'var(--ink-3)', fontStyle: 'italic' }}>
+            {retryErr
+              ? <span style={{ color: 'var(--down)', fontFamily: 'var(--mono)' }}>{retryErr}</span>
+              : 'No coach reply yet. Usually means the downsell policy isn\'t seeded, or the first call failed.'}
+          </span>
+          <button
+            type="button"
+            onClick={retryCoach}
+            disabled={retrying}
+            className="editorial-btn-ghost"
+            style={{ flexShrink: 0 }}
+          >
+            {retrying ? <><Loader size={ICON.sm} className="animate-spin" /> Retrying…</> : <><Send size={ICON.sm} /> Retry coach</>}
+          </button>
+        </div>
+      )}
 
       {/* Reply form */}
       {!isLocked && (
