@@ -1839,6 +1839,12 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   const [offerFilter, setOfferFilter] = useState(() => new Set())  // values: offer_slug | '__none__'
   const [runFilter, setRunFilter]     = useState(() => new Set())  // values: 'yes' | 'no'
   const [stageFilter, setStageFilter] = useState(() => new Set())  // values: 'raw_unused' | 'raw_used' | 'edited_seg' | 'merged'
+  // Upload-date filter. Preset windows only — operator picks a quick range
+  // and the list narrows to clips whose added_at falls inside it. Set so
+  // the same FilterDropdown component as the other chips works; in practice
+  // only one preset is ever selected at a time. Values: 'today', 'last7',
+  // 'last30', 'last90'. Empty Set = no filter.
+  const [dateFilter, setDateFilter] = useState(() => new Set())
   const [latestOnly, setLatestOnly] = useState(false)  // when true, hide non-latest versions
   // Hide low-quality (corrupted-on-ingest) clips by default. The 2026-05-20
   // Drive-import batch left 81 rows pointing at 1-3 MB placeholder files
@@ -2193,6 +2199,24 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         return false
       })
     }
+    if (dateFilter.size > 0) {
+      const now = Date.now()
+      const DAY = 24 * 60 * 60 * 1000
+      // Earliest cutoff across the selected presets — multiple presets means
+      // "OR", so the widest window wins (e.g. last7 + last30 = last30).
+      let cutoff = Infinity
+      if (dateFilter.has('today')) {
+        const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0)
+        cutoff = Math.min(cutoff, startOfToday.getTime())
+      }
+      if (dateFilter.has('last7'))  cutoff = Math.min(cutoff, now - 7  * DAY)
+      if (dateFilter.has('last30')) cutoff = Math.min(cutoff, now - 30 * DAY)
+      if (dateFilter.has('last90')) cutoff = Math.min(cutoff, now - 90 * DAY)
+      list = list.filter(r => {
+        if (!r.added_at) return false
+        return new Date(r.added_at).getTime() >= cutoff
+      })
+    }
     if (latestOnly) {
       // For each root (parent_id || id), keep only the row with the
       // highest version_number. Roots without children just stay.
@@ -2219,6 +2243,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           case 'offer':    return (r.offer_slug || '').toLowerCase()
           case 'run':      return r.has_been_run ? 1 : 0
           case 'status':   return (r.status || '').toLowerCase()
+          case 'uploaded': return r.added_at ? new Date(r.added_at).getTime() : 0
           default:         return 0
         }
       }
@@ -2230,7 +2255,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       })
     }
     return list
-  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, latestOnly, hideLowQuality, sortKey, sortDir, usedRawIds])
+  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, dateFilter, latestOnly, hideLowQuality, sortKey, sortDir, usedRawIds])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -2261,6 +2286,28 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
 
   const runCount    = useMemo(() => rows.filter(r => r.has_been_run).length, [rows])
   const notRunCount = useMemo(() => rows.filter(r => !r.has_been_run).length, [rows])
+  // Counts for the Uploaded filter dropdown. Recomputed when rows change;
+  // shown beside each preset so the operator can see how many clips fall
+  // inside each window before picking.
+  const dateCounts = useMemo(() => {
+    const now = Date.now()
+    const DAY = 24 * 60 * 60 * 1000
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0)
+    const tToday  = startOfToday.getTime()
+    const t7      = now - 7  * DAY
+    const t30     = now - 30 * DAY
+    const t90     = now - 90 * DAY
+    const counts  = { today: 0, last7: 0, last30: 0, last90: 0 }
+    for (const r of rows) {
+      if (!r.added_at) continue
+      const t = new Date(r.added_at).getTime()
+      if (t >= tToday) counts.today  += 1
+      if (t >= t7)     counts.last7  += 1
+      if (t >= t30)    counts.last30 += 1
+      if (t >= t90)    counts.last90 += 1
+    }
+    return counts
+  }, [rows])
   // Stable reference for MatrixRow's editor dropdown — same memo concern
   // as openDrawer: avoid re-creating this array each render.
   // Excludes admins so they don't show up in assignment dropdowns.
@@ -2589,6 +2636,16 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
             ]}
             allCount={rows.length}
             onChange={setRunFilter} />
+          <FilterDropdown label="UPLOADED"
+            selected={dateFilter}
+            options={[
+              { value: 'today',  label: 'TODAY',         count: dateCounts.today,  dot: '#3e8a5e' },
+              { value: 'last7',  label: 'LAST 7 DAYS',   count: dateCounts.last7,  dot: '#3e7eba' },
+              { value: 'last30', label: 'LAST 30 DAYS',  count: dateCounts.last30, dot: '#b8920c' },
+              { value: 'last90', label: 'LAST 90 DAYS',  count: dateCounts.last90, dot: 'var(--ink-3)' },
+            ]}
+            allCount={rows.length}
+            onChange={setDateFilter} />
           <button type="button"
             onClick={() => setLatestOnly(v => !v)}
             title="Show only the latest version of each clip (hide v1 when a v2 exists)"
@@ -2619,11 +2676,12 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
               {hideLowQuality ? `Hiding ${lowQualityCount} low-quality` : `⚠ Showing ${lowQualityCount} low-quality`}
             </button>
           )}
-          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size > 0 || latestOnly) && (
+          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size + dateFilter.size > 0 || latestOnly) && (
             <button type="button"
               onClick={() => {
                 setStageFilter(new Set()); setTypeFilter(new Set())
                 setOfferFilter(new Set()); setRunFilter(new Set())
+                setDateFilter(new Set())
                 setLatestOnly(false)
               }}
               style={{
@@ -3000,9 +3058,11 @@ const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onCl
   // Selectable adds a 26px checkbox column at the very left. Mirrors the
   // matrix view so bulk-edit works identically across both view modes.
   const selectable = !!onToggleSelect
+  // Added an "Uploaded" column between Status and Actions so the operator
+  // can scan upload dates at a glance and combine with the date filter.
   const gridCols = selectable
-    ? '26px 52px minmax(240px, 1.6fr) 90px 90px 140px 70px 80px 80px'
-    : '52px minmax(240px, 1.6fr) 90px 90px 140px 70px 80px 80px'
+    ? '26px 52px minmax(220px, 1.6fr) 90px 90px 130px 70px 80px 90px 80px'
+    : '52px minmax(220px, 1.6fr) 90px 90px 130px 70px 80px 90px 80px'
 
   // Header "select all visible" handler. Toggles all rows currently in
   // this group's list — caller passes group.rows so the meaning matches
@@ -3052,6 +3112,7 @@ const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onCl
         <div>Offer</div>
         <div>Run?</div>
         <div>Status</div>
+        <div>Uploaded</div>
         <div style={{ textAlign: 'right' }}>Actions</div>
       </div>
       {rows.map((r, i) => (
@@ -3218,6 +3279,11 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
             )}
           </div>
           <div><StatusBadge status={r.status} /></div>
+          {/* Uploaded date — YYYY-MM-DD compact mono so the column stays tight. */}
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}
+               title={r.added_at ? new Date(r.added_at).toLocaleString() : ''}>
+            {r.added_at ? new Date(r.added_at).toISOString().slice(0, 10) : '—'}
+          </div>
           {/* Actions */}
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
             {onDelete && (
@@ -3245,7 +3311,10 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
    when 100+ rows are visible. */
 // Condensed edge-to-edge layout. Adds a 22px checkbox column when bulk-
 // select handlers are wired in. Slightly tighter column widths than before.
-const MATRIX_COLS_BASE = '38px minmax(110px, 0.85fr) minmax(180px, 1.8fr) 86px 70px 120px 120px 56px 76px 62px'
+// Columns: rank · thumb · id · description · type · creator · editor · offer · run · status · uploaded · raw.
+// "Uploaded" was added between Status and Raw so the operator can scan
+// added_at without opening the detail modal.
+const MATRIX_COLS_BASE = '38px minmax(110px, 0.85fr) minmax(180px, 1.8fr) 86px 70px 120px 120px 56px 76px 78px 62px'
 const MATRIX_COLS_SEL  = `26px ${MATRIX_COLS_BASE}`
 
 // Header cell with clickable sort + arrow indicator. Used in CreativeMatrixView.
@@ -3325,6 +3394,7 @@ const CreativeMatrixView = memo(function CreativeMatrixView({ rows, editors, off
         <SortableHeader label="Offer"       k="offer"   sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
         <SortableHeader label="Run?"        k="run"     sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
         <SortableHeader label="Status"      k="status"  sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+        <SortableHeader label="Uploaded"    k="uploaded" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
         <div>Raw</div>
       </div>
       {rows.map((r, i) => (
@@ -3614,6 +3684,11 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
         ) : (
           <span style={{ color: STATUS_COLOR[r.status] || 'var(--ink-3)' }}>{STATUS_LABEL[r.status] || r.status}</span>
         )}
+      </div>
+      {/* Uploaded — added_at as YYYY-MM-DD. Title tooltip shows full timestamp. */}
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-3)' }}
+           title={r.added_at ? new Date(r.added_at).toLocaleString() : ''}>
+        {r.added_at ? new Date(r.added_at).toISOString().slice(0, 10) : '—'}
       </div>
       {/* Raw — open the source file */}
       <div onClick={stop} style={{ display: 'flex', justifyContent: 'center' }}>
