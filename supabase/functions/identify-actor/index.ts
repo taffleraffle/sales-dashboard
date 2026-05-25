@@ -144,8 +144,9 @@ serve(async (req) => {
       content.push({ type: 'text', text:
 `You compare ad-creative video stills. Look at the TARGET frame and decide:
 1. Is there a clearly visible person?
-2. If yes, which of the REFERENCE people (if any) is the same person as the target?
-3. Otherwise return UNKNOWN.
+2. If yes, which of the REFERENCE people (if any) is the SAME INDIVIDUAL as the target?
+3. If you have ANY DOUBT — return UNKNOWN. New creators that aren't in
+   the reference list will fail this check, and that is the correct outcome.
 
 Available references: ${referenceNames.join(', ') || '(none)'}.
 
@@ -156,9 +157,18 @@ Return JSON ONLY:
   "confidence": 0.0-1.0
 }
 
-Use NO_PERSON if the target frame is a screencast / black screen / logo card with no human.
-Use UNKNOWN if there's a person but they don't clearly match any reference.
-Only return a reference name when you are confident (>0.7).` })
+CRITICAL identity rules:
+- "Same person" means same individual face — NOT just same demographic
+  (age / gender / ethnicity / hairstyle). Two different people with similar
+  looks are NOT a match.
+- If the target person is not in the reference list, return UNKNOWN. We
+  expect new creators frequently; matching them to the closest-looking
+  existing creator is WORSE than leaving them unlabelled.
+- Default bias: when uncertain, return UNKNOWN.
+- Use NO_PERSON only if the target frame is a screencast / black screen /
+  logo card with no human face.
+- Only return a reference name when you are HIGHLY confident (>=0.9).
+  Anything below that should be UNKNOWN.` })
 
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -191,10 +201,14 @@ Only return a reference name when you are confident (>0.7).` })
       const confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0))
 
       // Only apply a match if Claude is confident AND the name is in
-      // our reference set. NO_PERSON / UNKNOWN leave the row's existing
-      // creator alone.
+      // our reference set. Threshold raised to 0.9 after wrongly tagging
+      // brand-new creators as "Natalie" (closest demographic match in the
+      // reference set, ~0.75 confidence). New creators should land as
+      // null so the operator hand-assigns. NO_PERSON / UNKNOWN leave
+      // the row's existing creator alone.
+      const MATCH_THRESHOLD = 0.9
       let newCreator: string | null = null
-      if (matchRaw && matchRaw !== 'UNKNOWN' && matchRaw !== 'NO_PERSON' && confidence >= 0.7) {
+      if (matchRaw && matchRaw !== 'UNKNOWN' && matchRaw !== 'NO_PERSON' && confidence >= MATCH_THRESHOLD) {
         if (referenceNames.includes(matchRaw)) newCreator = matchRaw
       }
 

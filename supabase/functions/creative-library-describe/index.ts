@@ -56,21 +56,29 @@ function slugify(s: string): string {
   return (s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 16) || 'UNTITLED'
 }
 
+function isVideoUrl(url: string | null | undefined): boolean {
+  if (!url) return false
+  return /\.(mp4|mov|m4v|webm|mkv|avi)(\?|$)/i.test(url)
+}
+
 async function describeOne(row: any): Promise<{ topic: string, description: string } | null> {
   const transcript = (row.transcript || '').trim()
   const visualDesc = (row.visual_description || '').trim()
-  // Two valid inputs: a Whisper transcript (video) OR a visual description
-  // from identify-actor (image / silent clip). If neither, skip — there's
-  // nothing for Claude to summarise.
+  const isVideo = isVideoUrl(row.preview_url)
+  // Video rows MUST be described from the transcript. Falling back to the
+  // thumbnail-derived visual_description produced garbage like "fashion
+  // styling" on restoration sales clips because Whisper had failed silently
+  // (>25 MB cap, no speech track, etc.) — see Bug 1+5 fix. If a video has
+  // no transcript, skip describe entirely; the operator will hand-label.
+  // Image rows have no audio to transcribe, so visual_description is the
+  // only legitimate source.
+  if (isVideo && !transcript) return null
   if (!transcript && !visualDesc) return null
   const truncated = transcript.length > 4000 ? transcript.slice(0, 4000) + '...' : transcript
 
-  // Build the source-content block based on what we have. Image rows lean
-  // on the visual_description, video rows on the transcript. When both
-  // are present (rare but possible), give Claude both.
   const sourceBlock = transcript
     ? `TRANSCRIPT:\n"""\n${truncated}\n"""${visualDesc ? `\n\nVISUAL DESCRIPTION:\n"""\n${visualDesc}\n"""` : ''}`
-    : `VISUAL DESCRIPTION (no audio — static image or silent clip):\n"""\n${visualDesc}\n"""`
+    : `VISUAL DESCRIPTION (no audio — static image):\n"""\n${visualDesc}\n"""`
 
   const prompt = `You are reviewing a single short-form ad clip (UGC, hook, body, or full script).
 
@@ -131,11 +139,11 @@ serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
 
-  // Pull all target rows — include visual_description so image rows (no
-  // transcript) can be summarised from the identify-actor description.
+  // Pull all target rows — include preview_url so we can detect video vs
+  // image (videos require a transcript; images fall back to visual_description).
   const { data: rows, error: selErr } = await supabase
     .from('lib_creative_library')
-    .select('id, name, canonical_name, creator, type, status, transcript, visual_description')
+    .select('id, name, canonical_name, creator, type, status, transcript, visual_description, preview_url')
     .in('id', ids)
   if (selErr) return json({ error: `select: ${selErr.message}` }, 500)
 
@@ -147,7 +155,9 @@ serve(async (req) => {
     try {
       const out = await describeOne(row)
       if (!out) {
-        results.push({ id: row.id, skipped: 'no transcript' })
+        // Video with no transcript: leave description NULL so the operator
+        // can hand-label and the matrix shows "—" instead of garbage.
+        results.push({ id: row.id, skipped: 'video without transcript' })
         continue
       }
       // Preserve take number if the existing canonical_name has one

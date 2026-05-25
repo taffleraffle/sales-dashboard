@@ -85,6 +85,63 @@ function toDownloadUrl(url, filename) {
 
    `onProgress(fraction)` is called frequently — debounce in the caller
    if it's wired straight into setState. */
+// Minimum media dimensions for upload acceptance. 1080p floor — covers
+// both landscape 1920x1080 long-form and 1080x1920 shorts. We check
+// shortest_side >= 1080 so any orientation passes as long as the resolution
+// is genuinely 1080p+. Below this we hard-reject pre-upload (no override) —
+// the editor team can't do anything useful with sub-1080 footage anyway.
+const MIN_SHORTEST_SIDE = 1080
+
+/* Probe a File's intrinsic dimensions browser-side using the object URL +
+   a hidden <video> or <img>. Returns { width, height, kind } or throws
+   with a human message. 10s timeout so a broken codec doesn't hang forever
+   — operator gets a clear reject instead of an indefinite spinner. */
+async function probeMediaDimensions(file) {
+  const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
+  const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
+  if (!isVideo && !isImage) throw new Error('not a video or image')
+
+  const url = URL.createObjectURL(file)
+  try {
+    return await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('took >10s to read dimensions (codec unsupported?)'))
+      }, 10_000)
+      if (isVideo) {
+        const v = document.createElement('video')
+        v.preload = 'metadata'
+        v.muted = true
+        v.onloadedmetadata = () => {
+          clearTimeout(timeout)
+          const w = v.videoWidth, h = v.videoHeight
+          if (!w || !h) reject(new Error('zero-dimension video (corrupt file?)'))
+          else resolve({ width: w, height: h, kind: 'video' })
+        }
+        v.onerror = () => {
+          clearTimeout(timeout)
+          reject(new Error('browser could not decode video metadata'))
+        }
+        v.src = url
+      } else {
+        const img = new Image()
+        img.onload = () => {
+          clearTimeout(timeout)
+          const w = img.naturalWidth, h = img.naturalHeight
+          if (!w || !h) reject(new Error('zero-dimension image'))
+          else resolve({ width: w, height: h, kind: 'image' })
+        }
+        img.onerror = () => {
+          clearTimeout(timeout)
+          reject(new Error('browser could not decode image'))
+        }
+        img.src = url
+      }
+    })
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 async function uploadWithResume(file, { bucket, path, contentType, onProgress, upsert = false, registerHandle }) {
   const session = (await supabase.auth.getSession()).data.session
   const accessToken = session?.access_token
@@ -417,7 +474,11 @@ const uploadQueue = {
     try {
       await runUploadPipeline(next, (patch) => this.updateItem(next.id, patch))
     } catch (e) {
-      this.updateItem(next.id, { status: 'error', message: e?.message || 'failed', error: e?.message || 'failed' })
+      // Skip the error status if the item was cancelled — cancel() already
+      // dropped it from the queue and updateItem would be a no-op anyway.
+      if (!next.cancelled) {
+        this.updateItem(next.id, { status: 'error', message: e?.message || 'failed', error: e?.message || 'failed' })
+      }
     }
     // Yield to event loop so React can paint, then move on.
     setTimeout(() => this.processNext(), 50)
@@ -430,6 +491,45 @@ const uploadQueue = {
     this.items = this.items.filter((i) => i.id !== id)
     this.notify()
   },
+  // Cancel an in-flight (or queued) item. If the TUS upload is currently
+  // running we abort the tus.Upload handle to free the socket; if the
+  // lib_creative_library row was already inserted at step 1 of the
+  // pipeline we also delete it so cancelled uploads don't leave behind
+  // orphan rows with no asset. Removed from items either way so it
+  // disappears from the dock immediately.
+  cancel(id) {
+    const item = this.items.find((i) => i.id === id)
+    if (!item) return
+    if (item.tusHandle) {
+      try { item.tusHandle.abort() } catch {}
+    }
+    item.cancelled = true
+    if (item.libraryId) {
+      // Fire-and-forget — the row is no longer wanted. Errors swallowed
+      // because there's nothing actionable: the row will appear in the
+      // library as untitled, the operator can delete it manually.
+      supabase.from('lib_creative_library').delete().eq('id', item.libraryId).then(() => {})
+    }
+    this.items = this.items.filter((i) => i.id !== id)
+    this.notify()
+  },
+  // Cancel-all: abort everything still in flight + drop the whole queue.
+  // Done/error items get dropped too — this is a hard reset of the dock.
+  // Any rows already inserted into lib_creative_library get deleted too
+  // so we don't leave orphan rows behind.
+  cancelAll() {
+    const idsToDelete = []
+    for (const it of this.items) {
+      if (it.tusHandle) { try { it.tusHandle.abort() } catch {} }
+      it.cancelled = true
+      if (it.libraryId) idsToDelete.push(it.libraryId)
+    }
+    if (idsToDelete.length > 0) {
+      supabase.from('lib_creative_library').delete().in('id', idsToDelete).then(() => {})
+    }
+    this.items = []
+    this.notify()
+  },
 }
 
 /* Per-file pipeline. Was inline in UploadModal.submit; extracted so the
@@ -440,6 +540,10 @@ const uploadQueue = {
 async function runUploadPipeline(item, update) {
   const { file, config } = item
   const { batchType, batchStatus, batchEditorId, batchOfferSlug, stamp } = config
+  // Bail early if the operator already cancelled this item before processing
+  // reached it. cancel() sets item.cancelled before removing from the queue,
+  // so this guard covers the brief window when processNext() was scheduled.
+  if (item.cancelled) return
   update({ status: 'creating', message: 'creating row' })
 
   // 1. Insert library row
@@ -460,6 +564,7 @@ async function runUploadPipeline(item, update) {
   if (insErr) throw new Error(insErr.message)
   const libraryId = inserted.id
   update({ libraryId })
+  if (item.cancelled) return
 
   // 2. TUS upload
   const HARD_LIMIT = 10 * 1024 * 1024 * 1024
@@ -470,18 +575,30 @@ async function runUploadPipeline(item, update) {
     storagePath = `incoming/${libraryId}_${file.name.replace(/[^A-Za-z0-9._-]/g, '_')}`
     const contentType = file.type || (isImageFile ? 'image/jpeg' : 'video/mp4')
     let lastPct = -1
-    await uploadWithResume(file, {
-      bucket: 'creative-uploads',
-      path: storagePath,
-      contentType,
-      onProgress: (frac) => {
-        const pct = Math.floor(frac * 20) * 5
-        if (pct !== lastPct) {
-          lastPct = pct
-          update({ status: 'uploading', progress: frac, message: `uploading ${pct}%` })
-        }
-      },
-    })
+    try {
+      await uploadWithResume(file, {
+        bucket: 'creative-uploads',
+        path: storagePath,
+        contentType,
+        onProgress: (frac) => {
+          const pct = Math.floor(frac * 20) * 5
+          if (pct !== lastPct) {
+            lastPct = pct
+            update({ status: 'uploading', progress: frac, message: `uploading ${pct}%` })
+          }
+        },
+        // Stash the tus handle so uploadQueue.cancel() can abort mid-chunk.
+        // We clear it after the upload settles so cancel() during the
+        // post-upload pipeline doesn't try to abort a finished tus.Upload.
+        registerHandle: (handle) => { item.tusHandle = handle },
+      })
+    } catch (e) {
+      if (item.cancelled) return  // tus.abort() rejects the promise; swallow
+      throw e
+    } finally {
+      item.tusHandle = null
+    }
+    if (item.cancelled) return
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
     const postPatch = { preview_url: publicUrl }
     if (isImageFile) {
@@ -523,7 +640,10 @@ async function runUploadPipeline(item, update) {
   }
 
   // 3. Transcribe → identify-actor → describe (background, but we still
-  //    surface failures into the queue item's message).
+  //    surface failures into the queue item's message). Cancellation is
+  //    checked between each stage so cancel() during the post-upload
+  //    pipeline still short-circuits — we can't abort a running Edge
+  //    Function but we can skip the next ones.
   const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
   let pipelineErr = null
   if (isVideo) {
@@ -536,6 +656,7 @@ async function runUploadPipeline(item, update) {
       else if (data?.error) pipelineErr = `transcribe: ${data.error}`
     } catch (e) { pipelineErr = `transcribe threw: ${e.message}` }
   }
+  if (item.cancelled) return
   update({ status: 'identifying', message: 'identifying actor' })
   try {
     const { data, error } = await supabase.functions.invoke('identify-actor', {
@@ -544,6 +665,7 @@ async function runUploadPipeline(item, update) {
     if (error) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `actor-id: ${error.message}`
     else if (data?.errors?.length > 0) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `actor-id: ${data.errors[0].error || 'unknown'}`
   } catch (e) { pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `actor-id threw: ${e.message}` }
+  if (item.cancelled) return
   update({ status: 'describing', message: 'naming' })
   try {
     const { data, error } = await supabase.functions.invoke('creative-library-describe', {
@@ -552,6 +674,7 @@ async function runUploadPipeline(item, update) {
     if (error) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe: ${error.message}`
     else if (data?.errors?.length > 0) pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe: ${data.errors[0].error || 'unknown'}`
   } catch (e) { pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `describe threw: ${e.message}` }
+  if (item.cancelled) return
 
   update({
     status: 'done',
@@ -587,6 +710,12 @@ function UploadDock({ onRefresh }) {
   const failed   = items.filter((i) => i.status === 'error')
   const done     = items.filter((i) => i.status === 'done')
   const tooBig   = items.filter((i) => i.status === 'too-large')
+  // Rename trouble = upload itself succeeded BUT the post-upload pipeline
+  // (transcribe / identify-actor / describe) hit an error, so the row
+  // probably landed without a canonical_name. Distinct from `failed` so
+  // the operator can tell apart "didn't upload" vs "uploaded but blurry-
+  // skipped naming". Surfaces as an amber warning instead of red.
+  const renameTrouble = done.filter((i) => i.error)
   const totalProg = items.reduce((s, i) => s + (i.progress || 0), 0) / items.length
 
   // Compact summary pill
@@ -597,7 +726,11 @@ function UploadDock({ onRefresh }) {
           position: 'fixed', bottom: 16, right: 16, zIndex: 95,
           padding: '10px 14px', minWidth: 220,
           background: 'var(--paper)', border: '1px solid var(--rule)',
-          borderLeft: failed.length > 0 ? '3px solid #b53e3e' : '3px solid var(--accent, #e8b408)',
+          borderLeft: failed.length > 0
+            ? '3px solid #b53e3e'
+            : renameTrouble.length > 0
+              ? '3px solid #d09c08'
+              : '3px solid var(--accent, #e8b408)',
           boxShadow: '0 8px 24px rgba(10,10,10,0.12)',
           fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink)',
           cursor: 'pointer', textAlign: 'left',
@@ -609,7 +742,9 @@ function UploadDock({ onRefresh }) {
               ? `Uploading ${inFlight.length}/${items.length}`
               : failed.length > 0
                 ? `${done.length} done · ${failed.length} failed`
-                : `${done.length} uploaded`}
+                : renameTrouble.length > 0
+                  ? `${done.length} uploaded · ${renameTrouble.length} need rename retry`
+                  : `${done.length} uploaded`}
           </span>
           <span style={{ color: 'var(--ink-3)' }}>▴</span>
         </div>
@@ -656,6 +791,21 @@ function UploadDock({ onRefresh }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
+            {inFlight.length > 0 && (
+              <button
+                onClick={() => {
+                  if (confirm(`Cancel ${inFlight.length} upload${inFlight.length === 1 ? '' : 's'} in flight? Partially-uploaded chunks will be discarded.`)) {
+                    uploadQueue.cancelAll()
+                  }
+                }}
+                style={{
+                  background: 'transparent', border: '1px solid #b53e3e', padding: '4px 8px',
+                  fontFamily: 'var(--mono)', fontSize: 10, cursor: 'pointer', color: '#b53e3e',
+                  textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600,
+                }}
+                title="Abort every upload in flight and clear the queue"
+              >Cancel all</button>
+            )}
             {(done.length + failed.length + tooBig.length) > 0 && inFlight.length === 0 && (
               <button onClick={() => uploadQueue.clearCompleted()} style={{
                 background: 'transparent', border: '1px solid var(--rule)', padding: '4px 8px',
@@ -697,12 +847,29 @@ function UploadDock({ onRefresh }) {
                     </div>
                   )}
                 </div>
-                {(isDone || isErr || it.status === 'too-large') && (
-                  <button onClick={() => uploadQueue.dismiss(it.id)} title="Dismiss" style={{
-                    background: 'transparent', border: 'none', cursor: 'pointer',
-                    color: 'var(--ink-4)', fontSize: 16, padding: 0,
-                  }}>×</button>
-                )}
+                {(isDone || isErr || it.status === 'too-large')
+                  ? (
+                    <button onClick={() => uploadQueue.dismiss(it.id)} title="Dismiss" style={{
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      color: 'var(--ink-4)', fontSize: 16, padding: 0,
+                    }}>×</button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        // No confirm for a single item — the file is still
+                        // here on disk and re-uploadable. Cancel-all gets a
+                        // confirm because losing a whole batch hurts more.
+                        uploadQueue.cancel(it.id)
+                      }}
+                      title={`Cancel upload of ${it.file.name}`}
+                      style={{
+                        background: 'transparent', border: '1px solid var(--rule)',
+                        cursor: 'pointer', color: '#b53e3e', padding: '2px 6px',
+                        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                        letterSpacing: '0.08em', textTransform: 'uppercase',
+                      }}
+                    >Cancel</button>
+                  )}
               </div>
             )
           })}
@@ -710,6 +877,113 @@ function UploadDock({ onRefresh }) {
       </div>
     </>,
     document.body,
+  )
+}
+
+/* Thin progress bar pinned to the very top of the viewport while there's
+   at least one upload in flight. Mirrors the YouTube/GitHub pattern —
+   ambient signal that "something is uploading" without taking up real
+   estate. Aggregate progress across the whole queue. Mounted via portal
+   so it sits above the app's sticky header / sidebar / modals at z-index
+   9999 but doesn't intercept clicks (pointer-events: none).
+
+   Disappears the instant the queue drains (or is cancelled). The
+   floating UploadDock owns the per-file detail; this is just the
+   peripheral-vision indicator. */
+function TopUploadProgressBar() {
+  const items = useUploadQueue()
+  const inFlight = items.filter((i) => i.status !== 'done' && i.status !== 'error' && i.status !== 'too-large')
+  if (inFlight.length === 0) return null
+  const failed = items.filter((i) => i.status === 'error').length
+  // Average progress across every item currently in the dock, not just
+  // the in-flight ones — so the bar advances smoothly as items finish
+  // rather than snapping back to 0% when the next file starts.
+  const totalProg = items.length > 0
+    ? items.reduce((s, i) => s + (i.progress || 0), 0) / items.length
+    : 0
+  return createPortal(
+    <div
+      style={{
+        position: 'fixed', top: 0, left: 0, right: 0, height: 3,
+        zIndex: 9999, pointerEvents: 'none',
+        background: 'transparent',
+      }}
+      aria-hidden="true"
+    >
+      <div
+        style={{
+          height: '100%',
+          width: `${Math.max(2, Math.round(totalProg * 100))}%`,
+          background: failed > 0 ? '#b53e3e' : 'var(--accent, #e8b408)',
+          transition: 'width 0.25s ease',
+          boxShadow: '0 0 6px rgba(232,180,8,0.6)',
+        }}
+      />
+    </div>,
+    document.body,
+  )
+}
+
+/* Bulk admin action: re-fire identify-actor + describe on every row in
+   the current library list that's missing a canonical_name. Surfaces the
+   most common upload failure mode — the rename pipeline silently skipped
+   because transcribe + actor-id both came back empty — and gives the
+   operator a one-click way to retry.
+
+   Runs in batches of 10 to stay under the Edge Function CPU budget +
+   not hammer Anthropic rate limits. Progress shown inline on the button. */
+function RenameUnnamedButton({ rows, onComplete }) {
+  const unnamed = (rows || []).filter(r => !r.canonical_name)
+  const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState(null)
+  if (unnamed.length === 0) return null
+  const run = async () => {
+    if (busy) return
+    setBusy(true)
+    setProgress({ done: 0, total: unnamed.length, errors: 0 })
+    const BATCH = 10
+    for (let i = 0; i < unnamed.length; i += BATCH) {
+      const slice = unnamed.slice(i, i + BATCH).map(r => r.id)
+      try {
+        // Re-fire identify-actor first so any visual_description that
+        // never landed gets populated. Then describe — which needs
+        // EITHER transcript OR visual_description to produce a name.
+        await supabase.functions.invoke('identify-actor', { body: { library_ids: slice } })
+        const { data } = await supabase.functions.invoke('creative-library-describe', { body: { library_ids: slice } })
+        const errCount = (data?.errors?.length || 0)
+        setProgress(p => ({ done: Math.min((p?.done || 0) + slice.length, unnamed.length), total: unnamed.length, errors: (p?.errors || 0) + errCount }))
+      } catch (e) {
+        setProgress(p => ({ done: (p?.done || 0) + slice.length, total: unnamed.length, errors: (p?.errors || 0) + slice.length }))
+      }
+    }
+    setBusy(false)
+    onComplete?.()
+    // Leave the final count visible briefly so the operator sees the
+    // result, then clear so the button reverts to its default label.
+    setTimeout(() => setProgress(null), 4000)
+  }
+  return (
+    <button
+      onClick={run}
+      disabled={busy}
+      title={`Re-fire AI naming on ${unnamed.length} clip${unnamed.length === 1 ? '' : 's'} that never got a canonical name`}
+      style={{
+        padding: '6px 10px',
+        fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+        letterSpacing: '0.06em', textTransform: 'uppercase',
+        background: busy ? 'var(--paper-2)' : 'white',
+        color: busy ? 'var(--ink-3)' : '#a86a08',
+        border: '1px solid ' + (busy ? 'var(--rule)' : '#e8b408'),
+        borderRadius: 2,
+        cursor: busy ? 'wait' : 'pointer',
+      }}
+    >
+      {busy && progress
+        ? `Renaming ${progress.done}/${progress.total}${progress.errors > 0 ? ` · ${progress.errors} err` : ''}…`
+        : progress && !busy
+          ? `Done · ${progress.done - progress.errors}/${progress.total} renamed`
+          : `Re-name ${unnamed.length} unnamed`}
+    </button>
   )
 }
 
@@ -774,8 +1048,14 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
         ? { ...x, read_at: new Date().toISOString() } : x))
     }
     setOpen(false)
-    // Open the related task in the portal's task modal.
-    if (n.task_id) onOpenTask?.(n.task_id)
+    // Task-bound notifications open the task modal in the portal.
+    if (n.task_id) { onOpenTask?.(n.task_id); return }
+    // Otherwise, use the notification's link_path for navigation. This is
+    // how new_upload_needs_assignment notifications (which don't have a
+    // task yet — that's the whole point) deep-link to the library view.
+    if (n.link_path) {
+      try { window.location.href = n.link_path } catch {}
+    }
   }
   const relTime = (iso) => {
     const t = new Date(iso).getTime()
@@ -802,13 +1082,14 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
   // colored left border do the visual sorting.
   const kindStyle = (kind) => {
     switch (kind) {
-      case 'feedback':            return { label: 'Feedback',     color: '#e8b408' }
-      case 'revision_requested':  return { label: 'Revision',     color: '#d09c08' }
-      case 'assignment':          return { label: 'New task',     color: '#3e7eba' }
-      case 'reassignment':        return { label: 'Reassigned',   color: '#3e7eba' }
-      case 'source_replaced':     return { label: 'Source updated', color: '#a05810' }
-      case 'approved':            return { label: 'Approved',     color: '#3e8a5e' }
-      default:                    return { label: 'Update',       color: 'var(--ink-3)' }
+      case 'feedback':                     return { label: 'Feedback',     color: '#e8b408' }
+      case 'revision_requested':           return { label: 'Revision',     color: '#d09c08' }
+      case 'assignment':                   return { label: 'New task',     color: '#3e7eba' }
+      case 'reassignment':                 return { label: 'Reassigned',   color: '#3e7eba' }
+      case 'source_replaced':              return { label: 'Source updated', color: '#a05810' }
+      case 'approved':                     return { label: 'Approved',     color: '#3e8a5e' }
+      case 'new_upload_needs_assignment':  return { label: 'Needs editor', color: '#b53e3e' }
+      default:                             return { label: 'Update',       color: 'var(--ink-3)' }
     }
   }
 
@@ -1501,7 +1782,47 @@ function TabBtn({ active, onClick, children }) {
 
 /* ─────────────────────────── LIBRARY TAB ─────────────────────────── */
 
+// Resolve the currently-logged-in auth user to a lib_creative_editors row
+// when they're flagged as an assignment coordinator (notify_on_unassigned).
+// Returns null otherwise. Used to mount the EditorNotificationBell for
+// admins/coordinators (e.g. Kirill) so they get in-app notifications about
+// new uploads that need editor assignment.
+//
+// Matches on auth_user_id first (the canonical link), falling back to
+// case-insensitive email match for editors who haven't logged in yet but
+// were invited by email.
+function useCoordinatorEditorId(scope) {
+  const [coordinatorId, setCoordinatorId] = useState(null)
+  useEffect(() => {
+    // Editor-view already has a dedicated bell via scope.editorId — no need
+    // to layer a second one on top.
+    if (scope?.isEditorView) return
+    let mounted = true
+    ;(async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      // Try auth_user_id first, fall back to email. Filter by the flag so
+      // non-coordinator admins don't get a notification bell they don't need.
+      const orClauses = [`auth_user_id.eq.${user.id}`]
+      if (user.email) orClauses.push(`email.ilike.${user.email}`)
+      const { data } = await supabase.from('lib_creative_editors')
+        .select('id, notify_on_unassigned, active')
+        .or(orClauses.join(','))
+        .eq('notify_on_unassigned', true)
+        .neq('active', false)
+        .limit(1)
+      if (mounted && data && data.length > 0 && data[0].id) setCoordinatorId(data[0].id)
+    })()
+    return () => { mounted = false }
+  }, [scope?.isEditorView])
+  return coordinatorId
+}
+
 function LibraryTab({ scope = ADMIN_SCOPE }) {
+  // Assignment coordinator (e.g. Kirill) gets the editor-style bell so
+  // new_upload_needs_assignment notifications surface inside the dashboard.
+  // Null for everyone else (editors already have scope.editorId).
+  const coordinatorEditorId = useCoordinatorEditorId(scope)
   // Hydrate from module cache so tab-switches don't re-show a blank
   // "Loading…" — we show the previous data instantly and revalidate.
   const cached = scope.isEditorView ? null : PAGE_CACHE
@@ -1797,11 +2118,14 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       if (r.manually_marked_used === true)  { used.add(r.id); overridden.add(r.id) }
       if (r.manually_marked_used === false) {                  overridden.add(r.id) }
     }
-    // Type-based fast path — raw Hooks are "already used" by default
-    // unless the operator explicitly overrode to RAW.
-    for (const r of rows) {
-      if (r.status === 'raw' && r.type === 'Hook' && !overridden.has(r.id)) used.add(r.id)
-    }
+    // (Removed) Type-based Hook fast-path. Used to auto-mark every raw
+    // Hook as "used" by default — the assumption was that Hooks are
+    // self-contained and never need a separate edit pass. That broke for
+    // new freshly-uploaded Hooks that genuinely DO need an editor (the
+    // operator was getting "ticked / used" badges on stuff they'd just
+    // uploaded). Now Hooks follow the same rules as everything else:
+    // they're only considered used if the operator manually marks them,
+    // OR if their transcript matches phrases in an edited composite.
     // Build phrase Set from edited transcripts
     const editedPhrases = new Set()
     for (const r of rows) {
@@ -1861,7 +2185,10 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     if (stageFilter.size > 0) {
       list = list.filter(r => {
         if (stageFilter.has('raw_used') && r.status === 'raw' && usedRawIds.has(r.id)) return true
-        if (stageFilter.has('raw_unused') && r.status === 'raw' && !usedRawIds.has(r.id)) return true
+        // raw_unused must mirror the banner exactly: raw + not yet used + no editor + not Testimony.
+        // Without the editor/Testimony checks, the "Filter to these →" view showed rows the operator
+        // had already assigned (Mohamed/Ahmed/Dean in the wild), which defeated the whole banner.
+        if (stageFilter.has('raw_unused') && r.status === 'raw' && !usedRawIds.has(r.id) && !r.assigned_editor_id && r.type !== 'Testimony') return true
         if (stageFilter.has('edited_seg') && r.status === 'edited') return true
         return false
       })
@@ -1945,7 +2272,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // edited). 'Merged' is a narrower filter showing only Joined.
   const stageCounts = useMemo(() => ({
     raw_used:   rows.filter(r => r.status === 'raw' && usedRawIds.has(r.id)).length,
-    raw_unused: rows.filter(r => r.status === 'raw' && !usedRawIds.has(r.id)).length,
+    raw_unused: rows.filter(r => r.status === 'raw' && !usedRawIds.has(r.id) && !r.assigned_editor_id && r.type !== 'Testimony').length,
     edited_seg: rows.filter(r => r.status === 'edited').length,
   }), [rows, usedRawIds])
 
@@ -2082,27 +2409,55 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       {unassignedRawCount > 0 && (
         <div onClick={focusUnassignedRaw}
           style={{
-            display: 'flex', alignItems: 'center', gap: 12,
-            padding: '10px 14px', marginBottom: 10,
-            background: '#fffaea', border: '1px solid #e8b408',
-            borderLeft: '3px solid #e8b408',
+            display: 'flex', alignItems: 'center', gap: 14,
+            padding: '16px 18px', marginBottom: 14,
+            background: '#fff3d1', border: '2px solid #d68f00',
+            borderLeft: '6px solid #d68f00',
             cursor: 'pointer',
-            fontFamily: 'var(--mono)', fontSize: 11.5,
-            letterSpacing: '0.04em', color: '#7a4e08',
+            fontFamily: 'var(--mono)', fontSize: 13,
+            letterSpacing: '0.04em', color: '#4d3000',
+            boxShadow: '0 1px 0 rgba(214,143,0,0.18)',
           }}
           title="Click to filter the library to just these rows">
-          <span style={{ fontSize: 14 }}>⚠</span>
-          <span style={{ fontWeight: 600 }}>{unassignedRawCount}</span>
-          <span>raw creative{unassignedRawCount === 1 ? '' : 's'} need editor assignment</span>
+          <span style={{ fontSize: 20, lineHeight: 1 }}>⚠</span>
+          <span style={{
+            fontWeight: 800, fontSize: 18, color: '#9a4d00',
+            padding: '2px 8px', background: '#fff', border: '1.5px solid #d68f00',
+            borderRadius: 3, minWidth: 32, textAlign: 'center',
+          }}>{unassignedRawCount}</span>
+          <span style={{ fontWeight: 700, textTransform: 'uppercase' }}>
+            raw creative{unassignedRawCount === 1 ? '' : 's'} need editor assignment
+          </span>
           <span style={{ flex: 1 }} />
-          <span style={{ textDecoration: 'underline' }}>Filter to these →</span>
+          <span style={{
+            textDecoration: 'underline', fontWeight: 700,
+            padding: '4px 10px', background: '#9a4d00', color: '#fff',
+            borderRadius: 2, textDecorationColor: 'rgba(255,255,255,0.4)',
+          }}>Filter to these →</span>
         </div>
       )}
 
       {/* Notification surface — editors get the editor-side bell
           (personal feed of feedback / assignments / source updates /
           approvals), admins get the recent-submissions bell. Two
-          different bells reading two different tables. */}
+          different bells reading two different tables.
+          Assignment coordinators (e.g. Kirill, flagged via
+          notify_on_unassigned) ALSO get the editor-side bell mounted
+          so they see new_upload_needs_assignment notifications in
+          the dashboard alongside the admin submissions bell. */}
+      {!scope.isEditorView && coordinatorEditorId && (
+        <EditorNotificationBell
+          editorId={coordinatorEditorId}
+          onOpenTask={() => {
+            // Coordinator bell — clicking a notification deep-links to
+            // the library with the raw_unused filter pre-set (via the
+            // notification's link_path). The default onOpenTask path
+            // assumes editor portal; for the admin coordinator we just
+            // navigate to the standard library route.
+            try { window.location.href = '/sales/ads/creative/library?stage=raw_unused' } catch {}
+          }}
+        />
+      )}
       {scope.isEditorView && scope.editorId && (
         <EditorNotificationBell
           editorId={scope.editorId}
@@ -2152,6 +2507,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           Refreshes the library list whenever the queue empties so new
           rows surface without a manual refresh. */}
       <UploadDock onRefresh={() => load(true)} />
+      <TopUploadProgressBar />
 
       {/* Toolbar — compact, single block. No more 5-row chip stack. */}
       <div style={{
@@ -2180,6 +2536,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
             <button onClick={() => setUploadOpen(true)} style={primaryBtn}>
               + Upload creative
             </button>
+          )}
+          {scope.canUpload && (
+            <RenameUnnamedButton rows={rows} onComplete={() => load(true)} />
           )}
         </div>
 
@@ -2275,6 +2634,23 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                 border: '1px solid var(--rule)', cursor: 'pointer',
               }}>Clear filters</button>
           )}
+          {/* Bulk-edit discovery hint. Visible only when nothing is selected
+              and the operator can actually edit. Single-click selects every
+              currently-visible row so the operator can immediately see the
+              bulk bar appear. */}
+          {selected.size === 0 && scope.canEditCreative && filtered.length > 0 && (view === 'matrix' || view === 'list') && (
+            <button type="button"
+              onClick={() => setSelected(new Set(filtered.map(r => r.id)))}
+              title="Click any row's checkbox (left column) to start a bulk selection, or this button to select all visible rows. Bulk-edit creator, status, editor, offer, type."
+              style={{
+                marginLeft: 'auto', padding: '5px 10px',
+                fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                background: '#fff', color: 'var(--ink)',
+                border: '1.5px dashed var(--ink-3)', cursor: 'pointer',
+                borderRadius: 2,
+              }}>☐ Bulk edit · select all {filtered.length}</button>
+          )}
         </div>
       </div>
 
@@ -2368,6 +2744,9 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                   usedRawIds={usedRawIds}
                   onClick={setDrawerRow}
                   onDelete={scope.canDelete ? setConfirmDelete : null}
+                  selected={selected}
+                  selectionMode={selected.size > 0}
+                  onToggleSelect={scope.canEditCreative ? toggleSelect : null}
                 />
               ) : (
                 <CreativeMatrixView
@@ -2405,7 +2784,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           knownCreators={knownCreators}
           onOpenRow={openRowById}
           onClose={() => startTransition(() => setDrawerRow(null))}
-          onSaved={() => { startTransition(() => setDrawerRow(null)); load() }}
+          onSaved={() => { load(true) }}
           onRowPatched={(id, patch) => {
             // Merge changed fields into the parent's rows state.
             // No full DB reload — DB is already updated by the modal's
@@ -2440,6 +2819,19 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           offers={offers}
           onClose={() => setUploadOpen(false)}
           onSaved={() => { setUploadOpen(false); load() }}
+          onOfferAdded={(newOffer) => {
+            // Optimistically push the new niche into local + cache so the
+            // dropdown shows it immediately (including in other modals
+            // that read from the same prop). The next full load() will
+            // confirm it from the DB.
+            setOffers(curr => {
+              if (curr.some(o => o.slug === newOffer.slug)) return curr
+              return [...curr, newOffer].sort((a, b) => (a.slug || '').localeCompare(b.slug || ''))
+            })
+            if (Array.isArray(PAGE_CACHE.offers) && !PAGE_CACHE.offers.some(o => o.slug === newOffer.slug)) {
+              PAGE_CACHE.offers = [...PAGE_CACHE.offers, newOffer]
+            }
+          }}
         />
       )}
 
@@ -2604,11 +2996,25 @@ function StatusBadge({ status }) {
 // memo'd for the same reason as CreativeMatrixView — modal open/close
 // shouldn't force the entire list to re-render when no list-relevant
 // props changed.
-const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onClick, onDelete }) {
-  // 8 columns: thumb · name · type · creator · offer · run? · status · actions.
-  // Dropped v21 + size — both available in the detail modal. Keeps the row
-  // scannable without horizontal scroll on 1280px+ screens.
-  const gridCols = '52px minmax(240px, 1.6fr) 90px 90px 140px 70px 80px 80px'
+const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onClick, onDelete, selected, selectionMode, onToggleSelect }) {
+  // Selectable adds a 26px checkbox column at the very left. Mirrors the
+  // matrix view so bulk-edit works identically across both view modes.
+  const selectable = !!onToggleSelect
+  const gridCols = selectable
+    ? '26px 52px minmax(240px, 1.6fr) 90px 90px 140px 70px 80px 80px'
+    : '52px minmax(240px, 1.6fr) 90px 90px 140px 70px 80px 80px'
+
+  // Header "select all visible" handler. Toggles all rows currently in
+  // this group's list — caller passes group.rows so the meaning matches
+  // what the operator sees.
+  const allVisible = selectable && rows.length > 0 && rows.every(r => selected?.has(r.id))
+  const someVisible = selectable && rows.some(r => selected?.has(r.id)) && !allVisible
+  const toggleAll = () => {
+    if (!selectable) return
+    if (allVisible) rows.forEach(r => onToggleSelect(r.id))
+    else            rows.forEach(r => !selected?.has(r.id) && onToggleSelect(r.id))
+  }
+
   return (
     <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       <div style={{
@@ -2617,7 +3023,28 @@ const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onCl
         background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
         letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
+        alignItems: 'center',
       }}>
+        {selectable && (
+          <div onClick={toggleAll} title="Select / deselect all visible rows in this group — then bulk-edit creator, status, editor, offer, etc."
+            style={{
+              width: 18, height: 18, borderRadius: 3,
+              border: '2px solid var(--ink)',
+              background: allVisible ? 'var(--accent)' : (someVisible ? 'var(--paper-2)' : 'white'),
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+            }}>
+            {allVisible && (
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                  strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+            {someVisible && (
+              <span style={{ width: 9, height: 2.5, background: 'var(--ink)' }} />
+            )}
+          </div>
+        )}
         <div></div>
         <div>Name</div>
         <div>Type</div>
@@ -2631,15 +3058,25 @@ const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onCl
         <ListRow key={r.id} row={r} isLast={i === rows.length - 1}
           isUsed={usedRawIds?.has(r.id)}
           gridCols={gridCols}
+          selectable={selectable}
+          selected={selected?.has(r.id)}
+          selectionMode={selectionMode}
+          onToggleSelect={onToggleSelect}
           onClick={() => onClick(r)} onDelete={() => onDelete(r)} />
       ))}
     </div>
   )
 })
 
-function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete }) {
+function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectable, selected, selectionMode, onToggleSelect }) {
   // `onDelete` may be null when the viewer doesn't have delete permission
   const [hover, setHover] = useState(false)
+  // In selection mode, body-clicks toggle selection instead of opening
+  // the detail drawer — matches matrix-view behaviour.
+  const handleRowClick = () => {
+    if (selectionMode && selectable) onToggleSelect?.(r.id)
+    else onClick()
+  }
   // Debounced hover-to-play. The raw `hover` boolean drives the visual
   // (paper-2 tint) immediately; `hoverPlay` is only set 320ms after
   // hover begins, so dragging the mouse across 200 rows no longer
@@ -2671,13 +3108,34 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete }) {
             padding: '10px 14px', gap: 12, alignItems: 'center',
             borderBottom: isLast ? 'none' : '1px solid var(--rule)',
             borderLeft: `3px solid ${stripeColor}`,
-            background: hover ? (tint?.hover || 'var(--paper-2)') : (tint?.base || 'transparent'),
+            background: selected
+              ? 'rgba(244,225,74,0.15)'
+              : (hover ? (tint?.hover || 'var(--paper-2)') : (tint?.base || 'transparent')),
             transition: 'background 0.12s',
             cursor: 'pointer',
           }}
           onMouseEnter={() => setHover(true)}
           onMouseLeave={() => setHover(false)}
-          onClick={onClick}>
+          onClick={handleRowClick}>
+          {selectable && (
+            <div onClick={(e) => { e.stopPropagation(); onToggleSelect?.(r.id) }}
+              title="Select for bulk edit"
+              style={{
+                width: 16, height: 16, borderRadius: 2,
+                border: selected ? '2px solid var(--ink)' : (hover ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)'),
+                background: selected ? 'var(--accent)' : 'white',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'border-color 0.08s',
+              }}>
+              {selected && (
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                    strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </div>
+          )}
           {/* Thumb. Hover-to-play used to swap to a <video> on every
               mouseenter — that fired N requests for every pass of the
               mouse and tanked scroll perf. Now we wait for `hoverPlay`
@@ -2839,22 +3297,22 @@ const CreativeMatrixView = memo(function CreativeMatrixView({ rows, editors, off
         alignItems: 'center',
       }}>
         {selectable && (
-          <div onClick={toggleAll} title="Select / deselect all visible"
+          <div onClick={toggleAll} title="Select / deselect all visible rows — then bulk-edit creator, status, editor, offer, etc."
             style={{
-              width: 16, height: 16, borderRadius: 2,
-              border: '1.5px solid var(--ink-3)',
+              width: 18, height: 18, borderRadius: 3,
+              border: '2px solid var(--ink)',
               background: allVisible ? 'var(--accent)' : (someVisible ? 'var(--paper-2)' : 'white'),
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer',
             }}>
             {allVisible && (
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
                 <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
                   strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             )}
             {someVisible && (
-              <span style={{ width: 8, height: 2, background: 'var(--ink-3)' }} />
+              <span style={{ width: 9, height: 2.5, background: 'var(--ink)' }} />
             )}
           </div>
         )}
@@ -2961,12 +3419,16 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
       }}>
       {selectable && (
         <div onClick={(e) => { e.stopPropagation(); onToggleSelect(r.id) }}
+          title="Select for bulk edit"
           style={{
             width: 16, height: 16, borderRadius: 2,
-            border: selected ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
+            // Selected: solid dark border. Hovered row: dark border so it
+            // pops as discoverable. Otherwise: visible but muted.
+            border: selected ? '2px solid var(--ink)' : (hover ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)'),
             background: selected ? 'var(--accent)' : 'white',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer',
+            transition: 'border-color 0.08s',
           }}>
           {selected && (
             <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
@@ -3625,7 +4087,10 @@ function VersionsPanel({ row, onReload }) {
           name: `v${nextVersion} of ${row.canonical_name || row.name}`,
           type: row.type,
           creator: row.creator,
-          status: 'edited',
+          // Inherit parent status. A v2 of a raw is another raw take; a v2 of
+          // an edited cut is a revised cut. Hardcoding 'edited' here used to
+          // wrongly promote raw takes to edited on upload.
+          status: row.status || 'raw',
           offer_slug: row.offer_slug,
           assigned_editor_id: row.assigned_editor_id,
           parent_id: rootId,
@@ -5526,7 +5991,7 @@ function driveEmbedUrl(url) {
 
 /* ─────────────────────────── UPLOAD MODAL ─────────────────────────── */
 
-function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
+function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded }) {
   // The modal is now a thin shell: it collects files + batch config,
   // hands them off to the module-level upload queue, and closes. The
   // queue owns all upload state, runs in the background regardless of
@@ -5541,20 +6006,70 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
   const [batchStatus, setBatchStatus] = useState('raw')
   const [batchEditorId, setBatchEditorId] = useState('')
   const [batchOfferSlug, setBatchOfferSlug] = useState('')
+  // Inline "+ Add new niche" form state. Any team member can add a niche
+  // — public.offers has allow-all RLS (migration 059). Slug auto-derives
+  // from the display name (lowercase, dashed, opt- prefix) but is
+  // editable. The new offer is selected as the batch offer on success.
+  const [addingNiche, setAddingNiche] = useState(false)
+  const [newNicheName, setNewNicheName] = useState('')
+  const [newNicheSlug, setNewNicheSlug] = useState('')
+  const [newNicheBusy, setNewNicheBusy] = useState(false)
+  const [newNicheErr, setNewNicheErr] = useState(null)
+  // Resolution-rejected files. Each entry: { name, size, reason }.
+  // Shown inline so the operator sees exactly what got blocked and why
+  // — Ben's "surface errors, never swallow" rule.
+  const [rejected, setRejected] = useState([])
+  const [probing, setProbing] = useState(false)
   const inputRef = useRef(null)
   // No `busy` state — the modal is never blocked once Upload is clicked
   // because the queue takes over. The button just dispatches + closes.
   const busy = false
 
-  const acceptFiles = (incoming) => {
+  const acceptFiles = async (incoming) => {
     // Accept videos AND images. Static image ads (banners, carousel
     // creatives) live in the same bucket — widened the bucket's
     // allowed_mime_types to match. Editor uploads from the queue still
     // expect videos, but bulk-add from the Library can be either.
     const isVideo = (f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name)
     const isImage = (f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(f.name)
-    const added = Array.from(incoming || []).filter(f => isVideo(f) || isImage(f))
-    if (added.length) setFiles(prev => [...prev, ...added])
+    const candidates = Array.from(incoming || []).filter(f => isVideo(f) || isImage(f))
+    if (!candidates.length) return
+
+    // Resolution preflight. We probe each file browser-side BEFORE the
+    // TUS upload starts so anything below 1080p gets rejected here —
+    // no bandwidth wasted, no garbage rows in lib_creative_library.
+    // Runs in parallel; rejected files surface with reasons in the UI.
+    setProbing(true)
+    const probes = await Promise.all(candidates.map(async (file) => {
+      try {
+        const dims = await probeMediaDimensions(file)
+        const shortest = Math.min(dims.width, dims.height)
+        if (shortest < MIN_SHORTEST_SIDE) {
+          return {
+            ok: false,
+            file,
+            reason: `${dims.width}×${dims.height} — below 1080p floor (shortest side must be ≥${MIN_SHORTEST_SIDE}px)`,
+          }
+        }
+        return { ok: true, file, dims }
+      } catch (e) {
+        return {
+          ok: false,
+          file,
+          reason: e?.message || 'could not read dimensions',
+        }
+      }
+    }))
+    setProbing(false)
+
+    const accepted = probes.filter(p => p.ok).map(p => p.file)
+    const newlyRejected = probes.filter(p => !p.ok).map(p => ({
+      name: p.file.name,
+      size: p.file.size,
+      reason: p.reason,
+    }))
+    if (accepted.length) setFiles(prev => [...prev, ...accepted])
+    if (newlyRejected.length) setRejected(prev => [...prev, ...newlyRejected])
   }
 
   const handleDrop = (e) => {
@@ -5592,12 +6107,16 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
         const sizeLabel = totalBytes > 0
           ? (gb >= 1 ? `${gb.toFixed(2)} GB total` : `${(totalBytes / (1024 * 1024)).toFixed(1)} MB total`)
           : ''
-        return `Drop video or image files — up to 10 GB each. Resumable uploads survive multi-GB clips. Transcripts + auto-tag fire in the background once the file lands.${sizeLabel ? ` · ${sizeLabel}` : ''}`
+        return `Drop video or image files — up to 10 GB each, 1080p minimum (shortest side ≥ 1080px). Resumable uploads survive multi-GB clips. Transcripts + auto-rename fire in the background once the file lands.${sizeLabel ? ` · ${sizeLabel}` : ''}`
       })()}
       footer={
         <>
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
-          <button onClick={onClose} style={ghostBtn}>Cancel</button>
+          {/* "Close" instead of "Cancel" — uploads, once queued, keep
+              running in the background regardless of this modal's state.
+              Naming it Cancel implied the uploads would die, which is
+              not what happens. */}
+          <button onClick={onClose} style={ghostBtn}>Close</button>
           <button onClick={submit} disabled={!files.length} style={primaryBtn}>
             {`Queue ${files.length || ''} for upload`}
           </button>
@@ -5640,13 +6159,139 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
               </select>
             </div>
             <div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Offer / niche</div>
-              <select value={batchOfferSlug} onChange={e => setBatchOfferSlug(e.target.value)} style={selectStyle} disabled={busy}>
-                <option value="">— None —</option>
-                {offers.map(o => (
-                  <option key={o.slug} value={o.slug}>{o.name || o.slug}</option>
-                ))}
-              </select>
+              <div style={{
+                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                marginBottom: 4,
+              }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Offer / niche</div>
+                {!addingNiche && (
+                  <button
+                    type="button"
+                    onClick={() => { setAddingNiche(true); setNewNicheErr(null) }}
+                    style={{
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      color: 'var(--ink-3)', fontFamily: 'var(--mono)', fontSize: 9.5,
+                      letterSpacing: '0.06em', textTransform: 'uppercase', padding: 0,
+                      textDecoration: 'underline',
+                    }}
+                    title="Add a new niche — visible to everyone"
+                  >+ Add</button>
+                )}
+              </div>
+              {addingNiche ? (
+                <div style={{
+                  border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent, #e8b408)',
+                  padding: 8, background: 'var(--paper)',
+                  display: 'flex', flexDirection: 'column', gap: 6,
+                }}>
+                  <input
+                    type="text"
+                    placeholder="Niche name (e.g. OPT Accounting)"
+                    value={newNicheName}
+                    onChange={e => {
+                      const name = e.target.value
+                      setNewNicheName(name)
+                      // Auto-derive slug from name on the fly until the
+                      // operator manually edits the slug. Strip non-alphanum
+                      // and prefix opt- to match the existing convention.
+                      const auto = 'opt-' + name.toLowerCase()
+                        .replace(/[^a-z0-9]+/g, '-')
+                        .replace(/^-+|-+$/g, '')
+                        .replace(/^opt-/, '')
+                      setNewNicheSlug(prev => (prev === '' || prev.startsWith('opt-')) ? auto : prev)
+                    }}
+                    style={{
+                      padding: '6px 8px', fontFamily: 'var(--mono)', fontSize: 11,
+                      border: '1px solid var(--rule)', background: 'var(--paper)',
+                    }}
+                    autoFocus
+                  />
+                  <input
+                    type="text"
+                    placeholder="slug (auto)"
+                    value={newNicheSlug}
+                    onChange={e => setNewNicheSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                    style={{
+                      padding: '6px 8px', fontFamily: 'var(--mono)', fontSize: 10.5,
+                      border: '1px solid var(--rule)', background: 'var(--paper-2)',
+                      color: 'var(--ink-3)',
+                    }}
+                  />
+                  {newNicheErr && (
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#b53e3e' }}>
+                      {newNicheErr}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddingNiche(false)
+                        setNewNicheName('')
+                        setNewNicheSlug('')
+                        setNewNicheErr(null)
+                      }}
+                      disabled={newNicheBusy}
+                      style={{
+                        background: 'transparent', border: '1px solid var(--rule)',
+                        padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10,
+                        cursor: 'pointer', color: 'var(--ink-3)',
+                      }}
+                    >Cancel</button>
+                    <button
+                      type="button"
+                      disabled={newNicheBusy || !newNicheName.trim() || !newNicheSlug.trim()}
+                      onClick={async () => {
+                        setNewNicheBusy(true)
+                        setNewNicheErr(null)
+                        const slug = newNicheSlug.trim()
+                        const name = newNicheName.trim()
+                        // Derive a vertical from the slug (strip opt- prefix
+                        // + stub/template suffixes). Matches the convention
+                        // in migration 059's seed rows. Vertical is NOT NULL
+                        // in the schema, so we always pass something.
+                        const vertical = slug
+                          .replace(/^opt-/, '')
+                          .replace(/-stub$/, '')
+                          .replace(/-template$/, '')
+                          || 'generic'
+                        const { data, error } = await supabase
+                          .from('offers')
+                          .insert({ slug, name, vertical })
+                          .select('slug,name')
+                          .single()
+                        setNewNicheBusy(false)
+                        if (error) {
+                          // Most common failure: duplicate slug. Surface the
+                          // actual message — Ben's "surface errors, never
+                          // swallow" rule.
+                          setNewNicheErr(error.message || 'failed to add niche')
+                          return
+                        }
+                        onOfferAdded?.(data)
+                        setBatchOfferSlug(data.slug)
+                        setAddingNiche(false)
+                        setNewNicheName('')
+                        setNewNicheSlug('')
+                      }}
+                      style={{
+                        background: 'var(--ink)', color: 'var(--paper)', border: 'none',
+                        padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                        fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+                        cursor: newNicheBusy ? 'wait' : 'pointer',
+                        opacity: (newNicheBusy || !newNicheName.trim() || !newNicheSlug.trim()) ? 0.5 : 1,
+                      }}
+                    >{newNicheBusy ? 'Adding…' : 'Add niche'}</button>
+                  </div>
+                </div>
+              ) : (
+                <select value={batchOfferSlug} onChange={e => setBatchOfferSlug(e.target.value)} style={selectStyle} disabled={busy}>
+                  <option value="">— None —</option>
+                  {offers.map(o => (
+                    <option key={o.slug} value={o.slug}>{o.name || o.slug}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
         </div>
@@ -5673,6 +6318,15 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
           </div>
         </div>
 
+        {probing && (
+          <div style={{
+            marginTop: 12, padding: '8px 12px',
+            background: 'var(--paper-2)', border: '1px solid var(--rule)',
+            fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
+          }}>
+            Reading resolution of selected files…
+          </div>
+        )}
         {files.length > 0 && (
           <div style={{
             marginTop: 14, border: '1px solid var(--rule)', maxHeight: 280, overflowY: 'auto',
@@ -5700,13 +6354,56 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [] }) {
             ))}
           </div>
         )}
+        {rejected.length > 0 && (
+          <div style={{
+            marginTop: 12, border: '1px solid #b53e3e', borderLeft: '3px solid #b53e3e',
+            background: 'rgba(181,62,62,0.04)',
+          }}>
+            <div style={{
+              padding: '8px 12px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              borderBottom: '1px solid rgba(181,62,62,0.25)',
+            }}>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                letterSpacing: '0.12em', textTransform: 'uppercase', color: '#b53e3e',
+              }}>
+                {rejected.length} file{rejected.length === 1 ? '' : 's'} rejected · below 1080p
+              </div>
+              <button onClick={() => setRejected([])} style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: 'var(--ink-4)', fontSize: 14, padding: 0,
+              }}>×</button>
+            </div>
+            <div style={{ maxHeight: 180, overflowY: 'auto' }}>
+              {rejected.map((r, i) => (
+                <div key={i} style={{
+                  padding: '6px 12px',
+                  borderBottom: i === rejected.length - 1 ? 'none' : '1px solid rgba(181,62,62,0.15)',
+                }}>
+                  <div style={{
+                    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }} title={r.name}>{r.name}</div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#b53e3e', marginTop: 1 }}>
+                    {r.reason}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div style={{
           marginTop: 12, padding: '8px 12px',
           background: 'var(--paper-2)', border: '1px solid var(--rule)',
-          fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
-          letterSpacing: '0.04em',
+          borderLeft: '3px solid var(--accent, #e8b408)',
+          fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)',
+          letterSpacing: '0.04em', lineHeight: 1.5,
         }}>
-          Uploads run in the background — close this modal once you hit Upload. Progress shows in the floating dock (bottom-right).
+          Uploads run in the background — once you hit <b>Queue for upload</b> you can
+          close this modal (or leave the page entirely) and uploads keep going.
+          A thin progress bar shows at the top of the screen, and full per-file progress
+          shows in the floating dock (bottom-right). Cancel any upload from the dock.
         </div>
       </div>
     </Modal>
@@ -5767,6 +6464,23 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   }, [editors])
   // Status multi-select for filtering — empty = show all.
   const [selectedStatuses, setSelectedStatuses] = useState(() => new Set())
+
+  // Bulk-select state for the queue list. Keyed by task_id (lib_editing_tasks.id).
+  // Admin-only: editors don't bulk-edit each other's tasks. Cleared when the
+  // task list reloads to avoid stale IDs.
+  const [selectedTasks, setSelectedTasks] = useState(() => new Set())
+  const toggleTaskSelect = useCallback((taskId) => {
+    setSelectedTasks(prev => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }, [])
+  const clearTaskSelection = useCallback(() => setSelectedTasks(new Set()), [])
+  const [bulkTaskBusy, setBulkTaskBusy] = useState(false)
+  const [bulkTaskMsg, setBulkTaskMsg] = useState(null)
+  const canBulkEditTasks = !scope.isEditorView
 
   // Submissions with unread feedback. Used for the editor-portal banner
   // ("You have feedback on N submissions") and the per-task FEEDBACK
@@ -6110,6 +6824,126 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         </div>
       )}
 
+      {/* Bulk-action bar for the queue list. Mirrors the Library tab pattern:
+          sticky, dark, only appears when something is selected. Inline pickers
+          (no separate modal) for the three most-common task bulk ops:
+          reassign editor, change status, change priority. */}
+      {selectedTasks.size > 0 && canBulkEditTasks && view === 'list' && (
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 50,
+          marginBottom: 14, padding: '10px 14px',
+          background: 'var(--ink)', color: 'white',
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        }}>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+            letterSpacing: '0.08em',
+          }}>{selectedTasks.size} task{selectedTasks.size === 1 ? '' : 's'} selected</span>
+          <button onClick={() => setSelectedTasks(new Set(filteredTasks.map(t => t.task_id)))}
+            style={{
+              padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+              fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: 'transparent', color: 'white',
+              border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
+            }}>Select all visible ({filteredTasks.length})</button>
+          <button onClick={clearTaskSelection}
+            style={{
+              padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+              fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: 'transparent', color: 'white',
+              border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
+            }}>Clear</button>
+          <span style={{ flex: 1 }} />
+          {/* Reassign editor inline picker */}
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            Reassign:
+            <select disabled={bulkTaskBusy}
+              defaultValue=""
+              onChange={async (e) => {
+                const v = e.target.value
+                if (!v) return
+                const editorId = v === '__UNASSIGN__' ? null : v
+                setBulkTaskBusy(true); setBulkTaskMsg(null)
+                const ids = [...selectedTasks]
+                const { error } = await supabase.from('lib_editing_tasks')
+                  .update({ editor_id: editorId }).in('id', ids)
+                setBulkTaskBusy(false)
+                if (error) { setBulkTaskMsg(`Reassign failed: ${error.message}`); return }
+                setBulkTaskMsg(`Reassigned ${ids.length} task${ids.length === 1 ? '' : 's'}.`)
+                e.target.value = ''
+                load(true)
+              }}
+              style={{ padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10.5, background: 'white', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer' }}>
+              <option value="" disabled>— Pick editor —</option>
+              <option value="__UNASSIGN__">Unassign</option>
+              {editors.filter(e => e.active !== false && e.tier !== 'admin').map(e => (
+                <option key={e.id} value={e.id}>{e.name}</option>
+              ))}
+            </select>
+          </label>
+          {/* Status inline picker */}
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            Status:
+            <select disabled={bulkTaskBusy}
+              defaultValue=""
+              onChange={async (e) => {
+                const v = e.target.value
+                if (!v) return
+                setBulkTaskBusy(true); setBulkTaskMsg(null)
+                const ids = [...selectedTasks]
+                const patch = { status: v }
+                if (v === 'done') patch.completed_at = new Date().toISOString()
+                const { error } = await supabase.from('lib_editing_tasks')
+                  .update(patch).in('id', ids)
+                setBulkTaskBusy(false)
+                if (error) { setBulkTaskMsg(`Status update failed: ${error.message}`); return }
+                setBulkTaskMsg(`${ids.length} task${ids.length === 1 ? '' : 's'} → ${v}.`)
+                e.target.value = ''
+                load(true)
+              }}
+              style={{ padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10.5, background: 'white', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer' }}>
+              <option value="" disabled>— Pick status —</option>
+              <option value="queued">queued</option>
+              <option value="in_progress">in_progress</option>
+              <option value="in_review">in_review</option>
+              <option value="needs_revision">needs_revision</option>
+              <option value="blocked">blocked</option>
+              <option value="done">done</option>
+            </select>
+          </label>
+          {/* Priority inline picker */}
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            Priority:
+            <select disabled={bulkTaskBusy}
+              defaultValue=""
+              onChange={async (e) => {
+                const v = e.target.value
+                if (!v) return
+                setBulkTaskBusy(true); setBulkTaskMsg(null)
+                const ids = [...selectedTasks]
+                const { error } = await supabase.from('lib_editing_tasks')
+                  .update({ priority: v }).in('id', ids)
+                setBulkTaskBusy(false)
+                if (error) { setBulkTaskMsg(`Priority update failed: ${error.message}`); return }
+                setBulkTaskMsg(`${ids.length} task${ids.length === 1 ? '' : 's'} → ${v}.`)
+                e.target.value = ''
+                load(true)
+              }}
+              style={{ padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10.5, background: 'white', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer' }}>
+              <option value="" disabled>— Pick priority —</option>
+              <option value="P0 - Critical">P0 — Critical</option>
+              <option value="P1 - High">P1 — High</option>
+              <option value="P2 - Medium">P2 — Medium</option>
+              <option value="P3 - Low">P3 — Low</option>
+            </select>
+          </label>
+          {bulkTaskMsg && (
+            <span style={{ flexBasis: '100%', fontFamily: 'var(--mono)', fontSize: 10.5, color: '#f4e14a' }}>{bulkTaskMsg}</span>
+          )}
+        </div>
+      )}
+
       {tasks.length === 0 ? (
         <div style={{
           border: '1px dashed var(--rule)', padding: 40, textAlign: 'center',
@@ -6127,6 +6961,9 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         </div>
       ) : view === 'list' ? (
         <QueueListView tasks={filteredTasks} editors={editors} onEdit={setEditingTask} feedbackTaskIds={pendingFeedback.tasks}
+          selected={selectedTasks}
+          selectionMode={selectedTasks.size > 0}
+          onToggleSelect={canBulkEditTasks ? toggleTaskSelect : null}
           onReorder={async (orderedIds) => {
             // Optimistic local update — assign sequential sort_order to
             // the open tasks in their new order. Tasks not in the
@@ -6245,10 +7082,15 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
             setEditingTask(null)
           }}
           onSaved={() => {
+            // Keep the modal OPEN after approve / mark-done — the user wants
+            // to see the state flip to 'done' inside the popup, not get the
+            // entire queue list yanked out from under them. Background-
+            // revalidate the list so it stays in sync without re-mounting
+            // the table or showing a loading spinner.
             if (scope.isEditorView) clearPendingForTask(editingTask.task_id)
-            setEditingTask(null); load()
+            load(true)
           }}
-          onDeleted={() => { setEditingTask(null); load() }} />
+          onDeleted={() => { setEditingTask(null); load(true) }} />
       )}
       {editingEditor && (
         <EditEditorModal
@@ -6430,7 +7272,8 @@ function priorityOrder(p) {
   if (p && Object.prototype.hasOwnProperty.call(PRIORITY_RANK, p)) return PRIORITY_RANK[p]
   return 99
 }
-function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds }) {
+function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds, selected, selectionMode, onToggleSelect }) {
+  const selectable = !!onToggleSelect
   // Sort by manual sort_order first (when any open task carries one), else
   // by priority + due date. Done tasks always sink to the bottom.
   const ordered = useMemo(() => {
@@ -6497,8 +7340,21 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds }) {
   }
 
   if (!ordered.length) return null
-  // 7-col grid: rank · thumb · creative · editor · status · task-type · due · priority · source
-  const GRID = '40px 56px minmax(220px, 1.6fr) 130px 110px 110px 120px 90px 50px'
+  // Grid: [select] rank · thumb · creative · editor · status · task-type · due · priority · source.
+  // First column is conditionally a 26px checkbox when bulk-select is enabled.
+  const GRID = selectable
+    ? '26px 40px 56px minmax(220px, 1.6fr) 130px 110px 110px 120px 90px 50px'
+    : '40px 56px minmax(220px, 1.6fr) 130px 110px 110px 120px 90px 50px'
+
+  // "Select all visible" — toggles every task currently shown in the list.
+  const allVisible = selectable && ordered.length > 0 && ordered.every(t => selected?.has(t.task_id))
+  const someVisible = selectable && ordered.some(t => selected?.has(t.task_id)) && !allVisible
+  const toggleAll = () => {
+    if (!selectable) return
+    if (allVisible) ordered.forEach(t => onToggleSelect(t.task_id))
+    else            ordered.forEach(t => !selected?.has(t.task_id) && onToggleSelect(t.task_id))
+  }
+
   return (
     <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       <div style={{
@@ -6507,7 +7363,28 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds }) {
         background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)',
         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
         letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)',
+        alignItems: 'center',
       }}>
+        {selectable && (
+          <div onClick={toggleAll} title="Select / deselect all visible tasks — bulk reassign editor, change status, change priority"
+            style={{
+              width: 18, height: 18, borderRadius: 3,
+              border: '2px solid var(--ink)',
+              background: allVisible ? 'var(--accent)' : (someVisible ? 'var(--paper-2)' : 'white'),
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+            }}>
+            {allVisible && (
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                  strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+            {someVisible && (
+              <span style={{ width: 9, height: 2.5, background: 'var(--ink)' }} />
+            )}
+          </div>
+        )}
         <div>#</div>
         <div></div>
         <div>Creative</div>
@@ -6536,7 +7413,12 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds }) {
             }}
             onDrop={isDone ? undefined : (e) => handleRowDrop(e, t.task_id)}
             onDragEnd={() => { setDragId(null); setDropTargetId(null); setDropPosition(null) }}
-            onClick={() => onEdit(t)}
+            onClick={() => {
+              // In selection mode, body-click toggles selection — matches the
+              // Library-tab matrix/list behaviour so muscle memory transfers.
+              if (selectionMode && selectable) onToggleSelect(t.task_id)
+              else onEdit(t)
+            }}
             style={{
               display: 'grid', gridTemplateColumns: GRID,
               padding: '10px 14px', gap: 12, alignItems: 'center',
@@ -6545,11 +7427,37 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds }) {
               cursor: isDone ? 'pointer' : 'grab',
               transition: 'background 0.12s',
               opacity: isDragging ? 0.4 : (isDone ? 0.55 : 1),
-              background: tint?.base || 'transparent',
+              background: (selectable && selected?.has(t.task_id))
+                ? 'rgba(244,225,74,0.15)'
+                : (tint?.base || 'transparent'),
               boxShadow: isDropTarget && dropPosition === 'after' ? 'inset 0 -2px 0 0 var(--ink)' : 'none',
             }}
-            onMouseEnter={e => { if (!tint) e.currentTarget.style.background = 'var(--paper-2)' }}
-            onMouseLeave={e => { if (!tint) e.currentTarget.style.background = 'transparent' }}>
+            onMouseEnter={e => {
+              if (selectable && selected?.has(t.task_id)) return
+              if (!tint) e.currentTarget.style.background = 'var(--paper-2)'
+            }}
+            onMouseLeave={e => {
+              if (selectable && selected?.has(t.task_id)) return
+              if (!tint) e.currentTarget.style.background = 'transparent'
+            }}>
+            {selectable && (
+              <div onClick={(e) => { e.stopPropagation(); onToggleSelect(t.task_id) }}
+                title="Select for bulk edit"
+                style={{
+                  width: 16, height: 16, borderRadius: 2,
+                  border: selected?.has(t.task_id) ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
+                  background: selected?.has(t.task_id) ? 'var(--accent)' : 'white',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer',
+                }}>
+                {selected?.has(t.task_id) && (
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                    <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                      strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </div>
+            )}
             <div style={{
               fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
               color: openIdx === 1 ? 'var(--accent-ink, #b8920c)'
