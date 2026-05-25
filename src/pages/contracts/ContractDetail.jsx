@@ -768,6 +768,18 @@ function DocumentMenu({ contract, amendments, onRegenerated }) {
     }
   }
 
+  // State-specific label so the closer knows exactly what clicking the
+  // button will give them. The previous generic "Open contract" was
+  // ambiguous — closers didn't realise it auto-opened the amended PDF
+  // when one existed.
+  const buttonLabel = !hasLocked
+    ? 'Open contract'
+    : amendedStale
+      ? `Generate amended v${(contract.version || 1) + 1}`
+      : `Open amended v${contract.version}`
+
+  const busyLabel = amendedStale ? 'Generating…' : 'Opening…'
+
   return (
     <div style={{ flexShrink: 0, textAlign: 'right' }}>
       <button
@@ -777,13 +789,38 @@ function DocumentMenu({ contract, amendments, onRegenerated }) {
         className="editorial-btn-primary"
         style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
       >
-        {busy ? <><Loader size={ICON.sm} className="animate-spin" /> {amendedStale ? 'Updating…' : 'Opening…'}</> : <><FileText size={ICON.sm} /> Open contract</>}
+        {busy ? <><Loader size={ICON.sm} className="animate-spin" /> {busyLabel}</> : <><FileText size={ICON.sm} /> {buttonLabel}</>}
       </button>
+      {/* Secondary action: when an amended PDF exists, give a small link
+          to view the original for comparison. Hidden when the contract
+          has never been amended (no need for a "original" button when
+          there's only an original). */}
+      {hasLocked && contract.amended_pdf_path && !amendedStale && contract.agreement_pdf_path && (
+        <button
+          type="button"
+          onClick={async () => {
+            setBusy(true); setErr(null)
+            try {
+              const { data, error } = await supabase.storage.from('contract-uploads').createSignedUrl(contract.agreement_pdf_path, 300)
+              if (error) throw error
+              window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+            } catch (e) { setErr(e.message || String(e)) }
+            finally { setBusy(false) }
+          }}
+          style={{
+            background: 'transparent', border: 'none', padding: 0,
+            marginTop: 4, fontSize: 11, color: 'var(--ink-3)',
+            textDecoration: 'underline', cursor: 'pointer',
+          }}
+        >
+          View original (v1)
+        </button>
+      )}
       {hasLocked && (
         <p style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)', margin: '4px 0 0' }}>
           {amendedStale
-            ? `${locked.length} locked amendment${locked.length === 1 ? '' : 's'} — clicking will regenerate`
-            : `v${contract.version || 1} (${locked.length} amendment${locked.length === 1 ? '' : 's'} applied)`}
+            ? `${locked.length} amendment${locked.length === 1 ? '' : 's'} pending — click to ship`
+            : `${locked.length} amendment${locked.length === 1 ? '' : 's'} applied`}
         </p>
       )}
       {err && (

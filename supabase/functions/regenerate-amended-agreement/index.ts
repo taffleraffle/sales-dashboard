@@ -84,10 +84,17 @@ serve(async (req) => {
     // 3. Load base PDF (bundled as base64 module — see top of file)
     const base = await PDFDocument.load(baseBytes)
 
-    // 4. Build addendum pages
-    const font     = await base.embedFont(StandardFonts.HelveticaBold)
-    const regular  = await base.embedFont(StandardFonts.Helvetica)
-    const italic   = await base.embedFont(StandardFonts.HelveticaOblique)
+    // 4. Build addendum into a fresh PDFDocument so we can put addendum
+    //    pages FIRST and original contract pages AFTER. Previous version
+    //    appended addendum to the end — closers would open the PDF,
+    //    scroll through the original boilerplate they recognised, and
+    //    conclude "nothing changed" because they never reached the
+    //    addendum pages at the back. Addendum-first means page 1 IS
+    //    the changes, impossible to miss.
+    const out = await PDFDocument.create()
+    const font     = await out.embedFont(StandardFonts.HelveticaBold)
+    const regular  = await out.embedFont(StandardFonts.Helvetica)
+    const italic   = await out.embedFont(StandardFonts.HelveticaOblique)
 
     const PAGE_W   = 595.28           // A4 portrait
     const PAGE_H   = 841.89
@@ -119,7 +126,7 @@ serve(async (req) => {
 
     type DrawState = { page: any; y: number }
     function newPage(): DrawState {
-      const page = base.addPage([PAGE_W, PAGE_H])
+      const page = out.addPage([PAGE_W, PAGE_H])
       return { page, y: PAGE_H - MARGIN_T }
     }
     function ensureSpace(s: DrawState, needed: number): DrawState {
@@ -187,6 +194,33 @@ serve(async (req) => {
       year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Pacific/Auckland',
     })
 
+    // ─── Summary of changes (page 1, top — impossible to miss) ──────
+    // Lists what's being amended in this addendum so the closer + client
+    // see at a glance what changed. Each line includes the clause ref so
+    // it's easy to cross-reference with the original agreement (which is
+    // bundled at the back of this PDF).
+    const summaryBoxY = s.y
+    s = ensureSpace(s, 30 + finalised.length * 14)
+    const summaryStartY = s.y
+    s = drawWrappedText(s, 'SUMMARY OF CHANGES', { font, size: 11, lineGap: 4, color: rgb(0.08, 0.08, 0.08) })
+    s.y -= 4
+    finalised.forEach((a, idx) => {
+      const ref = a.clause_reference ? a.clause_reference.toUpperCase() : `AMENDMENT ${idx + 1}`
+      s.page.drawText(sanitize(`${idx + 1}.  ${ref} — amended`), {
+        x: MARGIN_X + 4, y: s.y - 9, size: 10, font: regular, color: rgb(0.08, 0.08, 0.08),
+      })
+      s.y -= 14
+    })
+    // Yellow vertical rule beside the summary so it pops as "the
+    // executive overview" before any legal prose.
+    s.page.drawLine({
+      start: { x: MARGIN_X - 6, y: summaryStartY - 2 },
+      end:   { x: MARGIN_X - 6, y: s.y + 4 },
+      thickness: 3,
+      color: rgb(0.96, 0.85, 0.20),
+    })
+    s.y -= 18
+
     // Parties + recitals — formal contract preamble
     const partiesPara = `This Amendment Addendum (the "Addendum") is made on ${dateStr} between Opt Digital Limited (the "Provider") and ${contract.client_name}${contract.client_company ? ' of ' + contract.client_company : ''} (the "Client"), and is incorporated into and forms part of the Client Form and Client Terms previously entered into between the Provider and the Client (the "Agreement"). This Addendum constitutes contract version v${(contract.version || 1) + 1}.`
     s = drawWrappedText(s, partiesPara, { font: regular, size: 10, lineGap: 4 })
@@ -205,14 +239,108 @@ serve(async (req) => {
       { font: regular, size: 10, lineGap: 4 })
     s.y -= 18
 
-    // Helper — render a block of text indented + with a left accent rule.
-    // Returns the new draw state.
+    // Helper — render the new-clause language in a FILLED yellow block
+    // with bold dark text. The previous version used a thin left rule
+    // which reads as decoration; reviewers scanning the document would
+    // skim past it. A fully-coloured block jumps off the page and makes
+    // the new language impossible to miss.
+    //
+    // Implementation: we measure the wrapped lines first to know the
+    // total block height, draw the yellow background rectangle, then
+    // draw the text on top.
+    function drawHighlightedBlock(s: DrawState, text: string, opts: { font: any; size: number; color?: any; bg?: any }): DrawState {
+      const leftPad = 12
+      const rightPad = 12
+      const topPad = 10
+      const botPad = 10
+      const blockInnerW = BODY_W - leftPad - rightPad
+      const size = opts.size
+      const lineGap = 4
+      const lineHeight = size + lineGap
+      const textColor = opts.color ?? rgb(0.10, 0.08, 0.02)
+      const bg = opts.bg ?? rgb(0.99, 0.95, 0.65)  // light cream-yellow
+
+      // 1) Wrap text into lines without drawing yet (need total height)
+      const words = sanitize(text).split(/\s+/)
+      const lines: string[] = []
+      let line = ''
+      for (const w of words) {
+        const test = line ? line + ' ' + w : w
+        const width = opts.font.widthOfTextAtSize(test, size)
+        if (width > blockInnerW && line) { lines.push(line); line = w }
+        else line = test
+      }
+      if (line) lines.push(line)
+
+      // 2) Render lines, paging if needed. The yellow background gets
+      //    drawn per-page so it works across page breaks (rare but
+      //    happens on very long clause text).
+      let segmentStartY = s.y
+      let segmentLines = 0
+      const flushSegment = () => {
+        if (segmentLines === 0) return
+        const h = topPad + segmentLines * lineHeight + botPad - lineGap
+        s.page.drawRectangle({
+          x: MARGIN_X, y: segmentStartY - h,
+          width: BODY_W, height: h,
+          color: bg,
+        })
+        // Re-draw the lines for this segment on top of the rect. We
+        // already advanced s.y; the per-line draws happened above the
+        // rect. We need to draw text AFTER the rect so it appears on
+        // top. So we'll buffer + draw both at the end of each segment.
+      }
+      // Simpler implementation: buffer lines per page, draw rect + text
+      // for the segment when we move to a new page or finish.
+      type Segment = { page: any; startY: number; lines: string[] }
+      const segments: Segment[] = [{ page: s.page, startY: s.y, lines: [] }]
+
+      for (const ln of lines) {
+        if (s.y - lineHeight - (segments[segments.length - 1].lines.length === 0 ? topPad : 0) < MARGIN_B) {
+          s = newPage()
+          segments.push({ page: s.page, startY: s.y, lines: [] })
+        }
+        const seg = segments[segments.length - 1]
+        if (seg.lines.length === 0) s.y -= topPad
+        seg.lines.push(ln)
+        s.y -= lineHeight
+      }
+      // Add bottom padding to the final segment's y advancement
+      s.y -= (botPad - lineGap)
+
+      // Now draw each segment's background + text
+      for (const seg of segments) {
+        const h = topPad + seg.lines.length * lineHeight - lineGap + botPad
+        seg.page.drawRectangle({
+          x: MARGIN_X, y: seg.startY - h,
+          width: BODY_W, height: h,
+          color: bg,
+        })
+        // Left accent strip — darker yellow on the left edge for extra emphasis
+        seg.page.drawRectangle({
+          x: MARGIN_X, y: seg.startY - h,
+          width: 4, height: h,
+          color: rgb(0.94, 0.78, 0.12),
+        })
+        // Draw each line
+        let lineY = seg.startY - topPad
+        for (const ln of seg.lines) {
+          seg.page.drawText(ln, {
+            x: MARGIN_X + leftPad, y: lineY - size, size, font: opts.font, color: textColor,
+          })
+          lineY -= lineHeight
+        }
+      }
+
+      return s
+    }
+
+    // Helper for previously-read text (italic grey, no background)
     function drawIndentedBlock(s: DrawState, text: string, opts: { font: any; size: number; color?: any }): DrawState {
       const leftPad = 14
       const blockInnerW = BODY_W - leftPad
       const size = opts.size
       const lineHeight = size + 5
-      const blockStartY = s.y
       const words = sanitize(text).split(/\s+/)
       let line = ''
       const renderLine = (txt: string) => {
@@ -230,44 +358,31 @@ serve(async (req) => {
         else line = test
       }
       if (line) renderLine(line)
-      const blockEndY = s.y
-      s.page.drawLine({
-        start: { x: MARGIN_X + 4, y: blockStartY - 2 },
-        end:   { x: MARGIN_X + 4, y: blockEndY + 4 },
-        thickness: 2,
-        color: rgb(0.96, 0.85, 0.20),  // accent yellow
-      })
       return s
     }
 
     finalised.forEach((a, idx) => {
-      s.y -= 12
-      s = ensureSpace(s, 80)
+      s.y -= 14
+      s = ensureSpace(s, 90)
       const clauseHeader = a.clause_reference
         ? `${idx + 1}.  AMENDMENT TO ${a.clause_reference.toUpperCase()}`
         : `${idx + 1}.  AMENDMENT`
       s.page.drawText(sanitize(clauseHeader), {
-        x: MARGIN_X, y: s.y - 12, size: 11, font, color: rgb(0.08, 0.08, 0.08),
+        x: MARGIN_X, y: s.y - 12, size: 12, font, color: rgb(0.08, 0.08, 0.08),
       })
-      s.y -= 18
+      s.y -= 20
 
-      // If the closer captured the original clause text, surface it first
-      // so the parties can see what's being replaced ("Previously read:")
-      // before the new agreed language. Renders italic + grey to read as
-      // historic context, distinct from the new language which renders
-      // bold + accented as the substantive change.
       const originalText = (a.original_excerpt || '').trim()
       if (originalText) {
         s = drawWrappedText(s, 'Previously read:', { font, size: 9, lineGap: 2, color: rgb(0.45, 0.45, 0.45) })
-        s.y -= 2
+        s.y -= 4
         s = drawIndentedBlock(s, `"${originalText}"`, {
           font: italic, size: 10, color: rgb(0.40, 0.40, 0.40),
         })
         s.y -= 10
-        s = drawWrappedText(s, 'Now reads:', { font, size: 9, lineGap: 2, color: rgb(0.35, 0.35, 0.35) })
-        s.y -= 2
+        s = drawWrappedText(s, 'NOW READS:', { font, size: 9, lineGap: 2, color: rgb(0.94, 0.78, 0.12) })
+        s.y -= 4
       } else {
-        // No original text on file — fall back to the bare lead-in.
         const leadIn = a.clause_reference
           ? `${a.clause_reference} of the Agreement is hereby amended and replaced in its entirety with the following:`
           : 'The Agreement is hereby amended by the inclusion of the following provision:'
@@ -275,11 +390,11 @@ serve(async (req) => {
         s.y -= 6
       }
 
-      // The agreed language — bold, indented, left-accent rule.
+      // The agreed language — bold, full yellow background, dark text.
       const finalText = (a.final_clause_text || a.ai_proposed_redline || '').trim()
-      s = drawIndentedBlock(s, finalText, { font, size: 10.5 })
+      s = drawHighlightedBlock(s, finalText, { font, size: 11 })
 
-      s.y -= 4
+      s.y -= 6
       if (a.locked_at) {
         const lockStr = `(Agreed and locked on ${new Date(a.locked_at).toLocaleDateString('en-NZ', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Pacific/Auckland' })}.)`
         s = drawWrappedText(s, lockStr, { font: italic, size: 8, lineGap: 2, color: rgb(0.50, 0.50, 0.50) })
@@ -321,8 +436,15 @@ serve(async (req) => {
     s.page.drawText('Date: ____________________________', { x: MARGIN_X + sigColW + 30, y: s.y - 8, size: 9, font: regular, color: rgb(0.08, 0.08, 0.08) })
 
 
-    // 5. Save merged PDF (base + addendum pages)
-    const outBytes = await base.save()
+    // 5. Append the ORIGINAL contract pages AFTER the addendum we just
+    //    drew. Order is now: [Addendum page 1 with summary] +
+    //    [Addendum pages 2..N with amended clauses + execution block] +
+    //    [Original signed agreement pages]. Closer opens the PDF and
+    //    lands on the changes immediately.
+    const originalPages = await out.copyPages(base, base.getPageIndices())
+    originalPages.forEach(p => out.addPage(p))
+
+    const outBytes = await out.save()
 
     // 6. Upload to storage
     const nextVersion = (contract.version || 1) + 1
