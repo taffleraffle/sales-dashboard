@@ -32,7 +32,7 @@ export default function DownsellsListPage() {
   }, [])
 
   return (
-    <div className="max-w-[960px] mx-auto">
+    <div className="max-w-[1200px] mx-auto">
       {/* Header */}
       <div className="flex items-end justify-between mb-6 pb-4" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>

@@ -195,28 +195,53 @@ serve(async (req) => {
       const size = 11
       const lineGap = 4
       const lineHeight = size + lineGap
+      const paragraphGap = 6  // extra space between paragraphs
       const blockInnerW = BODY_W - leftPad - rightPad
       const bg = rgb(0.99, 0.95, 0.65)
       const accent = rgb(0.94, 0.78, 0.12)
       const textColor = rgb(0.10, 0.08, 0.02)
 
-      // Wrap into lines
-      const words = sanitize(text).split(/\s+/)
-      const lines: string[] = []
-      let line = ''
-      for (const w of words) {
-        const test = line ? line + ' ' + w : w
-        if (bold.widthOfTextAtSize(test, size) > blockInnerW && line) { lines.push(line); line = w }
-        else line = test
+      // Split into paragraphs FIRST (preserves the closer's intentional
+      // line breaks in multi-paragraph amendments). Then wrap each
+      // paragraph's words to the block width. Previous version did a
+      // single \s+ split which collapsed \n\n into a single space,
+      // flattening multi-paragraph amendments into one block of text.
+      const paragraphs = sanitize(text)
+        .split(/\n\s*\n+/)
+        .map(p => p.replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+      const lines: Array<{ text: string; paragraphBreakAfter: boolean }> = []
+      for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+        const words = paragraphs[pIdx].split(' ')
+        let line = ''
+        const flushPara = () => {
+          if (line) {
+            lines.push({ text: line, paragraphBreakAfter: false })
+            line = ''
+          }
+        }
+        for (const w of words) {
+          const test = line ? line + ' ' + w : w
+          if (bold.widthOfTextAtSize(test, size) > blockInnerW && line) {
+            lines.push({ text: line, paragraphBreakAfter: false })
+            line = w
+          } else {
+            line = test
+          }
+        }
+        if (line) lines.push({ text: line, paragraphBreakAfter: pIdx < paragraphs.length - 1 })
       }
-      if (line) lines.push(line)
 
-      // Distribute across segments respecting page boundaries
-      type Seg = { page: any; startY: number; lines: string[] }
+      // Distribute across segments respecting page boundaries.
+      // Each `Line` entry contributes its own height + an extra gap when
+      // it ends a paragraph mid-block.
+      type Line = { text: string; paragraphBreakAfter: boolean }
+      type Seg = { page: any; startY: number; lines: Line[] }
       const segs: Seg[] = [{ page: s.page, startY: s.y, lines: [] }]
       for (const ln of lines) {
         const isFirstLineOfSeg = segs[segs.length - 1].lines.length === 0
-        const lineCost = lineHeight + (isFirstLineOfSeg ? topPad : 0)
+        const extraGap = ln.paragraphBreakAfter ? paragraphGap : 0
+        const lineCost = lineHeight + extraGap + (isFirstLineOfSeg ? topPad : 0)
         if (s.y - lineCost < MARGIN_B) {
           s = newPage()
           segs.push({ page: s.page, startY: s.y, lines: [] })
@@ -224,19 +249,21 @@ serve(async (req) => {
         const seg = segs[segs.length - 1]
         if (seg.lines.length === 0) s.y -= topPad
         seg.lines.push(ln)
-        s.y -= lineHeight
+        s.y -= lineHeight + extraGap
       }
       s.y -= (botPad - lineGap)
 
-      // Render each segment's bg + accent + text
+      // Render each segment's bg + accent + text. Lines flagged with
+      // paragraphBreakAfter get an extra gap below before the next line.
       for (const seg of segs) {
-        const h = topPad + seg.lines.length * lineHeight - lineGap + botPad
+        const segParagraphGapTotal = seg.lines.reduce((sum, ln) => sum + (ln.paragraphBreakAfter ? paragraphGap : 0), 0)
+        const h = topPad + seg.lines.length * lineHeight - lineGap + botPad + segParagraphGapTotal
         seg.page.drawRectangle({ x: MARGIN_X, y: seg.startY - h, width: BODY_W, height: h, color: bg })
         seg.page.drawRectangle({ x: MARGIN_X, y: seg.startY - h, width: 5, height: h, color: accent })
         let lineY = seg.startY - topPad
         for (const ln of seg.lines) {
-          seg.page.drawText(ln, { x: MARGIN_X + leftPad, y: lineY - size, size, font: bold, color: textColor })
-          lineY -= lineHeight
+          seg.page.drawText(ln.text, { x: MARGIN_X + leftPad, y: lineY - size, size, font: bold, color: textColor })
+          lineY -= lineHeight + (ln.paragraphBreakAfter ? paragraphGap : 0)
         }
       }
 
