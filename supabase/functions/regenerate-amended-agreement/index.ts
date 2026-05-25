@@ -206,58 +206,31 @@ serve(async (req) => {
       s.y -= 6
     }
 
-    finalised.forEach((a, idx) => {
-      s.y -= 10
-      s = ensureSpace(s, 70)
-      const clauseHeader = a.clause_reference
-        ? `${idx + 1}.  AMENDMENT TO ${a.clause_reference.toUpperCase()}`
-        : `${idx + 1}.  AMENDMENT`
-      s.page.drawText(sanitize(clauseHeader), {
-        x: MARGIN_X, y: s.y - 12, size: 11, font, color: rgb(0.08, 0.08, 0.08),
-      })
-      s.y -= 20
-
-      // Leading legal sentence introducing the amendment.
-      const leadIn = a.clause_reference
-        ? `${a.clause_reference} of the Agreement is hereby amended and replaced in its entirety with the following:`
-        : 'The Agreement is hereby amended by the inclusion of the following provision:'
-      s = drawWrappedText(s, leadIn, { font: regular, size: 10, lineGap: 4 })
-      s.y -= 8
-
-      // The agreed language itself — bold + slightly indented + boxed
-      // with a left rule so it visually pops as the substantive change.
-      const finalText = (a.final_clause_text || a.ai_proposed_redline || '').trim()
-      const blockStartY = s.y
-      const blockLeftPad = 14
-      const blockInnerW = BODY_W - blockLeftPad
-
-      // Render bold text inside the indented block.
-      // Reuse drawWrappedText logic but with an inset left margin.
-      const words = sanitize(finalText).split(/\s+/)
-      let line = ''
-      const size = 10.5
+    // Helper — render a block of text indented + with a left accent rule.
+    // Returns the new draw state.
+    function drawIndentedBlock(s: DrawState, text: string, opts: { font: any; size: number; color?: any }): DrawState {
+      const leftPad = 14
+      const blockInnerW = BODY_W - leftPad
+      const size = opts.size
       const lineHeight = size + 5
+      const blockStartY = s.y
+      const words = sanitize(text).split(/\s+/)
+      let line = ''
       const renderLine = (txt: string) => {
         s = ensureSpace(s, lineHeight)
         s.page.drawText(txt, {
-          x: MARGIN_X + blockLeftPad, y: s.y - size, size, font, color: rgb(0.05, 0.05, 0.05),
+          x: MARGIN_X + leftPad, y: s.y - size, size, font: opts.font,
+          color: opts.color ?? rgb(0.05, 0.05, 0.05),
         })
         s.y -= lineHeight
       }
       for (const w of words) {
         const test = line ? line + ' ' + w : w
-        const width = font.widthOfTextAtSize(test, size)
-        if (width > blockInnerW && line) {
-          renderLine(line)
-          line = w
-        } else {
-          line = test
-        }
+        const width = opts.font.widthOfTextAtSize(test, size)
+        if (width > blockInnerW && line) { renderLine(line); line = w }
+        else line = test
       }
       if (line) renderLine(line)
-
-      // Left-side rule next to the bold block to make the change visually
-      // obvious. Drawn after text so we know the vertical extent.
       const blockEndY = s.y
       s.page.drawLine({
         start: { x: MARGIN_X + 4, y: blockStartY - 2 },
@@ -265,6 +238,47 @@ serve(async (req) => {
         thickness: 2,
         color: rgb(0.96, 0.85, 0.20),  // accent yellow
       })
+      return s
+    }
+
+    finalised.forEach((a, idx) => {
+      s.y -= 12
+      s = ensureSpace(s, 80)
+      const clauseHeader = a.clause_reference
+        ? `${idx + 1}.  AMENDMENT TO ${a.clause_reference.toUpperCase()}`
+        : `${idx + 1}.  AMENDMENT`
+      s.page.drawText(sanitize(clauseHeader), {
+        x: MARGIN_X, y: s.y - 12, size: 11, font, color: rgb(0.08, 0.08, 0.08),
+      })
+      s.y -= 18
+
+      // If the closer captured the original clause text, surface it first
+      // so the parties can see what's being replaced ("Previously read:")
+      // before the new agreed language. Renders italic + grey to read as
+      // historic context, distinct from the new language which renders
+      // bold + accented as the substantive change.
+      const originalText = (a.original_excerpt || '').trim()
+      if (originalText) {
+        s = drawWrappedText(s, 'Previously read:', { font, size: 9, lineGap: 2, color: rgb(0.45, 0.45, 0.45) })
+        s.y -= 2
+        s = drawIndentedBlock(s, `"${originalText}"`, {
+          font: italic, size: 10, color: rgb(0.40, 0.40, 0.40),
+        })
+        s.y -= 10
+        s = drawWrappedText(s, 'Now reads:', { font, size: 9, lineGap: 2, color: rgb(0.35, 0.35, 0.35) })
+        s.y -= 2
+      } else {
+        // No original text on file — fall back to the bare lead-in.
+        const leadIn = a.clause_reference
+          ? `${a.clause_reference} of the Agreement is hereby amended and replaced in its entirety with the following:`
+          : 'The Agreement is hereby amended by the inclusion of the following provision:'
+        s = drawWrappedText(s, leadIn, { font: regular, size: 10, lineGap: 4 })
+        s.y -= 6
+      }
+
+      // The agreed language — bold, indented, left-accent rule.
+      const finalText = (a.final_clause_text || a.ai_proposed_redline || '').trim()
+      s = drawIndentedBlock(s, finalText, { font, size: 10.5 })
 
       s.y -= 4
       if (a.locked_at) {

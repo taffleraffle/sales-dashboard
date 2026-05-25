@@ -2,12 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, Loader, AlertCircle, ExternalLink, Send, Copy, FileText,
-  Lock, MessageCircle, Plus, TrendingDown,
+  Lock, MessageCircle, Plus, ChevronDown, TrendingDown,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { ICON } from '../../utils/constants'
-import DownsellCoach from './DownsellCoach'
 
 const VERDICT_STYLES = {
   allow:  { label: 'Approvable',  color: 'var(--up)' },
@@ -23,14 +22,11 @@ export default function ContractDetail() {
   const [messagesByAmendment, setMessagesByAmendment] = useState({})
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState(null)
-  // Downsell is the primary action on a contract page — most contracts
-  // never need amendments. Default tab is downsell; amendments tab still
-  // accessible but doesn't dominate the layout.
-  const [activeTab, setActiveTab]   = useState('downsell')
 
   // form: start a new amendment thread
   const [newRequest, setNewRequest] = useState('')
   const [newClauseRef, setNewClauseRef] = useState('')
+  const [newOriginal, setNewOriginal]   = useState('')
   const [creatingNew, setCreatingNew]   = useState(false)
   const [newErr, setNewErr]             = useState(null)
 
@@ -97,6 +93,7 @@ export default function ContractDetail() {
         closer_id: profile?.teamMemberId || null,
         requested_change: newRequest.trim(),
         clause_reference: newClauseRef.trim() || null,
+        original_excerpt: newOriginal.trim() || null,
         status: 'pending',
       })
       .select()
@@ -107,7 +104,7 @@ export default function ContractDetail() {
       return
     }
     setAmendments(prev => [inserted, ...prev])
-    setNewRequest(''); setNewClauseRef('')
+    setNewRequest(''); setNewClauseRef(''); setNewOriginal('')
 
     try {
       const { data, error: invErr } = await supabase.functions.invoke('contract-judge-amendment', {
@@ -151,133 +148,65 @@ export default function ContractDetail() {
         <ArrowLeft size={ICON.sm} /> All reviews
       </Link>
 
-      {/* Contract header */}
-      <div className="tile tile-feedback p-6 mb-6">
+      {/* Contract header — compact. Identity on the left, single
+          "Document ▾" dropdown on the right collapses the three PDF
+          actions (Original / Amended / Regenerate) into one button.
+          Fee / period / PandaDoc moved inline on a single row to
+          collapse vertical space. */}
+      <div className="tile tile-feedback p-5 mb-5">
         <div className="flex items-start justify-between gap-4">
-          <div>
+          <div className="min-w-0">
             <span className="eyebrow eyebrow-accent">
               {contract.contract_type === 'retainer' ? 'Retainer template' : 'Trial template'}
               {' · v'}{contract.version || 1}
             </span>
-            <h1 style={{ fontFamily: 'var(--serif)', fontSize: 26, color: 'var(--ink)', margin: '8px 0 0' }}>
+            <h1 style={{ fontFamily: 'var(--serif)', fontSize: 24, color: 'var(--ink)', margin: '4px 0 0', lineHeight: 1.1 }}>
               {contract.client_name}
             </h1>
             {contract.client_company && (
-              <p style={{ fontSize: 14, color: 'var(--ink-3)', margin: '4px 0 0' }}>{contract.client_company}</p>
+              <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '2px 0 0' }}>{contract.client_company}</p>
             )}
           </div>
-          <div className="flex flex-col items-end gap-2">
-            <SignedPdfLink path={contract.agreement_pdf_path} label="Open original" />
-            {contract.amended_pdf_path && (
-              <SignedPdfLink path={contract.amended_pdf_path} label={`Open amended v${contract.version}`} primary />
-            )}
-            <RegenerateButton
-              contract={contract}
-              amendments={amendments}
-              onRegenerated={async () => {
-                // Refresh contract row so amended_pdf_path + version update
-                const { data } = await supabase.from('contracts').select('*').eq('id', id).maybeSingle()
-                if (data) setContract(data)
-              }}
-            />
-          </div>
+          <DocumentMenu
+            contract={contract}
+            amendments={amendments}
+            onRegenerated={async () => {
+              const { data } = await supabase.from('contracts').select('*').eq('id', id).maybeSingle()
+              if (data) setContract(data)
+            }}
+          />
         </div>
-        <div className="grid grid-cols-3 gap-6 mt-6 pt-4" style={{ borderTop: '1px solid var(--rule)' }}>
-          <Stat label="Fee" value={contract.fee_amount_usd ? `$${Number(contract.fee_amount_usd).toLocaleString()}` : '—'} />
-          <Stat label="Period" value={contract.project_period_days ? `${contract.project_period_days} days` : '—'} />
+        <div className="flex items-center gap-6 mt-4 pt-3" style={{ borderTop: '1px solid var(--rule)', fontFamily: 'var(--mono)', fontSize: 12 }}>
+          <span><span style={{ color: 'var(--ink-3)' }}>Fee</span> <span style={{ color: 'var(--ink)', marginLeft: 6 }}>{contract.fee_amount_usd ? `$${Number(contract.fee_amount_usd).toLocaleString()}` : '—'}</span></span>
+          <span><span style={{ color: 'var(--ink-3)' }}>Period</span> <span style={{ color: 'var(--ink)', marginLeft: 6 }}>{contract.project_period_days ? `${contract.project_period_days} days` : '—'}</span></span>
+          <span className="flex-1 text-right">
+            <span style={{ color: 'var(--ink-3)' }}>PandaDoc</span>{' '}
+            {contract.pandadoc_view_url
+              ? <a href={contract.pandadoc_view_url} target="_blank" rel="noreferrer" style={{ color: 'var(--ink)', display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>Open <ExternalLink size={11} /></a>
+              : <span style={{ color: 'var(--ink-3)', marginLeft: 6 }}>Not linked</span>}
+          </span>
+          <Link to={`/sales/downsells/new`} state={{ contractId: contract.id }} className="editorial-btn-ghost" style={{ fontSize: 11, padding: '4px 10px', borderColor: 'var(--accent)' }} title="Open a downsell session for this client">
+            <TrendingDown size={11} /> Downsell this client
+          </Link>
+        </div>
+      </div>
+
+      {/* Amendments — the only thing on this page. Downsells moved to
+          their own /sales/downsells page. */}
+      <div>
+        <div className="flex items-center gap-3 mb-4 pb-2" style={{ borderBottom: '1px solid var(--rule)' }}>
+          <MessageCircle size={16} style={{ color: 'var(--accent)' }} />
           <div>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>PandaDoc</span>
-            <p style={{ margin: '4px 0 0' }}>
-              {contract.pandadoc_view_url
-                ? <a href={contract.pandadoc_view_url} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--ink)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    Open document <ExternalLink size={12} />
-                  </a>
-                : <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--ink-3)' }}>Not linked</span>}
+            <span className="eyebrow eyebrow-bare">Amendments</span>
+            <p style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+              Client asking to change a specific clause? Open a thread per ask. The judge runs each through the amendment policy.
             </p>
           </div>
         </div>
-      </div>
-
-      {/* Tab strip — downsell is the default action. Amendments live
-          behind a second tab so the page isn't cluttered when there's
-          no clause change in flight. Amendment count badge surfaces
-          when there's actual activity to draw attention there. */}
-      <div className="flex items-center gap-1 mb-6" style={{ borderBottom: '1px solid var(--rule)' }}>
-        {[
-          { key: 'downsell',   label: 'Downsell',   icon: <TrendingDown size={14} /> },
-          { key: 'amendments', label: 'Amendments', icon: <MessageCircle size={14} />, badge: amendments.length },
-        ].map(t => {
-          const isActive = t.key === activeTab
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setActiveTab(t.key)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '10px 16px',
-                fontFamily: 'var(--mono)',
-                fontSize: 11,
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase',
-                background: 'transparent',
-                color: isActive ? 'var(--ink)' : 'var(--ink-3)',
-                borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                cursor: 'pointer',
-                marginBottom: -1,
-              }}
-            >
-              {t.icon}
-              {t.label}
-              {t.badge != null && t.badge > 0 && (
-                <span style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 18,
-                  height: 18,
-                  padding: '0 5px',
-                  fontFamily: 'var(--mono)',
-                  fontSize: 10,
-                  color: 'var(--paper)',
-                  background: 'var(--ink)',
-                  borderRadius: 9,
-                  marginLeft: 2,
-                }}>
-                  {t.badge}
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Downsell tab (default) */}
-      {activeTab === 'downsell' && (
-        <DownsellCoach contractId={id} contract={contract} />
-      )}
-
-      {/* Amendments tab */}
-      {activeTab === 'amendments' && (
-        <div>
-          <div className="flex items-center gap-3 mb-4 pb-3" style={{ borderBottom: '1px solid var(--rule)' }}>
-            <MessageCircle size={18} style={{ color: 'var(--accent)' }} />
-            <div>
-              <span className="eyebrow eyebrow-accent">OPT Digital · Amendments</span>
-              <h2 style={{ fontFamily: 'var(--serif)', fontSize: 22, color: 'var(--ink)', margin: '4px 0 0' }}>
-                Amend the <em style={{ fontStyle: 'italic' }}>agreement</em>
-              </h2>
-              <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4, maxWidth: 640 }}>
-                Client asking to change a specific clause? Open a thread per ask. The judge runs each through the amendment policy and tells you what you can lock in vs what needs Ben.
-              </p>
-            </div>
-          </div>
 
           {amendments.length === 0 && (
-            <div className="tile tile-feedback p-6 text-center" style={{ marginBottom: 24 }}>
-              <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>
+            <div className="tile tile-feedback p-4 text-center" style={{ marginBottom: 16 }}>
+              <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: 0 }}>
                 No amendment threads on this contract yet. Open one below.
               </p>
             </div>
@@ -320,6 +249,22 @@ export default function ContractDetail() {
                   className="editorial-input w-full mt-1"
                 />
               </div>
+              <div>
+                <label style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+                  Original clause text (optional)
+                  <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--ink-3)', fontWeight: 400, marginLeft: 6, fontStyle: 'italic' }}>
+                    — paste from the contract; the regenerated PDF will show it as "Previously read:" above the new language
+                  </span>
+                </label>
+                <textarea
+                  value={newOriginal}
+                  onChange={e => setNewOriginal(e.target.value)}
+                  placeholder='e.g. "This Agreement shall be governed by the laws of New Zealand."'
+                  rows={2}
+                  className="editorial-input w-full mt-1"
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
               {newErr && (
                 <p style={{ fontSize: 12, color: 'var(--down)', fontFamily: 'var(--mono)' }}>{newErr}</p>
               )}
@@ -330,8 +275,7 @@ export default function ContractDetail() {
               </div>
             </form>
           </div>
-        </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -635,86 +579,146 @@ function Stat({ label, value }) {
   )
 }
 
-// SignedPdfLink — generates a 5-minute signed URL for the uploaded agreement
+// DocumentMenu — consolidated dropdown that replaces the previously-stacked
+// Open original / Open amended / Regenerate buttons. One button on the
+// contract header, expands to a small menu of document actions. Closes
+// on outside click / escape.
+function DocumentMenu({ contract, amendments, onRegenerated }) {
+  const [open, setOpen]   = useState(false)
+  const [busy, setBusy]   = useState(null)   // 'original' | 'amended' | 'regen' | null
+  const [err, setErr]     = useState(null)
+  const menuRef = useRef(null)
+  const lockedCount = amendments.filter(a => a.locked_at).length
+
+  useEffect(() => {
+    if (!open) return
+    function onClick(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false) }
+    function onKey(e) { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('pointerdown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  async function openSigned(path, which) {
+    setBusy(which); setErr(null)
+    try {
+      const { data, error } = await supabase.storage.from('contract-uploads').createSignedUrl(path, 300)
+      if (error) throw error
+      window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+      setOpen(false)
+    } catch (e) {
+      setErr(e.message || String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function regen() {
+    setBusy('regen'); setErr(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('regenerate-amended-agreement', { body: { contract_id: contract.id } })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      if (!data?.signed_url) throw new Error('Regen returned no signed URL.')
+      window.open(data.signed_url, '_blank', 'noopener,noreferrer')
+      await onRegenerated()
+      setOpen(false)
+    } catch (e) {
+      setErr(e.message || String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="editorial-btn-primary"
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+      >
+        <FileText size={ICON.sm} /> Document
+        <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
+      </button>
+      {open && (
+        <div className="dropdown-panel" style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, minWidth: 280, zIndex: 50 }}>
+          {contract.agreement_pdf_path && (
+            <button type="button" onClick={() => openSigned(contract.agreement_pdf_path, 'original')} disabled={busy != null} style={menuItemStyle}>
+              {busy === 'original' ? <Loader size={ICON.sm} className="animate-spin" /> : <FileText size={ICON.sm} />}
+              <span className="flex-1 text-left">Open original</span>
+              <span style={menuMeta}>v1</span>
+            </button>
+          )}
+          {contract.amended_pdf_path && (
+            <button type="button" onClick={() => openSigned(contract.amended_pdf_path, 'amended')} disabled={busy != null} style={menuItemStyle}>
+              {busy === 'amended' ? <Loader size={ICON.sm} className="animate-spin" /> : <FileText size={ICON.sm} />}
+              <span className="flex-1 text-left">Open amended</span>
+              <span style={menuMeta}>v{contract.version}</span>
+            </button>
+          )}
+          <button type="button" onClick={regen} disabled={busy != null || lockedCount === 0} style={{ ...menuItemStyle, borderTop: '1px solid var(--rule)' }}>
+            {busy === 'regen' ? <Loader size={ICON.sm} className="animate-spin" /> : <FileText size={ICON.sm} />}
+            <span className="flex-1 text-left">
+              Regenerate amended
+              {lockedCount === 0 && <span style={{ fontSize: 10, color: 'var(--ink-3)', fontStyle: 'italic', display: 'block', marginTop: 1 }}>Lock an amendment first</span>}
+              {lockedCount > 0 && <span style={{ fontSize: 10, color: 'var(--ink-3)', display: 'block', marginTop: 1 }}>{lockedCount} locked amendment{lockedCount === 1 ? '' : 's'} ready</span>}
+            </span>
+            <span style={menuMeta}>v{(contract.version || 1) + 1}</span>
+          </button>
+          {err && (
+            <div style={{ padding: '8px 12px', borderTop: '1px solid var(--rule)' }}>
+              <p style={{ fontSize: 11, color: 'var(--down)', fontFamily: 'var(--mono)', margin: 0 }}>{err}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const menuItemStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  width: '100%',
+  padding: '10px 12px',
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
+  fontFamily: 'var(--sans)',
+  fontSize: 13,
+  color: 'var(--ink)',
+  textAlign: 'left',
+}
+const menuMeta = {
+  fontFamily: 'var(--mono)',
+  fontSize: 10,
+  color: 'var(--ink-3)',
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+}
+
+// SignedPdfLink (legacy — left for any out-of-page references; new code
+// uses DocumentMenu). TODO: remove when nothing else imports it.
 function SignedPdfLink({ path, label = 'Open agreement PDF', primary = false }) {
   const [opening, setOpening] = useState(false)
   if (!path) return null
-
   async function open() {
     setOpening(true)
-    const { data, error } = await supabase.storage
-      .from('contract-uploads')
-      .createSignedUrl(path, 300)
+    const { data, error } = await supabase.storage.from('contract-uploads').createSignedUrl(path, 300)
     setOpening(false)
     if (error) return alert(`Could not open PDF: ${error.message}`)
     window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
   }
-
   return (
-    <button
-      type="button"
-      onClick={open}
-      disabled={opening}
-      className={primary ? 'editorial-btn-primary' : 'editorial-btn-ghost'}
-      style={{ flexShrink: 0 }}
-    >
+    <button type="button" onClick={open} disabled={opening} className={primary ? 'editorial-btn-primary' : 'editorial-btn-ghost'} style={{ flexShrink: 0 }}>
       {opening ? <Loader size={ICON.sm} className="animate-spin" /> : <FileText size={ICON.sm} />}
       {label}
     </button>
   )
 }
 
-// RegenerateButton — runs the regenerate-amended-agreement Edge fn.
-// Enabled only when there's at least one locked amendment on the contract.
-function RegenerateButton({ contract, amendments, onRegenerated }) {
-  const [busy, setBusy] = useState(false)
-  const [err, setErr]   = useState(null)
-  const lockedCount = amendments.filter(a => a.locked_at).length
-
-  if (lockedCount === 0) {
-    return (
-      <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)', fontStyle: 'italic', textAlign: 'right', maxWidth: 220 }}>
-        Lock in at least one amendment thread to enable agreement regeneration.
-      </span>
-    )
-  }
-
-  async function regen() {
-    setBusy(true); setErr(null)
-    try {
-      const { data, error } = await supabase.functions.invoke('regenerate-amended-agreement', {
-        body: { contract_id: contract.id },
-      })
-      if (error) throw error
-      if (data?.error) throw new Error(data.error)
-      if (data?.signed_url) {
-        window.open(data.signed_url, '_blank', 'noopener,noreferrer')
-      } else {
-        throw new Error('Regen returned no signed URL — try again or check function logs.')
-      }
-      await onRegenerated()
-    } catch (e) {
-      setErr(e.message || String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <button
-        type="button"
-        onClick={regen}
-        disabled={busy}
-        className="editorial-btn-primary"
-        style={{ borderColor: 'var(--accent)', flexShrink: 0 }}
-      >
-        {busy ? <><Loader size={ICON.sm} className="animate-spin" /> Generating…</> : <><FileText size={ICON.sm} /> Regenerate amended agreement</>}
-      </button>
-      <span style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
-        Will splice in {lockedCount} locked amendment{lockedCount === 1 ? '' : 's'}
-      </span>
-      {err && <span style={{ fontSize: 10, color: 'var(--down)', fontFamily: 'var(--mono)', maxWidth: 240, textAlign: 'right' }}>{err}</span>}
-    </div>
-  )
-}

@@ -96,6 +96,9 @@ const ContractDetail    = lazyWithReload(() => import('./pages/contracts/Contrac
 const ContractAdd       = lazyWithReload(() => import('./pages/contracts/ContractAdd'))
 const ContractsPolicy   = lazyWithReload(() => import('./pages/contracts/ContractsPolicy'))
 const ContractsPending  = lazyWithReload(() => import('./pages/contracts/ContractsPending'))
+const DownsellsListPage    = lazyWithReload(() => import('./pages/downsells/DownsellsListPage'))
+const DownsellsNewPage     = lazyWithReload(() => import('./pages/downsells/DownsellsNewPage'))
+const DownsellsSessionPage = lazyWithReload(() => import('./pages/downsells/DownsellsSessionPage'))
 
 import SetPasswordPage from './pages/SetPasswordPage'
 import SplashScreen from './components/SplashScreen'
@@ -257,6 +260,9 @@ export default function App() {
               <Route path="/sales/contracts/policy" element={<AdminRoute><Suspense fallback={<PageSkeleton />}><ContractsPolicy /></Suspense></AdminRoute>} />
               <Route path="/sales/contracts/pending" element={<AdminRoute><Suspense fallback={<PageSkeleton />}><ContractsPending /></Suspense></AdminRoute>} />
               <Route path="/sales/contracts/:id" element={<Suspense fallback={<PageSkeleton />}><ContractDetail /></Suspense>} />
+              <Route path="/sales/downsells" element={<Suspense fallback={<PageSkeleton />}><DownsellsListPage /></Suspense>} />
+              <Route path="/sales/downsells/new" element={<Suspense fallback={<PageSkeleton />}><DownsellsNewPage /></Suspense>} />
+              <Route path="/sales/downsells/:id" element={<Suspense fallback={<PageSkeleton />}><DownsellsSessionPage /></Suspense>} />
               <Route path="/sales/commissions" element={<Suspense fallback={<PageSkeleton />}><CommissionPage /></Suspense>} />
               <Route path="/sales/commissions/:id" element={<Suspense fallback={<PageSkeleton />}><CommissionDetail /></Suspense>} />
               <Route path="/sales/setter-bot" element={<Suspense fallback={<PageSkeleton />}><SetterBot /></Suspense>} />
