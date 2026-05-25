@@ -49,20 +49,10 @@ export default function ContractsPage() {
             Contract <em style={{ fontStyle: 'italic' }}>reviews</em>
           </h1>
           <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4, maxWidth: 720 }}>
-            Open a contract to work two things on the same page — downsell options to save a wobbling client, and contract negotiation for clause-by-clause amendment requests. The coach + judge both read live policy and quote it back to you.
+            Upload a signed agreement, raise amendment threads on specific clauses, and the judge tells you what we can lock in based on policy.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {isAdmin && (
-            <>
-              <Link to="/sales/contracts/pending" className="editorial-btn-ghost">
-                Pending
-              </Link>
-              <Link to="/sales/contracts/policy" className="editorial-btn-ghost">
-                Policy
-              </Link>
-            </>
-          )}
           <Link to="/sales/contracts/add" className="editorial-btn-primary">
             <Plus size={ICON.sm} />
             New review

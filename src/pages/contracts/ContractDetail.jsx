@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, Loader, AlertCircle, ExternalLink, Send, Copy, FileText,
-  Lock, MessageCircle, Plus, ChevronDown, TrendingDown,
+  Lock, MessageCircle, Plus,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
@@ -185,9 +185,6 @@ export default function ContractDetail() {
               ? <a href={contract.pandadoc_view_url} target="_blank" rel="noreferrer" style={{ color: 'var(--ink)', display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>Open <ExternalLink size={11} /></a>
               : <span style={{ color: 'var(--ink-3)', marginLeft: 6 }}>Not linked</span>}
           </span>
-          <Link to={`/sales/downsells/new`} state={{ contractId: contract.id }} className="editorial-btn-ghost" style={{ fontSize: 11, padding: '4px 10px', borderColor: 'var(--accent)' }} title="Open a downsell session for this client">
-            <TrendingDown size={11} /> Downsell this client
-          </Link>
         </div>
       </div>
 
@@ -579,127 +576,88 @@ function Stat({ label, value }) {
   )
 }
 
-// DocumentMenu — consolidated dropdown that replaces the previously-stacked
-// Open original / Open amended / Regenerate buttons. One button on the
-// contract header, expands to a small menu of document actions. Closes
-// on outside click / escape.
+// DocumentMenu — one button that always opens the most current contract.
+// Logic:
+//   - No locked amendments  → open the original signed PDF
+//   - Locked amendments exist + amended PDF is up to date → open amended
+//   - Locked amendments exist + amended PDF is stale (a newer lock landed
+//     after the last regen) → regenerate, then open the fresh one
+// Closer doesn't need to think about versions or pick between original
+// vs amended vs regenerate — there's just "the contract" and clicking it
+// always gives them the latest authoritative document.
 function DocumentMenu({ contract, amendments, onRegenerated }) {
-  const [open, setOpen]   = useState(false)
-  const [busy, setBusy]   = useState(null)   // 'original' | 'amended' | 'regen' | null
-  const [err, setErr]     = useState(null)
-  const menuRef = useRef(null)
-  const lockedCount = amendments.filter(a => a.locked_at).length
+  const [busy, setBusy] = useState(false)
+  const [err, setErr]   = useState(null)
 
-  useEffect(() => {
-    if (!open) return
-    function onClick(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false) }
-    function onKey(e) { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('pointerdown', onClick)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('pointerdown', onClick)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  const locked = amendments.filter(a => a.locked_at)
+  const hasLocked = locked.length > 0
+  // Amended PDF is "stale" if any locked amendment was locked AFTER the
+  // current amended_pdf_path was generated. The amended PDF version bumps
+  // each regen; we treat any locked amendment as "needs include" when
+  // there's no amended PDF at all, OR when a lock timestamp is newer than
+  // the contract's updated_at-derived regen time.
+  const latestLockTime = locked.reduce((max, a) => {
+    const t = new Date(a.locked_at).getTime()
+    return t > max ? t : max
+  }, 0)
+  const lastRegenTime = contract.updated_at ? new Date(contract.updated_at).getTime() : 0
+  const amendedStale = hasLocked && (!contract.amended_pdf_path || latestLockTime > lastRegenTime)
 
-  async function openSigned(path, which) {
-    setBusy(which); setErr(null)
+  async function openLatest() {
+    setBusy(true); setErr(null)
     try {
-      const { data, error } = await supabase.storage.from('contract-uploads').createSignedUrl(path, 300)
-      if (error) throw error
-      window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
-      setOpen(false)
-    } catch (e) {
-      setErr(e.message || String(e))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function regen() {
-    setBusy('regen'); setErr(null)
-    try {
-      const { data, error } = await supabase.functions.invoke('regenerate-amended-agreement', { body: { contract_id: contract.id } })
-      if (error) throw error
-      if (data?.error) throw new Error(data.error)
-      if (!data?.signed_url) throw new Error('Regen returned no signed URL.')
-      window.open(data.signed_url, '_blank', 'noopener,noreferrer')
+      // Path 1: no locked amendments yet → open the original
+      if (!hasLocked) {
+        if (!contract.agreement_pdf_path) throw new Error('No contract on file. Upload one first.')
+        const { data, error } = await supabase.storage.from('contract-uploads').createSignedUrl(contract.agreement_pdf_path, 300)
+        if (error) throw error
+        window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+        return
+      }
+      // Path 2: amended is current → open it
+      if (!amendedStale && contract.amended_pdf_path) {
+        const { data, error } = await supabase.storage.from('contract-uploads').createSignedUrl(contract.amended_pdf_path, 300)
+        if (error) throw error
+        window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+        return
+      }
+      // Path 3: amended is stale (or doesn't exist yet) → regen then open
+      const { data: regenData, error: regenErr } = await supabase.functions.invoke('regenerate-amended-agreement', { body: { contract_id: contract.id } })
+      if (regenErr) throw regenErr
+      if (regenData?.error) throw new Error(regenData.error)
+      if (!regenData?.signed_url) throw new Error('Regen returned no signed URL.')
+      window.open(regenData.signed_url, '_blank', 'noopener,noreferrer')
       await onRegenerated()
-      setOpen(false)
     } catch (e) {
       setErr(e.message || String(e))
     } finally {
-      setBusy(null)
+      setBusy(false)
     }
   }
 
   return (
-    <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
+    <div style={{ flexShrink: 0, textAlign: 'right' }}>
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={openLatest}
+        disabled={busy || (!contract.agreement_pdf_path && !contract.amended_pdf_path)}
         className="editorial-btn-primary"
         style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
       >
-        <FileText size={ICON.sm} /> Document
-        <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
+        {busy ? <><Loader size={ICON.sm} className="animate-spin" /> {amendedStale ? 'Updating…' : 'Opening…'}</> : <><FileText size={ICON.sm} /> Open contract</>}
       </button>
-      {open && (
-        <div className="dropdown-panel" style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, minWidth: 280, zIndex: 50 }}>
-          {contract.agreement_pdf_path && (
-            <button type="button" onClick={() => openSigned(contract.agreement_pdf_path, 'original')} disabled={busy != null} style={menuItemStyle}>
-              {busy === 'original' ? <Loader size={ICON.sm} className="animate-spin" /> : <FileText size={ICON.sm} />}
-              <span className="flex-1 text-left">Open original</span>
-              <span style={menuMeta}>v1</span>
-            </button>
-          )}
-          {contract.amended_pdf_path && (
-            <button type="button" onClick={() => openSigned(contract.amended_pdf_path, 'amended')} disabled={busy != null} style={menuItemStyle}>
-              {busy === 'amended' ? <Loader size={ICON.sm} className="animate-spin" /> : <FileText size={ICON.sm} />}
-              <span className="flex-1 text-left">Open amended</span>
-              <span style={menuMeta}>v{contract.version}</span>
-            </button>
-          )}
-          <button type="button" onClick={regen} disabled={busy != null || lockedCount === 0} style={{ ...menuItemStyle, borderTop: '1px solid var(--rule)' }}>
-            {busy === 'regen' ? <Loader size={ICON.sm} className="animate-spin" /> : <FileText size={ICON.sm} />}
-            <span className="flex-1 text-left">
-              Regenerate amended
-              {lockedCount === 0 && <span style={{ fontSize: 10, color: 'var(--ink-3)', fontStyle: 'italic', display: 'block', marginTop: 1 }}>Lock an amendment first</span>}
-              {lockedCount > 0 && <span style={{ fontSize: 10, color: 'var(--ink-3)', display: 'block', marginTop: 1 }}>{lockedCount} locked amendment{lockedCount === 1 ? '' : 's'} ready</span>}
-            </span>
-            <span style={menuMeta}>v{(contract.version || 1) + 1}</span>
-          </button>
-          {err && (
-            <div style={{ padding: '8px 12px', borderTop: '1px solid var(--rule)' }}>
-              <p style={{ fontSize: 11, color: 'var(--down)', fontFamily: 'var(--mono)', margin: 0 }}>{err}</p>
-            </div>
-          )}
-        </div>
+      {hasLocked && (
+        <p style={{ fontSize: 10, color: 'var(--ink-3)', fontFamily: 'var(--mono)', margin: '4px 0 0' }}>
+          {amendedStale
+            ? `${locked.length} locked amendment${locked.length === 1 ? '' : 's'} — clicking will regenerate`
+            : `v${contract.version || 1} (${locked.length} amendment${locked.length === 1 ? '' : 's'} applied)`}
+        </p>
+      )}
+      {err && (
+        <p style={{ fontSize: 11, color: 'var(--down)', fontFamily: 'var(--mono)', margin: '4px 0 0', maxWidth: 260, textAlign: 'right' }}>{err}</p>
       )}
     </div>
   )
-}
-
-const menuItemStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-  width: '100%',
-  padding: '10px 12px',
-  background: 'transparent',
-  border: 'none',
-  cursor: 'pointer',
-  fontFamily: 'var(--sans)',
-  fontSize: 13,
-  color: 'var(--ink)',
-  textAlign: 'left',
-}
-const menuMeta = {
-  fontFamily: 'var(--mono)',
-  fontSize: 10,
-  color: 'var(--ink-3)',
-  letterSpacing: '0.08em',
-  textTransform: 'uppercase',
 }
 
 // SignedPdfLink (legacy — left for any out-of-page references; new code

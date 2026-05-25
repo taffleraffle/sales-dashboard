@@ -153,20 +153,27 @@ serve(async (req) => {
       return s
     }
 
-    // Partition amendments: clauses that have actual agreed language go
-    // into the substantive body of the addendum (those are what the
-    // parties are signing to). Anything still under negotiation (locked
-    // but no final_clause_text — i.e. escalated to admin without a
-    // resolution) goes into a footer schedule so the document remains a
-    // clean legal instrument rather than a mid-negotiation document.
+    // Only amendments with actual agreed clause language make it into the
+    // signed document. If a closer locked something without resolving it
+    // (e.g. the judge said "needs Ben" and the closer hit Lock In anyway),
+    // the amendment has no final_clause_text and there's nothing legitimate
+    // to put in the contract. Those get dropped from the PDF entirely —
+    // they don't go in a Schedule A, they don't appear as "client request /
+    // escalated to management" closer-internal notes. A legal document
+    // either incorporates an agreed change or it doesn't mention it.
     const finalised = amendments.filter(a => {
       const txt = (a.final_clause_text || a.ai_proposed_redline || '').trim()
       return txt.length > 0
     })
-    const pending = amendments.filter(a => {
-      const txt = (a.final_clause_text || a.ai_proposed_redline || '').trim()
-      return txt.length === 0
-    })
+    const skipped = amendments.length - finalised.length
+
+    if (finalised.length === 0) {
+      return json(409, {
+        error: skipped > 0
+          ? `All ${skipped} locked amendment${skipped === 1 ? '' : 's'} are missing agreed clause language. Reopen them, finish the thread with the judge until specific clause wording is on the table, then lock in to capture it.`
+          : 'No locked amendments to incorporate.',
+      })
+    }
 
     let s = newPage()
 
@@ -197,14 +204,6 @@ serve(async (req) => {
     s = drawWrappedText(s, 'NOW THEREFORE, in consideration of the mutual covenants set out herein, the parties agree as follows:',
       { font: regular, size: 10, lineGap: 4 })
     s.y -= 18
-
-    // ─── Each FINALISED amendment ────────────────────────────────────
-    if (finalised.length === 0) {
-      s = drawWrappedText(s,
-        'No amendments have been finalised with agreed clause language at the time of this Addendum. Items currently under negotiation are listed in Schedule A below for the parties\' reference and will be incorporated into a subsequent Addendum upon written agreement.',
-        { font: italic, size: 10, lineGap: 4, color: rgb(0.35, 0.35, 0.35) })
-      s.y -= 6
-    }
 
     // Helper — render a block of text indented + with a left accent rule.
     // Returns the new draw state.
@@ -321,30 +320,6 @@ serve(async (req) => {
     s.page.drawText('Date: ____________________________', { x: MARGIN_X, y: s.y - 8, size: 9, font: regular, color: rgb(0.08, 0.08, 0.08) })
     s.page.drawText('Date: ____________________________', { x: MARGIN_X + sigColW + 30, y: s.y - 8, size: 9, font: regular, color: rgb(0.08, 0.08, 0.08) })
 
-    // ─── Schedule A — items still under negotiation (informational) ─
-    // Kept out of the executed body because they aren't agreed; included
-    // as a schedule so the parties' file shows what was raised but not
-    // yet resolved at the time of execution.
-    if (pending.length > 0) {
-      s.y -= 36
-      s = ensureSpace(s, 60)
-      s.page.drawText('SCHEDULE A -- ITEMS UNDER CONTINUED NEGOTIATION', {
-        x: MARGIN_X, y: s.y - 12, size: 11, font, color: rgb(0.08, 0.08, 0.08),
-      })
-      s.y -= 18
-      s = drawWrappedText(s,
-        'The following items have been raised by the Client and are under continued negotiation. They are NOT amended by this Addendum and are listed solely for the parties\' reference. Any agreed resolution will be incorporated into a subsequent Addendum upon written agreement of the parties.',
-        { font: italic, size: 9, lineGap: 3, color: rgb(0.35, 0.35, 0.35) })
-      s.y -= 8
-      pending.forEach((a, idx) => {
-        s = ensureSpace(s, 24)
-        const ref = a.clause_reference ? a.clause_reference : `Item ${idx + 1}`
-        s.page.drawText(sanitize(`${idx + 1}.  ${ref}`), {
-          x: MARGIN_X, y: s.y - 10, size: 10, font, color: rgb(0.08, 0.08, 0.08),
-        })
-        s.y -= 14
-      })
-    }
 
     // 5. Save merged PDF (base + addendum pages)
     const outBytes = await base.save()
