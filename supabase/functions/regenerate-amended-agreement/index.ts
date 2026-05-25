@@ -153,75 +153,184 @@ serve(async (req) => {
       return s
     }
 
+    // Partition amendments: clauses that have actual agreed language go
+    // into the substantive body of the addendum (those are what the
+    // parties are signing to). Anything still under negotiation (locked
+    // but no final_clause_text — i.e. escalated to admin without a
+    // resolution) goes into a footer schedule so the document remains a
+    // clean legal instrument rather than a mid-negotiation document.
+    const finalised = amendments.filter(a => {
+      const txt = (a.final_clause_text || a.ai_proposed_redline || '').trim()
+      return txt.length > 0
+    })
+    const pending = amendments.filter(a => {
+      const txt = (a.final_clause_text || a.ai_proposed_redline || '').trim()
+      return txt.length === 0
+    })
+
     let s = newPage()
 
-    // Cover header
+    // ─── Cover header ─────────────────────────────────────────────────
     s.page.drawText('AMENDMENT ADDENDUM', { x: MARGIN_X, y: s.y - 22, size: 22, font, color: rgb(0.08, 0.08, 0.08) })
     s.y -= 32
     s.page.drawText('Opt Digital Limited', { x: MARGIN_X, y: s.y - 12, size: 11, font: regular, color: rgb(0.35, 0.35, 0.35) })
-    s.y -= 24
+    s.y -= 28
 
     const dateStr = new Date().toLocaleDateString('en-NZ', {
       year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Pacific/Auckland',
     })
-    const introLines = [
-      `This Amendment Addendum is incorporated into and forms part of the Client Form and Client Terms (the "Agreement") between Opt Digital Limited and ${contract.client_name}${contract.client_company ? ' (' + contract.client_company + ')' : ''}.`,
-      `Template: ${templateKey === 'retainer' ? 'Local Surge — Work For Free Until We Do (90-day retainer)' : 'Local Surge Offer — 14-day Trial ($997)'}.`,
-      `Date of Addendum: ${dateStr}. Contract version: v${(contract.version || 1) + 1}.`,
-      `The following amendments have been negotiated between the parties and have been agreed by Opt Digital Limited via the OPT amendment-review process. The original Agreement remains in effect as printed, save where expressly modified by the clauses set out below. In the event of any conflict between the original Agreement and this Addendum, the language in this Addendum shall prevail.`,
-    ]
-    for (const p of introLines) {
-      s = drawWrappedText(s, p, { font: regular, size: 10, lineGap: 4 })
-      s.y -= 8
+
+    // Parties + recitals — formal contract preamble
+    const partiesPara = `This Amendment Addendum (the "Addendum") is made on ${dateStr} between Opt Digital Limited (the "Provider") and ${contract.client_name}${contract.client_company ? ' of ' + contract.client_company : ''} (the "Client"), and is incorporated into and forms part of the Client Form and Client Terms previously entered into between the Provider and the Client (the "Agreement"). This Addendum constitutes contract version v${(contract.version || 1) + 1}.`
+    s = drawWrappedText(s, partiesPara, { font: regular, size: 10, lineGap: 4 })
+    s.y -= 12
+
+    s = drawWrappedText(s, 'RECITALS', { font, size: 11, lineGap: 4, color: rgb(0.08, 0.08, 0.08) })
+    s.y -= 6
+    const recitalA = 'A.  The parties have entered into the Agreement and wish to amend certain of its terms as set out in this Addendum.'
+    const recitalB = 'B.  Each amendment set out below has been reviewed and agreed by the Provider through the Provider\'s internal amendment-review process.'
+    s = drawWrappedText(s, recitalA, { font: regular, size: 10, lineGap: 4 })
+    s.y -= 4
+    s = drawWrappedText(s, recitalB, { font: regular, size: 10, lineGap: 4 })
+    s.y -= 14
+
+    s = drawWrappedText(s, 'NOW THEREFORE, in consideration of the mutual covenants set out herein, the parties agree as follows:',
+      { font: regular, size: 10, lineGap: 4 })
+    s.y -= 18
+
+    // ─── Each FINALISED amendment ────────────────────────────────────
+    if (finalised.length === 0) {
+      s = drawWrappedText(s,
+        'No amendments have been finalised with agreed clause language at the time of this Addendum. Items currently under negotiation are listed in Schedule A below for the parties\' reference and will be incorporated into a subsequent Addendum upon written agreement.',
+        { font: italic, size: 10, lineGap: 4, color: rgb(0.35, 0.35, 0.35) })
+      s.y -= 6
     }
 
-    // Each amendment
-    amendments.forEach((a, idx) => {
-      s.y -= 8
-      s = ensureSpace(s, 60)
-      s.page.drawText(sanitize(`Clause ${idx + 1}${a.clause_reference ? ' -- ' + a.clause_reference : ''}`), {
-        x: MARGIN_X, y: s.y - 13, size: 13, font, color: rgb(0.08, 0.08, 0.08),
+    finalised.forEach((a, idx) => {
+      s.y -= 10
+      s = ensureSpace(s, 70)
+      const clauseHeader = a.clause_reference
+        ? `${idx + 1}.  AMENDMENT TO ${a.clause_reference.toUpperCase()}`
+        : `${idx + 1}.  AMENDMENT`
+      s.page.drawText(sanitize(clauseHeader), {
+        x: MARGIN_X, y: s.y - 12, size: 11, font, color: rgb(0.08, 0.08, 0.08),
       })
-      s.y -= 22
+      s.y -= 20
 
-      s = drawWrappedText(s, 'Client request:', { font, size: 9, lineGap: 2, color: rgb(0.35, 0.35, 0.35) })
-      s.y -= 2
-      s = drawWrappedText(s, a.requested_change, { font: italic, size: 10, lineGap: 4 })
+      // Leading legal sentence introducing the amendment.
+      const leadIn = a.clause_reference
+        ? `${a.clause_reference} of the Agreement is hereby amended and replaced in its entirety with the following:`
+        : 'The Agreement is hereby amended by the inclusion of the following provision:'
+      s = drawWrappedText(s, leadIn, { font: regular, size: 10, lineGap: 4 })
       s.y -= 8
 
-      const finalText = a.final_clause_text || a.ai_proposed_redline || ''
-      if (finalText.trim()) {
-        s = drawWrappedText(s, 'Agreed clause language:', { font, size: 9, lineGap: 2, color: rgb(0.35, 0.35, 0.35) })
-        s.y -= 2
-        s = drawWrappedText(s, finalText, { font: regular, size: 10, lineGap: 4 })
-      } else {
-        s = drawWrappedText(s, 'Resolution:', { font, size: 9, lineGap: 2, color: rgb(0.35, 0.35, 0.35) })
-        s.y -= 2
-        const verdictLabel =
-          a.ai_verdict === 'allow'  ? 'Approved per OPT policy.' :
-          a.ai_verdict === 'reject' ? 'Declined per OPT policy.' :
-                                       'Escalated to Opt Digital management for review.'
-        s = drawWrappedText(s, verdictLabel + ' Refer to the amendment review thread for the full negotiated position.',
-          { font: regular, size: 10, lineGap: 4 })
+      // The agreed language itself — bold + slightly indented + boxed
+      // with a left rule so it visually pops as the substantive change.
+      const finalText = (a.final_clause_text || a.ai_proposed_redline || '').trim()
+      const blockStartY = s.y
+      const blockLeftPad = 14
+      const blockInnerW = BODY_W - blockLeftPad
+
+      // Render bold text inside the indented block.
+      // Reuse drawWrappedText logic but with an inset left margin.
+      const words = sanitize(finalText).split(/\s+/)
+      let line = ''
+      const size = 10.5
+      const lineHeight = size + 5
+      const renderLine = (txt: string) => {
+        s = ensureSpace(s, lineHeight)
+        s.page.drawText(txt, {
+          x: MARGIN_X + blockLeftPad, y: s.y - size, size, font, color: rgb(0.05, 0.05, 0.05),
+        })
+        s.y -= lineHeight
       }
-      s.y -= 6
+      for (const w of words) {
+        const test = line ? line + ' ' + w : w
+        const width = font.widthOfTextAtSize(test, size)
+        if (width > blockInnerW && line) {
+          renderLine(line)
+          line = w
+        } else {
+          line = test
+        }
+      }
+      if (line) renderLine(line)
+
+      // Left-side rule next to the bold block to make the change visually
+      // obvious. Drawn after text so we know the vertical extent.
+      const blockEndY = s.y
+      s.page.drawLine({
+        start: { x: MARGIN_X + 4, y: blockStartY - 2 },
+        end:   { x: MARGIN_X + 4, y: blockEndY + 4 },
+        thickness: 2,
+        color: rgb(0.96, 0.85, 0.20),  // accent yellow
+      })
+
+      s.y -= 4
       if (a.locked_at) {
-        const lockStr = `Locked in on ${new Date(a.locked_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })}.`
-        s = drawWrappedText(s, lockStr, { font: italic, size: 8, lineGap: 2, color: rgb(0.45, 0.45, 0.45) })
+        const lockStr = `(Agreed and locked on ${new Date(a.locked_at).toLocaleDateString('en-NZ', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Pacific/Auckland' })}.)`
+        s = drawWrappedText(s, lockStr, { font: italic, size: 8, lineGap: 2, color: rgb(0.50, 0.50, 0.50) })
       }
     })
 
-    // Signature block
-    s.y -= 24
-    s = ensureSpace(s, 100)
+    // ─── Execution / signature block ────────────────────────────────
+    s.y -= 28
+    s = ensureSpace(s, 140)
+
+    s = drawWrappedText(s,
+      'Save as expressly amended by this Addendum, the Agreement remains in full force and effect. In the event of any conflict or inconsistency between the terms of this Addendum and the terms of the Agreement, the terms of this Addendum shall prevail to the extent of the inconsistency.',
+      { font: regular, size: 10, lineGap: 4 })
+    s.y -= 12
+
+    s = drawWrappedText(s, 'IN WITNESS WHEREOF, the parties have executed this Addendum as of the dates set forth below.',
+      { font: regular, size: 10, lineGap: 4 })
+    s.y -= 20
+
     s.page.drawLine({ start: { x: MARGIN_X, y: s.y }, end: { x: PAGE_W - MARGIN_X, y: s.y }, thickness: 0.5, color: rgb(0.6, 0.6, 0.6) })
-    s.y -= 18
-    s.page.drawText('Executed as an amendment to the Agreement on _________________ (insert date the final party signs).',
-      { x: MARGIN_X, y: s.y - 10, size: 10, font: regular, color: rgb(0.08, 0.08, 0.08) })
-    s.y -= 50
-    s.page.drawText('Client signature: _____________________________', { x: MARGIN_X, y: s.y - 10, size: 10, font: regular })
     s.y -= 30
-    s.page.drawText('Opt Digital Limited: _____________________________', { x: MARGIN_X, y: s.y - 10, size: 10, font: regular })
+
+    // Signature lines — two columns side by side
+    const sigColW = (BODY_W - 30) / 2
+    s.page.drawText('CLIENT', { x: MARGIN_X, y: s.y - 9, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
+    s.page.drawText('OPT DIGITAL LIMITED', { x: MARGIN_X + sigColW + 30, y: s.y - 9, size: 9, font, color: rgb(0.35, 0.35, 0.35) })
+    s.y -= 46
+    s.page.drawLine({ start: { x: MARGIN_X, y: s.y }, end: { x: MARGIN_X + sigColW, y: s.y }, thickness: 0.5, color: rgb(0.4, 0.4, 0.4) })
+    s.page.drawLine({ start: { x: MARGIN_X + sigColW + 30, y: s.y }, end: { x: PAGE_W - MARGIN_X, y: s.y }, thickness: 0.5, color: rgb(0.4, 0.4, 0.4) })
+    s.y -= 12
+    s.page.drawText('Signature', { x: MARGIN_X, y: s.y - 8, size: 8, font: italic, color: rgb(0.45, 0.45, 0.45) })
+    s.page.drawText('Signature', { x: MARGIN_X + sigColW + 30, y: s.y - 8, size: 8, font: italic, color: rgb(0.45, 0.45, 0.45) })
+    s.y -= 26
+
+    s.page.drawText(sanitize(`Name: ${contract.client_name}`), { x: MARGIN_X, y: s.y - 8, size: 9, font: regular, color: rgb(0.08, 0.08, 0.08) })
+    s.page.drawText('Name: ____________________________', { x: MARGIN_X + sigColW + 30, y: s.y - 8, size: 9, font: regular, color: rgb(0.08, 0.08, 0.08) })
+    s.y -= 18
+    s.page.drawText('Date: ____________________________', { x: MARGIN_X, y: s.y - 8, size: 9, font: regular, color: rgb(0.08, 0.08, 0.08) })
+    s.page.drawText('Date: ____________________________', { x: MARGIN_X + sigColW + 30, y: s.y - 8, size: 9, font: regular, color: rgb(0.08, 0.08, 0.08) })
+
+    // ─── Schedule A — items still under negotiation (informational) ─
+    // Kept out of the executed body because they aren't agreed; included
+    // as a schedule so the parties' file shows what was raised but not
+    // yet resolved at the time of execution.
+    if (pending.length > 0) {
+      s.y -= 36
+      s = ensureSpace(s, 60)
+      s.page.drawText('SCHEDULE A -- ITEMS UNDER CONTINUED NEGOTIATION', {
+        x: MARGIN_X, y: s.y - 12, size: 11, font, color: rgb(0.08, 0.08, 0.08),
+      })
+      s.y -= 18
+      s = drawWrappedText(s,
+        'The following items have been raised by the Client and are under continued negotiation. They are NOT amended by this Addendum and are listed solely for the parties\' reference. Any agreed resolution will be incorporated into a subsequent Addendum upon written agreement of the parties.',
+        { font: italic, size: 9, lineGap: 3, color: rgb(0.35, 0.35, 0.35) })
+      s.y -= 8
+      pending.forEach((a, idx) => {
+        s = ensureSpace(s, 24)
+        const ref = a.clause_reference ? a.clause_reference : `Item ${idx + 1}`
+        s.page.drawText(sanitize(`${idx + 1}.  ${ref}`), {
+          x: MARGIN_X, y: s.y - 10, size: 10, font, color: rgb(0.08, 0.08, 0.08),
+        })
+        s.y -= 14
+      })
+    }
 
     // 5. Save merged PDF (base + addendum pages)
     const outBytes = await base.save()
