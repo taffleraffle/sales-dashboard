@@ -189,18 +189,9 @@ export default function ContractDetail() {
       </div>
 
       {/* Amendments — the only thing on this page. Downsells moved to
-          their own /sales/downsells page. */}
+          their own /sales/downsells page, so we don't need a section
+          header here; the contract page IS the amendments page. */}
       <div>
-        <div className="flex items-center gap-3 mb-4 pb-2" style={{ borderBottom: '1px solid var(--rule)' }}>
-          <MessageCircle size={16} style={{ color: 'var(--accent)' }} />
-          <div>
-            <span className="eyebrow eyebrow-bare">Amendments</span>
-            <p style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
-              Client asking to change a specific clause? Open a thread per ask. The judge runs each through the amendment policy.
-            </p>
-          </div>
-        </div>
-
           {amendments.length === 0 && (
             <div className="tile tile-feedback p-4 text-center" style={{ marginBottom: 16 }}>
               <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: 0 }}>

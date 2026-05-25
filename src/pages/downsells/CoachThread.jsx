@@ -22,25 +22,31 @@ export function CoachThread({ thread, messages, onChange }) {
     && messages[0].role === 'closer'
   const retriedRef = useRef(false)
 
+  // Manual retry — invoke the coach with no new_message so it reads the
+  // existing thread + responds. Used by the auto-retry on mount AND the
+  // "Try again" link in the error banner when something failed.
+  async function callCoach() {
+    setSending(true); setErr(null)
+    try {
+      const { data, error: invErr } = await supabase.functions.invoke('contract-downsell-coach', {
+        body: { thread_id: thread.id },
+      })
+      if (invErr) throw invErr
+      if (data?.error) throw new Error(data.error)
+      await onChange()
+    } catch (e) {
+      setErr(e.message || String(e))
+    } finally {
+      setSending(false)
+    }
+  }
+
   useEffect(() => {
     if (!needsAutoRetry || retriedRef.current) return
     retriedRef.current = true
-    ;(async () => {
-      setSending(true); setErr(null)
-      try {
-        const { data, error: invErr } = await supabase.functions.invoke('contract-downsell-coach', {
-          body: { thread_id: thread.id },
-        })
-        if (invErr) throw invErr
-        if (data?.error) throw new Error(data.error)
-        await onChange()
-      } catch (e) {
-        setErr(e.message || String(e))
-      } finally {
-        setSending(false)
-      }
-    })()
-  }, [needsAutoRetry, thread.id, onChange])
+    callCoach()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsAutoRetry, thread.id])
 
   useEffect(() => {
     if (messages.length > prevLengthRef.current) {
@@ -89,7 +95,27 @@ export function CoachThread({ thread, messages, onChange }) {
       {err && (
         <div className="tile tile-feedback p-3 mb-3 flex items-start gap-3" style={{ borderLeft: '3px solid var(--down)' }}>
           <AlertCircle size={14} style={{ color: 'var(--down)', flexShrink: 0, marginTop: 2 }} />
-          <p style={{ fontSize: 12, color: 'var(--ink)', margin: 0, fontFamily: 'var(--mono)' }}>{err}</p>
+          <div className="flex-1">
+            <p style={{ fontSize: 12, color: 'var(--ink)', margin: 0, fontFamily: 'var(--mono)' }}>{err}</p>
+            <button
+              type="button"
+              onClick={callCoach}
+              disabled={sending}
+              style={{
+                marginTop: 6,
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                fontSize: 11,
+                color: 'var(--ink)',
+                textDecoration: 'underline',
+                cursor: sending ? 'default' : 'pointer',
+                opacity: sending ? 0.5 : 1,
+              }}
+            >
+              {sending ? 'Retrying…' : 'Try again'}
+            </button>
+          </div>
         </div>
       )}
 

@@ -20,7 +20,7 @@ export default function DownsellsListPage() {
       setLoading(true); setError(null)
       const { data, error } = await supabase
         .from('contract_downsell_threads')
-        .select('id, client_name, client_company, status, updated_at, contracts(client_name, client_company)')
+        .select('id, client_name, client_company, status, updated_at, opening_context, contracts(client_name, client_company)')
         .order('updated_at', { ascending: false })
       if (cancelled) return
       if (error) setError(error.message)
@@ -85,7 +85,7 @@ export default function DownsellsListPage() {
             <thead>
               <tr style={{ background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
                 <th className="text-left px-4 py-2" style={th}>Client</th>
-                <th className="text-left px-4 py-2" style={th}>Status</th>
+                <th className="text-left px-4 py-2" style={th}>Situation</th>
                 <th className="text-right px-4 py-2" style={th}>Last activity</th>
                 <th style={{ width: 32 }}></th>
               </tr>
@@ -95,6 +95,8 @@ export default function DownsellsListPage() {
                 const isHover = hoveredRow === t.id
                 const name = t.client_name || t.contracts?.client_name || '—'
                 const co   = t.client_company || t.contracts?.client_company || null
+                const preview = (t.opening_context || '').slice(0, 140).replace(/\s+/g, ' ').trim()
+                const truncated = (t.opening_context || '').length > 140
                 return (
                   <tr
                     key={t.id}
@@ -116,21 +118,21 @@ export default function DownsellsListPage() {
                       transition: 'background 120ms ease',
                     }}
                   >
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" style={{ verticalAlign: 'top', minWidth: 180 }}>
                       <span style={{ fontSize: 14, color: 'var(--ink)', fontWeight: 500 }}>{name}</span>
                       {co && (
                         <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{co}</div>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
-                        {t.status === 'open' ? 'Open' : t.status === 'locked' ? 'Locked' : t.status}
+                    <td className="px-4 py-3" style={{ verticalAlign: 'top', maxWidth: 460 }}>
+                      <span style={{ fontSize: 13, color: 'var(--ink-3)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {preview}{truncated ? '…' : ''}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right" style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)' }}>
+                    <td className="px-4 py-3 text-right" style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
                       {new Date(t.updated_at).toLocaleDateString()}
                     </td>
-                    <td className="px-2 py-3 text-right">
+                    <td className="px-2 py-3 text-right" style={{ verticalAlign: 'top' }}>
                       <ChevronRight size={14} style={{ color: isHover ? 'var(--accent)' : 'var(--ink-3)', transition: 'color 120ms ease' }} />
                     </td>
                   </tr>

@@ -106,7 +106,7 @@ export default function ContractsPage() {
               into the downsell + amendment workspace. Previously the table
               looked like a static list with no visible affordance. */}
           <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 8px', fontStyle: 'italic' }}>
-            Click any row to open downsell options + contract negotiation for that client.
+            Click any row to open the contract and raise amendments.
           </p>
           <div className="tile tile-feedback p-0 overflow-hidden">
             <table className="w-full" style={{ borderCollapse: 'collapse' }}>
