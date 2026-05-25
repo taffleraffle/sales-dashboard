@@ -205,14 +205,27 @@ export default function ContractDetail() {
               key={a.id}
               amendment={a}
               messages={messagesByAmendment[a.id] || []}
+              contract={contract}
               onChange={() => refreshAmendment(a.id)}
+              onContractChange={async () => {
+                const { data } = await supabase.from('contracts').select('*').eq('id', id).maybeSingle()
+                if (data) setContract(data)
+              }}
             />
           ))}
 
+          {/* Only show the "start new" form when there's no amendment yet
+              for this contract. One rolling conversation per contract —
+              the judge handles multiple clauses inside a single thread
+              (proven out by Eric1's IP + Direct Debit lock). After lock
+              + generate, this form reappears only if the closer needs to
+              raise a separate amendment round later — but for now we
+              only show it on the empty state. */}
+          {amendments.length === 0 && (
           <div className="tile tile-feedback p-6">
-            <span className="eyebrow eyebrow-bare">Start a new amendment thread</span>
+            <span className="eyebrow eyebrow-bare">Raise an amendment</span>
             <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: '6px 0 16px' }}>
-              For a different clause or a separate ask. Each thread gets its own back-and-forth with the judge.
+              Tell the judge what the client wants changed. You'll work through it in chat, then confirm to generate the amended document.
             </p>
             <form onSubmit={startNewAmendment} className="space-y-3">
               <div>
@@ -258,23 +271,25 @@ export default function ContractDetail() {
               )}
               <div className="flex items-center justify-end">
                 <button type="submit" disabled={creatingNew || !newRequest.trim()} className="editorial-btn-primary">
-                  {creatingNew ? <><Loader size={ICON.sm} className="animate-spin" /> Judging…</> : <><Plus size={ICON.sm} /> Start thread</>}
+                  {creatingNew ? <><Loader size={ICON.sm} className="animate-spin" /> Judging…</> : <><Plus size={ICON.sm} /> Start amendment</>}
                 </button>
               </div>
             </form>
           </div>
+          )}
       </div>
     </div>
   )
 }
 
 // ─── Amendment thread (chat) ──────────────────────────────────────────────
-function AmendmentThread({ amendment, messages, onChange }) {
+function AmendmentThread({ amendment, messages, contract, onChange, onContractChange }) {
   const { profile } = useAuth()
   const [replyText, setReplyText] = useState('')
   const [sending, setSending]     = useState(false)
   const [sendErr, setSendErr]     = useState(null)
-  const [locking, setLocking]     = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [genErr, setGenErr]       = useState(null)
   const threadEndRef = useRef(null)
   const prevLengthRef = useRef(messages.length)
 
@@ -286,8 +301,16 @@ function AmendmentThread({ amendment, messages, onChange }) {
   const lastProposedClause = [...messages].reverse().find(m => m.role === 'judge' && m.metadata?.proposed_clause)?.metadata?.proposed_clause
     || amendment.ai_proposed_redline
 
+  // The Generate button is the SINGLE control that does lock + regen +
+  // open + post download link. Gated tighter than the old "Lock in"
+  // button so it only appears when the judge has actually proposed
+  // final clause language with verdict=allow. The closer's job in chat
+  // is to negotiate until this state is reached; then one click ships
+  // the amended document.
   const isLocked = !!amendment.locked_at
-  const canLock = !isLocked && lastJudgeVerdict && lastJudgeVerdict !== 'reject'
+  const canGenerate = !isLocked
+    && lastJudgeVerdict === 'allow'
+    && (lastProposedClause || '').trim().length > 0
 
   useEffect(() => {
     // Only scroll when a NEW message lands (length grew). Skip mount so
@@ -320,34 +343,75 @@ function AmendmentThread({ amendment, messages, onChange }) {
     }
   }
 
-  async function lockIn() {
-    if (!confirm('Lock in this thread? You can\'t reply after this — but you can still regenerate the amended agreement.')) return
-    setLocking(true)
-    const finalClause = lastProposedClause || ''
-    // Guard against double-click + race: only update if still unlocked.
-    const { data: updated, error: lockErr } = await supabase
-      .from('contract_amendments')
-      .update({
-        locked_at: new Date().toISOString(),
-        final_clause_text: finalClause,
-        status: lastJudgeVerdict === 'allow' ? 'approved' : 'judged',
+  // generateAmendedDocument
+  //   One click does everything the closer needs:
+  //     1. Locks the thread (captures final_clause_text from the latest
+  //        judge proposal so the PDF generator has authoritative text)
+  //     2. Calls regenerate-amended-agreement (produces a fresh PDF)
+  //     3. Opens the PDF in a new tab
+  //     4. Inserts a 'judge' message in the thread with the download link
+  //        so there's a permanent record of what was generated and when
+  //     5. Refreshes the contract row so the contract header reflects the
+  //        new amended_pdf_path + version
+  //   If any step fails, the error is surfaced inline; the lock is not
+  //   rolled back, but the closer can click again to retry the regen.
+  async function generateAmendedDocument() {
+    if (generating) return
+    setGenerating(true); setGenErr(null)
+    try {
+      const finalClause = lastProposedClause || ''
+      if (!finalClause.trim()) {
+        throw new Error('No proposed clause language to lock in. Keep working with the judge until it surfaces a redline.')
+      }
+
+      // 1. Lock — idempotent if already locked (skipped)
+      if (!isLocked) {
+        const { data: updated, error: lockErr } = await supabase
+          .from('contract_amendments')
+          .update({
+            locked_at: new Date().toISOString(),
+            final_clause_text: finalClause,
+            status: 'approved',
+          })
+          .eq('id', amendment.id)
+          .is('locked_at', null)
+          .select()
+        if (lockErr) throw new Error(`Lock failed: ${lockErr.message}`)
+        if (!updated || updated.length === 0) {
+          throw new Error('Lock failed silently — another tab may have locked this already. Refresh to see latest state.')
+        }
+      }
+
+      // 2. Regenerate
+      const { data: regen, error: regenErr } = await supabase.functions.invoke('regenerate-amended-agreement', {
+        body: { contract_id: amendment.contract_id || contract?.id },
       })
-      .eq('id', amendment.id)
-      .is('locked_at', null)
-      .select()
-    setLocking(false)
-    if (lockErr) {
-      alert(`Lock failed: ${lockErr.message}`)
-      return
-    }
-    if (!updated || updated.length === 0) {
-      // Either RLS blocked the update (non-admin closer with admin-only
-      // update policy pre-020) or the row was already locked.
-      alert('Lock failed silently — your account may not have permission to lock amendments yet, or another tab already locked this thread. Refresh to see latest state.')
+      if (regenErr) throw regenErr
+      if (regen?.error) throw new Error(regen.error)
+      if (!regen?.signed_url) throw new Error('Regen returned no signed URL.')
+
+      // 3. Open the PDF
+      window.open(regen.signed_url, '_blank', 'noopener,noreferrer')
+
+      // 4. Record the generation as a judge message so the thread shows
+      //    what shipped and when. The signed URL expires in 10 minutes
+      //    so we don't store it; the closer can re-open from the
+      //    "Open contract" button in the header any time after.
+      await supabase.from('contract_amendment_messages').insert({
+        amendment_id: amendment.id,
+        role: 'judge',
+        content: `Amended document generated. Version v${regen.version}. Opening now — you can re-open it any time from the "Open contract" button at the top of the page.`,
+        metadata: { generated_version: regen.version, kind: 'generation_receipt' },
+      })
+
+      // 5. Refresh local state
       await onChange()
-      return
+      if (onContractChange) await onContractChange()
+    } catch (err) {
+      setGenErr(err.message || String(err))
+    } finally {
+      setGenerating(false)
     }
-    await onChange()
   }
 
   return (
@@ -387,6 +451,34 @@ function AmendmentThread({ amendment, messages, onChange }) {
         <div ref={threadEndRef} />
       </div>
 
+      {/* Generate banner — only appears once the judge has actually
+          proposed final clause language AND landed on 'allow'. This is
+          the explicit confirmation step Ben asked for: the closer
+          doesn't see a Lock button on every turn, only at the moment
+          there's something concrete to lock. One click → lock + regen
+          + open the PDF + post a receipt message in the thread. */}
+      {canGenerate && (
+        <div className="mb-4 p-4" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
+          <p style={{ fontSize: 13, color: 'var(--ink)', margin: 0, lineHeight: 1.4 }}>
+            The judge has finalised the clause language above. Ready to lock it in and generate the amended document?
+          </p>
+          {genErr && (
+            <p style={{ fontSize: 11, color: 'var(--down)', fontFamily: 'var(--mono)', margin: '6px 0 0' }}>{genErr}</p>
+          )}
+          <div className="flex items-center justify-end gap-2 mt-3">
+            <button
+              type="button"
+              onClick={generateAmendedDocument}
+              disabled={generating}
+              className="editorial-btn-primary"
+              style={{ borderColor: 'var(--accent)' }}
+            >
+              {generating ? <><Loader size={ICON.sm} className="animate-spin" /> Generating…</> : <><FileText size={ICON.sm} /> Generate amended document</>}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Reply form */}
       {!isLocked && (
         <form onSubmit={sendReply} className="pt-3" style={{ borderTop: '1px solid var(--rule)' }}>
@@ -400,7 +492,9 @@ function AmendmentThread({ amendment, messages, onChange }) {
                   sendReply()
                 }
               }}
-              placeholder="Reply to the judge — push back, ask for counter-options, propose alternative wording…"
+              placeholder={canGenerate
+                ? 'Keep negotiating, or hit Generate above when you\'re ready.'
+                : 'Reply to the judge — push back, ask for counter-options, propose alternative wording…'}
               rows={2}
               className="editorial-input flex-1"
               style={{ resize: 'vertical' }}
@@ -410,37 +504,69 @@ function AmendmentThread({ amendment, messages, onChange }) {
               {sending ? <><Loader size={ICON.sm} className="animate-spin" /> Thinking…</> : <><Send size={ICON.sm} /> Send</>}
             </button>
           </div>
-          <div className="flex items-center justify-between mt-2">
+          <div className="mt-2">
             <span style={{ fontSize: 10, color: 'var(--ink-3)', fontStyle: 'italic' }}>
               {sendErr ? <span style={{ color: 'var(--down)', fontFamily: 'var(--mono)' }}>{sendErr}</span> : 'Cmd/Ctrl + Enter to send'}
             </span>
-            {canLock && (
-              <button
-                type="button"
-                onClick={lockIn}
-                disabled={locking}
-                className="editorial-btn-ghost"
-                style={{ borderColor: 'var(--accent)', color: 'var(--ink)' }}
-                title="Freeze this thread and trigger DOCX regeneration"
-              >
-                {locking ? <><Loader size={ICON.sm} className="animate-spin" /> Locking…</> : <><Lock size={ICON.sm} /> Lock in &amp; regenerate</>}
-              </button>
-            )}
           </div>
         </form>
       )}
 
       {isLocked && (
-        <LockedPanel amendment={amendment} fallbackClause={lastProposedClause} />
+        <LockedPanel
+          amendment={amendment}
+          fallbackClause={lastProposedClause}
+          contract={contract}
+          onContractChange={onContractChange}
+        />
       )}
     </div>
   )
 }
 
 // ─── Locked-in confirmation + DOCX regen status ───────────────────────────
-function LockedPanel({ amendment, fallbackClause }) {
+// Shown when the amendment thread is locked. If a PDF hasn't been
+// generated yet for this lock (or the contract's amended PDF is stale
+// against a newer lock), a "Generate amended document" button is the
+// primary action. Otherwise, just shows the agreed clause language —
+// "Open contract" in the page header is the way to re-open the latest
+// PDF after that.
+function LockedPanel({ amendment, fallbackClause, contract, onContractChange }) {
   const clauseText = amendment.final_clause_text || fallbackClause || ''
   const lockedAt = amendment.locked_at ? new Date(amendment.locked_at) : null
+  const [generating, setGenerating] = useState(false)
+  const [genErr, setGenErr]         = useState(null)
+
+  // If the contract has never been regenerated (no amended_pdf_path) OR
+  // the lock happened AFTER the last regen, we still have work to do.
+  const lockTime = lockedAt ? lockedAt.getTime() : 0
+  const lastRegenTime = contract?.updated_at ? new Date(contract.updated_at).getTime() : 0
+  const needsGenerate = !contract?.amended_pdf_path || lockTime > lastRegenTime
+
+  async function generateAmendedDocument() {
+    if (generating) return
+    setGenerating(true); setGenErr(null)
+    try {
+      const { data, error } = await supabase.functions.invoke('regenerate-amended-agreement', {
+        body: { contract_id: amendment.contract_id || contract?.id },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      if (!data?.signed_url) throw new Error('Regen returned no signed URL.')
+      window.open(data.signed_url, '_blank', 'noopener,noreferrer')
+      await supabase.from('contract_amendment_messages').insert({
+        amendment_id: amendment.id,
+        role: 'judge',
+        content: `Amended document generated. Version v${data.version}. Opening now — you can re-open it any time from the "Open contract" button at the top of the page.`,
+        metadata: { generated_version: data.version, kind: 'generation_receipt' },
+      })
+      if (onContractChange) await onContractChange()
+    } catch (e) {
+      setGenErr(e.message || String(e))
+    } finally {
+      setGenerating(false)
+    }
+  }
 
   return (
     <div className="mt-3 p-4" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
@@ -453,6 +579,17 @@ function LockedPanel({ amendment, fallbackClause }) {
             Agreed position frozen{lockedAt ? ` ${lockedAt.toLocaleString()}` : ''}
           </p>
         </div>
+        {needsGenerate && (
+          <button
+            type="button"
+            onClick={generateAmendedDocument}
+            disabled={generating}
+            className="editorial-btn-primary"
+            style={{ flexShrink: 0, borderColor: 'var(--accent)' }}
+          >
+            {generating ? <><Loader size={ICON.sm} className="animate-spin" /> Generating…</> : <><FileText size={ICON.sm} /> Generate amended document</>}
+          </button>
+        )}
       </div>
 
       {clauseText ? (
@@ -466,13 +603,18 @@ function LockedPanel({ amendment, fallbackClause }) {
         </div>
       ) : (
         <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: 0, fontStyle: 'italic' }}>
-          No specific clause text was committed in the thread. The regenerated agreement will splice this in from the discussion's resolution.
+          No specific clause text was committed in the thread. Reopen the conversation and ask the judge for a redline before generating.
         </p>
       )}
 
-      <p style={{ fontSize: 11, color: 'var(--ink-3)', margin: '12px 0 0', fontStyle: 'italic' }}>
-        Hit "Regenerate amended agreement" at the top of this page to produce the v{(amendment.contracts?.version || 1) + 1} PDF for PandaDoc.
-      </p>
+      {genErr && (
+        <p style={{ fontSize: 11, color: 'var(--down)', fontFamily: 'var(--mono)', margin: '8px 0 0' }}>{genErr}</p>
+      )}
+      {!needsGenerate && (
+        <p style={{ fontSize: 11, color: 'var(--ink-3)', margin: '10px 0 0', fontStyle: 'italic' }}>
+          Amended document v{contract?.version} is current. Re-open any time from "Open contract" at the top of the page.
+        </p>
+      )}
     </div>
   )
 }
