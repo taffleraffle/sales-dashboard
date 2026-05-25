@@ -143,7 +143,7 @@ export default function ContractDetail() {
   }
 
   return (
-    <div className="max-w-[900px] mx-auto">
+    <div className="max-w-[1640px] mx-auto px-2">
       <Link to="/sales/contracts" className="editorial-btn-ghost" style={{ marginBottom: 16, display: 'inline-flex' }}>
         <ArrowLeft size={ICON.sm} /> All reviews
       </Link>
@@ -188,14 +188,18 @@ export default function ContractDetail() {
         </div>
       </div>
 
-      {/* Amendments — the only thing on this page. Downsells moved to
-          their own /sales/downsells page, so we don't need a section
-          header here; the contract page IS the amendments page. */}
-      <div>
+      {/* Two-pane workspace: chat on the left, contract preview on the
+          right. Each pane scrolls independently within the viewport so
+          the closer can chat without losing sight of the document.
+          Below 1100px the panes stack into the previous single-column
+          layout (mobile / narrow desktop). */}
+      <div className="contract-workspace">
+        {/* LEFT PANE — amendment chat */}
+        <div className="contract-workspace-chat">
           {amendments.length === 0 && (
             <div className="tile tile-feedback p-4 text-center" style={{ marginBottom: 16 }}>
               <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: 0 }}>
-                No amendment threads on this contract yet. Open one below.
+                No amendment threads on this contract yet. Raise one below.
               </p>
             </div>
           )}
@@ -277,8 +281,165 @@ export default function ContractDetail() {
             </form>
           </div>
           )}
+        </div>
+
+        {/* RIGHT PANE — contract preview */}
+        <div className="contract-workspace-preview">
+          <ContractPreviewPane contract={contract} amendments={amendments} />
+        </div>
       </div>
     </div>
+  )
+}
+
+// ─── ContractPreviewPane — right side of the workspace ────────────────────
+// Renders the contract PDF in an iframe with a toolbar that lets the
+// closer flip between the Original and the latest Amended version. The
+// iframe URLs are signed (10-minute TTL) and refreshed on mount + when
+// the contract's amended PDF path changes (i.e. after a regen). Phase 1
+// of the workspace redesign — Phase 2 will replace the iframe with
+// inline HTML rendering of the structured contract source.
+function ContractPreviewPane({ contract, amendments }) {
+  const [view, setView]           = useState('amended') // 'amended' | 'original'
+  const [originalUrl, setOriginalUrl] = useState(null)
+  const [amendedUrl, setAmendedUrl]   = useState(null)
+  const [loading, setLoading]     = useState(false)
+  const [err, setErr]             = useState(null)
+
+  const hasAmended  = !!contract?.amended_pdf_path
+  const hasOriginal = !!contract?.agreement_pdf_path
+  const lockedCount = amendments.filter(a => a.locked_at).length
+
+  // If there's no amended PDF, default to original tab
+  useEffect(() => {
+    if (!hasAmended && hasOriginal) setView('original')
+  }, [hasAmended, hasOriginal])
+
+  // Load signed URLs for whichever PDFs exist
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true); setErr(null)
+      try {
+        const reqs = []
+        if (contract.agreement_pdf_path) {
+          reqs.push(
+            supabase.storage.from('contract-uploads')
+              .createSignedUrl(contract.agreement_pdf_path, 600)
+              .then(r => ({ kind: 'original', ...r }))
+          )
+        }
+        if (contract.amended_pdf_path) {
+          reqs.push(
+            supabase.storage.from('contract-uploads')
+              .createSignedUrl(contract.amended_pdf_path, 600)
+              .then(r => ({ kind: 'amended', ...r }))
+          )
+        }
+        const results = await Promise.all(reqs)
+        if (cancelled) return
+        for (const r of results) {
+          if (r.error) throw r.error
+          if (r.kind === 'original') setOriginalUrl(r.data.signedUrl)
+          if (r.kind === 'amended')  setAmendedUrl(r.data.signedUrl)
+        }
+      } catch (e) {
+        if (!cancelled) setErr(e.message || String(e))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [contract.agreement_pdf_path, contract.amended_pdf_path])
+
+  const activeUrl = view === 'amended' ? amendedUrl : originalUrl
+  const noPdfYet = !hasOriginal && !hasAmended
+
+  return (
+    <div className="tile tile-feedback" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
+      {/* Tabs */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', flexShrink: 0 }}>
+        <div className="flex items-center gap-1">
+          <PreviewTab label="Amended" active={view === 'amended'} disabled={!hasAmended} onClick={() => setView('amended')}>
+            {hasAmended && <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-3)', marginLeft: 6 }}>v{contract.version}</span>}
+          </PreviewTab>
+          <PreviewTab label="Original" active={view === 'original'} disabled={!hasOriginal} onClick={() => setView('original')} />
+        </div>
+        {lockedCount > 0 && (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+            {lockedCount} amendment{lockedCount === 1 ? '' : 's'} applied
+          </span>
+        )}
+      </div>
+
+      {/* Body */}
+      <div style={{ flex: 1, minHeight: 600, background: 'var(--paper-2)', position: 'relative' }}>
+        {noPdfYet && (
+          <div className="flex flex-col items-center justify-center h-full py-12 px-6 text-center">
+            <FileText size={28} style={{ color: 'var(--ink-3)', marginBottom: 10 }} />
+            <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>No contract PDF uploaded yet.</p>
+          </div>
+        )}
+        {!noPdfYet && loading && (
+          <div className="flex items-center justify-center h-full">
+            <Loader className="animate-spin" size={20} style={{ color: 'var(--ink-3)' }} />
+          </div>
+        )}
+        {!noPdfYet && err && (
+          <div className="p-4">
+            <p style={{ fontSize: 12, color: 'var(--down)', fontFamily: 'var(--mono)' }}>{err}</p>
+          </div>
+        )}
+        {!noPdfYet && !loading && !err && activeUrl && (
+          <iframe
+            src={activeUrl}
+            title={view === 'amended' ? 'Amended contract' : 'Original contract'}
+            style={{ width: '100%', height: '100%', minHeight: 600, border: 'none', display: 'block' }}
+          />
+        )}
+        {!noPdfYet && !loading && !err && !activeUrl && view === 'amended' && (
+          <div className="flex flex-col items-center justify-center h-full py-12 px-6 text-center">
+            <FileText size={24} style={{ color: 'var(--ink-3)', marginBottom: 8 }} />
+            <p style={{ fontSize: 13, color: 'var(--ink)', margin: 0, fontWeight: 500 }}>No amended version yet</p>
+            <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6, maxWidth: 320 }}>
+              Lock in an amendment in the chat thread, then hit "Generate amended document" to produce v{(contract.version || 1) + 1}.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PreviewTab({ label, active, disabled, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        padding: '6px 12px',
+        background: active ? 'var(--paper)' : 'transparent',
+        border: '1px solid',
+        borderColor: active ? 'var(--rule)' : 'transparent',
+        borderBottom: active ? '1px solid var(--paper)' : '1px solid transparent',
+        borderRadius: '3px 3px 0 0',
+        fontFamily: 'var(--mono)',
+        fontSize: 10,
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
+        color: disabled ? 'var(--ink-4)' : (active ? 'var(--ink)' : 'var(--ink-3)'),
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.4 : 1,
+        marginBottom: -1,
+        display: 'inline-flex',
+        alignItems: 'center',
+      }}
+    >
+      {label}
+      {children}
+    </button>
   )
 }
 

@@ -306,6 +306,42 @@ input[type="date"], input[type="month"] {
 .panel-accent { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .panel-tight { padding: 14px 16px; }
 
+/* ── Contract workspace — two-pane layout on wide viewports ──
+   Chat on the left, contract preview on the right. Each pane scrolls
+   independently inside the viewport so the closer can work the chat
+   without losing sight of the document. Stacks to a single column on
+   narrow screens.
+*/
+.contract-workspace {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.contract-workspace-chat,
+.contract-workspace-preview {
+  min-width: 0;
+}
+@media (min-width: 1100px) {
+  .contract-workspace {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  .contract-workspace-chat {
+    max-height: calc(100vh - 240px);
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  .contract-workspace-preview {
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 240px);
+    display: flex;
+    flex-direction: column;
+  }
+  .contract-workspace-preview > .tile { flex: 1; display: flex; flex-direction: column; }
+}
+
 /* ── .scorecard — 4-column metric grid ── */
 .scorecard {
   display: grid;
