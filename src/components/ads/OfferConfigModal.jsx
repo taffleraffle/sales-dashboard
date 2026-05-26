@@ -75,8 +75,11 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
         has_dual_guarantee: form.has_dual_guarantee,
         brand_voice_md: form.brand_voice_md.trim() || null,
       }
-      if (!payload.slug || !payload.name || !payload.vertical) {
-        throw new Error('slug, name, and vertical are required')
+      if (!payload.slug || !payload.name) {
+        throw new Error('slug and name are required')
+      }
+      if (!isEdit && !payload.vertical) {
+        throw new Error('vertical is required for new offers')
       }
       let result
       if (isEdit) {

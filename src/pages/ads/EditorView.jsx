@@ -378,26 +378,27 @@ export default function EditorView() {
       <div style={{
         maxWidth: 1400, margin: '0 auto', padding: '0 32px',
       }}>
-        <AdsCreativeLibrary editorScope={{
-          isEditorView: true,
-          isTeamWide,
-          editorId: editor?.id || null,
-          editorName: editor?.name || null,
-          editorEmail: editor?.email || null,
-          canDelete: false,
-          // Authenticated editors can upload anywhere (team-wide). Per-editor
-          // token links can only upload inside an assigned task. Team-wide
-          // tokens (no editor) can upload finished work for admin review.
-          canUpload: authMode === 'auth' ? true : !editor,
-          canEditCreative: false,
-          // Authenticated editors AND team-wide tokens can reassign from
-          // the matrix. Per-editor tokens cannot.
-          canAssignEditor: authMode === 'auth' ? true : !editor,
-          canEditTask: true,
-          canAssignSelf: true,
-          canDeleteTask: false,
-          canManageEditors: false,
-        }} />
+        <AdsCreativeLibrary editorScope={(() => {
+          // tier='admin' editors (e.g. Kirill the assignment coordinator) get
+          // full editorial control — they need to set creators, assign offers,
+          // and delete bad takes. Regular editors stay read-only on creatives.
+          const isCoordinator = editor?.tier === 'admin'
+          return {
+            isEditorView: true,
+            isTeamWide,
+            editorId: editor?.id || null,
+            editorName: editor?.name || null,
+            editorEmail: editor?.email || null,
+            canDelete: isCoordinator,
+            canUpload: authMode === 'auth' ? true : !editor,
+            canEditCreative: isCoordinator,
+            canAssignEditor: authMode === 'auth' ? true : !editor,
+            canEditTask: true,
+            canAssignSelf: true,
+            canDeleteTask: isCoordinator,
+            canManageEditors: isCoordinator,
+          }
+        })()} />
       </div>
     </div>
   )

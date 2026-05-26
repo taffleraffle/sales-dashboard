@@ -1855,6 +1855,10 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     try { return localStorage.getItem('lib.hideLowQuality') !== 'false' } catch { return true }
   })
   useEffect(() => { try { localStorage.setItem('lib.hideLowQuality', String(hideLowQuality)) } catch {} }, [hideLowQuality])
+  const [hideBadTakes, setHideBadTakes] = useState(() => {
+    try { return localStorage.getItem('lib.hideBadTakes') !== 'false' } catch { return true }
+  })
+  useEffect(() => { try { localStorage.setItem('lib.hideBadTakes', String(hideBadTakes)) } catch {} }, [hideBadTakes])
   // Column sort for the Matrix view. sortKey = '' means default order
   // (insertion / added_at desc). Clicking a header sets the key; clicking
   // the same key again toggles direction.
@@ -1965,7 +1969,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // of transcript = 600KB+ wasted on the first paint. Pulling without it
   // cuts the initial payload roughly in half. Transcripts get lazy-loaded
   // in a follow-up query after first paint so library search still works.
-  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb'
+  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason'
 
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true)
@@ -2165,12 +2169,14 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   }, [rows])
 
   const lowQualityCount = useMemo(() => rows.filter(r => r.is_low_quality).length, [rows])
+  const badTakeCount = useMemo(() => rows.filter(r => r.is_bad_take).length, [rows])
 
   const filtered = useMemo(() => {
     let list = rows
     // Hide rows whose stored file is broken / sub-par. Default ON. Operator
     // toggles via the chip in the toolbar when they want to see/triage them.
     if (hideLowQuality) list = list.filter(r => !r.is_low_quality)
+    if (hideBadTakes) list = list.filter(r => !r.is_bad_take)
     const search = deferredQ.trim().toLowerCase()
     if (search) list = list.filter(r => {
       const blob = `${r.name} ${r.canonical_name || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
@@ -2255,7 +2261,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       })
     }
     return list
-  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, dateFilter, latestOnly, hideLowQuality, sortKey, sortDir, usedRawIds])
+  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, dateFilter, latestOnly, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -2674,6 +2680,24 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                 borderRadius: 2, cursor: 'pointer',
               }}>
               {hideLowQuality ? `Hiding ${lowQualityCount} low-quality` : `⚠ Showing ${lowQualityCount} low-quality`}
+            </button>
+          )}
+          {badTakeCount > 0 && (
+            <button type="button"
+              onClick={() => setHideBadTakes(v => !v)}
+              title={hideBadTakes
+                ? `${badTakeCount} clips are flagged as bad takes. Click to show them.`
+                : `Currently SHOWING ${badTakeCount} bad takes. Click to hide.`}
+              style={{
+                padding: '5px 9px',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: hideBadTakes ? '#fef3f3' : '#b53e3e',
+                color: hideBadTakes ? '#b53e3e' : 'white',
+                border: '1px solid #b53e3e',
+                borderRadius: 2, cursor: 'pointer',
+              }}>
+              {hideBadTakes ? `Hiding ${badTakeCount} bad takes` : `Showing ${badTakeCount} bad takes`}
             </button>
           )}
           {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size + dateFilter.size > 0 || latestOnly) && (
@@ -3551,6 +3575,17 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
               letterSpacing: '0.08em', textTransform: 'uppercase',
               borderRadius: 2,
             }}>LOW-Q</span>
+        )}
+        {r.is_bad_take && (
+          <span title={r.bad_take_reason ? `Bad take: ${r.bad_take_reason}` : 'Flagged as bad take — discard'}
+            style={{
+              flexShrink: 0,
+              padding: '1px 5px',
+              background: '#7a2020', color: 'white',
+              fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              borderRadius: 2,
+            }}>BAD</span>
         )}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {r.description || r.name}
@@ -5620,6 +5655,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
       // AND manually_marked_used=true, so include the flag in every
       // save. Otherwise the override is lost on the next auto-save.
       manually_marked_used: !!edit.manually_marked_used,
+      is_bad_take: !!edit.is_bad_take,
+      bad_take_reason: edit.bad_take_reason || null,
     }
     const { error } = await supabase
       .from('lib_creative_library')
@@ -5970,6 +6007,40 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               editors={editors}
               onChange={v => setEdit({ ...edit, assigned_editor_id: v || null })} />
           </Field>
+        </div>
+
+        {/* Bad take flag — coordinator/admin marks clips that should never
+            be used (wrong angle, flubbed lines, technical failure, etc.).
+            Hidden by default in the library via the toolbar filter chip. */}
+        <div style={{
+          padding: '10px 14px',
+          background: edit.is_bad_take ? 'rgba(122,32,32,0.07)' : 'var(--paper-2)',
+          border: '1px solid ' + (edit.is_bad_take ? 'rgba(122,32,32,0.35)' : 'var(--rule)'),
+          borderLeft: '3px solid ' + (edit.is_bad_take ? '#7a2020' : 'var(--rule)'),
+          display: 'flex', alignItems: 'flex-start', gap: 12,
+        }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', flexShrink: 0 }}>
+            <input type="checkbox"
+              checked={!!edit.is_bad_take}
+              onChange={e => setEdit({ ...edit, is_bad_take: e.target.checked, bad_take_reason: e.target.checked ? (edit.bad_take_reason || '') : null })} />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+              letterSpacing: '0.10em', textTransform: 'uppercase',
+              color: edit.is_bad_take ? '#7a2020' : 'var(--ink-3)' }}>
+              Bad take
+            </span>
+          </label>
+          {edit.is_bad_take && (
+            <input type="text"
+              value={edit.bad_take_reason || ''}
+              onChange={e => setEdit({ ...edit, bad_take_reason: e.target.value || null })}
+              placeholder="Reason (optional) — wrong angle, flubbed line, audio issue…"
+              style={{ ...inputStyle, flex: 1, fontSize: 12 }} />
+          )}
+          {!edit.is_bad_take && (
+            <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12, color: 'var(--ink-4)', lineHeight: 1.4 }}>
+              Flag this clip to hide it from the library. Useful for bad angles, technical failures, or duplicate takes you never want used.
+            </span>
+          )}
         </div>
 
         {/* Advanced disclosure — only opens if user wants to touch the rarely-
