@@ -2002,6 +2002,23 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       setLoading(false)
       return
     }
+    // Migration 099 adds is_bad_take + bad_take_reason. If those columns aren't
+    // in the DB yet (code deployed ahead of the migration), retry without them
+    // so the library still loads. Rows will show is_bad_take=undefined (falsy),
+    // which the filter treats as "not a bad take" — safe default. Self-heals
+    // the moment the migration is applied.
+    if (rowsRes.error?.code === '42703' && rowsRes.error.message?.includes('is_bad_take')) {
+      const fallbackCols = LIB_LEAN_COLS
+        .replace(',is_bad_take,bad_take_reason', '')
+        .replace('is_bad_take,bad_take_reason,', '')
+        .replace('is_bad_take,bad_take_reason', '')
+      const { data: fd, error: fe } = await supabase.from('lib_creative_library')
+        .select(`${fallbackCols},assigned_editor:assigned_editor_id (id, name)`)
+        .eq('exclude_from_library', false)
+        .order('added_at', { ascending: false })
+      rowsRes = { data: fd, error: fe }
+    }
+
     if (rowsRes.error) setErr(rowsRes.error.message)
     else {
       // Preserve any transcripts we already loaded from a previous
