@@ -185,6 +185,17 @@ async function uploadWithResume(file, { bucket, path, contentType, onProgress, u
         contentType: contentType || file.type || 'application/octet-stream',
         cacheControl: '3600',
       },
+      // Fingerprint MUST include the target objectName. tus-js-client's
+      // default fingerprint keys only on file identity (name+size+mtime+
+      // endpoint), so re-dropping the SAME file into a NEW library row
+      // resumed the PRIOR row's upload: bytes landed under the old path
+      // while the new row's onSuccess wrote a preview_url pointing at a
+      // path that never received bytes -> orphaned object + 404 download.
+      // Scoping to bucket+path means resume only ever continues an upload
+      // to the exact same destination. (Incident 2026-05-24: C0855/C0848.)
+      fingerprint: (f) => Promise.resolve(
+        ['tus', bucket, path, f.name, f.size, f.lastModified].join('-')
+      ),
       chunkSize: 6 * 1024 * 1024,
       onError: (err) => reject(err),
       onProgress: (bytesUploaded, bytesTotal) => {
