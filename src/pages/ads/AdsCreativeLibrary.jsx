@@ -165,6 +165,24 @@ async function probeMediaDimensions(file) {
   }
 }
 
+// Confirm an uploaded object is actually fetchable before the caller trusts
+// it enough to write a preview_url. Assumes a PUBLIC bucket (every caller in
+// this module uses creative-uploads). One retry rides out storage
+// read-after-write propagation. This is the backstop that guarantees a row
+// can never reference an object that 404s — independent of *why* it might be
+// missing (resume cross-wire, partial finalize, mid-flight deletion).
+async function verifyUploaded(bucket, path) {
+  const url = `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' } })
+      if (r.ok) return true // 200 / 206
+    } catch { /* transient network error — fall through to retry */ }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 1500))
+  }
+  return false
+}
+
 async function uploadWithResume(file, { bucket, path, contentType, onProgress, upsert = false, registerHandle }) {
   const session = (await supabase.auth.getSession()).data.session
   const accessToken = session?.access_token
@@ -201,7 +219,16 @@ async function uploadWithResume(file, { bucket, path, contentType, onProgress, u
       onProgress: (bytesUploaded, bytesTotal) => {
         if (onProgress) onProgress(bytesTotal > 0 ? bytesUploaded / bytesTotal : 0)
       },
-      onSuccess: () => resolve({ path }),
+      onSuccess: () => {
+        // tus reported a finalize — but verify the bytes are really there
+        // before letting the caller persist a link to them. Never resolve
+        // (and thus never write a preview_url) for a missing object.
+        verifyUploaded(bucket, path)
+          .then((ok) => ok
+            ? resolve({ path })
+            : reject(new Error(`Upload finalized but object is missing at ${path} — refusing to write a broken link. Please re-upload.`)))
+          .catch(reject)
+      },
     })
     // Hand the tus instance back to the caller so it can call
     // upload.abort() if the user closes the modal mid-transfer.
