@@ -110,20 +110,24 @@ export function AuthProvider({ children }) {
       }
     }
     if (editor) {
-      // tier='admin' creative editors get full admin access (none today
-      // but future-proofs the schema). tier='editor' get appRole='editor'
-      // which the ProtectedRoute gate redirects out of /sales/* into
-      // /editor-view.
-      const isAdminEditor = editor.tier === 'admin'
+      // Creative editors are ALWAYS confined to the editor portal:
+      // appRole='editor' makes ProtectedRoute redirect them out of
+      // /sales/* into /editor-view. tier='admin' does NOT grant
+      // sales-dashboard access (commissions, setter data, etc.) — it only
+      // flags "can manage the editor roster + creative library from inside
+      // the portal", surfaced as canManageRoster and consumed by the
+      // EditorView scope. Ben's real dashboard admin comes from
+      // user_profiles (resolved above), so he is unaffected.
       setProfile({
         id: editor.id,
         name: editor.name,
         role: null,
-        appRole: isAdminEditor ? 'admin' : 'editor',
+        appRole: 'editor',
         teamMemberId: null,
         email: editor.email,
         editorFormat: editor.format,
         editorTier: editor.tier,
+        canManageRoster: editor.tier === 'admin',
       })
       return
     }
