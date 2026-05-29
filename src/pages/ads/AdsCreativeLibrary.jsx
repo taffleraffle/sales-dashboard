@@ -4,7 +4,6 @@ import * as tus from 'tus-js-client'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Icon } from '../../components/editorial/atoms'
 import Modal from '../../components/editorial/Modal'
-import OfferConfigModal from '../../components/ads/OfferConfigModal'
 
 const SUPABASE_URL = 'https://kjfaqhmllagbxjdxlopm.supabase.co'
 
@@ -47,28 +46,6 @@ async function notifyEditor({ editor_id, kind, task_id, creative_id, submission_
       }).catch(() => { /* email is best-effort; in-app already saved */ })
     }
   } catch { /* in-app notification is best-effort */ }
-}
-
-/* Best-effort editor invite. Fires the invite-editor Edge Function which
-   emails the new editor an OPT-branded welcome pointing at /editor-login.
-   Call AFTER the lib_creative_editors row is inserted (the function only
-   mails addresses on the active roster). Returns:
-     'sent'    - Resend accepted the email
-     'failed'  - function errored / roster lookup missed / Resend rejected
-     'skipped' - no email supplied (editor can be invited later)
-   Never throws — the row already exists; the email is a nudge the editor
-   can self-serve at /editor-login if it doesn't land. */
-async function sendEditorInvite(email, name) {
-  if (!email) return 'skipped'
-  try {
-    const { data, error } = await supabase.functions.invoke('invite-editor', {
-      body: { email, name: name || '' },
-    })
-    if (error) return 'failed'
-    return data?.sent ? 'sent' : 'failed'
-  } catch {
-    return 'failed'
-  }
 }
 
 /* Force a true binary download instead of an in-tab video stream.
@@ -569,22 +546,6 @@ async function runUploadPipeline(item, update) {
   if (item.cancelled) return
   update({ status: 'creating', message: 'creating row' })
 
-  // Duplicate check (warn-but-allow): a take with the same filename already
-  // in the library is very likely a re-upload. Surface a warning on the item
-  // but DON'T block — per the chosen behaviour, the operator still decides.
-  // Best-effort: never let a dedup hiccup stop a real upload.
-  try {
-    const { data: dupes } = await supabase
-      .from('lib_creative_library')
-      .select('canonical_name,name')
-      .eq('name', file.name)
-      .eq('exclude_from_library', false)
-      .limit(1)
-    if (dupes && dupes.length) {
-      update({ duplicateWarning: `Possible duplicate of "${dupes[0].canonical_name || dupes[0].name}" — uploaded anyway` })
-    }
-  } catch { /* dedup is advisory only */ }
-
   // 1. Insert library row
   const { data: inserted, error: insErr } = await supabase
     .from('lib_creative_library')
@@ -875,14 +836,6 @@ function UploadDock({ onRefresh }) {
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color, marginTop: 2 }}>
                     {it.message}
                   </div>
-                  {it.duplicateWarning && (
-                    <div style={{
-                      fontFamily: 'var(--mono)', fontSize: 9.5, color: '#b8893e',
-                      marginTop: 3, display: 'flex', alignItems: 'flex-start', gap: 4,
-                    }} title={it.duplicateWarning}>
-                      <span>⚠</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.duplicateWarning}</span>
-                    </div>
-                  )}
                   {it.status === 'uploading' && (
                     <div style={{ height: 2, background: 'var(--paper-2)', marginTop: 4, position: 'relative' }}>
                       <div style={{
@@ -5640,20 +5593,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
   const [editorsLocal, setEditorsLocal] = useState([])
   const [offersLocal, setOffersLocal] = useState([])
   const [knownCreatorsLocal, setKnownCreatorsLocal] = useState([])
-  // Offer create/edit modal state. null = closed; { existing } = open
-  // (existing=null → create mode, existing=row → edit mode).
-  const [offerModal, setOfferModal] = useState(null)
   const editors = editorsProp && editorsProp.length > 0 ? editorsProp : editorsLocal
-  // Merge any locally created/renamed offers over the base list (local wins
-  // by slug) so the dropdown reflects edits made via OfferConfigModal without
-  // waiting for the parent to reload.
-  const offersBase = offersProp && offersProp.length > 0 ? offersProp : offersLocal
-  const offers = useMemo(() => {
-    const map = new Map()
-    for (const o of offersBase) map.set(o.slug, { slug: o.slug, name: o.name })
-    for (const o of offersLocal) map.set(o.slug, { slug: o.slug, name: o.name })
-    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-  }, [offersBase, offersLocal])
+  const offers = offersProp && offersProp.length > 0 ? offersProp : offersLocal
   const knownCreators = knownCreatorsProp && knownCreatorsProp.length > 0 ? knownCreatorsProp : knownCreatorsLocal
   const [showAdvanced, setShowAdvanced] = useState(false)
   // When the viewer is an editor on /editor-view, auto-target them as the assignee.
@@ -5679,24 +5620,6 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
     // would fire AFTER the delete, re-upserting the row back into the DB.
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     setDeleting(true); setErr(null)
-    // Best-effort: also remove the underlying storage objects so deleting a
-    // bad take doesn't leave orphaned bytes in the bucket. Paths are derived
-    // from the row's URL fields. Never blocks the DB delete.
-    try {
-      const urls = [row.preview_url, row.final_cut_url, row.rough_cut_url,
-                    row.approved_url, row.delivered_url, row.thumbnail_url].filter(Boolean)
-      const uploads = [], thumbs = []
-      for (const u of urls) {
-        const mU = u.match(/\/creative-uploads\/(.+)$/)
-        if (mU) { uploads.push(decodeURIComponent(mU[1].split('?')[0])); continue }
-        const mT = u.match(/\/creative-thumbnails\/(.+)$/)
-        if (mT) thumbs.push(decodeURIComponent(mT[1].split('?')[0]))
-      }
-      // Fire-and-forget so the Delete button doesn't hang on the storage
-      // round-trip — the DB delete below is what the user is waiting on.
-      if (uploads.length) supabase.storage.from('creative-uploads').remove(uploads).catch(() => {})
-      if (thumbs.length) supabase.storage.from('creative-thumbnails').remove(thumbs).catch(() => {})
-    } catch { /* orphaned bytes are a cost concern, not a blocker */ }
     const { error } = await supabase.from('lib_creative_library').delete().eq('id', row.id)
     setDeleting(false)
     if (error) {
@@ -5712,19 +5635,6 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
     // Editing-queue tasks for this creative — always fetch (row-specific).
     supabase.from('lib_editing_queue').select('*').eq('creative_id', row.id)
       .then(({ data }) => { if (mounted) setExistingTasks(data || []) })
-    // Lazy-load the (potentially large) script for THIS row only — it's
-    // deliberately excluded from the lean list query. If migration 101
-    // (script_text) isn't applied yet the select 42703s; treat as empty.
-    // The `=== undefined` guard means we set it once and never clobber
-    // text the user has already started typing.
-    supabase.from('lib_creative_library').select('script_text').eq('id', row.id).maybeSingle()
-      .then(({ data, error }) => {
-        if (!mounted || error) return
-        // Use null (not '') for an empty script so a script-less clip isn't
-        // re-saved as an empty string on the next auto-save (null → null is
-        // a no-op; '' would be a real write).
-        setEdit(e => (e.script_text === undefined ? { ...e, script_text: data?.script_text ?? null } : e))
-      })
     // Only fetch editors / offers / creators if the parent didn't pass
     // them as props. Avoids 3 redundant queries per modal open.
     if (!editorsProp || editorsProp.length === 0) {
@@ -5764,29 +5674,11 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
       manually_marked_used: !!edit.manually_marked_used,
       is_bad_take: !!edit.is_bad_take,
       bad_take_reason: edit.bad_take_reason || null,
-      // Only write script_text once it's actually been loaded/edited
-      // (lazy-fetched after mount). Including it unconditionally would let
-      // an unrelated save fire `script_text: null` before the fetch lands
-      // and wipe an existing script.
-      ...(edit.script_text !== undefined ? { script_text: edit.script_text || null } : {}),
     }
-    // Self-heal when the code references columns whose migration hasn't been
-    // applied to the DB yet (is_bad_take/bad_take_reason from 099, script_text
-    // from 101, etc.). Without this, ONE missing column 42703-fails the whole
-    // update and NOTHING persists — so editing creator/status/notes silently
-    // does nothing. On 42703 we strip the named-missing column and retry, so
-    // every other field still saves. Self-heals the moment the migration lands.
-    let working = { ...patch }
-    let resp = await supabase.from('lib_creative_library').update(working).eq('id', row.id)
-    let guard = 0
-    while (resp.error?.code === '42703' && guard < Object.keys(patch).length) {
-      guard++
-      const missing = Object.keys(working).find(k => (resp.error.message || '').includes(k))
-      if (!missing) break
-      delete working[missing]
-      resp = await supabase.from('lib_creative_library').update(working).eq('id', row.id)
-    }
-    const { error } = resp
+    const { error } = await supabase
+      .from('lib_creative_library')
+      .update(patch)
+      .eq('id', row.id)
     if (!silent) setSaving(false)
     if (error) {
       setErr(error.message)
@@ -6126,29 +6018,6 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               <option value="">— Pick offer —</option>
               {offers.map(o => <option key={o.slug} value={o.slug}>{o.name}</option>)}
             </select>
-            {scope.canEditCreative && (
-              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                <button type="button" onClick={() => setOfferModal({ existing: null })}
-                  style={{
-                    flex: 1, padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10,
-                    fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                    background: 'white', color: 'var(--ink-3)', border: '1px solid var(--rule)',
-                    borderRadius: 2, cursor: 'pointer',
-                  }}>+ New offer</button>
-                <button type="button" disabled={!edit.offer_slug}
-                  onClick={async () => {
-                    const { data } = await supabase.from('offers').select('*').eq('slug', edit.offer_slug).maybeSingle()
-                    setOfferModal({ existing: data || { slug: edit.offer_slug } })
-                  }}
-                  style={{
-                    flex: 1, padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10,
-                    fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                    background: 'white', color: 'var(--ink-3)', border: '1px solid var(--rule)',
-                    borderRadius: 2, opacity: edit.offer_slug ? 1 : 0.4,
-                    cursor: edit.offer_slug ? 'pointer' : 'not-allowed',
-                  }}>Edit offer</button>
-              </div>
-            )}
           </Field>
           <Field label="Assigned editor">
             <EditorPicker value={edit.assigned_editor_id}
@@ -6156,26 +6025,6 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               onChange={v => setEdit({ ...edit, assigned_editor_id: v || null })} />
           </Field>
         </div>
-
-        {offerModal && (
-          <OfferConfigModal
-            open={true}
-            existing={offerModal.existing}
-            onClose={() => setOfferModal(null)}
-            onSaved={(saved) => {
-              // Reflect the create/rename in the dropdown immediately and
-              // assign the offer to this creative.
-              if (saved?.slug) {
-                setOffersLocal(prev => [
-                  ...prev.filter(o => o.slug !== saved.slug),
-                  { slug: saved.slug, name: saved.name },
-                ])
-                setEdit(e => ({ ...e, offer_slug: saved.slug }))
-              }
-              setOfferModal(null)
-            }}
-          />
-        )}
 
         {/* Bad take flag — coordinator/admin marks clips that should never
             be used (wrong angle, flubbed lines, technical failure, etc.).
@@ -6240,13 +6089,6 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                 }} title={row.name}>{row.name}</div>
               </Field>
             </div>
-            <Field label="Script">
-              <textarea value={edit.script_text ?? ''}
-                onChange={e => setEdit({ ...edit, script_text: e.target.value })}
-                rows={6}
-                placeholder="Paste the script this footage was shot from. Editors see this (read-only) on their task."
-                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--sans)', lineHeight: 1.5 }} />
-            </Field>
             <Field label="Notes">
               <textarea value={edit.notes || ''}
                 onChange={e => setEdit({ ...edit, notes: e.target.value })}
@@ -7339,7 +7181,6 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         <ManageEditorsModal
           editors={editors}
           tasks={tasks}
-          selfEditorId={scope.editorId || null}
           onClose={() => setManageEditorsOpen(false)}
           onEditorAdded={(e) => setEditors(curr => [...curr, e].sort((a, b) => (a.name || '').localeCompare(b.name || '')))}
           onEditorPatched={(id, patch) => setEditors(curr => curr.map(e => e.id === id ? { ...e, ...patch } : e))}
@@ -7417,7 +7258,6 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       {editingEditor && (
         <EditEditorModal
           editor={editingEditor}
-          selfEditorId={scope.editorId || null}
           onClose={() => setEditingEditor(null)}
           onSavedPatch={(patch) => {
             setEditors(curr => curr.map(e => e.id === editingEditor.id ? { ...e, ...patch } : e))
@@ -8002,17 +7842,6 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [confirmDel, setConfirmDel] = useState(false)
-  // The script this footage was shot from — read-only here so the editor
-  // can read it while cutting. Fetched from the creative row (excluded from
-  // the lean list). null = not yet loaded / none.
-  const [scriptText, setScriptText] = useState(null)
-  useEffect(() => {
-    if (!task.creative_id) return
-    let alive = true
-    supabase.from('lib_creative_library').select('script_text').eq('id', task.creative_id).maybeSingle()
-      .then(({ data, error }) => { if (alive && !error) setScriptText(data?.script_text || null) })
-    return () => { alive = false }
-  }, [task.creative_id])
   // Upload edited version state
   const [uploadFile, setUploadFile] = useState(null)
   const [uploadProgress, setUploadProgress] = useState(null)
@@ -8415,22 +8244,6 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               }}>Open in Drive</a>
           </div>
         ) : null}
-
-        {/* Script the footage was shot from — read-only reference so the
-            editor can follow it while cutting. Only shown when set. */}
-        {scriptText && scriptText.trim() && (
-          <div>
-            <div style={chipLabelStyle}>Script</div>
-            <div style={{
-              marginTop: 6, padding: '12px 14px',
-              background: 'var(--paper-2)', border: '1px solid var(--rule)',
-              borderLeft: '3px solid var(--accent)', borderRadius: 2,
-              fontFamily: 'var(--sans)', fontSize: 13, lineHeight: 1.6,
-              color: 'var(--ink-2)', whiteSpace: 'pre-wrap',
-              maxHeight: 280, overflowY: 'auto',
-            }}>{scriptText}</div>
-          </div>
-        )}
 
         {/* Quick-action status row — colored pill per status when selected.
             Uses TASK_STATUS_COLOR/LABEL so display reads "In progress" not
@@ -9225,31 +9038,24 @@ function TierBadge({ tier }) {
 
 /* Dedicated Manage Editors modal — centralized roster view + add new +
    row-level edit click-through. */
-function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEditorAdded, onEditorPatched, onEditorsRemoved, onOpenEditor }) {
+function ManageEditorsModal({ editors, tasks, onClose, onEditorAdded, onEditorPatched, onEditorsRemoved, onOpenEditor }) {
   const [newName, setNewName] = useState('')
-  const [newEmail, setNewEmail] = useState('')
-  const [addStatus, setAddStatus] = useState(null)  // { color, text } after a quick-add
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
-  // Self-lockout guard: a coordinator managing the roster from the portal
-  // (selfEditorId set) can't select / delete / deactivate their own row.
-  // Ben on the dashboard has selfEditorId=null so no row is protected.
-  const isSelf = (id) => selfEditorId != null && id === selfEditorId
   const toggleSel = (id) => {
-    if (isSelf(id)) return
     setSelectedIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id); else next.add(id)
       return next
     })
   }
-  const selectAll = () => setSelectedIds(new Set(editors.filter(e => !isSelf(e.id)).map(e => e.id)))
+  const selectAll = () => setSelectedIds(new Set(editors.map(e => e.id)))
   const clearSel = () => setSelectedIds(new Set())
   const bulkDelete = async () => {
     setBusy(true); setErr(null)
-    const ids = Array.from(selectedIds).filter(id => !isSelf(id))
+    const ids = Array.from(selectedIds)
     const { error } = await supabase.from('lib_creative_editors')
       .delete().in('id', ids)
     setBusy(false)
@@ -9271,30 +9077,21 @@ function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEditorAdd
 
   const addEditor = async () => {
     if (!newName.trim()) return
-    setBusy(true); setErr(null); setAddStatus(null)
+    setBusy(true); setErr(null)
     const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-    const cleanEmail = newEmail.trim() ? newEmail.trim().toLowerCase() : null
     const { data, error } = await supabase.from('lib_creative_editors')
-      .insert({ name: newName.trim(), slug, email: cleanEmail })
+      .insert({ name: newName.trim(), slug })
       .select()
       .single()
-    if (error) { setBusy(false); setErr(error.message); return }
-    // Auto-send the welcome invite (best-effort) so the new editor knows
-    // to log in. Row exists now → the function's roster guard finds it.
-    const inviteStatus = await sendEditorInvite(cleanEmail, newName.trim())
     setBusy(false)
-    const added = newName.trim()
-    setNewName(''); setNewEmail('')
-    if (data) onEditorAdded?.(data)
-    setAddStatus(
-      inviteStatus === 'sent'    ? { color: '#3e8a5e', text: `Added ${added} · invite emailed to ${cleanEmail}` }
-      : inviteStatus === 'skipped' ? { color: 'var(--ink-3)', text: `Added ${added} · no email, so no invite sent (add one via the row to enable login)` }
-      :                            { color: '#a8650f', text: `Added ${added} · invite email didn't send — they can still log in at /editor-login` }
-    )
+    if (error) setErr(error.message)
+    else {
+      setNewName('')
+      if (data) onEditorAdded?.(data)
+    }
   }
 
   const toggleActive = async (e) => {
-    if (isSelf(e.id)) return  // can't deactivate yourself
     const next = !e.active
     const { error } = await supabase.from('lib_creative_editors')
       .update({ active: next }).eq('id', e.id)
@@ -9314,30 +9111,19 @@ function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEditorAdd
         </>
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
-        {/* Add new editor — name + email so the invite can go out. */}
+        {/* Add new editor */}
         <div style={{
           padding: '12px 14px', background: 'var(--paper-2)', border: '1px solid var(--rule)',
-          display: 'grid', gap: 8,
+          display: 'flex', gap: 8, alignItems: 'center',
         }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={chipLabelStyle}>Add new</span>
-            <input type="text" value={newName} onChange={e => setNewName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') addEditor() }}
-              placeholder="Editor name (e.g. Sarah)"
-              style={{ ...inputStyle, flex: 1 }} />
-            <input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') addEditor() }}
-              placeholder="email (sends invite)"
-              style={{ ...inputStyle, flex: 1 }} />
-            <button onClick={addEditor} disabled={!newName.trim() || busy} style={primaryBtn}>
-              {busy ? '…' : '+ Add + invite'}
-            </button>
-          </div>
-          {addStatus && (
-            <div style={{ fontFamily: 'var(--sans)', fontSize: 12, color: addStatus.color, lineHeight: 1.4 }}>
-              {addStatus.text}
-            </div>
-          )}
+          <span style={chipLabelStyle}>Add new</span>
+          <input type="text" value={newName} onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') addEditor() }}
+            placeholder="Editor name (e.g. Sarah)"
+            style={{ ...inputStyle, flex: 1 }} />
+          <button onClick={addEditor} disabled={!newName.trim() || busy} style={primaryBtn}>
+            {busy ? '…' : '+ Add'}
+          </button>
         </div>
 
         {/* Bulk selection bar — sticky when any editor is selected */}
@@ -9431,31 +9217,21 @@ function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEditorAdd
               }}
                 onMouseEnter={ev => { if (!isSel) ev.currentTarget.style.background = 'var(--paper-2)' }}
                 onMouseLeave={ev => { if (!isSel) ev.currentTarget.style.background = 'transparent' }}>
-                {isSelf(e.id) ? (
-                  <div title="This is you — you can't remove your own access"
-                    style={{ width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
-                      <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="var(--ink-4)" strokeWidth="1.5" />
-                      <path d="M5.5 7V5a2.5 2.5 0 015 0v2" stroke="var(--ink-4)" strokeWidth="1.5" />
+                <div onClick={ev => { ev.stopPropagation(); toggleSel(e.id) }}
+                  style={{
+                    width: 16, height: 16, borderRadius: 2,
+                    border: isSel ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
+                    background: isSel ? 'var(--accent)' : 'white',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}>
+                  {isSel && (
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                      <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                        strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                  </div>
-                ) : (
-                  <div onClick={ev => { ev.stopPropagation(); toggleSel(e.id) }}
-                    style={{
-                      width: 16, height: 16, borderRadius: 2,
-                      border: isSel ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
-                      background: isSel ? 'var(--accent)' : 'white',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: 'pointer',
-                    }}>
-                    {isSel && (
-                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                        <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
-                          strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
                 <span style={{ width: 18, height: 18, borderRadius: 3, background: color }} />
                 <div style={{ fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>
                   {e.name}
@@ -9470,10 +9246,8 @@ function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEditorAdd
                 <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12 }}>{c.open}</div>
                 <div style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-3)' }}>{c.done}</div>
                 <div>
-                  <label onClick={ev => ev.stopPropagation()}
-                    title={isSelf(e.id) ? "You can't deactivate yourself" : undefined}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: isSelf(e.id) ? 'not-allowed' : 'pointer' }}>
-                    <input type="checkbox" checked={e.active} disabled={isSelf(e.id)}
+                  <label onClick={ev => ev.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={e.active}
                       onChange={() => toggleActive(e)} />
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
                       {e.active ? 'Active' : 'Off'}
@@ -9776,7 +9550,7 @@ function ShareLinksModal({ editors, onClose }) {
   )
 }
 
-function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, onDeleted }) {
+function EditEditorModal({ editor, onClose, onSavedPatch, onDeleted }) {
   const [name, setName] = useState(editor.name || '')
   const [email, setEmail] = useState(editor.email || '')
   const [active, setActive] = useState(editor.active !== false)
@@ -9788,10 +9562,6 @@ function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, onDelete
   const [err, setErr] = useState(null)
   const [confirmDeactivate, setConfirmDeactivate] = useState(false)
   const [confirmHardDelete, setConfirmHardDelete] = useState(false)
-  // Self-lockout guard: a coordinator editing their own row from the
-  // portal can't deactivate / delete / demote themselves. selfEditorId is
-  // null for Ben on the dashboard, so nothing is blocked there.
-  const isSelf = selfEditorId != null && editor.id === selfEditorId
   // Share links state — load existing + allow generate / revoke
   const [links, setLinks] = useState([])
   const [linksLoading, setLinksLoading] = useState(true)
@@ -9911,20 +9681,12 @@ function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, onDelete
             </>
           ) : (
             <>
-              {isSelf ? (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)', marginRight: 'auto', fontStyle: 'italic' }}>
-                  This is you — you can't deactivate, delete, or change your own permission.
-                </span>
-              ) : (
-                <>
-                  <button onClick={() => setConfirmDeactivate(true)} disabled={busy} style={{
-                    ...ghostBtn, color: 'var(--ink-3)', borderColor: 'var(--rule)', marginRight: 4,
-                  }}>Deactivate</button>
-                  <button onClick={() => setConfirmHardDelete(true)} disabled={busy} style={{
-                    ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
-                  }}>Delete forever</button>
-                </>
-              )}
+              <button onClick={() => setConfirmDeactivate(true)} disabled={busy} style={{
+                ...ghostBtn, color: 'var(--ink-3)', borderColor: 'var(--rule)', marginRight: 4,
+              }}>Deactivate</button>
+              <button onClick={() => setConfirmHardDelete(true)} disabled={busy} style={{
+                ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
+              }}>Delete forever</button>
               <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
               <button onClick={save} disabled={!name.trim() || busy} style={primaryBtn}>
                 {busy ? 'Saving…' : 'Save'}
@@ -9965,15 +9727,13 @@ function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, onDelete
               What this editor primarily cuts. Used to filter assignment pickers.
             </div>
           </Field>
-          <Field label="Permission">
-            <select value={tier} onChange={e => setTier(e.target.value)} disabled={isSelf} style={inputStyle}>
+          <Field label="Tier">
+            <select value={tier} onChange={e => setTier(e.target.value)} style={inputStyle}>
               <option value="editor">Editor</option>
-              <option value="admin">Admin (manages editors)</option>
+              <option value="admin">Admin</option>
             </select>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 6 }}>
-              {isSelf
-                ? "You can't change your own permission."
-                : 'Admins can invite, remove + set permissions for editors from the portal. Does not grant sales-dashboard access.'}
+              Admins can manage the roster + see all editor views.
             </div>
           </Field>
         </div>
@@ -10087,73 +9847,24 @@ function AddEditorModal({ onClose, onSaved }) {
   const [tier, setTier] = useState('editor')    // editor | admin
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-  // After a successful add we show a confirmation (incl. invite outcome)
-  // instead of closing, so the admin can see whether the welcome email
-  // went out and add another in one sitting. { name, email, inviteStatus }
-  const [result, setResult] = useState(null)
   const submit = async () => {
     if (!name.trim()) return
     setBusy(true); setErr(null)
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-    const cleanEmail = email.trim() ? email.trim().toLowerCase() : null
     const { error } = await supabase.from('lib_creative_editors').insert({
       name: name.trim(),
       slug,
       // Email enables magic-link login. Lowercased for case-insensitive
       // matching against auth.user.email. Optional — editor can be
       // added without one and gets onboarded via legacy share-link.
-      email: cleanEmail,
+      email: email.trim() ? email.trim().toLowerCase() : null,
       format,
       tier,
     })
-    if (error) { setBusy(false); setErr(error.message); return }
-    // Auto-send the branded welcome invite (best-effort). The row exists
-    // now, so the Edge Function's active-roster guard will find it.
-    const inviteStatus = await sendEditorInvite(cleanEmail, name.trim())
     setBusy(false)
-    setResult({ name: name.trim(), email: cleanEmail, inviteStatus })
+    if (error) setErr(error.message)
+    else onSaved?.()
   }
-  const addAnother = () => {
-    setResult(null); setName(''); setEmail(''); setFormat('both'); setTier('editor'); setErr(null)
-  }
-  // onSaved closes + reloads the parent roster. Used by Done after the
-  // confirmation, so freshly-added editors show up on close.
-  const finish = () => onSaved?.()
-
-  if (result) {
-    const { inviteStatus } = result
-    const inviteLine =
-      inviteStatus === 'sent'    ? { color: '#3e8a5e', text: `Invite emailed to ${result.email}. They log in at /editor-login — no password needed.` }
-      : inviteStatus === 'skipped' ? { color: 'var(--ink-3)', text: 'No email yet — add one via Edit to enable their login + send an invite.' }
-      :                            { color: '#a8650f', text: `Couldn't send the invite email. ${result.name} can still log in at /editor-login with ${result.email || 'their email'} — or resend later.` }
-    return (
-      <Modal open={true} onClose={finish} size="sm"
-        eyebrow="Editor added"
-        title={result.name}
-        footer={
-          <>
-            <button onClick={addAnother} style={ghostBtn}>Add another</button>
-            <button onClick={finish} style={primaryBtn}>Done</button>
-          </>
-        }>
-        <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
-          <div style={{
-            padding: '12px 14px', background: 'var(--paper-2)', border: '1px solid var(--rule)',
-            borderLeft: '3px solid var(--accent)',
-            fontFamily: 'var(--sans)', fontSize: 13.5, color: 'var(--ink)', lineHeight: 1.5,
-          }}>
-            <strong>{result.name}</strong> is now on the editor roster.
-          </div>
-          <div style={{
-            fontFamily: 'var(--sans)', fontSize: 13, color: inviteLine.color, lineHeight: 1.5,
-          }}>
-            {inviteLine.text}
-          </div>
-        </div>
-      </Modal>
-    )
-  }
-
   return (
     <Modal open={true} onClose={busy ? () => {} : onClose} size="sm"
       eyebrow="New editor"
@@ -10163,7 +9874,7 @@ function AddEditorModal({ onClose, onSaved }) {
           {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
           <button onClick={submit} disabled={!name.trim() || busy} style={primaryBtn}>
-            {busy ? 'Adding…' : 'Add + invite'}
+            {busy ? 'Adding…' : 'Add'}
           </button>
         </>
       }>
@@ -10173,13 +9884,10 @@ function AddEditorModal({ onClose, onSaved }) {
             placeholder="e.g. Sarah" style={inputStyle}
             onKeyDown={e => { if (e.key === 'Enter') submit() }} />
         </Field>
-        <Field label="Email — sends a login invite (recommended)">
+        <Field label="Email — enables magic-link login (optional)">
           <input type="email" value={email} onChange={e => setEmail(e.target.value)}
             placeholder="sarah@opt.co.nz" style={inputStyle}
             onKeyDown={e => { if (e.key === 'Enter') submit() }} />
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 6 }}>
-            With an email we send a branded welcome + they log in at /editor-login. Without one, they can only be reached via a legacy share link.
-          </div>
         </Field>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Format">
@@ -10189,14 +9897,11 @@ function AddEditorModal({ onClose, onSaved }) {
               <option value="both">Both</option>
             </select>
           </Field>
-          <Field label="Permission">
+          <Field label="Tier">
             <select value={tier} onChange={e => setTier(e.target.value)} style={inputStyle}>
               <option value="editor">Editor</option>
-              <option value="admin">Admin (manages editors)</option>
+              <option value="admin">Admin</option>
             </select>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 6 }}>
-              Admins can invite, remove + set permissions for editors from the portal. Does not grant sales-dashboard access.
-            </div>
           </Field>
         </div>
       </div>
