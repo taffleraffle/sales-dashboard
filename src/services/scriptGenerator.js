@@ -38,6 +38,7 @@ export async function generateScripts({
   mechanism_slug,     // optional (migration 108)
   target_shapes,
   target_length,
+  target_proof_characters,   // optional subset of proof-character names to feature
   offer_slug,
   n_concepts = 3,
   target_attributes = {},
@@ -54,6 +55,7 @@ export async function generateScripts({
     if (mechanism_slug) body.mechanism_slug = mechanism_slug
     if (target_shapes?.length) body.target_shapes = target_shapes
     if (target_length) body.target_length = target_length
+    if (target_proof_characters?.length) body.target_proof_characters = target_proof_characters
   } else {
     body.offer_slug = offer_slug
     body.target_attributes = target_attributes
@@ -162,6 +164,63 @@ export async function generateAngles({ offer_slug, n_problems = 5, n_desires = 5
   if (error) throw new Error(error.message || 'angle generation failed')
   if (data?.error) throw new Error(data.error)
   return data
+}
+
+/* ───────────────── Proof characters (per angle) ───────────────── */
+// Table: script_proof_characters
+//   { id, angle_slug, name, result_short, result_long, industry_context,
+//     metric_kind, display_order, active }
+// One row = one named proof a script can pull from. The Edge Function
+// loads them per angle and rotates through them across the batch.
+
+export async function listProofCharactersForAngle(angle_slug, { active_only = true } = {}) {
+  if (!angle_slug) return []
+  let q = supabase
+    .from('script_proof_characters')
+    .select('id,angle_slug,name,result_short,result_long,industry_context,metric_kind,display_order,active')
+    .eq('angle_slug', angle_slug)
+    .order('display_order')
+    .order('name')
+  if (active_only) q = q.eq('active', true)
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return data || []
+}
+
+export async function upsertProofCharacter(row) {
+  if (!row?.angle_slug || !row?.name?.trim() || !row?.result_short?.trim()) {
+    throw new Error('upsertProofCharacter: angle_slug, name, result_short are required')
+  }
+  const payload = {
+    angle_slug: row.angle_slug,
+    name: row.name.trim(),
+    result_short: row.result_short.trim(),
+    result_long: (row.result_long || '').trim() || null,
+    industry_context: (row.industry_context || '').trim() || null,
+    metric_kind: (row.metric_kind || '').trim() || null,
+    display_order: typeof row.display_order === 'number' ? row.display_order : 100,
+    active: row.active !== false,
+  }
+  // angle_slug + name is the unique key per the migration 105 schema.
+  const { data, error } = await supabase
+    .from('script_proof_characters')
+    .upsert(payload, { onConflict: 'angle_slug,name' })
+    .select()
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return data
+}
+
+export async function deleteProofCharacter(id) {
+  if (!id) throw new Error('deleteProofCharacter: id required')
+  // Soft-delete via active=false so historical scripts that referenced
+  // this proof character don't get orphaned audit trails.
+  const { error } = await supabase
+    .from('script_proof_characters')
+    .update({ active: false })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+  return true
 }
 
 /** List the catalog of opening-move shapes (A-H). */

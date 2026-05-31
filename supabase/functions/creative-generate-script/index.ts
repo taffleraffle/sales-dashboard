@@ -551,6 +551,11 @@ serve(async (req) => {
   const n_concepts = Math.max(1, Math.min(30, body?.n_concepts || 5))
   const target_attributes_raw = body?.target_attributes || {}
   const save_as_drafts = !!body?.save_as_drafts
+  // Optional subset of proof character names to feature this batch.
+  // Empty/undefined = use all active proofs for the angle (default).
+  const target_proof_characters: string[] = Array.isArray(body?.target_proof_characters)
+    ? body.target_proof_characters.filter((n: any) => typeof n === 'string' && n.trim()).map((n: string) => n.trim())
+    : []
   // Free-text operator instructions appended to the Claude prompt for
   // this run only. Trimmed + length-capped to keep token usage sane
   // (anything longer than ~4k chars is likely a copy/paste mistake).
@@ -754,6 +759,14 @@ serve(async (req) => {
       ])
     } catch (e: any) {
       return json({ error: e.message }, 500)
+    }
+    // Subset proof characters if the operator picked specific names. If
+    // the subset is non-empty but doesn't match any loaded proofs, we
+    // intentionally let the array stay empty (no proofs) so the generator
+    // hits the "(none)" path rather than silently using the full set.
+    if (target_proof_characters.length) {
+      const allow = new Set(target_proof_characters.map(n => n.toLowerCase()))
+      proofs = proofs.filter((p: any) => allow.has((p?.name || '').toLowerCase()))
     }
     if ((script_type === 'hook' || script_type === 'joined') && shapes.length === 0) {
       return json({ error: 'no hook_shapes match the requested filter' }, 400)

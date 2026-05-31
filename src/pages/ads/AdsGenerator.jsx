@@ -1,11 +1,13 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Trash2 } from 'lucide-react'
 import { generateScripts, generateAngles,
-         listAngles, listHookShapes, listMechanisms } from '../../services/scriptGenerator'
+         listAngles, listHookShapes, listMechanisms,
+         listProofCharactersForAngle } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import { listTestBatches, addScriptsToBatch } from '../../services/testBatches'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
 import MechanismConfigModal from '../../components/ads/MechanismConfigModal'
+import ProofCharacterEditor from '../../components/ads/ProofCharacterEditor'
 import ConfirmModal from '../../components/ConfirmModal'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Eyebrow } from '../../components/editorial/atoms'
@@ -68,6 +70,12 @@ export default function AdsGenerator() {
   // both modes — operator can name specific proofs ("lead with Eric's
   // $215K case study"), banned phrases, framing tweaks, etc.
   const [extraInstructions, setExtraInstructions] = useState('')
+  // Per-angle proof character roster + which subset to feature this batch.
+  // Reloaded whenever the angle changes. Empty selectedProofNames = use ALL
+  // active proofs for the angle (the Edge Function's default behavior).
+  const [proofCharacters, setProofCharacters] = useState([])
+  const [selectedProofNames, setSelectedProofNames] = useState([])
+  const [proofEditorOpen, setProofEditorOpen] = useState(false)
 
   // Template-based generator (Ben 2026-05-31). Templates is now the
   // only path — Mode toggle was removed in the /generate overhaul.
@@ -144,6 +152,31 @@ export default function AdsGenerator() {
     if (!angleSlug) return
     listMechanisms({ angle_slug: angleSlug }).then(setMechanisms).catch(() => {})
   }, [angleSlug])
+
+  // Refresh proof characters whenever the selected angle changes. The
+  // picker resets to "use all" — operator can subset before generating.
+  useEffect(() => {
+    if (!angleSlug) { setProofCharacters([]); setSelectedProofNames([]); return }
+    let cancelled = false
+    listProofCharactersForAngle(angleSlug)
+      .then(rows => {
+        if (cancelled) return
+        setProofCharacters(rows)
+        setSelectedProofNames([])   // reset subset on angle change
+      })
+      .catch(() => { if (!cancelled) { setProofCharacters([]); setSelectedProofNames([]) } })
+    return () => { cancelled = true }
+  }, [angleSlug])
+
+  async function refreshProofCharacters() {
+    if (!angleSlug) return
+    try {
+      const rows = await listProofCharactersForAngle(angleSlug)
+      setProofCharacters(rows)
+      // Drop any selected names that no longer exist (retired)
+      setSelectedProofNames(prev => prev.filter(n => rows.some(r => r.name === n)))
+    } catch {}
+  }
 
   // Messaging tab: the full saved-angle library for the current offer.
   // Kept separate from `angles` (which is the Scripts picker source — same
@@ -294,6 +327,7 @@ export default function AdsGenerator() {
             mechanism_slug: mechanismSlug || undefined,
             target_shapes: targetShapes.length ? targetShapes : undefined,
             target_length: (scriptType === 'body' || scriptType === 'joined') ? targetLength : undefined,
+            target_proof_characters: selectedProofNames.length ? selectedProofNames : undefined,
             n_concepts: nConcepts,
             save_as_drafts: saveAsDrafts,
             extra_instructions: extras,
@@ -750,6 +784,80 @@ export default function AdsGenerator() {
             })()}
           </Section>
 
+          {/* Step 03b: proof characters (per angle) — picker + opener for editor */}
+          {angleSlug && (
+            <Section label="03b" title="Proof characters">
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8, gap: 12, flexWrap: 'wrap' }}>
+                <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                            color: 'var(--ink-4)', margin: 0, maxWidth: 640 }}>
+                  Named clients with a one-line result. The generator rotates through them.
+                  Leave the chip row at <strong>All</strong> to use every active character —
+                  or click to subset which appear in this batch.
+                </p>
+                <button onClick={() => setProofEditorOpen(true)}
+                  style={{
+                    padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11,
+                    letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
+                    border: '1px solid var(--ink)', background: 'var(--paper)',
+                    color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                  }}>
+                  <Settings size={12} />
+                  Manage ({proofCharacters.length})
+                </button>
+              </div>
+              {proofCharacters.length === 0 ? (
+                <div style={{
+                  padding: '12px 14px', background: '#fff3d1',
+                  border: '1px solid #d68f00', borderLeft: '4px solid #d68f00',
+                  fontFamily: 'var(--mono)', fontSize: 12, color: '#4d3000', lineHeight: 1.5,
+                }}>
+                  No proof characters saved for this angle. Click <strong>Manage</strong> to
+                  add 3-5 (Eric — closed a $215K job in 90 days; Adam — booked top-3 in 60d;
+                  etc). Without proofs the generator falls back to generic placeholders.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  <button onClick={() => setSelectedProofNames([])}
+                    style={{
+                      padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11,
+                      letterSpacing: '0.1em', textTransform: 'uppercase',
+                      fontWeight: selectedProofNames.length === 0 ? 700 : 500,
+                      border: `1px solid ${selectedProofNames.length === 0 ? 'var(--ink)' : 'var(--rule)'}`,
+                      background: selectedProofNames.length === 0 ? 'var(--ink)' : 'white',
+                      color: selectedProofNames.length === 0 ? 'var(--paper)' : 'var(--ink-3)',
+                      cursor: 'pointer', borderRadius: 2,
+                    }}>
+                    All ({proofCharacters.length})
+                  </button>
+                  {proofCharacters.map(p => {
+                    const on = selectedProofNames.includes(p.name)
+                    return (
+                      <button key={p.id}
+                        onClick={() => setSelectedProofNames(prev =>
+                          prev.includes(p.name) ? prev.filter(n => n !== p.name) : [...prev, p.name])}
+                        title={p.result_short}
+                        style={{
+                          padding: '8px 12px', fontFamily: 'var(--sans)', fontSize: 12.5,
+                          border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                          background: on ? 'var(--ink)' : 'white',
+                          color: on ? 'var(--paper)' : 'var(--ink-2)',
+                          cursor: 'pointer', borderRadius: 2,
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                        }}>
+                        {on && <Check size={12} />}
+                        <span style={{ fontWeight: on ? 600 : 400 }}>{p.name}</span>
+                        <span style={{ opacity: 0.7, fontSize: 11 }}>
+                          — {(p.result_short || '').slice(0, 48)}{(p.result_short || '').length > 48 ? '…' : ''}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </Section>
+          )}
+
           {/* Step 02b: mechanism (optional) */}
           <Section label="04" title="Mechanism (optional)">
             <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
@@ -855,6 +963,13 @@ export default function AdsGenerator() {
             angles={angles}
             onClose={() => setMechanismModalOpen(false)}
             onSaved={handleMechanismSaved}
+          />
+
+          <ProofCharacterEditor
+            open={proofEditorOpen}
+            angle={angles.find(a => a.slug === angleSlug) || null}
+            onClose={() => setProofEditorOpen(false)}
+            onSaved={refreshProofCharacters}
           />
 
           {/* Step 03: shapes (Hook + Joined) and/or length (Body + Joined) */}
