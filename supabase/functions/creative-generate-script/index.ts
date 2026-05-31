@@ -477,6 +477,15 @@ serve(async (req) => {
   const n_concepts = Math.max(1, Math.min(30, body?.n_concepts || 5))
   const target_attributes_raw = body?.target_attributes || {}
   const save_as_drafts = !!body?.save_as_drafts
+  // Free-text operator instructions appended to the Claude prompt for
+  // this run only. Trimmed + length-capped to keep token usage sane
+  // (anything longer than ~4k chars is likely a copy/paste mistake).
+  const extra_instructions: string = typeof body?.extra_instructions === 'string'
+    ? body.extra_instructions.trim().slice(0, 4000)
+    : ''
+  const extraBlock = extra_instructions
+    ? `\n\nOPERATOR INSTRUCTIONS FOR THIS RUN (these take precedence over generic defaults; honor them literally):\n${extra_instructions}\n`
+    : ''
 
   // ── BRANCH: Messaging mode (Ben 2026-05-31) — generate angles ──
   // Produces N problem + M desire angles for an offer and auto-saves to
@@ -504,6 +513,7 @@ serve(async (req) => {
       'Problems = what the prospect is stuck on, phrased in their voice. Desires = what they want, phrased in their voice.',
       'Each angle must be specific to the audience qualifier (above). Generic "grow your business" angles will be rejected.',
       `Return via the ${ANGLE_TOOL_NAME} tool with problems first, then desires.`,
+      extraBlock,
     ].filter(Boolean).join('\n')
 
     const upstreamA = await fetch('https://api.anthropic.com/v1/messages', {
@@ -650,6 +660,7 @@ serve(async (req) => {
       `\n\nGenerate exactly ${n_concepts} ${script_type === 'joined' ? 'joined scripts' : (script_type === 'hook' ? 'hooks' : 'bodies')} for this angle.`,
       `\n${typeSpecificInstructions}`,
       `\nReturn via the ${TEMPLATE_TOOL_NAMES[script_type]} tool.`,
+      extraBlock,
     ].join('')
 
     const shapeCodes = shapes.map(s => s.code)
@@ -775,6 +786,7 @@ serve(async (req) => {
     winnerContext,
     targetContext,
     `\nGenerate exactly ${n_concepts} script concepts. Return via the generate_scripts tool.`,
+    extraBlock,
   ].filter(Boolean).join('\n')
 
   const tool = buildToolSchema(vocab, n_concepts, offer.default_proof_characters || [])

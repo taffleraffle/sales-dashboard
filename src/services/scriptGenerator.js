@@ -42,6 +42,7 @@ export async function generateScripts({
   n_concepts = 3,
   target_attributes = {},
   save_as_drafts = false,
+  extra_instructions,    // optional free-text appended to the Claude prompt
 } = {}) {
   if (!offer_slug && !(script_type && angle_slug)) {
     throw new Error('generateScripts: pass either offer_slug, or script_type + angle_slug')
@@ -56,6 +57,9 @@ export async function generateScripts({
   } else {
     body.offer_slug = offer_slug
     body.target_attributes = target_attributes
+  }
+  if (extra_instructions && extra_instructions.trim()) {
+    body.extra_instructions = extra_instructions.trim()
   }
   const { data, error } = await supabase.functions.invoke('creative-generate-script', { body })
   if (error) throw new Error(error.message || 'creative-generate-script failed')
@@ -143,7 +147,7 @@ export async function listAngles({ offer_slug } = {}) {
  * @param {number} [opts.n_desires=5]
  * @param {string} [opts.niche_hint]   — optional context (niche, situation, vertical specifics)
  */
-export async function generateAngles({ offer_slug, n_problems = 5, n_desires = 5, niche_hint } = {}) {
+export async function generateAngles({ offer_slug, n_problems = 5, n_desires = 5, niche_hint, extra_instructions } = {}) {
   if (!offer_slug) throw new Error('generateAngles: offer_slug required')
   const { data, error } = await supabase.functions.invoke('creative-generate-script', {
     body: {
@@ -152,6 +156,7 @@ export async function generateAngles({ offer_slug, n_problems = 5, n_desires = 5
       n_problems,
       n_desires,
       niche_hint: niche_hint || undefined,
+      extra_instructions: (extra_instructions && extra_instructions.trim()) || undefined,
     },
   })
   if (error) throw new Error(error.message || 'angle generation failed')

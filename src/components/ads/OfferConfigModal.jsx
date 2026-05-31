@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { X, Check, AlertCircle, Trash2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import ConfirmModal from '../ConfirmModal'
 
 /*
   Offer config modal.
@@ -29,6 +30,8 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
+  const [retireConfirmOpen, setRetireConfirmOpen] = useState(false)
+  const [retiring, setRetiring] = useState(false)
 
   useEffect(() => {
     if (existing) {
@@ -61,26 +64,19 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
 
   const isEdit = !!existing
 
-  async function handleRetire() {
+  async function performRetire() {
     if (!existing?.slug) return
-    const ok = confirm(
-      `Retire "${existing.name}"?\n\n` +
-      `It will disappear from the offer picker and all dropdowns. ` +
-      `Historical scripts that reference this offer keep working — this ` +
-      `is a soft delete (sets retired = true). You can un-retire it ` +
-      `later directly in Supabase if needed.`
-    )
-    if (!ok) return
-    setSaving(true); setErr(null)
+    setRetiring(true); setErr(null)
     try {
       const { error } = await supabase.from('offers')
         .update({ retired: true }).eq('slug', existing.slug)
       if (error) throw new Error(error.message)
+      setRetireConfirmOpen(false)
       onSaved(null)   // null = retired, parent should refresh + pick a different offer
     } catch (e) {
       setErr(`Retire failed: ${e.message}`)
     } finally {
-      setSaving(false)
+      setRetiring(false)
     }
   }
 
@@ -241,13 +237,13 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
               creating a new offer + immediately retiring it makes no sense. */}
           <div>
             {isEdit && (
-              <button onClick={handleRetire} disabled={saving}
+              <button onClick={() => setRetireConfirmOpen(true)} disabled={saving || retiring}
                 title="Soft delete — hides from picker, keeps historical references intact"
                 style={{ padding: '10px 16px', fontFamily: 'var(--mono)', fontSize: 11,
                         letterSpacing: '0.12em', textTransform: 'uppercase',
                         border: '1px solid #b53e3e', background: 'transparent',
-                        color: '#b53e3e', cursor: saving ? 'wait' : 'pointer',
-                        opacity: saving ? 0.5 : 1, borderRadius: 2,
+                        color: '#b53e3e', cursor: (saving || retiring) ? 'wait' : 'pointer',
+                        opacity: (saving || retiring) ? 0.5 : 1, borderRadius: 2,
                         display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <Trash2 size={12} />
                 Retire offer
@@ -275,6 +271,17 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
           </div>
         </div>
       </div>
+
+      <ConfirmModal
+        open={retireConfirmOpen}
+        onClose={() => !retiring && setRetireConfirmOpen(false)}
+        onConfirm={performRetire}
+        title={`Retire "${existing?.name || ''}"?`}
+        message="It will disappear from the offer picker and all dropdowns. Historical scripts that reference this offer keep working — this is a soft delete (sets retired = true)."
+        confirmLabel="Retire offer"
+        variant="danger"
+        loading={retiring}
+      />
     </div>
   )
 }
