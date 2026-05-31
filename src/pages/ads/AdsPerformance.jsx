@@ -1469,13 +1469,14 @@ export default function AdsPerformance() {
       </div>
 
       {/* Current range — always visible so it's clear what window is in play */}
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 12 }}>
-        Showing: {rangeLabel(dateRange)}
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span>Showing: {rangeLabel(dateRange)}</span>
         {dataCoverage && (
-          <span style={{ marginLeft: 12, color: 'var(--ink-4)' }}>
+          <span style={{ color: 'var(--ink-4)' }}>
             · spend synced from Meta: {dataCoverage.earliest} → {dataCoverage.latest}
           </span>
         )}
+        <RefreshFromMetaButton onDone={() => load()} />
       </div>
 
       {error && (
@@ -2985,3 +2986,56 @@ const drillTd = {
   padding: '12px 8px', fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink)',
   verticalAlign: 'top',
 }
+
+
+// Manual sync trigger (Ben 2026-06-01). Hits the sync-meta-ads-full Edge
+// Function which does the same thing as the daily 09:00 UTC cron — pulls
+// the last 30 days of insights + creatives and writes ads + ad_daily_stats.
+// Use this when you just paused/launched ads and want the dashboard to
+// reflect it now rather than tomorrow morning.
+function RefreshFromMetaButton({ onDone }) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  async function trigger() {
+    setBusy(true); setMsg(null)
+    try {
+      const { data, error } = await supabase.functions.invoke("sync-meta-ads-full", {
+        body: { days: 30 },
+      })
+      if (error) throw new Error(error.message || "sync failed")
+      if (data && data.ok === false) throw new Error(data.error || "sync failed")
+      setMsg("synced " + (data?.ads_synced ?? "?") + " ads · " + (data?.stat_rows ?? "?") + " stat rows · " + Math.round((data?.duration_ms || 0) / 1000) + "s")
+      if (onDone) onDone()
+    } catch (e) {
+      setMsg("failed: " + (e.message || String(e)))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <button
+        type="button"
+        onClick={trigger}
+        disabled={busy}
+        style={{
+          fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.12em",
+          textTransform: "uppercase", padding: "4px 10px",
+          border: "1px solid var(--ink-3)", background: busy ? "var(--paper-2)" : "var(--paper)",
+          color: "var(--ink)", cursor: busy ? "wait" : "pointer", borderRadius: 2,
+        }}
+        title="Pulls last 30 days of insights + creatives from Meta. ~60s."
+      >
+        {busy ? "Syncing…" : "Refresh from Meta"}
+      </button>
+      {msg && (
+        <span style={{ fontFamily: "var(--mono)", fontSize: 9.5, color: msg.startsWith("failed") ? "var(--down)" : "var(--ink-3)" }}>
+          {msg}
+        </span>
+      )}
+    </span>
+  )
+}
+
