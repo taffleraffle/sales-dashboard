@@ -8,28 +8,103 @@ import { supabase } from '../lib/supabase'
 */
 
 /**
- * Generate N script concepts for an offer.
+ * Generate N script concepts.
+ *
+ * Two modes (Ben 2026-05-31):
+ *
+ *   TEMPLATE — pass script_type + angle_slug. Edge Function uses the
+ *   script_angles / proof_characters / hook_shapes / body_skeletons
+ *   tables (migrations 105/106) to produce Hook-only, Body-only, or
+ *   Joined (Hook+Body) scripts layered on top of the existing locked
+ *   principles. Optional target_shapes filters hook shapes (A-H).
+ *
+ *   LEGACY — pass offer_slug + optional target_attributes. Falls
+ *   through to the original 8-attribute generator.
  *
  * @param {object} opts
- * @param {string} opts.offer_slug                    — FK to offers.slug
- * @param {number} [opts.n_concepts=3]                — 1-10
- * @param {object} [opts.target_attributes={}]        — bias hints (hook_type, pain_angle, etc)
+ * @param {string} [opts.script_type]                 — 'hook' | 'body' | 'joined'
+ * @param {string} [opts.angle_slug]                  — FK to script_angles.slug
+ * @param {string[]} [opts.target_shapes]             — A-H subset (template mode)
+ * @param {string} [opts.target_length]               — 'under_60s' | '60_75s' | '75s_plus'
+ * @param {string} [opts.offer_slug]                  — FK to offers.slug (legacy mode)
+ * @param {number} [opts.n_concepts=3]                — 1-30
+ * @param {object} [opts.target_attributes={}]        — legacy mode only
  * @param {boolean} [opts.save_as_drafts=false]       — persist to generated_scripts
- * @returns {Promise<{ ok, offer, scripts, saved_variant_ids, model }>}
+ * @returns {Promise<{ ok, mode, scripts, ... }>}
  */
 export async function generateScripts({
+  script_type,
+  angle_slug,
+  target_shapes,
+  target_length,
   offer_slug,
   n_concepts = 3,
   target_attributes = {},
   save_as_drafts = false,
 } = {}) {
-  if (!offer_slug) throw new Error('generateScripts: offer_slug required')
-  const { data, error } = await supabase.functions.invoke('creative-generate-script', {
-    body: { offer_slug, n_concepts, target_attributes, save_as_drafts },
-  })
+  if (!offer_slug && !(script_type && angle_slug)) {
+    throw new Error('generateScripts: pass either offer_slug, or script_type + angle_slug')
+  }
+  const body = { n_concepts, save_as_drafts }
+  if (script_type && angle_slug) {
+    body.script_type = script_type
+    body.angle_slug = angle_slug
+    if (target_shapes?.length) body.target_shapes = target_shapes
+    if (target_length) body.target_length = target_length
+  } else {
+    body.offer_slug = offer_slug
+    body.target_attributes = target_attributes
+  }
+  const { data, error } = await supabase.functions.invoke('creative-generate-script', { body })
   if (error) throw new Error(error.message || 'creative-generate-script failed')
   if (data?.error) throw new Error(data.error)
   return data
+}
+
+/** List all active script angles (template mode). */
+export async function listAngles() {
+  const { data, error } = await supabase
+    .from('script_angles')
+    .select('slug,name,offer_slugs,qualifier,primary_promise,mechanism_short,active')
+    .eq('active', true)
+    .order('name')
+  if (error) throw new Error(error.message)
+  return data || []
+}
+
+/** List the catalog of opening-move shapes (A-H). */
+export async function listHookShapes() {
+  const { data, error } = await supabase
+    .from('script_hook_shapes')
+    .select('code,name,description,message_frame,display_order,active')
+    .eq('active', true)
+    .order('display_order')
+  if (error) throw new Error(error.message)
+  return data || []
+}
+
+/** List body skeleton options (length-bucket variants). */
+export async function listBodySkeletons() {
+  const { data, error } = await supabase
+    .from('script_body_skeletons')
+    .select('code,name,description,length_bucket,display_order,active')
+    .eq('active', true)
+    .order('display_order')
+  if (error) throw new Error(error.message)
+  return data || []
+}
+
+/** List proof characters defined under a specific angle. */
+export async function listProofCharacters(angle_slug) {
+  if (!angle_slug) return []
+  const { data, error } = await supabase
+    .from('script_proof_characters')
+    .select('name,result_short,result_long,industry_context,metric_kind,display_order')
+    .eq('angle_slug', angle_slug)
+    .eq('active', true)
+    .order('display_order')
+  if (error) throw new Error(error.message)
+  return data || []
 }
 
 /** List previously generated script drafts. */

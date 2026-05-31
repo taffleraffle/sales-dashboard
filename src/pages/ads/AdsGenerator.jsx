@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Link2 } from 'lucide-react'
-import { generateScripts, listGeneratedScripts, linkScriptToAd } from '../../services/scriptGenerator'
+import { generateScripts, listGeneratedScripts, linkScriptToAd,
+         listAngles, listHookShapes } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import { listTestBatches, addScriptsToBatch } from '../../services/testBatches'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
@@ -49,6 +50,18 @@ export default function AdsGenerator() {
   const [offerModalExisting, setOfferModalExisting] = useState(null)
   const [assignScript, setAssignScript] = useState(null)
 
+  // Template-based generator (Ben 2026-05-31). Mode toggle lives at the
+  // very top — defaults to 'templates' so new users land on the new path.
+  // 'attributes' keeps the old 8-attribute flow available for power users
+  // who already learned it.
+  const [generatorMode, setGeneratorMode] = useState('templates')
+  const [scriptType, setScriptType] = useState('hook')        // 'hook' | 'body' | 'joined'
+  const [angleSlug, setAngleSlug] = useState('')
+  const [targetShapes, setTargetShapes] = useState([])        // string[] of A-H codes; empty = all
+  const [targetLength, setTargetLength] = useState('60_75s')
+  const [angles, setAngles] = useState([])
+  const [hookShapes, setHookShapes] = useState([])
+
   async function refreshOffers() {
     const o = await listOffers()
     setOffers(o)
@@ -67,6 +80,16 @@ export default function AdsGenerator() {
     listTestBatches({ launched: false })
       .then(setDraftBatches)
       .catch(() => setDraftBatches([]))
+    // Template-mode catalog: angles + global hook shapes. Both surface
+    // as picker UI. If the tables haven't been migrated yet (pre-105),
+    // both calls just return empty arrays and the template UI shows
+    // an inline help notice telling the operator to apply 105/106.
+    Promise.all([listAngles().catch(() => []), listHookShapes().catch(() => [])])
+      .then(([a, hs]) => {
+        setAngles(a)
+        setHookShapes(hs)
+        if (a.length && !angleSlug) setAngleSlug(a[0].slug)
+      })
   }, [])
 
   function openNewOffer() {
@@ -99,14 +122,26 @@ export default function AdsGenerator() {
   async function handleGenerate() {
     setGenerating(true); setErr(null); setResult(null)
     try {
-      // In diverse mode, send empty target_attributes so Edge Function uses
-      // the "MAX VARIANCE" prompt branch.
-      const payload = {
-        offer_slug: offerSlug,
-        n_concepts: nConcepts,
-        target_attributes: mode === 'targeted' ? targets : {},
-        save_as_drafts: saveAsDrafts,
-      }
+      // Template mode (Ben 2026-05-31): send script_type + angle_slug
+      // + target_shapes instead of offer_slug + target_attributes.
+      // Edge Function picks the right branch.
+      const payload = generatorMode === 'templates'
+        ? {
+            script_type: scriptType,
+            angle_slug: angleSlug,
+            target_shapes: targetShapes.length ? targetShapes : undefined,
+            target_length: (scriptType === 'body' || scriptType === 'joined') ? targetLength : undefined,
+            n_concepts: nConcepts,
+            save_as_drafts: saveAsDrafts,
+          }
+        : {
+            // Legacy attribute mode: empty target_attributes in diverse,
+            // user-picked in targeted.
+            offer_slug: offerSlug,
+            n_concepts: nConcepts,
+            target_attributes: mode === 'targeted' ? targets : {},
+            save_as_drafts: saveAsDrafts,
+          }
       const res = await generateScripts(payload)
       setResult(res)
       if (res.save_error) setErr(`Generated but save-as-drafts failed: ${res.save_error}`)
@@ -145,6 +180,249 @@ export default function AdsGenerator() {
         </div>
       )}
 
+      {/* Mode toggle — Templates (new, 2026-05-31) vs Attributes (legacy).
+          Templates uses the angle / hook-shape / body-skeleton library
+          seeded in migration 105; Attributes uses the original 8-axis
+          variance system. Saved drafts go into the same generated_scripts
+          table either way (template mode also tags script_type + angle_slug). */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24,
+        padding: '12px 16px', background: 'var(--paper-2)', border: '1px solid var(--rule)',
+      }}>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+          letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
+        }}>Mode</span>
+        {[
+          { v: 'templates',  label: 'Templates',  hint: 'Hook / Body / Joined via angle library' },
+          { v: 'attributes', label: 'Attributes', hint: 'Legacy 8-axis variance' },
+        ].map(opt => {
+          const on = generatorMode === opt.v
+          return (
+            <button key={opt.v} onClick={() => setGeneratorMode(opt.v)}
+              title={opt.hint}
+              style={{
+                padding: '6px 14px',
+                border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                background: on ? 'var(--ink)' : 'white',
+                color: on ? 'var(--paper)' : 'var(--ink-3)',
+                fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                cursor: 'pointer', borderRadius: 2,
+              }}>{opt.label}</button>
+          )
+        })}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontFamily: 'var(--serif)', fontSize: 12, fontStyle: 'italic', color: 'var(--ink-4)' }}>
+          {generatorMode === 'templates'
+            ? `${angles.length} angle${angles.length === 1 ? '' : 's'} loaded · ${hookShapes.length} hook shapes`
+            : 'Pick offer → pick attributes → generate'}
+        </span>
+      </div>
+
+      {/* ──── TEMPLATE MODE SECTIONS ──── */}
+      {generatorMode === 'templates' && (
+        <>
+          {angles.length === 0 && (
+            <div style={{
+              padding: '14px 18px', marginBottom: 20,
+              background: '#fff3d1', border: '1px solid #d68f00', borderLeft: '4px solid #d68f00',
+              fontFamily: 'var(--mono)', fontSize: 12.5, color: '#4d3000',
+            }}>
+              No script angles found. Apply migrations 105 + 106 to enable template-based generation.
+              In the meantime switch to <strong>Attributes</strong> mode above.
+            </div>
+          )}
+
+          {/* Step 01: type */}
+          <Section label="01" title="Script type">
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {[
+                { v: 'hook',   label: 'Hooks',    desc: 'Standalone openings — 60-90 words each. Filter by hook shape (A-H).' },
+                { v: 'body',   label: 'Bodies',   desc: 'Full body copy following the 7-beat skeleton. Standalone — pair with any hook later.' },
+                { v: 'joined', label: 'Joined',   desc: 'Hook + Body chained. Body continues the same proof character + posture as its hook.' },
+              ].map(opt => {
+                const on = scriptType === opt.v
+                return (
+                  <button key={opt.v} onClick={() => setScriptType(opt.v)}
+                    style={{
+                      flex: '1 1 240px', maxWidth: 380,
+                      padding: '14px 16px', textAlign: 'left',
+                      border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                      background: on ? 'var(--ink)' : 'white',
+                      color: on ? 'var(--paper)' : 'var(--ink)',
+                      cursor: 'pointer', borderRadius: 2,
+                      display: 'flex', flexDirection: 'column', gap: 4,
+                    }}>
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                      letterSpacing: '0.12em', textTransform: 'uppercase',
+                    }}>{opt.label}</span>
+                    <span style={{ fontFamily: 'var(--serif)', fontSize: 12.5,
+                                   fontStyle: 'italic', opacity: 0.85, lineHeight: 1.4 }}>
+                      {opt.desc}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </Section>
+
+          {/* Step 02: angle */}
+          <Section label="02" title="Angle">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {angles.map(a => {
+                const on = a.slug === angleSlug
+                return (
+                  <button key={a.slug} onClick={() => setAngleSlug(a.slug)}
+                    title={a.qualifier}
+                    style={{
+                      padding: '10px 14px',
+                      border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                      background: on ? 'var(--ink)' : 'white',
+                      color: on ? 'var(--paper)' : 'var(--ink)',
+                      fontFamily: 'var(--sans)', fontSize: 14, fontWeight: on ? 600 : 400,
+                      cursor: 'pointer', borderRadius: 2,
+                      display: 'inline-flex', alignItems: 'center', gap: 8,
+                    }}>
+                    {on && <Check size={14} />}
+                    {a.name}
+                  </button>
+                )
+              })}
+            </div>
+            {angleSlug && (() => {
+              const a = angles.find(x => x.slug === angleSlug)
+              if (!a) return null
+              return (
+                <div style={{
+                  marginTop: 12, padding: '10px 14px',
+                  background: 'var(--paper)', border: '1px solid var(--rule)',
+                  fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink-2)',
+                  lineHeight: 1.5,
+                }}>
+                  <strong style={{ fontFamily: 'var(--mono)', fontSize: 10.5,
+                                   letterSpacing: '0.1em', textTransform: 'uppercase',
+                                   color: 'var(--ink-3)' }}>Qualifier:</strong> {a.qualifier}<br/>
+                  <strong style={{ fontFamily: 'var(--mono)', fontSize: 10.5,
+                                   letterSpacing: '0.1em', textTransform: 'uppercase',
+                                   color: 'var(--ink-3)' }}>Promise:</strong> {a.primary_promise}<br/>
+                  <strong style={{ fontFamily: 'var(--mono)', fontSize: 10.5,
+                                   letterSpacing: '0.1em', textTransform: 'uppercase',
+                                   color: 'var(--ink-3)' }}>Mechanism:</strong> {a.mechanism_short}
+                </div>
+              )
+            })()}
+          </Section>
+
+          {/* Step 03: shapes (Hook + Joined) and/or length (Body + Joined) */}
+          {(scriptType === 'hook' || scriptType === 'joined') && (
+            <Section label="03" title="Hook shapes">
+              <div style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                            color: 'var(--ink-4)', marginBottom: 10, maxWidth: 720 }}>
+                Pick the opening-move shapes the generator can use. Leave empty = all 8 shapes
+                rotate evenly across the {nConcepts} concepts. Pick a subset to constrain
+                (e.g. for an A/B test on Pain anchor vs Reframe, select C + F).
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {hookShapes.map(s => {
+                  const on = targetShapes.includes(s.code)
+                  return (
+                    <button key={s.code}
+                      onClick={() => setTargetShapes(prev =>
+                        prev.includes(s.code) ? prev.filter(c => c !== s.code) : [...prev, s.code])}
+                      title={s.description}
+                      style={{
+                        padding: '8px 12px', fontSize: 12.5,
+                        fontFamily: 'var(--sans)',
+                        border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                        background: on ? 'var(--ink)' : 'white',
+                        color: on ? 'var(--paper)' : 'var(--ink-3)',
+                        cursor: 'pointer', borderRadius: 2,
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                      }}>
+                      <span style={{
+                        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                        padding: '1px 4px', background: on ? 'var(--paper)' : 'var(--paper-2)',
+                        color: on ? 'var(--ink)' : 'var(--ink-3)', borderRadius: 1,
+                      }}>{s.code}</span>
+                      {s.name}
+                    </button>
+                  )
+                })}
+                {targetShapes.length > 0 && (
+                  <button onClick={() => setTargetShapes([])}
+                    style={{ padding: '8px 12px', fontSize: 12.5,
+                            fontFamily: 'var(--mono)', background: 'transparent',
+                            color: 'var(--ink-4)', border: 'none', cursor: 'pointer',
+                            textDecoration: 'underline' }}>
+                    Clear ({targetShapes.length})
+                  </button>
+                )}
+              </div>
+            </Section>
+          )}
+          {(scriptType === 'body' || scriptType === 'joined') && (
+            <Section label={scriptType === 'joined' ? '03b' : '03'} title="Target length">
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[
+                  { v: 'under_60s', label: 'Under 60s', desc: 'Tight body, single proof beat' },
+                  { v: '60_75s',    label: '60-75s',    desc: 'Canonical OPT length, full skeleton' },
+                  { v: '75s_plus',  label: '75s+',      desc: 'Full scene paint, extended proof roster' },
+                ].map(opt => {
+                  const on = targetLength === opt.v
+                  return (
+                    <button key={opt.v} onClick={() => setTargetLength(opt.v)}
+                      title={opt.desc}
+                      style={{
+                        padding: '10px 16px',
+                        border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                        background: on ? 'var(--accent)' : 'white',
+                        color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
+                        cursor: 'pointer', borderRadius: 2,
+                      }}>{opt.label}</button>
+                  )
+                })}
+              </div>
+            </Section>
+          )}
+
+          {/* Step 04: how many concepts (template mode) */}
+          <Section label="04" title="How many concepts">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[3, 5, 10, 15, 20, 30].map(n => (
+                  <button key={n} onClick={() => setNConcepts(n)}
+                    style={{
+                      padding: '10px 20px',
+                      border: `1px solid ${nConcepts === n ? 'var(--ink)' : 'var(--rule)'}`,
+                      background: nConcepts === n ? 'var(--accent)' : 'white',
+                      color: 'var(--ink)',
+                      fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600,
+                      cursor: 'pointer', borderRadius: 2, minWidth: 70,
+                    }}>{n}</button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em',
+                              textTransform: 'uppercase', color: 'var(--ink-4)' }}>Custom:</span>
+                <input type="number" min={1} max={30} value={nConcepts}
+                  onChange={e => setNConcepts(Math.max(1, Math.min(30, parseInt(e.target.value) || 1)))}
+                  style={{
+                    width: 70, padding: '8px 10px',
+                    fontFamily: 'var(--mono)', fontSize: 14, textAlign: 'center',
+                    border: '1px solid var(--rule)', background: 'white',
+                    borderRadius: 2,
+                  }} />
+              </div>
+            </div>
+          </Section>
+        </>
+      )}
+
+      {/* ──── LEGACY ATTRIBUTE MODE SECTIONS ──── */}
+      {generatorMode === 'attributes' && (
+      <>
       {/* Step 1: pick offer */}
       <Section label="01" title="Pick an offer">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -371,25 +649,30 @@ export default function AdsGenerator() {
           </div>
         )}
       </Section>
+      </>
+      )}
 
-      {/* Step 4: generate */}
-      <Section label="04" title="Generate">
+      {/* Step 4/5: generate (shared between modes) */}
+      <Section label={generatorMode === 'templates' ? '05' : '04'} title="Generate">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <button onClick={handleGenerate} disabled={generating || !offerSlug}
+          <button onClick={handleGenerate}
+            disabled={generating || (generatorMode === 'templates' ? !angleSlug : !offerSlug)}
             style={{
               padding: '14px 28px', fontFamily: 'var(--mono)', fontSize: 12,
               letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700,
               border: '2px solid var(--ink)',
               background: generating ? 'var(--ink-3)' : 'var(--ink)',
               color: 'var(--paper)', cursor: generating ? 'wait' : 'pointer',
-              opacity: !offerSlug ? 0.4 : 1, borderRadius: 2,
-              boxShadow: !generating && offerSlug ? '4px 4px 0 var(--accent)' : 'none',
+              opacity: (generatorMode === 'templates' ? !angleSlug : !offerSlug) ? 0.4 : 1, borderRadius: 2,
+              boxShadow: !generating && (generatorMode === 'templates' ? angleSlug : offerSlug) ? '4px 4px 0 var(--accent)' : 'none',
               transition: 'all 140ms ease',
             }}>
             <Sparkles size={14} style={{ display: 'inline', marginRight: 8, verticalAlign: 'middle' }} />
             {generating
               ? `Generating ${nConcepts}…`
-              : `Generate ${nConcepts} ${mode === 'diverse' ? 'diverse' : 'targeted'} concept${nConcepts > 1 ? 's' : ''}`}
+              : generatorMode === 'templates'
+                ? `Generate ${nConcepts} ${scriptType}${nConcepts > 1 ? (scriptType === 'body' ? ' bodies' : scriptType === 'joined' ? ' joined scripts' : 's') : ''}`
+                : `Generate ${nConcepts} ${mode === 'diverse' ? 'diverse' : 'targeted'} concept${nConcepts > 1 ? 's' : ''}`}
           </button>
           <label style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-3)',
                         display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
