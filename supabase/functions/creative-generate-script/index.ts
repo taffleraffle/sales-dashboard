@@ -117,7 +117,157 @@ Return scripts via the generate_scripts tool. Each script:
 
 Be ruthlessly literal. No adjective-heavy filler. No marketing-speak. Use editorial em-dashes — like this — not double-dashes.`
 
-// ── Helpers ───────────────────────────────────────────────────────────
+// ── Template-based generator (Ben 2026-05-31) ─────────────────────────
+//
+// New code path that consumes the script_angles / script_proof_characters /
+// script_hook_shapes / script_body_skeletons tables introduced in migration
+// 105. The legacy offer-based path below is preserved for callers that
+// don't yet send angle_slug + script_type. Branch is selected at the top
+// of serve().
+
+async function loadAngle(supabase: any, slug: string) {
+  const { data, error } = await supabase.from('script_angles').select('*').eq('slug', slug).maybeSingle()
+  if (error) throw new Error(`angle fetch: ${error.message}`)
+  if (!data) throw new Error(`angle "${slug}" not found`)
+  return data
+}
+
+async function loadProofCharacters(supabase: any, angle_slug: string) {
+  const { data, error } = await supabase
+    .from('script_proof_characters')
+    .select('name, result_short, result_long, industry_context, metric_kind, display_order')
+    .eq('angle_slug', angle_slug)
+    .eq('active', true)
+    .order('display_order')
+  if (error) throw new Error(`proof_characters fetch: ${error.message}`)
+  return data || []
+}
+
+async function loadHookShapes(supabase: any, target_codes?: string[]) {
+  let q = supabase
+    .from('script_hook_shapes')
+    .select('code, name, description, structural_template, example_filled, message_frame, display_order')
+    .eq('active', true)
+    .order('display_order')
+  if (target_codes && target_codes.length) q = q.in('code', target_codes)
+  const { data, error } = await q
+  if (error) throw new Error(`hook_shapes fetch: ${error.message}`)
+  return data || []
+}
+
+async function loadBodySkeletons(supabase: any, length_bucket?: string) {
+  let q = supabase
+    .from('script_body_skeletons')
+    .select('code, name, description, beat_structure, example_filled, length_bucket, display_order')
+    .eq('active', true)
+    .order('display_order')
+  if (length_bucket) q = q.eq('length_bucket', length_bucket)
+  const { data, error } = await q
+  if (error) throw new Error(`body_skeletons fetch: ${error.message}`)
+  return data || []
+}
+
+// Build the angle-context block that prefixes every template-based prompt.
+function buildAngleContext(angle: any, proofs: any[]): string {
+  const proofRoster = proofs.length
+    ? proofs.map((p, i) => `${i + 1}. ${p.name} — ${p.result_short}  (long: "${p.name} ${p.result_long}")`).join('\n')
+    : '(no proof characters defined for this angle)'
+  return [
+    `ANGLE: ${angle.name}`,
+    `QUALIFIER (the audience-filter opening line shape): ${angle.qualifier}`,
+    `PRIMARY PROMISE (every script must deliver on exactly this): ${angle.primary_promise}`,
+    `MECHANISM (short, for hook use): ${angle.mechanism_short}`,
+    angle.mechanism_long ? `MECHANISM (long, for body reveal beat): ${angle.mechanism_long}` : '',
+    `GUARANTEE CLOSE: ${angle.guarantee_close}`,
+    angle.cta_teeup ? `CTA TEE-UP (body beat 1 opener template): ${angle.cta_teeup}` : '',
+    angle.anchor_vocab?.length ? `ANCHOR VOCAB (rotate so anchors don't become a structural tic): ${angle.anchor_vocab.join(' · ')}` : '',
+    '',
+    `PROOF CHARACTERS (you may name only these, in only these forms):`,
+    proofRoster,
+  ].filter(Boolean).join('\n')
+}
+
+function buildHookShapesBlock(shapes: any[]): string {
+  return shapes.map(s => [
+    `Shape ${s.code} — ${s.name}`,
+    `Description: ${s.description}`,
+    s.message_frame ? `Natural message frame: ${s.message_frame}` : '',
+    `Structural template (slot markers get filled from the angle + proof_characters):`,
+    `  ${s.structural_template}`,
+    s.example_filled ? `Worked example (becoming-1-in-city):\n  ${s.example_filled}` : '',
+  ].filter(Boolean).join('\n')).join('\n\n')
+}
+
+function buildBodySkeletonsBlock(skeletons: any[]): string {
+  return skeletons.map(s => [
+    `Body skeleton ${s.code} — ${s.name} (length bucket: ${s.length_bucket})`,
+    `Description: ${s.description}`,
+    `Beat structure:`,
+    ...(s.beat_structure || []).map((b: string) => `  ${b}`),
+    s.example_filled ? `Worked example:\n${s.example_filled.split('\n').map((l: string) => '  ' + l).join('\n')}` : '',
+  ].filter(Boolean).join('\n')).join('\n\n')
+}
+
+// Each shape gets equal share of the N concepts. Rotation ensures the
+// generator doesn't over-index on one shape (the previous attribute-based
+// path produced 7/10 hooks all in "conditional" shape on the first run).
+function planShapeRotation(shapes: any[], n: number): string[] {
+  if (!shapes.length) return []
+  const out: string[] = []
+  for (let i = 0; i < n; i++) out.push(shapes[i % shapes.length].code)
+  return out
+}
+
+const TEMPLATE_TOOL_NAMES: Record<string, string> = {
+  hook:   'generate_hooks',
+  body:   'generate_bodies',
+  joined: 'generate_joined_scripts',
+}
+
+function buildTemplateToolSchema(script_type: string, n: number, shape_codes: string[]) {
+  const itemBase: any = {
+    type: 'object',
+    properties: {
+      ref:    { type: 'string', description: 'short sequential reference like H1, H2, ...' },
+      body:   { type: 'string', description: 'the script text. Plain text, paragraph breaks for sentence groups, NO markdown' },
+      proof_character: { type: 'string', description: 'which proof character name is used in this script, exactly as listed in the angle context' },
+      notes:  { type: 'string', description: 'one-line note on why this concept' },
+    },
+    required: ['ref', 'body'],
+  }
+  if (script_type === 'hook' || script_type === 'joined') {
+    itemBase.properties.shape_code = {
+      type: 'string',
+      enum: shape_codes,
+      description: 'the hook shape code this script uses (must match the rotation plan)',
+    }
+    itemBase.required.push('shape_code')
+  }
+  if (script_type === 'joined') {
+    itemBase.properties.hook_text = {
+      type: 'string',
+      description: 'the standalone hook portion of the joined script (so we can also save it as a Hook variant)',
+    }
+    itemBase.properties.body_text = {
+      type: 'string',
+      description: 'the body portion that continues from hook_text',
+    }
+    itemBase.required.push('hook_text', 'body_text')
+  }
+  return {
+    name: TEMPLATE_TOOL_NAMES[script_type],
+    description: `Return exactly ${n} ${script_type} concepts.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        scripts: { type: 'array', items: itemBase, minItems: n, maxItems: n },
+      },
+      required: ['scripts'],
+    },
+  }
+}
+
+// ── Legacy helpers (existing offer-based generator) ───────────────────
 async function loadOffer(supabase: any, slug: string) {
   const { data, error } = await supabase.from('offers').select('*').eq('slug', slug).maybeSingle()
   if (error) throw new Error(`offer fetch: ${error.message}`)
@@ -209,11 +359,144 @@ serve(async (req) => {
   try { body = await req.json() } catch { return json({ error: 'invalid JSON' }, 400) }
 
   const offer_slug = body?.offer_slug
+  const angle_slug = body?.angle_slug
+  const script_type = body?.script_type   // 'hook' | 'body' | 'joined'
+  const target_shapes_raw = body?.target_shapes
+  const target_length    = body?.target_length      // 'under_60s' | '60_75s' | '75s_plus'
   const n_concepts = Math.max(1, Math.min(30, body?.n_concepts || 5))
   const target_attributes_raw = body?.target_attributes || {}
   const save_as_drafts = !!body?.save_as_drafts
 
-  if (!offer_slug) return json({ error: 'offer_slug required' }, 400)
+  // ── BRANCH: template-based generator (new Ben 2026-05-31 path) ──
+  if (script_type && angle_slug) {
+    if (!['hook', 'body', 'joined'].includes(script_type)) {
+      return json({ error: `script_type must be one of hook | body | joined` }, 400)
+    }
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
+    const target_shapes = Array.isArray(target_shapes_raw)
+      ? target_shapes_raw.filter((s: any) => typeof s === 'string')
+      : (typeof target_shapes_raw === 'string' && target_shapes_raw ? [target_shapes_raw] : [])
+
+    let angle: any, proofs: any[], shapes: any[], skeletons: any[]
+    try {
+      const needsShapes = script_type === 'hook' || script_type === 'joined'
+      const needsSkeletons = script_type === 'body' || script_type === 'joined'
+      ;[angle, proofs, shapes, skeletons] = await Promise.all([
+        loadAngle(supabase, angle_slug),
+        loadProofCharacters(supabase, angle_slug),
+        needsShapes ? loadHookShapes(supabase, target_shapes.length ? target_shapes : undefined) : Promise.resolve([]),
+        needsSkeletons ? loadBodySkeletons(supabase, target_length) : Promise.resolve([]),
+      ])
+    } catch (e: any) {
+      return json({ error: e.message }, 500)
+    }
+    if ((script_type === 'hook' || script_type === 'joined') && shapes.length === 0) {
+      return json({ error: 'no hook_shapes match the requested filter' }, 400)
+    }
+    if ((script_type === 'body' || script_type === 'joined') && skeletons.length === 0) {
+      return json({ error: 'no body_skeletons match the requested length bucket' }, 400)
+    }
+
+    const shapeRotation = (script_type === 'hook' || script_type === 'joined')
+      ? planShapeRotation(shapes, n_concepts) : []
+
+    const angleCtx = buildAngleContext(angle, proofs)
+    const shapesBlock = (script_type === 'hook' || script_type === 'joined')
+      ? `\n\nHOOK SHAPES AVAILABLE:\n${buildHookShapesBlock(shapes)}` : ''
+    const skeletonsBlock = (script_type === 'body' || script_type === 'joined')
+      ? `\n\nBODY SKELETON:\n${buildBodySkeletonsBlock(skeletons)}` : ''
+    const rotationBlock = shapeRotation.length
+      ? `\n\nSHAPE ROTATION PLAN (the ${n_concepts} ${script_type === 'joined' ? 'joined scripts' : 'hooks'} you return MUST use these shape codes in this order, one per concept):\n${shapeRotation.map((c, i) => `  ${i + 1}. Shape ${c}`).join('\n')}\nProof character rotation: cycle through the proof characters listed above so we don't get 5 Metros in a row.`
+      : ''
+
+    const typeSpecificInstructions =
+      script_type === 'hook'
+        ? `Each hook is a SINGLE PARAGRAPH (no body, no CTA tee-up). It opens with the angle's qualifier (you may rephrase slightly per shape), states the promise + mechanism, includes the assigned shape's signature opening move, and closes with the guarantee. Length: 60-90 words. The hook must be standalone — an editor will pair it with a body later.`
+        : script_type === 'body'
+          ? `Each body follows the 7-beat skeleton above. Use the angle's CTA tee-up shape for Beat 1. Beat 2 (pattern statement) is where you vary stylistically across the ${n_concepts} concepts. Beats 3 (proof roster), 4 (mechanism reveal), 5 (3-part HOW), 6 (guarantee), and 7 (final CTA) follow the skeleton tightly. Length: 250-380 words. Do NOT include a hook — bodies are standalone too.`
+          : `Each joined script is HOOK + BODY chained. Write the hook FIRST using the rotation's assigned shape, then write a body that explicitly continues from THAT hook's proof character + opening posture (don't switch proof characters between hook and body). Return them as separate strings (hook_text + body_text) and also as the combined body field. Length: 350-470 words total.`
+
+    const userMsg = [
+      angleCtx,
+      shapesBlock,
+      skeletonsBlock,
+      rotationBlock,
+      `\n\nGenerate exactly ${n_concepts} ${script_type === 'joined' ? 'joined scripts' : (script_type === 'hook' ? 'hooks' : 'bodies')} for this angle.`,
+      `\n${typeSpecificInstructions}`,
+      `\nReturn via the ${TEMPLATE_TOOL_NAMES[script_type]} tool.`,
+    ].join('')
+
+    const shapeCodes = shapes.map(s => s.code)
+    const tool = buildTemplateToolSchema(script_type, n_concepts, shapeCodes.length ? shapeCodes : ['_'])
+
+    const upstreamT = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 4000 + n_concepts * 700,
+        system: SYSTEM_PROMPT,    // existing locked principles still layer in
+        messages: [{ role: 'user', content: userMsg }],
+        tools: [tool],
+        tool_choice: { type: 'tool', name: TEMPLATE_TOOL_NAMES[script_type] },
+      }),
+    })
+    if (!upstreamT.ok) {
+      const errText = await upstreamT.text()
+      return json({ error: `Anthropic ${upstreamT.status}: ${errText.slice(0, 400)}` }, 502)
+    }
+    const resultT = await upstreamT.json()
+    const toolUseT = (resultT.content || []).find((c: any) => c.type === 'tool_use')
+    if (!toolUseT) return json({ error: 'Claude did not return a tool_use block', raw: resultT }, 502)
+    const scriptsT = toolUseT.input?.scripts || []
+
+    // Optional save-as-drafts. For hook/body/joined we tag the type so the
+    // library system can later link generated scripts to recorded clips of
+    // the matching type ('Hook', 'Body', 'Joined').
+    let saved_variant_ids_t: string[] | undefined
+    let save_error_t: string | undefined
+    if (save_as_drafts && scriptsT.length) {
+      const typeMap: Record<string, string> = { hook: 'Hook', body: 'Body', joined: 'Joined' }
+      const inserts = scriptsT.map((s: any) => ({
+        offer_slug: angle.offer_slugs?.[0] || null,
+        angle_slug,
+        script_type: typeMap[script_type] || script_type,
+        ref: s.ref,
+        title: `${typeMap[script_type] || script_type} via ${angle.slug} (shape ${s.shape_code || '—'})`,
+        frame: script_type === 'body' ? 'OUTCOME' : 'OUTCOME',
+        body: s.body,
+        target_attributes: {
+          shape_code: s.shape_code || null,
+          proof_character: s.proof_character || null,
+          length_bucket: target_length || null,
+        },
+        generated_by_model: ANTHROPIC_MODEL,
+        generation_params: { angle_slug, script_type, target_shapes, n_concepts },
+      }))
+      const { data, error } = await supabase.from('generated_scripts').insert(inserts).select('id')
+      if (error) save_error_t = error.message
+      else if (data) saved_variant_ids_t = data.map((r: any) => r.id)
+    }
+
+    return json({
+      ok: true,
+      mode: 'template',
+      script_type,
+      angle: { slug: angle.slug, name: angle.name },
+      shape_rotation: shapeRotation,
+      scripts: scriptsT,
+      saved_variant_ids: saved_variant_ids_t,
+      save_error: save_error_t,
+      model: ANTHROPIC_MODEL,
+    })
+  }
+
+  // ── Legacy offer-based path (unchanged) ──
+  if (!offer_slug) return json({ error: 'offer_slug or (script_type + angle_slug) required' }, 400)
 
   // Normalize target_attributes — accept either string or string[] per key.
   // Arrays mean "include any of these values". Empty means "any/varied".
