@@ -4,6 +4,7 @@ import {
   listProofCharactersForAngle,
   upsertProofCharacter,
   deleteProofCharacter,
+  PROOF_TYPES,
 } from '../../services/scriptGenerator'
 import ConfirmModal from '../ConfirmModal'
 
@@ -65,7 +66,8 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
       e.result_short !== undefined && e.result_short !== row.result_short ||
       e.result_long !== undefined && (e.result_long || '') !== (row.result_long || '') ||
       e.industry_context !== undefined && (e.industry_context || '') !== (row.industry_context || '') ||
-      e.metric_kind !== undefined && (e.metric_kind || '') !== (row.metric_kind || '')
+      e.metric_kind !== undefined && (e.metric_kind || '') !== (row.metric_kind || '') ||
+      e.proof_type !== undefined && e.proof_type !== (row.proof_type || 'case_study')
     )
   }
 
@@ -85,6 +87,7 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
       result_long: (e.result_long ?? (isNew ? '' : rowOrNew.result_long) ?? '').trim() || null,
       industry_context: (e.industry_context ?? (isNew ? '' : rowOrNew.industry_context) ?? '').trim() || null,
       metric_kind: (e.metric_kind ?? (isNew ? '' : rowOrNew.metric_kind) ?? '').trim() || null,
+      proof_type: (e.proof_type ?? (isNew ? 'case_study' : rowOrNew.proof_type) ?? 'case_study'),
     }
     if (!payload.name || !payload.result_short) {
       setErr('Name and one-line result are required.')
@@ -192,26 +195,59 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
                     No proof characters yet for this angle. Add one below to populate the generator.
                   </div>
                 )}
-                {rows.map(row => {
-                  const saving = savingIds.has(row.id)
-                  const dirty = isDirty(row)
-                  return (
-                    <ProofRow
-                      key={row.id}
-                      title={`#${row.display_order || 100}`}
-                      name={valueFor(row, 'name')}
-                      resultShort={valueFor(row, 'result_short')}
-                      resultLong={valueFor(row, 'result_long')}
-                      industryContext={valueFor(row, 'industry_context')}
-                      metricKind={valueFor(row, 'metric_kind')}
-                      onChange={(field, v) => setEdit(row.id, { [field]: v })}
-                      onSave={() => saveRow(row)}
-                      onRetire={() => setRetireTarget({ id: row.id, name: row.name })}
-                      saving={saving}
-                      dirty={dirty}
-                    />
-                  )
-                })}
+                {/* Group existing rows by proof_type so the operator scans
+                    cleanly — Case studies, then Statistics, then Authority etc. */}
+                {(() => {
+                  const grouped = {}
+                  const order = []
+                  for (const r of rows) {
+                    const t = r.proof_type || 'case_study'
+                    if (!grouped[t]) { grouped[t] = []; order.push(t) }
+                    grouped[t].push(r)
+                  }
+                  return order.map(t => {
+                    const meta = PROOF_TYPES.find(p => p.value === t) || { label: t, hint: '' }
+                    return (
+                      <div key={t} style={{ marginBottom: 14 }}>
+                        <div style={{
+                          display: 'flex', alignItems: 'baseline', gap: 8,
+                          marginBottom: 6, paddingBottom: 4,
+                          borderBottom: '1px solid var(--rule)',
+                        }}>
+                          <span style={{
+                            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                            letterSpacing: '0.14em', textTransform: 'uppercase',
+                            color: 'var(--ink)',
+                          }}>{meta.label}</span>
+                          <span style={{
+                            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                          }}>{grouped[t].length}</span>
+                        </div>
+                        {grouped[t].map(row => {
+                          const saving = savingIds.has(row.id)
+                          const dirty = isDirty(row)
+                          return (
+                            <ProofRow
+                              key={row.id}
+                              title={`#${row.display_order || 100}`}
+                              name={valueFor(row, 'name')}
+                              resultShort={valueFor(row, 'result_short')}
+                              resultLong={valueFor(row, 'result_long')}
+                              industryContext={valueFor(row, 'industry_context')}
+                              metricKind={valueFor(row, 'metric_kind')}
+                              proofType={valueFor(row, 'proof_type') || 'case_study'}
+                              onChange={(field, v) => setEdit(row.id, { [field]: v })}
+                              onSave={() => saveRow(row)}
+                              onRetire={() => setRetireTarget({ id: row.id, name: row.name })}
+                              saving={saving}
+                              dirty={dirty}
+                            />
+                          )
+                        })}
+                      </div>
+                    )
+                  })
+                })()}
 
                 {/* New row buffer */}
                 <div style={{
@@ -232,6 +268,7 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
                     resultLong={edits.__new?.result_long || ''}
                     industryContext={edits.__new?.industry_context || ''}
                     metricKind={edits.__new?.metric_kind || ''}
+                    proofType={edits.__new?.proof_type || 'case_study'}
                     onChange={(field, v) => setEdit('__new', { [field]: v })}
                     onSave={() => saveRow('__new')}
                     onRetire={null}
@@ -273,14 +310,48 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
 }
 
 function emptyEdit() {
-  return { name: '', result_short: '', result_long: '', industry_context: '', metric_kind: '' }
+  return {
+    name: '', result_short: '', result_long: '',
+    industry_context: '', metric_kind: '', proof_type: 'case_study',
+  }
 }
 
 function ProofRow({
-  title, name, resultShort, resultLong, industryContext, metricKind,
+  title, name, resultShort, resultLong, industryContext, metricKind, proofType,
   onChange, onSave, onRetire, saving, dirty, isNew,
 }) {
   const [showDetails, setShowDetails] = useState(false)
+  const typeMeta = PROOF_TYPES.find(p => p.value === proofType) || PROOF_TYPES[0]
+  // Per-type placeholder text so the field guides the operator. Names mean
+  // different things for different proof types (e.g. for 'authority' the
+  // "name" is the source citation, for 'statistic' it's the metric label).
+  const nameLabel = {
+    case_study:    'Client name',
+    testimonial:   'Quote attribution',
+    statistic:     'Metric label',
+    authority:     'Source / citation',
+    demonstration: 'Demo name',
+    social_volume: 'Cohort label',
+    comparison:    'Vs what',
+  }[proofType] || 'Name'
+  const namePh = {
+    case_study:    'Eric',
+    testimonial:   'Mark — plumber, NC',
+    statistic:     'HomeAdvisor burnout rate',
+    authority:     'Roto-Rooter franchise manual',
+    demonstration: 'Month 1 vs month 6 dashboard',
+    social_volume: 'Restoration cohort 2024',
+    comparison:    'vs HomeAdvisor',
+  }[proofType] || 'Eric'
+  const resultPh = {
+    case_study:    'Closed a $215K job in 90 days',
+    testimonial:   '"My closing rate doubled in week 2."',
+    statistic:     '67% of restoration owners burn out on HomeAdvisor in year 2',
+    authority:     'Explicitly recommends abandoning shared-lead platforms',
+    demonstration: '$14K → $48K MRR by month 6, charted',
+    social_volume: '38 restoration companies, average $32K/mo lift',
+    comparison:    '3.2x bookings, 1/4 the cost-per-lead',
+  }[proofType] || 'Closed a $215K job in 90 days'
   return (
     <div style={{
       padding: isNew ? 0 : 14,
@@ -288,19 +359,39 @@ function ProofRow({
       border: isNew ? 'none' : '1px solid var(--rule)',
       borderRadius: 2, marginBottom: isNew ? 0 : 10,
     }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Label>Type</Label>
+        <select value={proofType} onChange={e => onChange('proof_type', e.target.value)}
+          style={{
+            padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 11,
+            letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600,
+            border: '1px solid var(--rule)', background: 'white',
+            color: 'var(--ink)', borderRadius: 2, outline: 'none', cursor: 'pointer',
+          }}>
+          {PROOF_TYPES.map(t => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+        <span style={{
+          fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 11.5,
+          color: 'var(--ink-4)',
+        }}>
+          {typeMeta.hint}
+        </span>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr auto', gap: 10, alignItems: 'start' }}>
         <div>
-          <Label>Name</Label>
+          <Label>{nameLabel}</Label>
           <input type="text" value={name}
             onChange={e => onChange('name', e.target.value)}
-            placeholder="Eric"
+            placeholder={namePh}
             style={inputStyle} />
         </div>
         <div>
-          <Label>One-line result</Label>
+          <Label>One-line proof</Label>
           <input type="text" value={resultShort}
             onChange={e => onChange('result_short', e.target.value)}
-            placeholder="Closed a $215K job in 90 days"
+            placeholder={resultPh}
             style={inputStyle} />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 18 }}>

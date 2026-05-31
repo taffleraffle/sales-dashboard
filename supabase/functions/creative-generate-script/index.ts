@@ -143,9 +143,10 @@ async function loadMechanism(supabase: any, slug: string) {
 async function loadProofCharacters(supabase: any, angle_slug: string) {
   const { data, error } = await supabase
     .from('script_proof_characters')
-    .select('name, result_short, result_long, industry_context, metric_kind, display_order')
+    .select('name, result_short, result_long, industry_context, metric_kind, proof_type, display_order')
     .eq('angle_slug', angle_slug)
     .eq('active', true)
+    .order('proof_type')
     .order('display_order')
   if (error) throw new Error(`proof_characters fetch: ${error.message}`)
   return data || []
@@ -181,9 +182,30 @@ async function loadBodySkeletons(supabase: any, length_bucket?: string) {
 // same angle (problem/desire door) be paired with different mechanisms
 // across campaigns without editing the angle row.
 function buildAngleContext(angle: any, proofs: any[], mechanism: any = null): string {
+  // Proof roster: group by proof_type so the rotation directive can ask
+  // Claude to vary across kinds (Schwartz's hierarchy of proof — case
+  // study, testimonial, statistic, authority, demonstration, social_volume,
+  // comparison). Defaults to 'case_study' for any pre-migration-117 rows.
+  const byType: Record<string, any[]> = {}
+  for (const p of proofs) {
+    const t = p.proof_type || 'case_study'
+    if (!byType[t]) byType[t] = []
+    byType[t].push(p)
+  }
+  const typeOrder = Object.keys(byType)
   const proofRoster = proofs.length
-    ? proofs.map((p, i) => `${i + 1}. ${p.name} — ${p.result_short}  (long: "${p.name} ${p.result_long}")`).join('\n')
+    ? typeOrder.map(t => {
+        const items = byType[t].map((p, i) =>
+          `   ${i + 1}. ${p.name} — ${p.result_short}${p.result_long ? `\n      long: "${p.result_long}"` : ''}${p.metric_kind ? ` [metric: ${p.metric_kind}]` : ''}`
+        ).join('\n')
+        return `  [${t.toUpperCase()}]\n${items}`
+      }).join('\n')
     : '(no proof characters defined for this angle — generate WITHOUT naming any specific clients; use generic phrasing like "our clients" only if absolutely required, and prefer omitting proof entirely so the operator can drop a real win in later)'
+  // Schwartz rotation directive — only fire when multiple proof types are
+  // present, otherwise it's noise.
+  const rotationDirective = typeOrder.length > 1
+    ? `\nPROOF ROTATION DIRECTIVE: ${typeOrder.length} proof TYPES available (${typeOrder.join(', ')}). Across the concepts you produce, ROTATE across types — don't lean on case_study alone. Treat each type as a distinct mode of conviction: case_study persuades by specificity, testimonial by voice + identity, statistic by scale, authority by borrowed credibility, demonstration by show-not-tell, social_volume by aggregate weight, comparison by alternative-anchor. A 10-concept batch should touch at least ${Math.min(typeOrder.length, 4)} different types.`
+    : ''
   const pains = angle.pain_points || []
   const painBlock = pains.length
     ? `\nPAIN POINTS (use these as the lived-reality of the prospect — Shape C "Pain anchor" hooks especially must lean on specific items from this list, NOT generic competitor language. Other shapes can reference one or two of these as supporting context):\n${pains.map((p: string) => `  - ${p}`).join('\n')}`
@@ -194,10 +216,18 @@ function buildAngleContext(angle: any, proofs: any[], mechanism: any = null): st
   const mechBlock = mechanism
     ? `\nMECHANISM PICKED: ${mechanism.name}${mechanism.summary ? ' — ' + mechanism.summary : ''}`
     : ''
-  // 3-part HOW for body Beat 5 — comes from mechanism table when available.
   const howBlock = (mechanism?.beat_5a || mechanism?.beat_5b || mechanism?.beat_5c)
     ? `\n3-PART HOW (use these as Beat 5a / 5b / 5c in the body skeleton — one sentence each, in order):\n  5a: ${mechanism.beat_5a || '(unset)'}\n  5b: ${mechanism.beat_5b || '(unset)'}\n  5c: ${mechanism.beat_5c || '(unset)'}`
     : ''
+  // Schwartz awareness-stage diversity directive — applies to every angle
+  // context regardless of proof state. Asks the generator to consider where
+  // each script's reader sits on the unaware→most-aware continuum and to
+  // vary across the batch.
+  const awarenessBlock = `
+SCHWARTZ DIVERSITY (apply across the batch, NOT to every individual script):
+- AWARENESS STAGE: rotate scripts across (a) Problem-Aware — reader knows the pain but no solution yet; (b) Solution-Aware — reader knows solutions exist but not your mechanism; (c) Product-Aware — reader knows your mechanism but isn't convinced it's for them; (d) Most-Aware — reader is already comparing OPT to alternatives and needs a final push. A 10-script batch should include AT LEAST one from each of (a)/(b)/(c).
+- SOPHISTICATION LEVEL: the more "this category is well-worn" the prospect feels, the stronger the unique mechanism + bigger the promise must be. For tired markets (HomeAdvisor era restoration, Bench-era bookkeeping), lean Stage 4-5 — name the mechanism + a sharper promise. For greener pockets, Stage 2-3 is fine — basic claim + proof.
+- MASS DESIRE: every concept must connect to a pre-existing dominant emotion the prospect ALREADY has — not invent a new one. Surface the desire that's already burning, then channel it.`
   return [
     `ANGLE: ${angle.name}`,
     `QUALIFIER (the audience-filter opening line shape): ${angle.qualifier}`,
@@ -211,8 +241,10 @@ function buildAngleContext(angle: any, proofs: any[], mechanism: any = null): st
     angle.anchor_vocab?.length ? `ANCHOR VOCAB (rotate so anchors don't become a structural tic): ${angle.anchor_vocab.join(' · ')}` : '',
     painBlock,
     '',
-    `PROOF CHARACTERS (you may name only these, in only these forms — if there's only one, use them as the single focal proof and lean into BOTH their result_short and result_long color rather than padding with fabricated others. If there are ZERO, omit proof beats entirely or use [CLIENT NAME — fill] placeholder markers):`,
+    `PROOF SOURCES (you may name only these, in only these forms — grouped by Schwartz proof type. Use them as written; do not invent new specific results or clients):`,
     proofRoster,
+    rotationDirective,
+    awarenessBlock,
   ].filter(Boolean).join('\n')
 }
 
@@ -606,6 +638,12 @@ serve(async (req) => {
       'Problems = what the prospect is stuck on, phrased in their voice. Desires = what they want, phrased in their voice.',
       'Each angle must be specific to the audience qualifier (above). Generic "grow your business" angles will be rejected.',
       'For each angle, ALSO write why_it_matters (consequences + deeper anxiety + what they\'ve tried) and 2-3 evidence_examples (concrete situational moments, not summaries). These are not optional.',
+      '',
+      'SCHWARTZ DIVERSITY (apply across the batch):',
+      `- AWARENESS STAGES: distribute angles across Problem-Aware (the prospect knows the pain, no solution yet), Solution-Aware (knows agencies/SEO/etc exist, picking between them), Product-Aware (knows OPT or a competitor exists, weighing it), and Most-Aware (already comparing OPT to one specific alternative). A batch of ${n_problems + n_desires} should touch at least ${Math.min(n_problems + n_desires, 3)} distinct stages.`,
+      '- SOPHISTICATION: tired markets need named-mechanism + sharper promise; greener pockets can land on basic claim + proof. Rotate.',
+      '- MASS DESIRE: each angle must hook into a desire the prospect ALREADY has — never invent a new one. Identify the burning emotion, then channel it.',
+      '- AVOID stacking angles in the same emotional register. If two desires both read as "I want predictability", consolidate into one and use the slot for a different burning desire (recognition, autonomy, escape, status, security, contribution).',
       grounding.length
         ? 'Cite only the GROUNDING SOURCES you actually drew from for each angle. If an angle came from reasoning alone, leave its sources array empty. NEVER invent URLs or titles.'
         : 'No grounding sources were provided this run. Leave every sources array empty. NEVER invent sources.',

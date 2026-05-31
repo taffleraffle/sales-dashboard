@@ -2,7 +2,8 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Trash2 } from 'lucide-react'
 import { generateScripts, generateAngles, generateProofsForAngle,
          listAngles, listHookShapes, listMechanisms,
-         listProofCharactersForAngle } from '../../services/scriptGenerator'
+         listProofCharactersForAngle,
+         listGeneratedScripts } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import { listTestBatches, addScriptsToBatch } from '../../services/testBatches'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
@@ -84,6 +85,11 @@ export default function AdsGenerator() {
   // indicator. Populated lazily — fetched when the angle library loads
   // and refreshed after auto-generation. Map<slug, number>.
   const [proofCountByAngle, setProofCountByAngle] = useState({})
+  // History: previously generated scripts for the current offer (drafts).
+  // Loaded per offer; refreshed after every successful Generate. Grouped
+  // by minute-bucket in the UI so a single fan-out run shows as one row.
+  const [history, setHistory] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
 
   // Template-based generator (Ben 2026-05-31). Templates is now the
   // only path — Mode toggle was removed in the /generate overhaul.
@@ -188,6 +194,24 @@ export default function AdsGenerator() {
       }
     } catch {}
   }
+
+  // Load history for the current offer. Called on offer change + after
+  // every Generate. Fetches the last 50 drafts so a multi-batch run
+  // (which inserts N rows) all surface in one place.
+  async function refreshHistory(slug) {
+    const target = slug || offerSlug
+    if (!target) { setHistory([]); return }
+    setHistoryLoading(true)
+    try {
+      const rows = await listGeneratedScripts({ offer_slug: target, limit: 50 })
+      setHistory(rows)
+    } catch {
+      setHistory([])
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+  useEffect(() => { refreshHistory(offerSlug) /* eslint-disable-next-line */ }, [offerSlug])
 
   // Refresh mechanism + proof lists whenever the single-selected angle changes.
   // Multi-angle mode hides those pickers — each angle uses its own defaults
@@ -466,6 +490,8 @@ export default function AdsGenerator() {
       }
       // Mirror the existing result-panel shape so the UI doesn't change
       setResult({ scripts: allScripts, model: settled.find(r => r.status === 'fulfilled')?.value?.model || '' })
+      // Refresh history so the new drafts surface in the History block.
+      refreshHistory(offerSlug)
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -1162,51 +1188,16 @@ export default function AdsGenerator() {
                   </Block>
                 )}
 
-                {/* Hook shapes — when hooks or joined are in scriptTypes. */}
-                {(scriptTypes.includes('hook') || scriptTypes.includes('joined')) && (
-                  <Block title="Hook shapes filter" dense
-                    hint={`Leave empty = all 8 shapes rotate. Pick a subset to constrain (e.g. A/B test Pain anchor vs Reframe = C + F).`}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {hookShapes.map(s => {
-                        const on = targetShapes.includes(s.code)
-                        return (
-                          <button key={s.code}
-                            onClick={() => setTargetShapes(prev =>
-                              prev.includes(s.code) ? prev.filter(c => c !== s.code) : [...prev, s.code])}
-                            title={s.description}
-                            style={{
-                              padding: '8px 12px', fontSize: 12.5,
-                              fontFamily: 'var(--sans)',
-                              border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                              background: on ? 'var(--ink)' : 'white',
-                              color: on ? 'var(--paper)' : 'var(--ink-3)',
-                              cursor: 'pointer', borderRadius: 2,
-                              display: 'inline-flex', alignItems: 'center', gap: 6,
-                            }}>
-                            <span style={{
-                              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                              padding: '1px 4px', background: on ? 'var(--paper)' : 'var(--paper-2)',
-                              color: on ? 'var(--ink)' : 'var(--ink-3)', borderRadius: 1,
-                            }}>{s.code}</span>
-                            {s.name}
-                          </button>
-                        )
-                      })}
-                      {targetShapes.length > 0 && (
-                        <button onClick={() => setTargetShapes([])}
-                          style={{ padding: '8px 12px', fontSize: 12.5,
-                                  fontFamily: 'var(--mono)', background: 'transparent',
-                                  color: 'var(--ink-4)', border: 'none', cursor: 'pointer',
-                                  textDecoration: 'underline' }}>
-                          Clear ({targetShapes.length})
-                        </button>
-                      )}
-                    </div>
-                  </Block>
-                )}
+                {/* Hook shapes filter retired (Ben 2026-06-01) — was overkill.
+                    Generator now rotates all 8 shapes automatically across
+                    the batch. */}
 
-                {/* Target length — when bodies or joined are in scriptTypes. */}
-                {(scriptTypes.includes('body') || scriptTypes.includes('joined')) && (
+                {/* Target length — only when a single script type is selected.
+                    Mixed runs (hooks + bodies + joined) use sensible per-type
+                    defaults so the operator gets a varied mix without having
+                    to pick a length that doesn't apply to all of them. */}
+                {scriptTypes.length === 1 &&
+                 (scriptTypes.includes('body') || scriptTypes.includes('joined')) && (
                   <Block title="Target length" dense>
                     <div style={{ display: 'flex', gap: 8 }}>
                       {[
@@ -1486,34 +1477,117 @@ export default function AdsGenerator() {
       </>
       )}
 
-      {/* Result panel — Scripts mode only */}
-      {genTarget === 'scripts' && result?.scripts?.length > 0 && (
-        <div style={{ marginTop: 40, marginBottom: 32 }}>
-          <div style={{
-            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-            gap: 16, marginBottom: 14,
-          }}>
-            <div>
-              <Eyebrow style={{ marginBottom: 4 }}>Output</Eyebrow>
-              <h2 style={{
-                margin: 0, fontSize: 18, lineHeight: 1.2, color: 'var(--ink)',
-                letterSpacing: '-0.005em', fontFamily: 'var(--sans)', fontWeight: 600,
-              }}>
-                {result.scripts.length} scripts generated
-              </h2>
-            </div>
-            <span style={{
-              fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
-              letterSpacing: '0.04em', textTransform: 'uppercase',
+      {/* Result panel — Scripts mode only. Grouped by script type when
+          a multi-type run was fired so the operator can scan all hooks
+          first, then all bodies, then all joined. */}
+      {genTarget === 'scripts' && result?.scripts?.length > 0 && (() => {
+        // Group by _combo.script_type (set by handleGenerate fan-out).
+        // Falls back to a single 'all' group when the combos are missing.
+        const groups = {}
+        const order = []
+        for (const s of result.scripts) {
+          const t = s._combo?.script_type || 'all'
+          if (!groups[t]) { groups[t] = []; order.push(t) }
+          groups[t].push(s)
+        }
+        const typeLabel = (t) => t === 'hook' ? 'Hooks'
+          : t === 'body' ? 'Bodies'
+          : t === 'joined' ? 'Joined' : 'All scripts'
+        return (
+          <div style={{ marginTop: 40, marginBottom: 32 }}>
+            <div style={{
+              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+              gap: 16, marginBottom: 14,
             }}>
-              {result.model}
-            </span>
+              <div>
+                <Eyebrow style={{ marginBottom: 4 }}>Output</Eyebrow>
+                <h2 style={{
+                  margin: 0, fontSize: 18, lineHeight: 1.2, color: 'var(--ink)',
+                  letterSpacing: '-0.005em', fontFamily: 'var(--sans)', fontWeight: 600,
+                }}>
+                  {result.scripts.length} scripts generated{order.length > 1 ? ` · ${order.length} groups` : ''}
+                </h2>
+              </div>
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)',
+                letterSpacing: '0.04em', textTransform: 'uppercase',
+              }}>
+                {result.model}
+              </span>
+            </div>
+            {order.map(t => (
+              <div key={t} style={{ marginBottom: 24 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10,
+                  paddingBottom: 6, borderBottom: '2px solid var(--ink)',
+                }}>
+                  <h3 style={{
+                    margin: 0, fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 600,
+                    color: 'var(--ink)', letterSpacing: '-0.005em',
+                  }}>{typeLabel(t)}</h3>
+                  <span style={{
+                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                    letterSpacing: '0.12em', textTransform: 'uppercase',
+                  }}>{groups[t].length}</span>
+                </div>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(440px, 1fr))',
+                  gap: 16,
+                }}>
+                  {groups[t].map((s, i) => <ScriptCard key={`${t}-${i}`} script={s} index={i + 1} />)}
+                </div>
+              </div>
+            ))}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(440px, 1fr))', gap: 16 }}>
-            {result.scripts.map((s, i) => <ScriptCard key={i} script={s} index={i + 1} />)}
+        )
+      })()}
+
+      {/* History — previous draft scripts for this offer. Readable body
+          previews, grouped by run-bucket (drafts created within the same
+          minute = same fan-out run), collapsible per run. Replaces the
+          old "Recent drafts" table whose titles were uninformative. */}
+      {genTarget === 'scripts' && offerSlug && history.length > 0 && (() => {
+        // Group rows into "runs": same script_type + same minute = one
+        // bucket. We use script_type + minute since a single Generate fires
+        // N calls per (angle × type), all stamped within seconds of each
+        // other. Grouping by exact timestamp would split them up; grouping
+        // by minute folds them cleanly without merging unrelated runs.
+        const bucketKey = (r) => {
+          const m = (r.created_at || '').slice(0, 16)  // YYYY-MM-DDTHH:MM
+          return m
+        }
+        const buckets = {}
+        const order = []
+        for (const r of history) {
+          const k = bucketKey(r)
+          if (!buckets[k]) { buckets[k] = []; order.push(k) }
+          buckets[k].push(r)
+        }
+        return (
+          <div style={{ marginTop: 48, marginBottom: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline',
+                          justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
+              <div>
+                <Eyebrow style={{ marginBottom: 4 }}>History · this offer</Eyebrow>
+                <h2 style={{
+                  margin: 0, fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 400,
+                }}>
+                  {history.length} previously generated {history.length === 1 ? 'draft' : 'drafts'}
+                </h2>
+              </div>
+              <button onClick={() => refreshHistory(offerSlug)} disabled={historyLoading}
+                style={pillButtonStyle()}>
+                {historyLoading ? 'Loading…' : 'Refresh'}
+              </button>
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {order.map(k => (
+                <HistoryRunRow key={k} bucket={k} rows={buckets[k]} />
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       <ConfirmModal
         open={!!retireAngleTarget}
@@ -1616,6 +1690,120 @@ function AdvancedExpander({ label = 'Advanced (optional)', defaultOpen = false, 
 
 // Pill-style mono button used for the angle-picker batch controls
 // (Select all / Clear). Same shape used in MechanismConfigModal etc.
+// Collapsible "run row" in the History block. One row per minute-bucket
+// of generated_scripts. Default closed; expands to show the actual body
+// previews for each draft inside the bucket. Replaces the old "Recent
+// drafts" flat table whose titles were uninformative.
+function HistoryRunRow({ bucket, rows }) {
+  const [open, setOpen] = useState(false)
+  // Group within the bucket by script_type so the operator scans Hooks /
+  // Bodies / Joined separately even within one run.
+  const byType = {}
+  const typeOrder = []
+  for (const r of rows) {
+    const t = (r.script_type || 'Other').toString()
+    if (!byType[t]) { byType[t] = []; typeOrder.push(t) }
+    byType[t].push(r)
+  }
+  const ts = new Date(bucket + ':00Z')
+  const when = isNaN(ts) ? bucket : ts.toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  })
+  return (
+    <div style={{
+      background: 'white', border: '1px solid var(--rule)',
+      borderLeft: '3px solid var(--accent)', borderRadius: 2,
+    }}>
+      <button onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', padding: '10px 14px', background: 'transparent',
+          border: 'none', cursor: 'pointer', textAlign: 'left',
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: 'var(--ink-4)', minWidth: 130,
+        }}>{when}</span>
+        <span style={{
+          fontFamily: 'var(--sans)', fontSize: 13.5, color: 'var(--ink-2)', flex: 1,
+        }}>
+          {rows.length} {rows.length === 1 ? 'draft' : 'drafts'}
+          {typeOrder.length > 1 && (
+            <span style={{ color: 'var(--ink-4)', marginLeft: 6 }}>
+              ({typeOrder.map(t => `${byType[t].length} ${t.toLowerCase()}`).join(' · ')})
+            </span>
+          )}
+        </span>
+        {open ? <ChevronUp size={14} color="var(--ink-4)" /> : <ChevronDown size={14} color="var(--ink-4)" />}
+      </button>
+      {open && (
+        <div style={{ borderTop: '1px solid var(--rule)', padding: '8px 14px 14px' }}>
+          {typeOrder.map(t => (
+            <div key={t} style={{ marginTop: 10 }}>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.14em',
+                textTransform: 'uppercase', color: 'var(--ink-3)',
+                marginBottom: 6, fontWeight: 600,
+              }}>
+                {t} · {byType[t].length}
+              </div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {byType[t].map(r => <HistoryDraftRow key={r.id} row={r} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function HistoryDraftRow({ row }) {
+  const [expanded, setExpanded] = useState(false)
+  const preview = (row.body || '').replace(/\s+/g, ' ').trim().slice(0, 180)
+  function copy(e) {
+    e.stopPropagation()
+    navigator.clipboard.writeText(row.body || '')
+  }
+  return (
+    <div style={{
+      padding: '10px 12px', background: 'var(--paper)',
+      border: '1px solid var(--rule)', borderRadius: 2,
+      cursor: 'pointer',
+    }} onClick={() => setExpanded(e => !e)}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: 'var(--ink-4)',
+        }}>
+          {row.target_attributes?.shape_code ? `Shape ${row.target_attributes.shape_code}` : '—'}
+          {row.target_attributes?.proof_character ? ` · ${row.target_attributes.proof_character}` : ''}
+        </span>
+        <span style={{
+          marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 9.5,
+          padding: '2px 6px', background: 'white', border: '1px solid var(--rule)',
+          color: 'var(--ink-4)', borderRadius: 2, letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+        }}>{row.status || 'draft'}</span>
+        <button onClick={copy} title="Copy body"
+          style={{
+            padding: 4, background: 'transparent', border: 'none',
+            color: 'var(--ink-4)', cursor: 'pointer',
+          }}>
+          <Copy size={11} />
+        </button>
+      </div>
+      <div style={{
+        fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
+        color: 'var(--ink-2)',
+        whiteSpace: expanded ? 'pre-wrap' : 'normal',
+      }}>
+        {expanded ? row.body : (preview + ((row.body || '').length > 180 ? '…' : ''))}
+      </div>
+    </div>
+  )
+}
+
 // Angle picker chip with hover popup + colored type accent + gear icon.
 // Visual rules (Ben 2026-06-01):
 //   - hover reveals a 3px left accent in the angle_type color (red for

@@ -189,12 +189,24 @@ export async function generateProofsForAngle({ angle_slug, n = 4 } = {}) {
 // One row = one named proof a script can pull from. The Edge Function
 // loads them per angle and rotates through them across the batch.
 
+// proof_type values (mirror of migration 117 CHECK constraint).
+export const PROOF_TYPES = [
+  { value: 'case_study',    label: 'Case study',    hint: 'Named client + one-line result' },
+  { value: 'testimonial',   label: 'Testimonial',   hint: 'Direct quote from a client' },
+  { value: 'statistic',     label: 'Statistic',     hint: 'Numeric data point about the audience or market' },
+  { value: 'authority',     label: 'Authority',     hint: 'Industry expert / institution citation' },
+  { value: 'demonstration', label: 'Demonstration', hint: 'Show-not-tell mechanic — before/after numbers' },
+  { value: 'social_volume', label: 'Social volume', hint: 'Aggregate-count proof ("across 38 companies in 2024")' },
+  { value: 'comparison',    label: 'Comparison',    hint: 'Vs the alternative ("vs HomeAdvisor: 3.2x bookings")' },
+]
+
 export async function listProofCharactersForAngle(angle_slug, { active_only = true } = {}) {
   if (!angle_slug) return []
   let q = supabase
     .from('script_proof_characters')
-    .select('id,angle_slug,name,result_short,result_long,industry_context,metric_kind,display_order,active')
+    .select('id,angle_slug,name,result_short,result_long,industry_context,metric_kind,proof_type,display_order,active')
     .eq('angle_slug', angle_slug)
+    .order('proof_type')
     .order('display_order')
     .order('name')
   if (active_only) q = q.eq('active', true)
@@ -207,6 +219,10 @@ export async function upsertProofCharacter(row) {
   if (!row?.angle_slug || !row?.name?.trim() || !row?.result_short?.trim()) {
     throw new Error('upsertProofCharacter: angle_slug, name, result_short are required')
   }
+  const proofType = (row.proof_type || 'case_study').trim()
+  if (!PROOF_TYPES.some(t => t.value === proofType)) {
+    throw new Error(`upsertProofCharacter: unknown proof_type "${proofType}"`)
+  }
   const payload = {
     angle_slug: row.angle_slug,
     name: row.name.trim(),
@@ -214,6 +230,7 @@ export async function upsertProofCharacter(row) {
     result_long: (row.result_long || '').trim() || null,
     industry_context: (row.industry_context || '').trim() || null,
     metric_kind: (row.metric_kind || '').trim() || null,
+    proof_type: proofType,
     display_order: typeof row.display_order === 'number' ? row.display_order : 100,
     active: row.active !== false,
   }
