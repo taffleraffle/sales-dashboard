@@ -1995,18 +1995,39 @@ const NotificationBell = forwardRef(function NotificationBell(
    Keyboard: space = play/pause, ← / → = ±5s, F = fullscreen. */
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
-const OptVideoPlayer = forwardRef(function OptVideoPlayer(
+// memo-wrapped so SubmissionPreviewModal's 1Hz state ticks don't cascade
+// into a player re-render unless an actual prop changes (markers,
+// hoveredMarkerId, etc.). All callbacks passed by the parent are
+// useCallback-stable; markers is useMemo-stable. Together they let the
+// player stay completely idle during normal playback.
+const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
   { src, markers = [], onSeek, onState, hoveredMarkerId, onMarkerHoverChange },
   parentRef,
 ) {
   const videoRef = useRef(null)
   const wrapRef = useRef(null)
   const scrubberRef = useRef(null)
+  // Refs for direct DOM updates on the scrubber + time display. The
+  // previous implementation kept currentTime/buffered in React state and
+  // setState'd on every video tick (4-30Hz depending on the browser),
+  // which re-rendered the whole player tree — markers, tooltips,
+  // controls bar — every tick. With ~10 comment markers + a memoized
+  // SubmissionPreviewModal still subscribing via onState, the combined
+  // cost made the player feel sluggish from the moment the modal opened
+  // (Ben 2026-06-01: "everything now is very, very slow, so please
+  // review this in depth"). Now: timeupdate writes width/left/textContent
+  // directly to these DOM nodes and React never reconciles for time
+  // progression. Marker positions depend on duration (not currentTime)
+  // so they're stable across ticks.
+  const progressFillRef = useRef(null)
+  const bufferedFillRef = useRef(null)
+  const playheadRef = useRef(null)
+  const timeDisplayRef = useRef(null)
+  const currentTimeRef = useRef(0)
+  const bufferedRef = useRef(0)
   const [playing, setPlaying] = useState(false)
   const [muted, setMuted] = useState(false)
   const [duration, setDuration] = useState(0)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [buffered, setBuffered] = useState(0)
   const [hoverPct, setHoverPct] = useState(null)  // 0..1
   const [playbackRate, setPlaybackRate] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -2033,28 +2054,58 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
     getCurrentTime: () => videoRef.current?.currentTime ?? 0,
   }), [])
 
-  // Mirror state up so the composer + scrubber both see the same time.
-  // Throttled to ~4Hz (every 250ms) so the parent doesn't re-render
-  // every video tick — with the comment sidebar mounting N CommentThread
-  // components, the unthrottled path was visibly burning frame rate
-  // (Ben 2026-06-01: "It's very slow").
-  const stateThrottleRef = useRef(0)
+  // Push state up to parent. currentTime is NOT pushed on every tick —
+  // the parent only needs it to label the "+ Comment at X:XX" button,
+  // which can read live time from playerRef.current.getCurrentTime() at
+  // click time (and already does — line 2804). We push at 1Hz while
+  // playing so any UI that DOES want to display live time can; the
+  // button label refreshes once per second which matches the visible
+  // resolution of fmtTime anyway. Pushes on play/pause/duration changes
+  // happen immediately via the second effect.
   useEffect(() => {
-    if (typeof onState !== 'function') return
-    const now = performance.now()
-    if (now - stateThrottleRef.current < 250) return
-    stateThrottleRef.current = now
-    onState({ currentTime, duration, playing })
-  }, [currentTime, duration, playing, onState])
-  // Force a final state push when playback state flips (play/pause) or
-  // duration first loads so the parent always sees the latest, even if
-  // the throttle just fired.
+    if (typeof onState !== 'function' || !playing) return
+    const i = setInterval(() => {
+      onState({
+        currentTime: videoRef.current?.currentTime ?? 0,
+        duration,
+        playing: true,
+      })
+    }, 1000)
+    return () => clearInterval(i)
+  }, [playing, duration, onState])
   useEffect(() => {
     if (typeof onState === 'function') {
       onState({ currentTime: videoRef.current?.currentTime ?? 0, duration, playing })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, duration])
+
+  // Direct-DOM timeupdate handler — replaces setCurrentTime/setBuffered.
+  // Reads videoRef once per tick, writes style.width / style.left /
+  // textContent directly. No React reconciliation.
+  const onVideoTimeUpdate = useCallback(() => {
+    const v = videoRef.current
+    if (!v) return
+    const t = v.currentTime
+    currentTimeRef.current = t
+    const d = v.duration && isFinite(v.duration) ? v.duration : duration
+    if (d > 0) {
+      const pct = (t / d) * 100
+      if (progressFillRef.current) progressFillRef.current.style.width = `${pct}%`
+      if (playheadRef.current) playheadRef.current.style.left = `${pct}%`
+    }
+    if (timeDisplayRef.current) {
+      timeDisplayRef.current.textContent = `${fmtTime(t)} / ${fmtTime(d)}`
+    }
+    const b = v.buffered
+    if (b && b.length > 0) {
+      const bEnd = b.end(b.length - 1)
+      bufferedRef.current = bEnd
+      if (d > 0 && bufferedFillRef.current) {
+        bufferedFillRef.current.style.width = `${Math.min(100, (bEnd / d) * 100)}%`
+      }
+    }
+  }, [duration])
 
   // Teardown — same cleanup pattern as the rest of the codebase.
   useEffect(() => {
@@ -2164,10 +2215,6 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
     onSeek?.(marker.ts)
   }, [onSeek])
 
-  // Snapshot the scrubber position for the progress fill + thumb.
-  const progressPct = duration > 0 ? (currentTime / duration) * 100 : 0
-  const bufferedPct = duration > 0 ? Math.min(100, (buffered / duration) * 100) : 0
-
   return (
     <div ref={wrapRef} className="opt-player"
       style={{
@@ -2204,13 +2251,7 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
               if (v && isFinite(v.duration)) setDuration(v.duration)
               if (v) setMuted(v.muted)
             }}
-            onTimeUpdate={() => {
-              const v = videoRef.current
-              if (!v) return
-              setCurrentTime(v.currentTime)
-              const b = v.buffered
-              if (b && b.length > 0) setBuffered(b.end(b.length - 1))
-            }}
+            onTimeUpdate={onVideoTimeUpdate}
             onVolumeChange={() => setMuted(videoRef.current?.muted ?? false)}
             onRateChange={() => setPlaybackRate(videoRef.current?.playbackRate ?? 1)}
             style={{
@@ -2262,15 +2303,15 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
             position: 'absolute', left: 0, right: 0, height: 4,
             background: 'rgba(255,255,255,0.15)', borderRadius: 2,
           }} />
-          {/* Buffered range */}
-          <div style={{
-            position: 'absolute', left: 0, width: `${bufferedPct}%`,
+          {/* Buffered range — width driven by onVideoTimeUpdate via ref */}
+          <div ref={bufferedFillRef} style={{
+            position: 'absolute', left: 0, width: '0%',
             height: 4, background: 'rgba(255,255,255,0.35)',
             borderRadius: 2,
           }} />
-          {/* Progress fill */}
-          <div style={{
-            position: 'absolute', left: 0, width: `${progressPct}%`,
+          {/* Progress fill — width driven by onVideoTimeUpdate via ref */}
+          <div ref={progressFillRef} style={{
+            position: 'absolute', left: 0, width: '0%',
             height: 4, background: '#f4e14a', borderRadius: 2,
           }} />
           {/* Hover preview marker */}
@@ -2360,9 +2401,9 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
               </div>
             )
           })()}
-          {/* Playhead thumb */}
-          <div style={{
-            position: 'absolute', left: `${progressPct}%`,
+          {/* Playhead thumb — left driven by onVideoTimeUpdate via ref */}
+          <div ref={playheadRef} style={{
+            position: 'absolute', left: '0%',
             width: 12, height: 12, borderRadius: '50%',
             background: '#f4e14a', transform: 'translateX(-50%)',
             boxShadow: '0 2px 6px rgba(244,225,74,0.5)',
@@ -2391,8 +2432,14 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
               color: 'white', fontSize: 14, padding: '0 2px',
               minWidth: 18,
             }}>{muted ? '🔇' : '🔊'}</button>
-          <span style={{ color: 'rgba(255,255,255,0.85)', letterSpacing: '0.04em' }}>
-            {fmtTime(currentTime)} / {fmtTime(duration)}
+          {/* Read currentTime from ref so re-renders (play/pause/hover)
+              don't clobber the live textContent written by
+              onVideoTimeUpdate. Ref read at render time → React writes
+              the latest known time; next tick writes the next. They
+              converge without flashing back to 0:00. */}
+          <span ref={timeDisplayRef}
+            style={{ color: 'rgba(255,255,255,0.85)', letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums' }}>
+            {fmtTime(currentTimeRef.current)} / {fmtTime(duration)}
           </span>
           <span style={{ flex: 1 }} />
           {/* Playback rate — custom popup. Native <select> renders OS-
@@ -2430,7 +2477,7 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
       `}</style>
     </div>
   )
-})
+}))
 
 // Custom playback-speed picker. Renders the current speed as a small
 // pill; click opens a styled popup with the rate options. Replaces the
@@ -2514,7 +2561,7 @@ function fmtTime(seconds) {
    Comments live in lib_submission_comments (migration 119); admin-
    authored comments fire a trigger that notifies the editor via the
    existing bell. */
-function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, onRequestRevision, busy: parentBusy }) {
+function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, onRequestRevision, busy: parentBusy, onCommentsChanged }) {
   const playerRef = useRef(null)
   const [playerState, setPlayerState] = useState({ currentTime: 0, duration: 0, playing: false })
   const [comments, setComments] = useState([])
@@ -2595,12 +2642,13 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
       if (error) throw error
       setComments(curr => [...curr, data])
       setComposer({ open: false, body: '', ts: null, parentId: null })
+      onCommentsChanged?.()
     } catch (e) {
       try { alert(`Comment failed: ${e.message || e}`) } catch {}
     } finally {
       setPosting(false)
     }
-  }, [submission?.id, currentUser])
+  }, [submission?.id, currentUser, onCommentsChanged])
 
   // Resolve / re-open a top-level comment. Admin-only — editors can
   // reply but shouldn't be able to close their own feedback threads.
@@ -2611,7 +2659,8 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
       : { resolved_at: new Date().toISOString(), resolved_by_name: currentUser?.name || 'Admin' }
     setComments(curr => curr.map(c => c.id === comment.id ? { ...c, ...patch } : c))
     await supabase.from('lib_submission_comments').update(patch).eq('id', comment.id)
-  }, [currentUser])
+    onCommentsChanged?.()
+  }, [currentUser, onCommentsChanged])
 
   // Soft-delete a comment. Author-only (or admin override). Replies are
   // cascade-deleted via the FK ON DELETE CASCADE — but for soft delete
@@ -2622,44 +2671,47 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
     await supabase.from('lib_submission_comments')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', comment.id)
-  }, [])
+    onCommentsChanged?.()
+  }, [onCommentsChanged])
+
+  // Derived data — memoized on `comments` so the 1Hz onState push from
+  // the player doesn't rebuild these arrays + force a fresh
+  // `playerMarkers` reference (which would defeat the memo wrap on
+  // OptVideoPlayer and cause a full player re-render every second).
+  const { topLevels, repliesBy, sortedTop, openCount, playerMarkers } = useMemo(() => {
+    const tops = comments.filter(c => !c.parent_id)
+    const replies = comments.reduce((acc, c) => {
+      if (!c.parent_id) return acc
+      if (!acc[c.parent_id]) acc[c.parent_id] = []
+      acc[c.parent_id].push(c)
+      return acc
+    }, {})
+    const sorted = [...tops].sort((a, b) => {
+      const at = a.timestamp_seconds, bt = b.timestamp_seconds
+      if (at == null && bt == null) return new Date(a.created_at) - new Date(b.created_at)
+      if (at == null) return 1
+      if (bt == null) return -1
+      return at - bt
+    })
+    const open = tops.filter(c => !c.resolved_at).length
+    const markers = tops
+      .filter(c => c.timestamp_seconds != null)
+      .map(c => ({
+        id: c.id,
+        ts: c.timestamp_seconds,
+        color: c.resolved_at ? 'rgba(255,255,255,0.4)' : '#3e7eba',
+        title: c.body,
+        authorName: c.author_name,
+      }))
+    return { topLevels: tops, repliesBy: replies, sortedTop: sorted, openCount: open, playerMarkers: markers }
+  }, [comments])
 
   if (!submission) return null
   const url = submission.file_url
   const filename = `v${submission.version_number || 1}.mp4`
   const editor = submission.submitted_by_name || 'Unknown editor'
-  // Top-level comments + their replies. Sorted by timestamp first
-  // (null = end), then by created_at to keep general comments at
-  // the bottom of the list under their first reply.
-  const topLevels = comments.filter(c => !c.parent_id)
-  const repliesBy = comments.reduce((acc, c) => {
-    if (!c.parent_id) return acc
-    if (!acc[c.parent_id]) acc[c.parent_id] = []
-    acc[c.parent_id].push(c)
-    return acc
-  }, {})
-  const sortedTop = [...topLevels].sort((a, b) => {
-    const at = a.timestamp_seconds, bt = b.timestamp_seconds
-    if (at == null && bt == null) return new Date(a.created_at) - new Date(b.created_at)
-    if (at == null) return 1
-    if (bt == null) return -1
-    return at - bt
-  })
-  const openCount = topLevels.filter(c => !c.resolved_at).length
   const isApproved = !!submission.approved_at
   const canAct = !submission.__synthetic && !isApproved
-  // Markers passed to the player — only top-level timestamped comments.
-  // Color reflects open vs resolved. Author name flows into the tooltip
-  // so "BEN · 0:02" reads cleaner than a bare timestamp.
-  const playerMarkers = topLevels
-    .filter(c => c.timestamp_seconds != null)
-    .map(c => ({
-      id: c.id,
-      ts: c.timestamp_seconds,
-      color: c.resolved_at ? 'rgba(255,255,255,0.4)' : '#3e7eba',
-      title: c.body,
-      authorName: c.author_name,
-    }))
   // Send-revision handler — local wrapper that closes the draft on success.
   const handleSendRevision = async () => {
     if (!revisionDraft.body.trim() || !onRequestRevision) return
@@ -2699,8 +2751,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
               markers={playerMarkers}
               onState={onPlayerState}
               hoveredMarkerId={hoveredMarkerId}
-              onMarkerHoverChange={setHoveredMarkerId}
-              onSeek={() => { /* nothing extra — the player handles seek+play */ }} />
+              onMarkerHoverChange={setHoveredMarkerId} />
           </div>
           {/* Editor's submission note. Tucked just below the player so
               the operator sees context without scrolling. */}
@@ -2759,7 +2810,10 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
                 comment={c}
                 replies={repliesBy[c.id] || []}
                 onSeek={seekTo}
-                onReply={(parentId) => setComposer({ open: true, body: '', ts: null, parentId })}
+                onReply={(parentId) => {
+                  playerRef.current?.pause()
+                  setComposer({ open: true, body: '', ts: null, parentId })
+                }}
                 onResolve={toggleResolve}
                 onDelete={deleteComment}
                 canResolve={currentUser?.kind === 'admin'}
@@ -2802,6 +2856,11 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
                         // "I can't leave a comment at certain time
                         // periods").
                         const liveTs = url ? (playerRef.current?.getCurrentTime() ?? currentTime) : null
+                        // Pause so the operator can think + type without
+                        // the video running away (Ben 2026-06-01: "when
+                        // I leave comments on the video, it doesn't
+                        // automatically pause you").
+                        playerRef.current?.pause()
                         setComposer({ open: true, body: '', ts: liveTs, parentId: null })
                       }}
                       style={{
@@ -2810,9 +2869,12 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
                         letterSpacing: '0.08em', textTransform: 'uppercase',
                         background: 'var(--ink)', color: 'var(--paper)',
                         border: 'none', cursor: 'pointer',
-                      }}>+ Comment{url && duration > 0 ? ` at ${fmtTime(currentTime)}` : ''}</button>
+                      }}>+ Comment{url && duration > 0 ? ` at ${fmtTime(playerRef.current?.getCurrentTime() ?? currentTime)}` : ''}</button>
                     {url && duration > 0 && (
-                      <button onClick={() => setComposer({ open: true, body: '', ts: null, parentId: null })}
+                      <button onClick={() => {
+                          playerRef.current?.pause()
+                          setComposer({ open: true, body: '', ts: null, parentId: null })
+                        }}
                         title="General comment (no timestamp)"
                         style={{
                           padding: '9px 12px',
@@ -11316,6 +11378,43 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     return () => clearInterval(t)
   }, [hasPendingIngest, reloadSubmissions])
 
+  // Comment counts per submission. Pulled from lib_submission_comments so
+  // the inline SubmissionsPanel can show "💬 N comments · K open" instead
+  // of "No feedback yet" (Ben 2026-06-01: leaving comments in the Review
+  // modal wasn't reflected anywhere on the version card, so the panel
+  // looked like nothing had happened). Refetches whenever the submissions
+  // list changes and re-polls while the modal is open.
+  const [commentsBySubId, setCommentsBySubId] = useState({})
+  const submissionIdsKey = submissions.map(s => s.id).join(',')
+  const reloadCommentCounts = useCallback(async () => {
+    if (!submissions.length) { setCommentsBySubId({}); return }
+    const ids = submissions.map(s => s.id)
+    const { data, error } = await supabase
+      .from('lib_submission_comments')
+      .select('submission_id, parent_id, resolved_at, deleted_at')
+      .in('submission_id', ids)
+      .is('deleted_at', null)
+    if (error || !data) return
+    const map = {}
+    for (const id of ids) map[id] = { total: 0, open: 0, openTimestamped: 0 }
+    for (const c of data) {
+      const bucket = map[c.submission_id]
+      if (!bucket) continue
+      bucket.total += 1
+      if (!c.parent_id && !c.resolved_at) bucket.open += 1
+    }
+    setCommentsBySubId(map)
+  }, [submissionIdsKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { reloadCommentCounts() }, [reloadCommentCounts])
+  // Re-fetch counts when the Review modal closes — the admin probably
+  // just posted/resolved a bunch of comments and the card needs to
+  // reflect that immediately.
+  const prevReviewingRef = useRef(null)
+  useEffect(() => {
+    if (prevReviewingRef.current && !reviewingSub) reloadCommentCounts()
+    prevReviewingRef.current = reviewingSub
+  }, [reviewingSub, reloadCommentCounts])
+
   // Tracks whether any field has been touched in this modal session.
   // Used by handleCloseModal to decide whether to flush a final save —
   // we don't want to write to the DB on every modal close if the user
@@ -11780,6 +11879,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             own video preview, Approve button (admin), Delete button. */}
         <SubmissionsPanel
           submissions={submissions}
+          commentsBySubId={commentsBySubId}
           canApprove={scope.canEditTask}
           canDelete={scope.canEditTask}
           // Anyone with access to the task modal can leave feedback —
@@ -12024,6 +12124,11 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             setBusy(false)
           }
         }}
+        // Refresh the count chip in the underlying SubmissionsPanel the
+        // moment a comment is posted / resolved / deleted, so the version
+        // card stays in sync without waiting for the modal to close
+        // (code-review P1, 2026-06-01).
+        onCommentsChanged={reloadCommentCounts}
         onClose={() => setReviewingSub(null)} />
     </Modal>
   )
@@ -12033,7 +12138,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
    lib_task_submissions, newest first. Each card has its own inline
    playable preview + per-version Approve / Delete buttons. Replaces
    the old single-slot SubmittedWorkPanel. */
-function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onOpenReview, onFeedbackSaved, onRequestRevision, currentUserName, currentUserRole = 'admin', taskEditorId, taskName }) {
+function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onOpenReview, onFeedbackSaved, onRequestRevision, currentUserName, currentUserRole = 'admin', taskEditorId, taskName }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   // Per-card expand/collapse state. Default: only the LATEST (first
   // in the list) is expanded, older versions are collapsed so the
@@ -12237,6 +12342,39 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                   }}>
                     {sub.submitted_by_name || 'Unknown'} · {new Date(sub.created_at).toLocaleString()}
                   </span>
+                  {/* Comment-count chip — surfaces lib_submission_comments
+                      activity onto the version header so it's obvious at
+                      a glance that this cut has been reviewed (Ben
+                      2026-06-01: "right now there isn't any real way to
+                      know"). Open count is red-ish if there are unresolved
+                      timestamped comments, neutral if all resolved. */}
+                  {(() => {
+                    const cc = commentsBySubId[sub.id]
+                    if (!cc || cc.total === 0) return null
+                    const hasOpen = cc.open > 0
+                    return (
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (onOpenReview && sub.file_url) onOpenReview(sub)
+                        }}
+                        title={hasOpen
+                          ? `${cc.open} open · ${cc.total} total — click to open Review`
+                          : `${cc.total} comment${cc.total === 1 ? '' : 's'} (all resolved) — click to open Review`}
+                        style={{
+                          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                          letterSpacing: '0.06em', textTransform: 'uppercase',
+                          padding: '3px 7px', borderRadius: 2, cursor: 'pointer',
+                          background: hasOpen ? '#fff1f1' : 'rgba(62,138,94,0.08)',
+                          color: hasOpen ? '#8b1f1f' : '#1f5a2f',
+                          border: `1px solid ${hasOpen ? 'rgba(181,62,62,0.45)' : 'rgba(62,138,94,0.4)'}`,
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                        }}>
+                        <span style={{ fontSize: 11 }}>💬</span>
+                        {hasOpen ? `${cc.open} OPEN · ${cc.total}` : `${cc.total} RESOLVED`}
+                      </span>
+                    )
+                  })()}
                 </div>
                 {/* Action row — collapsed to one primary + small quick actions.
                     Ben's overhaul ask: Review is the catch-all (opens player +
@@ -12373,15 +12511,36 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                   not a passive label, so it's impossible to miss. */}
               {isExpanded && (() => {
                 const hasFeedback = !!sub.feedback_text
+                const cc = commentsBySubId[sub.id] || { total: 0, open: 0 }
+                const hasComments = cc.total > 0
+                const hasOpenComments = cc.open > 0
                 const isEditing = feedbackEditingId === sub.id
                 const isUnread = hasFeedback && !sub.feedback_read_at
-                // Color the whole section by status:
-                //   unread feedback -> red border (action needed)
-                //   read feedback   -> green border (closed)
-                //   empty           -> yellow border (waiting for input)
-                const accent = isUnread ? '#b53e3e' : hasFeedback ? '#3e8a5e' : '#e8b408'
-                const bg = isUnread ? '#fff1f1' : hasFeedback ? 'rgba(62,138,94,0.05)' : '#fffaea'
-                const labelColor = isUnread ? '#8b1f1f' : hasFeedback ? '#1f5a2f' : '#7a4e08'
+                // Status priority (highest first):
+                //   unread feedback OR open comments -> red (action needed)
+                //   has feedback OR resolved comments -> green (closed)
+                //   empty -> yellow (waiting for input)
+                const needsAction = isUnread || hasOpenComments
+                const hasAny = hasFeedback || hasComments
+                const accent = needsAction ? '#b53e3e' : hasAny ? '#3e8a5e' : '#e8b408'
+                const bg = needsAction ? '#fff1f1' : hasAny ? 'rgba(62,138,94,0.05)' : '#fffaea'
+                const labelColor = needsAction ? '#8b1f1f' : hasAny ? '#1f5a2f' : '#7a4e08'
+                // Build a status label that reflects ALL signals — feedback
+                // text + comment activity — so the panel never lies about
+                // whether anyone's said anything about this cut.
+                let statusLabel
+                if (!hasFeedback && !hasComments) statusLabel = 'No feedback yet'
+                else if (needsAction) {
+                  const bits = []
+                  if (isUnread) bits.push('Feedback waiting')
+                  if (hasOpenComments) bits.push(`${cc.open} open comment${cc.open === 1 ? '' : 's'}`)
+                  statusLabel = bits.join(' · ')
+                } else {
+                  const bits = []
+                  if (hasFeedback) bits.push('Feedback (seen)')
+                  if (hasComments) bits.push(`${cc.total} comment${cc.total === 1 ? '' : 's'} resolved`)
+                  statusLabel = bits.join(' · ')
+                }
                 return (
                   <div style={{
                     padding: '10px 12px',
@@ -12397,17 +12556,28 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                       marginBottom: hasFeedback ? 6 : 8,
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                     }}>
-                      <span>
-                        {!hasFeedback && 'No feedback yet'}
-                        {hasFeedback && isUnread && 'Feedback waiting'}
-                        {hasFeedback && !isUnread && 'Feedback (seen)'}
-                      </span>
+                      <span>{statusLabel}</span>
                       {hasFeedback && sub.feedback_at && (
                         <span style={{ color: 'var(--ink-3)', fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'none', fontWeight: 500 }}>
                           {displayAuthor(sub.feedback_by_name)} · {new Date(sub.feedback_at).toLocaleString()}
                         </span>
                       )}
                     </div>
+                    {/* Quick-jump CTA when there are timestamped comments —
+                        the inline panel can't show a player scrubber so
+                        the only way to read them is the Review modal. */}
+                    {!hasFeedback && hasComments && onOpenReview && sub.file_url && (
+                      <button type="button"
+                        onClick={() => onOpenReview(sub)}
+                        style={{
+                          padding: '5px 10px', marginBottom: hasFeedback ? 6 : 4,
+                          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                          letterSpacing: '0.08em', textTransform: 'uppercase',
+                          background: needsAction ? '#b53e3e' : '#3e8a5e',
+                          color: 'white', border: 'none', borderRadius: 2,
+                          cursor: 'pointer',
+                        }}>Open comments in Review ▶</button>
+                    )}
                     {/* Display mode */}
                     {hasFeedback && !isEditing && (
                       <div style={{
