@@ -1240,6 +1240,116 @@ function RenameUnnamedButton({ rows, onComplete }) {
   )
 }
 
+// Status chip for the external-submission ingest pipeline. Editors who
+// submit a Frame.io / Drive / Dropbox / direct URL kick off a DB trigger
+// that hits the ingest-external-submission Edge Function; until that
+// function finishes we render a "pulling…" pill, and if it fails we
+// render a red chip with a Retry button. On success ingest_status flips
+// to null (or 'success', briefly) and this component renders nothing —
+// the submission becomes playable in-place via SubmissionPreviewModal
+// just like a TUS-uploaded one.
+function IngestStatusChip({ submission, onRetry, busy }) {
+  const status = submission?.ingest_status
+  if (status !== 'pending' && status !== 'failed') return null
+  if (status === 'pending') {
+    return (
+      <span title="Pulling video from external host…"
+        style={{
+          padding: '2px 8px',
+          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          background: 'rgba(232,180,8,0.18)', color: '#7a5800',
+          border: '1px solid rgba(232,180,8,0.45)', borderRadius: 2,
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+        }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: '#e8b408',
+          animation: 'ingestPulse 1.4s ease-in-out infinite',
+        }} />
+        Pulling
+        <style>{`@keyframes ingestPulse { 0%,100% { opacity: 0.3 } 50% { opacity: 1 } }`}</style>
+      </span>
+    )
+  }
+  // failed
+  return (
+    <span title={submission.ingest_error_text || 'Ingestion failed'}
+      style={{
+        padding: '2px 4px 2px 8px',
+        fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        background: 'rgba(181,62,62,0.12)', color: '#8a2a2a',
+        border: '1px solid rgba(181,62,62,0.4)', borderRadius: 2,
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+      }}>
+      Ingest failed
+      {onRetry && (
+        <button type="button"
+          onClick={(e) => { e.stopPropagation(); if (!busy) onRetry(submission) }}
+          disabled={busy}
+          style={{
+            padding: '1px 6px',
+            fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            background: '#b53e3e', color: 'white',
+            border: 'none', borderRadius: 2,
+            cursor: busy ? 'not-allowed' : 'pointer',
+          }}>Retry</button>
+      )}
+    </span>
+  )
+}
+
+// Resolve the current auth user → a comment-author identity. Used by
+// the SubmissionPreviewModal comment composer so admin comments are
+// attributed correctly (and so the editor's bell notification shows
+// who left the feedback). Falls back to { kind: 'admin', name: 'Admin' }
+// if the auth session can't be resolved — same convention the existing
+// approveSubmission flow uses (approved_by_name: 'admin').
+function useAdminIdentity() {
+  const [identity, setIdentity] = useState({ kind: 'admin', id: null, name: 'Admin' })
+  useEffect(() => {
+    let mounted = true
+    supabase.auth.getUser().then(({ data }) => {
+      const user = data?.user
+      if (!mounted || !user) return
+      // Best-effort name: prefer the team_members row's display_name,
+      // then user metadata, then the email local-part. We don't block
+      // on this — the modal opens with 'Admin' and patches in once
+      // the lookup resolves.
+      const fallback = (user.email || '').split('@')[0] || 'Admin'
+      setIdentity({ kind: 'admin', id: user.id, name: fallback })
+      supabase.from('team_members')
+        .select('display_name')
+        .eq('auth_user_id', user.id)
+        .maybeSingle()
+        .then(({ data: tm }) => {
+          if (mounted && tm?.display_name) {
+            setIdentity({ kind: 'admin', id: user.id, name: tm.display_name })
+          }
+        })
+    })
+    return () => { mounted = false }
+  }, [])
+  return identity
+}
+
+// Fire the retry_external_ingest RPC. Idempotent: bumps ingest_attempt_count,
+// resets ingest_status to 'pending', re-fires the edge function via pg_net.
+// Returns { ok, error } so the caller can flash a toast on failure.
+async function retryIngest(submissionId) {
+  try {
+    const { data, error } = await supabase.rpc('retry_external_ingest', {
+      p_submission_id: submissionId,
+    })
+    if (error) return { ok: false, error: error.message }
+    return { ok: !!data, error: null }
+  } catch (e) {
+    return { ok: false, error: e?.message || 'retry failed' }
+  }
+}
+
 // Strip mangled control / replacement chars that occasionally land in
 // notification bodies (the U+FFFD diamond from a cp1252-on-utf8 round-trip,
 // or a stray bullet that got transliterated). Also rewrite the cosmetic
@@ -1282,7 +1392,9 @@ function notificationsSubtitle(notifications, unseenCount, _seenAt) {
 function groupNotifications(notifications) {
   const KIND_ORDER = [
     'new_upload_needs_assignment',
+    'ingest_failed',
     'revision_requested',
+    'submission_comment',
     'feedback',
     'assignment',
     'reassignment',
@@ -1292,7 +1404,9 @@ function groupNotifications(notifications) {
   ]
   const KIND_META = {
     new_upload_needs_assignment: { label: 'Needs editor',   color: '#b53e3e' },
+    ingest_failed:               { label: 'Ingest failed',  color: '#b53e3e' },
     revision_requested:          { label: 'Revision asked', color: '#d09c08' },
+    submission_comment:          { label: 'New comment',    color: '#3e7eba' },
     feedback:                    { label: 'Feedback',       color: '#e8b408' },
     assignment:                  { label: 'New tasks',      color: '#3e7eba' },
     reassignment:                { label: 'Reassigned',     color: '#3e7eba' },
@@ -1588,10 +1702,13 @@ const NotificationBell = forwardRef(function NotificationBell(
   ref,
 ) {
   const [open, setOpen] = useState(false)
-  // Submission currently being previewed inline (Supabase-hosted files only).
-  // External review links (Frame.io / Drive / Dropbox) can't be embedded —
-  // they keep their external-link UX. Null = no preview open.
+  // Submission currently being previewed inline. We now also support
+  // submissions whose external_url was ingested into Supabase storage
+  // by the ingest-external-submission Edge Function — those carry a
+  // file_url too. Submissions still pending ingest render the inline
+  // preview disabled (use the "Open review link" affordance instead).
   const [previewing, setPreviewing] = useState(null)
+  const adminIdentity = useAdminIdentity()
   // "Seen" timestamp — anything created AFTER this counts as new.
   // Persists in localStorage so the bell remembers across reloads.
   const [seenAt, setSeenAt] = useState(() => {
@@ -1768,7 +1885,7 @@ const NotificationBell = forwardRef(function NotificationBell(
                         }} title={creativeName}>
                           {creativeName}
                         </div>
-                        {/* Row 2: editor + version + time + NEW pill */}
+                        {/* Row 2: editor + version + time + NEW pill + ingest chip */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
                           <span style={{
                             padding: '1px 5px', background: 'var(--ink-3)', color: 'white',
@@ -1786,6 +1903,17 @@ const NotificationBell = forwardRef(function NotificationBell(
                               letterSpacing: '0.08em',
                             }}>NEW</span>
                           )}
+                          {/* External-submission ingest status. The row click bubbles
+                              to onOpenCreative; the chip's Retry button stops
+                              propagation so it doesn't open the drawer. */}
+                          <IngestStatusChip
+                            submission={s}
+                            onRetry={async (sub) => {
+                              await retryIngest(sub.id)
+                              // No optimistic update here — the activity bell polls
+                              // every 60s via the load() effect, so the chip will
+                              // refresh to pending on next tick.
+                            }} />
                         </div>
                         {/* Row 3: status + view-submission action */}
                         <div style={{
@@ -1840,27 +1968,44 @@ const NotificationBell = forwardRef(function NotificationBell(
           (the Modal primitive auto-increments z-index by mount depth). */}
       <SubmissionPreviewModal
         submission={previewing}
+        currentUser={adminIdentity}
         onClose={() => setPreviewing(null)} />
     </>
   )
 })
 
-/* In-place video preview for an editor submission. Plays the Supabase
-   file_url directly via the native <video> element. The optional
-   "Download" link below the player wraps the URL in toDownloadUrl()
-   so the operator can still grab the original bytes if they want — but
-   the default action is just watch. */
-function SubmissionPreviewModal({ submission, onClose }) {
+/* In-place video preview for an editor submission with native review
+   surface (Frame.io-ish: timestamped comments pinned to the scrubber).
+   Plays the Supabase file_url directly via the native <video> element.
+   Comments live in lib_submission_comments (migration 119); admin-
+   authored comments fire a trigger that notifies the editor via the
+   existing bell. Editor sees the same comments in the EditTaskModal.
+
+   Layout: video left, comment thread right. Comment markers sit just
+   below the video as a thin track, positioned proportionally to the
+   video duration. Click a marker → seek to that time. Click "Add
+   comment at {currentTime}" → opens a composer pre-stamped with the
+   current playback position; submit posts the comment + the marker
+   appears immediately.
+
+   Why a separate scrubber-marker track instead of overlaying on the
+   native <video controls>: browsers don't expose the controls bar
+   DOM so we can't reliably absolute-position children on it across
+   Chrome/Safari/Firefox. The track below is visually associated
+   with the video timeline and behaves the same in every browser. */
+function SubmissionPreviewModal({ submission, onClose, currentUser }) {
   const videoRef = useRef(null)
-  // Pause + release the decoder when the modal closes. The previous
-  // implementation tried to do the teardown in the effect body, but the
-  // early-return below (`if (!submission) return null`) unmounts the
-  // <video> before the effect ever sees a live ref. Using the cleanup
-  // function fixes this: we capture the live element when the effect
-  // runs with submission set, and the cleanup closure-tearing-down
-  // happens on the next deps change OR component unmount — at which
-  // point the captured element is detached but still pause-able and
-  // src-clearable. Matches the pattern in PreviewVideo (line ~2050).
+  const [duration, setDuration] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [comments, setComments] = useState([])
+  const [busy, setBusy] = useState(false)
+  // Composer state. ts=null means a general (non-timestamped) comment.
+  const [composer, setComposer] = useState({ open: false, body: '', ts: null, parentId: null })
+  // Auto-tear-down for the decoder — same cleanup-function pattern as
+  // the rest of the codebase (see PreviewVideo at ~2050). Capture the
+  // live element when the effect runs with a submission, release in
+  // cleanup so closing the modal kills the network/CPU immediately
+  // instead of letting the browser drag the unmount.
   useEffect(() => {
     if (!submission) return
     const v = videoRef.current
@@ -1870,52 +2015,441 @@ function SubmissionPreviewModal({ submission, onClose }) {
       try { v.removeAttribute('src'); v.load() } catch {}
     }
   }, [submission])
+
+  // Load comments + poll every 10s while the modal is open so admin/
+  // editor side-by-side stays in sync without realtime. supabase
+  // realtime channels are heavier infra — poll is fine for a small
+  // per-submission feed.
+  const reloadComments = useCallback(async () => {
+    if (!submission?.id) return
+    const { data } = await supabase
+      .from('lib_submission_comments')
+      .select('*')
+      .eq('submission_id', submission.id)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+    setComments(data || [])
+  }, [submission?.id])
+  useEffect(() => { reloadComments() }, [reloadComments])
+  useEffect(() => {
+    if (!submission) return
+    const t = setInterval(reloadComments, 10_000)
+    return () => clearInterval(t)
+  }, [submission, reloadComments])
+
+  // Wire the <video> element's metadata + timeupdate events to local
+  // state. Used to position markers + the "Add at {currentTime}" button.
+  // We poll currentTime via the native event rather than rAF — it fires
+  // ~4x/sec which is enough for marker labelling but doesn't burn CPU.
+  const onVideoLoaded = useCallback(() => {
+    if (videoRef.current && isFinite(videoRef.current.duration)) {
+      setDuration(videoRef.current.duration)
+    }
+  }, [])
+  const onVideoTime = useCallback(() => {
+    if (videoRef.current) setCurrentTime(videoRef.current.currentTime)
+  }, [])
+  const seekTo = useCallback((seconds) => {
+    if (!videoRef.current) return
+    try { videoRef.current.currentTime = Math.max(0, seconds) } catch {}
+    try { videoRef.current.play() } catch {}
+  }, [])
+
+  // Post a new top-level comment OR a reply (when parentId set). Author
+  // identity falls back to 'Admin' if we couldn't resolve a name — the
+  // trigger doesn't care, and the editor still gets a notification.
+  const postComment = useCallback(async ({ body, ts, parentId }) => {
+    if (!submission?.id || !body?.trim()) return
+    setBusy(true)
+    try {
+      const row = {
+        submission_id: submission.id,
+        parent_id: parentId || null,
+        timestamp_seconds: parentId ? null : (ts != null ? Number(ts.toFixed(3)) : null),
+        author_kind: currentUser?.kind || 'admin',
+        author_id: currentUser?.id || null,
+        author_name: currentUser?.name || 'Admin',
+        body: body.trim(),
+      }
+      const { data, error } = await supabase
+        .from('lib_submission_comments')
+        .insert(row)
+        .select('*')
+        .single()
+      if (error) throw error
+      // Optimistic: append the inserted row so the marker / thread
+      // updates immediately, then let the next poll pick up any
+      // server-side merges.
+      setComments(curr => [...curr, data])
+      setComposer({ open: false, body: '', ts: null, parentId: null })
+    } catch (e) {
+      // Surface as alert — composer failures are rare and the user
+      // needs to know their comment didn't land.
+      try { alert(`Comment failed: ${e.message || e}`) } catch {}
+    } finally {
+      setBusy(false)
+    }
+  }, [submission?.id, currentUser])
+
+  // Resolve / re-open a top-level comment. Admin-only — editors can
+  // reply but shouldn't be able to close their own feedback threads.
+  const toggleResolve = useCallback(async (comment) => {
+    if (currentUser?.kind !== 'admin') return
+    const patch = comment.resolved_at
+      ? { resolved_at: null, resolved_by_name: null }
+      : { resolved_at: new Date().toISOString(), resolved_by_name: currentUser?.name || 'Admin' }
+    setComments(curr => curr.map(c => c.id === comment.id ? { ...c, ...patch } : c))
+    await supabase.from('lib_submission_comments').update(patch).eq('id', comment.id)
+  }, [currentUser])
+
+  // Soft-delete a comment. Author-only (or admin override). Replies are
+  // cascade-deleted via the FK ON DELETE CASCADE — but for soft delete
+  // we just hide the parent; replies become orphans of a missing thread.
+  // For the small per-submission scale this is acceptable.
+  const deleteComment = useCallback(async (comment) => {
+    setComments(curr => curr.filter(c => c.id !== comment.id))
+    await supabase.from('lib_submission_comments')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', comment.id)
+  }, [])
+
   if (!submission) return null
   const url = submission.file_url
   const filename = `v${submission.version_number || 1}.mp4`
   const editor = submission.submitted_by_name || 'Unknown editor'
+  // Top-level comments + their replies. Sorted by timestamp first
+  // (null = end), then by created_at to keep general comments at
+  // the bottom of the list under their first reply.
+  const topLevels = comments.filter(c => !c.parent_id)
+  const repliesBy = comments.reduce((acc, c) => {
+    if (!c.parent_id) return acc
+    if (!acc[c.parent_id]) acc[c.parent_id] = []
+    acc[c.parent_id].push(c)
+    return acc
+  }, {})
+  const sortedTop = [...topLevels].sort((a, b) => {
+    const at = a.timestamp_seconds, bt = b.timestamp_seconds
+    if (at == null && bt == null) return new Date(a.created_at) - new Date(b.created_at)
+    if (at == null) return 1
+    if (bt == null) return -1
+    return at - bt
+  })
+  const openCount = topLevels.filter(c => !c.resolved_at).length
   return (
-    <Modal open={!!submission} onClose={onClose} size="lg"
+    <Modal open={!!submission} onClose={onClose} size="xl"
       eyebrow="Submission"
       title={`v${submission.version_number || 1} · ${editor}`}
-      subtitle={submission.approved_at ? 'Approved' : 'In review'}>
-      <div style={{ padding: '0 0 16px' }}>
-        <div style={{
-          background: '#000', maxHeight: '60vh',
-          display: 'flex', justifyContent: 'center', alignItems: 'center',
-        }}>
-          {url ? (
-            <video ref={videoRef} src={url} controls autoPlay preload="metadata"
-              style={{ maxWidth: '100%', maxHeight: '60vh', display: 'block' }} />
-          ) : (
+      subtitle={`${submission.approved_at ? 'Approved' : 'In review'} · ${openCount} open comment${openCount === 1 ? '' : 's'}`}>
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px',
+        gap: 0, minHeight: 420,
+      }}>
+        {/* Video column */}
+        <div style={{ padding: '0 0 16px', minWidth: 0 }}>
+          <div style={{
+            background: '#000', maxHeight: '60vh',
+            display: 'flex', justifyContent: 'center', alignItems: 'center',
+          }}>
+            {url ? (
+              <video ref={videoRef} src={url} controls autoPlay preload="metadata"
+                onLoadedMetadata={onVideoLoaded}
+                onTimeUpdate={onVideoTime}
+                style={{ maxWidth: '100%', maxHeight: '60vh', display: 'block' }} />
+            ) : (
+              <div style={{
+                padding: 40, color: 'rgba(255,255,255,0.6)',
+                fontFamily: 'var(--mono)', fontSize: 12,
+              }}>No playable file on this submission.</div>
+            )}
+          </div>
+          {/* Comment marker track. Renders proportional dots for each
+              timestamped comment; click → seek the video. Hovering
+              shows the comment body in a tooltip. */}
+          {url && duration > 0 && (
             <div style={{
-              padding: 40, color: 'rgba(255,255,255,0.6)',
-              fontFamily: 'var(--mono)', fontSize: 12,
-            }}>No playable file on this submission.</div>
+              position: 'relative', height: 22, margin: '0 22px',
+              borderTop: '1px solid var(--rule)',
+              borderBottom: '1px solid var(--rule)',
+              background: 'var(--paper-2)',
+            }}>
+              {topLevels
+                .filter(c => c.timestamp_seconds != null)
+                .map(c => {
+                  const left = Math.min(99, (c.timestamp_seconds / duration) * 100)
+                  const color = c.resolved_at ? 'var(--ink-4)' : '#3e7eba'
+                  return (
+                    <button key={c.id}
+                      onClick={() => seekTo(c.timestamp_seconds)}
+                      title={`${formatTs(c.timestamp_seconds)} — ${c.body.slice(0, 80)}${c.body.length > 80 ? '…' : ''}`}
+                      style={{
+                        position: 'absolute', top: 4, left: `${left}%`,
+                        width: 12, height: 12, borderRadius: '50%',
+                        background: color,
+                        border: '2px solid white',
+                        cursor: 'pointer', padding: 0,
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                      }} />
+                  )
+                })}
+            </div>
+          )}
+          {submission.notes && (
+            <div style={{
+              padding: '12px 22px 0',
+              fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
+              color: 'var(--ink-2)',
+            }}>{submission.notes}</div>
+          )}
+          {url && (
+            <div style={{
+              padding: '14px 22px 0',
+              fontFamily: 'var(--mono)', fontSize: 10.5,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+            }}>
+              <a href={toDownloadUrl(url, filename)}
+                style={{ color: 'var(--ink-3)', textDecoration: 'underline' }}>
+                Download original
+              </a>
+            </div>
           )}
         </div>
-        {submission.notes && (
+        {/* Comments column */}
+        <div style={{
+          borderLeft: '1px solid var(--rule)',
+          background: 'var(--paper-2)',
+          display: 'flex', flexDirection: 'column',
+          minHeight: 0, maxHeight: '70vh',
+        }}>
           <div style={{
-            padding: '12px 22px 0',
-            fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
-            color: 'var(--ink-2)',
-          }}>{submission.notes}</div>
-        )}
-        {url && (
-          <div style={{
-            padding: '14px 22px 0',
-            fontFamily: 'var(--mono)', fontSize: 10.5,
-            letterSpacing: '0.08em', textTransform: 'uppercase',
+            padding: '12px 16px',
+            borderBottom: '1px solid var(--rule)',
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+            letterSpacing: '0.12em', textTransform: 'uppercase',
+            color: 'var(--ink-3)',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
-            <a href={toDownloadUrl(url, filename)}
-              style={{ color: 'var(--ink-3)', textDecoration: 'underline' }}>
-              Download original
-            </a>
+            <span>Comments</span>
+            <span style={{ color: 'var(--ink-4)' }}>{comments.length}</span>
           </div>
-        )}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
+            {sortedTop.length === 0 && (
+              <div style={{
+                padding: '24px 8px', textAlign: 'center',
+                fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13,
+                color: 'var(--ink-3)',
+              }}>No comments yet.<br/>Click below to add the first one.</div>
+            )}
+            {sortedTop.map(c => (
+              <CommentThread key={c.id}
+                comment={c}
+                replies={repliesBy[c.id] || []}
+                onSeek={seekTo}
+                onReply={(parentId) => setComposer({ open: true, body: '', ts: null, parentId })}
+                onResolve={toggleResolve}
+                onDelete={deleteComment}
+                canResolve={currentUser?.kind === 'admin'}
+                currentUser={currentUser} />
+            ))}
+          </div>
+          {/* Composer. Two modes:
+              1) Quick "Add at {currentTime}" button when composer is closed
+              2) Full textarea when open. ts captured at open time so the
+                 user can scrub around while typing without the marker
+                 moving on submit. */}
+          <div style={{ borderTop: '1px solid var(--rule)', padding: 12 }}>
+            {!composer.open ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setComposer({ open: true, body: '', ts: url ? currentTime : null, parentId: null })}
+                  style={{
+                    flex: 1, padding: '8px 12px',
+                    fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                    background: 'var(--ink)', color: 'var(--paper)',
+                    border: 'none', cursor: 'pointer',
+                  }}>+ Comment{url && duration > 0 ? ` at ${formatTs(currentTime)}` : ''}</button>
+                {url && duration > 0 && (
+                  <button onClick={() => setComposer({ open: true, body: '', ts: null, parentId: null })}
+                    title="General comment (no timestamp)"
+                    style={{
+                      padding: '8px 12px',
+                      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                      background: 'transparent', color: 'var(--ink-3)',
+                      border: '1px solid var(--rule)', cursor: 'pointer',
+                    }}>General</button>
+                )}
+              </div>
+            ) : (
+              <div>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+                  letterSpacing: '0.1em', textTransform: 'uppercase',
+                  color: 'var(--ink-3)', marginBottom: 6,
+                  display: 'flex', justifyContent: 'space-between',
+                }}>
+                  <span>
+                    {composer.parentId
+                      ? 'Reply'
+                      : composer.ts != null
+                        ? `At ${formatTs(composer.ts)}`
+                        : 'General comment'}
+                  </span>
+                  <button onClick={() => setComposer({ open: false, body: '', ts: null, parentId: null })}
+                    style={{
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      color: 'var(--ink-4)', fontSize: 14, padding: 0,
+                    }}>×</button>
+                </div>
+                <textarea
+                  autoFocus
+                  value={composer.body}
+                  onChange={e => setComposer(c => ({ ...c, body: e.target.value }))}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault()
+                      postComment({ body: composer.body, ts: composer.ts, parentId: composer.parentId })
+                    }
+                  }}
+                  placeholder="What needs to change?"
+                  rows={3}
+                  style={{
+                    width: '100%', padding: '8px 10px',
+                    fontFamily: 'var(--sans)', fontSize: 12.5,
+                    background: 'white', border: '1px solid var(--rule)',
+                    outline: 'none', resize: 'vertical',
+                    boxSizing: 'border-box',
+                  }} />
+                <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>
+                    ⌘/Ctrl-Enter to send
+                  </span>
+                  <button onClick={() => postComment({ body: composer.body, ts: composer.ts, parentId: composer.parentId })}
+                    disabled={busy || !composer.body.trim()}
+                    style={{
+                      padding: '6px 14px',
+                      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                      background: busy || !composer.body.trim() ? 'var(--ink-4)' : 'var(--ink)',
+                      color: 'var(--paper)', border: 'none',
+                      cursor: busy || !composer.body.trim() ? 'not-allowed' : 'pointer',
+                    }}>{busy ? 'Posting…' : 'Send'}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </Modal>
   )
+}
+
+// Single comment thread = one top-level comment + N flat replies.
+// Replies don't nest further; that keeps the visual hierarchy simple
+// and matches Frame.io's convention.
+function CommentThread({ comment, replies, onSeek, onReply, onResolve, onDelete, canResolve, currentUser }) {
+  const isAuthor = currentUser?.kind === comment.author_kind &&
+    (currentUser?.id ? currentUser.id === comment.author_id : currentUser?.name === comment.author_name)
+  return (
+    <div style={{
+      marginBottom: 10,
+      padding: 10,
+      background: comment.resolved_at ? 'rgba(62,138,94,0.06)' : 'white',
+      border: '1px solid var(--rule)',
+      borderLeft: `3px solid ${comment.resolved_at ? '#3e8a5e' : '#3e7eba'}`,
+      opacity: comment.resolved_at ? 0.78 : 1,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+            color: comment.author_kind === 'admin' ? '#2f5a8a' : '#3e8a5e',
+          }}>{comment.author_name || 'Anon'}</span>
+          {comment.timestamp_seconds != null && (
+            <button onClick={() => onSeek?.(comment.timestamp_seconds)}
+              style={{
+                background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                color: '#3e7eba', textDecoration: 'underline',
+              }}>{formatTs(comment.timestamp_seconds)}</button>
+          )}
+        </div>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)' }}>
+          {relTimeShort(comment.created_at)}
+        </span>
+      </div>
+      <div style={{
+        fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink)',
+        lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        textDecoration: comment.resolved_at ? 'line-through' : 'none',
+      }}>{comment.body}</div>
+      {/* Replies, indented */}
+      {replies.length > 0 && (
+        <div style={{ marginTop: 8, marginLeft: 12, paddingLeft: 10, borderLeft: '2px solid var(--rule)' }}>
+          {replies.map(r => (
+            <div key={r.id} style={{ marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 2 }}>
+                <span style={{
+                  fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                  color: r.author_kind === 'admin' ? '#2f5a8a' : '#3e8a5e',
+                }}>{r.author_name || 'Anon'}</span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>
+                  {relTimeShort(r.created_at)}
+                </span>
+              </div>
+              <div style={{
+                fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--ink-2)',
+                lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}>{r.body}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* Per-thread actions */}
+      <div style={{
+        marginTop: 8, display: 'flex', gap: 8,
+        fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.08em',
+        textTransform: 'uppercase', fontWeight: 700,
+      }}>
+        <button onClick={() => onReply?.(comment.id)}
+          style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--ink-3)' }}>Reply</button>
+        {canResolve && (
+          <button onClick={() => onResolve?.(comment)}
+            style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: comment.resolved_at ? '#b8893e' : '#3e8a5e' }}>
+            {comment.resolved_at ? 'Re-open' : 'Resolve'}
+          </button>
+        )}
+        {isAuthor && (
+          <button onClick={() => { if (confirm('Delete this comment?')) onDelete?.(comment) }}
+            style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: '#b53e3e', marginLeft: 'auto' }}>Delete</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Format a time-in-seconds as M:SS or H:MM:SS for the marker labels.
+function formatTs(seconds) {
+  if (seconds == null || !isFinite(seconds)) return '—'
+  const s = Math.max(0, Math.floor(seconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = s % 60
+  const pad = (n) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`
+}
+
+function relTimeShort(iso) {
+  if (!iso) return ''
+  const t = new Date(iso).getTime()
+  const diff = Date.now() - t
+  const mins = Math.round(diff / 60000)
+  if (mins < 1) return 'now'
+  if (mins < 60) return `${mins}m`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 24) return `${hrs}h`
+  const days = Math.round(hrs / 24)
+  if (days < 30) return `${days}d`
+  return new Date(iso).toLocaleDateString()
 }
 
 /* Modal video preview with explicit teardown. The native <video> element
@@ -3238,6 +3772,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       .select(`
         id, task_id, version_number, submitted_by_name, file_url, external_url,
         thumbnail_url, approved_at, created_at,
+        ingest_status, ingest_source, ingest_error_text,
         task:lib_editing_tasks (
           id, creative_id,
           creative:lib_creative_library (
@@ -3258,6 +3793,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       .select(`
         id, task_id, version_number, submitted_by_name, file_url, external_url,
         thumbnail_url, approved_at, created_at,
+        ingest_status, ingest_source, ingest_error_text,
         task:lib_editing_tasks (
           id, creative_id,
           creative:lib_creative_library (
@@ -9649,6 +10185,19 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [confirmDel, setConfirmDel] = useState(false)
+  // Submission being reviewed in the SubmissionPreviewModal (the
+  // Frame.io-ish comment surface). Lifted to the task-modal level
+  // because we need state for the nested modal to live above the
+  // submission cards. Null = closed.
+  const [reviewingSub, setReviewingSub] = useState(null)
+  const adminIdentity = useAdminIdentity()
+  // Editor portal users get tagged as the editor whose share link
+  // they opened. Admins everywhere else fall back to useAdminIdentity.
+  // The Modal's comment composer uses this for author attribution +
+  // the resolve permission gate.
+  const reviewIdentity = (scope.isEditorView && scope.editorId)
+    ? { kind: 'editor', id: scope.editorId, name: scope.editorName || 'Editor' }
+    : adminIdentity
   // The script this footage was shot from — read-only here so the editor
   // can read it while cutting. Fetched from the creative row (excluded from
   // the lean list). null = not yet loaded / none.
@@ -9702,6 +10251,18 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     }
   }, [task.task_id, scope.isEditorView])
   useEffect(() => { reloadSubmissions() }, [reloadSubmissions])
+
+  // Polling refresh while any submission is in 'pending' ingest. Once they
+  // all settle (success → ingest_status=null, failed → 'failed'), the
+  // interval clears. 10s cadence is fast enough that the chip flips
+  // shortly after the edge function finishes (typical: 5-30s for a
+  // sub-220MB video) without spamming PostgREST.
+  const hasPendingIngest = submissions.some(s => s.ingest_status === 'pending')
+  useEffect(() => {
+    if (!hasPendingIngest) return
+    const t = setInterval(() => { reloadSubmissions() }, 10_000)
+    return () => clearInterval(t)
+  }, [hasPendingIngest, reloadSubmissions])
 
   // Tracks whether any field has been touched in this modal session.
   // Used by handleCloseModal to decide whether to flush a final save —
@@ -10173,6 +10734,10 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           // admins comment, editors reply. Tracking who-by-role keeps
           // the conversation clear + drives notifyEditor() routing.
           canFeedback={true}
+          // Opens the SubmissionPreviewModal (Frame.io-style review surface)
+          // for a specific submission. State lives at EditTaskModal level
+          // so the modal stacks above the task modal cleanly.
+          onOpenReview={(sub) => setReviewingSub(sub)}
           currentUserName={scope.editorName || 'Admin'}
           // Detect role from the scope. isEditorView=true means we're
           // on /editor-view OR a token-share link. But an authenticated
@@ -10340,6 +10905,14 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           </div>
         )}
       </div>
+      {/* SubmissionPreviewModal stacks on top of this task modal when the
+          operator clicks Review on a submission card. The Modal primitive's
+          MODAL_DEPTH counter handles z-index, so we just render in the
+          same React subtree. */}
+      <SubmissionPreviewModal
+        submission={reviewingSub}
+        currentUser={reviewIdentity}
+        onClose={() => setReviewingSub(null)} />
     </Modal>
   )
 }
@@ -10348,7 +10921,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
    lib_task_submissions, newest first. Each card has its own inline
    playable preview + per-version Approve / Delete buttons. Replaces
    the old single-slot SubmittedWorkPanel. */
-function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onFeedbackSaved, onRequestRevision, currentUserName, currentUserRole = 'admin', taskEditorId, taskName }) {
+function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onOpenReview, onFeedbackSaved, onRequestRevision, currentUserName, currentUserRole = 'admin', taskEditorId, taskName }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   // Per-card expand/collapse state. Default: only the LATEST (first
   // in the list) is expanded, older versions are collapsed so the
@@ -10537,13 +11110,38 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                       color: '#3e8a5e',
                     }}>Approved</span>
                   )}
+                  {/* Ingest status — only renders if this submission came in
+                      via an external URL that the edge function is still
+                      pulling or failed on. Retry kicks the RPC + relies on
+                      the next reloadSubmissions tick to refresh. */}
+                  <IngestStatusChip
+                    submission={sub}
+                    onRetry={async (s) => {
+                      await retryIngest(s.id)
+                      reloadSubmissions?.()
+                    }} />
                   <span style={{
                     fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
                   }}>
                     {sub.submitted_by_name || 'Unknown'} · {new Date(sub.created_at).toLocaleString()}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+                  {/* Review = opens SubmissionPreviewModal with the comment
+                      surface. Only available for playable submissions —
+                      ingestion-pending external links don't have a file_url
+                      yet, and pure external_url (Frame.io, etc.) without
+                      file_url can't be embedded so we don't pretend. */}
+                  {onOpenReview && sub.file_url && (
+                    <button type="button"
+                      onClick={() => onOpenReview(sub)}
+                      style={{
+                        padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                        fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'var(--ink)', color: 'var(--paper)',
+                        border: 'none', borderRadius: 2, cursor: 'pointer',
+                      }}>Review</button>
+                  )}
                   {(sub.file_url || sub.external_url) && (
                     // toDownloadUrl wraps the Supabase URL with ?download=
                     // per the quality contract — without it, browsers
