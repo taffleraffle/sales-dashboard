@@ -2722,11 +2722,15 @@ export default function AdsCreativeLibrary({ editorScope }) {
   // operator can see at a glance how many ads are waiting on a launch.
   // Yellow badge (positive/ready state) vs Triage's red (action required).
   //
-  // Filter: stage_final_cut='done' — that's what the actual approval flow
-  // sets (see approveSubmission at line ~9861, and the direct-edited-upload
-  // path at line ~838). The originally-spec'd stage_approved column exists
-  // in the schema but is never populated by any code path, so filtering on
-  // it returned zero rows (Ben 2026-06-01).
+  // Filter: anything the operator considers a finished cut + not-yet-run.
+  // "Finished cut" is signalled by EITHER stage_final_cut='done' (set by
+  // the formal approve flow at line ~9861 and the direct-edited-upload
+  // path at line ~838) OR status='edited' (set by the Library matrix
+  // status dropdown and the batchStatus='edited' direct upload). Earlier
+  // versions only filtered on stage_final_cut and missed every row that
+  // got marked edited through the manual dropdown — Ben 2026-06-01.
+  // The originally-spec'd stage_approved column is dead (no code writes
+  // to it) so we don't reference it.
   const [launchCount, setLaunchCount] = useState(0)
   const refreshLaunchCount = useCallback(async () => {
     if (scope.isEditorView) return  // editors don't ship ads
@@ -2734,7 +2738,7 @@ export default function AdsCreativeLibrary({ editorScope }) {
       const { count, error } = await supabase
         .from('lib_creative_library')
         .select('id', { count: 'exact', head: true })
-        .eq('stage_final_cut', 'done')
+        .or('stage_final_cut.eq.done,status.eq.edited')
         .eq('has_been_run', false)
         .eq('exclude_from_library', false)
       if (!error && typeof count === 'number') setLaunchCount(count)
@@ -8390,25 +8394,40 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
     if (scope.isEditorView) return
     setLoading(true)
     setErr(null)
-    // Match the columns LibraryTab uses for matrix rows + a couple extras
-    // for the messaging-angle display. Lean — no transcript (heavy, not
-    // needed in this view).
-    const cols = 'id,name,canonical_name,display_name,description,type,creator,offer_slug,has_been_run,stage_approved,thumbnail_url,preview_url,final_cut_url,approved_url,drive_url,messaging_angle,messaging_angle_override,added_at,updated_at,exclude_from_library'
+    // Lean column list — no transcript (heavy). Includes status + the
+    // assigned_editor join so the row card can show who cut the ad
+    // (creator = on-camera talent; editor = the cutter — Ben wants the
+    // latter visible per 2026-06-01 review).
+    const cols = 'id,name,canonical_name,display_name,description,type,creator,status,offer_slug,has_been_run,stage_final_cut,thumbnail_url,preview_url,final_cut_url,approved_url,drive_url,messaging_angle,messaging_angle_override,added_at,updated_at,exclude_from_library,assigned_editor_id'
     try {
-      const [rowsRes, offersRes] = await Promise.all([
+      const [rowsRes, offersRes, editorsRes] = await Promise.all([
         supabase.from('lib_creative_library')
-          .select(cols)
-          // stage_final_cut='done' is what the actual approval flow sets
-          // (admin Approve action + direct-edited uploads). The schema also
-          // has a stage_approved column but nothing ever writes to it, so
-          // filtering on that returned 0 rows (Ben 2026-06-01).
-          .eq('stage_final_cut', 'done')
+          .select(`${cols},assigned_editor:assigned_editor_id (id, name)`)
+          // Broadened filter: anything the operator considers a finished
+          // cut. That's stage_final_cut='done' (formal approve flow +
+          // direct-edited uploads) OR status='edited' (manual status
+          // dropdown — operators flip this on rows the Approve flow
+          // bypassed). Earlier version missed every row from the second
+          // bucket (Ben 2026-06-01).
+          .or('stage_final_cut.eq.done,status.eq.edited')
           .eq('has_been_run', false)
           .eq('exclude_from_library', false),
         supabase.from('offers').select('slug,name').eq('retired', false).order('slug'),
+        // Editors list for the "edited by" line on the row card. The join
+        // above hydrates assigned_editor for rows that have an editor set;
+        // this list is the fallback for rows where the embed resolved to
+        // null (e.g. editor was deleted but the FK is still pointing).
+        supabase.from('lib_creative_editors').select('id,name'),
       ])
       if (rowsRes.error) throw rowsRes.error
-      setRows(rowsRes.data || [])
+      // Flatten the assigned_editor.name into a top-level field so the
+      // row card doesn't have to drill through a sub-object.
+      const editorIdToName = new Map((editorsRes.data || []).map(e => [e.id, e.name]))
+      const flattened = (rowsRes.data || []).map(r => ({
+        ...r,
+        editor_name: r.assigned_editor?.name || editorIdToName.get(r.assigned_editor_id) || null,
+      }))
+      setRows(flattened)
       setOffers(offersRes.data || [])
     } catch (e) {
       // AbortError from auth-lock contention is usually transient — retry
@@ -8675,13 +8694,27 @@ function LaunchOfferChip({ offers, rows, selected, onChange }) {
 // in this list the re-render cost is negligible.
 function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
   const title = rowDisplayName(row) || row.canonical_name || row.name || '(unnamed)'
-  const angle = row.messaging_angle_override || row.messaging_angle
+  // Messaging angle resolution priority:
+  //   1. operator override
+  //   2. AI-generated messaging_angle
+  //   3. canonical_name segment ("RAW-OSO-GOOGLEDOMINANCER-T01" → "googledominancer")
+  //      — the canonical name encodes the angle at upload time and is
+  //      always present, so this is a reliable fallback when the
+  //      describe Edge Function hasn't populated messaging_angle yet.
+  // Only fall back to "angle pending" if none of the three resolved.
+  const angle = row.messaging_angle_override
+    || row.messaging_angle
+    || extractAngleFromCanonical(row.canonical_name || row.name)
   const offerSlug = row.offer_slug
   const offerName = offerLabel || offerSlug || null
   const thumb = row.thumbnail_url || row.preview_url
+  // Editor (the person who CUT the ad, distinct from creator = the
+  // person ON the ad). Joined in load() via assigned_editor_id and
+  // flattened onto editor_name. Null if unassigned.
+  const editorName = row.editor_name
   // Friendly relative time. Approved-at proxy = updated_at (no dedicated
   // approval timestamp on lib_creative_library; updated_at gets bumped when
-  // stage_approved flips to 'done').
+  // stage_final_cut flips to 'done' or status flips to 'edited').
   const when = row.updated_at || row.added_at
   return (
     <div style={{
@@ -8771,12 +8804,34 @@ function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
             overflow: 'hidden',
           }}>{row.description}</div>
         )}
+        {/* Meta row: actor + editor + approval time. Two distinct people
+            here — "creator" = who's ON the ad (e.g. Tanya, OSO, MAKEUGC);
+            "editor" = who CUT it (e.g. Ahmed, Mohamed). Show both so the
+            launch operator knows who to credit and who to ping if the
+            ad needs a fix before going live. */}
         <div style={{
           fontFamily: 'var(--mono)', fontSize: 10.5,
           color: 'var(--ink-4)', letterSpacing: '0.06em',
           marginTop: 2,
+          display: 'flex', gap: 6, flexWrap: 'wrap',
         }}>
-          {row.creator || 'creator pending'} · approved {relativeTime(when)}
+          {row.creator && (
+            <span>
+              <span style={{ color: 'var(--ink-4)', textTransform: 'uppercase', fontSize: 9, letterSpacing: '0.12em', marginRight: 3 }}>Actor</span>
+              <span style={{ color: 'var(--ink-3)' }}>{row.creator}</span>
+            </span>
+          )}
+          {editorName && (
+            <>
+              {row.creator && <span style={{ opacity: 0.5 }}>·</span>}
+              <span>
+                <span style={{ color: 'var(--ink-4)', textTransform: 'uppercase', fontSize: 9, letterSpacing: '0.12em', marginRight: 3 }}>Editor</span>
+                <span style={{ color: 'var(--ink-3)' }}>{editorName}</span>
+              </span>
+            </>
+          )}
+          {(row.creator || editorName) && <span style={{ opacity: 0.5 }}>·</span>}
+          <span>approved {relativeTime(when)}</span>
         </div>
       </div>
 
@@ -8805,6 +8860,27 @@ function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
       </div>
     </div>
   )
+}
+
+// Pull the angle out of a canonical creative name. Format is
+//   {STAGE}-{ACTOR}-{ANGLE}-T{take}.{ext}
+// e.g. RAW-OSO-GOOGLEDOMINANCER-T01.mp4 → "googledominancer"
+//      RAW-MAKEUGC-WATERRESTORATION-T01.mp4 → "waterrestoration"
+//      RETARGET-BEN-LOCALSEOSERVICEN-T01.mp4 → "localseoservicen"
+// The describe Edge Function populates messaging_angle eventually, but
+// at INSERT/approve time it's still NULL — without this fallback every
+// row showed "angle pending" until describe caught up (Ben 2026-06-01).
+// Returns null when the name doesn't match the canonical convention
+// (e.g. raw filenames like 20260524_C0858.MP4), in which case the
+// caller still renders "angle pending".
+function extractAngleFromCanonical(name) {
+  if (!name) return null
+  const m = name.match(/^[A-Z]+-[A-Z]+-(.+?)-T\d+/i)
+  if (!m) return null
+  // The convention keeps the angle as a contiguous slug; lowercase
+  // it for visual consistency with the AI-generated messaging_angle
+  // which is also lowercase ("stop-tpa", "rank-one", etc.).
+  return m[1].toLowerCase()
 }
 
 // Relative-time helper local to this tab. Same shape as the bell's
