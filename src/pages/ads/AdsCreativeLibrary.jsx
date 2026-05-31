@@ -2835,8 +2835,7 @@ export default function AdsCreativeLibrary({ editorScope }) {
         <div style={{ display: tab === 'launch' ? 'block' : 'none' }}>
           <LaunchQueueTab
             scope={scope}
-            onLaunched={refreshLaunchCount}
-            onOpenInLibrary={openInLibrary} />
+            onLaunched={refreshLaunchCount} />
         </div>
       )}
     </div>
@@ -8390,9 +8389,10 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
 
    Sort: updated_at DESC by default (most recently approved on top —
    what's freshest). Toggle to ASC for "oldest waiting first" / FIFO. */
-function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
+function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched }) {
   const [rows, setRows] = useState([])
   const [offers, setOffers] = useState([])
+  const [editorsList, setEditorsList] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
   // Search across name + canonical_name + display_name + messaging angle +
@@ -8403,6 +8403,9 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
   const [offerFilter, setOfferFilter] = useState(() => new Set())
   // Sort: 'newest' (most recently approved on top — default; what just
   // landed in the queue) or 'oldest' (FIFO — what's been waiting longest).
+  // NOTE: rows with an explicit launch_queue_position ALWAYS sort first
+  // regardless of this setting — the toggle only affects unpositioned
+  // rows (i.e. rows the operator hasn't drag-prioritised).
   const [sortMode, setSortMode] = useState(() => {
     try { return localStorage.getItem('launch.sort') || 'newest' } catch { return 'newest' }
   })
@@ -8416,9 +8419,21 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
     try { return localStorage.getItem('launch.hideLowQ') !== 'false' } catch { return true }
   })
   useEffect(() => { try { localStorage.setItem('launch.hideLowQ', String(hideLowQuality)) } catch {} }, [hideLowQuality])
-  // Inline video preview state — same pattern as SubmissionPreviewModal
-  // for editor submissions. Click thumbnail → opens a Modal-hosted player.
+  // Inline video preview state — thumbnail click → opens a Modal-hosted player.
   const [previewing, setPreviewing] = useState(null)
+  // Inline DETAIL drawer state. Row body click opens the same modal as
+  // a Library matrix row click — mounted in-place so we don't switch
+  // tabs and re-paint the entire library matrix (Ben 2026-06-01: "clicking
+  // the pop-up resets my view and takes me to the list rather than to the
+  // launch queue ... very, very slow").
+  const [drawerRow, setDrawerRow] = useState(null)
+  // Drag-and-drop priority reorder. Native HTML5 drag — same pattern
+  // as the EditingQueue kanban. dragId = row being dragged; dropTargetId
+  // = row we're hovering over; dropBefore = true if we should drop
+  // above the target row, false if below.
+  const [dragId, setDragId] = useState(null)
+  const [dropTargetId, setDropTargetId] = useState(null)
+  const [dropBefore, setDropBefore] = useState(true)
 
   const load = useCallback(async (attempt = 0) => {
     if (scope.isEditorView) return
@@ -8428,7 +8443,7 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
     // assigned_editor join (creator = on-camera talent vs editor = the
     // cutter; Ben wants both visible per 2026-06-01 review), plus the
     // is_low_quality flag so the chip can render.
-    const cols = 'id,name,canonical_name,display_name,description,type,creator,status,offer_slug,has_been_run,stage_final_cut,thumbnail_url,preview_url,final_cut_url,approved_url,drive_url,messaging_angle,messaging_angle_override,added_at,updated_at,exclude_from_library,assigned_editor_id,is_low_quality,low_quality_reason'
+    const cols = 'id,name,canonical_name,display_name,description,type,creator,status,offer_slug,has_been_run,stage_final_cut,thumbnail_url,preview_url,final_cut_url,approved_url,drive_url,messaging_angle,messaging_angle_override,added_at,updated_at,exclude_from_library,assigned_editor_id,is_low_quality,low_quality_reason,launch_queue_position'
     try {
       let q = supabase.from('lib_creative_library')
         .select(`${cols},assigned_editor:assigned_editor_id (id, name)`)
@@ -8457,7 +8472,9 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
       ])
       if (rowsRes.error) throw rowsRes.error
       // Flatten the assigned_editor.name into a top-level field so the
-      // row card doesn't have to drill through a sub-object.
+      // row card doesn't have to drill through a sub-object. Also keep
+      // the full editor list around — the inline CreativeDetailModal
+      // expects it as a prop.
       const editorIdToName = new Map((editorsRes.data || []).map(e => [e.id, e.name]))
       const flattened = (rowsRes.data || []).map(r => ({
         ...r,
@@ -8465,6 +8482,7 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
       }))
       setRows(flattened)
       setOffers(offersRes.data || [])
+      setEditorsList(editorsRes.data || [])
     } catch (e) {
       // AbortError from auth-lock contention is usually transient — retry
       // with a tiny backoff. Capped at 3 attempts so a persistent abort
@@ -8512,6 +8530,15 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
 
   // Filter + sort applied as a single useMemo so re-renders are cheap.
   // Search is case-insensitive across the same field blob LibraryTab uses.
+  //
+  // Sort order:
+  //   1. Rows WITH launch_queue_position go first, ascending by position
+  //      (smaller number = ship sooner). These are the drag-prioritised
+  //      rows that the operator explicitly placed.
+  //   2. Rows WITHOUT a position follow, sorted by updated_at according
+  //      to the newest/oldest toggle.
+  // This way the toggle still works as a "what's behind my priority pile"
+  // control while the explicit positions take precedence.
   const visible = useMemo(() => {
     const search = deferredQ.trim().toLowerCase()
     let list = rows
@@ -8527,11 +8554,112 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
     }
     const dir = sortMode === 'oldest' ? 1 : -1
     return [...list].sort((a, b) => {
+      const aPos = a.launch_queue_position
+      const bPos = b.launch_queue_position
+      const aHas = aPos != null
+      const bHas = bPos != null
+      if (aHas && bHas) return Number(aPos) - Number(bPos)
+      if (aHas) return -1
+      if (bHas) return 1
       const at = new Date(a.updated_at || a.added_at || 0).getTime()
       const bt = new Date(b.updated_at || b.added_at || 0).getTime()
       return (at - bt) * dir
     })
   }, [rows, offerFilter, deferredQ, sortMode])
+
+  // Drag-and-drop priority reorder. When the user drags row X over row Y
+  // and drops, we set X's launch_queue_position to land just before or
+  // just after Y in the visible list. Sparse numeric positions (NUMERIC
+  // column in Postgres) mean we never need to renumber — each drop
+  // computes a position between the two neighbours.
+  //
+  // First-time-prioritised rows: we need both neighbours to have explicit
+  // positions to compute a midpoint. When a neighbour is unpositioned, we
+  // use its visible-index *1000 as a synthetic position. The dropped row
+  // then gets a value that sorts correctly against both. Subsequent
+  // drops can use the real positions.
+  const onRowDragStart = useCallback((id) => {
+    setDragId(id)
+  }, [])
+  const onRowDragOver = useCallback((targetId, isUpperHalf) => {
+    if (!dragId || dragId === targetId) return
+    setDropTargetId(targetId)
+    setDropBefore(isUpperHalf)
+  }, [dragId])
+  const onRowDragEnd = useCallback(() => {
+    setDragId(null)
+    setDropTargetId(null)
+  }, [])
+  const onRowDrop = useCallback(async () => {
+    const draggedId = dragId
+    const targetId = dropTargetId
+    const before = dropBefore
+    setDragId(null)
+    setDropTargetId(null)
+    if (!draggedId || !targetId || draggedId === targetId) return
+    const list = visible
+    const targetIdx = list.findIndex(r => r.id === targetId)
+    if (targetIdx === -1) return
+    // Resolve neighbours of insertion. We exclude the dragged row from
+    // the filtered list (since it's being moved) and find the rows
+    // immediately above / below the drop point.
+    const filtered = list.filter(r => r.id !== draggedId)
+    const adjustedIdx = before
+      ? filtered.findIndex(r => r.id === targetId)
+      : filtered.findIndex(r => r.id === targetId) + 1
+    const above = filtered[adjustedIdx - 1]
+    const below = filtered[adjustedIdx]
+    // Only EXPLICIT positions count for the midpoint calculation. If a
+    // neighbour is unpinned (no launch_queue_position), we don't want
+    // to invent a synthetic position and end up dropping the dragged
+    // row into a confusing spot relative to the time-sorted tail.
+    // Instead, snap to the end of the pinned section (max pinned +
+    // 1000) so the row pinning is predictable: dragging anywhere from
+    // the unpinned tail = "pin this last in the priority pile".
+    const aboveExplicit = above?.launch_queue_position != null ? Number(above.launch_queue_position) : null
+    const belowExplicit = below?.launch_queue_position != null ? Number(below.launch_queue_position) : null
+    let newPos
+    if (aboveExplicit != null && belowExplicit != null) {
+      newPos = (aboveExplicit + belowExplicit) / 2
+    } else if (aboveExplicit != null) {
+      newPos = aboveExplicit + 1000
+    } else if (belowExplicit != null) {
+      newPos = belowExplicit - 1000
+    } else {
+      // No pinned neighbours → append to end of pinned section.
+      const maxPinned = rows.reduce((m, r) => {
+        const p = r.launch_queue_position
+        return p != null && Number(p) > m ? Number(p) : m
+      }, 0)
+      newPos = maxPinned + 1000
+    }
+    // Optimistic: patch the dragged row's position locally so the list
+    // re-sorts instantly. DB write happens in the background.
+    setRows(curr => curr.map(r => r.id === draggedId
+      ? { ...r, launch_queue_position: newPos }
+      : r))
+    const { error } = await supabase.from('lib_creative_library')
+      .update({ launch_queue_position: newPos })
+      .eq('id', draggedId)
+    if (error) {
+      setErr(`Reorder failed: ${error.message}`)
+      // Reload to recover the true server state.
+      load()
+    }
+  }, [dragId, dropTargetId, dropBefore, visible, load])
+
+  // Stable per-row callback factory. Avoids passing fresh inline lambdas
+  // to LaunchQueueRow on every parent render — the row is now wrapped
+  // in React.memo and would re-render every parent tick without this.
+  const rowHandlers = useMemo(() => ({
+    onPlay: (row) => setPreviewing(row),
+    onOpen: (row) => setDrawerRow(row),
+    onMarkLaunched: (id) => markLaunched(id),
+    onDragStart: onRowDragStart,
+    onDragOver: onRowDragOver,
+    onDragEnd: onRowDragEnd,
+    onDrop: onRowDrop,
+  }), [markLaunched, onRowDragStart, onRowDragOver, onRowDragEnd, onRowDrop])
 
   // Offers as a quick id→label map so per-row chip rendering is O(1).
   const offerLabel = useMemo(() => {
@@ -8612,15 +8740,16 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gap: 10 }}>
+      <div style={{ display: 'grid', gap: 6 }}>
         {visible.map(r => (
           <LaunchQueueRow
             key={r.id}
             row={r}
             offerLabel={offerLabel.get(r.offer_slug)}
-            onPlay={() => setPreviewing(r)}
-            onOpen={() => onOpenInLibrary?.(r.id)}
-            onMarkLaunched={() => markLaunched(r.id)} />
+            handlers={rowHandlers}
+            isDragging={dragId === r.id}
+            isDropTarget={dropTargetId === r.id && dragId && dragId !== r.id}
+            dropBefore={dropTargetId === r.id ? dropBefore : null} />
         ))}
       </div>
 
@@ -8631,6 +8760,69 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
       <LaunchPreviewModal
         row={previewing}
         onClose={() => setPreviewing(null)} />
+
+      {/* Detail drawer — same CreativeDetailModal as a Library matrix row
+          click, but mounted HERE so opening it doesn't switch tabs (the
+          old onOpenInLibrary flow re-rendered the entire library matrix
+          AND opened the drawer, which was the source of Ben's "very, very
+          slow" complaint). State is local to this tab; closes restore the
+          launch-queue scroll position. */}
+      {drawerRow && (
+        <CreativeDetailModal
+          row={drawerRow}
+          scope={scope}
+          editors={editorsList}
+          offers={offers}
+          knownCreators={Array.from(new Set(rows.map(r => r.creator).filter(Boolean))).sort()}
+          onOpenRow={async (id) => {
+            // Sibling-row click inside the modal: pull the row + reopen.
+            // If it's in the current launch-queue rows, use that. Otherwise
+            // one-shot fetch. Matches the LibraryTab.openRowById behaviour.
+            const local = rows.find(r => r.id === id)
+            if (local) { setDrawerRow(local); return }
+            const { data } = await supabase
+              .from('lib_creative_library')
+              .select('*, assigned_editor:assigned_editor_id (id, name)')
+              .eq('id', id)
+              .maybeSingle()
+            if (data) setDrawerRow({
+              ...data,
+              editor_name: data.assigned_editor?.name || null,
+            })
+          }}
+          onClose={() => setDrawerRow(null)}
+          onSaved={() => { load() }}
+          onRowPatched={(id, patch) => {
+            // Merge the patch into the local launch-queue row. Doesn't
+            // re-fetch — the modal already saved the DB update.
+            setRows(curr => curr.map(r => {
+              if (r.id !== id) return r
+              const next = { ...r, ...patch }
+              if ('assigned_editor_id' in patch) {
+                const ed = editorsList.find(e => e.id === patch.assigned_editor_id)
+                next.editor_name = ed?.name || null
+              }
+              // If the row was edited out of the launch queue (e.g.
+              // status flipped from 'edited' to 'raw', or has_been_run
+              // got toggled, or stage_final_cut cleared), drop it from
+              // local state so the count + visible list stay accurate.
+              const stillQualifies = (next.status === 'edited')
+                && !next.has_been_run
+                && !next.exclude_from_library
+              if (!stillQualifies) {
+                onLaunched?.()  // refresh count badge
+                return null  // marked for removal below
+              }
+              return next
+            }).filter(Boolean))
+          }}
+          onDeleted={() => {
+            const id = drawerRow?.id
+            setDrawerRow(null)
+            if (id) setRows(curr => curr.filter(r => r.id !== id))
+            onLaunched?.()
+          }} />
+      )}
     </div>
   )
 }
@@ -8738,17 +8930,22 @@ function LaunchOfferChip({ offers, rows, selected, onChange }) {
 }
 
 // Per-creative card in the launch queue. Three columns: thumbnail (with
-// play-overlay), main content (title + chips + messaging + description +
-// meta), actions (Mark launched). Click row body → opens the full library
-// detail drawer (same modal as clicking a Library matrix row) so the
-// operator can edit name / offer / status / etc. before shipping. Click
-// thumbnail → quick video preview (LaunchPreviewModal). Buttons in the
-// actions column stopPropagation so they don't bubble into the drawer-
-// open click.
-// Not wrapped in React.memo — the parent passes fresh inline handlers per
-// row each render, which would defeat the memo every time. With <50 rows
-// in this list the re-render cost is negligible.
-function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
+// play-overlay), main content (title + chips + messaging + meta),
+// actions (Mark launched). Row body click → detail drawer. Thumbnail
+// click → quick video preview. Buttons stopPropagation.
+//
+// Drag handle is the whole row except the thumb/buttons. HTML5 native
+// drag (no react-dnd) — matches the EditingQueue pattern. The parent
+// computes the drop position and writes a sparse NUMERIC value.
+//
+// React.memo wraps the component so the 99-row launch queue doesn't
+// re-render every card whenever the parent updates one thing (e.g. drag
+// state, search input). The `handlers` prop is a stable object built
+// in the parent via useMemo so memo's referential check works.
+const LaunchQueueRow = memo(function LaunchQueueRow({
+  row, offerLabel, handlers, isDragging, isDropTarget, dropBefore,
+}) {
+  const { onPlay, onOpen, onMarkLaunched, onDragStart, onDragOver, onDragEnd, onDrop } = handlers
   const title = rowDisplayName(row) || row.canonical_name || row.name || '(unnamed)'
   // Messaging angle resolution priority:
   //   1. operator override
@@ -8773,22 +8970,62 @@ function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
   // stage_final_cut flips to 'done' or status flips to 'edited').
   const when = row.updated_at || row.added_at
   return (
-    <div onClick={onOpen} role="button" tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.() }}
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move'
+        // Custom drag image — Firefox needs a payload for the drag to
+        // initiate at all.
+        try { e.dataTransfer.setData('text/plain', row.id) } catch {}
+        onDragStart?.(row.id)
+      }}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        // Decide upper/lower half of the target row to position the
+        // drop indicator AND determine "before" vs "after" semantics.
+        const rect = e.currentTarget.getBoundingClientRect()
+        const isUpper = (e.clientY - rect.top) < rect.height / 2
+        onDragOver?.(row.id, isUpper)
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        onDrop?.()
+      }}
+      onDragEnd={() => onDragEnd?.()}
+      onClick={() => onOpen?.(row)}
+      role="button" tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(row) }}
       style={{
-        display: 'grid', gridTemplateColumns: '72px 1fr auto',
-        gap: 12, alignItems: 'center',
+        display: 'grid', gridTemplateColumns: '20px 72px 1fr auto',
+        gap: 10, alignItems: 'center',
         padding: '8px 12px',
         background: 'var(--paper)',
         border: '1px solid var(--rule)',
-        borderLeft: '3px solid #3e8a5e',  // green = ready/approved
-        cursor: 'pointer',
+        // Top/bottom border highlight = drop indicator. Yellow accent
+        // when this row is the drag target so it's unmistakable in a
+        // 99-row list.
+        borderTop: isDropTarget && dropBefore ? '2px solid var(--accent, #f4e14a)' : '1px solid var(--rule)',
+        borderBottom: isDropTarget && !dropBefore ? '2px solid var(--accent, #f4e14a)' : '1px solid var(--rule)',
+        borderLeft: row.launch_queue_position != null
+          ? '3px solid var(--accent, #f4e14a)'  // yellow = pinned by operator
+          : '3px solid #3e8a5e',                 // green = ready/approved (default)
+        cursor: 'grab',
+        opacity: isDragging ? 0.4 : 1,
+        transition: 'opacity 0.12s',
       }}>
+      {/* Drag handle glyph — visual cue that the row is draggable.
+          The whole row is draggable but the glyph signposts it. */}
+      <div style={{
+        fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--ink-4)',
+        lineHeight: 1, userSelect: 'none', textAlign: 'center',
+      }}>⋮⋮</div>
       {/* Thumbnail with play overlay. Black background so partial-transparent
           thumbs don't show the paper colour underneath. Click → quick
           video preview (separate from the detail-drawer open). */}
       <button
-        onClick={(e) => { e.stopPropagation(); onPlay?.() }}
+        onClick={(e) => { e.stopPropagation(); onPlay?.(row) }}
+        onMouseDown={(e) => e.stopPropagation()}
         title="Quick play"
         style={{
           width: 72, height: 52, padding: 0,
@@ -8897,7 +9134,8 @@ function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
         display: 'flex', alignItems: 'center',
       }}>
         <button
-          onClick={(e) => { e.stopPropagation(); onMarkLaunched?.() }}
+          onClick={(e) => { e.stopPropagation(); onMarkLaunched?.(row.id) }}
+          onMouseDown={(e) => e.stopPropagation()}
           style={{
             padding: '6px 12px',
             fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
@@ -8909,7 +9147,7 @@ function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
       </div>
     </div>
   )
-}
+})
 
 // Pull the angle out of a canonical creative name. Format is
 //   {STAGE}-{ACTOR}-{ANGLE}-T{take}.{ext}
