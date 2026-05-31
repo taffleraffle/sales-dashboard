@@ -166,6 +166,22 @@ export async function generateAngles({ offer_slug, n_problems = 5, n_desires = 5
   return data
 }
 
+/**
+ * Auto-generate N proof characters for an angle and persist them.
+ * Edge Function branch: { generation_target: 'proofs', angle_slug, n }.
+ * Used by the Generate flow when the operator hits Generate on an angle
+ * with zero saved proofs (Ben 2026-05-31).
+ */
+export async function generateProofsForAngle({ angle_slug, n = 4 } = {}) {
+  if (!angle_slug) throw new Error('generateProofsForAngle: angle_slug required')
+  const { data, error } = await supabase.functions.invoke('creative-generate-script', {
+    body: { generation_target: 'proofs', angle_slug, n },
+  })
+  if (error) throw new Error(error.message || 'proof generation failed')
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
 /* ───────────────── Proof characters (per angle) ───────────────── */
 // Table: script_proof_characters
 //   { id, angle_slug, name, result_short, result_long, industry_context,

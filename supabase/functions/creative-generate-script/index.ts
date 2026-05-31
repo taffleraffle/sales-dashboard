@@ -736,6 +736,140 @@ serve(async (req) => {
     })
   }
 
+  // ── BRANCH: auto-generate proof characters for an angle ──
+  // Ben 2026-05-31: when the operator hits Generate on an angle with no
+  // saved proofs, the frontend fires this branch first to populate the
+  // library so the main script generation has named clients to rotate
+  // through. Produces N rows in script_proof_characters keyed on the
+  // angle, with name + result_short + (optional) result_long.
+  if (generation_target === 'proofs') {
+    if (!angle_slug) return json({ error: 'angle_slug required for proof generation' }, 400)
+    const n = Math.max(1, Math.min(10, body?.n ?? 4))
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
+    let angle: any
+    try { angle = await loadAngle(supabase, angle_slug) }
+    catch (e: any) { return json({ error: e.message }, 500) }
+    const offerSlugForAngle = angle.offer_slugs?.[0] || null
+    let offer: any = null
+    if (offerSlugForAngle) {
+      try { offer = await loadOffer(supabase, offerSlugForAngle) } catch {}
+    }
+
+    const PROOF_TOOL_NAME = 'generate_proof_characters'
+    const tool = {
+      name: PROOF_TOOL_NAME,
+      description: `Return exactly ${n} fabricated-but-realistic proof characters for this angle. Each one is a named client + a tight one-line result a script can hook into.`,
+      input_schema: {
+        type: 'object',
+        properties: {
+          proof_characters: {
+            type: 'array',
+            minItems: n,
+            maxItems: n,
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'First name only. Sounds like a real OPT client (e.g. "Eric", "Adam", "Belinda"). One word.' },
+                result_short: { type: 'string', description: 'ONE LINE result, hook-ready. Includes a specific number + timeframe. E.g. "Closed a $215K loss-of-business job in 90 days", "Booked 3 commercial jobs in his first 30 days", "Went from $0 to $48K MRR in 6 months". Max 100 chars.' },
+                result_long: { type: 'string', description: 'Optional 2-3 sentence narrative for body-roster use: starting state, what changed, final result with dollar amounts and timeframe. Leave empty if unsure.' },
+                industry_context: { type: 'string', description: 'One-word industry tag like "restoration", "accounting", "plumbing". Match the angle\'s vertical.' },
+                metric_kind: { type: 'string', description: 'Category tag like "revenue_close", "calls_increase", "ranking", "speed_close", "lead_volume".' },
+              },
+              required: ['name', 'result_short', 'industry_context', 'metric_kind'],
+            },
+          },
+        },
+        required: ['proof_characters'],
+      },
+    }
+
+    const userMsg = [
+      `ANGLE: ${angle.name}`,
+      `ANGLE TYPE: ${angle.angle_type}`,
+      `PROSPECT VOICE: "${angle.prospect_voice || ''}"`,
+      `QUALIFIER: ${angle.qualifier || ''}`,
+      offer ? `OFFER: ${offer.name} (vertical: ${offer.vertical})` : '',
+      offer?.default_proof_characters?.length ? `EXISTING NAMES ON OFFER (avoid duplicates): ${offer.default_proof_characters.join(', ')}` : '',
+      '',
+      `Generate exactly ${n} proof characters tailored to THIS angle. Each must:`,
+      '  - Have a believable first name (no last names).',
+      '  - Have a result_short that is sharp, numeric, and time-bound.',
+      '  - Match the angle\'s lived reality — accounting angles get CPA clients, restoration angles get restoration owners.',
+      '  - Vary across metric kinds so a script can rotate them.',
+      `Return via ${PROOF_TOOL_NAME}.`,
+    ].filter(Boolean).join('\n')
+
+    const upstream = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_KEY!,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 1200 + n * 350,
+        system: 'You generate realistic-sounding proof characters for direct-response ad scripts at OPT Digital. The names + results must be specific enough that a script can hook into them, but generic enough that they don\'t accidentally claim a real result for a real OPT client. The operator will edit anything that needs precision.',
+        messages: [{ role: 'user', content: userMsg }],
+        tools: [tool],
+        tool_choice: { type: 'tool', name: PROOF_TOOL_NAME },
+      }),
+    })
+    if (!upstream.ok) {
+      const errText = await upstream.text()
+      return json({ error: `Anthropic ${upstream.status}: ${errText.slice(0, 400)}` }, 502)
+    }
+    const result = await upstream.json()
+    const toolUse = (result.content || []).find((c: any) => c.type === 'tool_use')
+    if (!toolUse) return json({ error: 'Claude did not return proof tool_use', raw: result }, 502)
+    const generated: any[] = toolUse.input?.proof_characters || []
+
+    // Upsert into script_proof_characters keyed on (angle_slug, name).
+    // Dedup within the batch so we don't hit a unique-constraint collision.
+    const seen = new Set<string>()
+    const inserts: any[] = []
+    let order = 100
+    for (const p of generated) {
+      const name = (p.name || '').trim()
+      if (!name || seen.has(name.toLowerCase())) continue
+      seen.add(name.toLowerCase())
+      inserts.push({
+        angle_slug,
+        name,
+        result_short: (p.result_short || '').trim().slice(0, 200),
+        result_long: (p.result_long || '').trim() || null,
+        industry_context: (p.industry_context || '').trim() || null,
+        metric_kind: (p.metric_kind || '').trim() || null,
+        display_order: order,
+        active: true,
+      })
+      order += 10
+    }
+
+    let saved: any[] = []
+    let save_error: string | undefined
+    try {
+      const { data, error } = await supabase
+        .from('script_proof_characters')
+        .upsert(inserts, { onConflict: 'angle_slug,name' })
+        .select()
+      if (error) save_error = error.message
+      else saved = data || []
+    } catch (e: any) {
+      save_error = e.message
+    }
+
+    return json({
+      ok: true,
+      mode: 'proofs',
+      angle: { slug: angle.slug, name: angle.name },
+      proof_characters: generated,
+      saved,
+      save_error,
+      model: ANTHROPIC_MODEL,
+    })
+  }
+
   // ── BRANCH: template-based generator (new Ben 2026-05-31 path) ──
   if (script_type && angle_slug) {
     if (!['hook', 'body', 'joined'].includes(script_type)) {

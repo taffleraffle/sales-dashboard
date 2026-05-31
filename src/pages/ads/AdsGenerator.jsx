@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Trash2 } from 'lucide-react'
-import { generateScripts, generateAngles,
+import { generateScripts, generateAngles, generateProofsForAngle,
          listAngles, listHookShapes, listMechanisms,
          listProofCharactersForAngle } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
@@ -83,8 +83,19 @@ export default function AdsGenerator() {
   // branch logic; in practice it's always 'templates' going forward.
   // eslint-disable-next-line no-unused-vars
   const [generatorMode, setGeneratorMode] = useState('templates')
-  const [scriptType, setScriptType] = useState('hook')        // 'hook' | 'body' | 'joined'
-  const [angleSlug, setAngleSlug] = useState('')
+  // Multi-select script types (Ben 2026-05-31): fan out per type so a single
+  // batch can produce hooks AND bodies AND joined scripts. Empty array =
+  // nothing selected (Generate disabled).
+  const [scriptTypes, setScriptTypes] = useState(['hook'])
+  // Multi-select angles (Ben 2026-05-31): pick 1-N angles, the fan-out runs
+  // n_concepts per (angle × type) combo. When exactly one is selected the
+  // preview + mechanism picker + proof picker behave as before; with more
+  // than one those collapse to a note ("each angle uses its own defaults").
+  const [angleSlugs, setAngleSlugs] = useState([])
+  // Derived: the single "active" angle when exactly one is picked. Used by
+  // the preview / mechanism / proof effects so they keep working with the
+  // old single-select code paths.
+  const primaryAngleSlug = angleSlugs.length === 1 ? angleSlugs[0] : ''
   const [mechanismSlug, setMechanismSlug] = useState('')      // optional (migration 108)
   const [targetShapes, setTargetShapes] = useState([])        // string[] of A-H codes; empty = all
   const [targetLength, setTargetLength] = useState('60_75s')
@@ -129,36 +140,34 @@ export default function AdsGenerator() {
   // selected angle is no longer in the offer's list, reset the picker
   // to avoid silent "wrong-angle" generations.
   useEffect(() => {
-    if (!offerSlug) { setAngles([]); setAngleSlug(''); return }
+    if (!offerSlug) { setAngles([]); setAngleSlugs([]); return }
     let cancelled = false
     listAngles({ offer_slug: offerSlug })
       .then(rows => {
         if (cancelled) return
         setAngles(rows)
-        // Keep current angle if it still belongs to this offer, else pick
-        // the first one (or clear so the empty state shows).
-        if (!rows.some(r => r.slug === angleSlug)) {
-          setAngleSlug(rows[0]?.slug || '')
-        }
+        // Keep any selected angles that still belong to this offer; drop
+        // ones that don't. If nothing remains, leave empty (no auto-pick —
+        // forces explicit selection, which avoids accidental multi-runs).
+        setAngleSlugs(prev => prev.filter(s => rows.some(r => r.slug === s)))
       })
-      .catch(() => { if (!cancelled) { setAngles([]); setAngleSlug('') } })
+      .catch(() => { if (!cancelled) { setAngles([]); setAngleSlugs([]) } })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offerSlug])
 
-  // Refresh mechanism list whenever angle changes (so the picker filters
-  // to mechanisms compatible with the current angle).
+  // Refresh mechanism + proof lists whenever the single-selected angle changes.
+  // Multi-angle mode hides those pickers — each angle uses its own defaults
+  // server-side — so we only load them when exactly one is selected.
   useEffect(() => {
-    if (!angleSlug) return
-    listMechanisms({ angle_slug: angleSlug }).then(setMechanisms).catch(() => {})
-  }, [angleSlug])
+    if (!primaryAngleSlug) return
+    listMechanisms({ angle_slug: primaryAngleSlug }).then(setMechanisms).catch(() => {})
+  }, [primaryAngleSlug])
 
-  // Refresh proof characters whenever the selected angle changes. The
-  // picker resets to "use all" — operator can subset before generating.
   useEffect(() => {
-    if (!angleSlug) { setProofCharacters([]); setSelectedProofNames([]); return }
+    if (!primaryAngleSlug) { setProofCharacters([]); setSelectedProofNames([]); return }
     let cancelled = false
-    listProofCharactersForAngle(angleSlug)
+    listProofCharactersForAngle(primaryAngleSlug)
       .then(rows => {
         if (cancelled) return
         setProofCharacters(rows)
@@ -166,14 +175,13 @@ export default function AdsGenerator() {
       })
       .catch(() => { if (!cancelled) { setProofCharacters([]); setSelectedProofNames([]) } })
     return () => { cancelled = true }
-  }, [angleSlug])
+  }, [primaryAngleSlug])
 
   async function refreshProofCharacters() {
-    if (!angleSlug) return
+    if (!primaryAngleSlug) return
     try {
-      const rows = await listProofCharactersForAngle(angleSlug)
+      const rows = await listProofCharactersForAngle(primaryAngleSlug)
       setProofCharacters(rows)
-      // Drop any selected names that no longer exist (retired)
       setSelectedProofNames(prev => prev.filter(n => rows.some(r => r.name === n)))
     } catch {}
   }
@@ -304,7 +312,7 @@ export default function AdsGenerator() {
       if (error) throw new Error(error.message)
       setMessagingLibrary(prev => prev.filter(a => a.slug !== target.slug))
       setAngles(prev => prev.filter(a => a.slug !== target.slug))
-      if (angleSlug === target.slug) setAngleSlug('')
+      setAngleSlugs(prev => prev.filter(s => s !== target.slug))
       setRetireAngleTarget(null)
     } catch (e) {
       setErr(`Retire failed: ${e.message}`)
@@ -313,44 +321,118 @@ export default function AdsGenerator() {
     }
   }
 
+  // Fan-out progress: how many sub-batches in flight + which combo each is on.
+  // The Edge Function is one-shot per call, so for multi-angle/multi-type we
+  // fire N parallel calls and aggregate. Progress is per-call so the operator
+  // can see which combos completed first.
+  const [fanProgress, setFanProgress] = useState({ total: 0, done: 0, failed: 0 })
+
   async function handleGenerate() {
-    setGenerating(true); setErr(null); setResult(null)
-    try {
-      // Template mode (Ben 2026-05-31): send script_type + angle_slug
-      // + target_shapes instead of offer_slug + target_attributes.
-      // Edge Function picks the right branch.
-      const extras = extraInstructions.trim() || undefined
-      const payload = generatorMode === 'templates'
-        ? {
-            script_type: scriptType,
-            angle_slug: angleSlug,
-            mechanism_slug: mechanismSlug || undefined,
-            target_shapes: targetShapes.length ? targetShapes : undefined,
-            target_length: (scriptType === 'body' || scriptType === 'joined') ? targetLength : undefined,
-            target_proof_characters: selectedProofNames.length ? selectedProofNames : undefined,
-            n_concepts: nConcepts,
-            save_as_drafts: saveAsDrafts,
-            extra_instructions: extras,
-          }
-        : {
-            // Legacy attribute mode: empty target_attributes in diverse,
-            // user-picked in targeted.
-            offer_slug: offerSlug,
-            n_concepts: nConcepts,
-            target_attributes: mode === 'targeted' ? targets : {},
-            save_as_drafts: saveAsDrafts,
-            extra_instructions: extras,
-          }
-      const res = await generateScripts(payload)
-      setResult(res)
-      if (res.save_error) setErr(`Generated but save-as-drafts failed: ${res.save_error}`)
-      // If a test batch was picked, attach the freshly-saved scripts to it.
-      // The Edge Function returns saved_variant_ids when save_as_drafts is true.
-      const newIds = res?.saved_variant_ids || res?.saved_ids
-      if (saveToBatchId && saveAsDrafts && Array.isArray(newIds) && newIds.length) {
-        try { await addScriptsToBatch(saveToBatchId, newIds) }
-        catch (e) { setErr(`Generated but attaching to batch failed: ${e.message}`) }
+    setErr(null); setResult(null)
+    const extras = extraInstructions.trim() || undefined
+
+    if (generatorMode !== 'templates') {
+      // Legacy attribute mode: single offer, no fan-out.
+      setGenerating(true)
+      try {
+        const res = await generateScripts({
+          offer_slug: offerSlug,
+          n_concepts: nConcepts,
+          target_attributes: mode === 'targeted' ? targets : {},
+          save_as_drafts: true,
+          extra_instructions: extras,
+        })
+        setResult(res)
+        if (res.save_error) setErr(`Generated but save-as-drafts failed: ${res.save_error}`)
+      } catch (e) {
+        setErr(e.message)
+      } finally {
+        setGenerating(false)
       }
+      return
+    }
+
+    // Template mode: fan out one Edge Function call per (angle × type) combo.
+    if (!angleSlugs.length) { setErr('Pick at least one angle'); return }
+    if (!scriptTypes.length) { setErr('Pick at least one script type'); return }
+
+    // Auto-generate proof characters for any selected angle that has none.
+    // We check synchronously by counting active proofs per angle — fastest
+    // path is to call listProofCharactersForAngle in parallel for each.
+    // Ben's rule: "If there's no proof characters, it should generate them
+    // by default." We do this BEFORE fan-out so the script generator has
+    // proofs to use.
+    setGenerating(true)
+    try {
+      const proofChecks = await Promise.all(
+        angleSlugs.map(slug => listProofCharactersForAngle(slug).catch(() => []))
+      )
+      const anglesNeedingProofs = angleSlugs.filter((slug, i) => proofChecks[i].length === 0)
+      if (anglesNeedingProofs.length) {
+        setFanProgress({ total: anglesNeedingProofs.length, done: 0, failed: 0, phase: 'proofs' })
+        await Promise.allSettled(
+          anglesNeedingProofs.map(async (slug) => {
+            try {
+              await generateProofsForAngle({ angle_slug: slug, n: 4 })
+              setFanProgress(p => ({ ...p, done: p.done + 1 }))
+            } catch (e) {
+              setFanProgress(p => ({ ...p, failed: p.failed + 1 }))
+              console.warn(`auto-proofs for ${slug} failed: ${e.message}`)
+            }
+          })
+        )
+        // Refresh the local proof state for the primary angle if it was one
+        // of the ones we just generated, so the picker shows the new entries.
+        if (primaryAngleSlug && anglesNeedingProofs.includes(primaryAngleSlug)) {
+          await refreshProofCharacters()
+        }
+      }
+
+      // Now fan out the real script generation.
+      const combos = []
+      for (const slug of angleSlugs) {
+        for (const type of scriptTypes) {
+          combos.push({ angle_slug: slug, script_type: type })
+        }
+      }
+      setFanProgress({ total: combos.length, done: 0, failed: 0, phase: 'scripts' })
+
+      const settled = await Promise.allSettled(combos.map(async (c) => {
+        const r = await generateScripts({
+          script_type: c.script_type,
+          angle_slug: c.angle_slug,
+          mechanism_slug: angleSlugs.length === 1 ? (mechanismSlug || undefined) : undefined,
+          target_shapes: targetShapes.length ? targetShapes : undefined,
+          target_length: (c.script_type === 'body' || c.script_type === 'joined') ? targetLength : undefined,
+          target_proof_characters: angleSlugs.length === 1 && selectedProofNames.length
+            ? selectedProofNames : undefined,
+          n_concepts: nConcepts,
+          save_as_drafts: true,
+          extra_instructions: extras,
+        })
+        setFanProgress(p => ({ ...p, done: p.done + 1 }))
+        return r
+      }))
+
+      // Aggregate scripts across all successful calls into a single result.
+      // Failed calls get logged in setErr.
+      const allScripts = []
+      const failures = []
+      settled.forEach((r, i) => {
+        if (r.status === 'fulfilled') {
+          for (const s of (r.value?.scripts || [])) {
+            allScripts.push({ ...s, _combo: combos[i] })
+          }
+        } else {
+          failures.push(`${combos[i].angle_slug} (${combos[i].script_type}): ${r.reason?.message || r.reason}`)
+        }
+      })
+      if (failures.length) {
+        setErr(`${failures.length} of ${combos.length} batch${combos.length === 1 ? '' : 'es'} failed:\n${failures.join('\n')}`)
+        setFanProgress(p => ({ ...p, failed: failures.length }))
+      }
+      // Mirror the existing result-panel shape so the UI doesn't change
+      setResult({ scripts: allScripts, model: settled.find(r => r.status === 'fulfilled')?.value?.model || '' })
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -703,17 +785,24 @@ export default function AdsGenerator() {
             </div>
           )}
 
-          {/* Step 01: type */}
-          <Section label="02" title="Script type">
+          {/* Step 01: type — multi-select. Pick any combination. */}
+          <Section label="02" title="Script types">
+            <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                        color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
+              Pick one or more. Each selected type runs its own batch — selecting Hooks + Bodies
+              gives you N hooks AND N bodies for the same angle in one click.
+            </p>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               {[
                 { v: 'hook',   label: 'Hooks',    desc: 'Standalone openings — 60-90 words each. Filter by hook shape (A-H).' },
                 { v: 'body',   label: 'Bodies',   desc: 'Full body copy following the 7-beat skeleton. Standalone — pair with any hook later.' },
                 { v: 'joined', label: 'Joined',   desc: 'Hook + Body chained. Body continues the same proof character + posture as its hook.' },
               ].map(opt => {
-                const on = scriptType === opt.v
+                const on = scriptTypes.includes(opt.v)
                 return (
-                  <button key={opt.v} onClick={() => setScriptType(opt.v)}
+                  <button key={opt.v}
+                    onClick={() => setScriptTypes(prev =>
+                      prev.includes(opt.v) ? prev.filter(t => t !== opt.v) : [...prev, opt.v])}
                     style={{
                       flex: '1 1 240px', maxWidth: 380,
                       padding: '14px 16px', textAlign: 'left',
@@ -722,7 +811,11 @@ export default function AdsGenerator() {
                       color: on ? 'var(--paper)' : 'var(--ink)',
                       cursor: 'pointer', borderRadius: 2,
                       display: 'flex', flexDirection: 'column', gap: 4,
+                      position: 'relative',
                     }}>
+                    {on && (
+                      <Check size={14} style={{ position: 'absolute', top: 12, right: 12 }} />
+                    )}
                     <span style={{
                       fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
                       letterSpacing: '0.12em', textTransform: 'uppercase',
@@ -737,13 +830,37 @@ export default function AdsGenerator() {
             </div>
           </Section>
 
-          {/* Step 02: angle */}
-          <Section label="03" title="Angle">
+          {/* Step 02: angles — multi-select. Pick 1+. */}
+          <Section label="03" title="Angles">
+            <div style={{
+              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+              marginBottom: 10, gap: 12, flexWrap: 'wrap',
+            }}>
+              <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                          color: 'var(--ink-4)', margin: 0, maxWidth: 640 }}>
+                Click any angle to add it to the batch. Each selected angle gets its own run
+                — selecting three angles × two script types = six batches in parallel.
+              </p>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button onClick={() => setAngleSlugs(angles.map(a => a.slug))}
+                  style={pillButtonStyle(false)}>
+                  Select all ({angles.length})
+                </button>
+                {angleSlugs.length > 0 && (
+                  <button onClick={() => setAngleSlugs([])}
+                    style={pillButtonStyle(false)}>
+                    Clear ({angleSlugs.length})
+                  </button>
+                )}
+              </div>
+            </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {angles.map(a => {
-                const on = a.slug === angleSlug
+                const on = angleSlugs.includes(a.slug)
                 return (
-                  <button key={a.slug} onClick={() => setAngleSlug(a.slug)}
+                  <button key={a.slug}
+                    onClick={() => setAngleSlugs(prev =>
+                      prev.includes(a.slug) ? prev.filter(s => s !== a.slug) : [...prev, a.slug])}
                     title={a.qualifier}
                     style={{
                       padding: '10px 14px',
@@ -760,8 +877,11 @@ export default function AdsGenerator() {
                 )
               })}
             </div>
-            {angleSlug && (() => {
-              const a = angles.find(x => x.slug === angleSlug)
+            {/* Preview block: only when EXACTLY one selected. With many
+                selected the preview would be noise — each angle uses its
+                own qualifier / promise / mechanism server-side. */}
+            {primaryAngleSlug && (() => {
+              const a = angles.find(x => x.slug === primaryAngleSlug)
               if (!a) return null
               return (
                 <div style={{
@@ -782,10 +902,23 @@ export default function AdsGenerator() {
                 </div>
               )
             })()}
+            {angleSlugs.length > 1 && (
+              <div style={{
+                marginTop: 12, padding: '10px 14px',
+                background: 'var(--paper)', border: '1px solid var(--rule)',
+                fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                color: 'var(--ink-3)', lineHeight: 1.5,
+              }}>
+                {angleSlugs.length} angles selected. Each will use its own mechanism + proof
+                characters server-side. The Mechanism + Proof character pickers below are
+                hidden in multi-angle mode — re-select a single angle to override per-angle.
+              </div>
+            )}
           </Section>
 
-          {/* Step 03b: proof characters (per angle) — picker + opener for editor */}
-          {angleSlug && (
+          {/* Step 03b: proof characters (per angle) — picker + opener for editor.
+              Single-angle mode only; multi-angle runs use each angle's own proofs. */}
+          {primaryAngleSlug && (
             <Section label="03b" title="Proof characters">
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8, gap: 12, flexWrap: 'wrap' }}>
                 <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
@@ -858,13 +991,16 @@ export default function AdsGenerator() {
             </Section>
           )}
 
-          {/* Step 02b: mechanism (optional) */}
+          {/* Step 04: mechanism (optional). Single-angle mode only — when
+              multiple angles are selected each angle uses its own default
+              mechanism server-side. */}
+          {primaryAngleSlug && (
           <Section label="04" title="Mechanism (optional)">
             <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
                         color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
-              What OPT does to deliver the outcome for this angle. Leave unselected to use
-              the angle's default mechanism wording. Pick one to override — the body's
-              Beat 4 reveal and Beat 5 (3-part HOW) come from here.
+              A mechanism is a <strong>named system</strong> you sell — e.g. "The Direct CPA Engine",
+              "The Banker Referral Loop", "The Pipe Flow Method". Not a strategy or transition.
+              Leave unselected to use the angle's default mechanism wording.
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
               <button onClick={() => setMechanismSlug('')}
@@ -955,6 +1091,7 @@ export default function AdsGenerator() {
               )
             })()}
           </Section>
+          )}
 
           <MechanismConfigModal
             open={mechanismModalOpen}
@@ -967,13 +1104,14 @@ export default function AdsGenerator() {
 
           <ProofCharacterEditor
             open={proofEditorOpen}
-            angle={angles.find(a => a.slug === angleSlug) || null}
+            angle={angles.find(a => a.slug === primaryAngleSlug) || null}
             onClose={() => setProofEditorOpen(false)}
             onSaved={refreshProofCharacters}
           />
 
-          {/* Step 03: shapes (Hook + Joined) and/or length (Body + Joined) */}
-          {(scriptType === 'hook' || scriptType === 'joined') && (
+          {/* Step 05: shape filter (when any of hook/joined is in scriptTypes)
+              and/or length picker (when any of body/joined is in scriptTypes). */}
+          {(scriptTypes.includes('hook') || scriptTypes.includes('joined')) && (
             <Section label="05" title="Hook shapes">
               <div style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
                             color: 'var(--ink-4)', marginBottom: 10, maxWidth: 720 }}>
@@ -1019,8 +1157,8 @@ export default function AdsGenerator() {
               </div>
             </Section>
           )}
-          {(scriptType === 'body' || scriptType === 'joined') && (
-            <Section label={scriptType === 'joined' ? '05b' : '05'} title="Target length">
+          {(scriptTypes.includes('body') || scriptTypes.includes('joined')) && (
+            <Section label={scriptTypes.includes('hook') || scriptTypes.includes('joined') ? '05b' : '05'} title="Target length">
               <div style={{ display: 'flex', gap: 8 }}>
                 {[
                   { v: 'under_60s', label: 'Under 60s', desc: 'Tight body, single proof beat' },
@@ -1323,72 +1461,72 @@ export default function AdsGenerator() {
         </Section>
       )}
 
-      {/* Step 07: generate (Scripts mode only — Messaging has its own
-          Generate button in its panel) */}
-      {genTarget === 'scripts' && (
-      <Section label="07" title="Generate">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <button onClick={handleGenerate}
-            disabled={generating || (generatorMode === 'templates' ? !angleSlug : !offerSlug)}
-            style={{
-              padding: '14px 28px', fontFamily: 'var(--mono)', fontSize: 12,
-              letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700,
-              border: '2px solid var(--ink)',
-              background: generating ? 'var(--ink-3)' : 'var(--ink)',
-              color: 'var(--paper)', cursor: generating ? 'wait' : 'pointer',
-              opacity: (generatorMode === 'templates' ? !angleSlug : !offerSlug) ? 0.4 : 1, borderRadius: 2,
-              boxShadow: !generating && (generatorMode === 'templates' ? angleSlug : offerSlug) ? '4px 4px 0 var(--accent)' : 'none',
-              transition: 'all 140ms ease',
-            }}>
-            <Sparkles size={14} style={{ display: 'inline', marginRight: 8, verticalAlign: 'middle' }} />
-            {generating
-              ? `Generating ${nConcepts}…`
-              : generatorMode === 'templates'
-                ? `Generate ${nConcepts} ${scriptType}${nConcepts > 1 ? (scriptType === 'body' ? ' bodies' : scriptType === 'joined' ? ' joined scripts' : 's') : ''}`
-                : `Generate ${nConcepts} ${mode === 'diverse' ? 'diverse' : 'targeted'} concept${nConcepts > 1 ? 's' : ''}`}
-          </button>
-          {generating && (
-            <GenProgress
-              kind={scriptType === 'hook' ? 'hooks' : scriptType === 'body' ? 'bodies' : 'joined'}
-              total={nConcepts}
-            />
-          )}
-          <label style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-3)',
-                        display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-            <input type="checkbox" checked={saveAsDrafts} onChange={e => setSaveAsDrafts(e.target.checked)} />
-            Save to drafts
-          </label>
-          {saveAsDrafts && draftBatches.length > 0 && (
-            <label style={{
-              fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-3)',
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-            }}>
-              <span style={{
-                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
-                letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)',
-              }}>Into batch</span>
-              <select value={saveToBatchId || ''} onChange={e => setSaveToBatchId(e.target.value || null)}
-                style={{
-                  padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 13,
-                  border: '1px solid var(--rule-2)', background: 'white',
-                  color: 'var(--ink)', outline: 'none',
-                }}>
-                <option value="">— Loose drafts —</option>
-                {draftBatches.map(b => (
-                  <option key={b.id} value={b.id}>{b.name} ({b.script_count})</option>
-                ))}
-              </select>
-            </label>
-          )}
-          {selectedOffer?.has_dual_guarantee && (
-            <span style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                          color: 'var(--ink-4)' }}>
-              Dual-guarantee close: top 3 Maps + crews booked, money back if neither.
-            </span>
-          )}
-        </div>
-      </Section>
-      )}
+      {/* Step 07: generate (Scripts mode only). Stripped layout:
+          - Button on its own row.
+          - GenProgress sits BELOW the button (full width, not floated beside).
+          - Drafts are always saved. No batch dropdown (manage batches elsewhere).
+          - Dual-guarantee reminder kept as a one-line note above the button. */}
+      {genTarget === 'scripts' && (() => {
+        const totalBatches = generatorMode === 'templates'
+          ? angleSlugs.length * scriptTypes.length
+          : 1
+        const totalScripts = totalBatches * nConcepts
+        const disabled = generating || (generatorMode === 'templates'
+          ? (!angleSlugs.length || !scriptTypes.length)
+          : !offerSlug)
+        const buttonLabel = (() => {
+          if (generating) return `Generating ${totalScripts}…`
+          if (generatorMode !== 'templates') {
+            return `Generate ${nConcepts} ${mode === 'diverse' ? 'diverse' : 'targeted'} concept${nConcepts > 1 ? 's' : ''}`
+          }
+          if (totalBatches === 0) return 'Pick angles + script types to enable'
+          if (totalBatches === 1) {
+            const t = scriptTypes[0]
+            return `Generate ${nConcepts} ${t === 'body' ? 'bodies' : t === 'joined' ? 'joined scripts' : t + (nConcepts > 1 ? 's' : '')}`
+          }
+          return `Generate ${totalScripts} scripts (${angleSlugs.length} angle${angleSlugs.length > 1 ? 's' : ''} × ${scriptTypes.length} type${scriptTypes.length > 1 ? 's' : ''} × ${nConcepts})`
+        })()
+        return (
+          <Section label="07" title="Generate">
+            {selectedOffer?.has_dual_guarantee && (
+              <div style={{
+                marginBottom: 12, padding: '8px 12px',
+                background: 'var(--paper)', border: '1px solid var(--rule)',
+                fontFamily: 'var(--serif)', fontSize: 12.5, fontStyle: 'italic',
+                color: 'var(--ink-3)', maxWidth: 720, borderRadius: 2,
+              }}>
+                Dual-guarantee close in play: top 3 Maps + crews booked, money back if neither.
+              </div>
+            )}
+            <button onClick={handleGenerate} disabled={disabled}
+              style={{
+                padding: '14px 28px', fontFamily: 'var(--mono)', fontSize: 12,
+                letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700,
+                border: '2px solid var(--ink)',
+                background: generating ? 'var(--ink-3)' : 'var(--ink)',
+                color: 'var(--paper)', cursor: disabled ? 'not-allowed' : (generating ? 'wait' : 'pointer'),
+                opacity: disabled && !generating ? 0.4 : 1, borderRadius: 2,
+                boxShadow: !disabled ? '4px 4px 0 var(--accent)' : 'none',
+                transition: 'all 140ms ease',
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+              }}>
+              <Sparkles size={14} />
+              {buttonLabel}
+            </button>
+            {generating && (
+              <div style={{ marginTop: 14, maxWidth: 720 }}>
+                <GenProgress
+                  kind={scriptTypes.length === 1
+                    ? (scriptTypes[0] === 'hook' ? 'hooks' : scriptTypes[0] === 'body' ? 'bodies' : 'joined')
+                    : 'mixed'}
+                  total={totalScripts}
+                  fanout={totalBatches > 1 ? fanProgress : null}
+                />
+              </div>
+            )}
+          </Section>
+        )
+      })()}
 
       {/* Result panel — Scripts mode only */}
       {genTarget === 'scripts' && result?.scripts?.length > 0 && (
@@ -1450,6 +1588,17 @@ function Section({ label, title, children }) {
       {children}
     </div>
   )
+}
+
+// Pill-style mono button used for the angle-picker batch controls
+// (Select all / Clear). Same shape used in MechanismConfigModal etc.
+function pillButtonStyle() {
+  return {
+    padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
+    letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+    border: '1px solid var(--rule)', background: 'transparent',
+    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+  }
 }
 
 // Reusable free-text instructions field shared between Messaging and Scripts.
@@ -1596,16 +1745,16 @@ function AngleCard({ angle }) {
 // elapsed-time + phase-cycler that gives the operator something to read
 // while Claude runs (60–120s for a normal batch). Phases are tailored
 // per `kind` so it reads correctly for hooks / bodies / joined / angles.
-function GenProgress({ kind, total }) {
+function GenProgress({ kind, total, fanout }) {
   const [elapsed, setElapsed] = useState(0)
   const [phaseIdx, setPhaseIdx] = useState(0)
 
   const phases = useMemo(() => {
     if (kind === 'angles') {
       return [
-        `Loading offer + audience profile`,
+        `Searching the web for real grounding sources`,
         `Drafting ${total} angles in the prospect's voice`,
-        `Checking each angle is specific to the audience`,
+        `Adding why-it-matters + concrete evidence per angle`,
         `Saving to the offer's angle library`,
       ]
     }
@@ -1625,6 +1774,14 @@ function GenProgress({ kind, total }) {
         `Saving drafts`,
       ]
     }
+    if (kind === 'mixed') {
+      return [
+        `Loading angles, mechanisms, proofs in parallel`,
+        `Drafting ${total} scripts across types`,
+        `Reviewing each batch for voice + skeleton compliance`,
+        `Saving drafts`,
+      ]
+    }
     // hooks (default)
     return [
       `Loading angle + hook shapes`,
@@ -1639,8 +1796,6 @@ function GenProgress({ kind, total }) {
     const id = setInterval(() => {
       const secs = Math.floor((Date.now() - startedAt) / 1000)
       setElapsed(secs)
-      // Walk phases roughly in proportion to expected runtime.
-      // Per-concept: ~3s base + 2s/item. Phase boundaries at 15/45/75% of expected.
       const expected = Math.max(30, 8 + total * 4)
       const ratio = Math.min(0.99, secs / expected)
       const idx = ratio < 0.15 ? 0 : ratio < 0.45 ? 1 : ratio < 0.85 ? 2 : 3
@@ -1652,12 +1807,21 @@ function GenProgress({ kind, total }) {
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
   const ss = String(elapsed % 60).padStart(2, '0')
 
+  // Fan-out progress bar (when multiple parallel calls in flight).
+  // We show real done/total counts from the parent, plus an inline phase
+  // hint for the proof-gen pre-step when applicable.
+  const fanoutTotal = fanout?.total ?? 0
+  const fanoutDone = fanout?.done ?? 0
+  const fanoutFailed = fanout?.failed ?? 0
+  const fanoutPhase = fanout?.phase  // 'proofs' | 'scripts' | undefined
+  const fanoutPct = fanoutTotal > 0 ? Math.round((fanoutDone + fanoutFailed) * 100 / fanoutTotal) : 0
+
   return (
     <div style={{
-      marginTop: 14, padding: '14px 16px',
+      padding: '14px 16px',
       background: 'var(--paper)', border: '1px solid var(--rule)',
       borderLeft: '3px solid var(--accent)',
-      borderRadius: 2, maxWidth: 560,
+      borderRadius: 2,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
         <span style={{
@@ -1668,7 +1832,9 @@ function GenProgress({ kind, total }) {
           fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em',
           textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
         }}>
-          Step {phaseIdx + 1} of {phases.length}
+          {fanoutPhase === 'proofs'
+            ? `Generating proof characters · ${fanoutDone}/${fanoutTotal}`
+            : `Step ${phaseIdx + 1} of ${phases.length}`}
         </span>
         <span style={{
           marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 11,
@@ -1679,18 +1845,40 @@ function GenProgress({ kind, total }) {
         fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)',
         lineHeight: 1.4,
       }}>
-        {phases[phaseIdx]}
+        {fanoutPhase === 'proofs'
+          ? `Auto-generating proof characters for angles that don't have any yet`
+          : phases[phaseIdx]}
         <span style={{ display: 'inline-block', width: 16, color: 'var(--ink-4)' }}>
           {'.'.repeat((elapsed % 3) + 1)}
         </span>
       </div>
-      {/* Tracked-progress hint so the operator knows Claude calls don't stream */}
+      {/* Fan-out bar — real per-call progress */}
+      {fanout && fanoutTotal > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{
+            height: 4, background: 'var(--rule)', borderRadius: 2, overflow: 'hidden',
+          }}>
+            <div style={{
+              width: `${fanoutPct}%`, height: '100%',
+              background: fanoutFailed ? '#b53e3e' : 'var(--ink)',
+              transition: 'width 240ms ease',
+            }} />
+          </div>
+          <div style={{
+            marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10.5,
+            color: 'var(--ink-4)', letterSpacing: '0.06em',
+          }}>
+            {fanoutDone}/{fanoutTotal} batches complete{fanoutFailed ? ` · ${fanoutFailed} failed` : ''}
+          </div>
+        </div>
+      )}
       <div style={{
         marginTop: 8, fontFamily: 'var(--serif)', fontSize: 11.5, fontStyle: 'italic',
         color: 'var(--ink-4)', lineHeight: 1.4,
       }}>
-        Claude runs the whole batch in one pass — phases are an estimate, not a real-time signal.
-        A {total}-item batch usually finishes in {Math.round((8 + total * 4) / 6) * 6}–{Math.round((8 + total * 4) / 6) * 6 + 30}s.
+        {fanout && fanoutTotal > 1
+          ? `Fanning out ${fanoutTotal} parallel Claude calls — phases above are estimated; the progress bar is real.`
+          : `Claude runs the whole batch in one pass — phases are an estimate, not a real-time signal. A ${total}-item batch usually finishes in ${Math.round((8 + total * 4) / 6) * 6}–${Math.round((8 + total * 4) / 6) * 6 + 30}s.`}
       </div>
       <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }`}</style>
     </div>

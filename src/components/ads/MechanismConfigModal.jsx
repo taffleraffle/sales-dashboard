@@ -127,10 +127,19 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
           <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
                       fontSize: 14, margin: '0 0 20px', lineHeight: 1.5 }}>
             A mechanism is <strong>what OPT does to deliver the outcome</strong>. Same mechanism
-            can pair with multiple angles (e.g. the "Advisory Shift" mechanism answers both
-            the "Bench eating bookkeeping" pain AND the "$30k/mo recurring" desire). The fields
-            below feed straight into the generator's prompt — be specific about the short
-            phrasing for hooks and the 3-part HOW for body Beat 5.
+            can pair with multiple angles. The fields below feed straight into the generator's
+            prompt — be specific about the short phrasing for hooks and the 3-part HOW for body
+            Beat 5.
+          </p>
+          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13,
+                      color: '#7a5810', background: '#fef6e6', border: '1px solid #e8c98a',
+                      padding: '10px 14px', borderRadius: 2, margin: '0 0 18px', lineHeight: 1.5 }}>
+            <strong>Naming rule:</strong> a mechanism is a <strong>named system</strong> you sell —
+            something brandable a prospect could say. <em>"The Direct CPA Engine"</em>,
+            <em> "The Pipe Flow Method"</em>, <em>"The Banker Referral Loop"</em>. Not a strategy
+            label, not a transition arrow ("Compliance → Advisory" is not a mechanism), not
+            a description of what changes. If you can't put "The" in front of it and it still
+            sound like a product, it's not a mechanism.
           </p>
 
           {err && (
@@ -142,19 +151,20 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             <Field label="Slug (URL-safe)" required
-              helper="e.g. advisory-shift, referral-chain-rebuild, rank-1-in-ai-restoration"
+              helper="e.g. direct-cpa-engine, pipe-flow-method, banker-referral-loop"
               value={form.slug}
               disabled={isEdit}
               onChange={v => setForm({ ...form, slug: v.toLowerCase().replace(/[^a-z0-9-]/g, '-') })} />
             <Field label="Display name" required
-              helper='e.g. "Compliance → Advisory Shift"'
+              helper='Brandable named system. e.g. "The Direct CPA Engine", "The Pipe Flow Method".'
+              placeholder='The Direct CPA Engine'
               value={form.name}
               onChange={v => setForm({ ...form, name: v })} />
           </div>
 
           <Field label="Summary"
             helper="One-line description of what this mechanism delivers. Shown on the picker pills."
-            placeholder="e.g. Move a CPA practice off the tax-return treadmill into recurring advisory retainers."
+            placeholder="e.g. Builds a recurring-advisory book of business inside an existing CPA practice."
             value={form.summary}
             onChange={v => setForm({ ...form, summary: v })}
             multiline />
