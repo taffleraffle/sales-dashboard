@@ -11929,25 +11929,33 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               <strong>Upload failed:</strong> {err}
             </div>
           )}
-          {/* Alternative: paste a review link instead of uploading the
-              raw file. Useful for Frame.io / Drive review pages / Dropbox
-              previews — editor doesn't have to wait for a multi-GB upload
-              + Ben can leave comments inside the linked tool. */}
-          <ExternalLinkSubmitter
-            taskId={task.task_id}
-            editorId={task.editor_id}
-            editorName={task.editor_name}
-            currentVersionCount={submissions.length}
-            onSubmitted={async () => {
-              await reloadSubmissions()
-              // Move task to review (same effect as a file upload)
-              await supabase.from('lib_editing_tasks')
-                .update({ status: 'review', started_at: task.started_at || new Date().toISOString() })
-                .eq('id', task.task_id)
-              setStatus('review')
-              onSaved?.()
-            }}
-          />
+          {/* External-link submission DISABLED (Ben 2026-06-01 quality
+              policy). Frame.io and Drive both serve compressed proxy
+              videos by default — even though our ingest function never
+              transcodes, the BYTES we pull from the proxy already have
+              quality loss baked in vs the editor's original cut. The
+              only path that guarantees full quality is TUS direct
+              upload (the drop zone above), where the editor's local
+              file bytes go straight to Supabase storage with zero
+              re-encoding. Past submissions that came in via external_url
+              are untouched. New submissions must use the drop zone. */}
+          <div style={{
+            marginTop: 10, padding: '10px 12px',
+            background: 'var(--paper-2)',
+            border: '1px solid var(--rule)',
+            borderLeft: '3px solid var(--accent, #f4e14a)',
+            fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
+            lineHeight: 1.55, letterSpacing: '0.02em',
+          }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+              letterSpacing: '0.12em', textTransform: 'uppercase',
+              color: 'var(--ink-2)', marginBottom: 4,
+            }}>Direct upload only</div>
+            Drop the original file above. Frame.io / Drive submission
+            links aren't accepted — those services serve compressed
+            proxies that lose quality vs your original cut.
+          </div>
         </div>
         )}
 
