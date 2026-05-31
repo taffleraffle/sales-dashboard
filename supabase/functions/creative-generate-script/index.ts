@@ -801,6 +801,48 @@ serve(async (req) => {
         ].filter(Boolean).join(' ').slice(0, 220)
         const grounding = await fetchGrounding(groundingQuery, 6)
         const groundingBlock = formatGroundingBlock(grounding)
+
+        // ── Anti-repetition (Ben 2026-06-01) ──
+        // Ben's #1 complaint after 135 angles accumulated: "a lot of these
+        // are duplicates and pretty generic — we run through these quickly,
+        // get more creative." Root cause: Claude doesn't see the existing
+        // library, so each run independently rediscovers the same templates
+        // ("Maps top-3", "AI citation", "Just Hired Third Tech", "SEO Agency
+        // Money Pit"). Fix: fetch every active angle for this offer + the
+        // first ~60 chars of prospect_voice, pass them as an EXISTING list
+        // with a hard "must be MEANINGFULLY DIFFERENT" rule. We cap at 80
+        // most-recent to keep prompt size sane on large libraries (135+).
+        let existingAnglesBlock = ''
+        try {
+          const { data: existing } = await supabase
+            .from('script_angles')
+            .select('name, angle_type, prospect_voice')
+            .eq('active', true)
+            .contains('offer_slugs', [offer_slug])
+            .order('created_at', { ascending: false })
+            .limit(80)
+          if (existing && existing.length) {
+            const byType: Record<string, string[]> = { problem: [], circumstance: [], outcome: [], desire: [] }
+            for (const a of existing) {
+              const t = (a.angle_type || 'other').toLowerCase()
+              const arr = byType[t] || (byType.other = byType.other || [])
+              const voice = (a.prospect_voice || '').replace(/\s+/g, ' ').trim().slice(0, 70)
+              arr.push(`"${a.name}" — ${voice}`)
+            }
+            const lines: string[] = []
+            for (const t of ['problem', 'circumstance', 'outcome', 'desire']) {
+              const arr = byType[t]
+              if (arr && arr.length) {
+                lines.push(`  ${t.toUpperCase()} (${arr.length} already in library):`)
+                arr.slice(0, 25).forEach(s => lines.push(`    - ${s}`))
+                if (arr.length > 25) lines.push(`    ...(+${arr.length - 25} more — assume the obvious template variants of these are taken)`)
+              }
+            }
+            existingAnglesBlock = `\n\nEXISTING ANGLES IN THE LIBRARY (DO NOT REPEAT — your new angles must be MEANINGFULLY DIFFERENT, not synonyms, not word-swaps, not slight reframings):\n${lines.join('\n')}\n\nIf the template families that work for this vertical are exhausted (e.g. all 7 Maps-top-3 variants are taken), do NOT return an 8th. Instead, push into UNUSED FRAMINGS: contrarian angles, weird edge-case scenarios, specific-niche identities, oddly-specific dollar/time threshold moments, identity-crisis triggers, social-pressure / status-loss angles, FOMO / regret framings, etc. We would rather see 3 fresh weird angles than 8 dupes of what's already there.`
+          }
+        } catch (e) {
+          console.warn(`[messaging] existing-angles fetch failed: ${(e as any)?.message}`)
+        }
     const rankTierBlurb = rankTier === 'HIGH'
       ? `HIGH rank-aware vertical (${offer.vertical}). At least ${rankMin} of the ${n_outcomes} OUTCOMES MUST be rank-explicit (rank_explicit=true) — literal "rank #1", "top 3 on Maps", "first pin", "AI-recommended", "the one ChatGPT names", "LSA dominance", "page-one organic". This is non-negotiable; the operator has explicitly asked to see rank-#1 angles.`
       : rankTier === 'MODERATE'
@@ -887,10 +929,13 @@ serve(async (req) => {
         offer.mechanism_name ? `BRAND-NAMED MECHANISM (only mention in passing): ${offer.mechanism_name}` : '',
         niche_hint ? `\nADDITIONAL CONTEXT FROM OPERATOR: ${niche_hint}` : '',
         groundingBlock,
+        existingAnglesBlock,
         '',
         bucketBlock,
         '',
         'Each angle: specific to the audience qualifier above. why_it_matters (4-6 sentences) + 2-3 evidence_examples (concrete moments) are required, not optional.',
+        '',
+        `CREATIVITY MANDATE (Ben 2026-06-01): Ben is running through angles fast. He has explicitly asked for MORE CREATIVE, LESS GENERIC framings this run. The 7-template menu in the system prompt is a FLOOR, not a ceiling. Push for: (a) oddly-specific identity moments ("I'm the only ${offer.vertical || 'company'} owner in my city who still answers the phone at 9pm"), (b) contrarian / status-flip angles ("I'm tired of being the cheap option — I want to be the one they call AFTER getting three quotes"), (c) social-pressure / regret framings ("My neighbor's basement flooded and they didn't even think of me"), (d) specific-vs-generic threshold moments ("I just hired a tech who's better than me and now I need work to keep him here"), (e) FOMO on competitor wins ("My competitor just got featured in the local paper and my phone has been silent ever since"), (f) inside-baseball industry moves ("Insurance carriers are quietly rolling out their own preferred-vendor app and I'm not on it"). When in doubt, surprise the reader.`,
         '',
         grounding.length
           ? 'Cite GROUNDING SOURCES you actually used. Empty array if reasoning-only. NEVER invent URLs.'
