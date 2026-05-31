@@ -2912,61 +2912,45 @@ export default function MarketingPerformance() {
     return Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([a]) => a)
   }, [entries, audienceOverrides])
 
-  // Apply audience filter BEFORE date filtering so every downstream
-  // computation (KPIs, trailing table, comparison view) inherits it.
+  // Single source of truth: audienceDaily (= lib_marketing_by_audience_daily
+  // aggregating ad_daily_stats truth + typeform attribution chain). Used
+  // for BOTH the All view (sum across all audiences) AND filtered views
+  // (sum across selected audiences).
   //
-  // When no audience is selected → marketing_tracker daily totals (the
-  // closer-reported aggregates, unchanged).
+  // Ben caught the bug (2026-06-01): previously "All" used marketing_tracker
+  // (closer-EOD self-report = ~$16k spend last 30d), while filtered views
+  // used the audience view (= $29k Meta truth). Numbers didn't reconcile.
   //
-  // When audience(s) are selected → aggregate the per-audience daily view
-  // back to one marketing_tracker-shaped row per day. This is what makes
-  // "Restoration" actually show $21k of spend instead of $0 — the previous
-  // filter tried to read entry.campaign_name which doesn't exist on
-  // marketing_tracker rows (they're daily aggregates with no campaign
-  // info). Now we replace entries with attribution-derived per-audience
-  // rollups when filtering.
+  // Now: All math is consistent. Restoration + Electricians + ... ==
+  // All. EOD-only fields (offers, ascensions, refunds — closer-self-reported
+  // numbers not derivable from attribution) are layered in from
+  // marketing_tracker for the All view only. Those don't apply at the
+  // per-audience level because closers don't tag their EOD report by
+  // audience.
   const audienceFilteredEntries = useMemo(() => {
-    if (!selectedAudiences || selectedAudiences.size === 0) return entries
-    if (!audienceDaily.length) return []  // wait for the view to load
-    const wanted = selectedAudiences  // Set of audience strings
+    if (!audienceDaily.length) return entries  // wait for the view to load
+    const wanted = (selectedAudiences && selectedAudiences.size > 0) ? selectedAudiences : null
     const byDate = {}
+    const emptyRow = (d) => ({
+      date: d,
+      adspend: 0, leads: 0, qualified_bookings: 0,
+      live_calls: 0, new_live_calls: 0, net_live_calls: 0,
+      net_new_calls: 0, net_fu_calls: 0,
+      auto_bookings: 0, calls_on_calendar: 0,
+      offers: 0, closes: 0,
+      trial_cash: 0, trial_revenue: 0,
+      ascensions: 0, ascend_cash: 0, ascend_revenue: 0,
+      ar_collected: 0, ar_defaulted: 0,
+      refund_count: 0, refund_amount: 0,
+      finance_offers: 0, finance_accepted: 0,
+      monthly_offers: 0, monthly_accepted: 0,
+      reschedules: 0, no_shows: 0,
+      cancelled_dtf: 0, cancelled_by_prospect: 0,
+    })
     for (const row of audienceDaily) {
-      if (!wanted.has(row.audience)) continue
-      const d = row.date  // 'YYYY-MM-DD'
-      if (!byDate[d]) {
-        byDate[d] = {
-          date: d,
-          adspend: 0,
-          leads: 0,
-          qualified_bookings: 0,
-          live_calls: 0,
-          new_live_calls: 0,
-          net_live_calls: 0,
-          net_new_calls: 0,
-          net_fu_calls: 0,
-          auto_bookings: 0,
-          calls_on_calendar: 0,
-          offers: 0,
-          closes: 0,
-          trial_cash: 0,
-          trial_revenue: 0,
-          ascensions: 0,
-          ascend_cash: 0,
-          ascend_revenue: 0,
-          ar_collected: 0,
-          ar_defaulted: 0,
-          refund_count: 0,
-          refund_amount: 0,
-          finance_offers: 0,
-          finance_accepted: 0,
-          monthly_offers: 0,
-          monthly_accepted: 0,
-          reschedules: 0,
-          no_shows: 0,
-          cancelled_dtf: 0,
-          cancelled_by_prospect: 0,
-        }
-      }
+      if (wanted && !wanted.has(row.audience)) continue
+      const d = row.date
+      if (!byDate[d]) byDate[d] = emptyRow(d)
       const r = byDate[d]
       r.adspend            += Number(row.adspend) || 0
       r.leads              += Number(row.leads) || 0
@@ -2976,6 +2960,39 @@ export default function MarketingPerformance() {
       r.closes             += Number(row.closes) || 0
       r.trial_revenue      += Number(row.trial_revenue) || 0
       r.trial_cash         += Number(row.trial_cash) || 0
+    }
+    // For the All view (no filter active), layer in the EOD-only KPIs from
+    // marketing_tracker (offers, ascensions, refunds, etc. — closer-self-
+    // reported daily aggregates not derivable from attribution). These fields
+    // can't be reliably split by audience, so they're only meaningful when
+    // looking at the All bucket.
+    if (!wanted) {
+      const mtByDate = {}
+      for (const e of entries) mtByDate[e.date] = e
+      for (const d in byDate) {
+        const mt = mtByDate[d]; if (!mt) continue
+        byDate[d].offers              = Number(mt.offers) || 0
+        byDate[d].ascensions          = Number(mt.ascensions) || 0
+        byDate[d].ascend_cash         = Number(mt.ascend_cash) || 0
+        byDate[d].ascend_revenue      = Number(mt.ascend_revenue) || 0
+        byDate[d].ar_collected        = Number(mt.ar_collected) || 0
+        byDate[d].ar_defaulted        = Number(mt.ar_defaulted) || 0
+        byDate[d].refund_count        = Number(mt.refund_count) || 0
+        byDate[d].refund_amount       = Number(mt.refund_amount) || 0
+        byDate[d].finance_offers      = Number(mt.finance_offers) || 0
+        byDate[d].finance_accepted    = Number(mt.finance_accepted) || 0
+        byDate[d].monthly_offers      = Number(mt.monthly_offers) || 0
+        byDate[d].monthly_accepted    = Number(mt.monthly_accepted) || 0
+        byDate[d].reschedules         = Number(mt.reschedules) || 0
+        byDate[d].no_shows            = Number(mt.no_shows) || 0
+        byDate[d].cancelled_dtf       = Number(mt.cancelled_dtf) || 0
+        byDate[d].cancelled_by_prospect = Number(mt.cancelled_by_prospect) || 0
+        byDate[d].net_new_calls       = Number(mt.net_new_calls) || 0
+        byDate[d].net_fu_calls        = Number(mt.net_fu_calls) || 0
+        byDate[d].net_live_calls      = Number(mt.net_live_calls) || 0
+        byDate[d].auto_bookings       = Number(mt.auto_bookings) || 0
+        byDate[d].calls_on_calendar   = Number(mt.calls_on_calendar) || 0
+      }
     }
     return Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date))
   }, [entries, audienceDaily, selectedAudiences])
