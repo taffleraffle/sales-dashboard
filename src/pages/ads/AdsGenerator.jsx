@@ -293,8 +293,13 @@ export default function AdsGenerator() {
   }
   async function handleMechanismSaved(saved) {
     setMechanismModalOpen(false)
-    const fresh = await listMechanisms({ angle_slug: angleSlug }).catch(() => [])
-    setMechanisms(fresh)
+    // primaryAngleSlug is the only meaningful angle when refreshing
+    // mechanism compat; in multi-select mode skip the refresh (mechanism
+    // picker isn't visible anyway).
+    if (primaryAngleSlug) {
+      const fresh = await listMechanisms({ angle_slug: primaryAngleSlug }).catch(() => [])
+      setMechanisms(fresh)
+    }
     if (saved?.slug) setMechanismSlug(saved.slug)
   }
 
@@ -362,50 +367,89 @@ export default function AdsGenerator() {
         extra_instructions: extraInstructions.trim() || undefined,
       })
       setMessagingResult(res)
-      listAngles({ offer_slug: offerSlug }).then(setAngles).catch(() => {})
-      refreshMessagingLibrary(offerSlug)
+      if (res?.queued) {
+        // Background job — Edge Function returns 202 immediately and
+        // does the actual generation via EdgeRuntime.waitUntil. Kick
+        // off polling directly (the offerSlug-effect won't re-fire
+        // since the offer hasn't changed).
+        startInFlightPolling({
+          offer_slug: offerSlug,
+          started_at: Date.now(),
+          expected_count: total,
+          baseline_lib_count: baselineCount,
+        })
+      } else {
+        // Synchronous response (legacy / non-messaging path)
+        listAngles({ offer_slug: offerSlug }).then(setAngles).catch(() => {})
+        refreshMessagingLibrary(offerSlug)
+        clearMessagingInFlight()
+      }
     } catch (e) {
       setErr(e.message)
+      clearMessagingInFlight()
     } finally {
       setMessagingBusy(false)
-      clearMessagingInFlight()
     }
   }
 
   // ── In-flight messaging job recovery (Ben 2026-06-01) ──────────
-  // If the operator clicks away during a generation, the React component
-  // unmounts but the Edge Function keeps running server-side (the angles
-  // auto-save to script_angles regardless of frontend state). The next
-  // mount checks localStorage for an unfinished job and shows a recovery
-  // banner + polls the library every 4s until new rows appear (success)
-  // or 5 minutes lapse (assume dead).
+  // Three scenarios this needs to handle:
+  //   1. Operator clicks Generate, navigates away, comes back later
+  //      → mount-time effect reads localStorage, starts polling
+  //   2. Operator clicks Generate and stays on page (current run via
+  //      EdgeRuntime.waitUntil — Edge Function returned 202 immediately)
+  //      → handleGenerateMessaging calls startInFlightPolling directly
+  //   3. Operator clicks Generate, gen completes within seconds
+  //      → polling detects new rows, clears marker, stops
+  //
+  // The polling itself is the same in all three cases — factor it out
+  // so both entry points can kick it off.
   const [inFlightRecovery, setInFlightRecovery] = useState(null)
+  const pollIntervalRef = useRef(null)
+
+  function startInFlightPolling(job) {
+    if (!job?.offer_slug) return
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+    setInFlightRecovery(job)
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const fresh = await listAngles({ offer_slug: job.offer_slug })
+        if (fresh.length > job.baseline_lib_count) {
+          setAngles(fresh)
+          refreshMessagingLibrary(job.offer_slug)
+          clearMessagingInFlight()
+          setInFlightRecovery(null)
+          clearInterval(pollIntervalRef.current)
+          pollIntervalRef.current = null
+        }
+      } catch {}
+      if ((Date.now() - job.started_at) / 1000 > 300) {
+        clearMessagingInFlight()
+        setInFlightRecovery(null)
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current)
+          pollIntervalRef.current = null
+        }
+      }
+    }, 4000)
+  }
+
+  // Mount-time recovery — only fires when the offer changes (or first
+  // mount). Handles scenario 1 (operator returns to page after closing
+  // browser / navigating away).
   useEffect(() => {
     if (!offerSlug) return
     const job = readMessagingInFlight()
     if (!job || job.offer_slug !== offerSlug) return
     const ageSec = (Date.now() - job.started_at) / 1000
     if (ageSec > 300) { clearMessagingInFlight(); return }
-    setInFlightRecovery(job)
-    // Poll every 4s — when lib grows past the baseline, clear and stop.
-    const pollId = setInterval(async () => {
-      try {
-        const fresh = await listAngles({ offer_slug: offerSlug })
-        if (fresh.length > job.baseline_lib_count) {
-          setAngles(fresh)
-          refreshMessagingLibrary(offerSlug)
-          clearMessagingInFlight()
-          setInFlightRecovery(null)
-          clearInterval(pollId)
-        }
-      } catch {}
-      if ((Date.now() - job.started_at) / 1000 > 300) {
-        clearMessagingInFlight()
-        setInFlightRecovery(null)
-        clearInterval(pollId)
+    startInFlightPolling(job)
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
       }
-    }, 4000)
-    return () => clearInterval(pollId)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offerSlug])
 

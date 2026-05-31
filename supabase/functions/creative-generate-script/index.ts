@@ -434,6 +434,71 @@ function requiredRankExplicit(n_outcomes: number, tier: ReturnType<typeof classi
   return Math.min(n_outcomes, Math.max(2, Math.ceil(n_outcomes * 0.4)))
 }
 
+// Build a tool schema for a SINGLE-BUCKET angle generation call
+// (Ben 2026-06-01 — split from the prior all-buckets-in-one design
+// because single calls of 13+ angles were timing out the Edge Function
+// at the 60s connection limit). bucket = the only angle_type Claude
+// is allowed to return for this call.
+function buildSingleBucketAngleToolSchema(
+  bucket: 'problem' | 'circumstance' | 'outcome',
+  count: number,
+  groundingCount: number,
+  rankMinForBucket: number,
+) {
+  const angleItem = {
+    type: 'object',
+    properties: {
+      angle_type: { type: 'string', enum: [bucket],
+        description: `Always "${bucket}" for this call.` },
+      rank_explicit: { type: 'boolean',
+        description: bucket === 'outcome'
+          ? `TRUE only if this OUTCOME uses literal rank/visibility framing — "rank #1", "top 3 on Maps", "first pin", "AI-recommended", "the company ChatGPT names", "LSA dominance", "page-one organic", "outrank every other [vertical]". At least ${rankMinForBucket} of the ${count} outcomes MUST be true.`
+          : 'Always FALSE for problem and circumstance angles.' },
+      name: { type: 'string', description: 'Short title (3-7 words).' },
+      prospect_voice: { type: 'string', description: 'First-person voice, 1 sentence.' },
+      pain_points: { type: 'array', items: { type: 'string' },
+        description: '2-4 specific lived-reality details.' },
+      hook_build_sketch: { type: 'string',
+        description: 'ONE LINE: shape + first 12-20 words of how the hook would open.' },
+      why_it_matters: { type: 'string',
+        description: 'PROSE 4-6 sentences. Consequences + deeper anxiety + what they\'ve tried.' },
+      evidence_examples: { type: 'array', items: { type: 'string' },
+        description: '2-3 concrete situational moments. Specific scenes, not summaries.' },
+      sources: groundingCount > 0
+        ? {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                index: { type: 'integer', description: `1-based index into GROUNDING SOURCES (1-${groundingCount}).` },
+                relevance: { type: 'string', description: 'One sentence on what this source contributed.' },
+              },
+              required: ['index', 'relevance'],
+            },
+            description: 'Cite ONLY sources you actually drew from. Empty array if reasoning-only. Never invent.',
+          }
+        : {
+            type: 'array',
+            items: { type: 'object', properties: {}, additionalProperties: false },
+            description: 'No grounding. Return empty array.',
+            maxItems: 0,
+          },
+    },
+    required: ['angle_type', 'rank_explicit', 'name', 'prospect_voice', 'hook_build_sketch', 'why_it_matters', 'evidence_examples', 'sources'],
+  }
+  return {
+    name: ANGLE_TOOL_NAME,
+    description: `Return exactly ${count} ${bucket} angles.${bucket === 'outcome' && rankMinForBucket > 0 ? ` At least ${rankMinForBucket} must have rank_explicit=true.` : ''}`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        angles: { type: 'array', items: angleItem, minItems: count, maxItems: count },
+      },
+      required: ['angles'],
+    },
+  }
+}
+
 function buildAngleToolSchema(
   n_problems: number,
   n_circumstances: number,
@@ -697,21 +762,31 @@ serve(async (req) => {
     try { offer = await loadOffer(supabase, offer_slug) }
     catch (e: any) { return json({ error: e.message }, 500) }
 
-    // Real grounding: pull top organic results so Claude has actual
-    // forum/article snippets to anchor why_it_matters + evidence_examples
-    // against. Empty array when SERPER_API_KEY is unset on the function
-    // — generation still runs, just without sources.
-    const groundingQuery = [
-      offer.vertical || '',
-      offer.primary_audience || '',
-      niche_hint || '',
-      'owner problems frustrations forum',
-    ].filter(Boolean).join(' ').slice(0, 220)
-    const grounding = await fetchGrounding(groundingQuery, 6)
-    const groundingBlock = formatGroundingBlock(grounding)
-
     const rankTier = classifyRankAwareness(offer.vertical)
     const rankMin = requiredRankExplicit(n_outcomes, rankTier)
+
+    // ── Fire-and-forget background generation (Ben 2026-06-01) ──
+    // Anything that involves Claude (or Serper) takes 30-120s. Supabase
+    // closes the client connection at ~60s if no response has been sent,
+    // so a synchronous wait throws "non-2xx" for any realistic batch.
+    //
+    // Fix: validate synchronously, schedule the real work via
+    // EdgeRuntime.waitUntil(), return 202 Accepted immediately with the
+    // job metadata. Angles auto-save to script_angles when done; the
+    // frontend's recovery banner polls listAngles every 4s and surfaces
+    // the new rows as they appear.
+    const startedAt = new Date().toISOString()
+
+    const bgJob = (async () => {
+      try {
+        const groundingQuery = [
+          offer.vertical || '',
+          offer.primary_audience || '',
+          niche_hint || '',
+          'owner problems frustrations forum',
+        ].filter(Boolean).join(' ').slice(0, 220)
+        const grounding = await fetchGrounding(groundingQuery, 6)
+        const groundingBlock = formatGroundingBlock(grounding)
     const rankTierBlurb = rankTier === 'HIGH'
       ? `HIGH rank-aware vertical (${offer.vertical}). At least ${rankMin} of the ${n_outcomes} OUTCOMES MUST be rank-explicit (rank_explicit=true) — literal "rank #1", "top 3 on Maps", "first pin", "AI-recommended", "the one ChatGPT names", "LSA dominance", "page-one organic". This is non-negotiable; the operator has explicitly asked to see rank-#1 angles.`
       : rankTier === 'MODERATE'
@@ -753,30 +828,114 @@ serve(async (req) => {
       extraBlock,
     ].filter(Boolean).join('\n')
 
-    const upstreamA = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_KEY!,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 3500 + total * 400,
-        system: ANGLE_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: userMsg }],
-        tools: [buildAngleToolSchema(n_problems, n_circumstances, n_outcomes, grounding.length, rankTier)],
-        tool_choice: { type: 'tool', name: ANGLE_TOOL_NAME },
-      }),
-    })
-    if (!upstreamA.ok) {
-      const errText = await upstreamA.text()
-      return json({ error: `Anthropic ${upstreamA.status}: ${errText.slice(0, 400)}` }, 502)
+    // ── Parallel per-bucket angle generation ──
+    // The previous single-call design timed out at the Edge Function's
+    // 60s hard cap for any batch >~5 angles (Sonnet 4 generates ~80
+    // output tok/sec; 13 angles × 500 tok = 6500 tok / 80 = 80s). Fix:
+    // split into N parallel Anthropic calls, one per bucket (further
+    // chunked if any single bucket > MAX_PER_CALL). Wall-clock becomes
+    // max(per-call latency) ≈ 25-40s instead of sum.
+    const MAX_PER_CALL = 6
+
+    function chunkBucket(bucket: 'problem'|'circumstance'|'outcome', n: number): { bucket: 'problem'|'circumstance'|'outcome', count: number }[] {
+      if (n <= 0) return []
+      if (n <= MAX_PER_CALL) return [{ bucket, count: n }]
+      const out: { bucket: 'problem'|'circumstance'|'outcome', count: number }[] = []
+      let remaining = n
+      while (remaining > 0) {
+        const c = Math.min(MAX_PER_CALL, remaining)
+        out.push({ bucket, count: c })
+        remaining -= c
+      }
+      return out
     }
-    const resultA = await upstreamA.json()
-    const toolUseA = (resultA.content || []).find((c: any) => c.type === 'tool_use')
-    if (!toolUseA) return json({ error: 'Claude did not return angle tool_use', raw: resultA }, 502)
-    const generated_angles: any[] = toolUseA.input?.angles || []
+    const chunks = [
+      ...chunkBucket('problem',      n_problems),
+      ...chunkBucket('circumstance', n_circumstances),
+      ...chunkBucket('outcome',      n_outcomes),
+    ]
+
+    // Bucket-specific user message — only the directives that matter for
+    // this bucket. Keeps prompt size sane per call AND lets Claude focus.
+    // The full ANGLE_SYSTEM_PROMPT is shared across all calls (Anthropic
+    // prompt caching kicks in for free).
+    function buildBucketUserMsg(bucket: 'problem'|'circumstance'|'outcome', count: number, chunkIdx: number, chunksOfThisBucket: number): string {
+      const bucketBlock = bucket === 'problem'
+        ? `Generate exactly ${count} PROBLEM angles. A problem = what the prospect is stuck on, the pain, phrased in their voice. e.g. "I can\'t hire a senior accountant" / "My phone stopped ringing after Google\'s LSA changes" / "Every renewal becomes a price negotiation".`
+        : bucket === 'circumstance'
+          ? `Generate exactly ${count} CIRCUMSTANCE angles. A circumstance = an identity/situation moment that makes the prospect decision-ready. NOT a pain. NOT a desire. A STATE. e.g. "I just took on my third tech and can\'t keep them busy" / "My biggest referral source just retired" / "My new website went live and the calls didn\'t change" / "I just crossed $1M in revenue and realized I have no marketing system". These are the inflection moments when a prospect goes from "things are fine" to "I need to act".`
+          : `Generate exactly ${count} OUTCOME angles. Outcome = the end-state they want, phrased in their voice. RANK-EXPLICIT REQUIREMENT: at least ${Math.min(count, chunkIdx === 0 ? rankMin : 0)} of these MUST have rank_explicit=true${rankTier === 'HIGH' ? ' (Maps top-3, AI citation, LSA dominance, first pin, page-one organic — use those literal framings)' : ''}.${chunksOfThisBucket > 1 ? ` This is chunk ${chunkIdx + 1} of ${chunksOfThisBucket} for outcomes — make these ${count} DIFFERENT from anything else you might produce.` : ''}`
+      return [
+        `OFFER: ${offer.name} (slug: ${offer.slug})`,
+        `VERTICAL: ${offer.vertical}`,
+        `RANK-AWARENESS TIER: ${rankTier} — ${rankTierBlurb}`,
+        `PRIMARY AUDIENCE: ${offer.primary_audience || '(none defined)'}`,
+        offer.mechanism_name ? `BRAND-NAMED MECHANISM (only mention in passing): ${offer.mechanism_name}` : '',
+        niche_hint ? `\nADDITIONAL CONTEXT FROM OPERATOR: ${niche_hint}` : '',
+        groundingBlock,
+        '',
+        bucketBlock,
+        '',
+        'Each angle: specific to the audience qualifier above. why_it_matters (4-6 sentences) + 2-3 evidence_examples (concrete moments) are required, not optional.',
+        '',
+        grounding.length
+          ? 'Cite GROUNDING SOURCES you actually used. Empty array if reasoning-only. NEVER invent URLs.'
+          : 'No grounding sources this run. Return empty sources arrays.',
+        `Return via the ${ANGLE_TOOL_NAME} tool.`,
+        extraBlock,
+      ].filter(Boolean).join('\n')
+    }
+
+    async function runOneBucketCall(bucket: 'problem'|'circumstance'|'outcome', count: number, chunkIdx: number, chunksOfThisBucket: number): Promise<any[]> {
+      const userMsg = buildBucketUserMsg(bucket, count, chunkIdx, chunksOfThisBucket)
+      const rankMinForThisCall = bucket === 'outcome' && chunkIdx === 0 ? Math.min(count, rankMin) : 0
+      const upstream = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_KEY!,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: ANTHROPIC_MODEL,
+          max_tokens: Math.min(8192, 1500 + count * 500),
+          system: ANGLE_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: userMsg }],
+          tools: [buildSingleBucketAngleToolSchema(bucket, count, grounding.length, rankMinForThisCall)],
+          tool_choice: { type: 'tool', name: ANGLE_TOOL_NAME },
+        }),
+      })
+      if (!upstream.ok) {
+        const errText = await upstream.text()
+        throw new Error(`Anthropic ${upstream.status} (${bucket}): ${errText.slice(0, 300)}`)
+      }
+      const result = await upstream.json()
+      const toolUse = (result.content || []).find((c: any) => c.type === 'tool_use')
+      if (!toolUse) throw new Error(`Claude returned no tool_use for ${bucket} call`)
+      return Array.isArray(toolUse.input?.angles) ? toolUse.input.angles : []
+    }
+
+    // Fire all chunks in parallel. Partial failures don't kill the run —
+    // we still save what we got + report the failure to the caller.
+    const chunkResults = await Promise.allSettled(
+      chunks.map((c, i) => {
+        const sameTypeChunks = chunks.filter(x => x.bucket === c.bucket).length
+        const sameTypeIdx = chunks.slice(0, i).filter(x => x.bucket === c.bucket).length
+        return runOneBucketCall(c.bucket, c.count, sameTypeIdx, sameTypeChunks)
+      })
+    )
+    const generated_angles: any[] = []
+    const chunk_errors: string[] = []
+    chunkResults.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        for (const a of r.value) generated_angles.push(a)
+      } else {
+        chunk_errors.push(`${chunks[i].bucket}×${chunks[i].count}: ${r.reason?.message || r.reason}`)
+      }
+    })
+    if (generated_angles.length === 0) {
+      return json({ error: 'all bucket calls failed', detail: chunk_errors }, 502)
+    }
 
     // Resolve Claude's cited source indices back to {title, url, snippet}
     // objects. We trust only indices into the grounding array — Claude
@@ -864,25 +1023,42 @@ serve(async (req) => {
     } catch (e: any) {
       save_error = e.message
     }
+        // Log final outcome for ops visibility (Supabase function logs).
+        console.log(`[messaging] done offer=${offer.slug} buckets=${n_problems}/${n_circumstances}/${n_outcomes} generated=${generated_angles.length} saved=${saved.length} save_error=${save_error || '-'} chunk_errors=${chunk_errors.length}`)
+      } catch (e: any) {
+        console.error(`[messaging] background job failed offer=${offer.slug}: ${e?.message || e}`)
+      }
+    })()
+
+    // Schedule the background work and return immediately. The
+    // EdgeRuntime global is provided by Supabase's edge runtime; the
+    // typeof guard keeps this safe under `deno run` for local tests.
+    // @ts-ignore — EdgeRuntime is a Supabase runtime global
+    if (typeof EdgeRuntime !== 'undefined' && (EdgeRuntime as any).waitUntil) {
+      // @ts-ignore
+      ;(EdgeRuntime as any).waitUntil(bgJob)
+    } else {
+      // Fallback: kick off but don't await. Locally this means the
+      // job runs to completion in the same process before the response
+      // is flushed; on Supabase the waitUntil branch handles it.
+      bgJob.catch((e: any) => console.error('[messaging] bg fallback fail', e?.message || e))
+    }
 
     return json({
       ok: true,
       mode: 'messaging',
       target: 'angles',
+      queued: true,
+      started_at: startedAt,
+      expected_count: total,
       offer: { slug: offer.slug, name: offer.name, vertical: offer.vertical },
-      angles: generated_angles,
-      saved,
-      save_error,
-      model: ANTHROPIC_MODEL,
-      grounding: {
-        enabled: !!Deno.env.get('SERPER_API_KEY'),
-        query: groundingQuery,
-        hits: grounding.length,
-      },
       buckets: { n_problems, n_circumstances, n_outcomes },
       rank_tier: rankTier,
       rank_explicit_min: rankMin,
-    })
+      grounding: { enabled: !!Deno.env.get('SERPER_API_KEY') },
+      model: ANTHROPIC_MODEL,
+      note: 'Generation runs in the background. Poll script_angles for new rows tagged with the offer slug; expect them within 60-120s depending on batch size.',
+    }, 202)
   }
 
   // ── BRANCH: auto-generate proof characters for an angle ──
