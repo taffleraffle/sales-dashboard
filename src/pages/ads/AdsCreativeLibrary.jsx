@@ -95,6 +95,28 @@ function toDownloadUrl(url, filename) {
   return `${url}${sep}download=${encodeURIComponent(fname)}`
 }
 
+// Display priority for a creative-library row. Reads the new display_name
+// first (set by creative-library-describe post-migration 103), then falls
+// back to the pre-overhaul canonical_name, then the upload filename. This
+// is the SINGLE source of truth for what an operator or editor sees in
+// any list, kanban card, modal title, timeline bar, or download filename.
+//
+// Pass the row whichever object shape you have; the helper handles both
+// the lib_creative_library row shape and the lib_editing_queue task row
+// shape (whose columns are prefixed with `creative_`).
+function rowDisplayName(r) {
+  if (!r) return ''
+  // INTENTIONAL: inline fallback chain, NOT a recursive call. An earlier
+  // bulk replace_all of `r.canonical_name || r.name` -> `rowDisplayName(r)`
+  // also rewrote this function body and produced infinite recursion. Keep
+  // the chain literal here.
+  return r.display_name || r.canonical_name || r.name || ''
+}
+function taskDisplayName(t) {
+  if (!t) return ''
+  return t.creative_display_name || t.creative_canonical_name || t.creative_name || ''
+}
+
 /* Resumable upload via TUS. Supabase's standard storage `.upload()` is a
    single-shot POST that buffers the whole file in memory — it falls over
    at the project's per-request limit (was 50MB until we bumped it to 5GB
@@ -114,6 +136,59 @@ function toDownloadUrl(url, filename) {
 // is genuinely 1080p+. Below this we hard-reject pre-upload (no override) —
 // the editor team can't do anything useful with sub-1080 footage anyway.
 const MIN_SHORTEST_SIDE = 1080
+
+// Bad-take heuristic regex (Layer 2 of the failed-take system). Matches
+// any common shorthand editors / camera operators slap on a flubbed take
+// before re-rolling: "_x", "_bad", "_NG", "-fail", "_scratch", "_trash",
+// trailing "_X" or "X.mp4" (capital X is the Sony shorthand for void).
+// If a filename matches this, the row inserts with is_bad_take=true and
+// bad_take_source='heuristic' so it never reaches the editor.
+const BAD_TAKE_FILENAME_RE = /[_\-.](x|X|bad|ng|NG|fail|FAIL|scratch|trash|void)(\b|[_\-.\d])/
+
+// Files shorter than this are flagged as "too short to be a usable take".
+// Sony cameras sometimes write 1-2s clips when the operator taps record
+// twice. Picked 3.0s because legit hook clips have been seen as short
+// as 3.5s but never under 3s.
+const BAD_TAKE_MIN_DURATION_S = 3.0
+
+// Token slug for the ACTOR slot in the rename scheme. Mirrors the same
+// helper inside the creative-library-describe Edge Function so the
+// pre-describe name and the post-describe display_name use the same
+// actor token. Uppercase, alphanumerics only, no separators.
+function actorTokenForRename(creator) {
+  const cleaned = (creator || '').toUpperCase().replace(/[^A-Z0-9]+/g, '')
+  return cleaned || 'UNK'
+}
+
+// Compute the renamed RAW filename for an upload.
+// Format: RAW-{YYMMDD}-{ACTOR}-S{batch_seq:02}-{file_seq:03}.{ext}
+// Camera filename 20260524_C0858.MP4 + (TANYA, batch 3, file 1) becomes
+// RAW-260524-TANYA-S03-001.mp4. Sony original is preserved on the row
+// in `original_filename` for audit + re-keyed lookups.
+function renameForUpload({ originalName, actor, dateLocal, batchSeq, fileSeq }) {
+  // Pull extension from the original filename — accepts .mp4 / .MP4 / etc.
+  const m = (originalName || '').match(/\.([a-z0-9]{2,5})$/i)
+  const ext = m ? '.' + m[1].toLowerCase() : '.mp4'
+  // dateLocal is a YYYY-MM-DD string; shrink to YYMMDD (no dashes)
+  const ymd = (dateLocal || '').slice(2).replace(/-/g, '')
+  const a = actorTokenForRename(actor)
+  const bs = String(batchSeq).padStart(2, '0')
+  const fs = String(fileSeq).padStart(3, '0')
+  return `RAW-${ymd}-${a}-S${bs}-${fs}${ext}`
+}
+
+// Apply the Layer-2 heuristic to a probed file. Returns
+// { flagged: boolean, reason: string|null }. The caller writes this
+// to the row at insert time via is_bad_take + bad_take_source='heuristic'.
+function badTakeHeuristic(file, dims) {
+  if (BAD_TAKE_FILENAME_RE.test(file.name || '')) {
+    return { flagged: true, reason: `filename pattern (${file.name})` }
+  }
+  if (dims && dims.kind === 'video' && dims.duration_s != null && dims.duration_s < BAD_TAKE_MIN_DURATION_S) {
+    return { flagged: true, reason: `duration ${dims.duration_s.toFixed(1)}s under ${BAD_TAKE_MIN_DURATION_S}s floor` }
+  }
+  return { flagged: false, reason: null }
+}
 
 /* Probe a File's intrinsic dimensions browser-side using the object URL +
    a hidden <video> or <img>. Returns { width, height, kind } or throws
@@ -137,8 +212,12 @@ async function probeMediaDimensions(file) {
         v.onloadedmetadata = () => {
           clearTimeout(timeout)
           const w = v.videoWidth, h = v.videoHeight
+          // Duration in seconds — used by the bad-take heuristic
+          // (Layer 2): clips shorter than 3s are auto-flagged as
+          // failed/scratch takes at upload time. Infinity/NaN guarded.
+          const dur = (Number.isFinite(v.duration) && v.duration > 0) ? v.duration : null
           if (!w || !h) reject(new Error('zero-dimension video (corrupt file?)'))
-          else resolve({ width: w, height: h, kind: 'video' })
+          else resolve({ width: w, height: h, duration_s: dur, kind: 'video' })
         }
         v.onerror = () => {
           clearTimeout(timeout)
@@ -515,10 +594,18 @@ const uploadQueue = {
   },
   enqueue(files, config) {
     const stamp = new Date().toISOString().slice(0, 10)
-    const newItems = files.map((file) => ({
+    // Per-file config (rename slot, markedBad, etc.) lives on the item
+    // so each file in the batch can render its own state in the dock.
+    // perFile is index-aligned with files; we pop it off so the batch-
+    // level `config` stays clean for everything else.
+    const perFile = Array.isArray(config?.perFile) ? config.perFile : null
+    const baseConfig = { ...config, stamp }
+    if (perFile) delete baseConfig.perFile
+    const newItems = files.map((file, idx) => ({
       id: (crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`),
       file,
-      config: { ...config, stamp },
+      config: baseConfig,
+      perFileConfig: perFile ? perFile[idx] || {} : null,
       status: 'queued',
       progress: 0,
       message: 'queued',
@@ -605,45 +692,76 @@ const uploadQueue = {
    → transcribe (video) → identify-actor → describe. `update(patch)`
    merges into the queue item so subscribers see live progress. */
 async function runUploadPipeline(item, update) {
-  const { file, config } = item
-  const { batchType, batchStatus, batchEditorId, batchOfferSlug, stamp } = config
+  const { file, config, perFileConfig } = item
+  const {
+    batchType, batchStatus, batchEditorId, batchOfferSlug, stamp,
+    batchCreator, uploadBatchId,
+  } = config
+  // Per-file config from the rename allocator. Falls back to safe
+  // defaults if the modal didn't supply it (very old enqueue path).
+  const renamedName = perFileConfig?.renamedName || file.name
+  const markedBad   = !!perFileConfig?.markedBad
+  const badReason   = perFileConfig?.badReason || null
+  const badSource   = perFileConfig?.badSource || null
+
   // Bail early if the operator already cancelled this item before processing
   // reached it. cancel() sets item.cancelled before removing from the queue,
   // so this guard covers the brief window when processNext() was scheduled.
   if (item.cancelled) return
-  update({ status: 'creating', message: 'creating row' })
+  update({ status: 'creating', message: 'creating row', renamedName })
 
   // Duplicate check (warn-but-allow): a take with the same filename already
   // in the library is very likely a re-upload. Surface a warning on the item
   // but DON'T block — per the chosen behaviour, the operator still decides.
   // Best-effort: never let a dedup hiccup stop a real upload.
+  // Migration 104+: dupes are detected by ORIGINAL filename (the camera
+  // name), since the new name we generate is by design unique per batch.
   try {
     const { data: dupes } = await supabase
       .from('lib_creative_library')
-      .select('canonical_name,name')
-      .eq('name', file.name)
+      .select('canonical_name,name,display_name,original_filename')
+      .or(`original_filename.eq.${file.name},name.eq.${file.name}`)
       .eq('exclude_from_library', false)
       .limit(1)
     if (dupes && dupes.length) {
-      update({ duplicateWarning: `Possible duplicate of "${dupes[0].canonical_name || dupes[0].name}" — uploaded anyway` })
+      update({ duplicateWarning: `Possible duplicate of "${dupes[0].display_name || dupes[0].canonical_name || dupes[0].name}" — uploaded anyway` })
     }
   } catch { /* dedup is advisory only */ }
 
-  // 1. Insert library row
-  const { data: inserted, error: insErr } = await supabase
-    .from('lib_creative_library')
-    .insert({
-      name: file.name,
-      type: batchType || 'Joined',
-      size_mb: Math.round((file.size / 1024 / 1024) * 10) / 10,
-      status: batchStatus,
-      assigned_editor_id: batchEditorId || null,
-      offer_slug: batchOfferSlug || null,
-      source_bucket: 'Manual upload',
-      notes: `Uploaded via /sales/ads/creative/library on ${stamp}.`,
-    })
-    .select('id')
-    .single()
+  // 1. Insert library row. Renamed `name` lives in the column the rest of
+  //    the app reads as the primary identifier; the camera's original
+  //    filename is preserved in `original_filename` for audit. Bad-take
+  //    fields (Layer 1 operator toggle OR Layer 2 heuristic) ride along
+  //    so the row never appears in the main matrix in the first place.
+  //    Self-heal pattern: if migration 104 hasn't been applied, the new
+  //    columns 42703 and we strip them + retry so the upload still lands.
+  const fullInsert = {
+    name: renamedName,
+    original_filename: file.name,
+    type: batchType || 'Joined',
+    size_mb: Math.round((file.size / 1024 / 1024) * 10) / 10,
+    status: batchStatus,
+    assigned_editor_id: batchEditorId || null,
+    offer_slug: batchOfferSlug || null,
+    creator: batchCreator || null,
+    upload_batch_id: uploadBatchId || null,
+    is_bad_take: markedBad,
+    bad_take_reason: markedBad ? badReason : null,
+    bad_take_source: markedBad ? (badSource || 'upload') : null,
+    source_bucket: 'Manual upload',
+    notes: `Uploaded via /sales/ads/creative/library on ${stamp}.${markedBad ? ` Flagged as bad take at upload (${badSource || 'operator'}): ${badReason || ''}` : ''}`,
+  }
+  let working = { ...fullInsert }
+  let insertRes = await supabase.from('lib_creative_library').insert(working).select('id').single()
+  let guard = 0
+  while (insertRes.error?.code === '42703' && guard < Object.keys(fullInsert).length) {
+    guard++
+    const missing = Object.keys(working).find(k => (insertRes.error.message || '').includes(k))
+    if (!missing) break
+    delete working[missing]
+    insertRes = await supabase.from('lib_creative_library').insert(working).select('id').single()
+  }
+  const { data: inserted, error: insErr } = insertRes
   if (insErr) throw new Error(insErr.message)
   const libraryId = inserted.id
   update({ libraryId })
@@ -655,7 +773,11 @@ async function runUploadPipeline(item, update) {
   const isImageFile = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
   let storagePath = null
   if (!tooLarge) {
-    storagePath = `incoming/${libraryId}_${file.name.replace(/[^A-Za-z0-9._-]/g, '_')}`
+    // Storage key uses the RENAMED filename (RAW-YYMMDD-ACTOR-Sxx-NNN.ext)
+    // so the bucket browser shows structured names instead of camera
+    // shorthand. libraryId still prefixes the path so re-uploads / version
+    // bumps for the same row don't overwrite each other.
+    storagePath = `incoming/${libraryId}_${renamedName.replace(/[^A-Za-z0-9._-]/g, '_')}`
     const contentType = file.type || (isImageFile ? 'image/jpeg' : 'video/mp4')
     let lastPct = -1
     try {
@@ -727,6 +849,16 @@ async function runUploadPipeline(item, update) {
   //    checked between each stage so cancel() during the post-upload
   //    pipeline still short-circuits — we can't abort a running Edge
   //    Function but we can skip the next ones.
+  //
+  //    SKIP for marked-bad takes: they're hidden from the library by
+  //    default and no editor will ever look at them, so spending Whisper
+  //    + Claude budget transcribing + naming them is wasted spend. The
+  //    Triage tab still shows them; if the coordinator later un-flags
+  //    one, they can run describe manually from the detail modal.
+  if (markedBad) {
+    update({ status: 'done', progress: 1, message: 'done · flagged as bad take, naming pipeline skipped' })
+    return
+  }
   const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
   let pipelineErr = null
   if (isVideo) {
@@ -738,6 +870,36 @@ async function runUploadPipeline(item, update) {
       if (error) pipelineErr = `transcribe: ${error.message}`
       else if (data?.error) pipelineErr = `transcribe: ${data.error}`
     } catch (e) { pipelineErr = `transcribe threw: ${e.message}` }
+  }
+  if (item.cancelled) return
+  // Layer 3: AI scratch-take detection. Runs AFTER transcribe (needs the
+  // transcript) but BEFORE identify-actor + describe so flagged rows
+  // don't burn budget on naming pipelines they don't need. Best-effort:
+  // if the function isn't deployed yet or errors, we just skip and let
+  // the human triage queue handle it. Skipped on images (Claude has no
+  // good signal from a visual_description alone for "is this scratch").
+  if (isVideo) {
+    update({ status: 'triaging', message: 'reviewing for scratch take' })
+    try {
+      const { data, error } = await supabase.functions.invoke('triage-detect-bad-take', {
+        body: { library_ids: [libraryId] },
+      })
+      if (error) {
+        // Function not deployed yet OR runtime error — non-fatal.
+        pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `triage: ${error.message}`
+      } else if (data?.rows?.[0]?.bad) {
+        // AI flagged this as a bad take. Surface to the queue item AND
+        // skip the rest of the pipeline (identify-actor + describe) since
+        // the row is now hidden from the editor library.
+        update({
+          status: 'done', progress: 1,
+          message: `done · AI flagged as bad take (${data.rows[0].reason || 'no reason'})`,
+        })
+        return
+      }
+    } catch (e) {
+      pipelineErr = (pipelineErr ? pipelineErr + ' · ' : '') + `triage threw: ${e.message}`
+    }
   }
   if (item.cancelled) return
   update({ status: 'identifying', message: 'identifying actor' })
@@ -1187,9 +1349,14 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
   if (!editorId) return null
   return (
     <>
+      {/* Inline trigger — caller wraps multiple bells in a single fixed
+          tray so they don't stack on top of each other or the dashboard
+          avatar. Pre-2026-05-31 this was position:fixed top:12 right:16
+          AND the same on NotificationBell — two bells overlapped each
+          other AND the dashboard chrome. */}
       <button onClick={handleOpen} title="Notifications"
         style={{
-          position: 'fixed', top: 12, right: 16, zIndex: 90,
+          position: 'relative',
           height: 38, padding: '0 14px', borderRadius: 2,
           background: 'var(--paper)', border: '1px solid var(--rule)',
           cursor: 'pointer', boxShadow: '0 2px 6px rgba(10,10,10,0.10)',
@@ -1212,106 +1379,77 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
           }}>{unseenCount > 99 ? '99+' : unseenCount}</span>
         )}
       </button>
-      {open && createPortal(
-        <>
-          <div onClick={() => setOpen(false)}
-            style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(10,10,10,0.40)' }} />
+      {/* Centered Modal popup — replaces the right-side slide drawer
+          (per Ben 2026-05-31 + 2026-05-18 design preference logged in
+          Modal.jsx). No overlap with page content; backdrop click + Esc
+          to close, same as every other modal in the codebase. */}
+      <Modal open={open} onClose={() => setOpen(false)} size="md"
+        eyebrow="Notifications"
+        title={notifications.length === 0
+          ? 'Nothing yet'
+          : `${notifications.length} this month${unseenCount > 0 ? ` · ${unseenCount} new` : ''}`}>
+        {notifications.length === 0 && (
           <div style={{
-            position: 'fixed', top: 0, right: 0, bottom: 0,
-            width: 'min(420px, 92vw)', zIndex: 201,
-            background: 'var(--paper)',
-            borderLeft: '1px solid var(--rule)',
-            boxShadow: '-12px 0 32px rgba(10,10,10,0.15)',
-            display: 'flex', flexDirection: 'column',
-          }}>
-            <div style={{
-              padding: '16px 20px', borderBottom: '1px solid var(--rule)',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              background: 'var(--paper-2)',
-            }}>
-              <div>
-                <div style={{
-                  fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-                  letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
-                }}>Notifications</div>
-                <div style={{ fontFamily: 'var(--serif)', fontSize: 18, fontWeight: 500, marginTop: 4 }}>
-                  {notifications.length === 0
-                    ? 'Nothing yet'
-                    : `${notifications.length} this month` + (unseenCount > 0 ? ` · ${unseenCount} new` : '')}
+            padding: 40, textAlign: 'center',
+            fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+          }}>You're all caught up. Notifications about feedback, new tasks, source updates, and approvals show up here.</div>
+        )}
+        <div style={{ display: 'grid', gap: 8 }}>
+          {notifications.map(n => {
+            const k = kindStyle(n.kind)
+            const isNew = !seenAt || n.created_at > seenAt
+            return (
+              <button key={n.id}
+                onClick={() => handleNotificationClick(n)}
+                style={{
+                  display: 'block',
+                  padding: '10px 12px',
+                  background: n.read_at ? 'var(--paper)' : '#fffaea',
+                  border: '1px solid ' + (isNew ? '#3e7eba' : 'var(--rule)'),
+                  borderLeft: `3px solid ${k.color}`,
+                  cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit',
+                  width: '100%',
+                }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{
+                    fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+                    letterSpacing: '0.12em', textTransform: 'uppercase',
+                    color: k.color, marginBottom: 4,
+                  }}>{k.label}</div>
+                  <div style={{
+                    fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 600,
+                    color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis',
+                    display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+                  }}>
+                    <span style={{
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      maxWidth: 280,
+                    }}>{n.title}</span>
+                    {isNew && (
+                      <span style={{
+                        padding: '1px 5px', background: '#3e7eba', color: 'white',
+                        borderRadius: 2, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
+                      }}>NEW</span>
+                    )}
+                  </div>
+                  {n.body && (
+                    <div style={{
+                      marginTop: 3, fontFamily: 'var(--serif)', fontSize: 12,
+                      color: 'var(--ink-2)', lineHeight: 1.45,
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                    }}>{n.body}</div>
+                  )}
+                  <div style={{
+                    marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10,
+                    color: 'var(--ink-4)', letterSpacing: '0.04em',
+                  }}>{relTime(n.created_at)}</div>
                 </div>
-              </div>
-              <button onClick={() => setOpen(false)} style={{
-                background: 'transparent', border: 'none', cursor: 'pointer',
-                color: 'var(--ink-3)', fontSize: 22, padding: 4, lineHeight: 1,
-              }}>×</button>
-            </div>
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12 }}>
-              {notifications.length === 0 && (
-                <div style={{
-                  padding: 40, textAlign: 'center',
-                  fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
-                }}>You're all caught up. Notifications about feedback, new tasks, source updates, and approvals show up here.</div>
-              )}
-              <div style={{ display: 'grid', gap: 8 }}>
-                {notifications.map(n => {
-                  const k = kindStyle(n.kind)
-                  const isNew = !seenAt || n.created_at > seenAt
-                  return (
-                    <button key={n.id}
-                      onClick={() => handleNotificationClick(n)}
-                      style={{
-                        display: 'block',
-                        padding: '10px 12px',
-                        background: n.read_at ? 'var(--paper)' : '#fffaea',
-                        border: '1px solid ' + (isNew ? '#3e7eba' : 'var(--rule)'),
-                        borderLeft: `3px solid ${k.color}`,
-                        cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit',
-                        width: '100%',
-                      }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{
-                          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
-                          letterSpacing: '0.12em', textTransform: 'uppercase',
-                          color: k.color, marginBottom: 4,
-                        }}>{k.label}</div>
-                        <div style={{
-                          fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 600,
-                          color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis',
-                          display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
-                        }}>
-                          <span style={{
-                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                            maxWidth: 280,
-                          }}>{n.title}</span>
-                          {isNew && (
-                            <span style={{
-                              padding: '1px 5px', background: '#3e7eba', color: 'white',
-                              borderRadius: 2, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
-                            }}>NEW</span>
-                          )}
-                        </div>
-                        {n.body && (
-                          <div style={{
-                            marginTop: 3, fontFamily: 'var(--serif)', fontSize: 12,
-                            color: 'var(--ink-2)', lineHeight: 1.45,
-                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                          }}>{n.body}</div>
-                        )}
-                        <div style={{
-                          marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10,
-                          color: 'var(--ink-4)', letterSpacing: '0.04em',
-                        }}>{relTime(n.created_at)}</div>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        </>,
-        document.body,
-      )}
+              </button>
+            )
+          })}
+        </div>
+      </Modal>
     </>
   )
 }
@@ -1363,12 +1501,12 @@ function NotificationBell({ submissions, onOpenCreative }) {
   }, [open])
   return (
     <>
-      {/* Floating bell — fixed in the top-right of the viewport so it
-          doesn't fight for space in the toolbar. Red ping when there's
-          activity since last open. */}
+      {/* Inline button — caller wraps both bells in the BellTray
+          fixed-position container so they don't overlap the dashboard
+          avatar or stack on top of each other. */}
       <button onClick={handleOpen} title="Recent activity"
         style={{
-          position: 'fixed', top: 12, right: 16, zIndex: 90,
+          position: 'relative',
           height: 38, padding: '0 14px', borderRadius: 2,
           background: 'var(--paper)', border: '1px solid var(--rule)',
           cursor: 'pointer', boxShadow: '0 2px 6px rgba(10,10,10,0.10)',
@@ -1391,85 +1529,49 @@ function NotificationBell({ submissions, onOpenCreative }) {
           }}>{unseenCount > 99 ? '99+' : unseenCount}</span>
         )}
       </button>
-      {open && createPortal(
-        <>
-          <div onClick={() => setOpen(false)}
-            style={{
-              position: 'fixed', inset: 0, zIndex: 200,
-              background: 'rgba(10,10,10,0.40)',
-            }} />
-          <div style={{
-            position: 'fixed', top: 0, right: 0, bottom: 0,
-            width: 'min(420px, 92vw)', zIndex: 201,
-            background: 'var(--paper)',
-            borderLeft: '1px solid var(--rule)',
-            boxShadow: '-12px 0 32px rgba(10,10,10,0.15)',
-            display: 'flex', flexDirection: 'column',
-          }}>
+      {/* Centered Modal popup — replaces the right-side slide drawer
+          (Ben 2026-05-31 + earlier 2026-05-18 design preference). */}
+      <Modal open={open} onClose={() => setOpen(false)} size="md"
+        eyebrow="Recent activity"
+        title={`${submissions.length} submission${submissions.length === 1 ? '' : 's'} this week`}
+        subtitle={pendingApproval > 0 ? `${pendingApproval} awaiting review` : 'All caught up'}>
+        {/* Per-editor breakdown — pinned at the top of the panel so
+            you see who has stuff in flight without scrolling. */}
+        {(() => {
+          const byEditor = {}
+          for (const s of submissions) {
+            const name = s.submitted_by_name || 'Unknown'
+            if (!byEditor[name]) byEditor[name] = { total: 0, pending: 0 }
+            byEditor[name].total++
+            if (!s.approved_at) byEditor[name].pending++
+          }
+          const editors = Object.entries(byEditor)
+          if (editors.length === 0) return null
+          return (
             <div style={{
-              padding: '16px 20px', borderBottom: '1px solid var(--rule)',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              background: 'var(--paper-2)',
+              marginBottom: 12, display: 'flex', gap: 6, flexWrap: 'wrap',
             }}>
-              <div>
-                <div style={{
-                  fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-                  letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
-                }}>Recent activity</div>
-                <div style={{ fontFamily: 'var(--serif)', fontSize: 18, fontWeight: 500, marginTop: 4 }}>
-                  {submissions.length} submission{submissions.length === 1 ? '' : 's'} this week
-                  {pendingApproval > 0 && (
-                    <span style={{ marginLeft: 8, fontFamily: 'var(--mono)', fontSize: 12, color: '#7a4e08' }}>
-                      · {pendingApproval} awaiting review
-                    </span>
-                  )}
-                </div>
-                {/* Per-editor breakdown — shows at a glance which editors
-                    have stuff in flight without scrolling the full list. */}
-                {(() => {
-                  const byEditor = {}
-                  for (const s of submissions) {
-                    const name = s.submitted_by_name || 'Unknown'
-                    if (!byEditor[name]) byEditor[name] = { total: 0, pending: 0 }
-                    byEditor[name].total++
-                    if (!s.approved_at) byEditor[name].pending++
-                  }
-                  const editors = Object.entries(byEditor)
-                  if (editors.length === 0) return null
-                  return (
-                    <div style={{
-                      marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap',
-                    }}>
-                      {editors.map(([name, c]) => (
-                        <span key={name} style={{
-                          padding: '2px 8px',
-                          background: c.pending > 0 ? 'rgba(232,180,8,0.15)' : 'var(--paper)',
-                          border: '1px solid ' + (c.pending > 0 ? '#e8b408' : 'var(--rule)'),
-                          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
-                          borderRadius: 2,
-                        }}>
-                          {name} · <strong>{c.total}</strong>{c.pending > 0 ? ` (${c.pending} pending)` : ''}
-                        </span>
-                      ))}
-                    </div>
-                  )
-                })()}
-              </div>
-              <button onClick={() => setOpen(false)}
-                style={{
-                  background: 'transparent', border: 'none', cursor: 'pointer',
-                  color: 'var(--ink-3)', fontSize: 22, padding: 4,
-                  lineHeight: 1,
-                }}>×</button>
+              {editors.map(([name, c]) => (
+                <span key={name} style={{
+                  padding: '2px 8px',
+                  background: c.pending > 0 ? 'rgba(232,180,8,0.15)' : 'var(--paper)',
+                  border: '1px solid ' + (c.pending > 0 ? '#e8b408' : 'var(--rule)'),
+                  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-2)',
+                  borderRadius: 2,
+                }}>
+                  {name} · <strong>{c.total}</strong>{c.pending > 0 ? ` (${c.pending} pending)` : ''}
+                </span>
+              ))}
             </div>
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12 }}>
-              {submissions.length === 0 && (
-                <div style={{
-                  padding: 40, textAlign: 'center',
-                  fontFamily: 'var(--serif)', fontStyle: 'italic',
-                  color: 'var(--ink-3)',
-                }}>Nothing new this week. When an editor uploads a cut, it'll appear here.</div>
-              )}
+          )
+        })()}
+        {submissions.length === 0 && (
+          <div style={{
+            padding: 40, textAlign: 'center',
+            fontFamily: 'var(--serif)', fontStyle: 'italic',
+            color: 'var(--ink-3)',
+          }}>Nothing new this week. When an editor uploads a cut, it'll appear here.</div>
+        )}
               <div style={{ display: 'grid', gap: 8 }}>
                 {submissions.map(s => {
                   const isNew = !seenAt || s.created_at > seenAt
@@ -1479,7 +1581,7 @@ function NotificationBell({ submissions, onOpenCreative }) {
                   // useless context.
                   const creative = s.task?.creative
                   const creativeId = creative?.id
-                  const creativeName = creative?.canonical_name || creative?.name || '(unknown creative)'
+                  const creativeName = creative?.display_name || creative?.canonical_name || creative?.name || '(unknown creative)'
                   const creativeType = creative?.type
                   const creativeCreator = creative?.creator
                   // Thumbnail priority: submission's own thumb (preferred,
@@ -1573,11 +1675,7 @@ function NotificationBell({ submissions, onOpenCreative }) {
                   )
                 })}
               </div>
-            </div>
-          </div>
-        </>,
-        document.body
-      )}
+      </Modal>
     </>
   )
 }
@@ -1823,6 +1921,30 @@ export default function AdsCreativeLibrary({ editorScope }) {
   })
   useEffect(() => { try { localStorage.setItem('lib.tab', tab) } catch {} }, [tab])
 
+  // Triage count — pulled here so the count badge on the Triage tab button
+  // refreshes whether the user is on Library, Queue, or Triage. Re-runs
+  // every 30s; refresh hook also allows immediate refresh after the
+  // TriageTab approves/flags a row.
+  const [triageCount, setTriageCount] = useState(0)
+  const refreshTriageCount = useCallback(async () => {
+    if (scope.isEditorView) return  // editors don't triage
+    try {
+      const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+      const { count, error } = await supabase
+        .from('lib_creative_library')
+        .select('id', { count: 'exact', head: true })
+        .is('triaged_at', null)
+        .eq('exclude_from_library', false)
+        .gte('added_at', since)
+      if (!error && typeof count === 'number') setTriageCount(count)
+    } catch { /* triaged_at column may not exist pre-104 — silently skip */ }
+  }, [scope.isEditorView])
+  useEffect(() => {
+    refreshTriageCount()
+    const t = setInterval(refreshTriageCount, 30_000)
+    return () => clearInterval(t)
+  }, [refreshTriageCount])
+
   return (
     <div style={{ padding: '12px 0 60px' }}>
       <div style={{
@@ -1833,10 +1955,13 @@ export default function AdsCreativeLibrary({ editorScope }) {
           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
           letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
         }}>
-          {scope.isEditorView ? 'Editor portal · ' : ''}{tab === 'library' ? 'Library' : 'Editing queue'}
+          {scope.isEditorView ? 'Editor portal · ' : ''}{tab === 'library' ? 'Library' : tab === 'triage' ? 'Triage' : 'Editing queue'}
         </div>
         <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper)' }}>
           <TabBtn active={tab === 'library'} onClick={() => setTab('library')}>Library</TabBtn>
+          {!scope.isEditorView && (
+            <TabBtn active={tab === 'triage'} onClick={() => setTab('triage')} badge={triageCount}>Triage</TabBtn>
+          )}
           <TabBtn active={tab === 'queue'}   onClick={() => setTab('queue')}>Editing queue</TabBtn>
         </div>
       </div>
@@ -1851,6 +1976,11 @@ export default function AdsCreativeLibrary({ editorScope }) {
       <div style={{ display: tab === 'library' ? 'block' : 'none' }}>
         <LibraryTab scope={scope} />
       </div>
+      {!scope.isEditorView && (
+        <div style={{ display: tab === 'triage' ? 'block' : 'none' }}>
+          <TriageTab scope={scope} onTriaged={refreshTriageCount} />
+        </div>
+      )}
       <div style={{ display: tab === 'queue' ? 'block' : 'none' }}>
         <EditingQueueTab scope={scope} />
       </div>
@@ -1858,7 +1988,7 @@ export default function AdsCreativeLibrary({ editorScope }) {
   )
 }
 
-function TabBtn({ active, onClick, children }) {
+function TabBtn({ active, onClick, children, badge }) {
   return (
     <button onClick={onClick} style={{
       padding: '8px 16px',
@@ -1867,7 +1997,265 @@ function TabBtn({ active, onClick, children }) {
       background: active ? 'var(--ink)' : 'transparent',
       color: active ? 'var(--paper)' : 'var(--ink-3)',
       border: 'none', cursor: 'pointer',
-    }}>{children}</button>
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+    }}>
+      <span>{children}</span>
+      {/* Badge for unread/untriaged counts. Hidden at zero. Color flips
+          to accent when the parent tab is active. */}
+      {badge != null && badge > 0 && (
+        <span style={{
+          minWidth: 18, height: 16, padding: '0 5px', borderRadius: 999,
+          background: active ? 'var(--paper)' : '#b53e3e',
+          color: active ? 'var(--ink)' : 'white',
+          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          letterSpacing: 0, lineHeight: 1,
+        }}>{badge > 99 ? '99+' : badge}</span>
+      )}
+    </button>
+  )
+}
+
+/* ─────────────────────────── TRIAGE TAB ─────────────────────────── */
+
+/* Triage = "everything uploaded in the last 48h that the coordinator
+   hasn't approved or flagged yet" + everything auto-flagged (heuristic
+   or AI) regardless of age that still hasn't been triaged. Shows the
+   FULL set including bad-flagged rows (the hideBadTakes filter is
+   intentionally NOT applied here) so the coordinator sees what the
+   AI flagged and can un-flag false positives.
+
+   This is where Layers 1/2/3 of the bad-take system surface for human
+   confirmation. After triage, rows drop out (triaged_at IS NOT NULL)
+   and behave like any library row going forward. */
+function TriageTab({ scope, onTriaged }) {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState(null)
+  const [selected, setSelected] = useState(new Set())
+  const [busyIds, setBusyIds] = useState(new Set())
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr(null)
+    try {
+      const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+      // Pull untriaged rows from the last 48h OR any age that's flagged
+      // by heuristic/ai (those need coordinator confirmation no matter how
+      // old). Coordinator-flagged rows aren't surfaced here — those are
+      // already a deliberate human decision.
+      const { data, error } = await supabase
+        .from('lib_creative_library')
+        .select('id, name, original_filename, display_name, canonical_name, type, creator, preview_url, thumbnail_url, transcript, description, is_bad_take, bad_take_reason, bad_take_source, added_at, size_mb, status, upload_batch_id')
+        .is('triaged_at', null)
+        .eq('exclude_from_library', false)
+        .or(`added_at.gte.${since},bad_take_source.in.(heuristic,ai)`)
+        .order('added_at', { ascending: false })
+        .limit(200)
+      if (error) throw error
+      setRows(data || [])
+    } catch (e) {
+      // Pre-104 deploy: triaged_at column doesn't exist. Show a friendly
+      // notice instead of a stack trace.
+      const msg = e?.message || 'Failed to load'
+      if (/triaged_at|bad_take_source/.test(msg)) {
+        setErr('Triage requires migration 104 — apply migrations/104_triage_and_bad_takes.sql to enable.')
+      } else {
+        setErr(msg)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const markRows = useCallback(async (ids, asBad, reason = null) => {
+    if (!ids.length) return
+    setBusyIds(prev => new Set([...prev, ...ids]))
+    try {
+      const patch = {
+        triaged_at: new Date().toISOString(),
+      }
+      if (asBad === true) {
+        patch.is_bad_take = true
+        patch.bad_take_source = 'coordinator'
+        patch.bad_take_reason = reason || 'flagged in triage'
+      } else if (asBad === false) {
+        // Approve = un-flag (even if Layer 2/3 had flagged it) AND mark triaged.
+        patch.is_bad_take = false
+        patch.bad_take_reason = null
+        patch.bad_take_source = null
+      }
+      const { error } = await supabase.from('lib_creative_library').update(patch).in('id', ids)
+      if (error) throw error
+      // Remove handled rows locally + clear selection
+      setRows(curr => curr.filter(r => !ids.includes(r.id)))
+      setSelected(curr => {
+        const next = new Set(curr)
+        ids.forEach(id => next.delete(id))
+        return next
+      })
+      onTriaged?.()
+    } catch (e) {
+      setErr(e?.message || 'triage update failed')
+    } finally {
+      setBusyIds(prev => {
+        const next = new Set(prev)
+        ids.forEach(id => next.delete(id))
+        return next
+      })
+    }
+  }, [onTriaged])
+
+  const approveOne = (id) => markRows([id], false)
+  const flagOne    = (id) => markRows([id], true, 'flagged by coordinator in triage')
+  const bulkApprove = () => markRows([...selected], false)
+  const bulkFlag    = () => markRows([...selected], true, 'bulk-flagged by coordinator in triage')
+
+  const sourceLabel = (s) => s === 'upload' ? 'Operator (at upload)'
+                          : s === 'heuristic' ? 'Auto (filename/duration)'
+                          : s === 'ai' ? 'AI (transcript review)'
+                          : s === 'coordinator' ? 'Coordinator'
+                          : 'New upload'
+
+  if (loading) return <div style={{ padding: 24, fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)' }}>Loading triage queue…</div>
+  if (err) return (
+    <div style={{
+      padding: 16, border: '1px solid #b53e3e', borderLeft: '4px solid #b53e3e',
+      background: 'rgba(181,62,62,0.05)', fontFamily: 'var(--mono)', fontSize: 12, color: '#b53e3e',
+    }}>{err}</div>
+  )
+
+  if (rows.length === 0) {
+    return (
+      <div style={{
+        padding: 60, textAlign: 'center',
+        fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+      }}>
+        Triage queue clear. New uploads + auto-flagged takes will appear here for review.
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {/* Toolbar: counts + bulk actions */}
+      <div style={{
+        marginBottom: 14, padding: '10px 14px', background: 'var(--paper-2)',
+        border: '1px solid var(--rule)',
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          {rows.length} awaiting triage
+          {(() => {
+            const ai = rows.filter(r => r.bad_take_source === 'ai').length
+            const heur = rows.filter(r => r.bad_take_source === 'heuristic').length
+            const op = rows.filter(r => r.bad_take_source === 'upload').length
+            const parts = []
+            if (ai) parts.push(`${ai} AI`)
+            if (heur) parts.push(`${heur} auto`)
+            if (op) parts.push(`${op} operator`)
+            return parts.length ? ` · ${parts.join(' · ')} flagged` : ''
+          })()}
+        </span>
+        <span style={{ flex: 1 }} />
+        {selected.size > 0 && (
+          <>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)' }}>
+              {selected.size} selected
+            </span>
+            <button onClick={bulkApprove} style={{
+              padding: '5px 12px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: '#3e8a5e', color: 'white', border: 'none', cursor: 'pointer',
+            }}>Approve {selected.size}</button>
+            <button onClick={bulkFlag} style={{
+              padding: '5px 12px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: '#b53e3e', color: 'white', border: 'none', cursor: 'pointer',
+            }}>Flag bad {selected.size}</button>
+            <button onClick={() => setSelected(new Set())} style={{
+              padding: '5px 12px', fontFamily: 'var(--mono)', fontSize: 10.5,
+              background: 'transparent', color: 'var(--ink-3)', border: '1px solid var(--rule)', cursor: 'pointer',
+            }}>Clear</button>
+          </>
+        )}
+      </div>
+
+      {/* Row list */}
+      <div style={{ display: 'grid', gap: 8 }}>
+        {rows.map(r => {
+          const sel = selected.has(r.id)
+          const busy = busyIds.has(r.id)
+          const flagged = !!r.is_bad_take
+          const accent = r.bad_take_source === 'ai' ? '#a05810'
+                       : flagged ? '#b53e3e'
+                       : '#3e7eba'
+          return (
+            <div key={r.id} style={{
+              display: 'grid', gridTemplateColumns: '24px 96px 1fr auto', gap: 12,
+              padding: 12, border: '1px solid var(--rule)',
+              borderLeft: `4px solid ${accent}`,
+              background: sel ? 'var(--paper-2)' : 'var(--paper)',
+              opacity: busy ? 0.5 : 1,
+            }}>
+              <input type="checkbox" checked={sel} disabled={busy}
+                onChange={(e) => {
+                  const next = new Set(selected)
+                  if (e.target.checked) next.add(r.id); else next.delete(r.id)
+                  setSelected(next)
+                }} />
+              <div style={{ width: 96, height: 60, background: '#000', overflow: 'hidden', border: '1px solid var(--rule)' }}>
+                {r.thumbnail_url ? (
+                  <img src={r.thumbnail_url} alt="" loading="lazy"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                ) : (
+                  <div style={{
+                    width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: 'var(--mono)', fontSize: 10, color: 'rgba(255,255,255,0.35)',
+                    letterSpacing: '0.08em',
+                  }}>NO PREVIEW</div>
+                )}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={r.display_name || r.canonical_name || r.name}>
+                  {r.display_name || r.canonical_name || r.name}
+                </div>
+                <div style={{ marginTop: 3, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {r.original_filename && r.original_filename !== r.name ? `${r.original_filename} · ` : ''}{r.type || '?'} · {r.creator || 'UNK'} · {r.size_mb ? `${Math.round(r.size_mb)} MB` : '?'}
+                </div>
+                {flagged && (
+                  <div style={{
+                    marginTop: 5, fontFamily: 'var(--mono)', fontSize: 10.5, color: accent, fontWeight: 600,
+                    letterSpacing: '0.04em',
+                  }}>
+                    {sourceLabel(r.bad_take_source)}{r.bad_take_reason ? ` — ${r.bad_take_reason}` : ''}
+                  </div>
+                )}
+                {!flagged && r.description && (
+                  <div style={{
+                    marginTop: 4, fontFamily: 'var(--serif)', fontSize: 12, color: 'var(--ink-2)',
+                    overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                  }}>{r.description}</div>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
+                <button onClick={() => approveOne(r.id)} disabled={busy} style={{
+                  padding: '5px 12px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  background: '#3e8a5e', color: 'white', border: 'none', cursor: busy ? 'wait' : 'pointer',
+                }}>Approve</button>
+                <button onClick={() => flagOne(r.id)} disabled={busy} style={{
+                  padding: '5px 12px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  background: 'var(--paper)', color: '#b53e3e', border: '1px solid #b53e3e', cursor: busy ? 'wait' : 'pointer',
+                }}>Flag bad</button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -2287,7 +2675,10 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     if (hideBadTakes) list = list.filter(r => !r.is_bad_take)
     const search = deferredQ.trim().toLowerCase()
     if (search) list = list.filter(r => {
-      const blob = `${r.name} ${r.canonical_name || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
+      // Search blob includes the new display_name + messaging_angle so a
+      // coordinator searching for "STOP-PAYING-FOR-LEADS" or "ACCOUNTANT"
+      // hits both legacy canonical and post-overhaul rows.
+      const blob = `${r.name} ${r.canonical_name || ''} ${r.display_name || ''} ${r.messaging_angle || ''} ${r.messaging_angle_override || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
       return blob.includes(search)
     })
     // Multi-select filters: empty Set = no filter; otherwise OR within
@@ -2349,7 +2740,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       const dir = sortDir === 'desc' ? -1 : 1
       const valueOf = (r) => {
         switch (sortKey) {
-          case 'id':       return (r.canonical_name || r.name || '').toLowerCase()
+          case 'id':       return (rowDisplayName(r) || '').toLowerCase()
           case 'desc':     return (r.description || r.name || '').toLowerCase()
           case 'type':     return (r.type || '').toLowerCase()
           case 'creator':  return (r.creator || '').toLowerCase()
@@ -2541,7 +2932,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       .map(id => rows.find(r => r.id === id))
       .filter(Boolean)
       .map(r => ({
-        name: r.canonical_name || r.name,
+        name: rowDisplayName(r),
         url: r.final_cut_url || r.drive_url || r.preview_url,
       }))
       .filter(t => t.url)
@@ -2606,62 +2997,73 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
           notify_on_unassigned) ALSO get the editor-side bell mounted
           so they see new_upload_needs_assignment notifications in
           the dashboard alongside the admin submissions bell. */}
-      {!scope.isEditorView && coordinatorEditorId && (
-        <EditorNotificationBell
-          editorId={coordinatorEditorId}
-          onOpenTask={() => {
-            // Coordinator bell — clicking a notification deep-links to
-            // the library with the raw_unused filter pre-set (via the
-            // notification's link_path). The default onOpenTask path
-            // assumes editor portal; for the admin coordinator we just
-            // navigate to the standard library route.
-            try { window.location.href = '/sales/ads/creative/library?stage=raw_unused' } catch {}
-          }}
-        />
-      )}
-      {scope.isEditorView && scope.editorId && (
-        <EditorNotificationBell
-          editorId={scope.editorId}
-          onOpenTask={(taskId) => {
-            // We need to find the matching task row to open the modal.
-            // The editor portal renders EditingQueueTab; the task open
-            // happens via tab.setEditingTask. But this bell lives in
-            // LibraryTab. Easiest: navigate the URL with ?task=<id>
-            // and let the queue tab pick it up.
-            try {
-              const url = new URL(window.location.href)
-              url.searchParams.set('task', taskId)
-              window.history.replaceState({}, '', url.toString())
-              // Force the editor portal to switch to the queue tab
-              // where the editing task modals live.
-              try { localStorage.setItem('lib.tab', 'queue') } catch {}
-              // Round-trip reload so EditingQueueTab picks up the
-              // ?task= param and pops the modal cleanly.
-              window.location.reload()
-            } catch {}
-          }}
-        />
-      )}
-      {!scope.isEditorView && (
-      <NotificationBell
-        submissions={recentSubmissions}
-        onOpenCreative={(creativeId) => {
-          // Find the creative in rows + open the detail modal. If it's not
-          // in the current filter (e.g. low-quality hidden), pull it
-          // directly from the DB by id so we can still open the drawer.
-          const local = rows.find(r => r.id === creativeId)
-          if (local) {
-            openDrawer(local)
-          } else {
-            supabase.from('lib_creative_library')
-              .select('*')
-              .eq('id', creativeId)
-              .maybeSingle()
-              .then(({ data }) => { if (data) openDrawer(data) })
-          }
-        }}
-      />
-      )}
+      {/* Bell tray — single fixed-position container that holds whichever
+          bells are mounted for this scope. Positioned at top:76 right:16
+          so it sits BELOW the dashboard chrome (the avatar/menu live at
+          top:12 area) instead of overlapping it (Ben 2026-05-31). Flex
+          row means multiple bells stack horizontally with a small gap
+          instead of piling on top of each other. */}
+      <div style={{
+        position: 'fixed', top: 76, right: 16, zIndex: 90,
+        display: 'flex', gap: 8, alignItems: 'center',
+      }}>
+        {!scope.isEditorView && coordinatorEditorId && (
+          <EditorNotificationBell
+            editorId={coordinatorEditorId}
+            onOpenTask={() => {
+              // Coordinator bell — clicking a notification deep-links to
+              // the library with the raw_unused filter pre-set (via the
+              // notification's link_path). The default onOpenTask path
+              // assumes editor portal; for the admin coordinator we just
+              // navigate to the standard library route.
+              try { window.location.href = '/sales/ads/creative/library?stage=raw_unused' } catch {}
+            }}
+          />
+        )}
+        {scope.isEditorView && scope.editorId && (
+          <EditorNotificationBell
+            editorId={scope.editorId}
+            onOpenTask={(taskId) => {
+              // We need to find the matching task row to open the modal.
+              // The editor portal renders EditingQueueTab; the task open
+              // happens via tab.setEditingTask. But this bell lives in
+              // LibraryTab. Easiest: navigate the URL with ?task=<id>
+              // and let the queue tab pick it up.
+              try {
+                const url = new URL(window.location.href)
+                url.searchParams.set('task', taskId)
+                window.history.replaceState({}, '', url.toString())
+                // Force the editor portal to switch to the queue tab
+                // where the editing task modals live.
+                try { localStorage.setItem('lib.tab', 'queue') } catch {}
+                // Round-trip reload so EditingQueueTab picks up the
+                // ?task= param and pops the modal cleanly.
+                window.location.reload()
+              } catch {}
+            }}
+          />
+        )}
+        {!scope.isEditorView && (
+          <NotificationBell
+            submissions={recentSubmissions}
+            onOpenCreative={(creativeId) => {
+              // Find the creative in rows + open the detail modal. If it's not
+              // in the current filter (e.g. low-quality hidden), pull it
+              // directly from the DB by id so we can still open the drawer.
+              const local = rows.find(r => r.id === creativeId)
+              if (local) {
+                openDrawer(local)
+              } else {
+                supabase.from('lib_creative_library')
+                  .select('*')
+                  .eq('id', creativeId)
+                  .maybeSingle()
+                  .then(({ data }) => { if (data) openDrawer(data) })
+              }
+            }}
+          />
+        )}
+      </div>
 
       {/* Upload dock — floating bottom-right indicator showing the
           background upload queue. Survives modal close + tab navigation.
@@ -3007,6 +3409,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         <UploadModal
           editors={editors}
           offers={offers}
+          knownCreators={knownCreators}
           onClose={() => setUploadOpen(false)}
           onSaved={() => { setUploadOpen(false); load() }}
           onOfferAdded={(newOffer) => {
@@ -3339,18 +3742,36 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
             border: '1px solid var(--rule)', overflow: 'hidden',
             position: 'relative',
           }}>
-            {r.thumbnail_url && !(hoverPlay && r.preview_url) && (
-              <img src={r.thumbnail_url} alt="" loading="lazy"
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-            )}
-            {hoverPlay && r.preview_url && (
-              <video src={r.preview_url} autoPlay muted loop playsInline preload="metadata"
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-            )}
+            {(() => {
+              // Image rows: render preview_url (the full-quality original)
+              // not thumbnail_url. For NEW image uploads these are the same
+              // URL, but for OLD Drive-imported rows the thumbnail can be
+              // a downscaled Drive transcode — saving the wrong file via
+              // right-click "Save image as". Hover-to-play is video-only.
+              const isImageContent = r.preview_url && /\.(jpe?g|png|webp|gif|heic|heif)(\?|$)/i.test(r.preview_url)
+              const tileSrc = isImageContent ? r.preview_url : r.thumbnail_url
+              const showVideoHover = hoverPlay && r.preview_url && !isImageContent
+              return (
+                <>
+                  {tileSrc && !showVideoHover && (
+                    <img src={tileSrc} alt="" loading="lazy"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  )}
+                  {showVideoHover && (
+                    <video src={r.preview_url} autoPlay muted loop playsInline preload="metadata"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  )}
+                </>
+              )
+            })()}
           </div>
           {/* Name */}
           <div style={{ minWidth: 0 }}>
-            <div style={{
+            {/* title= surfaces the full display_name on hover (browser-
+                native tooltip). Names are longer post-overhaul and the
+                row wraps in ellipsis, so without this the operator has
+                to open the modal to read the messaging slot. */}
+            <div title={rowDisplayName(r)} style={{
               fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 500,
               color: 'var(--ink)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -3361,7 +3782,7 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
                 <span title="Already edited"
                   style={{ color: '#3e8a5e', fontWeight: 600, marginRight: 5 }}>✓</span>
               )}
-              {r.canonical_name || r.name}
+              {rowDisplayName(r)}
             </div>
           </div>
           {/* Type pill */}
@@ -3656,13 +4077,13 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
         display: 'flex', alignItems: 'center', gap: 4,
         textDecoration: (r.status === 'raw' && isUsed) ? 'line-through' : 'none',
         opacity: (r.status === 'raw' && isUsed) ? 0.65 : 1,
-      }} title={r.canonical_name || r.name}>
+      }} title={rowDisplayName(r)}>
         {(r.status === 'raw' && isUsed) && (
           <span title="Already edited"
             style={{ color: '#3e8a5e', fontWeight: 600, flexShrink: 0 }}>✓</span>
         )}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {r.canonical_name || r.name}
+          {rowDisplayName(r)}
         </span>
       </div>
       {/* Description — read-only at this scope. Editing happens in the
@@ -3684,17 +4105,31 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
               borderRadius: 2,
             }}>LOW-Q</span>
         )}
-        {r.is_bad_take && (
-          <span title={r.bad_take_reason ? `Bad take: ${r.bad_take_reason}` : 'Flagged as bad take — discard'}
-            style={{
-              flexShrink: 0,
-              padding: '1px 5px',
-              background: '#7a2020', color: 'white',
-              fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700,
-              letterSpacing: '0.08em', textTransform: 'uppercase',
-              borderRadius: 2,
-            }}>BAD</span>
-        )}
+        {r.is_bad_take && (() => {
+          // Source-aware label so the operator can tell at a glance whether
+          // the flag came from the human (Layer 1 upload toggle / Kirill in
+          // the detail modal), a deterministic heuristic, or the AI. AI flags
+          // get a softer color because the operator might want to un-flag.
+          const src = r.bad_take_source
+          const label = src === 'ai' ? 'BAD?' : 'BAD'
+          const bg    = src === 'ai' ? '#a05810' : '#7a2020'
+          const sourceLabel = src === 'upload' ? 'flagged at upload'
+                            : src === 'heuristic' ? 'auto-flagged (filename/duration)'
+                            : src === 'ai' ? 'AI-flagged — review recommended'
+                            : src === 'coordinator' ? 'flagged by coordinator'
+                            : 'flagged'
+          return (
+            <span title={`${sourceLabel}${r.bad_take_reason ? ' — ' + r.bad_take_reason : ''}`}
+              style={{
+                flexShrink: 0,
+                padding: '1px 5px',
+                background: bg, color: 'white',
+                fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                borderRadius: 2,
+              }}>{label}</span>
+          )
+        })()}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {r.description || r.name}
         </span>
@@ -4302,7 +4737,7 @@ function VersionsPanel({ row, onReload }) {
       setProgress('Creating version…')
       const { data: inserted, error: insErr } = await supabase.from('lib_creative_library')
         .insert({
-          name: `v${nextVersion} of ${row.canonical_name || row.name}`,
+          name: `v${nextVersion} of ${rowDisplayName(row)}`,
           type: row.type,
           creator: row.creator,
           // Inherit parent status. A v2 of a raw is another raw take; a v2 of
@@ -4317,7 +4752,7 @@ function VersionsPanel({ row, onReload }) {
           preview_url: publicUrl,
           thumbnail_url: thumbnailUrl,
           source_bucket: 'New version upload',
-          notes: `v${nextVersion} of ${row.canonical_name || row.name}, uploaded ${new Date().toISOString().slice(0,10)}.`,
+          notes: `v${nextVersion} of ${rowDisplayName(row)}, uploaded ${new Date().toISOString().slice(0,10)}.`,
         })
         .select()
         .single()
@@ -4416,7 +4851,7 @@ function VersionsPanel({ row, onReload }) {
               }}>v{v.version_number || 1}</span>
               <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <div style={{ fontWeight: isCurrent ? 700 : 500 }}>
-                  {v.canonical_name || v.name}
+                  {rowDisplayName(v)}
                   {isCurrent && <span style={{ marginLeft: 6, color: 'var(--ink-3)', fontSize: 9.5 }}>CURRENT</span>}
                 </div>
               </div>
@@ -4637,7 +5072,7 @@ function SourceSlot({ role, label, sourceRow, busy, onOpenRow, onPick, onClear }
           flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           cursor: onOpenRow ? 'pointer' : 'default',
         }}>
-        <div style={{ fontWeight: 600 }}>{sourceRow.canonical_name || sourceRow.name}</div>
+        <div style={{ fontWeight: 600 }}>{rowDisplayName(sourceRow)}</div>
         <div style={{ color: 'var(--ink-4)', fontSize: 10 }}>{sourceRow.name}</div>
       </div>
       <span style={{
@@ -4689,7 +5124,7 @@ function SourcePickerModal({ role, currentId, onClose, onPick }) {
     const search = q.trim().toLowerCase()
     if (!search) return rows
     return rows.filter(r => {
-      const blob = `${r.name} ${r.canonical_name || ''} ${r.creator || ''}`.toLowerCase()
+      const blob = `${r.name} ${r.canonical_name || ''} ${r.display_name || ''} ${r.messaging_angle || ''} ${r.creator || ''}`.toLowerCase()
       return blob.includes(search)
     })
   }, [rows, q])
@@ -4741,7 +5176,7 @@ function SourcePickerModal({ role, currentId, onClose, onPick }) {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 600,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {r.canonical_name || r.name}
+                      {rowDisplayName(r)}
                     </div>
                     <div style={{ fontFamily: 'var(--sans)', fontSize: 10.5, color: 'var(--ink-4)' }}>
                       {r.creator || '—'} · {r.status}
@@ -4794,7 +5229,7 @@ function DerivationLinkRow({ row, role, onOpenRow }) {
         )}
       </div>
       <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        <div style={{ fontWeight: 600 }}>{row.canonical_name || row.name}</div>
+        <div style={{ fontWeight: 600 }}>{rowDisplayName(row)}</div>
         <div style={{ color: 'var(--ink-4)', fontSize: 10 }}>{row.name}</div>
       </div>
       {role && (
@@ -5136,7 +5571,7 @@ function ConfirmDeleteModal({ row, onClose, onDeleted }) {
           background: 'var(--paper-2)', border: '1px solid var(--rule)',
           color: 'var(--ink-2)',
         }}>
-          <div style={{ fontWeight: 600, color: 'var(--ink)' }}>{row.canonical_name || row.name}</div>
+          <div style={{ fontWeight: 600, color: 'var(--ink)' }}>{rowDisplayName(row)}</div>
           {row.canonical_name && row.canonical_name !== row.name && (
             <div style={{ marginTop: 4, color: 'var(--ink-4)', fontSize: 11 }}>{row.name}</div>
           )}
@@ -5545,7 +5980,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
             <span title="Already edited"
               style={{ color: '#3e8a5e', marginRight: 4 }}>✓</span>
           )}
-          {row.canonical_name || row.name}
+          {rowDisplayName(row)}
         </div>
         <div style={{
           marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center',
@@ -5610,13 +6045,36 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
       })
       const newUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
       const sizeMB = Math.round(file.size / 1024 / 1024 * 10) / 10
+      // Regenerate the thumbnail from the new high-quality source — without
+      // this the matrix tile + kanban card kept showing the OLD low-res
+      // poster, so a replaced HQ file looked unchanged from the operator's
+      // POV. Try the local File fast path first, fall back to HTTP-range
+      // off the just-uploaded URL for >500MB files.
+      let newThumbnailUrl = null
+      const isVideoFile = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(file.name)
+      if (isVideoFile) {
+        let thumbBlob = await captureVideoThumbnail(file)
+        if (!thumbBlob) thumbBlob = await captureVideoThumbnailFromUrl(newUrl)
+        if (thumbBlob) {
+          const thumbPath = `incoming/${row.id}_replaced_${Date.now()}_thumb.jpg`
+          const { error: thumbErr } = await supabase.storage
+            .from('creative-uploads')
+            .upload(thumbPath, thumbBlob, { upsert: true, contentType: 'image/jpeg' })
+          if (!thumbErr) {
+            newThumbnailUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${thumbPath}`
+          }
+        }
+      } else {
+        // Image replace: the uploaded file IS the thumbnail (full-quality).
+        newThumbnailUrl = newUrl
+      }
       setReplaceProgress('saving')
       // Single PATCH: update URL + size + clear all low-quality flag fields
       // so the row stops appearing in the "hidden" bucket and the LOW-Q
       // badge disappears immediately. We do NOT touch transcript / creator /
       // canonical_name — those derived fields still apply since the source
       // content is the same clip, just at higher quality.
-      const { error: upErr } = await supabase.from('lib_creative_library').update({
+      const patch = {
         preview_url: newUrl,
         size_mb: sizeMB,
         is_low_quality: false,
@@ -5625,7 +6083,9 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         low_quality_detected_at: null,
         source_bucket: 'Source file replaced',
         notes: `Source file replaced on ${new Date().toISOString().slice(0,10)} (was ${row.low_quality_reason || 'damaged'}, ${row.low_quality_actual_mb || '?'} MB).\n\n${row.notes || ''}`.trim(),
-      }).eq('id', row.id)
+      }
+      if (newThumbnailUrl) patch.thumbnail_url = newThumbnailUrl
+      const { error: upErr } = await supabase.from('lib_creative_library').update(patch).eq('id', row.id)
       if (upErr) throw new Error(upErr.message)
       // Surface the updated row to the parent matrix so it disappears from
       // the low-quality filter immediately.
@@ -5635,6 +6095,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         is_low_quality: false,
         low_quality_reason: null,
         low_quality_actual_mb: null,
+        ...(newThumbnailUrl ? { thumbnail_url: newThumbnailUrl } : {}),
       })
       // Notify any editor currently assigned to a task on this creative —
       // their source video just changed and any cut they were working on
@@ -5654,7 +6115,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             kind: 'source_replaced',
             task_id: t.id,
             creative_id: row.id,
-            title: `Source video replaced — ${row.canonical_name || row.name}`,
+            title: `Source video replaced — ${rowDisplayName(row)}`,
             body: 'Admin replaced the source clip with a higher-quality version. Re-download before continuing your edit.',
             link_path: `/editor-view?task=${t.id}`,
           })
@@ -5808,6 +6269,10 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
       manually_marked_used: !!edit.manually_marked_used,
       is_bad_take: !!edit.is_bad_take,
       bad_take_reason: edit.bad_take_reason || null,
+      // Messaging angle override (migration 103). Coordinator's free-text
+      // rewrite of the AI-generated angle. Empty string -> NULL so the
+      // partial unique index on display_name behaves cleanly.
+      messaging_angle_override: edit.messaging_angle_override ? edit.messaging_angle_override.trim() || null : null,
       // Only write script_text once it's actually been loaded/edited
       // (lazy-fetched after mount). Including it unconditionally would let
       // an unrelated save fire `script_text: null` before the fetch lands
@@ -5897,8 +6362,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
 
   return (
     <Modal open={true} onClose={handleClose} size="lg"
-      eyebrow={edit.canonical_name || row.type || 'Creative'}
-      title={row.canonical_name || row.name}
+      eyebrow={edit.display_name || edit.canonical_name || row.type || 'Creative'}
+      title={rowDisplayName(row)}
       subtitle={row.canonical_name ? row.name : `${row.source_bucket || ''}${row.size_mb ? ' · ' + Math.round(row.size_mb) + ' MB' : ''}`}
       footer={
         confirmDelete ? (
@@ -6052,8 +6517,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
             }}>
               <span>Original file</span>
-              <a href={toDownloadUrl(dl, row.canonical_name || row.name)}
-                download={row.canonical_name || row.name || 'creative.mp4'}
+              <a href={toDownloadUrl(dl, rowDisplayName(row))}
+                download={rowDisplayName(row) || 'creative.mp4'}
                 rel="noreferrer"
                 title="Download the highest-quality version of this creative"
                 style={{
@@ -6069,10 +6534,35 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         {/* Slim form — only the fields Ben actually uses to organise creatives.
             Notes, v21 script, and original filename are tucked into the
             'Advanced' disclosure below. */}
-        <Field label="Name">
-          <input type="text" value={edit.canonical_name || ''}
-            onChange={e => setEdit({ ...edit, canonical_name: e.target.value })}
+        <Field label="Display name (auto)">
+          {/* Read-only. The display_name is built by creative-library-describe
+              from offer + messaging_angle + creator + take_number. Editing it
+              directly used to produce the messy 5-token strings (Ben 2026-05-31).
+              To change what appears here, edit the Messaging angle field below
+              (free-text) or the Offer / Creator dropdowns. */}
+          <input type="text" readOnly
+            value={rowDisplayName(edit) || ''}
+            title={rowDisplayName(edit) || ''}
+            style={{
+              ...inputStyle,
+              color: 'var(--ink-3)',
+              background: 'var(--paper-2)',
+              cursor: 'default',
+            }} />
+        </Field>
+        <Field label="Messaging angle (override)">
+          {/* Free-text override of the AI-generated messaging_angle. The AI
+              value is preserved in messaging_angle so we can compare and
+              revert. Empty override -> AI value wins. */}
+          <input type="text"
+            value={edit.messaging_angle_override || ''}
+            placeholder={edit.messaging_angle ? `AI: ${edit.messaging_angle}` : 'No angle generated yet — describe will populate after transcribe'}
+            onChange={e => setEdit({ ...edit, messaging_angle_override: e.target.value })}
             style={inputStyle} />
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', marginTop: 4 }}>
+            Edits the MESSAGING slot in display_name. Use kebab-case or plain words —
+            it'll be UPPER-KEBAB-CASED automatically.
+          </div>
         </Field>
 
         {/* Type — pill button group, color-coded per type. Much more
@@ -6322,8 +6812,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                   <span style={{ fontWeight: 600 }}>{t.editor_name}</span>
                   <span style={{ color: 'var(--ink-3)' }}>{t.task_type}</span>
                   <span style={{ color: 'var(--ink-3)' }}>{t.status}</span>
-                  <span style={{ marginLeft: 'auto', color: t.is_overdue ? '#b53e3e' : 'var(--ink-4)' }}>
-                    {t.is_overdue ? '⚠ overdue ' : ''}{t.due_date || 'no due date'}
+                  <span style={{ marginLeft: 'auto', color: (t.is_overdue && t.status !== 'review') ? '#b53e3e' : 'var(--ink-4)' }}>
+                    {(t.is_overdue && t.status !== 'review') ? '⚠ overdue ' : ''}{t.due_date || 'no due date'}
                   </span>
                 </div>
               ))}
@@ -6356,11 +6846,14 @@ function driveEmbedUrl(url) {
 
 /* ─────────────────────────── UPLOAD MODAL ─────────────────────────── */
 
-function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded }) {
+function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded, knownCreators = [] }) {
   // The modal is now a thin shell: it collects files + batch config,
   // hands them off to the module-level upload queue, and closes. The
   // queue owns all upload state, runs in the background regardless of
   // whether this modal is mounted, and surfaces progress via UploadDock.
+  // files now holds richer items: { file, dims, markedBad, badReason }
+  // so the per-file Layer-1 toggle (Keep/Bad) and the Layer-2 heuristic
+  // result can both round-trip into the upload queue config.
   const [files, setFiles] = useState([])
   const [err, setErr] = useState(null)
   const [batchType, setBatchType] = useState('Joined')
@@ -6371,6 +6864,10 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
   const [batchStatus, setBatchStatus] = useState('raw')
   const [batchEditorId, setBatchEditorId] = useState('')
   const [batchOfferSlug, setBatchOfferSlug] = useState('')
+  // Actor / creator for the whole batch. Drives the rename scheme
+  // (RAW-YYMMDD-ACTOR-S03-001.mp4) and the per-actor-per-day batch_seq
+  // allocation. Empty -> UNK actor + the batch goes into the UNK bucket.
+  const [batchCreator, setBatchCreator] = useState('')
   // Inline "+ Add new niche" form state. Any team member can add a niche
   // — public.offers has allow-all RLS (migration 059). Slug auto-derives
   // from the display name (lowercase, dashed, opt- prefix) but is
@@ -6427,7 +6924,19 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
     }))
     setProbing(false)
 
-    const accepted = probes.filter(p => p.ok).map(p => p.file)
+    // Layer 2 heuristics run as soon as we have dims. Items can land in
+    // the file list pre-flagged — operator sees a red badge + reason, can
+    // un-flag via the Keep/Bad toggle if it was a false positive.
+    const accepted = probes.filter(p => p.ok).map(p => {
+      const heuristic = badTakeHeuristic(p.file, p.dims)
+      return {
+        file: p.file,
+        dims: p.dims,
+        markedBad: heuristic.flagged,
+        badReason: heuristic.reason,
+        badSource: heuristic.flagged ? 'heuristic' : null,
+      }
+    })
     const newlyRejected = probes.filter(p => !p.ok).map(p => ({
       name: p.file.name,
       size: p.file.size,
@@ -6435,6 +6944,22 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
     }))
     if (accepted.length) setFiles(prev => [...prev, ...accepted])
     if (newlyRejected.length) setRejected(prev => [...prev, ...newlyRejected])
+  }
+
+  // Toggle the per-file Layer-1 flag. Operator-driven (vs heuristic which
+  // is auto). When operator flips an auto-flag back to Keep, we change
+  // badSource to null so the row never lands with a stale heuristic note.
+  const toggleMarkedBad = (idx) => {
+    setFiles(prev => prev.map((item, i) => {
+      if (i !== idx) return item
+      const next = !item.markedBad
+      return {
+        ...item,
+        markedBad: next,
+        badSource: next ? (item.badSource || 'upload') : null,
+        badReason: next ? (item.badReason || 'flagged at upload') : null,
+      }
+    }))
   }
 
   const handleDrop = (e) => {
@@ -6447,14 +6972,71 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
   // identify-actor → describe) and survives modal unmount, so the
   // operator can close this modal, navigate around, and uploads
   // continue with progress shown in the floating UploadDock.
-  const submit = () => {
+  // Migration 104: allocate a per-actor-per-day batch via the RPC,
+  // then enqueue each file with its rename-ready slot info.
+  const submit = async () => {
     if (!files.length) return
     setErr(null)
-    uploadQueue.enqueue(files, {
+
+    // Allocate the upload batch FIRST so all files in this batch share
+    // the same batch_seq + date_local. RPC handles race-safe allocation
+    // (advisory lock keyed by actor+date) so two concurrent uploads
+    // can't collide on batch_seq.
+    let batch
+    try {
+      const actor = actorTokenForRename(batchCreator)
+      const { data, error } = await supabase.rpc('next_upload_batch', {
+        p_actor_creator: actor,
+        p_uploaded_by_label: null,
+        p_uploaded_by_user: null,
+        p_tz: 'Pacific/Auckland',
+      })
+      if (error) throw error
+      batch = data
+    } catch (e) {
+      // If migration 104 hasn't landed yet, the RPC will 42883 (function
+      // doesn't exist). Fall back to a client-allocated batch so the
+      // upload doesn't die — rename still happens, just with batch_seq=1
+      // and no upload_batch_id FK. Once 104 lands the RPC wins.
+      console.warn('next_upload_batch RPC unavailable — falling back to client-side batch:', e?.message)
+      batch = {
+        id: null,
+        actor_creator: actorTokenForRename(batchCreator),
+        date_local: new Date().toISOString().slice(0, 10),
+        batch_seq: 1,
+      }
+    }
+
+    // Per-file payload: the rename gets computed at enqueue time so
+    // the floating UploadDock can show the renamed filename instead of
+    // the original Sony shorthand.
+    const perFile = files.map((item, idx) => ({
+      file: item.file,
+      perFileConfig: {
+        fileSeq: idx + 1,
+        renamedName: renameForUpload({
+          originalName: item.file.name,
+          actor: batch.actor_creator,
+          dateLocal: batch.date_local,
+          batchSeq: batch.batch_seq,
+          fileSeq: idx + 1,
+        }),
+        markedBad: !!item.markedBad,
+        badReason: item.badReason || null,
+        badSource: item.badSource || (item.markedBad ? 'upload' : null),
+      },
+    }))
+
+    uploadQueue.enqueue(perFile.map(p => p.file), {
       batchType,
       batchStatus,
       batchEditorId,
       batchOfferSlug,
+      batchCreator: batch.actor_creator,
+      uploadBatchId: batch.id,
+      uploadBatchSeq: batch.batch_seq,
+      uploadBatchDate: batch.date_local,
+      perFile: perFile.map(p => p.perFileConfig),  // index-aligned with files
     })
     // Clear the modal's local file list so re-opening doesn't show
     // the same files queued again, and close immediately.
@@ -6500,6 +7082,31 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
             letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)',
             marginBottom: 8,
           }}>Apply to all files in this batch</div>
+          {/* Actor / Creator picker — drives the rename scheme. Renames
+              cameras-original filenames to RAW-YYMMDD-ACTOR-Sxx-NNN.{ext}
+              at insert. The actor token shows up in display_name later
+              too, so picking it here saves an edit pass post-describe. */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              Actor / creator (drives filename + batch grouping)
+            </div>
+            <input list="upload-actor-suggest" type="text"
+              value={batchCreator} onChange={e => setBatchCreator(e.target.value)}
+              placeholder="e.g. TANYA · leave blank for UNK"
+              style={selectStyle} disabled={busy} />
+            <datalist id="upload-actor-suggest">
+              {(knownCreators || []).filter(Boolean).map(c => <option key={c} value={c} />)}
+            </datalist>
+            {files.length > 0 && (
+              <div style={{
+                marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
+                letterSpacing: '0.04em',
+              }}>
+                Preview: <strong>RAW-{new Date().toISOString().slice(2, 10).replace(/-/g, '')}-{actorTokenForRename(batchCreator)}-S??-001.{(files[0]?.file?.name || '').match(/\.([a-z0-9]{2,5})$/i)?.[1]?.toLowerCase() || 'mp4'}</strong>
+                {' '}<span style={{ color: 'var(--ink-4)' }}>(batch number assigned at queue time)</span>
+              </div>
+            )}
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr 1fr', gap: 10 }}>
             <div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Type</div>
@@ -6694,29 +7301,80 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
         )}
         {files.length > 0 && (
           <div style={{
-            marginTop: 14, border: '1px solid var(--rule)', maxHeight: 280, overflowY: 'auto',
+            marginTop: 14, border: '1px solid var(--rule)', maxHeight: 320, overflowY: 'auto',
           }}>
-            {files.map((f, i) => (
-              <div key={i} style={{
-                display: 'grid', gridTemplateColumns: '1fr 90px 30px',
-                gap: 10, alignItems: 'center',
-                padding: '8px 12px',
-                borderBottom: i === files.length - 1 ? 'none' : '1px solid var(--rule)',
-                background: i % 2 === 0 ? 'transparent' : 'var(--paper-2)',
-              }}>
-                <div style={{
-                  fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }} title={f.name}>{f.name}</div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>
-                  {(f.size / 1024 / 1024).toFixed(1)} MB
+            {files.map((item, i) => {
+              const f = item.file
+              const dur = item.dims?.duration_s
+              return (
+                <div key={i} style={{
+                  display: 'grid', gridTemplateColumns: '1fr auto 80px 100px 30px',
+                  gap: 10, alignItems: 'center',
+                  padding: '8px 12px',
+                  borderBottom: i === files.length - 1 ? 'none' : '1px solid var(--rule)',
+                  background: item.markedBad ? 'rgba(181,62,62,0.05)' : (i % 2 === 0 ? 'transparent' : 'var(--paper-2)'),
+                  borderLeft: item.markedBad ? '3px solid #b53e3e' : '3px solid transparent',
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{
+                      fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      textDecoration: item.markedBad ? 'line-through' : 'none',
+                      opacity: item.markedBad ? 0.6 : 1,
+                    }} title={f.name}>{f.name}</div>
+                    {item.markedBad && item.badReason && (
+                      <div style={{
+                        fontFamily: 'var(--mono)', fontSize: 9.5, color: '#b53e3e',
+                        marginTop: 2, letterSpacing: '0.04em',
+                      }}>
+                        BAD{item.badSource === 'heuristic' ? ' (auto)' : ' (operator)'} · {item.badReason}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>
+                    {dur != null ? `${dur.toFixed(1)}s` : '—'}
+                  </div>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>
+                    {(f.size / 1024 / 1024).toFixed(1)} MB
+                  </div>
+                  {/* Keep/Bad toggle (Layer 1). Operator-driven mark for
+                      takes the operator KNOWS are flubbed before upload
+                      — restart, missed cue, audio fail, etc. Auto-flagged
+                      items can be un-flagged with the same toggle. */}
+                  <button onClick={() => toggleMarkedBad(i)} type="button"
+                    title={item.markedBad ? 'Currently flagged as bad take — click to keep' : 'Mark as bad take (will be hidden from editor library)'}
+                    style={{
+                      padding: '3px 9px', borderRadius: 2,
+                      background: item.markedBad ? '#b53e3e' : 'var(--paper)',
+                      color: item.markedBad ? 'white' : 'var(--ink-3)',
+                      border: '1px solid ' + (item.markedBad ? '#b53e3e' : 'var(--rule)'),
+                      fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                      cursor: 'pointer', whiteSpace: 'nowrap',
+                    }}>{item.markedBad ? 'Bad take' : 'Keep'}</button>
+                  <button onClick={() => setFiles(files.filter((_, j) => j !== i))} style={{
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    color: 'var(--ink-4)', fontSize: 16, padding: 0,
+                  }}>×</button>
                 </div>
-                <button onClick={() => setFiles(files.filter((_, j) => j !== i))} style={{
-                  background: 'transparent', border: 'none', cursor: 'pointer',
-                  color: 'var(--ink-4)', fontSize: 16, padding: 0,
-                }}>×</button>
-              </div>
-            ))}
+              )
+            })}
+            {/* Footer: count of items flagged so the operator sees how
+                many won't reach the editor before clicking Queue. */}
+            {(() => {
+              const badCount = files.filter(it => it.markedBad).length
+              if (!badCount) return null
+              return (
+                <div style={{
+                  padding: '6px 12px', background: 'var(--paper-2)',
+                  borderTop: '1px solid var(--rule)',
+                  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                }}>
+                  {badCount} of {files.length} flagged as bad — will upload but hide from editor library
+                </div>
+              )
+            })()}
           </div>
         )}
         {rejected.length > 0 && (
@@ -6967,10 +7625,14 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     return out
   }, [tasks, selectedEditors, selectedStatuses])
 
-  const overdue = filteredTasks.filter(t => t.is_overdue).length
-  const inProg  = filteredTasks.filter(t => t.status === 'in_progress').length
-  const queued  = filteredTasks.filter(t => t.status === 'queued').length
-  const done    = filteredTasks.filter(t => t.status === 'done').length
+  // Only count as overdue when the editor is actually blocking. status='review'
+  // means the editor has submitted; the task is on the coordinator now.
+  const overdue  = filteredTasks.filter(t => t.is_overdue && t.status !== 'review').length
+  const inProg   = filteredTasks.filter(t => t.status === 'in_progress').length
+  const queued   = filteredTasks.filter(t => t.status === 'queued').length
+  const review   = filteredTasks.filter(t => t.status === 'review').length
+  const revision = filteredTasks.filter(t => t.status === 'needs_revision').length
+  const done     = filteredTasks.filter(t => t.status === 'done').length
 
   const toggleEditor = (id) => {
     setSelectedEditors(prev => {
@@ -7041,8 +7703,8 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         task_id: task.task_id,
         creative_id: task.creative_id,
         title: prevState.editor_id
-          ? `Reassigned to you — ${task.creative_canonical_name || task.creative_name || 'task'}`
-          : `New assignment — ${task.creative_canonical_name || task.creative_name || 'task'}`,
+          ? `Reassigned to you — ${taskDisplayName(task) || 'task'}`
+          : `New assignment — ${taskDisplayName(task) || 'task'}`,
         body: task.due_date ? `Due ${task.due_date}.` : 'No due date set.',
         link_path: `/editor-view?task=${task.task_id}`,
       })
@@ -7102,14 +7764,30 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         </div>
       )}
 
-      {/* KPI bar */}
+      {/* KPI bar. Six tiles so Review + Revision get their own slots
+          alongside Overdue / In progress / Queued / Done — Ben 2026-05-31
+          wanted needs_revision visible at a glance (was buried in the
+          status filter chip). Click a tile to filter the queue to that
+          status; click again to clear. */}
       <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 18,
+        display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10, marginBottom: 18,
       }}>
-        <KpiTile label="Overdue"     value={overdue} accent={overdue > 0 ? '#b53e3e' : null} />
-        <KpiTile label="In progress" value={inProg} />
-        <KpiTile label="Queued"      value={queued} />
-        <KpiTile label="Done"        value={done} />
+        <KpiTile label="Overdue"     value={overdue}  accent={overdue > 0 ? '#b53e3e' : null} />
+        <KpiTile label="In progress" value={inProg}   accent={inProg > 0 ? '#e0853e' : null}
+          onClick={() => setSelectedStatuses(prev => prev.has('in_progress') ? new Set([...prev].filter(s => s !== 'in_progress')) : new Set([...prev, 'in_progress']))}
+          active={selectedStatuses.has('in_progress')} />
+        <KpiTile label="Review"      value={review}   accent={review > 0 ? '#3e7eba' : null}
+          onClick={() => setSelectedStatuses(prev => prev.has('review') ? new Set([...prev].filter(s => s !== 'review')) : new Set([...prev, 'review']))}
+          active={selectedStatuses.has('review')} />
+        <KpiTile label="Revision"    value={revision} accent={revision > 0 ? '#c47a1a' : null}
+          onClick={() => setSelectedStatuses(prev => prev.has('needs_revision') ? new Set([...prev].filter(s => s !== 'needs_revision')) : new Set([...prev, 'needs_revision']))}
+          active={selectedStatuses.has('needs_revision')} />
+        <KpiTile label="Queued"      value={queued}
+          onClick={() => setSelectedStatuses(prev => prev.has('queued') ? new Set([...prev].filter(s => s !== 'queued')) : new Set([...prev, 'queued']))}
+          active={selectedStatuses.has('queued')} />
+        <KpiTile label="Done"        value={done}     accent={done > 0 ? '#3e8a5e' : null}
+          onClick={() => setSelectedStatuses(prev => prev.has('done') ? new Set([...prev].filter(s => s !== 'done')) : new Set([...prev, 'done']))}
+          active={selectedStatuses.has('done')} />
       </div>
 
       {/* Toolbar: actions + view toggle */}
@@ -7860,7 +8538,7 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds, sel
                     }}>Feedback</span>
                 )}
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {t.creative_canonical_name || t.creative_name}
+                  {taskDisplayName(t)}
                 </span>
               </div>
               <div style={{
@@ -7879,11 +8557,11 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds, sel
               {t.editor_name && <span style={{ width: 9, height: 9, borderRadius: 2, background: color, flexShrink: 0 }} />}
               <span style={{ color: t.editor_name ? 'var(--ink)' : 'var(--ink-4)' }}>{t.editor_name || 'Unassigned'}</span>
             </div>
-            <div><StatusPipBadge status={t.status} isOverdue={t.is_overdue} /></div>
+            <div><StatusPipBadge status={t.status} isOverdue={t.is_overdue && t.status !== 'review'} /></div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{t.task_type || '—'}</div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 11,
-                          color: t.is_overdue ? '#b53e3e' : 'var(--ink-3)' }}>
-              {t.is_overdue && '⚠ '}{t.due_date || '—'}
+                          color: (t.is_overdue && t.status !== 'review') ? '#b53e3e' : 'var(--ink-3)' }}>
+              {(t.is_overdue && t.status !== 'review') && '⚠ '}{t.due_date || '—'}
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
               {t.priority?.replace(' - ', ' ') || '—'}
@@ -8100,8 +8778,24 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   }, [task.task_id, scope.isEditorView])
   useEffect(() => { reloadSubmissions() }, [reloadSubmissions])
 
-  const save = async () => {
-    setBusy(true); setErr(null)
+  // Tracks whether any field has been touched in this modal session.
+  // Used by handleCloseModal to decide whether to flush a final save —
+  // we don't want to write to the DB on every modal close if the user
+  // just opened it to look. (Kirill bug #7, Ben 2026-05-31: edits to
+  // priority/editor/due-date/notes were silently dropped if the user
+  // clicked X or the backdrop instead of the Save button.)
+  const dirtyRef = useRef(false)
+  // First effect run = mount, NOT a user change. Skip it so we don't
+  // mark dirty on initial form hydration from `task` props.
+  const dirtyInitRef = useRef(true)
+  useEffect(() => {
+    if (dirtyInitRef.current) { dirtyInitRef.current = false; return }
+    dirtyRef.current = true
+  }, [editorId, status, priority, taskType, due, notes])
+
+  const save = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setBusy(true)
+    setErr(null)
     const patch = {
       editor_id: editorId || null,
       status, priority, task_type: taskType, due_date: due || null,
@@ -8112,10 +8806,16 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     // Auto-set completed_at when moving to done
     if (status === 'done' && !task.completed_at) patch.completed_at = new Date().toISOString()
     const { error } = await supabase.from('lib_editing_tasks').update(patch).eq('id', task.task_id)
-    setBusy(false)
-    if (error) setErr(error.message)
-    else onSaved?.()
-  }
+    if (!silent) setBusy(false)
+    if (error) {
+      if (!silent) setErr(error.message)
+    } else {
+      // Reset dirty so closing the modal twice doesn't fire a redundant
+      // silent write. Manual Save also wins this flag back for the user.
+      dirtyRef.current = false
+      if (!silent) onSaved?.()
+    }
+  }, [editorId, status, priority, taskType, due, notes, task.task_id, task.started_at, task.completed_at, onSaved])
   const remove = async () => {
     setBusy(true); setErr(null)
     const { error } = await supabase.from('lib_editing_tasks').delete().eq('id', task.task_id)
@@ -8259,7 +8959,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           task_id: task.task_id,
           submission_id: sub.id,
           creative_id: task.creative_id,
-          title: `v${sub.version_number || 1} approved — ${task.creative_canonical_name || task.creative_name}`,
+          title: `v${sub.version_number || 1} approved — ${taskDisplayName(task)}`,
           body: 'Admin approved your cut. Task moved to done.',
           link_path: `/editor-view?task=${task.task_id}`,
         })
@@ -8299,7 +8999,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   // never runs and busy/progress would get stuck. Reset them explicitly
   // here so the modal returns to a clean state whether the editor stays
   // open or fully closes.
-  const handleCloseModal = useCallback(() => {
+  const handleCloseModal = useCallback(async () => {
     if (uploadXhrRef.current) {
       try { uploadXhrRef.current.abort() } catch {}
       uploadXhrRef.current = null
@@ -8307,8 +9007,16 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       setUploadProgress(null)
       setUploadFile(null)
     }
+    // Flush any pending edits to lib_editing_tasks before unmounting so
+    // changes to priority / editor / due date / notes never get dropped
+    // if the coordinator clicks X / backdrop / Cancel instead of Save.
+    // Only fires when something actually changed (dirtyRef) — opening
+    // a task purely to look should NOT trigger a DB write.
+    if (dirtyRef.current) {
+      try { await save({ silent: true }) } catch { /* close anyway */ }
+    }
     onClose?.()
-  }, [onClose])
+  }, [onClose, save])
 
   return (
     <Modal open={true} onClose={handleCloseModal} size="lg"
@@ -8415,9 +9123,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                     Open in Drive ↗
                   </a>
                 )}
-                {(task.drive_url || task.preview_url) && (
+                {(task.final_cut_url || task.drive_url || task.preview_url) && (
                   <a
-                    href={toDownloadUrl(task.drive_url || task.preview_url, task.creative_name)}
+                    href={toDownloadUrl(task.final_cut_url || task.drive_url || task.preview_url, task.creative_name)}
                     download={task.creative_name || 'creative.mp4'}
                     rel="noreferrer"
                     title="Download the original full-quality file"
@@ -8551,7 +9259,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           // when an admin saves feedback — the assigned editor of the
           // task gets a notification + email (once Resend is wired).
           taskEditorId={task.editor_id}
-          taskName={task.creative_canonical_name || task.creative_name}
+          taskName={taskDisplayName(task)}
           busy={busy}
           onApprove={approveSubmission}
           onDelete={deleteSubmission}
@@ -8581,7 +9289,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                 task_id: task.task_id,
                 submission_id: sub.id,
                 creative_id: task.creative_id,
-                title: `Revision requested on v${sub.version_number || 1} — ${task.creative_canonical_name || task.creative_name}`,
+                title: `Revision requested on v${sub.version_number || 1} — ${taskDisplayName(task)}`,
                 body: feedbackText.length > 180 ? feedbackText.slice(0, 177) + '…' : feedbackText,
                 link_path: `/editor-view?task=${task.task_id}`,
               })
@@ -10312,7 +11020,7 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
     }
     const matchesSearch = (c) => {
       if (!q) return true
-      return (c.canonical_name || c.name || '').toLowerCase().includes(q)
+      return (rowDisplayName(c) || '').toLowerCase().includes(q)
           || (c.name || '').toLowerCase().includes(q)
     }
     const matchesAssigned = (c) => {
@@ -10347,12 +11055,26 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
         setUploadProgress(10)
         const sanitized = uploadFile.name.replace(/[^A-Za-z0-9._-]+/g, '_')
         const storagePath = `edited/${Date.now()}_${sanitized}`
-        const { error: upErr } = await supabase.storage
-          .from('creative-uploads')
-          .upload(storagePath, uploadFile, { upsert: false })
-        if (upErr) throw upErr
+        // Resumable upload (TUS) — single-POST .upload() silently failed
+        // on multi-hundred-MB files routed through "+ Add task" and left
+        // the operator with no progress past a static 50%. Now goes through
+        // uploadWithResume which: chunks at 6MB, retries on transient
+        // failures, fingerprints by (bucket,path) so re-drops don't cross-
+        // wire, and refuses to resolve unless verifyUploaded confirms the
+        // object is fetchable (no broken-link rows).
+        let lastUploadPct = -1
+        await uploadWithResume(uploadFile, {
+          bucket: 'creative-uploads',
+          path: storagePath,
+          contentType: uploadFile.type || 'video/mp4',
+          onProgress: (frac) => {
+            // 0-1 fraction -> 10-50% slot (rest of the work claims 50-100%)
+            const pct = 10 + Math.floor(frac * 40)
+            if (pct !== lastUploadPct) { lastUploadPct = pct; setUploadProgress(pct) }
+          },
+        })
         setUploadProgress(50)
-        const publicUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${storagePath}`
+        const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
 
         // Extract thumbnail. Pre-upload File path first (fast path,
         // < 500 MB) then post-upload URL path (HTTP-range, any size).
@@ -10398,21 +11120,30 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
       }
       if (cids.length === 0) { setErr('Pick one or more creatives or upload a new file'); setBusy(false); return }
 
-      // Optional: bulk-rename the picked creatives to a shared project name.
-      // Format: "<projectName> 1", "<projectName> 2", ... so each row has
-      // a unique canonical_name (no DB unique constraint, but Ben wants
-      // them visually distinct in lists).
+      // Optional: tag the picked creatives with a shared project name.
+      // PRE-2026-05-31 BEHAVIOUR was to overwrite canonical_name with
+      // "<projectName> 1", "<projectName> 2", ... — that produced messes
+      // like JOINED-OSO-ERIC-GOOGLERANKINGRES-T01.mp4 that don't match
+      // the auto-generated bulletproof format and made the editor view
+      // unreadable. The shared tag now lives in project_tag (filterable,
+      // groupable) and the display_name stays untouched.
+      // Self-heal pattern: if migration 103 hasn't been applied yet, the
+      // project_tag column won't exist and a 42703 error would kill the
+      // whole assign-creative flow. Catch the column-missing error and
+      // continue silently — the rest of the task assignment still lands.
       if (projectName.trim() && mode === 'pick') {
         const proj = projectName.trim()
-        const updates = cids.map((id, i) => ({ id, canonical_name: cids.length === 1 ? proj : `${proj} ${i + 1}` }))
-        // Bulk update via individual writes — Supabase doesn't have a clean
-        // 'upsert different values per row' API. N is small (selected count)
-        // so this is fine.
-        for (const u of updates) {
+        for (const id of cids) {
           const { error: rnErr } = await supabase.from('lib_creative_library')
-            .update({ canonical_name: u.canonical_name })
-            .eq('id', u.id)
-          if (rnErr) throw rnErr
+            .update({ project_tag: proj })
+            .eq('id', id)
+          if (rnErr && rnErr.code !== '42703') throw rnErr
+          if (rnErr && rnErr.code === '42703') {
+            // Migration 103 not applied yet. Log once + stop trying the
+            // remaining IDs — they'd all hit the same error.
+            console.warn('project_tag column missing — apply migration 103 to enable project tagging. Skipping tag write.')
+            break
+          }
         }
       }
 
@@ -10625,7 +11356,7 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
                         <div style={{
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                           fontWeight: 500,
-                        }}>{c.canonical_name || c.name}</div>
+                        }}>{rowDisplayName(c)}</div>
                         {c.description && (
                           <div style={{
                             fontFamily: 'var(--sans)', fontSize: 10.5, color: 'var(--ink-3)',
@@ -10640,13 +11371,18 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
                 })}
               </div>
             </Field>
-            {/* Project rename — applies the same project name to all selected
-                creatives (auto-numbered when there's more than one). */}
+            {/* Project tag — applies a shared project_tag to all selected
+                creatives WITHOUT touching their display_name. Lets you
+                group / filter by project ("HAMMER campaign") without
+                trashing the bulletproof name format. */}
             {creativeIds.size > 0 && (
-              <Field label={creativeIds.size === 1 ? 'Optional: rename this creative' : `Optional: rename all ${creativeIds.size} as a project`}>
+              <Field label={creativeIds.size === 1 ? 'Optional: project tag' : `Optional: tag all ${creativeIds.size} with a project name`}>
                 <input type="text" value={projectName} onChange={e => setProjectName(e.target.value)}
-                  placeholder={creativeIds.size === 1 ? 'New name (leave blank to keep current)' : 'e.g. HAMMER campaign — will become "HAMMER campaign 1", "HAMMER campaign 2"…'}
+                  placeholder='e.g. HAMMER campaign'
                   style={inputStyle} />
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', marginTop: 4 }}>
+                  Filter by this tag in the library. Display names stay intact.
+                </div>
               </Field>
             )}
           </>
@@ -11198,22 +11934,31 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                   const baseW = Math.max(dayWidth - 2, xForDate(new Date(endTs).toISOString()) - x + dayWidth - 2)
                   const w = Math.max(dayWidth, baseW + resizeDeltaPx)
                   const y = PADDING + rowIdx * (BAR_HEIGHT + ROW_GAP)
-                  const stripe = t.is_overdue ? '#b53e3e' : (STATUS_STRIPE[t.status] || '#999')
-                  const label = t.creative_canonical_name || t.creative_name
+                  // status='review' means the EDITOR has already submitted and
+                  // the task is on the COORDINATOR's plate — it is NOT overdue
+                  // from the editor's POV regardless of due date. Don't paint
+                  // the bar or badge red for it. (Ben 2026-05-31: tasks were
+                  // showing OVD when an editor had actually submitted, so it
+                  // was impossible to tell who was blocking from the timeline.)
+                  const editorIsBlocking = t.is_overdue && t.status !== 'review'
+                  const stripe = editorIsBlocking ? '#b53e3e' : (STATUS_STRIPE[t.status] || '#999')
+                  const label = taskDisplayName(t)
                   const thumbVisible = !!t.thumbnail_url && w >= 80
                   // Status badge: show prominently for non-queued states.
                   //   review      → solid blue "REVIEW"
                   //   in_progress → solid orange "WIP"
                   //   done        → solid green "DONE" + bar dimmed
                   //   blocked     → solid red "BLOCKED"
-                  // Overdue replaces the badge with "OVD" in red.
+                  // Overdue replaces the badge with "OVD" in red — but ONLY
+                  // when the editor is actually blocking (status != review).
                   const STATUS_BADGE = {
                     review:      { label: 'REVIEW', bg: '#3e7eba' },
                     in_progress: { label: 'WIP',    bg: '#e0853e' },
                     done:        { label: 'DONE',   bg: '#3e8a5e' },
                     blocked:     { label: 'BLOCK',  bg: '#b53e3e' },
+                    needs_revision: { label: 'REVISE', bg: '#c47a1a' },
                   }
-                  const badge = t.is_overdue
+                  const badge = editorIsBlocking
                     ? { label: 'OVD', bg: '#b53e3e' }
                     : STATUS_BADGE[t.status] || null
                   const isDone = t.status === 'done'
@@ -11230,7 +11975,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                       draggable={!!(onMoveEditor || onUpdateAssignment) && !isResizing}
                       onDragStart={(e) => handleTaskDragStart(e, t)}
                       onDragEnd={handleTaskDragEnd}
-                      title={`${label}${t.creative_canonical_name ? ' · ' + t.creative_name : ''} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${t.is_overdue ? ' · OVERDUE' : ''}${(onMoveEditor || onUpdateAssignment) ? ' · drag the bar to reassign · drag the right edge to extend the due date' : ''}`}
+                      title={`${label}${t.creative_canonical_name ? ' · ' + t.creative_name : ''} · ${t.status}${t.due_date ? ' · due ' + t.due_date : ''}${editorIsBlocking ? ' · OVERDUE' : ''}${t.status === 'review' && t.is_overdue ? ' · in review past due — coordinator must review' : ''}${(onMoveEditor || onUpdateAssignment) ? ' · drag the bar to reassign · drag the right edge to extend the due date' : ''}`}
                       style={{
                         position: 'absolute', left: x + 2, top: y,
                         width: w, height: BAR_HEIGHT,
@@ -11401,7 +12146,14 @@ function InboxCard({ task: t, onEdit, sectionColor }) {
         const d = new Date(t.due_date); d.setHours(0,0,0,0)
         const today = new Date(); today.setHours(0,0,0,0)
         const days = Math.round((d - today) / 86400000)
-        if (days < 0) return `${Math.abs(days)}d overdue`
+        // status='review' means the editor submitted; the task is on the
+        // coordinator. Don't paint the date as "overdue" in that case —
+        // show "Submitted (1d past due)" so it's clear what's blocking.
+        if (days < 0) {
+          return t.status === 'review'
+            ? `Submitted (${Math.abs(days)}d past due)`
+            : `${Math.abs(days)}d overdue`
+        }
         if (days === 0) return 'Due today'
         if (days === 1) return 'Due tomorrow'
         return `Due in ${days}d`
@@ -11433,10 +12185,10 @@ function InboxCard({ task: t, onEdit, sectionColor }) {
         )}
       </div>
       <div style={{ minWidth: 0 }}>
-        <div style={{
+        <div title={taskDisplayName(t)} style={{
           fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: 'var(--ink)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{t.creative_canonical_name || t.creative_name}</div>
+        }}>{taskDisplayName(t)}</div>
         <div style={{
           fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-4)', marginTop: 2,
           display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
@@ -11448,7 +12200,7 @@ function InboxCard({ task: t, onEdit, sectionColor }) {
           {dueLabel && (
             <>
               <span style={{ color: 'var(--ink-4)' }}>·</span>
-              <span style={{ color: t.is_overdue ? '#b53e3e' : 'var(--ink-4)' }}>{dueLabel}</span>
+              <span style={{ color: (t.is_overdue && t.status !== 'review') ? '#b53e3e' : 'var(--ink-4)' }}>{dueLabel}</span>
             </>
           )}
           {t.notes && (
@@ -11477,8 +12229,25 @@ function InboxCard({ task: t, onEdit, sectionColor }) {
 
 /* ─────────────────────────── KANBAN view ─────────────────────────── */
 
+// Kanban columns — Ben 2026-05-31: "Queued / In progress / Review /
+// Revision / Done". `needs_revision` joined the lineup so coordinator
+// kick-backs are visible as a column instead of disappearing into one
+// of the other buckets. `blocked` is intentionally OFF this view — it's
+// rare, accessible via the status filter chip + List/Timeline views,
+// and used to clutter the kanban whenever an editor went on PTO.
+const KANBAN_COLS = ['queued', 'in_progress', 'review', 'needs_revision', 'done']
+// Kanban-specific column labels (shorter than TASK_STATUS_LABEL so they
+// fit in the column headers). Other surfaces keep the longer labels.
+const KANBAN_LABEL = {
+  queued:         'Queued',
+  in_progress:    'In progress',
+  review:         'Review',
+  needs_revision: 'Revision',
+  done:           'Done',
+}
+
 function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInColumn }) {
-  const cols = ['queued', 'in_progress', 'review', 'blocked', 'done']
+  const cols = KANBAN_COLS
   const byCol = Object.fromEntries(cols.map(c => [c, tasks.filter(t => t.status === c)]))
   const taskById = useMemo(() => Object.fromEntries(tasks.map(t => [t.task_id, t])), [tasks])
   const [dragOver, setDragOver] = useState(null)
@@ -11538,12 +12307,12 @@ function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInC
                           fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                           letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
               <span style={{ width: 7, height: 7, borderRadius: 2, background: TASK_STATUS_COLOR[c] }} />
-              {TASK_STATUS_LABEL[c]}
+              {KANBAN_LABEL[c] || TASK_STATUS_LABEL[c]}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{byCol[c].length}</span>
               {onAddInColumn && (
-                <button onClick={() => onAddInColumn(c)} title={`Add a task in ${TASK_STATUS_LABEL[c]}`}
+                <button onClick={() => onAddInColumn(c)} title={`Add a task in ${KANBAN_LABEL[c] || TASK_STATUS_LABEL[c]}`}
                   style={{
                     background: 'var(--ink)', color: 'var(--paper)', border: 'none',
                     width: 22, height: 22, borderRadius: 2, cursor: 'pointer',
@@ -11652,10 +12421,10 @@ function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDrag
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.08em' }}>NO PREVIEW</span>
         )}
       </div>
-      <div style={{
+      <div title={taskDisplayName(task)} style={{
         fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 500,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>{task.creative_canonical_name || task.creative_name}</div>
+      }}>{taskDisplayName(task)}</div>
       <div style={{
         fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-4)',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -11695,8 +12464,8 @@ function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDrag
         <span>·</span>
         <span>{task.priority}</span>
         {task.due_date && (
-          <span style={{ marginLeft: 'auto', color: task.is_overdue ? '#b53e3e' : 'var(--ink-4)' }}>
-            {task.is_overdue ? '⚠ ' : ''}{task.due_date}
+          <span style={{ marginLeft: 'auto', color: (task.is_overdue && task.status !== 'review') ? '#b53e3e' : 'var(--ink-4)' }}>
+            {(task.is_overdue && task.status !== 'review') ? '⚠ ' : ''}{task.due_date}
           </span>
         )}
       </div>
@@ -11745,12 +12514,26 @@ function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDrag
 
 /* ─────────────────────────── Shared bits ─────────────────────────── */
 
-function KpiTile({ label, value, accent }) {
+function KpiTile({ label, value, accent, onClick, active }) {
+  // Tiles are click-to-filter when `onClick` is provided. `active` lights
+  // the border in the accent color so it's visible at a glance which
+  // status the queue is currently filtered to.
+  const clickable = typeof onClick === 'function'
   return (
-    <div style={{
-      background: 'var(--paper)', border: '1px solid var(--rule)',
-      padding: '14px 18px',
-    }}>
+    <div
+      onClick={clickable ? onClick : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+      title={clickable ? (active ? `Showing only ${label} — click to clear` : `Filter to ${label}`) : undefined}
+      style={{
+        background: active ? 'var(--paper-2)' : 'var(--paper)',
+        border: `1px solid ${active ? (accent || 'var(--ink)') : 'var(--rule)'}`,
+        borderLeft: active ? `4px solid ${accent || 'var(--ink)'}` : '1px solid var(--rule)',
+        padding: '14px 18px',
+        cursor: clickable ? 'pointer' : 'default',
+        transition: 'background 0.12s, border-color 0.12s',
+      }}>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
         {label}
       </div>
