@@ -2028,7 +2028,22 @@ function SubmissionPreviewModal({ submission, onClose, currentUser }) {
       .eq('submission_id', submission.id)
       .is('deleted_at', null)
       .order('created_at', { ascending: true })
-    setComments(data || [])
+    if (!data) return
+    // Merge-by-id instead of replace, so an optimistic insert that
+    // hasn't propagated to the next poll yet doesn't flicker out of
+    // the list. The poll wins for any row that DOES come back from
+    // the server (server is source of truth — picks up edits, resolves,
+    // soft-deletes); optimistic-only rows survive until the server
+    // catches up. Same shape as a CRDT last-write-wins merge.
+    setComments(prev => {
+      const byId = new Map(data.map(c => [c.id, c]))
+      // Keep any prev row that hasn't been deleted server-side AND
+      // isn't already in the server payload (i.e. truly local-only).
+      const localOnly = prev.filter(c => !byId.has(c.id))
+      // Stable order: server rows first (already sorted by created_at),
+      // then local optimistic rows after (they're the most recent).
+      return [...data, ...localOnly]
+    })
   }, [submission?.id])
   useEffect(() => { reloadComments() }, [reloadComments])
   useEffect(() => {
@@ -2722,15 +2737,20 @@ export default function AdsCreativeLibrary({ editorScope }) {
   // operator can see at a glance how many ads are waiting on a launch.
   // Yellow badge (positive/ready state) vs Triage's red (action required).
   //
-  // Filter: anything the operator considers a finished cut + not-yet-run.
-  // "Finished cut" is signalled by EITHER stage_final_cut='done' (set by
-  // the formal approve flow at line ~9861 and the direct-edited-upload
-  // path at line ~838) OR status='edited' (set by the Library matrix
-  // status dropdown and the batchStatus='edited' direct upload). Earlier
-  // versions only filtered on stage_final_cut and missed every row that
-  // got marked edited through the manual dropdown — Ben 2026-06-01.
-  // The originally-spec'd stage_approved column is dead (no code writes
-  // to it) so we don't reference it.
+  // Filter: only EDITED rows that haven't been run. The earlier OR-on-
+  // stage_final_cut allowed approved-but-status-raw rows through (the
+  // approveSubmission flow at line ~9867 sets stage_final_cut='done'
+  // without touching status, so an approved submission against a raw
+  // source landed in the launch queue and looked launch-ready when it
+  // wasn't). Ben: "raw footage would never be actually run" (2026-06-01).
+  // Use only status='edited' — every legitimate ship-ready path either
+  // sets status='edited' directly (Library matrix dropdown, batchStatus
+  // ='edited' upload) or should set it as part of approval. If a row is
+  // approved (stage_final_cut='done') but still status='raw', that's a
+  // data-hygiene gap we surface by NOT including it.
+  // Also exclude low-quality flagged rows by default — they shouldn't
+  // be considered launch-ready until cleaned up. Operator can toggle
+  // them back in via the hide-low-quality chip.
   const [launchCount, setLaunchCount] = useState(0)
   const refreshLaunchCount = useCallback(async () => {
     if (scope.isEditorView) return  // editors don't ship ads
@@ -2738,9 +2758,10 @@ export default function AdsCreativeLibrary({ editorScope }) {
       const { count, error } = await supabase
         .from('lib_creative_library')
         .select('id', { count: 'exact', head: true })
-        .or('stage_final_cut.eq.done,status.eq.edited')
+        .eq('status', 'edited')
         .eq('has_been_run', false)
         .eq('exclude_from_library', false)
+        .or('is_low_quality.is.null,is_low_quality.eq.false')
       if (!error && typeof count === 'number') setLaunchCount(count)
     } catch { /* defensive — same pattern as refreshTriageCount */ }
   }, [scope.isEditorView])
@@ -8386,6 +8407,15 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
     try { return localStorage.getItem('launch.sort') || 'newest' } catch { return 'newest' }
   })
   useEffect(() => { try { localStorage.setItem('launch.sort', sortMode) } catch {} }, [sortMode])
+  // Hide low-quality flagged creatives by default — Ben: "some of
+  // these videos are kind of low quality as well" (2026-06-01). The
+  // is_low_quality flag is set by scripts/audit-preview-file-sizes.mjs
+  // and the matrix detail modal. Operator can toggle off to surface
+  // them for triage (rename, replace bytes, etc.).
+  const [hideLowQuality, setHideLowQuality] = useState(() => {
+    try { return localStorage.getItem('launch.hideLowQ') !== 'false' } catch { return true }
+  })
+  useEffect(() => { try { localStorage.setItem('launch.hideLowQ', String(hideLowQuality)) } catch {} }, [hideLowQuality])
   // Inline video preview state — same pattern as SubmissionPreviewModal
   // for editor submissions. Click thumbnail → opens a Modal-hosted player.
   const [previewing, setPreviewing] = useState(null)
@@ -8394,24 +8424,30 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
     if (scope.isEditorView) return
     setLoading(true)
     setErr(null)
-    // Lean column list — no transcript (heavy). Includes status + the
-    // assigned_editor join so the row card can show who cut the ad
-    // (creator = on-camera talent; editor = the cutter — Ben wants the
-    // latter visible per 2026-06-01 review).
-    const cols = 'id,name,canonical_name,display_name,description,type,creator,status,offer_slug,has_been_run,stage_final_cut,thumbnail_url,preview_url,final_cut_url,approved_url,drive_url,messaging_angle,messaging_angle_override,added_at,updated_at,exclude_from_library,assigned_editor_id'
+    // Lean column list — no transcript (heavy). Includes status, the
+    // assigned_editor join (creator = on-camera talent vs editor = the
+    // cutter; Ben wants both visible per 2026-06-01 review), plus the
+    // is_low_quality flag so the chip can render.
+    const cols = 'id,name,canonical_name,display_name,description,type,creator,status,offer_slug,has_been_run,stage_final_cut,thumbnail_url,preview_url,final_cut_url,approved_url,drive_url,messaging_angle,messaging_angle_override,added_at,updated_at,exclude_from_library,assigned_editor_id,is_low_quality,low_quality_reason'
     try {
+      let q = supabase.from('lib_creative_library')
+        .select(`${cols},assigned_editor:assigned_editor_id (id, name)`)
+        // Strict: only edited rows. Earlier OR with stage_final_cut='done'
+        // let approved-but-status-raw rows through (approveSubmission flips
+        // stage_final_cut but never status). Ben: "raw footage would never
+        // be actually run" (2026-06-01). If a row needs to ship and isn't
+        // showing here, fix its status in the Library matrix.
+        .eq('status', 'edited')
+        .eq('has_been_run', false)
+        .eq('exclude_from_library', false)
+      // Hide low-quality flagged rows when the toggle is on (default).
+      // is_low_quality is nullable (NULL = unflagged, FALSE = explicitly
+      // cleared, TRUE = flagged). Treat NULL and FALSE as "clean".
+      if (hideLowQuality) {
+        q = q.or('is_low_quality.is.null,is_low_quality.eq.false')
+      }
       const [rowsRes, offersRes, editorsRes] = await Promise.all([
-        supabase.from('lib_creative_library')
-          .select(`${cols},assigned_editor:assigned_editor_id (id, name)`)
-          // Broadened filter: anything the operator considers a finished
-          // cut. That's stage_final_cut='done' (formal approve flow +
-          // direct-edited uploads) OR status='edited' (manual status
-          // dropdown — operators flip this on rows the Approve flow
-          // bypassed). Earlier version missed every row from the second
-          // bucket (Ben 2026-06-01).
-          .or('stage_final_cut.eq.done,status.eq.edited')
-          .eq('has_been_run', false)
-          .eq('exclude_from_library', false),
+        q,
         supabase.from('offers').select('slug,name').eq('retired', false).order('slug'),
         // Editors list for the "edited by" line on the row card. The join
         // above hydrates assigned_editor for rows that have an editor set;
@@ -8442,7 +8478,7 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
     } finally {
       setLoading(false)
     }
-  }, [scope.isEditorView])
+  }, [scope.isEditorView, hideLowQuality])
 
   useEffect(() => { load() }, [load])
 
@@ -8528,6 +8564,21 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
           rows={rows}
           selected={offerFilter}
           onChange={setOfferFilter} />
+        {/* Hide-low-quality toggle. Default ON; flip to surface flagged
+            rows for triage. The flag itself is set by audit-preview-file-
+            sizes.mjs + the detail modal's Low-Q button. */}
+        <button onClick={() => setHideLowQuality(v => !v)}
+          title={hideLowQuality ? 'Showing only clean videos' : 'Showing all videos including flagged low-quality'}
+          style={{
+            padding: '6px 11px',
+            fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            background: hideLowQuality ? 'var(--ink)' : 'white',
+            color: hideLowQuality ? 'var(--paper)' : 'var(--ink-2)',
+            border: '1px solid var(--rule)', cursor: 'pointer',
+          }}>
+          {hideLowQuality ? 'Hiding low-Q' : 'Showing low-Q'}
+        </button>
         <span style={{ flex: 1 }} />
         <span style={{
           fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
@@ -8688,7 +8739,12 @@ function LaunchOfferChip({ offers, rows, selected, onChange }) {
 
 // Per-creative card in the launch queue. Three columns: thumbnail (with
 // play-overlay), main content (title + chips + messaging + description +
-// meta), actions (Open, Mark launched). Click thumbnail → preview modal.
+// meta), actions (Mark launched). Click row body → opens the full library
+// detail drawer (same modal as clicking a Library matrix row) so the
+// operator can edit name / offer / status / etc. before shipping. Click
+// thumbnail → quick video preview (LaunchPreviewModal). Buttons in the
+// actions column stopPropagation so they don't bubble into the drawer-
+// open click.
 // Not wrapped in React.memo — the parent passes fresh inline handlers per
 // row each render, which would defeat the memo every time. With <50 rows
 // in this list the re-render cost is negligible.
@@ -8717,19 +8773,25 @@ function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
   // stage_final_cut flips to 'done' or status flips to 'edited').
   const when = row.updated_at || row.added_at
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: '88px 1fr auto',
-      gap: 14, alignItems: 'stretch',
-      padding: 12,
-      background: 'var(--paper)',
-      border: '1px solid var(--rule)',
-      borderLeft: '3px solid #3e8a5e',  // green = ready/approved
-    }}>
+    <div onClick={onOpen} role="button" tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.() }}
+      style={{
+        display: 'grid', gridTemplateColumns: '72px 1fr auto',
+        gap: 12, alignItems: 'center',
+        padding: '8px 12px',
+        background: 'var(--paper)',
+        border: '1px solid var(--rule)',
+        borderLeft: '3px solid #3e8a5e',  // green = ready/approved
+        cursor: 'pointer',
+      }}>
       {/* Thumbnail with play overlay. Black background so partial-transparent
-          thumbs don't show the paper colour underneath. */}
-      <button onClick={onPlay} title="Play"
+          thumbs don't show the paper colour underneath. Click → quick
+          video preview (separate from the detail-drawer open). */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onPlay?.() }}
+        title="Quick play"
         style={{
-          width: 88, height: 64, padding: 0,
+          width: 72, height: 52, padding: 0,
           background: '#000', border: 'none', cursor: 'pointer',
           position: 'relative', overflow: 'hidden',
         }}>
@@ -8749,27 +8811,28 @@ function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
           position: 'absolute', inset: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'rgba(0,0,0,0.15)',
-          color: 'rgba(255,255,255,0.92)', fontSize: 20, lineHeight: 1,
+          color: 'rgba(255,255,255,0.92)', fontSize: 16, lineHeight: 1,
         }}>▶</div>
       </button>
 
-      {/* Main content column. Three lines: title row (with chips), messaging
-          row, description row. Bottom row collapses messaging+desc into
-          a single block for narrow widths. */}
-      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {/* Main content column. Compact two-line layout (was three) so the
+          launch queue can fit 30+ rows on screen without scrolling fatigue.
+          Title row + meta row. Description moved to the title's hover
+          title attribute to keep the row tight. */}
+      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{
           display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap',
         }}>
           <span style={{
-            fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500,
+            fontFamily: 'var(--serif)', fontSize: 14, fontWeight: 500,
             color: 'var(--ink)', letterSpacing: '-0.005em',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             maxWidth: '100%',
-          }} title={title}>{title}</span>
+          }} title={row.description ? `${title}\n\n${row.description}` : title}>{title}</span>
           {offerName && (
             <span style={{
-              padding: '2px 8px',
-              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+              padding: '1px 6px',
+              fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
               letterSpacing: '0.1em', textTransform: 'uppercase',
               background: 'rgba(62,138,94,0.12)', color: '#2f6a48',
               border: '1px solid rgba(62,138,94,0.3)', borderRadius: 2,
@@ -8777,86 +8840,72 @@ function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
           )}
           {row.type && (
             <span style={{
-              padding: '2px 8px',
-              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+              padding: '1px 6px',
+              fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
               letterSpacing: '0.1em', textTransform: 'uppercase',
               background: 'var(--paper-2)', color: 'var(--ink-3)',
               border: '1px solid var(--rule)', borderRadius: 2,
             }}>{row.type}</span>
           )}
+          {/* LOW-Q badge when the row is flagged. Matches the Library matrix
+              badge so the operator can spot bad bytes at a glance even when
+              the hide-low-Q chip is off. */}
+          {row.is_low_quality && (
+            <span title={row.low_quality_reason || 'Flagged low quality'}
+              style={{
+                padding: '1px 6px',
+                fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+                background: 'rgba(181,62,62,0.12)', color: '#8a2a2a',
+                border: '1px solid rgba(181,62,62,0.4)', borderRadius: 2,
+              }}>Low-Q</span>
+          )}
         </div>
+        {/* Meta row collapses messaging + actor/editor + time into one line
+            so each card is two lines tall instead of four. */}
         <div style={{
-          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
-          color: 'var(--ink-2)', letterSpacing: '0.04em',
+          fontFamily: 'var(--mono)', fontSize: 10,
+          color: 'var(--ink-4)', letterSpacing: '0.04em',
+          display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'baseline',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          <span style={{
-            color: 'var(--ink-4)', marginRight: 6,
-            textTransform: 'uppercase', fontSize: 9.5, letterSpacing: '0.12em',
-          }}>Messaging</span>
-          {angle ? angle : <span style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>angle pending</span>}
-        </div>
-        {row.description && (
-          <div style={{
-            fontFamily: 'var(--sans)', fontSize: 12.5,
-            color: 'var(--ink-2)', lineHeight: 1.45,
-            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-          }}>{row.description}</div>
-        )}
-        {/* Meta row: actor + editor + approval time. Two distinct people
-            here — "creator" = who's ON the ad (e.g. Tanya, OSO, MAKEUGC);
-            "editor" = who CUT it (e.g. Ahmed, Mohamed). Show both so the
-            launch operator knows who to credit and who to ping if the
-            ad needs a fix before going live. */}
-        <div style={{
-          fontFamily: 'var(--mono)', fontSize: 10.5,
-          color: 'var(--ink-4)', letterSpacing: '0.06em',
-          marginTop: 2,
-          display: 'flex', gap: 6, flexWrap: 'wrap',
-        }}>
+          {angle
+            ? <span style={{ color: 'var(--ink-3)', fontWeight: 600 }}>{angle}</span>
+            : <span style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>angle pending</span>}
           {row.creator && (
-            <span>
-              <span style={{ color: 'var(--ink-4)', textTransform: 'uppercase', fontSize: 9, letterSpacing: '0.12em', marginRight: 3 }}>Actor</span>
-              <span style={{ color: 'var(--ink-3)' }}>{row.creator}</span>
-            </span>
+            <>
+              <span style={{ opacity: 0.4 }}>·</span>
+              <span><span style={{ opacity: 0.6 }}>actor</span> {row.creator}</span>
+            </>
           )}
           {editorName && (
             <>
-              {row.creator && <span style={{ opacity: 0.5 }}>·</span>}
-              <span>
-                <span style={{ color: 'var(--ink-4)', textTransform: 'uppercase', fontSize: 9, letterSpacing: '0.12em', marginRight: 3 }}>Editor</span>
-                <span style={{ color: 'var(--ink-3)' }}>{editorName}</span>
-              </span>
+              <span style={{ opacity: 0.4 }}>·</span>
+              <span><span style={{ opacity: 0.6 }}>editor</span> {editorName}</span>
             </>
           )}
-          {(row.creator || editorName) && <span style={{ opacity: 0.5 }}>·</span>}
+          <span style={{ opacity: 0.4 }}>·</span>
           <span>approved {relativeTime(when)}</span>
         </div>
       </div>
 
-      {/* Actions column. Open = deep-link to library detail drawer.
-          Mark launched = flip has_been_run + remove from list. */}
+      {/* Actions column. Single button now — the row body click handles
+          "open detail drawer" (which is the same edit modal as clicking
+          a Library matrix row). Mark launched stays as the primary
+          action since it's the explicit ship-it gesture. */}
       <div style={{
-        display: 'flex', flexDirection: 'column', gap: 6,
-        justifyContent: 'center', alignItems: 'flex-end',
+        display: 'flex', alignItems: 'center',
       }}>
-        <button onClick={onOpen} style={{
-          padding: '6px 12px',
-          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
-          letterSpacing: '0.08em', textTransform: 'uppercase',
-          background: 'white', color: 'var(--ink-2)',
-          border: '1px solid var(--rule)', cursor: 'pointer',
-          minWidth: 132,
-        }}>Open in library</button>
-        <button onClick={onMarkLaunched} style={{
-          padding: '7px 12px',
-          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-          letterSpacing: '0.08em', textTransform: 'uppercase',
-          background: 'var(--ink)', color: 'var(--paper)',
-          border: '1px solid var(--ink)', cursor: 'pointer',
-          minWidth: 132,
-        }}>Mark launched</button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onMarkLaunched?.() }}
+          style={{
+            padding: '6px 12px',
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            background: 'var(--ink)', color: 'var(--paper)',
+            border: '1px solid var(--ink)', cursor: 'pointer',
+            minWidth: 116,
+          }}>Mark launched</button>
       </div>
     </div>
   )

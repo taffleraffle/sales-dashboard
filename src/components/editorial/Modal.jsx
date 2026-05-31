@@ -8,6 +8,22 @@ import { Icon } from './atoms'
 let MODAL_DEPTH = 0
 const Z_BASE = 100  // backdrop = Z_BASE + depth*10, dialog = +1
 
+// Shared body-scroll-lock state. Each modal used to capture
+// `document.body.style.overflow` independently and restore it on
+// cleanup — which broke for nested modals: modal A captures '' and
+// sets 'hidden', then modal B captures 'hidden' (A's value) and
+// sets 'hidden'. When A closes first it restores '' (good), then
+// when B closes it restores 'hidden' (BAD) and the page stays
+// scroll-locked forever. Real-world symptom: the Launch queue
+// stops scrolling after a sequence of preview-modal opens and
+// closes (Ben 2026-06-01).
+//
+// New approach: only the FIRST modal captures the pre-lock value
+// and writes 'hidden'; only the LAST modal restores it. Nested
+// modals just increment/decrement the counter.
+let SCROLL_LOCK_COUNT = 0
+let PRE_LOCK_OVERFLOW = ''
+
 /*
   Centered modal primitive. Replaces the right-side slide drawers per
   Ben's request 2026-05-18 — "instead of making these pop-ups slide out
@@ -60,12 +76,22 @@ export default function Modal({
     return () => window.removeEventListener('keydown', h)
   }, [open, onClose, depth])
 
-  // Lock body scroll while open
+  // Lock body scroll while open — reference-counted across all
+  // mounted modals so nested-then-staggered closes don't strand
+  // body.style.overflow = 'hidden'.
   useEffect(() => {
     if (!open) return
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
+    if (SCROLL_LOCK_COUNT === 0) {
+      PRE_LOCK_OVERFLOW = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+    }
+    SCROLL_LOCK_COUNT++
+    return () => {
+      SCROLL_LOCK_COUNT = Math.max(0, SCROLL_LOCK_COUNT - 1)
+      if (SCROLL_LOCK_COUNT === 0) {
+        document.body.style.overflow = PRE_LOCK_OVERFLOW
+      }
+    }
   }, [open])
 
   if (!open || depth == null) return null

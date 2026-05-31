@@ -89,13 +89,16 @@ BEGIN
   IF NEW.author_kind <> 'admin' THEN
     RETURN NEW;
   END IF;
-  -- Resolve the submission's task → editor.
+  -- Resolve the submission's task → editor. Skip soft-deleted submissions
+  -- so a comment on a tombstoned version doesn't spuriously ping the
+  -- editor (their UI doesn't show the submission anyway).
   SELECT s.task_id, s.version_number
     INTO v_task_id, v_version
     FROM public.lib_task_submissions s
-   WHERE s.id = NEW.submission_id;
+   WHERE s.id = NEW.submission_id
+     AND s.deleted_at IS NULL;
   IF v_task_id IS NULL THEN
-    RETURN NEW;  -- orphan submission, no-op
+    RETURN NEW;  -- orphan / soft-deleted submission, no-op
   END IF;
   SELECT editor_id, creative_id
     INTO v_editor_id, v_creative_id
