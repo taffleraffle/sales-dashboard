@@ -20,6 +20,47 @@ const toLocalDateStr = (d) => {
   return `${y}-${m}-${day}`
 }
 
+// ── Audience parsing + filter (Ben 2026-05-31) ──────────────────────
+// Campaign names follow a "BRAND - VERTICAL - description" convention
+// (e.g. "SCIO - Electricians - VSL - #1 Electrician 5/24 - Relaunch",
+// "OPT - Restoration - Winners Historic"). Parse the second token after
+// the brand prefix to get the audience. Manual overrides live in
+// campaign_audience_overrides (migration 110) and take precedence.
+
+const BRAND_PREFIXES = new Set(['OPT', 'SCIO', 'CBO'])
+
+export function audienceFromCampaignName(name) {
+  if (!name || typeof name !== 'string') return 'Unknown'
+  // Split on " - " (with optional spaces around the dash) — campaigns have
+  // an inconsistent number of spaces so the regex tolerates both.
+  const tokens = name.split(/\s*-\s*/).map(t => t.trim()).filter(Boolean)
+  if (tokens.length === 0) return 'Unknown'
+  // Drop the brand prefix if present
+  const candidates = tokens.filter(t => !BRAND_PREFIXES.has(t.toUpperCase()))
+  const first = candidates[0]
+  if (!first) return 'Unknown'
+  // Normalize casing: "Restoration", "Electricians", "Accounting", etc.
+  // Already title-cased in practice so we just return as-is.
+  return first
+}
+
+// Returns the audience for a single entry, consulting overrides first.
+export function audienceForEntry(entry, overrideMap) {
+  if (!entry) return 'Unknown'
+  if (overrideMap && entry.campaign_id && overrideMap[entry.campaign_id]) {
+    return overrideMap[entry.campaign_id]
+  }
+  return audienceFromCampaignName(entry.campaign_name)
+}
+
+// Apply the audience multiselect filter. selectedAudiences is a Set of
+// audience strings. Empty set = no filter (show all). Returns a NEW
+// array — does NOT mutate.
+export function filterByAudience(entries, selectedAudiences, overrideMap) {
+  if (!selectedAudiences || selectedAudiences.size === 0) return entries
+  return entries.filter(e => selectedAudiences.has(audienceForEntry(e, overrideMap)))
+}
+
 // All trailing-window math anchors on ET ("today" in the business timezone)
 // so a user in NZ and a user in US ET see the same numbers for the same
 // trailing-Nd selection. Without this, browser-local TZ produced different
@@ -2810,9 +2851,81 @@ export default function MarketingPerformance() {
     return { all, qualified, dq }
   }, [leadCohortBookingsByDate, canonicalKey])
 
-  const rangeEntries = useMemo(() => filterByDays(entries, range), [entries, range])
-  const mtdEntries = useMemo(() => filterByDays(entries, 'mtd'), [entries])
-  const prevEntries = useMemo(() => filterPreviousPeriod(entries, range), [entries, range])
+  // Audience filter (Ben 2026-05-31). Multiselect via chips next to the
+  // date range. Empty Set = show all. Overrides loaded from
+  // campaign_audience_overrides table (migration 110).
+  const [selectedAudiences, setSelectedAudiences] = useState(() => new Set())
+  const [audienceOverrides, setAudienceOverrides] = useState({})   // campaign_id → audience_slug
+  const [overrideModal, setOverrideModal] = useState(null)         // { campaign_id, campaign_name, current_audience }
+
+  useEffect(() => {
+    let alive = true
+    supabase.from('campaign_audience_overrides').select('campaign_id,audience_slug')
+      .then(({ data, error }) => {
+        if (!alive || error || !data) return
+        const map = {}
+        data.forEach(r => { map[r.campaign_id] = r.audience_slug })
+        setAudienceOverrides(map)
+      })
+    return () => { alive = false }
+  }, [])
+
+  // All distinct audiences present in the dataset, sorted by total spend
+  // so the chip strip shows the heaviest audiences first. Includes
+  // "Unknown" so the operator can see misparses.
+  const audienceList = useMemo(() => {
+    const totals = {}
+    for (const e of entries || []) {
+      const a = audienceForEntry(e, audienceOverrides)
+      totals[a] = (totals[a] || 0) + Number(e.adspend || 0)
+    }
+    return Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([a]) => a)
+  }, [entries, audienceOverrides])
+
+  // Apply audience filter BEFORE date filtering so every downstream
+  // computation (KPIs, trailing table, comparison view) inherits it.
+  const audienceFilteredEntries = useMemo(
+    () => filterByAudience(entries, selectedAudiences, audienceOverrides),
+    [entries, selectedAudiences, audienceOverrides],
+  )
+
+  const rangeEntries = useMemo(() => filterByDays(audienceFilteredEntries, range), [audienceFilteredEntries, range])
+  const mtdEntries = useMemo(() => filterByDays(audienceFilteredEntries, 'mtd'), [audienceFilteredEntries])
+  const prevEntries = useMemo(() => filterPreviousPeriod(audienceFilteredEntries, range), [audienceFilteredEntries, range])
+
+  // Per-audience comparison rollup — one row per audience in the
+  // currently-selected DATE range. Used by the AudienceComparisonTable
+  // below the headline KPIs. Always uses the date-filtered entries
+  // (so the comparison respects the date range) but ignores the
+  // audience filter so all audiences show side-by-side.
+  const rangeAllAudiences = useMemo(() => filterByDays(entries, range), [entries, range])
+  const audienceComparison = useMemo(() => {
+    const byAudience = {}
+    for (const e of rangeAllAudiences) {
+      const a = audienceForEntry(e, audienceOverrides)
+      if (!byAudience[a]) byAudience[a] = []
+      byAudience[a].push(e)
+    }
+    return Object.entries(byAudience)
+      .map(([audience, rows]) => ({ audience, stats: computeMarketingStats(rows), spend: rows.reduce((s, e) => s + Number(e.adspend || 0), 0), days: new Set(rows.map(r => r.date)).size }))
+      .sort((a, b) => b.spend - a.spend)
+  }, [rangeAllAudiences, audienceOverrides])
+
+  const toggleAudience = useCallback((aud) => {
+    setSelectedAudiences(prev => {
+      const next = new Set(prev)
+      if (next.has(aud)) next.delete(aud); else next.add(aud)
+      return next
+    })
+  }, [])
+
+  const saveAudienceOverride = useCallback(async (campaign_id, campaign_name, audience_slug) => {
+    if (!campaign_id) return
+    const { error } = await supabase.from('campaign_audience_overrides')
+      .upsert({ campaign_id, campaign_name: campaign_name || null, audience_slug }, { onConflict: 'campaign_id' })
+    if (error) { console.error('audience override save:', error); return }
+    setAudienceOverrides(prev => ({ ...prev, [campaign_id]: audience_slug }))
+  }, [])
 
   // Per-call prospect-deduped close-rate. Single source of truth shared
   // with CloserOverview / CloserDetail / SalesOverview. Replaces the
@@ -3285,11 +3398,78 @@ export default function MarketingPerformance() {
             {entries.length} entries · daily attribution
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <SyncStatusIndicator />
           <DateRangeSelector selected={range} onChange={setRange} />
         </div>
       </div>
+
+      {/* Audience filter chip strip — multiselect, empty = show all.
+          Sorted by total ad spend so the heaviest audiences sit first.
+          Click "All" to clear. Includes "Unknown" so the operator sees
+          campaigns that didn't parse cleanly and can override them. */}
+      {audienceList.length > 0 && (
+        <div style={{
+          marginBottom: 18, padding: '10px 14px',
+          background: 'var(--paper-2)', border: '1px solid var(--rule)',
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        }}>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+            letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
+          }}>Audience</span>
+          <button onClick={() => setSelectedAudiences(new Set())}
+            style={{
+              padding: '6px 12px',
+              border: `1px solid ${selectedAudiences.size === 0 ? 'var(--ink)' : 'var(--rule)'}`,
+              background: selectedAudiences.size === 0 ? 'var(--ink)' : 'var(--paper)',
+              color: selectedAudiences.size === 0 ? 'var(--paper)' : 'var(--ink-3)',
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              cursor: 'pointer', borderRadius: 2,
+            }}>All</button>
+          {audienceList.map(a => {
+            const on = selectedAudiences.has(a)
+            const isUnknown = a === 'Unknown'
+            return (
+              <button key={a} onClick={() => toggleAudience(a)}
+                style={{
+                  padding: '6px 12px',
+                  border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                  background: on ? 'var(--ink)' : 'var(--paper)',
+                  color: on ? 'var(--paper)' : (isUnknown ? '#b53e3e' : 'var(--ink-3)'),
+                  fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  cursor: 'pointer', borderRadius: 2,
+                  fontStyle: isUnknown ? 'italic' : 'normal',
+                }}>
+                {a}
+              </button>
+            )
+          })}
+          <span style={{ flex: 1 }} />
+          {selectedAudiences.size > 0 && (
+            <span style={{ fontFamily: 'var(--serif)', fontSize: 12, fontStyle: 'italic', color: 'var(--ink-4)', marginRight: 8 }}>
+              Showing {selectedAudiences.size} of {audienceList.length} audiences
+            </span>
+          )}
+          <button onClick={() => setOverrideModal({ audience: null, campaign_id: null })}
+            title="Tag a campaign with the correct audience"
+            style={{
+              padding: '6px 12px',
+              border: '1px solid var(--rule)',
+              background: 'var(--paper)',
+              color: 'var(--ink-3)',
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              cursor: 'pointer', borderRadius: 2,
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}>
+            <Edit3 size={11} />
+            Tag campaigns
+          </button>
+        </div>
+      )}
 
       {/* Out-of-window banner — fires when the selected range starts
           earlier than the closer_calls hook's 730-day fetch window.
@@ -3633,15 +3813,56 @@ export default function MarketingPerformance() {
         <MTDFunnel stats={statsMTD} />
       </div>
 
-      {/* Trailing Period Summary */}
+      {/* Audience comparison table — answers "is there a losing
+          audience?" by rolling up the current date range per audience
+          side-by-side. Ignores the audience FILTER chip strip (so all
+          audiences show), but RESPECTS the date range. Click a row to
+          drill into a single audience. Ben 2026-05-31. */}
+      {audienceComparison.length > 1 && (
+        <div className="mb-5">
+          <AudienceComparisonTable
+            rows={audienceComparison}
+            selected={selectedAudiences}
+            onSelect={(aud) => {
+              setSelectedAudiences(new Set([aud]))
+              window.scrollTo({ top: 0, behavior: 'smooth' })
+            }}
+            onOverride={(row) => {
+              // Open override modal pre-filled with this row's campaigns.
+              // For audience-level rows we let the operator pick a campaign
+              // to override from the breakdown below.
+              setOverrideModal({ audience: row.audience, campaign_id: null, campaign_name: null })
+            }}
+          />
+        </div>
+      )}
+
+      {/* Trailing Period Summary — uses the AUDIENCE-FILTERED entries
+          so trailing periods reflect the chip selection too. Empty
+          selection (default) = same behavior as before. */}
       <div className="mb-5">
-        <TrailingTable entries={entries} applyProspectMetrics={applyProspectMetrics} />
+        <TrailingTable entries={audienceFilteredEntries} applyProspectMetrics={applyProspectMetrics} />
       </div>
 
-      {/* Daily Tracker */}
+      {/* Daily Tracker — audience-filtered too. */}
       <div className="mb-5">
-        <DailyTracker entries={entries} onDelete={handleDelete} onSave={upsertEntry} />
+        <DailyTracker entries={audienceFilteredEntries} onDelete={handleDelete} onSave={upsertEntry} />
       </div>
+
+      {/* Audience override modal */}
+      {overrideModal && (
+        <AudienceOverrideModal
+          modal={overrideModal}
+          entries={entries}
+          audienceList={audienceList}
+          overrides={audienceOverrides}
+          onClose={() => setOverrideModal(null)}
+          onSave={async (campaign_id, campaign_name, audience_slug) => {
+            await saveAudienceOverride(campaign_id, campaign_name, audience_slug)
+            setOverrideModal(null)
+          }}
+        />
+      )}
 
       {/* Modals */}
       {showAddEntry && <AddEntryModal onSave={upsertEntry} onClose={() => setShowAddEntry(false)} />}
@@ -3656,6 +3877,297 @@ export default function MarketingPerformance() {
         }
         return <DrilldownModal kind={drilldown} range={range} onClose={() => setDrilldown(null)} spendByDate={spendByDate} />
       })()}
+    </div>
+  )
+}
+
+// ── Audience comparison table — Ben 2026-05-31 ──────────────────────
+// Side-by-side rollup per audience within the selected date range.
+// Each row = one audience. Columns = the headline KPIs. Click a row to
+// filter the whole page to that audience. Sort defaults to spend desc.
+function AudienceComparisonTable({ rows, selected, onSelect, onOverride }) {
+  const [sortKey, setSortKey] = useState('spend')
+  const [sortDir, setSortDir] = useState('desc')
+  const sorted = useMemo(() => {
+    const arr = [...rows]
+    arr.sort((a, b) => {
+      const va = sortKey === 'audience' ? a.audience : (sortKey === 'spend' ? a.spend : (a.stats?.[sortKey] || 0))
+      const vb = sortKey === 'audience' ? b.audience : (sortKey === 'spend' ? b.spend : (b.stats?.[sortKey] || 0))
+      if (va === vb) return 0
+      const d = va > vb ? 1 : -1
+      return sortDir === 'desc' ? -d : d
+    })
+    return arr
+  }, [rows, sortKey, sortDir])
+  const toggleSort = (k) => {
+    if (sortKey === k) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    else { setSortKey(k); setSortDir('desc') }
+  }
+  const Th = ({ k, label, align = 'right' }) => (
+    <th onClick={() => toggleSort(k)}
+      style={{
+        padding: '10px 12px', textAlign: align, cursor: 'pointer',
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+        letterSpacing: '0.12em', textTransform: 'uppercase',
+        color: 'var(--ink-3)', borderBottom: '1px solid var(--rule)',
+        whiteSpace: 'nowrap', userSelect: 'none',
+      }}>
+      {label}{sortKey === k ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+    </th>
+  )
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+      <div style={{
+        padding: '14px 18px', borderBottom: '1px solid var(--rule)',
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16,
+      }}>
+        <div>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+            letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
+          }}>By audience · current date range</div>
+          <h3 style={{
+            margin: '4px 0 0', fontFamily: 'var(--serif)', fontSize: 20, fontWeight: 500, color: 'var(--ink)',
+          }}>Audience comparison</h3>
+        </div>
+        <span style={{ fontFamily: 'var(--serif)', fontSize: 12, fontStyle: 'italic', color: 'var(--ink-4)' }}>
+          Click a row to filter the whole page to that audience
+        </span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <Th k="audience" label="Audience" align="left" />
+              <Th k="spend" label="Spend" />
+              <Th k="leads" label="Leads" />
+              <Th k="cpl" label="CPL" />
+              <Th k="qualified_bookings" label="Booked" />
+              <Th k="new_live_calls" label="Net Live" />
+              <Th k="show_rate" label="Show%" />
+              <Th k="closes" label="Closes" />
+              <Th k="close_rate" label="Cl%" />
+              <Th k="cpa_trial" label="CPA" />
+              <Th k="trial_fe_roas" label="FE ROAS" />
+              <Th k="all_cash_roas" label="NET ROAS" />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(row => {
+              const s = row.stats || {}
+              const isSelected = selected && selected.has && selected.has(row.audience)
+              const isUnknown = row.audience === 'Unknown'
+              const cellStyle = {
+                padding: '10px 12px', textAlign: 'right',
+                fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink)',
+                fontVariantNumeric: 'tabular-nums',
+                borderBottom: '1px solid var(--rule)',
+              }
+              return (
+                <tr key={row.audience}
+                  onClick={() => onSelect?.(row.audience)}
+                  style={{
+                    cursor: 'pointer',
+                    background: isSelected ? 'var(--paper-2)' : 'transparent',
+                    borderLeft: isSelected ? '4px solid var(--ink)' : '4px solid transparent',
+                    transition: 'background 120ms ease',
+                  }}>
+                  <td style={{
+                    padding: '10px 12px', textAlign: 'left',
+                    fontFamily: 'var(--sans)', fontSize: 14, fontWeight: isSelected ? 700 : 600,
+                    color: isUnknown ? '#b53e3e' : 'var(--ink)',
+                    borderBottom: '1px solid var(--rule)',
+                    fontStyle: isUnknown ? 'italic' : 'normal',
+                  }}>
+                    {row.audience}
+                    {isUnknown && (
+                      <span style={{
+                        marginLeft: 8, fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+                        letterSpacing: '0.08em', textTransform: 'uppercase', color: '#b53e3e',
+                      }}>(unparsed — override below)</span>
+                    )}
+                  </td>
+                  <td style={cellStyle}>{f$(row.spend)}</td>
+                  <td style={cellStyle}>{fN(s.leads)}</td>
+                  <td style={cellStyle}>{f$(s.cpl)}</td>
+                  <td style={cellStyle}>{fN(s.qualified_bookings)}</td>
+                  <td style={cellStyle}>{fN(s.new_live_calls)}</td>
+                  <td style={cellStyle}>{fP(s.show_rate)}</td>
+                  <td style={cellStyle}>{fN(s.closes)}</td>
+                  <td style={cellStyle}>{fP(s.close_rate)}</td>
+                  <td style={cellStyle}>{f$(s.cpa_trial)}</td>
+                  <td style={cellStyle}>{fX(s.trial_fe_roas)}</td>
+                  <td style={cellStyle}>{fX(s.all_cash_roas)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Audience override modal — Ben 2026-05-31 ────────────────────────
+// Lets the operator manually tag a campaign with an audience when the
+// parser got it wrong (or when the campaign name doesn't follow the
+// "BRAND - VERTICAL" convention). Lists every campaign in the dataset
+// optionally filtered by current parsed audience. Saves to
+// campaign_audience_overrides.
+function AudienceOverrideModal({ modal, entries, audienceList, overrides, onClose, onSave }) {
+  const [search, setSearch] = useState('')
+  const [audChoice, setAudChoice] = useState('')
+  const [newAudience, setNewAudience] = useState('')
+  const [picked, setPicked] = useState(modal?.campaign_id ? { campaign_id: modal.campaign_id, campaign_name: modal.campaign_name } : null)
+  // Distinct campaigns in the dataset
+  const campaigns = useMemo(() => {
+    const seen = new Map()
+    for (const e of entries || []) {
+      if (!e.campaign_id) continue
+      if (!seen.has(e.campaign_id)) {
+        const currentAud = overrides[e.campaign_id] || audienceFromCampaignName(e.campaign_name)
+        seen.set(e.campaign_id, { campaign_id: e.campaign_id, campaign_name: e.campaign_name, current_audience: currentAud })
+      }
+    }
+    let rows = Array.from(seen.values())
+    if (modal?.audience) rows = rows.filter(c => c.current_audience === modal.audience)
+    if (search) rows = rows.filter(c => (c.campaign_name || '').toLowerCase().includes(search.toLowerCase()))
+    return rows.sort((a, b) => (a.campaign_name || '').localeCompare(b.campaign_name || ''))
+  }, [entries, overrides, modal, search])
+
+  const audienceOptions = useMemo(() => {
+    const set = new Set(audienceList.filter(a => a !== 'Unknown'))
+    return Array.from(set).sort()
+  }, [audienceList])
+
+  const handleSave = () => {
+    const aud = (newAudience.trim() || audChoice).trim()
+    if (!picked || !aud) return
+    onSave(picked.campaign_id, picked.campaign_name, aud)
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.5)',
+      zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+        style={{
+          background: 'var(--paper)', width: '100%', maxWidth: 760, maxHeight: '90vh',
+          overflow: 'auto', border: '1px solid var(--rule)', borderTop: '3px solid var(--accent)',
+          borderRadius: 2, boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
+        }}>
+        <div style={{
+          padding: '20px 24px', borderBottom: '1px solid var(--rule)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+        }}>
+          <div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                          letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+              Audience override
+            </div>
+            <h2 style={{ margin: '6px 0 0', fontFamily: 'var(--serif)', fontSize: 24, fontWeight: 400 }}>
+              {modal?.audience ? `Re-tag campaigns in "${modal.audience}"` : 'Tag a campaign'}
+            </h2>
+          </div>
+          <button onClick={onClose}
+            style={{ background: 'transparent', border: 'none', color: 'var(--ink-3)', cursor: 'pointer', padding: 4 }}>
+            <X size={20} />
+          </button>
+        </div>
+        <div style={{ padding: 24 }}>
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Filter campaigns by name…"
+            style={{
+              width: '100%', padding: '10px 12px', marginBottom: 16,
+              fontFamily: 'var(--sans)', fontSize: 14,
+              border: '1px solid var(--rule)', background: 'var(--paper)',
+              borderRadius: 2,
+            }} />
+          <div style={{
+            maxHeight: 280, overflowY: 'auto', border: '1px solid var(--rule)',
+            background: 'var(--paper-2)', marginBottom: 16,
+          }}>
+            {campaigns.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', fontFamily: 'var(--serif)',
+                            fontStyle: 'italic', color: 'var(--ink-4)' }}>
+                No campaigns match.
+              </div>
+            ) : campaigns.map(c => {
+              const on = picked?.campaign_id === c.campaign_id
+              return (
+                <div key={c.campaign_id} onClick={() => setPicked(c)}
+                  style={{
+                    padding: '10px 14px',
+                    borderBottom: '1px solid var(--rule)',
+                    background: on ? 'var(--paper)' : 'transparent',
+                    borderLeft: on ? '4px solid var(--ink)' : '4px solid transparent',
+                    cursor: 'pointer',
+                  }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)' }}>
+                    {c.campaign_name || '(no name)'}
+                  </div>
+                  <div style={{ marginTop: 3, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
+                                letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                    Currently: {c.current_audience}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {picked && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                            letterSpacing: '0.12em', textTransform: 'uppercase',
+                            color: 'var(--ink-3)', marginBottom: 8 }}>
+                Set audience for "{picked.campaign_name?.slice(0, 60)}{(picked.campaign_name?.length || 0) > 60 ? '…' : ''}"
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                {audienceOptions.map(a => (
+                  <button key={a} onClick={() => { setAudChoice(a); setNewAudience('') }}
+                    style={{
+                      padding: '6px 12px',
+                      border: `1px solid ${audChoice === a ? 'var(--ink)' : 'var(--rule)'}`,
+                      background: audChoice === a ? 'var(--ink)' : 'var(--paper)',
+                      color: audChoice === a ? 'var(--paper)' : 'var(--ink-3)',
+                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                      cursor: 'pointer', borderRadius: 2,
+                    }}>{a}</button>
+                ))}
+              </div>
+              <input type="text" value={newAudience} onChange={e => { setNewAudience(e.target.value); setAudChoice('') }}
+                placeholder="Or type a new audience name"
+                style={{
+                  width: '100%', padding: '8px 10px', fontFamily: 'var(--sans)', fontSize: 13,
+                  border: '1px solid var(--rule)', background: 'var(--paper)',
+                  borderRadius: 2,
+                }} />
+            </div>
+          )}
+        </div>
+        <div style={{ padding: '14px 24px', borderTop: '1px solid var(--rule)',
+                      display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button onClick={onClose}
+            style={{ padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
+                    letterSpacing: '0.12em', textTransform: 'uppercase',
+                    border: '1px solid var(--rule)', background: 'transparent',
+                    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2 }}>
+            Cancel
+          </button>
+          <button onClick={handleSave}
+            disabled={!picked || (!newAudience.trim() && !audChoice)}
+            style={{ padding: '10px 22px', fontFamily: 'var(--mono)', fontSize: 11,
+                    letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
+                    border: '2px solid var(--ink)', background: 'var(--ink)',
+                    color: 'var(--paper)', cursor: 'pointer', borderRadius: 2,
+                    boxShadow: '3px 3px 0 var(--accent)',
+                    opacity: (!picked || (!newAudience.trim() && !audChoice)) ? 0.4 : 1 }}>
+            <Check size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
+            Save override
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
