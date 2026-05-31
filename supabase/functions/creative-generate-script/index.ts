@@ -349,6 +349,16 @@ Rules:
 - Banned: generic agency-speak ("grow your business", "scale your firm", "stand out from competitors"). Specific over abstract.
 - Banned: solutions in the angle. The angle is the door; the solution comes after.
 
+WHAT'S CONVERTING for OPT right now (Ben 2026-06-01) — BOTTOM-OF-FUNNEL, MECHANISM-EXPLICIT desires:
+OPT's best-performing angles are outcome-explicit, vertical-named, rank-anchored desires. Examples:
+  • "I want to be the #1 [vertical] company in [my area] on Google."
+  • "I want to rank in the top 3 Google Maps results for [service] in [city]."
+  • "I want to be the company every insurance adjuster in town refers."
+  • "I want my ads to actually convert instead of burning $5K/month on shared HomeAdvisor leads."
+  • "I want the predictable booking calendar HomeAdvisor promised but never delivered."
+At least 30-40% of any DESIRE batch should land in this register — explicit-rank / explicit-outcome / specific-mechanism-frustration. These are Most-Aware angles where the prospect already knows the category exists and is shopping. They are on-the-nose by design — that bluntness IS the conversion edge.
+The rest of the desire batch should span Problem-Aware and Solution-Aware tiers so the operator has range.
+
 For each angle, also produce a hook_build_sketch — ONE LINE describing how the angle becomes a hook. Format: "Shape {X} ({shape name}). Opens '{first 12-20 words of the hook leading with the angle's voice}...'"
 
 Hook shapes available:
@@ -794,9 +804,13 @@ serve(async (req) => {
     }
 
     const PROOF_TOOL_NAME = 'generate_proof_characters'
+    const PROOF_TYPE_ENUM = [
+      'case_study', 'testimonial', 'statistic', 'authority',
+      'demonstration', 'social_volume', 'comparison',
+    ]
     const tool = {
       name: PROOF_TOOL_NAME,
-      description: `Return exactly ${n} fabricated-but-realistic proof characters for this angle. Each one is a named client + a tight one-line result a script can hook into.`,
+      description: `Return exactly ${n} proof items for this angle, MIXED across Schwartz proof types (not all case_study). Each item is a tight one-line proof a script can hook into.`,
       input_schema: {
         type: 'object',
         properties: {
@@ -807,19 +821,29 @@ serve(async (req) => {
             items: {
               type: 'object',
               properties: {
-                name: { type: 'string', description: 'First name only. Sounds like a real OPT client (e.g. "Eric", "Adam", "Belinda"). One word.' },
-                result_short: { type: 'string', description: 'ONE LINE result, hook-ready. Includes a specific number + timeframe. E.g. "Closed a $215K loss-of-business job in 90 days", "Booked 3 commercial jobs in his first 30 days", "Went from $0 to $48K MRR in 6 months". Max 100 chars.' },
-                result_long: { type: 'string', description: 'Optional 2-3 sentence narrative for body-roster use: starting state, what changed, final result with dollar amounts and timeframe. Leave empty if unsure.' },
+                proof_type: { type: 'string', enum: PROOF_TYPE_ENUM, description: 'Which Schwartz proof kind this item represents. Across the batch, rotate so the operator gets a mix.' },
+                name: { type: 'string', description: 'Source identifier — for case_study/testimonial it\'s a first name ("Eric"); for statistic it\'s the metric label ("HomeAdvisor burnout rate"); for authority it\'s the citation source ("Roto-Rooter franchise manual"); for demonstration it\'s the demo name ("Month 1 vs month 6"); for social_volume it\'s the cohort label ("Restoration cohort 2024"); for comparison it\'s "vs <alternative>".' },
+                result_short: { type: 'string', description: 'ONE LINE proof, hook-ready. case_study: "Closed a $215K job in 90 days". testimonial: full quote with attribution. statistic: numeric data point. authority: borrowed-credibility one-liner. demonstration: before→after numbers. social_volume: aggregate count. comparison: vs-alternative metric. Max 140 chars.' },
+                result_long: { type: 'string', description: 'Optional 2-3 sentence narrative for body-roster use. Leave empty if unsure — operator will fill in.' },
                 industry_context: { type: 'string', description: 'One-word industry tag like "restoration", "accounting", "plumbing". Match the angle\'s vertical.' },
-                metric_kind: { type: 'string', description: 'Category tag like "revenue_close", "calls_increase", "ranking", "speed_close", "lead_volume".' },
+                metric_kind: { type: 'string', description: 'Category tag like "revenue_close", "calls_increase", "ranking", "speed_close", "lead_volume", "market_data", "process_quote".' },
               },
-              required: ['name', 'result_short', 'industry_context', 'metric_kind'],
+              required: ['proof_type', 'name', 'result_short', 'industry_context', 'metric_kind'],
             },
           },
         },
         required: ['proof_characters'],
       },
     }
+
+    // Build a per-type allocation directive. For n=4 we want roughly:
+    //   2 case_study (the workhorse), 1 statistic, 1 testimonial OR authority.
+    // For larger n we widen to 5-6 types.
+    const mixHint = n <= 3
+      ? '1 case_study + 1 statistic + 1 testimonial'
+      : n <= 5
+        ? '2 case_study + 1 statistic + 1 testimonial + 1 authority'
+        : `${Math.ceil(n/3)} case_study + ${Math.ceil(n/4)} statistic + ${Math.ceil(n/4)} testimonial + 1 authority + 1 comparison (rest filled with demonstration or social_volume)`
 
     const userMsg = [
       `ANGLE: ${angle.name}`,
@@ -829,11 +853,20 @@ serve(async (req) => {
       offer ? `OFFER: ${offer.name} (vertical: ${offer.vertical})` : '',
       offer?.default_proof_characters?.length ? `EXISTING NAMES ON OFFER (avoid duplicates): ${offer.default_proof_characters.join(', ')}` : '',
       '',
-      `Generate exactly ${n} proof characters tailored to THIS angle. Each must:`,
-      '  - Have a believable first name (no last names).',
-      '  - Have a result_short that is sharp, numeric, and time-bound.',
-      '  - Match the angle\'s lived reality — accounting angles get CPA clients, restoration angles get restoration owners.',
-      '  - Vary across metric kinds so a script can rotate them.',
+      `Generate exactly ${n} proof items tailored to THIS angle. CRITICAL: ROTATE PROOF TYPES — do NOT return ${n} case_study items.`,
+      `Target mix for this batch: ${mixHint}.`,
+      '',
+      'Per-type rules:',
+      '  - case_study: First-name only. Result has specific $ + timeframe. ("Eric — closed a $215K loss-of-business job in 90 days")',
+      '  - testimonial: Quote in double quotes + attribution. ("My closing rate doubled in week 2." — Mark, NC plumber)',
+      '  - statistic: Market-level data point about the audience. ("67% of restoration owners burn out on HomeAdvisor in year 2")',
+      '  - authority: Borrowed credibility from a named industry source. ("Roto-Rooter franchise manual explicitly recommends abandoning shared-lead platforms")',
+      '  - demonstration: Show-not-tell, dashboard-style. ("$14K → $48K MRR by month 6, charted")',
+      '  - social_volume: Aggregate cohort proof. ("Across 38 restoration companies in 2024, avg $32K/mo lift")',
+      '  - comparison: vs the alternative. ("vs HomeAdvisor: 3.2x bookings, 1/4 the cost-per-lead")',
+      '',
+      '  - Match the angle\'s lived reality — accounting angles get CPA-flavored proofs, restoration angles get restoration-flavored proofs.',
+      '  - Numbers should be plausible-but-clearly-fabricated so the operator edits them in. Use round numbers ($50K, 90 days, 3x) rather than suspiciously precise ones.',
       `Return via ${PROOF_TOOL_NAME}.`,
     ].filter(Boolean).join('\n')
 
@@ -867,17 +900,23 @@ serve(async (req) => {
     const seen = new Set<string>()
     const inserts: any[] = []
     let order = 100
+    const ALLOWED_TYPES = new Set([
+      'case_study', 'testimonial', 'statistic', 'authority',
+      'demonstration', 'social_volume', 'comparison',
+    ])
     for (const p of generated) {
       const name = (p.name || '').trim()
       if (!name || seen.has(name.toLowerCase())) continue
       seen.add(name.toLowerCase())
+      const proof_type = ALLOWED_TYPES.has(p.proof_type) ? p.proof_type : 'case_study'
       inserts.push({
         angle_slug,
         name,
-        result_short: (p.result_short || '').trim().slice(0, 200),
+        result_short: (p.result_short || '').trim().slice(0, 240),
         result_long: (p.result_long || '').trim() || null,
         industry_context: (p.industry_context || '').trim() || null,
         metric_kind: (p.metric_kind || '').trim() || null,
+        proof_type,
         display_order: order,
         active: true,
       })

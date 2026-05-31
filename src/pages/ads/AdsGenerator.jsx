@@ -81,10 +81,12 @@ export default function AdsGenerator() {
   // for ANY angle regardless of selection state (Ben 2026-06-01).
   // null = closed.
   const [proofEditorAngle, setProofEditorAngle] = useState(null)
-  // Per-angle proof counts so each chip can show a "no proofs yet"
-  // indicator. Populated lazily — fetched when the angle library loads
-  // and refreshed after auto-generation. Map<slug, number>.
-  const [proofCountByAngle, setProofCountByAngle] = useState({})
+  // Per-angle proof lists — full rows, not just counts. Lets the angle
+  // chip indicator show "no proofs yet", the angle library tile show a
+  // breakdown by proof_type, and the Scripts "pulling proofs from"
+  // summary aggregate across multiple selected angles without re-fetching.
+  // Map<slug, proof[]>.
+  const [proofsByAngle, setProofsByAngle] = useState({})
   // History: previously generated scripts for the current offer (drafts).
   // Loaded per offer; refreshed after every successful Generate. Grouped
   // by minute-bucket in the UI so a single fan-out run shows as one row.
@@ -154,7 +156,7 @@ export default function AdsGenerator() {
   // selected angle is no longer in the offer's list, reset the picker
   // to avoid silent "wrong-angle" generations.
   useEffect(() => {
-    if (!offerSlug) { setAngles([]); setAngleSlugs([]); setProofCountByAngle({}); return }
+    if (!offerSlug) { setAngles([]); setAngleSlugs([]); setProofsByAngle({}); return }
     let cancelled = false
     listAngles({ offer_slug: offerSlug })
       .then(async rows => {
@@ -164,29 +166,31 @@ export default function AdsGenerator() {
         // ones that don't. If nothing remains, leave empty (no auto-pick —
         // forces explicit selection, which avoids accidental multi-runs).
         setAngleSlugs(prev => prev.filter(s => rows.some(r => r.slug === s)))
-        // Fetch proof counts per angle so each chip can show a "needs
-        // proofs" indicator. Soft-fail per angle (one bad fetch shouldn't
-        // hide the indicator for the others).
-        const counts = await Promise.all(
-          rows.map(r => listProofCharactersForAngle(r.slug).then(p => p.length).catch(() => 0))
+        // Fetch full proof rows per angle (parallel) so each chip can show
+        // a "needs proofs" indicator AND the library tile can show a
+        // type breakdown AND the Scripts proof-source preview can
+        // aggregate across selected angles without re-fetching.
+        const lists = await Promise.all(
+          rows.map(r => listProofCharactersForAngle(r.slug).catch(() => []))
         )
         if (cancelled) return
         const map = {}
-        rows.forEach((r, i) => { map[r.slug] = counts[i] })
-        setProofCountByAngle(map)
+        rows.forEach((r, i) => { map[r.slug] = lists[i] })
+        setProofsByAngle(map)
       })
-      .catch(() => { if (!cancelled) { setAngles([]); setAngleSlugs([]); setProofCountByAngle({}) } })
+      .catch(() => { if (!cancelled) { setAngles([]); setAngleSlugs([]); setProofsByAngle({}) } })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offerSlug])
 
-  // Refresh a single angle's proof count — called after the editor
-  // saves so the chip indicator updates without a full refetch.
+  // Refresh a single angle's proof list — called after the editor
+  // saves so the chip indicator + tile breakdown update without a full
+  // refetch of the whole library.
   async function refreshProofCount(slug) {
     if (!slug) return
     try {
       const rows = await listProofCharactersForAngle(slug)
-      setProofCountByAngle(prev => ({ ...prev, [slug]: rows.length }))
+      setProofsByAngle(prev => ({ ...prev, [slug]: rows }))
       // Also refresh the picker's local list if this is the primary angle
       if (slug === primaryAngleSlug) {
         setProofCharacters(rows)
@@ -630,7 +634,7 @@ export default function AdsGenerator() {
                   Problems
                 </div>
                 <div style={{ display: 'flex', gap: 4 }}>
-                  {[3, 5, 10, 15].map(n => (
+                  {[3, 5, 10, 15, 20].map(n => (
                     <button key={n} onClick={() => setNProblems(n)}
                       style={{
                         padding: '8px 14px',
@@ -649,7 +653,7 @@ export default function AdsGenerator() {
                   Desires
                 </div>
                 <div style={{ display: 'flex', gap: 4 }}>
-                  {[3, 5, 10, 15].map(n => (
+                  {[3, 5, 10, 15, 20].map(n => (
                     <button key={n} onClick={() => setNDesires(n)}
                       style={{
                         padding: '8px 14px',
@@ -755,10 +759,17 @@ export default function AdsGenerator() {
                   selectable in Scripts mode.
                 </div>
               ) : (
-                <div style={{ display: 'grid', gap: 10 }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
+                  gap: 14,
+                }}>
                   {messagingLibrary.map(a => (
-                    <SavedAngleRow key={a.slug} angle={a}
-                      onRetire={() => setRetireAngleTarget({ slug: a.slug, name: a.name })} />
+                    <LibraryAngleTile key={a.slug} angle={a}
+                      proofs={proofsByAngle[a.slug] || []}
+                      onRetire={() => setRetireAngleTarget({ slug: a.slug, name: a.name })}
+                      onOpenProofs={() => setProofEditorAngle(a)}
+                    />
                   ))}
                 </div>
               )}
@@ -873,7 +884,7 @@ export default function AdsGenerator() {
                 <AngleChip key={a.slug}
                   angle={a}
                   selected={angleSlugs.includes(a.slug)}
-                  proofCount={proofCountByAngle[a.slug] ?? null}
+                  proofCount={proofsByAngle[a.slug]?.length ?? null}
                   onToggle={() => setAngleSlugs(prev =>
                     prev.includes(a.slug) ? prev.filter(s => s !== a.slug) : [...prev, a.slug])}
                   onOpenProofs={() => setProofEditorAngle(a)}
@@ -903,6 +914,90 @@ export default function AdsGenerator() {
               )
             })()}
           </Block>
+
+          {/* Proof-source preview — shows the operator EXACTLY which
+              proofs Claude will rotate through for the selected angles.
+              Updates live when angle selection changes. */}
+          {angleSlugs.length > 0 && (() => {
+            // Aggregate proofs across all selected angles, group by type.
+            const all = []
+            const missing = []
+            for (const slug of angleSlugs) {
+              const list = proofsByAngle[slug] || []
+              if (list.length === 0) missing.push(slug)
+              for (const p of list) all.push({ ...p, _angle: slug })
+            }
+            const byType = {}
+            const typeOrder = []
+            for (const p of all) {
+              const t = p.proof_type || 'case_study'
+              if (!byType[t]) { byType[t] = []; typeOrder.push(t) }
+              byType[t].push(p)
+            }
+            return (
+              <div style={{
+                marginBottom: 20, padding: '12px 14px',
+                background: 'var(--paper)', border: '1px solid var(--rule)',
+                borderLeft: '3px solid var(--accent)', borderRadius: 2,
+              }}>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.14em',
+                  textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
+                  marginBottom: 8,
+                }}>
+                  Will pull proofs from
+                </div>
+                {all.length === 0 ? (
+                  <div style={{
+                    fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                    color: '#7a5810', lineHeight: 1.5,
+                  }}>
+                    No proofs saved across the {angleSlugs.length === 1 ? 'selected angle' : `${angleSlugs.length} selected angles`} yet.
+                    Generate will auto-create a diverse mix (case study + statistic +
+                    testimonial/authority) before drafting scripts. Click the gear on
+                    any angle chip to add proofs yourself first.
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                      {typeOrder.map(t => (
+                        <span key={t} style={{
+                          fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
+                          textTransform: 'uppercase', color: 'var(--ink)', fontWeight: 600,
+                          padding: '3px 8px', background: 'white',
+                          border: '1px solid var(--ink)', borderRadius: 2,
+                        }}>
+                          {t.replace('_', ' ')} <span style={{ opacity: 0.6, marginLeft: 2 }}>×{byType[t].length}</span>
+                        </span>
+                      ))}
+                    </div>
+                    <div style={{
+                      fontFamily: 'var(--serif)', fontSize: 12.5, color: 'var(--ink-3)',
+                      lineHeight: 1.5,
+                    }}>
+                      {all.slice(0, 6).map((p, i) => (
+                        <span key={i}>
+                          <strong style={{ color: 'var(--ink-2)' }}>{p.name}</strong>
+                          {' — '}{(p.result_short || '').slice(0, 60)}{(p.result_short || '').length > 60 ? '…' : ''}
+                          {i < Math.min(all.length, 6) - 1 ? ' · ' : ''}
+                        </span>
+                      ))}
+                      {all.length > 6 && <span style={{ color: 'var(--ink-4)' }}> · +{all.length - 6} more</span>}
+                    </div>
+                    {missing.length > 0 && (
+                      <div style={{
+                        marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)',
+                        fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12,
+                        color: '#7a5810',
+                      }}>
+                        {missing.length} of {angleSlugs.length} selected angles have no proofs yet — those will get auto-generated on Generate.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Script types — multi-select. */}
           <Block title="Script types"
@@ -2239,10 +2334,146 @@ function GenProgress({ kind, total, fanout }) {
   )
 }
 
-// Single row in the "Saved for this offer" list (Messaging tab). Compact
-// vs AngleCard — meant for scanning a library of 20-50 entries, not for
-// reviewing fresh output. Click expands to show the prospect_voice +
-// hook_build_sketch + pain_points. Retire = soft-delete (active=false).
+// Tile view for the Messaging "Saved for this offer" library. Rendered
+// in a responsive grid (vs the old single-column thin-row pattern that
+// Ben hated). Big serif title, type tag, prospect voice, proof type
+// breakdown chips, and an expander for evidence_examples / why-it-matters.
+// Retire = soft-delete (active=false).
+function LibraryAngleTile({ angle, proofs, onRetire, onOpenProofs }) {
+  const [open, setOpen] = useState(false)
+  const isProblem = angle.angle_type === 'problem'
+  const typeColor = isProblem ? '#b53e3e' : '#3068b5'
+  const typeLabel = isProblem ? 'Problem' : 'Desire'
+  // Proof breakdown by type — used for the small footer chip row.
+  const byType = {}
+  for (const p of proofs) {
+    const t = p.proof_type || 'case_study'
+    byType[t] = (byType[t] || 0) + 1
+  }
+  const proofTypes = Object.keys(byType)
+  return (
+    <div style={{
+      background: 'white', border: '1px solid var(--rule)',
+      borderTop: `3px solid ${typeColor}`, borderRadius: 2,
+      padding: 16, display: 'flex', flexDirection: 'column', gap: 10,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+        <div>
+          <span style={{
+            display: 'inline-block', padding: '2px 7px', marginBottom: 6,
+            background: typeColor, color: 'var(--paper)',
+            fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+            letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+          }}>{typeLabel}</span>
+          <h3 style={{
+            margin: 0, fontFamily: 'var(--serif)', fontSize: 19, fontWeight: 500,
+            lineHeight: 1.25, color: 'var(--ink)', letterSpacing: '-0.005em',
+          }}>{angle.name}</h3>
+        </div>
+        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          <button onClick={onOpenProofs} title="Manage proof characters"
+            style={{
+              padding: 6, background: 'transparent', border: '1px solid var(--rule)',
+              color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+            }}>
+            <Settings size={13} />
+          </button>
+          <button onClick={onRetire} title="Retire angle"
+            style={{
+              padding: 6, background: 'transparent', border: '1px solid var(--rule)',
+              color: 'var(--ink-4)', cursor: 'pointer', borderRadius: 2,
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.color = '#b53e3e'}
+            onMouseLeave={(e) => e.currentTarget.style.color = 'var(--ink-4)'}>
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+      {angle.prospect_voice && (
+        <div style={{
+          fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 14,
+          color: 'var(--ink-2)', lineHeight: 1.55,
+        }}>"{angle.prospect_voice}"</div>
+      )}
+      {open && (
+        <>
+          {angle.why_it_matters && (
+            <AngleSubBlock label="Why it matters">
+              <div style={{ fontFamily: 'var(--serif)', fontSize: 13,
+                            color: 'var(--ink-2)', lineHeight: 1.55 }}>
+                {angle.why_it_matters}
+              </div>
+            </AngleSubBlock>
+          )}
+          {angle.evidence_examples?.length > 0 && (
+            <AngleSubBlock label="Evidence">
+              <ul style={{ margin: 0, paddingLeft: 18, fontFamily: 'var(--serif)',
+                          fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.55 }}>
+                {angle.evidence_examples.map((ex, i) => <li key={i}>{ex}</li>)}
+              </ul>
+            </AngleSubBlock>
+          )}
+          {angle.hook_build_sketch && (
+            <AngleSubBlock label="Hook build">
+              <div style={{ fontFamily: 'var(--sans)', fontSize: 13,
+                            color: 'var(--ink-2)', lineHeight: 1.5 }}>
+                {angle.hook_build_sketch}
+              </div>
+            </AngleSubBlock>
+          )}
+          {angle.pain_points?.length > 0 && (
+            <AngleSubBlock label="Pain points">
+              <ul style={{ margin: 0, paddingLeft: 18, fontFamily: 'var(--sans)',
+                          fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+                {angle.pain_points.map((p, i) => <li key={i}>{p}</li>)}
+              </ul>
+            </AngleSubBlock>
+          )}
+        </>
+      )}
+      {/* Footer: proof breakdown + expander */}
+      <div style={{
+        marginTop: 'auto', paddingTop: 8, borderTop: '1px solid var(--rule)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+      }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, flex: 1 }}>
+          {proofTypes.length === 0 ? (
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: '#7a5810',
+              padding: '2px 8px', background: '#fef6e6', border: '1px solid #e8c98a',
+              borderRadius: 2,
+            }}>No proofs yet</span>
+          ) : (
+            proofTypes.map(t => (
+              <span key={t} style={{
+                fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
+                textTransform: 'uppercase', color: 'var(--ink-2)',
+                padding: '2px 7px', background: 'var(--paper)',
+                border: '1px solid var(--rule)', borderRadius: 2,
+              }}>
+                {t.replace('_', ' ')} <span style={{ opacity: 0.6, marginLeft: 2 }}>×{byType[t]}</span>
+              </span>
+            ))
+          )}
+        </div>
+        <button onClick={() => setOpen(o => !o)}
+          style={{
+            padding: '4px 8px', background: 'transparent', border: 'none',
+            color: 'var(--ink-4)', cursor: 'pointer', fontFamily: 'var(--mono)',
+            fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+          }}>
+          {open ? <>Less <ChevronUp size={12} /></> : <>More <ChevronDown size={12} /></>}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Single row in the "Saved for this offer" list (Messaging tab). LEGACY —
+// kept for reference; the Messaging tab now uses LibraryAngleTile in a
+// grid. Will get removed once nothing else references it.
 function SavedAngleRow({ angle, onRetire }) {
   const [open, setOpen] = useState(false)
   const isProblem = angle.angle_type === 'problem'
