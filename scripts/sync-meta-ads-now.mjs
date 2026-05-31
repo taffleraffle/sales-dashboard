@@ -56,6 +56,13 @@ const CREATIVE_FIELDS = [
 ].join(',')
 
 const adIds = new Set()
+// Campaign/adset metadata snapshot from the insights endpoint, keyed by
+// ad_id. The /{ad_id} creative endpoint we hit next does NOT return
+// campaign_id / campaign_name / adset_id / adset_name (Ben 2026-06-01:
+// 222 ads landed in `ads` with NULL campaign_name because the sync only
+// took those fields from creatives). Capture them here and merge into
+// the ads upsert below.
+const adMeta = {} // { ad_id: { campaign_id, campaign_name, adset_id, adset_name } }
 let pageNum = 0
 let totalRows = 0
 let totalErrors = 0
@@ -91,6 +98,16 @@ while (url) {
   for (const row of rows) {
     if (!row.ad_id) continue
     adIds.add(row.ad_id)
+    // Capture campaign/adset metadata the first time we see this ad.
+    // Insights rows for the same ad-day all carry the same campaign info.
+    if (!adMeta[row.ad_id]) {
+      adMeta[row.ad_id] = {
+        campaign_id:   row.campaign_id   || null,
+        campaign_name: row.campaign_name || null,
+        adset_id:      row.adset_id      || null,
+        adset_name:    row.adset_name    || null,
+      }
+    }
     const v3sAction     = (row.actions || []).find(a => a.action_type === 'video_view')
     const thruAction    = (row.video_thruplay_watched_actions || []).find(a => a.action_type === 'video_view')
     const avgTimeAction = (row.video_avg_time_watched_actions || []).find(a => a.action_type === 'video_view')
@@ -157,10 +174,15 @@ for (let i = 0; i < ids.length; i += concurrency) {
                      : 'unknown'
     const thumbnail_url = c?.thumbnail_url || c?.image_url || null
     const archived = ['DELETED','ARCHIVED'].includes(json.effective_status || json.status)
+    const meta = adMeta[json.id] || {}
     records.push({
       ad_id: json.id,
       platform: 'meta',
       ad_name: json.name || null,
+      campaign_id: meta.campaign_id,
+      campaign_name: meta.campaign_name,
+      adset_id: meta.adset_id,
+      adset_name: meta.adset_name,
       status: json.status || null,
       effective_status: json.effective_status || null,
       creative_id: c?.id || null,

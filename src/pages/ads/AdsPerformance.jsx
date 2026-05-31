@@ -403,12 +403,26 @@ export default function AdsPerformance() {
       // queries each paged to bypass the 1000-row cap. Use allSettled
       // so one missing/failing source (e.g., a view not yet migrated)
       // degrades gracefully instead of blanking the entire page.
+      // Chunk the ad_id list when sending it to PostgREST. With 300+ ads the
+      // .in() URL exceeds the ~4 KB request-line cap and the server returns
+      // "Bad Request" (caught Ben 2026-06-01). 150 ids per batch keeps the
+      // URL safely under 3 KB even with the longest 18-char Meta IDs.
+      const fetchAdStatsBatched = async () => {
+        const BATCH = 150
+        const out = []
+        for (let i = 0; i < adIds.length; i += BATCH) {
+          const chunk = adIds.slice(i, i + BATCH)
+          const rows = await fetchAllPaged(() => supabase
+            .from('ad_daily_stats')
+            .select('ad_id, spend, impressions, clicks, results')
+            .in('ad_id', chunk)
+            .gte('date', startStr).lte('date', endStr))
+          out.push(...rows)
+        }
+        return out
+      }
       const results = await Promise.allSettled([
-        fetchAllPaged(() => supabase
-          .from('ad_daily_stats')
-          .select('ad_id, spend, impressions, clicks, results')
-          .in('ad_id', adIds)
-          .gte('date', startStr).lte('date', endStr)),
+        fetchAdStatsBatched(),
         fetchAllPaged(() => supabase
           .from('lib_typeform_response_detail')
           // email + display_name added so the top-of-page tile counts can
