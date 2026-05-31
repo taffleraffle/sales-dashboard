@@ -289,16 +289,26 @@ const TEMPLATE_TOOL_NAMES: Record<string, string> = {
   joined: 'generate_joined_scripts',
 }
 
-function buildTemplateToolSchema(script_type: string, n: number, shape_codes: string[]) {
+function buildTemplateToolSchema(script_type: string, n: number, shape_codes: string[], proof_names: string[] = []) {
+  const hasProofs = proof_names.length > 0
   const itemBase: any = {
     type: 'object',
     properties: {
       ref:    { type: 'string', description: 'short sequential reference like H1, H2, ...' },
       body:   { type: 'string', description: 'the script text. Plain text, paragraph breaks for sentence groups, NO markdown' },
-      proof_character: { type: 'string', description: 'which proof character name is used in this script, exactly as listed in the angle context' },
+      proof_character: hasProofs
+        ? { type: 'string', enum: proof_names, description: `the named proof character this concept anchors on. REQUIRED — must be one of: ${proof_names.join(', ')}. The body text MUST mention this character by first name. Generic phrasing like "one client" / "a third client" is banned.` }
+        : { type: 'string', description: 'which proof character name is used in this script, exactly as listed in the angle context (no proofs are defined for this angle — leave blank or omit)' },
+      teach_focus: { type: 'string', description: 'one short phrase naming the specific lesson THIS concept teaches the prospect (must differ from other concepts in the batch — e.g. "why rank-1 captures 78% of clicks", "what the LSA algorithm actually weighs", "how the 3-part fix sequences")' },
       notes:  { type: 'string', description: 'one-line note on why this concept' },
     },
     required: ['ref', 'body'],
+  }
+  if (hasProofs) {
+    itemBase.required.push('proof_character')
+  }
+  if (n > 1) {
+    itemBase.required.push('teach_focus')
   }
   if (script_type === 'hook' || script_type === 'joined') {
     itemBase.properties.shape_code = {
@@ -321,7 +331,7 @@ function buildTemplateToolSchema(script_type: string, n: number, shape_codes: st
   }
   return {
     name: TEMPLATE_TOOL_NAMES[script_type],
-    description: `Return exactly ${n} ${script_type} concepts.`,
+    description: `Return exactly ${n} ${script_type} concepts.${n > 1 ? ' Each concept must use a DIFFERENT proof character + DIFFERENT teach focus — see the concept-variance directive in the user message.' : ''}`,
     input_schema: {
       type: 'object',
       properties: {
@@ -1329,12 +1339,35 @@ serve(async (req) => {
       ? `\n\nSHAPE ROTATION PLAN (the ${n_concepts} ${script_type === 'joined' ? 'joined scripts' : 'hooks'} you return MUST use these shape codes in this order, one per concept):\n${shapeRotation.map((c, i) => `  ${i + 1}. Shape ${c}`).join('\n')}\nProof character rotation: cycle through the proof characters listed above so we don't get 5 Metros in a row.`
       : ''
 
+    const hasProofs = proofs.length > 0
+    const proofNames = proofs.map((p: any) => p?.name).filter(Boolean)
+
+    const sharedVarianceBlock = n_concepts > 1
+      ? `\n\nCONCEPT-VARIANCE DIRECTIVE (n_concepts=${n_concepts}). The ${n_concepts} concepts you return MUST each feel like a DISTINCTLY DIFFERENT argument — not a re-shuffle of the same beats. Across the batch you MUST vary, concept-by-concept, on AT LEAST these three axes:
+  (a) Proof character driver — each concept anchors on a DIFFERENT named proof (cycle through ${proofNames.length ? proofNames.join(' / ') : 'the proofs above'}). Never re-use the same lead proof character across two concepts in the same batch.
+  (b) Teach focus — what specific aspect of the mechanism each concept educates on (e.g. concept 1 teaches WHY rank-1 captures most calls, concept 2 teaches WHAT the algorithm actually weighs, concept 3 teaches HOW the 3-part fix sequences). Don't teach the same lesson twice.
+  (c) Reframe / pattern statement — each concept opens with a different underlying truth-claim about the prospect's world. If concept 1 says "the top 3 take 78% of clicks," concept 2 must reach for a different reframe (e.g. "spending more on LSA doesn't move you up — the algorithm doesn't care about your bid").
+A reviewer reading all ${n_concepts} back-to-back should NOT be able to say "these are three versions of the same script." They should say "these are three different arguments for the same offer."`
+      : ''
+
+    const sharedNumberRules = `\n\nNUMBER RULES (apply to every concept):
+- Specific + uneven beats round + clean. "47 leads in 11 days" beats "50 leads in 14 days." "$32K MRR" beats "$30K MRR." "3.2x" beats "3x." Round numbers signal copywriter, not operator.
+- Pull numbers ONLY from the proof character results above. Do NOT invent new numbers. If a proof says "$215K loss-of-business job in 90 days," use those exact figures.
+${hasProofs
+  ? `- Proof characters EXIST for this angle (${proofNames.join(', ')}). You MUST name them by first name as written. Banned phrasing: "one client," "another client," "a third client," "we had a client," "I worked with someone" — every proof reference must be a NAMED first name from the roster.`
+  : `- NO proof characters exist for this angle. DO NOT invent named clients. DO NOT write "one client / another client / a third client" or any fake-specific person. Instead, write the proof block in COHORT VOICE: "the restoration companies we run this for", "every operator we've put through the LSA-foundation rebuild", "the owners in our portfolio". This signals truth without fabricating a person. The operator will swap in real names later.`}
+
+CTA RULES (CRITICAL — apply to body + joined; hooks have their own ending):
+- The phrase "So if that sounds [adjective], click the link below to book a call where we can talk and tell you more" — and any close variant of it — appears EXACTLY ONCE per script, at the FINAL line. Not after the hook. Not in the middle. ONLY as the closing line.
+- For joined scripts specifically: NEVER place a CTA between the hook and the body. The body must continue from the hook with a state-of-play / specific-scene opener (Beat 1), then build to ONE CTA at the very end.
+- Banned mid-script CTA patterns: "click the link below" / "book a call" / "tap the button" / "DM us" — these only appear in the final 1-2 sentences of the script.`
+
     const typeSpecificInstructions =
       script_type === 'hook'
-        ? `Each hook is a SINGLE PARAGRAPH (no body, no CTA tee-up). It opens with the angle's qualifier (you may rephrase slightly per shape), states the promise + mechanism, includes the assigned shape's signature opening move, and closes with the guarantee. Length: 60-90 words. The hook must be standalone — an editor will pair it with a body later.`
+        ? `Each hook is a SINGLE PARAGRAPH (no body, no CTA tee-up). It opens with the angle's qualifier (you may rephrase slightly per shape), states the promise + mechanism, includes the assigned shape's signature opening move, and closes with the guarantee. Length: 60-75 words (hard cap at 75). The hook must be standalone — an editor will pair it with a body later.`
         : script_type === 'body'
-          ? `Each body follows the 7-beat skeleton above. Use the angle's CTA tee-up shape for Beat 1. Beat 2 (pattern statement) is where you vary stylistically across the ${n_concepts} concepts. Beats 3 (proof roster), 4 (mechanism reveal), 5 (3-part HOW), 6 (guarantee), and 7 (final CTA) follow the skeleton tightly. Length: 250-380 words. Do NOT include a hook — bodies are standalone too.`
-          : `Each joined script is HOOK + BODY chained. Write the hook FIRST using the rotation's assigned shape, then write a body that explicitly continues from THAT hook's proof character + opening posture (don't switch proof characters between hook and body). Return them as separate strings (hook_text + body_text) and also as the combined body field. Length: 350-470 words total.`
+          ? `Each body follows the 9-entry skeleton above (7 logical beats; beat 5 is split 5a/5b/5c). CRITICAL — Beat 1 is the STATE-OF-PLAY / SCENE OPENER, not a CTA. The CTA appears ONLY in Beat 7 (Final CTA). NEVER open the body with "So if that sounds [adjective], click the link" — that line belongs at the END, not the start. Beat 1 grounds the reader in a concrete moment or underlying truth of the angle. Beat 2 (pattern statement) zooms out to the systemic claim. Beats 3 (proof roster — NAME the proof characters), 4 (mechanism reveal), 5a/5b/5c (3-part HOW), 6 (guarantee), and 7 (final CTA — THIS is where "click the link below" lives) follow the skeleton tightly. Length: 250-380 words. Do NOT include a hook — bodies are standalone too.`
+          : `Each joined script is HOOK + BODY chained. Write the hook FIRST using the rotation's assigned shape (60-75 words), then write a body that explicitly continues from THAT hook's proof character + opening posture (don't switch proof characters between hook and body). Body follows the skeleton above — Beat 1 is the state-of-play opener, NOT a CTA. CTA appears ONLY in Beat 7. Return them as separate strings (hook_text + body_text) and also as the combined body field. Length: 350-470 words total.`
 
     const userMsg = [
       angleCtx,
@@ -1343,12 +1376,14 @@ serve(async (req) => {
       rotationBlock,
       `\n\nGenerate exactly ${n_concepts} ${script_type === 'joined' ? 'joined scripts' : (script_type === 'hook' ? 'hooks' : 'bodies')} for this angle.`,
       `\n${typeSpecificInstructions}`,
+      sharedVarianceBlock,
+      sharedNumberRules,
       `\nReturn via the ${TEMPLATE_TOOL_NAMES[script_type]} tool.`,
       extraBlock,
     ].join('')
 
     const shapeCodes = shapes.map(s => s.code)
-    const tool = buildTemplateToolSchema(script_type, n_concepts, shapeCodes.length ? shapeCodes : ['_'])
+    const tool = buildTemplateToolSchema(script_type, n_concepts, shapeCodes.length ? shapeCodes : ['_'], hasProofs ? proofNames : [])
 
     const upstreamT = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
