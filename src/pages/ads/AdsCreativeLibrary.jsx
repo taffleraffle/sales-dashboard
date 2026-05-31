@@ -1993,8 +1993,10 @@ const NotificationBell = forwardRef(function NotificationBell(
    N:NN" using the live time.
 
    Keyboard: space = play/pause, ← / → = ±5s, F = fullscreen. */
+const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
+
 const OptVideoPlayer = forwardRef(function OptVideoPlayer(
-  { src, markers = [], onSeek, onState, onMarkerHoverChange },
+  { src, markers = [], onSeek, onState, hoveredMarkerId, onMarkerHoverChange },
   parentRef,
 ) {
   const videoRef = useRef(null)
@@ -2008,6 +2010,14 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
   const [hoverPct, setHoverPct] = useState(null)  // 0..1
   const [playbackRate, setPlaybackRate] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  // Local marker-hover state — used to show a styled tooltip near the
+  // marker. Separate from onMarkerHoverChange because the parent might
+  // not care, but the player still wants to render the tooltip.
+  const [localHoverMarkerId, setLocalHoverMarkerId] = useState(null)
+  // External hover (from the sidebar pointing at this marker) takes
+  // precedence over local hover so the marker pulses even without
+  // direct mouse-over.
+  const effectiveHoverId = hoveredMarkerId ?? localHoverMarkerId
 
   // Expose play/pause/seek to parent (used by comment markers in the
   // sidebar — clicking a comment seeks the video).
@@ -2024,11 +2034,27 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
   }), [])
 
   // Mirror state up so the composer + scrubber both see the same time.
+  // Throttled to ~4Hz (every 250ms) so the parent doesn't re-render
+  // every video tick — with the comment sidebar mounting N CommentThread
+  // components, the unthrottled path was visibly burning frame rate
+  // (Ben 2026-06-01: "It's very slow").
+  const stateThrottleRef = useRef(0)
+  useEffect(() => {
+    if (typeof onState !== 'function') return
+    const now = performance.now()
+    if (now - stateThrottleRef.current < 250) return
+    stateThrottleRef.current = now
+    onState({ currentTime, duration, playing })
+  }, [currentTime, duration, playing, onState])
+  // Force a final state push when playback state flips (play/pause) or
+  // duration first loads so the parent always sees the latest, even if
+  // the throttle just fired.
   useEffect(() => {
     if (typeof onState === 'function') {
-      onState({ currentTime, duration, playing })
+      onState({ currentTime: videoRef.current?.currentTime ?? 0, duration, playing })
     }
-  }, [currentTime, duration, playing, onState])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, duration])
 
   // Teardown — same cleanup pattern as the rest of the codebase.
   useEffect(() => {
@@ -2151,7 +2177,12 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
         userSelect: 'none',
       }}>
       {/* Video element with native controls killed. Click toggles
-          play/pause; double-click toggles fullscreen. */}
+          play/pause; double-click toggles fullscreen. The video FILLS
+          the container with object-fit: contain — earlier `maxWidth:
+          100%, maxHeight: 100%, width: auto` left the video at its
+          natural intrinsic size, which on a 320×176 sample video meant
+          a tiny rectangle in the middle of a giant black box (Ben
+          2026-06-01). */}
       <div style={{
         flex: '1 1 auto', minHeight: 0, position: 'relative',
         background: '#000', display: 'flex',
@@ -2178,9 +2209,10 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
             onVolumeChange={() => setMuted(videoRef.current?.muted ?? false)}
             onRateChange={() => setPlaybackRate(videoRef.current?.playbackRate ?? 1)}
             style={{
-              maxWidth: '100%', maxHeight: '100%',
-              width: 'auto', height: 'auto',
+              width: '100%', height: '100%',
+              objectFit: 'contain',
               display: 'block', cursor: 'pointer',
+              background: '#000',
             }} />
         ) : (
           <div style={{
@@ -2256,26 +2288,73 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
             </>
           )}
           {/* Comment markers on the scrubber itself — the killer feature
-              over the previous below-video strip. */}
+              over the previous below-video strip. Hover scales the marker
+              up and shows a styled tooltip above with author + preview. */}
           {markers.filter(m => m.ts != null && duration > 0).map(m => {
             const left = (m.ts / duration) * 100
             const color = m.color || '#f4e14a'
+            const isHovered = effectiveHoverId === m.id
             return (
               <div key={m.id}
                 onClick={(e) => onMarkerClick(e, m)}
-                onMouseEnter={() => onMarkerHoverChange?.(m.id)}
-                onMouseLeave={() => onMarkerHoverChange?.(null)}
-                title={`${fmtTime(m.ts)} — ${(m.title || '').slice(0, 80)}`}
+                onMouseEnter={() => {
+                  setLocalHoverMarkerId(m.id)
+                  onMarkerHoverChange?.(m.id)
+                }}
+                onMouseLeave={() => {
+                  setLocalHoverMarkerId(null)
+                  onMarkerHoverChange?.(null)
+                }}
                 style={{
                   position: 'absolute', left: `${left}%`,
-                  top: -4, transform: 'translateX(-50%)',
-                  width: 12, height: 12, borderRadius: '50%',
+                  top: isHovered ? -6 : -4, transform: 'translateX(-50%)',
+                  width: isHovered ? 16 : 12,
+                  height: isHovered ? 16 : 12,
+                  borderRadius: '50%',
                   background: color, border: '2px solid #0a0a0a',
                   cursor: 'pointer', zIndex: 2,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
+                  boxShadow: isHovered
+                    ? '0 0 0 4px rgba(244,225,74,0.25), 0 1px 3px rgba(0,0,0,0.5)'
+                    : '0 1px 3px rgba(0,0,0,0.5)',
+                  transition: 'all 120ms ease',
                 }} />
             )
           })}
+          {/* Custom marker tooltip — replaces the native title attr
+              (which has 1+ second delay and unstyled). Renders above
+              the scrubber when a marker is being hovered (locally OR
+              via the sidebar). Pointer-events: none so it never
+              blocks marker clicks. */}
+          {effectiveHoverId != null && (() => {
+            const m = markers.find(x => x.id === effectiveHoverId)
+            if (!m || m.ts == null || duration <= 0) return null
+            const left = Math.max(8, Math.min(92, (m.ts / duration) * 100))
+            return (
+              <div style={{
+                position: 'absolute', left: `${left}%`,
+                bottom: 22, transform: 'translateX(-50%)',
+                background: 'rgba(0,0,0,0.92)',
+                color: 'white', padding: '8px 10px',
+                fontFamily: 'var(--sans)', fontSize: 12,
+                maxWidth: 280, minWidth: 160,
+                lineHeight: 1.4, pointerEvents: 'none',
+                border: '1px solid rgba(244,225,74,0.4)',
+                boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
+                zIndex: 5,
+                animation: 'optTooltipIn 80ms ease-out',
+              }}>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  color: '#f4e14a', marginBottom: 4,
+                }}>{m.authorName ? `${m.authorName} · ${fmtTime(m.ts)}` : fmtTime(m.ts)}</div>
+                <div style={{
+                  whiteSpace: 'normal', wordBreak: 'break-word',
+                  maxHeight: 80, overflow: 'hidden',
+                }}>{(m.title || '').slice(0, 240)}</div>
+              </div>
+            )
+          })()}
           {/* Playhead thumb */}
           <div style={{
             position: 'absolute', left: `${progressPct}%`,
@@ -2311,39 +2390,106 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
             {fmtTime(currentTime)} / {fmtTime(duration)}
           </span>
           <span style={{ flex: 1 }} />
-          {/* Playback rate */}
-          <select value={playbackRate}
-            onChange={(e) => {
-              const r = parseFloat(e.target.value)
-              const v = videoRef.current
-              if (v) { v.playbackRate = r; setPlaybackRate(r) }
-            }}
-            style={{
-              background: 'rgba(255,255,255,0.08)', color: 'white',
-              border: '1px solid rgba(255,255,255,0.15)',
-              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
-              padding: '2px 6px', cursor: 'pointer', outline: 'none',
-            }}>
-            <option value="0.5">0.5×</option>
-            <option value="0.75">0.75×</option>
-            <option value="1">1×</option>
-            <option value="1.25">1.25×</option>
-            <option value="1.5">1.5×</option>
-            <option value="2">2×</option>
-          </select>
+          {/* Playback rate — custom popup. Native <select> renders OS-
+              level dropdowns we can't style, which gave a white-on-white
+              option list in dark mode and unreadable contrast (Ben
+              2026-06-01). */}
+          <OptSpeedMenu value={playbackRate} onChange={(r) => {
+            const v = videoRef.current
+            if (v) { v.playbackRate = r; setPlaybackRate(r) }
+          }} />
           <button onClick={toggleFullscreen}
             aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-            title="F"
+            title="F — fullscreen"
             style={{
               background: 'transparent', border: 'none', cursor: 'pointer',
-              color: 'white', fontSize: 14, padding: '0 2px',
+              color: 'white', fontSize: 14, padding: '0 4px',
               minWidth: 18,
-            }}>{isFullscreen ? '⛶' : '⛶'}</button>
+            }}>{isFullscreen ? '⤡' : '⛶'}</button>
         </div>
       </div>
+      <style>{`
+        @keyframes optTooltipIn {
+          from { opacity: 0; transform: translate(-50%, 4px); }
+          to   { opacity: 1; transform: translate(-50%, 0); }
+        }
+        @keyframes optSlideInUp {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes optPulse {
+          0%   { box-shadow: 0 0 0 0 rgba(244,225,74,0.5); }
+          70%  { box-shadow: 0 0 0 8px rgba(244,225,74,0); }
+          100% { box-shadow: 0 0 0 0 rgba(244,225,74,0); }
+        }
+      `}</style>
     </div>
   )
 })
+
+// Custom playback-speed picker. Renders the current speed as a small
+// pill; click opens a styled popup with the rate options. Replaces the
+// native <select> which had OS-default styling we couldn't override.
+function OptSpeedMenu({ value, onChange }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(v => !v)}
+        style={{
+          background: 'rgba(255,255,255,0.1)', color: 'white',
+          border: '1px solid rgba(255,255,255,0.18)',
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+          padding: '3px 9px', cursor: 'pointer', outline: 'none',
+          letterSpacing: '0.04em', minWidth: 38,
+          transition: 'background 120ms ease',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.18)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)' }}>
+        {value}×
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
+          <div style={{
+            position: 'absolute', right: 0, bottom: 'calc(100% + 6px)',
+            background: 'rgba(15,15,15,0.97)',
+            border: '1px solid rgba(255,255,255,0.18)',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
+            display: 'flex', flexDirection: 'column',
+            minWidth: 70, zIndex: 101,
+            animation: 'optSlideInUp 100ms ease-out',
+          }}>
+            {PLAYBACK_RATES.map(r => {
+              const active = r === value
+              return (
+                <button key={r}
+                  onClick={() => { onChange(r); setOpen(false) }}
+                  style={{
+                    background: active ? '#f4e14a' : 'transparent',
+                    color: active ? '#0a0a0a' : 'white',
+                    border: 'none',
+                    fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                    padding: '7px 12px', cursor: 'pointer',
+                    textAlign: 'right',
+                    letterSpacing: '0.04em',
+                  }}
+                  onMouseEnter={e => {
+                    if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
+                  }}
+                  onMouseLeave={e => {
+                    if (!active) e.currentTarget.style.background = 'transparent'
+                  }}>
+                  {r}×
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 // Format seconds as M:SS or H:MM:SS.
 function fmtTime(seconds) {
@@ -2374,6 +2520,10 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
   // sending a revision request is a one-shot action (no thread / no
   // resolve / no marker). Opens a full-width textarea above the footer.
   const [revisionDraft, setRevisionDraft] = useState({ open: false, body: '' })
+  // Marker hover state — shared between the player scrubber and the
+  // sidebar so hovering EITHER surface pulses BOTH. Frame.io-style
+  // cross-highlight.
+  const [hoveredMarkerId, setHoveredMarkerId] = useState(null)
   const { currentTime, duration } = playerState
 
   // Load comments + poll every 10s while the modal is open so admin/
@@ -2494,7 +2644,8 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
   const isApproved = !!submission.approved_at
   const canAct = !submission.__synthetic && !isApproved
   // Markers passed to the player — only top-level timestamped comments.
-  // Color reflects open vs resolved.
+  // Color reflects open vs resolved. Author name flows into the tooltip
+  // so "BEN · 0:02" reads cleaner than a bare timestamp.
   const playerMarkers = topLevels
     .filter(c => c.timestamp_seconds != null)
     .map(c => ({
@@ -2502,6 +2653,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
       ts: c.timestamp_seconds,
       color: c.resolved_at ? 'rgba(255,255,255,0.4)' : '#3e7eba',
       title: c.body,
+      authorName: c.author_name,
     }))
   // Send-revision handler — local wrapper that closes the draft on success.
   const handleSendRevision = async () => {
@@ -2541,6 +2693,8 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
               src={url}
               markers={playerMarkers}
               onState={onPlayerState}
+              hoveredMarkerId={hoveredMarkerId}
+              onMarkerHoverChange={setHoveredMarkerId}
               onSeek={() => { /* nothing extra — the player handles seek+play */ }} />
           </div>
           {/* Editor's submission note. Tucked just below the player so
@@ -2604,7 +2758,9 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
                 onResolve={toggleResolve}
                 onDelete={deleteComment}
                 canResolve={currentUser?.kind === 'admin'}
-                currentUser={currentUser} />
+                currentUser={currentUser}
+                isHovered={hoveredMarkerId === c.id}
+                onHoverChange={(hovering) => setHoveredMarkerId(hovering ? c.id : null)} />
             ))}
           </div>
           {/* Comment composer — synthetic submissions get an explanation
@@ -2633,7 +2789,16 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
                 </div>
                 {!composer.open ? (
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={() => setComposer({ open: true, body: '', ts: url ? currentTime : null, parentId: null })}
+                    <button onClick={() => {
+                        // Read currentTime DIRECTLY off the player ref
+                        // instead of from playerState — the React-state
+                        // path lags ~250ms behind the live video so the
+                        // captured ts could be stale (Ben 2026-06-01:
+                        // "I can't leave a comment at certain time
+                        // periods").
+                        const liveTs = url ? (playerRef.current?.getCurrentTime() ?? currentTime) : null
+                        setComposer({ open: true, body: '', ts: liveTs, parentId: null })
+                      }}
                       style={{
                         flex: 1, padding: '9px 12px',
                         fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
@@ -2821,18 +2986,25 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
 // Single comment thread = one top-level comment + N flat replies.
 // Replies don't nest further; that keeps the visual hierarchy simple
 // and matches Frame.io's convention.
-function CommentThread({ comment, replies, onSeek, onReply, onResolve, onDelete, canResolve, currentUser }) {
+function CommentThread({ comment, replies, onSeek, onReply, onResolve, onDelete, canResolve, currentUser, isHovered, onHoverChange }) {
   const isAuthor = currentUser?.kind === comment.author_kind &&
     (currentUser?.id ? currentUser.id === comment.author_id : currentUser?.name === comment.author_name)
   return (
-    <div style={{
-      marginBottom: 10,
-      padding: 10,
-      background: comment.resolved_at ? 'rgba(62,138,94,0.06)' : 'white',
-      border: '1px solid var(--rule)',
-      borderLeft: `3px solid ${comment.resolved_at ? '#3e8a5e' : '#3e7eba'}`,
-      opacity: comment.resolved_at ? 0.78 : 1,
-    }}>
+    <div
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
+      style={{
+        marginBottom: 10,
+        padding: 10,
+        background: isHovered
+          ? 'rgba(244,225,74,0.18)'
+          : comment.resolved_at ? 'rgba(62,138,94,0.06)' : 'white',
+        border: '1px solid ' + (isHovered ? '#f4e14a' : 'var(--rule)'),
+        borderLeft: `3px solid ${comment.resolved_at ? '#3e8a5e' : '#3e7eba'}`,
+        opacity: comment.resolved_at ? 0.78 : 1,
+        cursor: 'pointer',
+        transition: 'background 100ms ease, border-color 100ms ease',
+      }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
           <span style={{
