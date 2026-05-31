@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition } from 'react'
+import { Link } from 'react-router-dom'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { useCloserCallProspectMetrics } from '../hooks/useCloserCallProspectMetrics'
 import EditorialDate from '../components/EditorialDate'
@@ -3399,6 +3400,17 @@ export default function MarketingPerformance() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <Link
+            to="/sales/marketing/coverage"
+            style={{
+              fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
+              padding: '7px 12px', border: '1px solid var(--ink-3)',
+              color: 'var(--ink)', textDecoration: 'none', borderRadius: 2,
+              background: 'transparent',
+            }}
+            title="Attribution coverage report — how much of the chain is actually traced">
+            Coverage report →
+          </Link>
           <SyncStatusIndicator />
           <DateRangeSelector selected={range} onChange={setRange} />
         </div>

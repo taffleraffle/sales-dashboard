@@ -6,6 +6,7 @@ import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import { listTestBatches, addScriptsToBatch } from '../../services/testBatches'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
 import MechanismConfigModal from '../../components/ads/MechanismConfigModal'
+import ConfirmModal from '../../components/ConfirmModal'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Eyebrow } from '../../components/editorial/atoms'
 
@@ -63,6 +64,10 @@ export default function AdsGenerator() {
   const [nDesires, setNDesires] = useState(5)
   const [messagingBusy, setMessagingBusy] = useState(false)
   const [messagingResult, setMessagingResult] = useState(null)
+  // Free-text extra instructions appended to the Claude prompt. Used for
+  // both modes — operator can name specific proofs ("lead with Eric's
+  // $215K case study"), banned phrases, framing tweaks, etc.
+  const [extraInstructions, setExtraInstructions] = useState('')
 
   // Template-based generator (Ben 2026-05-31). Templates is now the
   // only path — Mode toggle was removed in the /generate overhaul.
@@ -236,6 +241,7 @@ export default function AdsGenerator() {
         n_problems: nProblems,
         n_desires: nDesires,
         niche_hint: nicheHint || undefined,
+        extra_instructions: extraInstructions.trim() || undefined,
       })
       setMessagingResult(res)
       // Refresh angles for both the Scripts picker and the persistent
@@ -250,18 +256,27 @@ export default function AdsGenerator() {
     }
   }
 
-  async function handleDeleteSavedAngle(slug) {
-    if (!slug) return
-    if (!confirm('Retire this angle? It will disappear from the picker but stay in the database (set active = false).')) return
+  // Two-stage confirm: clicking Retire on a row sets retireAngleTarget,
+  // which opens the ConfirmModal. ConfirmModal's confirm fires performRetireAngle.
+  const [retireAngleTarget, setRetireAngleTarget] = useState(null)  // { slug, name }
+  const [retireAngleBusy, setRetireAngleBusy] = useState(false)
+
+  async function performRetireAngle() {
+    const target = retireAngleTarget
+    if (!target?.slug) return
+    setRetireAngleBusy(true)
     try {
       const { error } = await supabase.from('script_angles')
-        .update({ active: false }).eq('slug', slug)
+        .update({ active: false }).eq('slug', target.slug)
       if (error) throw new Error(error.message)
-      setMessagingLibrary(prev => prev.filter(a => a.slug !== slug))
-      setAngles(prev => prev.filter(a => a.slug !== slug))
-      if (angleSlug === slug) setAngleSlug('')
+      setMessagingLibrary(prev => prev.filter(a => a.slug !== target.slug))
+      setAngles(prev => prev.filter(a => a.slug !== target.slug))
+      if (angleSlug === target.slug) setAngleSlug('')
+      setRetireAngleTarget(null)
     } catch (e) {
       setErr(`Retire failed: ${e.message}`)
+    } finally {
+      setRetireAngleBusy(false)
     }
   }
 
@@ -271,6 +286,7 @@ export default function AdsGenerator() {
       // Template mode (Ben 2026-05-31): send script_type + angle_slug
       // + target_shapes instead of offer_slug + target_attributes.
       // Edge Function picks the right branch.
+      const extras = extraInstructions.trim() || undefined
       const payload = generatorMode === 'templates'
         ? {
             script_type: scriptType,
@@ -280,6 +296,7 @@ export default function AdsGenerator() {
             target_length: (scriptType === 'body' || scriptType === 'joined') ? targetLength : undefined,
             n_concepts: nConcepts,
             save_as_drafts: saveAsDrafts,
+            extra_instructions: extras,
           }
         : {
             // Legacy attribute mode: empty target_attributes in diverse,
@@ -288,6 +305,7 @@ export default function AdsGenerator() {
             n_concepts: nConcepts,
             target_attributes: mode === 'targeted' ? targets : {},
             save_as_drafts: saveAsDrafts,
+            extra_instructions: extras,
           }
       const res = await generateScripts(payload)
       setResult(res)
@@ -483,6 +501,17 @@ export default function AdsGenerator() {
             </div>
           </Section>
 
+          <Section label="03b" title="Anything specific to mention? (optional)">
+            <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                        color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
+              Free-text instructions appended to Claude's prompt. Use this to call
+              out specific case studies, named clients, banned phrases, or framing
+              tweaks for THIS batch only. Example: "Lead with Eric's $215K close",
+              "don't mention guarantees", or "bias toward founders in their first 12 months".
+            </p>
+            <ExtraInstructionsField value={extraInstructions} onChange={setExtraInstructions} />
+          </Section>
+
           <Section label="04" title="Generate">
             <button onClick={handleGenerateMessaging}
               disabled={messagingBusy || !offerSlug}
@@ -551,7 +580,7 @@ export default function AdsGenerator() {
                 <div style={{ display: 'grid', gap: 10 }}>
                   {messagingLibrary.map(a => (
                     <SavedAngleRow key={a.slug} angle={a}
-                      onRetire={() => handleDeleteSavedAngle(a.slug)} />
+                      onRetire={() => setRetireAngleTarget({ slug: a.slug, name: a.name })} />
                   ))}
                 </div>
               )}
@@ -1128,6 +1157,20 @@ export default function AdsGenerator() {
       </>
       )}
 
+      {/* Step 06b: anything specific to mention this batch (Scripts mode) */}
+      {genTarget === 'scripts' && angles.length > 0 && (
+        <Section label="06b" title="Anything specific to mention? (optional)">
+          <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                      color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
+            Free-text instructions appended to Claude's prompt. Use this to call
+            out specific case studies, named clients, banned phrases, or framing
+            tweaks for THIS batch only. Example: "Lead with Eric's $215K close",
+            "don't mention guarantees", or "use Adam as proof character for all hooks".
+          </p>
+          <ExtraInstructionsField value={extraInstructions} onChange={setExtraInstructions} />
+        </Section>
+      )}
+
       {/* Step 07: generate (Scripts mode only — Messaging has its own
           Generate button in its panel) */}
       {genTarget === 'scripts' && (
@@ -1224,6 +1267,16 @@ export default function AdsGenerator() {
         </div>
       )}
 
+      <ConfirmModal
+        open={!!retireAngleTarget}
+        onClose={() => !retireAngleBusy && setRetireAngleTarget(null)}
+        onConfirm={performRetireAngle}
+        title={`Retire "${retireAngleTarget?.name || 'this angle'}"?`}
+        message="It will disappear from this library and from the Scripts > Angle picker. Historical scripts that reference it keep working — this is a soft delete (sets active = false)."
+        confirmLabel="Retire angle"
+        variant="danger"
+        loading={retireAngleBusy}
+      />
     </div>
   )
 }
@@ -1244,6 +1297,29 @@ function Section({ label, title, children }) {
       </h2>
       {children}
     </div>
+  )
+}
+
+// Reusable free-text instructions field shared between Messaging and Scripts.
+// 6 rows by default — enough to type 2-3 specific asks without feeling cramped,
+// vertical-resize via the textarea handle for longer instructions.
+function ExtraInstructionsField({ value, onChange }) {
+  return (
+    <textarea
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      rows={6}
+      placeholder={`e.g. "Lead with Eric's $215K close in 90 days"\n     "Don't mention guarantees in any hook"\n     "Bias toward roofers with weather-driven seasonality"\n\nLeave blank to use the default prompt.`}
+      style={{
+        width: '100%', maxWidth: 720, padding: '12px 14px',
+        fontFamily: 'var(--sans)', fontSize: 14, lineHeight: 1.5,
+        border: '1px solid var(--rule)', background: 'var(--paper)',
+        color: 'var(--ink)', resize: 'vertical', borderRadius: 2,
+        outline: 'none',
+      }}
+      onFocus={(e) => e.currentTarget.style.borderColor = 'var(--ink-3)'}
+      onBlur={(e) => e.currentTarget.style.borderColor = 'var(--rule)'}
+    />
   )
 }
 

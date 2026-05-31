@@ -58,6 +58,7 @@ const SetterDetail = lazyWithReload(() => import('./pages/SetterDetail'))
 const SetterKPIHistory = lazyWithReload(() => import('./pages/SetterKPIHistory'))
 const PipelinePerformance = lazyWithReload(() => import('./pages/PipelinePerformance'))
 const MarketingPerformance = lazyWithReload(() => import('./pages/MarketingPerformance'))
+const AttributionCoverage = lazyWithReload(() => import('./pages/AttributionCoverage'))
 const AdsLayout = lazyWithReload(() => import('./pages/ads/AdsLayout'))
 const AdsGallery = lazyWithReload(() => import('./pages/ads/AdsGallery'))
 const AdsMessaging = lazyWithReload(() => import('./pages/ads/AdsMessaging'))
@@ -214,6 +215,7 @@ export default function App() {
               <Route path="/sales/setters/:id/kpi-history" element={<Suspense fallback={<PageSkeleton />}><SetterKPIHistory /></Suspense>} />
               <Route path="/sales/pipeline" element={<Suspense fallback={<PageSkeleton />}><PipelinePerformance /></Suspense>} />
               <Route path="/sales/marketing" element={<Suspense fallback={<PageSkeleton />}><MarketingPerformance /></Suspense>} />
+              <Route path="/sales/marketing/coverage" element={<Suspense fallback={<PageSkeleton />}><AttributionCoverage /></Suspense>} />
               <Route path="/sales/ads" element={<Suspense fallback={<PageSkeleton />}><AdsLayout /></Suspense>}>
                 <Route index element={<Navigate to="/sales/ads/performance" replace />} />
                 <Route path="performance" element={<Suspense fallback={<PageSkeleton />}><AdsPerformance /></Suspense>} />
