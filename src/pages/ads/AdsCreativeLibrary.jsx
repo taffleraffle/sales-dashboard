@@ -1974,47 +1974,407 @@ const NotificationBell = forwardRef(function NotificationBell(
   )
 })
 
-/* In-place video preview for an editor submission with native review
-   surface (Frame.io-ish: timestamped comments pinned to the scrubber).
-   Plays the Supabase file_url directly via the native <video> element.
-   Comments live in lib_submission_comments (migration 119); admin-
-   authored comments fire a trigger that notifies the editor via the
-   existing bell. Editor sees the same comments in the EditTaskModal.
+/* OPT-branded video player. Replaces the native <video controls> on
+   the review surface so we can:
+   - Put comment markers ON the actual scrubber (not a separate strip
+     below the video). The native controls bar wouldn't expose its
+     DOM, so we built our own.
+   - Apply the editorial design language consistently (yellow accent,
+     mono labels, paper-on-black) instead of whatever the browser
+     decided to ship.
+   - Add Frame.io-style affordances: click anywhere on the scrubber to
+     seek, hover the scrubber to preview a time, click a marker to
+     jump to that comment's timestamp.
 
-   Layout: video left, comment thread right. Comment markers sit just
-   below the video as a thin track, positioned proportionally to the
-   video duration. Click a marker → seek to that time. Click "Add
-   comment at {currentTime}" → opens a composer pre-stamped with the
-   current playback position; submit posts the comment + the marker
-   appears immediately.
+   Public API: pass `src`, an array of `markers` ({ id, ts, color,
+   title }), and an `onSeek(seconds)` callback. The player owns its
+   <video> ref and surfaces play state + currentTime upward via
+   `onState` so the parent's comment composer can stamp "comment at
+   N:NN" using the live time.
 
-   Why a separate scrubber-marker track instead of overlaying on the
-   native <video controls>: browsers don't expose the controls bar
-   DOM so we can't reliably absolute-position children on it across
-   Chrome/Safari/Firefox. The track below is visually associated
-   with the video timeline and behaves the same in every browser. */
-function SubmissionPreviewModal({ submission, onClose, currentUser }) {
+   Keyboard: space = play/pause, ← / → = ±5s, F = fullscreen. */
+const OptVideoPlayer = forwardRef(function OptVideoPlayer(
+  { src, markers = [], onSeek, onState, onMarkerHoverChange },
+  parentRef,
+) {
   const videoRef = useRef(null)
+  const wrapRef = useRef(null)
+  const scrubberRef = useRef(null)
+  const [playing, setPlaying] = useState(false)
+  const [muted, setMuted] = useState(false)
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
-  const [comments, setComments] = useState([])
-  const [busy, setBusy] = useState(false)
-  // Composer state. ts=null means a general (non-timestamped) comment.
-  const [composer, setComposer] = useState({ open: false, body: '', ts: null, parentId: null })
-  // Auto-tear-down for the decoder — same cleanup-function pattern as
-  // the rest of the codebase (see PreviewVideo at ~2050). Capture the
-  // live element when the effect runs with a submission, release in
-  // cleanup so closing the modal kills the network/CPU immediately
-  // instead of letting the browser drag the unmount.
+  const [buffered, setBuffered] = useState(0)
+  const [hoverPct, setHoverPct] = useState(null)  // 0..1
+  const [playbackRate, setPlaybackRate] = useState(1)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Expose play/pause/seek to parent (used by comment markers in the
+  // sidebar — clicking a comment seeks the video).
+  useImperativeHandle(parentRef, () => ({
+    seekTo: (seconds) => {
+      const v = videoRef.current
+      if (!v) return
+      try { v.currentTime = Math.max(0, Math.min(seconds, v.duration || seconds)) } catch {}
+      try { v.play() } catch {}
+    },
+    play: () => { try { videoRef.current?.play() } catch {} },
+    pause: () => { try { videoRef.current?.pause() } catch {} },
+    getCurrentTime: () => videoRef.current?.currentTime ?? 0,
+  }), [])
+
+  // Mirror state up so the composer + scrubber both see the same time.
   useEffect(() => {
-    if (!submission) return
+    if (typeof onState === 'function') {
+      onState({ currentTime, duration, playing })
+    }
+  }, [currentTime, duration, playing, onState])
+
+  // Teardown — same cleanup pattern as the rest of the codebase.
+  useEffect(() => {
+    if (!src) return
     const v = videoRef.current
     return () => {
       if (!v) return
       try { v.pause() } catch {}
       try { v.removeAttribute('src'); v.load() } catch {}
     }
-  }, [submission])
+  }, [src])
+
+  // Keyboard shortcuts. Only fire when the player is focused or the
+  // event happened outside an input — typing in the comment composer
+  // shouldn't accidentally pause the video.
+  useEffect(() => {
+    const onKey = (e) => {
+      const t = e.target
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      const v = videoRef.current
+      if (!v) return
+      if (e.key === ' ' || e.key === 'k') {
+        e.preventDefault()
+        v.paused ? v.play() : v.pause()
+      } else if (e.key === 'ArrowLeft' || e.key === 'j') {
+        e.preventDefault()
+        v.currentTime = Math.max(0, v.currentTime - (e.key === 'j' ? 10 : 5))
+      } else if (e.key === 'ArrowRight' || e.key === 'l') {
+        e.preventDefault()
+        v.currentTime = Math.min(v.duration || 0, v.currentTime + (e.key === 'l' ? 10 : 5))
+      } else if (e.key === 'f') {
+        e.preventDefault()
+        toggleFullscreen()
+      } else if (e.key === 'm') {
+        e.preventDefault()
+        v.muted = !v.muted
+        setMuted(v.muted)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Fullscreen state sync — the browser can leave fullscreen on Esc
+  // without us telling it to, so we need to listen for the change event.
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onFs)
+    return () => document.removeEventListener('fullscreenchange', onFs)
+  }, [])
+
+  const toggleFullscreen = useCallback(() => {
+    const el = wrapRef.current
+    if (!el) return
+    if (document.fullscreenElement) {
+      try { document.exitFullscreen() } catch {}
+    } else {
+      try { el.requestFullscreen() } catch {}
+    }
+  }, [])
+
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current
+    if (!v) return
+    v.paused ? v.play() : v.pause()
+  }, [])
+
+  // Scrubber interactions. We use pointer events so a click-drag on
+  // the bar scrubs smoothly. The scrubber has a generous hit area
+  // (12px) but renders as a 4px bar with a 12px thumb on hover.
+  const scrubberToSeconds = useCallback((clientX) => {
+    const el = scrubberRef.current
+    if (!el || !duration) return 0
+    const rect = el.getBoundingClientRect()
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    return pct * duration
+  }, [duration])
+
+  const onScrubberPointerDown = useCallback((e) => {
+    e.preventDefault()
+    const v = videoRef.current
+    if (!v) return
+    v.currentTime = scrubberToSeconds(e.clientX)
+    const move = (ev) => { v.currentTime = scrubberToSeconds(ev.clientX) }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }, [scrubberToSeconds])
+
+  const onScrubberPointerMove = useCallback((e) => {
+    const el = scrubberRef.current
+    if (!el || !duration) { setHoverPct(null); return }
+    const rect = el.getBoundingClientRect()
+    setHoverPct(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)))
+  }, [duration])
+
+  const onMarkerClick = useCallback((e, marker) => {
+    e.stopPropagation()
+    if (marker.ts == null) return
+    const v = videoRef.current
+    if (!v) return
+    try { v.currentTime = marker.ts; v.play() } catch {}
+    onSeek?.(marker.ts)
+  }, [onSeek])
+
+  // Snapshot the scrubber position for the progress fill + thumb.
+  const progressPct = duration > 0 ? (currentTime / duration) * 100 : 0
+  const bufferedPct = duration > 0 ? Math.min(100, (buffered / duration) * 100) : 0
+
+  return (
+    <div ref={wrapRef} className="opt-player"
+      style={{
+        position: 'relative', width: '100%',
+        background: '#000', color: 'white',
+        display: 'flex', flexDirection: 'column',
+        userSelect: 'none',
+      }}>
+      {/* Video element with native controls killed. Click toggles
+          play/pause; double-click toggles fullscreen. */}
+      <div style={{
+        flex: '1 1 auto', minHeight: 0, position: 'relative',
+        background: '#000', display: 'flex',
+        justifyContent: 'center', alignItems: 'center',
+      }}>
+        {src ? (
+          <video ref={videoRef} src={src} preload="metadata" autoPlay
+            onClick={togglePlay}
+            onDoubleClick={toggleFullscreen}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onLoadedMetadata={() => {
+              const v = videoRef.current
+              if (v && isFinite(v.duration)) setDuration(v.duration)
+              if (v) setMuted(v.muted)
+            }}
+            onTimeUpdate={() => {
+              const v = videoRef.current
+              if (!v) return
+              setCurrentTime(v.currentTime)
+              const b = v.buffered
+              if (b && b.length > 0) setBuffered(b.end(b.length - 1))
+            }}
+            onVolumeChange={() => setMuted(videoRef.current?.muted ?? false)}
+            onRateChange={() => setPlaybackRate(videoRef.current?.playbackRate ?? 1)}
+            style={{
+              maxWidth: '100%', maxHeight: '100%',
+              width: 'auto', height: 'auto',
+              display: 'block', cursor: 'pointer',
+            }} />
+        ) : (
+          <div style={{
+            padding: 60, fontFamily: 'var(--mono)', fontSize: 12,
+            color: 'rgba(255,255,255,0.5)', letterSpacing: '0.1em',
+            textTransform: 'uppercase',
+          }}>No playable file</div>
+        )}
+        {/* Center play button overlay when paused */}
+        {src && !playing && (
+          <button onClick={togglePlay} aria-label="Play"
+            style={{
+              position: 'absolute', inset: 0, margin: 'auto',
+              width: 76, height: 76, borderRadius: '50%',
+              background: 'rgba(244,225,74,0.92)',
+              border: 'none', cursor: 'pointer',
+              color: '#0a0a0a', fontSize: 28,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+            }}>▶</button>
+        )}
+      </div>
+
+      {/* Custom controls bar */}
+      <div style={{
+        background: 'rgba(10,10,10,0.95)', padding: '8px 14px 10px',
+        borderTop: '1px solid rgba(255,255,255,0.08)',
+        display: 'flex', flexDirection: 'column', gap: 6,
+      }}>
+        {/* Scrubber row */}
+        <div
+          ref={scrubberRef}
+          onPointerDown={onScrubberPointerDown}
+          onPointerMove={onScrubberPointerMove}
+          onPointerLeave={() => setHoverPct(null)}
+          style={{
+            position: 'relative', height: 16, cursor: 'pointer',
+            display: 'flex', alignItems: 'center',
+          }}>
+          {/* Track (background) */}
+          <div style={{
+            position: 'absolute', left: 0, right: 0, height: 4,
+            background: 'rgba(255,255,255,0.15)', borderRadius: 2,
+          }} />
+          {/* Buffered range */}
+          <div style={{
+            position: 'absolute', left: 0, width: `${bufferedPct}%`,
+            height: 4, background: 'rgba(255,255,255,0.35)',
+            borderRadius: 2,
+          }} />
+          {/* Progress fill */}
+          <div style={{
+            position: 'absolute', left: 0, width: `${progressPct}%`,
+            height: 4, background: '#f4e14a', borderRadius: 2,
+          }} />
+          {/* Hover preview marker */}
+          {hoverPct != null && (
+            <>
+              <div style={{
+                position: 'absolute', left: `${hoverPct * 100}%`,
+                top: -22, transform: 'translateX(-50%)',
+                fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                background: 'rgba(0,0,0,0.85)', color: 'white',
+                padding: '2px 6px', borderRadius: 2, whiteSpace: 'nowrap',
+                pointerEvents: 'none',
+              }}>{fmtTime(hoverPct * duration)}</div>
+              <div style={{
+                position: 'absolute', left: `${hoverPct * 100}%`,
+                top: 0, height: 4,
+                width: 1, background: 'rgba(255,255,255,0.4)',
+                pointerEvents: 'none',
+              }} />
+            </>
+          )}
+          {/* Comment markers on the scrubber itself — the killer feature
+              over the previous below-video strip. */}
+          {markers.filter(m => m.ts != null && duration > 0).map(m => {
+            const left = (m.ts / duration) * 100
+            const color = m.color || '#f4e14a'
+            return (
+              <div key={m.id}
+                onClick={(e) => onMarkerClick(e, m)}
+                onMouseEnter={() => onMarkerHoverChange?.(m.id)}
+                onMouseLeave={() => onMarkerHoverChange?.(null)}
+                title={`${fmtTime(m.ts)} — ${(m.title || '').slice(0, 80)}`}
+                style={{
+                  position: 'absolute', left: `${left}%`,
+                  top: -4, transform: 'translateX(-50%)',
+                  width: 12, height: 12, borderRadius: '50%',
+                  background: color, border: '2px solid #0a0a0a',
+                  cursor: 'pointer', zIndex: 2,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
+                }} />
+            )
+          })}
+          {/* Playhead thumb */}
+          <div style={{
+            position: 'absolute', left: `${progressPct}%`,
+            width: 12, height: 12, borderRadius: '50%',
+            background: '#f4e14a', transform: 'translateX(-50%)',
+            boxShadow: '0 2px 6px rgba(244,225,74,0.5)',
+            pointerEvents: 'none',
+          }} />
+        </div>
+
+        {/* Buttons row */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          fontFamily: 'var(--mono)', fontSize: 11,
+        }}>
+          <button onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'white', fontSize: 16, padding: '0 2px',
+              minWidth: 18,
+            }}>{playing ? '⏸' : '▶'}</button>
+          <button onClick={() => {
+              const v = videoRef.current
+              if (v) { v.muted = !v.muted; setMuted(v.muted) }
+            }}
+            aria-label={muted ? 'Unmute' : 'Mute'}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'white', fontSize: 14, padding: '0 2px',
+              minWidth: 18,
+            }}>{muted ? '🔇' : '🔊'}</button>
+          <span style={{ color: 'rgba(255,255,255,0.85)', letterSpacing: '0.04em' }}>
+            {fmtTime(currentTime)} / {fmtTime(duration)}
+          </span>
+          <span style={{ flex: 1 }} />
+          {/* Playback rate */}
+          <select value={playbackRate}
+            onChange={(e) => {
+              const r = parseFloat(e.target.value)
+              const v = videoRef.current
+              if (v) { v.playbackRate = r; setPlaybackRate(r) }
+            }}
+            style={{
+              background: 'rgba(255,255,255,0.08)', color: 'white',
+              border: '1px solid rgba(255,255,255,0.15)',
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+              padding: '2px 6px', cursor: 'pointer', outline: 'none',
+            }}>
+            <option value="0.5">0.5×</option>
+            <option value="0.75">0.75×</option>
+            <option value="1">1×</option>
+            <option value="1.25">1.25×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+          <button onClick={toggleFullscreen}
+            aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            title="F"
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'white', fontSize: 14, padding: '0 2px',
+              minWidth: 18,
+            }}>{isFullscreen ? '⛶' : '⛶'}</button>
+        </div>
+      </div>
+    </div>
+  )
+})
+
+// Format seconds as M:SS or H:MM:SS.
+function fmtTime(seconds) {
+  if (seconds == null || !isFinite(seconds)) return '0:00'
+  const s = Math.max(0, Math.floor(seconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = s % 60
+  const pad = (n) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`
+}
+
+/* Full-screen review surface for a submission. OPT-branded player on
+   top of comments sidebar; approve / request revision live in the
+   modal footer so the operator can act WITHIN the review surface
+   instead of bouncing back out. Frame.io-ish layout, but ours.
+   Comments live in lib_submission_comments (migration 119); admin-
+   authored comments fire a trigger that notifies the editor via the
+   existing bell. */
+function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, onRequestRevision, busy: parentBusy }) {
+  const playerRef = useRef(null)
+  const [playerState, setPlayerState] = useState({ currentTime: 0, duration: 0, playing: false })
+  const [comments, setComments] = useState([])
+  const [posting, setPosting] = useState(false)
+  // Composer state. ts=null means a general (non-timestamped) comment.
+  const [composer, setComposer] = useState({ open: false, body: '', ts: null, parentId: null })
+  // Revision-request composer — separate from comment composer because
+  // sending a revision request is a one-shot action (no thread / no
+  // resolve / no marker). Opens a full-width textarea above the footer.
+  const [revisionDraft, setRevisionDraft] = useState({ open: false, body: '' })
+  const { currentTime, duration } = playerState
 
   // Load comments + poll every 10s while the modal is open so admin/
   // editor side-by-side stays in sync without realtime. supabase
@@ -2037,11 +2397,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser }) {
     // catches up. Same shape as a CRDT last-write-wins merge.
     setComments(prev => {
       const byId = new Map(data.map(c => [c.id, c]))
-      // Keep any prev row that hasn't been deleted server-side AND
-      // isn't already in the server payload (i.e. truly local-only).
       const localOnly = prev.filter(c => !byId.has(c.id))
-      // Stable order: server rows first (already sorted by created_at),
-      // then local optimistic rows after (they're the most recent).
       return [...data, ...localOnly]
     })
   }, [submission?.id])
@@ -2052,22 +2408,12 @@ function SubmissionPreviewModal({ submission, onClose, currentUser }) {
     return () => clearInterval(t)
   }, [submission, reloadComments])
 
-  // Wire the <video> element's metadata + timeupdate events to local
-  // state. Used to position markers + the "Add at {currentTime}" button.
-  // We poll currentTime via the native event rather than rAF — it fires
-  // ~4x/sec which is enough for marker labelling but doesn't burn CPU.
-  const onVideoLoaded = useCallback(() => {
-    if (videoRef.current && isFinite(videoRef.current.duration)) {
-      setDuration(videoRef.current.duration)
-    }
-  }, [])
-  const onVideoTime = useCallback(() => {
-    if (videoRef.current) setCurrentTime(videoRef.current.currentTime)
-  }, [])
+  // OptVideoPlayer pushes time/duration/playing changes up via onState.
+  const onPlayerState = useCallback((s) => setPlayerState(s), [])
+  // Seek into the video from a comment-thread click. Goes through the
+  // player's imperative handle so play+seek behaves uniformly.
   const seekTo = useCallback((seconds) => {
-    if (!videoRef.current) return
-    try { videoRef.current.currentTime = Math.max(0, seconds) } catch {}
-    try { videoRef.current.play() } catch {}
+    playerRef.current?.seekTo(seconds)
   }, [])
 
   // Post a new top-level comment OR a reply (when parentId set). Author
@@ -2075,7 +2421,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser }) {
   // trigger doesn't care, and the editor still gets a notification.
   const postComment = useCallback(async ({ body, ts, parentId }) => {
     if (!submission?.id || !body?.trim()) return
-    setBusy(true)
+    setPosting(true)
     try {
       const row = {
         submission_id: submission.id,
@@ -2092,17 +2438,12 @@ function SubmissionPreviewModal({ submission, onClose, currentUser }) {
         .select('*')
         .single()
       if (error) throw error
-      // Optimistic: append the inserted row so the marker / thread
-      // updates immediately, then let the next poll pick up any
-      // server-side merges.
       setComments(curr => [...curr, data])
       setComposer({ open: false, body: '', ts: null, parentId: null })
     } catch (e) {
-      // Surface as alert — composer failures are rare and the user
-      // needs to know their comment didn't land.
       try { alert(`Comment failed: ${e.message || e}`) } catch {}
     } finally {
-      setBusy(false)
+      setPosting(false)
     }
   }, [submission?.id, currentUser])
 
@@ -2150,109 +2491,109 @@ function SubmissionPreviewModal({ submission, onClose, currentUser }) {
     return at - bt
   })
   const openCount = topLevels.filter(c => !c.resolved_at).length
+  const isApproved = !!submission.approved_at
+  const canAct = !submission.__synthetic && !isApproved
+  // Markers passed to the player — only top-level timestamped comments.
+  // Color reflects open vs resolved.
+  const playerMarkers = topLevels
+    .filter(c => c.timestamp_seconds != null)
+    .map(c => ({
+      id: c.id,
+      ts: c.timestamp_seconds,
+      color: c.resolved_at ? 'rgba(255,255,255,0.4)' : '#3e7eba',
+      title: c.body,
+    }))
+  // Send-revision handler — local wrapper that closes the draft on success.
+  const handleSendRevision = async () => {
+    if (!revisionDraft.body.trim() || !onRequestRevision) return
+    try {
+      await onRequestRevision(submission, revisionDraft.body.trim())
+      setRevisionDraft({ open: false, body: '' })
+    } catch (e) {
+      try { alert(`Revision request failed: ${e?.message || e}`) } catch {}
+    }
+  }
   return (
-    <Modal open={!!submission} onClose={onClose} size="xl"
-      eyebrow="Submission"
+    <Modal open={!!submission} onClose={onClose} size="full"
+      eyebrow={isApproved ? 'Approved submission' : 'Review submission'}
       title={`v${submission.version_number || 1} · ${editor}`}
-      subtitle={`${submission.approved_at ? 'Approved' : 'In review'} · ${openCount} open comment${openCount === 1 ? '' : 's'}`}>
+      subtitle={`${openCount} open comment${openCount === 1 ? '' : 's'}${submission.__synthetic ? ' · direct upload' : ''}`}>
+      {/* Flex-column wrapper so the action footer + revision composer stay
+          pinned to the bottom while the video / comments grid takes the
+          remaining height. Without this wrapper the Modal body would
+          scroll the footer off-screen on shorter viewports. */}
       <div style={{
-        display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px',
-        gap: 0, minHeight: 420,
+        display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0,
       }}>
-        {/* Video column */}
-        <div style={{ padding: '0 0 16px', minWidth: 0 }}>
-          <div style={{
-            background: '#000', maxHeight: '60vh',
-            display: 'flex', justifyContent: 'center', alignItems: 'center',
-          }}>
-            {url ? (
-              <video ref={videoRef} src={url} controls autoPlay preload="metadata"
-                onLoadedMetadata={onVideoLoaded}
-                onTimeUpdate={onVideoTime}
-                style={{ maxWidth: '100%', maxHeight: '60vh', display: 'block' }} />
-            ) : (
-              <div style={{
-                padding: 40, color: 'rgba(255,255,255,0.6)',
-                fontFamily: 'var(--mono)', fontSize: 12,
-              }}>No playable file on this submission.</div>
-            )}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 400px',
+        gap: 0, minHeight: 0, flex: '1 1 auto',
+      }}>
+        {/* Player + meta column */}
+        <div style={{
+          minWidth: 0, display: 'flex', flexDirection: 'column',
+          background: '#0a0a0a',
+        }}>
+          {/* Custom OPT-branded player. Comment markers sit on the
+              actual scrubber, click anywhere on the bar to scrub. */}
+          <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex' }}>
+            <OptVideoPlayer ref={playerRef}
+              src={url}
+              markers={playerMarkers}
+              onState={onPlayerState}
+              onSeek={() => { /* nothing extra — the player handles seek+play */ }} />
           </div>
-          {/* Comment marker track. Renders proportional dots for each
-              timestamped comment; click → seek the video. Hovering
-              shows the comment body in a tooltip. */}
-          {url && duration > 0 && (
-            <div style={{
-              position: 'relative', height: 22, margin: '0 22px',
-              borderTop: '1px solid var(--rule)',
-              borderBottom: '1px solid var(--rule)',
-              background: 'var(--paper-2)',
-            }}>
-              {topLevels
-                .filter(c => c.timestamp_seconds != null)
-                .map(c => {
-                  const left = Math.min(99, (c.timestamp_seconds / duration) * 100)
-                  const color = c.resolved_at ? 'var(--ink-4)' : '#3e7eba'
-                  return (
-                    <button key={c.id}
-                      onClick={() => seekTo(c.timestamp_seconds)}
-                      title={`${formatTs(c.timestamp_seconds)} — ${c.body.slice(0, 80)}${c.body.length > 80 ? '…' : ''}`}
-                      style={{
-                        position: 'absolute', top: 4, left: `${left}%`,
-                        width: 12, height: 12, borderRadius: '50%',
-                        background: color,
-                        border: '2px solid white',
-                        cursor: 'pointer', padding: 0,
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
-                      }} />
-                  )
-                })}
-            </div>
-          )}
+          {/* Editor's submission note. Tucked just below the player so
+              the operator sees context without scrolling. */}
           {submission.notes && (
             <div style={{
-              padding: '12px 22px 0',
+              padding: '12px 22px',
+              background: 'var(--paper-2)',
+              borderTop: '1px solid var(--rule)',
               fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
-              color: 'var(--ink-2)',
-            }}>{submission.notes}</div>
-          )}
-          {url && (
-            <div style={{
-              padding: '14px 22px 0',
-              fontFamily: 'var(--mono)', fontSize: 10.5,
-              letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: 'var(--ink-2)', fontStyle: 'italic',
+              flexShrink: 0,
             }}>
-              <a href={toDownloadUrl(url, filename)}
-                style={{ color: 'var(--ink-3)', textDecoration: 'underline' }}>
-                Download original
-              </a>
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+                letterSpacing: '0.12em', textTransform: 'uppercase',
+                color: 'var(--ink-4)', marginRight: 8, fontStyle: 'normal',
+              }}>Editor note</span>
+              {submission.notes}
             </div>
           )}
         </div>
         {/* Comments column */}
         <div style={{
           borderLeft: '1px solid var(--rule)',
-          background: 'var(--paper-2)',
+          background: 'var(--paper)',
           display: 'flex', flexDirection: 'column',
-          minHeight: 0, maxHeight: '70vh',
+          minHeight: 0, overflow: 'hidden',
         }}>
           <div style={{
-            padding: '12px 16px',
+            padding: '14px 18px',
             borderBottom: '1px solid var(--rule)',
-            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+            fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
             letterSpacing: '0.12em', textTransform: 'uppercase',
             color: 'var(--ink-3)',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
             <span>Comments</span>
-            <span style={{ color: 'var(--ink-4)' }}>{comments.length}</span>
+            <span style={{ color: 'var(--ink-4)' }}>
+              {openCount > 0 ? `${openCount} open · ${comments.length} total` : `${comments.length} total`}
+            </span>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
             {sortedTop.length === 0 && (
               <div style={{
-                padding: '24px 8px', textAlign: 'center',
-                fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13,
-                color: 'var(--ink-3)',
-              }}>No comments yet.<br/>Click below to add the first one.</div>
+                padding: '36px 8px', textAlign: 'center',
+                fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 14,
+                color: 'var(--ink-3)', lineHeight: 1.6,
+              }}>No comments yet.<br/>
+                <span style={{ fontStyle: 'normal', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
+                  Click the scrubber or "+ Comment" below
+                </span>
+              </div>
             )}
             {sortedTop.map(c => (
               <CommentThread key={c.id}
@@ -2266,16 +2607,9 @@ function SubmissionPreviewModal({ submission, onClose, currentUser }) {
                 currentUser={currentUser} />
             ))}
           </div>
-          {/* Composer. Two modes:
-              1) Quick "Add at {currentTime}" button when composer is closed
-              2) Full textarea when open. ts captured at open time so the
-                 user can scrub around while typing without the marker
-                 moving on submit.
-              For synthetic submissions (direct-edited uploads that bypassed
-              the task flow → no real submission row to attach comments to),
-              we replace the composer with an explanatory note so the
-              operator knows why the comment surface is read-only. */}
-          <div style={{ borderTop: '1px solid var(--rule)', padding: 12 }}>
+          {/* Comment composer — synthetic submissions get an explanation
+              instead, since there's no submission_id to attach comments to. */}
+          <div style={{ borderTop: '1px solid var(--rule)', padding: '12px 14px', background: 'var(--paper-2)' }}>
             {submission.__synthetic ? (
               <div style={{
                 fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink-3)',
@@ -2283,90 +2617,202 @@ function SubmissionPreviewModal({ submission, onClose, currentUser }) {
               }}>
                 <strong style={{ color: 'var(--ink-2)' }}>Comments unavailable.</strong>{' '}
                 This creative was uploaded directly as "edited" and has no
-                editor submission record. To enable comments, re-route it
-                through the editing queue (create a task + submit a version).
-              </div>
-            ) : !composer.open ? (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setComposer({ open: true, body: '', ts: url ? currentTime : null, parentId: null })}
-                  style={{
-                    flex: 1, padding: '8px 12px',
-                    fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                    letterSpacing: '0.08em', textTransform: 'uppercase',
-                    background: 'var(--ink)', color: 'var(--paper)',
-                    border: 'none', cursor: 'pointer',
-                  }}>+ Comment{url && duration > 0 ? ` at ${formatTs(currentTime)}` : ''}</button>
-                {url && duration > 0 && (
-                  <button onClick={() => setComposer({ open: true, body: '', ts: null, parentId: null })}
-                    title="General comment (no timestamp)"
-                    style={{
-                      padding: '8px 12px',
-                      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                      letterSpacing: '0.08em', textTransform: 'uppercase',
-                      background: 'transparent', color: 'var(--ink-3)',
-                      border: '1px solid var(--rule)', cursor: 'pointer',
-                    }}>General</button>
-                )}
+                editor submission record.
               </div>
             ) : (
-              <div>
+              <>
+                {/* "Comment as" indicator — shows who the comment will be
+                    attributed to. Comes from useAdminIdentity (auth user
+                    name) or scope.editorName for editor-portal users. */}
                 <div style={{
-                  fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
-                  letterSpacing: '0.1em', textTransform: 'uppercase',
-                  color: 'var(--ink-3)', marginBottom: 6,
-                  display: 'flex', justifyContent: 'space-between',
+                  fontFamily: 'var(--mono)', fontSize: 9.5,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  color: 'var(--ink-4)', marginBottom: 6,
                 }}>
-                  <span>
-                    {composer.parentId
-                      ? 'Reply'
-                      : composer.ts != null
-                        ? `At ${formatTs(composer.ts)}`
-                        : 'General comment'}
-                  </span>
-                  <button onClick={() => setComposer({ open: false, body: '', ts: null, parentId: null })}
-                    style={{
-                      background: 'transparent', border: 'none', cursor: 'pointer',
-                      color: 'var(--ink-4)', fontSize: 14, padding: 0,
-                    }}>×</button>
+                  Commenting as <strong style={{ color: 'var(--ink-2)' }}>{currentUser?.name || 'Admin'}</strong>
                 </div>
-                <textarea
-                  autoFocus
-                  value={composer.body}
-                  onChange={e => setComposer(c => ({ ...c, body: e.target.value }))}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault()
-                      postComment({ body: composer.body, ts: composer.ts, parentId: composer.parentId })
-                    }
-                  }}
-                  placeholder="What needs to change?"
-                  rows={3}
-                  style={{
-                    width: '100%', padding: '8px 10px',
-                    fontFamily: 'var(--sans)', fontSize: 12.5,
-                    background: 'white', border: '1px solid var(--rule)',
-                    outline: 'none', resize: 'vertical',
-                    boxSizing: 'border-box',
-                  }} />
-                <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>
-                    ⌘/Ctrl-Enter to send
-                  </span>
-                  <button onClick={() => postComment({ body: composer.body, ts: composer.ts, parentId: composer.parentId })}
-                    disabled={busy || !composer.body.trim()}
-                    style={{
-                      padding: '6px 14px',
-                      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                      letterSpacing: '0.08em', textTransform: 'uppercase',
-                      background: busy || !composer.body.trim() ? 'var(--ink-4)' : 'var(--ink)',
-                      color: 'var(--paper)', border: 'none',
-                      cursor: busy || !composer.body.trim() ? 'not-allowed' : 'pointer',
-                    }}>{busy ? 'Posting…' : 'Send'}</button>
-                </div>
-              </div>
+                {!composer.open ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => setComposer({ open: true, body: '', ts: url ? currentTime : null, parentId: null })}
+                      style={{
+                        flex: 1, padding: '9px 12px',
+                        fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+                        letterSpacing: '0.08em', textTransform: 'uppercase',
+                        background: 'var(--ink)', color: 'var(--paper)',
+                        border: 'none', cursor: 'pointer',
+                      }}>+ Comment{url && duration > 0 ? ` at ${fmtTime(currentTime)}` : ''}</button>
+                    {url && duration > 0 && (
+                      <button onClick={() => setComposer({ open: true, body: '', ts: null, parentId: null })}
+                        title="General comment (no timestamp)"
+                        style={{
+                          padding: '9px 12px',
+                          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                          letterSpacing: '0.08em', textTransform: 'uppercase',
+                          background: 'transparent', color: 'var(--ink-3)',
+                          border: '1px solid var(--rule)', cursor: 'pointer',
+                        }}>General</button>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{
+                      fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+                      letterSpacing: '0.1em', textTransform: 'uppercase',
+                      color: 'var(--ink-3)', marginBottom: 6,
+                      display: 'flex', justifyContent: 'space-between',
+                    }}>
+                      <span>
+                        {composer.parentId
+                          ? 'Reply'
+                          : composer.ts != null
+                            ? `At ${fmtTime(composer.ts)}`
+                            : 'General comment'}
+                      </span>
+                      <button onClick={() => setComposer({ open: false, body: '', ts: null, parentId: null })}
+                        style={{
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          color: 'var(--ink-4)', fontSize: 14, padding: 0,
+                        }}>×</button>
+                    </div>
+                    <textarea
+                      autoFocus
+                      value={composer.body}
+                      onChange={e => setComposer(c => ({ ...c, body: e.target.value }))}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          e.preventDefault()
+                          postComment({ body: composer.body, ts: composer.ts, parentId: composer.parentId })
+                        }
+                      }}
+                      placeholder="What needs to change?"
+                      rows={3}
+                      style={{
+                        width: '100%', padding: '8px 10px',
+                        fontFamily: 'var(--sans)', fontSize: 12.5,
+                        background: 'white', border: '1px solid var(--rule)',
+                        outline: 'none', resize: 'vertical',
+                        boxSizing: 'border-box',
+                      }} />
+                    <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>
+                        ⌘/Ctrl-Enter to send
+                      </span>
+                      <button onClick={() => postComment({ body: composer.body, ts: composer.ts, parentId: composer.parentId })}
+                        disabled={posting || !composer.body.trim()}
+                        style={{
+                          padding: '7px 14px',
+                          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+                          letterSpacing: '0.08em', textTransform: 'uppercase',
+                          background: posting || !composer.body.trim() ? 'var(--ink-4)' : 'var(--ink)',
+                          color: 'var(--paper)', border: 'none',
+                          cursor: posting || !composer.body.trim() ? 'not-allowed' : 'pointer',
+                        }}>{posting ? 'Posting…' : 'Send'}</button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
+      </div>
+      {/* Footer — Approve / Request revision / Download.
+          Lives inside the Modal footer slot (the Modal already supports
+          a `footer` prop for this kind of bottom-bar). */}
+      <div style={{
+        padding: '14px 22px',
+        background: 'var(--paper-2)',
+        borderTop: '1px solid var(--rule)',
+        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+      }}>
+        {url && (
+          <a href={toDownloadUrl(url, filename)}
+            style={{
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: 'var(--ink-3)', textDecoration: 'underline',
+            }}>Download original</a>
+        )}
+        <span style={{ flex: 1 }} />
+        {isApproved && (
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: '#3e8a5e',
+          }}>Approved · {new Date(submission.approved_at).toLocaleDateString()}</span>
+        )}
+        {canAct && onRequestRevision && !revisionDraft.open && (
+          <button onClick={() => setRevisionDraft({ open: true, body: '' })}
+            disabled={parentBusy}
+            style={{
+              padding: '8px 16px',
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: '#d09c08', color: '#3a2904',
+              border: 'none', cursor: parentBusy ? 'not-allowed' : 'pointer',
+            }}>Request revision</button>
+        )}
+        {canAct && onApprove && (
+          <button onClick={() => onApprove(submission)}
+            disabled={parentBusy}
+            style={{
+              padding: '8px 18px',
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: parentBusy ? 'var(--ink-4)' : '#3e8a5e',
+              color: 'white',
+              border: 'none', cursor: parentBusy ? 'not-allowed' : 'pointer',
+            }}>{parentBusy ? 'Working…' : 'Approve'}</button>
+        )}
+      </div>
+      {/* Revision-request composer — slides in above the footer when the
+          operator hits "Request revision". One-shot send; closes on
+          success. */}
+      {revisionDraft.open && (
+        <div style={{
+          padding: '14px 22px',
+          background: 'rgba(208,156,8,0.08)',
+          borderTop: '1px solid rgba(208,156,8,0.4)',
+        }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+            letterSpacing: '0.1em', textTransform: 'uppercase',
+            color: '#7a5800', marginBottom: 6,
+          }}>Request revision — tell {editor} what to change</div>
+          <textarea
+            autoFocus
+            value={revisionDraft.body}
+            onChange={e => setRevisionDraft(d => ({ ...d, body: e.target.value }))}
+            placeholder="Be specific. The editor sees this verbatim in their notification."
+            rows={3}
+            style={{
+              width: '100%', padding: '8px 10px',
+              fontFamily: 'var(--sans)', fontSize: 13,
+              background: 'white', border: '1px solid var(--rule)',
+              outline: 'none', resize: 'vertical', boxSizing: 'border-box',
+            }} />
+          <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button onClick={() => setRevisionDraft({ open: false, body: '' })}
+              disabled={parentBusy}
+              style={{
+                padding: '7px 14px',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                background: 'transparent', color: 'var(--ink-3)',
+                border: '1px solid var(--rule)', cursor: 'pointer',
+              }}>Cancel</button>
+            <button onClick={handleSendRevision}
+              disabled={parentBusy || !revisionDraft.body.trim()}
+              style={{
+                padding: '7px 14px',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                background: parentBusy || !revisionDraft.body.trim() ? 'var(--ink-4)' : '#d09c08',
+                color: '#3a2904',
+                border: 'none', cursor: parentBusy || !revisionDraft.body.trim() ? 'not-allowed' : 'pointer',
+              }}>{parentBusy ? 'Sending…' : 'Send revision request'}</button>
+          </div>
+        </div>
+      )}
       </div>
     </Modal>
   )
@@ -11329,10 +11775,62 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       {/* SubmissionPreviewModal stacks on top of this task modal when the
           operator clicks Review on a submission card. The Modal primitive's
           MODAL_DEPTH counter handles z-index, so we just render in the
-          same React subtree. */}
+          same React subtree.
+
+          Approve + Request revision are wired here so the operator can
+          act WITHIN the review modal (Ben's overhaul ask — "I can either
+          go to approve or request revision from there"). Both handlers
+          share the existing approveSubmission / status-flip + notify
+          logic — we just write the revision feedback text first since
+          the modal's revision composer collects it inline. */}
       <SubmissionPreviewModal
         submission={reviewingSub}
         currentUser={reviewIdentity}
+        busy={busy}
+        onApprove={async (sub) => {
+          await approveSubmission(sub)
+          setReviewingSub(null)
+        }}
+        onRequestRevision={async (sub, feedbackText) => {
+          // Mirror SubmissionsPanel.submitRevisionPopup: write the feedback
+          // text to the submission row, then run the same status-flip +
+          // notify path the panel uses.
+          setBusy(true)
+          try {
+            const patch = {
+              feedback_text: feedbackText,
+              feedback_at: new Date().toISOString(),
+              feedback_by_name: reviewIdentity?.name || 'Admin',
+              feedback_read_at: null,
+            }
+            const { error: fbErr } = await supabase.from('lib_task_submissions')
+              .update(patch).eq('id', sub.id)
+            if (fbErr) throw fbErr
+            const { error: stErr } = await supabase.from('lib_editing_tasks')
+              .update({ status: 'needs_revision' }).eq('id', task.task_id)
+            if (stErr) throw stErr
+            setStatus('needs_revision')
+            if (task.editor_id) {
+              notifyEditor({
+                editor_id: task.editor_id,
+                kind: 'revision_requested',
+                task_id: task.task_id,
+                submission_id: sub.id,
+                creative_id: task.creative_id,
+                title: `Revision requested on v${sub.version_number || 1} — ${taskDisplayName(task)}`,
+                body: feedbackText.length > 180 ? feedbackText.slice(0, 177) + '…' : feedbackText,
+                link_path: `/editor-view?task=${task.task_id}`,
+              })
+            }
+            await reloadSubmissions()
+            onSaved?.()
+            setReviewingSub(null)
+          } catch (e) {
+            setErr(`Revision request failed: ${e.message || e}`)
+          } finally {
+            setBusy(false)
+          }
+        }}
         onClose={() => setReviewingSub(null)} />
     </Modal>
   )
@@ -11547,91 +12045,89 @@ function SubmissionsPanel({ submissions, canApprove, canDelete, canFeedback = tr
                     {sub.submitted_by_name || 'Unknown'} · {new Date(sub.created_at).toLocaleString()}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-                  {/* Review = opens SubmissionPreviewModal with the comment
-                      surface. Only available for playable submissions —
-                      ingestion-pending external links don't have a file_url
-                      yet, and pure external_url (Frame.io, etc.) without
-                      file_url can't be embedded so we don't pretend. */}
-                  {onOpenReview && sub.file_url && (
-                    <button type="button"
-                      onClick={() => onOpenReview(sub)}
-                      style={{
-                        padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
-                        fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: 'var(--ink)', color: 'var(--paper)',
-                        border: 'none', borderRadius: 2, cursor: 'pointer',
-                      }}>Review</button>
-                  )}
-                  {(sub.file_url || sub.external_url) && (
-                    // toDownloadUrl wraps the Supabase URL with ?download=
-                    // per the quality contract — without it, browsers
-                    // ignore the download attribute and play in-tab.
-                    // External (Drive) URLs pass through unchanged.
-                    <a href={sub.file_url ? toDownloadUrl(sub.file_url, `v${sub.version_number || 1}.mp4`) : sub.external_url}
-                      target="_blank" rel="noreferrer"
-                      style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)', textDecoration: 'underline' }}>
-                      Open
-                    </a>
-                  )}
+                {/* Action row — collapsed to one primary + small quick actions.
+                    Ben's overhaul ask: Review is the catch-all (opens player +
+                    comments + approve/revision in the modal). Approve + Request
+                    revision still live HERE as quick-paths for the "I only have
+                    one comment / no comments" workflow. Open external link
+                    deleted (Review covers playback; download is inside the
+                    modal). Delete kept but de-emphasised. */}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
                   {canApprove && !isApproved && (
                     <button type="button" disabled={busy}
                       onClick={() => onApprove?.(sub)}
+                      title="Approve this version. Use Review if you want to leave comments first."
                       style={{
-                        padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
-                        fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: '#3e8a5e', color: 'white',
-                        border: 'none', borderRadius: 2, cursor: busy ? 'not-allowed' : 'pointer',
+                        padding: '4px 10px',
+                        fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'transparent', color: '#3e8a5e',
+                        border: '1px solid rgba(62,138,94,0.5)', borderRadius: 2,
+                        cursor: busy ? 'not-allowed' : 'pointer',
                       }}>Approve</button>
                   )}
-                  {/* Request revision — admin-only, per-submission. Flips
-                      the task to needs_revision and pings the editor. The
-                      feedback text on this version (if any) is included in
-                      the notification body. Decoupled from the Save
-                      feedback button so admins can request revision
-                      without re-typing feedback, OR save feedback without
-                      flipping status — Ben's workflow ask. */}
                   {canFeedback && currentUserRole === 'admin' && !isApproved && (
                     <button type="button" disabled={busy || feedbackSavingId === sub.id}
                       onClick={() => openRevisionPopup(sub)}
-                      title="Open a popup to write the revision feedback, then send it. Flips the task to needs_revision + notifies the editor."
+                      title="Quick path: open a popup to type revision feedback. For per-timestamp comments, use Review."
                       style={{
-                        padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
-                        fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: '#d09c08', color: '#3a2904',
-                        border: 'none', borderRadius: 2, cursor: busy ? 'not-allowed' : 'pointer',
-                      }}>Request revision</button>
+                        padding: '4px 10px',
+                        fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'transparent', color: '#7a5800',
+                        border: '1px solid rgba(208,156,8,0.5)', borderRadius: 2,
+                        cursor: busy ? 'not-allowed' : 'pointer',
+                      }}>Revise</button>
                   )}
                   {canDelete && confirmDeleteId !== sub.id && (
                     <button type="button" disabled={busy}
                       onClick={() => setConfirmDeleteId(sub.id)}
+                      title="Delete this submission (soft delete)"
                       style={{
-                        padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
-                        fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: 'transparent', color: '#b53e3e',
-                        border: '1px solid rgba(181,62,62,0.35)', borderRadius: 2,
-                        cursor: busy ? 'not-allowed' : 'pointer',
-                      }}>Delete</button>
+                        padding: '4px 8px',
+                        fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                        background: 'transparent', color: 'var(--ink-4)',
+                        border: '1px solid transparent', borderRadius: 2,
+                        cursor: busy ? 'not-allowed' : 'pointer', lineHeight: 1,
+                      }}>×</button>
                   )}
                   {canDelete && confirmDeleteId === sub.id && (
                     <>
                       <button type="button" disabled={busy}
                         onClick={() => setConfirmDeleteId(null)}
                         style={{
-                          padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
-                          fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                          padding: '4px 8px',
+                          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
+                          letterSpacing: '0.06em', textTransform: 'uppercase',
                           background: 'transparent', color: 'var(--ink-3)',
                           border: '1px solid var(--rule)', borderRadius: 2, cursor: 'pointer',
                         }}>Cancel</button>
                       <button type="button" disabled={busy}
                         onClick={() => { onDelete?.(sub); setConfirmDeleteId(null) }}
                         style={{
-                          padding: '3px 9px', fontFamily: 'var(--mono)', fontSize: 10,
-                          fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                          padding: '4px 8px',
+                          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+                          letterSpacing: '0.06em', textTransform: 'uppercase',
                           background: '#b53e3e', color: 'white',
                           border: 'none', borderRadius: 2, cursor: 'pointer',
-                        }}>Confirm delete</button>
+                        }}>Confirm</button>
                     </>
+                  )}
+                  {/* Primary action — opens the OPT-branded review surface
+                      with the custom player, scrubber-pinned comment
+                      markers, and Approve / Request revision in the
+                      modal footer. */}
+                  {onOpenReview && sub.file_url && (
+                    <button type="button"
+                      onClick={() => onOpenReview(sub)}
+                      style={{
+                        padding: '6px 14px',
+                        fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+                        letterSpacing: '0.08em', textTransform: 'uppercase',
+                        background: 'var(--ink)', color: 'var(--paper)',
+                        border: 'none', cursor: 'pointer',
+                        marginLeft: 6,
+                      }}>Review ▶</button>
                   )}
                 </div>
               </div>

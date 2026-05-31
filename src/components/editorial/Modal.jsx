@@ -44,6 +44,12 @@ const SIZES = {
   md: 720,
   lg: 920,
   xl: 1080,
+  // 'full' is used by the SubmissionPreviewModal review surface — the
+  // earlier xl size (1080px) felt cramped on big monitors when the
+  // video, scrubber, AND comments sidebar all had to share it. 'full'
+  // lets the modal fill nearly the entire viewport so the video can
+  // breathe.
+  full: 1600,
 }
 
 export default function Modal({
