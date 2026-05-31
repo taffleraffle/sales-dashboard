@@ -149,14 +149,24 @@ export async function listAngles({ offer_slug } = {}) {
  * @param {number} [opts.n_desires=5]
  * @param {string} [opts.niche_hint]   — optional context (niche, situation, vertical specifics)
  */
-export async function generateAngles({ offer_slug, n_problems = 5, n_desires = 5, niche_hint, extra_instructions } = {}) {
+export async function generateAngles({
+  offer_slug,
+  n_problems = 5,
+  n_circumstances = 0,
+  n_outcomes,
+  n_desires,           // legacy alias for n_outcomes
+  niche_hint,
+  extra_instructions,
+} = {}) {
   if (!offer_slug) throw new Error('generateAngles: offer_slug required')
+  const outcomes = typeof n_outcomes === 'number' ? n_outcomes : (typeof n_desires === 'number' ? n_desires : 5)
   const { data, error } = await supabase.functions.invoke('creative-generate-script', {
     body: {
       generation_target: 'angles',
       offer_slug,
       n_problems,
-      n_desires,
+      n_circumstances,
+      n_outcomes: outcomes,
       niche_hint: niche_hint || undefined,
       extra_instructions: (extra_instructions && extra_instructions.trim()) || undefined,
     },
@@ -164,6 +174,21 @@ export async function generateAngles({ offer_slug, n_problems = 5, n_desires = 5
   if (error) throw new Error(error.message || 'angle generation failed')
   if (data?.error) throw new Error(data.error)
   return data
+}
+
+// Display metadata for angle_type values. Single source of truth for
+// UI colors, labels, and ordering across LibraryAngleTile, AngleChip,
+// AngleCard, the hover popup, and the Messaging count picker.
+export const ANGLE_TYPE_META = {
+  problem:      { label: 'Problem',      color: '#b53e3e', order: 1 },
+  circumstance: { label: 'Circumstance', color: '#d4a535', order: 2 },
+  outcome:      { label: 'Outcome',      color: '#3068b5', order: 3 },
+  // Legacy 'desire' is treated as outcome for display purposes
+  desire:       { label: 'Outcome',      color: '#3068b5', order: 3 },
+  legacy:       { label: 'Legacy',       color: '#888888', order: 4 },
+}
+export function angleTypeMeta(t) {
+  return ANGLE_TYPE_META[t] || { label: t || 'Other', color: '#888888', order: 99 }
 }
 
 /**

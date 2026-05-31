@@ -3,7 +3,8 @@ import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Z
 import { generateScripts, generateAngles, generateProofsForAngle,
          listAngles, listHookShapes, listMechanisms,
          listProofCharactersForAngle,
-         listGeneratedScripts } from '../../services/scriptGenerator'
+         listGeneratedScripts,
+         angleTypeMeta } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import { listTestBatches, addScriptsToBatch } from '../../services/testBatches'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
@@ -64,7 +65,8 @@ export default function AdsGenerator() {
   // Messaging-mode state
   const [nicheHint, setNicheHint] = useState('')
   const [nProblems, setNProblems] = useState(5)
-  const [nDesires, setNDesires] = useState(5)
+  const [nCircumstances, setNCircumstances] = useState(3)
+  const [nOutcomes, setNOutcomes] = useState(5)
   const [messagingBusy, setMessagingBusy] = useState(false)
   const [messagingResult, setMessagingResult] = useState(null)
   // Free-text extra instructions appended to the Claude prompt. Used for
@@ -336,27 +338,76 @@ export default function AdsGenerator() {
 
   async function handleGenerateMessaging() {
     if (!offerSlug) { setErr('Pick an offer first'); return }
+    const total = nProblems + nCircumstances + nOutcomes
+    if (total === 0) { setErr('Pick at least one bucket > 0'); return }
     setMessagingBusy(true); setErr(null); setMessagingResult(null)
+    // Persist an in-flight marker so this run survives navigation —
+    // if the operator clicks away mid-flight, the next mount sees this
+    // marker and shows a recovery banner that polls the library until
+    // the new rows appear or 5 min lapses.
+    const baselineCount = messagingLibrary.length
+    saveMessagingInFlight({
+      offer_slug: offerSlug,
+      started_at: Date.now(),
+      expected_count: total,
+      baseline_lib_count: baselineCount,
+    })
     try {
       const res = await generateAngles({
         offer_slug: offerSlug,
         n_problems: nProblems,
-        n_desires: nDesires,
+        n_circumstances: nCircumstances,
+        n_outcomes: nOutcomes,
         niche_hint: nicheHint || undefined,
         extra_instructions: extraInstructions.trim() || undefined,
       })
       setMessagingResult(res)
-      // Refresh angles for both the Scripts picker and the persistent
-      // Messaging library list below the Generate button. New entries
-      // for this offer will be visible immediately.
       listAngles({ offer_slug: offerSlug }).then(setAngles).catch(() => {})
       refreshMessagingLibrary(offerSlug)
     } catch (e) {
       setErr(e.message)
     } finally {
       setMessagingBusy(false)
+      clearMessagingInFlight()
     }
   }
+
+  // ── In-flight messaging job recovery (Ben 2026-06-01) ──────────
+  // If the operator clicks away during a generation, the React component
+  // unmounts but the Edge Function keeps running server-side (the angles
+  // auto-save to script_angles regardless of frontend state). The next
+  // mount checks localStorage for an unfinished job and shows a recovery
+  // banner + polls the library every 4s until new rows appear (success)
+  // or 5 minutes lapse (assume dead).
+  const [inFlightRecovery, setInFlightRecovery] = useState(null)
+  useEffect(() => {
+    if (!offerSlug) return
+    const job = readMessagingInFlight()
+    if (!job || job.offer_slug !== offerSlug) return
+    const ageSec = (Date.now() - job.started_at) / 1000
+    if (ageSec > 300) { clearMessagingInFlight(); return }
+    setInFlightRecovery(job)
+    // Poll every 4s — when lib grows past the baseline, clear and stop.
+    const pollId = setInterval(async () => {
+      try {
+        const fresh = await listAngles({ offer_slug: offerSlug })
+        if (fresh.length > job.baseline_lib_count) {
+          setAngles(fresh)
+          refreshMessagingLibrary(offerSlug)
+          clearMessagingInFlight()
+          setInFlightRecovery(null)
+          clearInterval(pollId)
+        }
+      } catch {}
+      if ((Date.now() - job.started_at) / 1000 > 300) {
+        clearMessagingInFlight()
+        setInFlightRecovery(null)
+        clearInterval(pollId)
+      }
+    }, 4000)
+    return () => clearInterval(pollId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerSlug])
 
   // Two-stage confirm: clicking Retire on a row sets retireAngleTarget,
   // which opens the ConfirmModal. ConfirmModal's confirm fires performRetireAngle.
@@ -620,6 +671,44 @@ export default function AdsGenerator() {
       {/* ──── MESSAGING MODE ──── */}
       {genTarget === 'messaging' && (
         <>
+          {/* Recovery banner: appears when an in-flight job was started
+              for THIS offer in a previous session/tab and hasn't returned
+              yet. Polls the library every 4s; clears itself when new rows
+              appear or after 5 min. The user can dismiss it manually. */}
+          {inFlightRecovery && inFlightRecovery.offer_slug === offerSlug && (
+            <div style={{
+              marginBottom: 12, padding: '12px 14px',
+              background: '#fef6e6', border: '1px solid #e8c98a',
+              borderLeft: '3px solid #d68f00',
+              fontFamily: 'var(--sans)', fontSize: 13, color: '#7a5810',
+              borderRadius: 2, display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <span style={{
+                display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+                background: '#d68f00', animation: 'pulse 1s ease-in-out infinite',
+                flexShrink: 0,
+              }} />
+              <div style={{ flex: 1, lineHeight: 1.5 }}>
+                <strong>Generation in progress from an earlier session</strong>
+                <span style={{ marginLeft: 8, fontFamily: 'var(--mono)', fontSize: 11 }}>
+                  ({Math.floor((Date.now() - inFlightRecovery.started_at) / 1000)}s ago · expecting {inFlightRecovery.expected_count} angles)
+                </span>
+                <div style={{ fontSize: 12, fontStyle: 'italic', marginTop: 2, color: '#8a6418' }}>
+                  Polling the library for new rows. They'll appear below as soon as Claude finishes.
+                </div>
+              </div>
+              <button onClick={() => { clearMessagingInFlight(); setInFlightRecovery(null) }}
+                title="Dismiss"
+                style={{
+                  padding: 4, background: 'transparent', border: 'none',
+                  color: '#8a6418', cursor: 'pointer',
+                }}>
+                <X size={14} />
+              </button>
+              <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }`}</style>
+            </div>
+          )}
+
           {/* Count + Generate row — primary action. */}
           <div style={{
             marginBottom: 6,
@@ -628,46 +717,41 @@ export default function AdsGenerator() {
             borderRadius: 2,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
-                              textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
-                  Problems
+              {[
+                { key: 'Problems',      value: nProblems,      set: setNProblems,      color: '#b53e3e' },
+                { key: 'Circumstances', value: nCircumstances, set: setNCircumstances, color: '#d4a535' },
+                { key: 'Outcomes',      value: nOutcomes,      set: setNOutcomes,      color: '#3068b5' },
+              ].map(b => (
+                <div key={b.key}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6,
+                  }}>
+                    <span style={{
+                      width: 8, height: 8, borderRadius: 1,
+                      background: b.color, display: 'inline-block',
+                    }} />
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
+                      textTransform: 'uppercase', color: 'var(--ink-4)',
+                    }}>{b.key}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {[0, 3, 5, 10, 15, 20].map(n => (
+                      <button key={n} onClick={() => b.set(n)}
+                        style={{
+                          padding: '8px 12px',
+                          border: `1px solid ${b.value === n ? 'var(--ink)' : 'var(--rule)'}`,
+                          background: b.value === n ? 'var(--accent)' : 'white',
+                          color: 'var(--ink)',
+                          fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
+                          cursor: 'pointer', borderRadius: 2, minWidth: 42,
+                        }}>{n}</button>
+                    ))}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {[3, 5, 10, 15, 20].map(n => (
-                    <button key={n} onClick={() => setNProblems(n)}
-                      style={{
-                        padding: '8px 14px',
-                        border: `1px solid ${nProblems === n ? 'var(--ink)' : 'var(--rule)'}`,
-                        background: nProblems === n ? 'var(--accent)' : 'white',
-                        color: 'var(--ink)',
-                        fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
-                        cursor: 'pointer', borderRadius: 2, minWidth: 50,
-                      }}>{n}</button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
-                              textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
-                  Desires
-                </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {[3, 5, 10, 15, 20].map(n => (
-                    <button key={n} onClick={() => setNDesires(n)}
-                      style={{
-                        padding: '8px 14px',
-                        border: `1px solid ${nDesires === n ? 'var(--ink)' : 'var(--rule)'}`,
-                        background: nDesires === n ? 'var(--accent)' : 'white',
-                        color: 'var(--ink)',
-                        fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
-                        cursor: 'pointer', borderRadius: 2, minWidth: 50,
-                      }}>{n}</button>
-                  ))}
-                </div>
-              </div>
+              ))}
               <button onClick={handleGenerateMessaging}
-                disabled={messagingBusy || !offerSlug}
+                disabled={messagingBusy || !offerSlug || (nProblems + nCircumstances + nOutcomes === 0)}
                 style={{
                   marginLeft: 'auto',
                   padding: '14px 24px', fontFamily: 'var(--mono)', fontSize: 12,
@@ -675,19 +759,20 @@ export default function AdsGenerator() {
                   border: '2px solid var(--ink)',
                   background: messagingBusy ? 'var(--ink-3)' : 'var(--ink)',
                   color: 'var(--paper)', cursor: messagingBusy ? 'wait' : 'pointer',
-                  opacity: !offerSlug ? 0.4 : 1, borderRadius: 2,
+                  opacity: (!offerSlug || (nProblems + nCircumstances + nOutcomes === 0)) ? 0.4 : 1,
+                  borderRadius: 2,
                   boxShadow: !messagingBusy && offerSlug ? '4px 4px 0 var(--accent)' : 'none',
                   display: 'inline-flex', alignItems: 'center', gap: 8,
                 }}>
                 <Sparkles size={14} />
                 {messagingBusy
-                  ? `Generating ${nProblems + nDesires}…`
-                  : `Generate ${nProblems + nDesires} angles`}
+                  ? `Generating ${nProblems + nCircumstances + nOutcomes}…`
+                  : `Generate ${nProblems + nCircumstances + nOutcomes} angles`}
               </button>
             </div>
             {messagingBusy && (
               <div style={{ marginTop: 14 }}>
-                <GenProgress kind="angles" total={nProblems + nDesires} />
+                <GenProgress kind="angles" total={nProblems + nCircumstances + nOutcomes} />
               </div>
             )}
             {messagingResult?.save_error && (
@@ -1920,9 +2005,9 @@ function AngleChip({ angle, selected, proofCount, onToggle, onOpenProofs }) {
   const [popOpen, setPopOpen] = useState(false)
   const dwellRef = useRef(null)
 
-  const isProblem = angle.angle_type === 'problem'
-  const typeColor = isProblem ? '#b53e3e' : '#3068b5'
-  const typeLabel = isProblem ? 'Problem' : 'Desire'
+  const meta = angleTypeMeta(angle.angle_type)
+  const typeColor = meta.color
+  const typeLabel = meta.label
   const needsProofs = proofCount === 0
 
   function startHover() {
@@ -2046,6 +2131,25 @@ function PopupRow({ label, value }) {
   )
 }
 
+// localStorage in-flight marker for Messaging generation. Survives
+// component unmount + page refresh + navigation. The Edge Function
+// auto-saves angles regardless, so this is purely a UI signal — the
+// remount recovery effect polls the library and clears the marker once
+// the new rows surface.
+const MESSAGING_INFLIGHT_KEY = 'opt-ads-generate-messaging-inflight'
+function saveMessagingInFlight(job) {
+  try { localStorage.setItem(MESSAGING_INFLIGHT_KEY, JSON.stringify(job)) } catch {}
+}
+function readMessagingInFlight() {
+  try {
+    const raw = localStorage.getItem(MESSAGING_INFLIGHT_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+function clearMessagingInFlight() {
+  try { localStorage.removeItem(MESSAGING_INFLIGHT_KEY) } catch {}
+}
+
 function pillButtonStyle() {
   return {
     padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
@@ -2112,9 +2216,9 @@ function ModeCard({ selected, onClick, icon, title, desc }) {
 // the prospect's voice + the hook-build sketch + any pain points.
 // Tag color follows the OPT palette via PALETTE in atoms.jsx.
 function AngleCard({ angle }) {
-  const isProblem = angle.angle_type === 'problem'
-  const tagColor = isProblem ? '#b53e3e' : '#3068b5'   // PALETTE.red / blueLight
-  const tagLabel = isProblem ? 'Problem' : 'Desire'
+  const meta = angleTypeMeta(angle.angle_type)
+  const tagColor = meta.color
+  const tagLabel = meta.label
   return (
     <div style={{
       padding: '18px 22px', background: 'var(--paper)',
@@ -2332,7 +2436,7 @@ function GenProgress({ kind, total, fanout }) {
       }}>
         {fanout && fanoutTotal > 1
           ? `Fanning out ${fanoutTotal} parallel Claude calls — phases above are estimated; the progress bar is real.`
-          : `Claude runs the whole batch in one pass — phases are an estimate, not a real-time signal. A ${total}-item batch usually finishes in ${Math.round((8 + total * 4) / 6) * 6}–${Math.round((8 + total * 4) / 6) * 6 + 30}s.`}
+          : `Claude runs the whole batch in one pass — phases are an estimate, not a real-time signal. A ${total}-item batch usually finishes in ${Math.round((8 + total * 4) / 6) * 6}–${Math.round((8 + total * 4) / 6) * 6 + 30}s. Safe to navigate away — angles auto-save to the library and a recovery banner will surface them when you come back.`}
       </div>
       <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }`}</style>
     </div>
@@ -2519,9 +2623,9 @@ async function upsertProofCharacterCall(payload) {
 // Retire = soft-delete (active=false).
 function LibraryAngleTile({ angle, proofs, onRetire, onOpenProofs }) {
   const [open, setOpen] = useState(false)
-  const isProblem = angle.angle_type === 'problem'
-  const typeColor = isProblem ? '#b53e3e' : '#3068b5'
-  const typeLabel = isProblem ? 'Problem' : 'Desire'
+  const meta = angleTypeMeta(angle.angle_type)
+  const typeColor = meta.color
+  const typeLabel = meta.label
   // Proof breakdown by type — used for the small footer chip row.
   const byType = {}
   for (const p of proofs) {
@@ -2654,9 +2758,9 @@ function LibraryAngleTile({ angle, proofs, onRetire, onOpenProofs }) {
 // grid. Will get removed once nothing else references it.
 function SavedAngleRow({ angle, onRetire }) {
   const [open, setOpen] = useState(false)
-  const isProblem = angle.angle_type === 'problem'
-  const tagColor = isProblem ? '#b53e3e' : '#3068b5'
-  const tagLabel = isProblem ? 'Problem' : 'Desire'
+  const meta = angleTypeMeta(angle.angle_type)
+  const tagColor = meta.color
+  const tagLabel = meta.label
   return (
     <div style={{
       background: 'white', border: '1px solid var(--rule)',

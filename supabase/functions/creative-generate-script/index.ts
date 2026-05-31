@@ -397,23 +397,72 @@ Pick the shape that the angle's voice MOST NATURALLY implies.`
 
 const ANGLE_TOOL_NAME = 'generate_angles'
 
-function buildAngleToolSchema(n_problems: number, n_desires: number, groundingCount: number) {
+// Vertical rank-awareness tiers (Ben 2026-06-01). Used to pick how many
+// rank-explicit outcomes the generator must produce.
+//   HIGH    — emergency / local-pack-driven verticals. 40% of outcomes rank-explicit.
+//   MODERATE — local-relevant but reputation-driven. 20% rank-explicit.
+//   LOW     — referral / authority / B2B. 0% rank-explicit (substitute authority desires).
+//   SKIP    — not local-rank at all (e-commerce, B2B SaaS).
+function classifyRankAwareness(vertical: string | null | undefined): 'HIGH' | 'MODERATE' | 'LOW' | 'SKIP' {
+  const v = (vertical || '').toLowerCase().trim()
+  if (!v) return 'MODERATE'   // unknown — middle tier is safest default
+  const HIGH = ['restoration', 'water damage', 'mit', 'mitigation', 'fire damage', 'mold', 'biohazard',
+                'roofing', 'roof', 'plumbing', 'plumber', 'hvac', 'electrical', 'electrician',
+                'pest', 'locksmith', 'garage door', 'garage', 'concrete', 'foundation', 'septic',
+                'tree service', 'fence', 'painting']
+  const MODERATE = ['dental', 'dentist', 'veterinary', 'vet', 'med spa', 'medspa', 'chiropractor',
+                    'gym', 'fitness', 'realtor', 'real estate', 'mortgage', 'insurance broker',
+                    'auto repair', 'mechanic', 'auto detail']
+  const LOW = ['accounting', 'cpa', 'bookkeeping', 'law', 'lawyer', 'attorney', 'attorneys',
+               'consulting', 'coaching', 'fractional']
+  const SKIP = ['ecommerce', 'e-commerce', 'd2c', 'saas', 'b2b saas', 'agency', 'marketing agency']
+  for (const k of HIGH) if (v.includes(k)) return 'HIGH'
+  for (const k of MODERATE) if (v.includes(k)) return 'MODERATE'
+  for (const k of LOW) if (v.includes(k)) return 'LOW'
+  for (const k of SKIP) if (v.includes(k)) return 'SKIP'
+  return 'MODERATE'
+}
+
+// Given a target outcome count + the rank-awareness tier, return the
+// REQUIRED minimum number of rank-explicit outcomes. The schema enforces
+// this via a separate sub-bucket so Claude can't silently dodge it.
+function requiredRankExplicit(n_outcomes: number, tier: ReturnType<typeof classifyRankAwareness>): number {
+  if (tier === 'SKIP') return 0
+  if (tier === 'LOW') return 0
+  if (tier === 'MODERATE') return Math.min(n_outcomes, Math.max(1, Math.floor(n_outcomes * 0.2)))
+  // HIGH
+  return Math.min(n_outcomes, Math.max(2, Math.ceil(n_outcomes * 0.4)))
+}
+
+function buildAngleToolSchema(
+  n_problems: number,
+  n_circumstances: number,
+  n_outcomes: number,
+  groundingCount: number,
+  rankTier: ReturnType<typeof classifyRankAwareness>,
+) {
+  const allowedTypes = ['problem', 'circumstance', 'outcome']
+  const total = n_problems + n_circumstances + n_outcomes
+  const rankMin = requiredRankExplicit(n_outcomes, rankTier)
   const angleItem = {
     type: 'object',
     properties: {
-      angle_type: { type: 'string', enum: ['problem', 'desire'] },
+      angle_type: { type: 'string', enum: allowedTypes,
+        description: 'problem = pain the prospect is stuck on. circumstance = identity/situation moment (e.g. "I just hired my third tech and there is not enough work to keep them busy"). outcome = the end-state they want (e.g. "I want to be the #1 water damage company in Houston on Maps"). Return problems first, then circumstances, then outcomes.' },
+      rank_explicit: { type: 'boolean',
+        description: `TRUE only if this is an OUTCOME angle that uses a literal rank/visibility framing — phrases like "rank #1", "top 3 on Maps", "first pin", "AI-recommended", "the company ChatGPT names", "Local Service Ads dominance", "page-one organic", "outrank every other [vertical]". FALSE otherwise (always FALSE for problem and circumstance angles). The batch MUST contain at least ${rankMin} OUTCOMES with rank_explicit=TRUE${rankTier === 'HIGH' ? ' — this is a HIGH rank-aware vertical and the operator has explicitly asked for rank-#1 angles to surface' : ''}.` },
       name: {
         type: 'string',
-        description: 'A short title (3-7 words) summarizing the angle. Will be displayed in the picker.',
+        description: 'Short title (3-7 words) summarizing the angle. Displayed in the picker.',
       },
       prospect_voice: {
         type: 'string',
-        description: "The angle phrased in the prospect's own first-person voice, 1 sentence. E.g. \"I can't hire a senior accountant for love or money.\" or \"I want to be the CPA every banker in my city refers to.\"",
+        description: 'Angle phrased in the prospect\'s own first-person voice, 1 sentence. PROBLEM example: "I can\'t hire a senior accountant for love or money." CIRCUMSTANCE example: "I just brought on my third tech and now there\'s not enough work to give them." OUTCOME example: "I want to be the first Maps pin every homeowner in Houston sees for water damage."',
       },
       pain_points: {
         type: 'array',
         items: { type: 'string' },
-        description: '2-4 specific lived-reality details that make this angle visceral. E.g. for the bookkeeping pain: ["watching Bench cold-pitch $300/mo clients", "QBO Live offering software-plus-human at half my price", "every renewal becoming a price negotiation"]. Used as PAIN POINTS block in script generation.',
+        description: '2-4 specific lived-reality details that make this angle visceral. E.g. for the bookkeeping pain: ["watching Bench cold-pitch $300/mo clients", "QBO Live offering software-plus-human at half my price"]. For outcomes: the supporting facts that make the desire feel earnable.',
       },
       hook_build_sketch: {
         type: 'string',
@@ -421,12 +470,12 @@ function buildAngleToolSchema(n_problems: number, n_desires: number, groundingCo
       },
       why_it_matters: {
         type: 'string',
-        description: 'PROSE PARAGRAPH (4-6 sentences) on WHY this problem/desire bites for this audience. Cover: the consequences of NOT solving it (what falls apart), the deeper anxiety underneath (identity, status, peer comparison), what they have already tried that failed, and the specific moment of friction. Visceral, not abstract.',
+        description: 'PROSE PARAGRAPH (4-6 sentences). For PROBLEMS: consequences of not solving + deeper anxiety + what they tried. For CIRCUMSTANCES: why this moment is decision-forcing (what they about to lose / gain). For OUTCOMES: what changes when they get there + what they have to believe to chase it.',
       },
       evidence_examples: {
         type: 'array',
         items: { type: 'string' },
-        description: '2-3 CONCRETE SITUATIONAL MOMENTS where this angle bites. Specific scenes, not summaries. E.g. "Refreshing the CRM at 9pm hoping a call came in.", "Asking his wife why he\'s stressed and not wanting to explain HomeAdvisor again.", "Walking past the new hire\'s empty desk because there\'s no work to give them."',
+        description: '2-3 CONCRETE SITUATIONAL MOMENTS where this angle bites. Specific scenes, not summaries.',
       },
       sources: groundingCount > 0
         ? {
@@ -434,33 +483,33 @@ function buildAngleToolSchema(n_problems: number, n_desires: number, groundingCo
             items: {
               type: 'object',
               properties: {
-                index: { type: 'integer', description: '1-based index into the GROUNDING SOURCES block in the user message. Cite the index of every source you used to inform this angle.' },
-                relevance: { type: 'string', description: 'One sentence on what this source contributed to the angle (a phrase, a specific concern, a competitor name, etc).' },
+                index: { type: 'integer', description: '1-based index into the GROUNDING SOURCES block in the user message.' },
+                relevance: { type: 'string', description: 'One sentence on what this source contributed.' },
               },
               required: ['index', 'relevance'],
             },
-            description: `Cite the GROUNDING SOURCES (1-${groundingCount}) you actually used while writing this angle. Cite ONLY sources that informed THIS specific angle — do not include every source on every angle. If you wrote this angle purely from training-data reasoning without consulting the grounding block, return an empty array. Do NOT invent sources.`,
+            description: `Cite the GROUNDING SOURCES (1-${groundingCount}) you actually used while writing this angle. Empty array if reasoning-only. Never invent sources.`,
           }
         : {
             type: 'array',
             items: { type: 'object', properties: {}, additionalProperties: false },
-            description: 'No grounding sources were provided for this generation. Return an empty array. Never fabricate sources.',
+            description: 'No grounding sources provided. Return empty array.',
             maxItems: 0,
           },
     },
-    required: ['angle_type', 'name', 'prospect_voice', 'hook_build_sketch', 'why_it_matters', 'evidence_examples', 'sources'],
+    required: ['angle_type', 'rank_explicit', 'name', 'prospect_voice', 'hook_build_sketch', 'why_it_matters', 'evidence_examples', 'sources'],
   }
   return {
     name: ANGLE_TOOL_NAME,
-    description: `Return exactly ${n_problems} problem angles + ${n_desires} desire angles for this offer's prospect. Problems first, then desires.`,
+    description: `Return exactly ${n_problems} problems + ${n_circumstances} circumstances + ${n_outcomes} outcomes. At least ${rankMin} of the outcomes MUST have rank_explicit=true (rank-#1 / top-3 / AI-recommended / Maps-pin framing).`,
     input_schema: {
       type: 'object',
       properties: {
         angles: {
           type: 'array',
           items: angleItem,
-          minItems: n_problems + n_desires,
-          maxItems: n_problems + n_desires,
+          minItems: total,
+          maxItems: total,
         },
       },
       required: ['angles'],
@@ -635,9 +684,12 @@ serve(async (req) => {
   // script_angles so they appear in the Scripts > Angle picker immediately.
   if (generation_target === 'angles') {
     if (!offer_slug) return json({ error: 'offer_slug required for angle generation' }, 400)
-    const n_problems = Math.max(0, Math.min(20, body?.n_problems ?? 5))
-    const n_desires  = Math.max(0, Math.min(20, body?.n_desires ?? 5))
-    if (n_problems + n_desires === 0) return json({ error: 'n_problems + n_desires must be > 0' }, 400)
+    const n_problems       = Math.max(0, Math.min(20, body?.n_problems       ?? 5))
+    const n_circumstances  = Math.max(0, Math.min(20, body?.n_circumstances  ?? 0))
+    // n_outcomes preferred; n_desires accepted as legacy alias for the same.
+    const n_outcomes       = Math.max(0, Math.min(20, body?.n_outcomes ?? body?.n_desires ?? 5))
+    const total = n_problems + n_circumstances + n_outcomes
+    if (total === 0) return json({ error: 'n_problems + n_circumstances + n_outcomes must be > 0' }, 400)
     const niche_hint = (body?.niche_hint || '').trim()
 
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
@@ -658,28 +710,46 @@ serve(async (req) => {
     const grounding = await fetchGrounding(groundingQuery, 6)
     const groundingBlock = formatGroundingBlock(grounding)
 
+    const rankTier = classifyRankAwareness(offer.vertical)
+    const rankMin = requiredRankExplicit(n_outcomes, rankTier)
+    const rankTierBlurb = rankTier === 'HIGH'
+      ? `HIGH rank-aware vertical (${offer.vertical}). At least ${rankMin} of the ${n_outcomes} OUTCOMES MUST be rank-explicit (rank_explicit=true) — literal "rank #1", "top 3 on Maps", "first pin", "AI-recommended", "the one ChatGPT names", "LSA dominance", "page-one organic". This is non-negotiable; the operator has explicitly asked to see rank-#1 angles.`
+      : rankTier === 'MODERATE'
+        ? `MODERATE rank-aware vertical (${offer.vertical}). At least ${rankMin} of the ${n_outcomes} OUTCOMES should be rank-explicit, but secondary to reputation / reviews.`
+        : rankTier === 'LOW'
+          ? `LOW rank-aware vertical (${offer.vertical}). Skip rank-explicit outcomes — referral / authority / LinkedIn desires convert better here.`
+          : `Non-local vertical (${offer.vertical}). Skip Maps / AI-citation / LSA framing entirely.`
+
     const userMsg = [
       `OFFER: ${offer.name} (slug: ${offer.slug})`,
       `VERTICAL: ${offer.vertical}`,
+      `RANK-AWARENESS TIER: ${rankTier} — ${rankTierBlurb}`,
       `PRIMARY AUDIENCE: ${offer.primary_audience || '(none defined)'}`,
       offer.mechanism_name ? `BRAND-NAMED MECHANISM (only mention in passing; the angles are upstream of mechanism): ${offer.mechanism_name}` : '',
       niche_hint ? `\nADDITIONAL CONTEXT FROM OPERATOR: ${niche_hint}\nUse this to bias the angles toward the specific niche / situation the operator named.` : '',
       groundingBlock,
       '',
-      `Generate exactly ${n_problems} PROBLEM angles and ${n_desires} DESIRE angles.`,
-      'Problems = what the prospect is stuck on, phrased in their voice. Desires = what they want, phrased in their voice.',
+      `Generate exactly ${n_problems} PROBLEMS + ${n_circumstances} CIRCUMSTANCES + ${n_outcomes} OUTCOMES (return in that order).`,
+      '',
+      'BUCKET DEFINITIONS:',
+      '  PROBLEM      = what the prospect is stuck on. The pain. Phrased in their voice.',
+      '  CIRCUMSTANCE = the situation / identity moment that makes them decision-ready. NOT a pain, NOT a desire — a STATE. e.g. "I just took on my third tech and can\'t keep them busy", "My biggest referral source just retired", "My new website went live last month and the calls didn\'t change". These are the moments when a prospect goes from "things are fine" to "I need to act".',
+      '  OUTCOME      = the end-state they want. Phrased in their voice as a desire.',
+      '',
       'Each angle must be specific to the audience qualifier (above). Generic "grow your business" angles will be rejected.',
       'For each angle, ALSO write why_it_matters (consequences + deeper anxiety + what they\'ve tried) and 2-3 evidence_examples (concrete situational moments, not summaries). These are not optional.',
       '',
+      `RANK-EXPLICIT REQUIREMENT for OUTCOMES: at least ${rankMin} of the ${n_outcomes} outcomes MUST have rank_explicit=true. Look at the WHAT\'S CONVERTING families in the system prompt — Maps top-3, AI citation, LSA dominance, etc. — and use those literal framings. If you return fewer than ${rankMin} rank_explicit outcomes the response is INVALID. The schema flag is your forcing function: set it true for any outcome that uses rank / Maps / AI / LSA / top-N / first-pin language.`,
+      '',
       'SCHWARTZ DIVERSITY (apply across the batch):',
-      `- AWARENESS STAGES: distribute angles across Problem-Aware (the prospect knows the pain, no solution yet), Solution-Aware (knows agencies/SEO/etc exist, picking between them), Product-Aware (knows OPT or a competitor exists, weighing it), and Most-Aware (already comparing OPT to one specific alternative). A batch of ${n_problems + n_desires} should touch at least ${Math.min(n_problems + n_desires, 3)} distinct stages.`,
+      `- AWARENESS STAGES: distribute angles across Problem-Aware, Solution-Aware, Product-Aware, Most-Aware. A batch of ${total} should touch at least ${Math.min(total, 3)} distinct stages.`,
       '- SOPHISTICATION: tired markets need named-mechanism + sharper promise; greener pockets can land on basic claim + proof. Rotate.',
-      '- MASS DESIRE: each angle must hook into a desire the prospect ALREADY has — never invent a new one. Identify the burning emotion, then channel it.',
-      '- AVOID stacking angles in the same emotional register. If two desires both read as "I want predictability", consolidate into one and use the slot for a different burning desire (recognition, autonomy, escape, status, security, contribution).',
+      '- MASS DESIRE: each outcome must hook into a desire the prospect ALREADY has — never invent a new one. Identify the burning emotion, then channel it.',
+      '- AVOID stacking angles in the same emotional register. If two outcomes both read as "I want predictability", consolidate.',
       grounding.length
-        ? 'Cite only the GROUNDING SOURCES you actually drew from for each angle. If an angle came from reasoning alone, leave its sources array empty. NEVER invent URLs or titles.'
+        ? 'Cite only the GROUNDING SOURCES you actually drew from for each angle. If an angle came from reasoning alone, leave its sources array empty. NEVER invent URLs or titles. Use the grounding to inform ALL THREE buckets — problems pulled from forum complaints, circumstances pulled from posts describing turning-point moments, outcomes pulled from "I wish my business looked like X" threads.'
         : 'No grounding sources were provided this run. Leave every sources array empty. NEVER invent sources.',
-      `Return via the ${ANGLE_TOOL_NAME} tool with problems first, then desires.`,
+      `Return via the ${ANGLE_TOOL_NAME} tool with problems first, then circumstances, then outcomes.`,
       extraBlock,
     ].filter(Boolean).join('\n')
 
@@ -692,10 +762,10 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: ANTHROPIC_MODEL,
-        max_tokens: 3500 + (n_problems + n_desires) * 400,
+        max_tokens: 3500 + total * 400,
         system: ANGLE_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMsg }],
-        tools: [buildAngleToolSchema(n_problems, n_desires, grounding.length)],
+        tools: [buildAngleToolSchema(n_problems, n_circumstances, n_outcomes, grounding.length, rankTier)],
         tool_choice: { type: 'tool', name: ANGLE_TOOL_NAME },
       }),
     })
@@ -751,16 +821,22 @@ serve(async (req) => {
     // payload) carry the same shape. Mutate the generated_angles entry
     // too so the API response has the resolved URLs the UI can render
     // without re-doing the index lookup.
+    // Normalize legacy 'desire' → 'outcome' on save so the DB stays
+    // consistent with the new bucket naming (migration 121). 'desire' is
+    // still accepted by the CHECK constraint for backwards compat.
+    const normalizeType = (t: string) => t === 'desire' ? 'outcome' : t
     for (const a of generated_angles) {
-      const slug = `${offer.slug}-${a.angle_type}-${slugify(a.name)}`
+      const at = normalizeType((a.angle_type || '').toString())
+      const slug = `${offer.slug}-${at}-${slugify(a.name)}`
       if (!slug || seenSlugs.has(slug)) continue
       seenSlugs.add(slug)
       const resolved = resolveSources(a.sources)
-      a.sources = resolved   // mutate so caller sees URLs not indices
+      a.sources = resolved
+      a.angle_type = at   // mutate the response too so UI sees 'outcome' not 'desire'
       inserts.push({
         slug,
         name: a.name,
-        angle_type: a.angle_type,
+        angle_type: at,
         prospect_voice: a.prospect_voice,
         hook_build_sketch: a.hook_build_sketch,
         pain_points: Array.isArray(a.pain_points) ? a.pain_points : [],
@@ -769,9 +845,9 @@ serve(async (req) => {
         sources: resolved,
         offer_slugs: [offer.slug],
         qualifier: offer.primary_audience || '',
-        primary_promise: '',       // filled by Claude or operator later when used in Scripts
-        mechanism_short: '',       // mechanism comes from script_mechanisms (migration 108)
-        guarantee_close: '',       // operator can set or use offer default
+        primary_promise: '',
+        mechanism_short: '',
+        guarantee_close: '',
         active: true,
       })
     }
@@ -803,6 +879,9 @@ serve(async (req) => {
         query: groundingQuery,
         hits: grounding.length,
       },
+      buckets: { n_problems, n_circumstances, n_outcomes },
+      rank_tier: rankTier,
+      rank_explicit_min: rankMin,
     })
   }
 
