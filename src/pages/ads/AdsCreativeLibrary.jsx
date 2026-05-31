@@ -2270,9 +2270,23 @@ function SubmissionPreviewModal({ submission, onClose, currentUser }) {
               1) Quick "Add at {currentTime}" button when composer is closed
               2) Full textarea when open. ts captured at open time so the
                  user can scrub around while typing without the marker
-                 moving on submit. */}
+                 moving on submit.
+              For synthetic submissions (direct-edited uploads that bypassed
+              the task flow → no real submission row to attach comments to),
+              we replace the composer with an explanatory note so the
+              operator knows why the comment surface is read-only. */}
           <div style={{ borderTop: '1px solid var(--rule)', padding: 12 }}>
-            {!composer.open ? (
+            {submission.__synthetic ? (
+              <div style={{
+                fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink-3)',
+                lineHeight: 1.5, padding: '4px 2px',
+              }}>
+                <strong style={{ color: 'var(--ink-2)' }}>Comments unavailable.</strong>{' '}
+                This creative was uploaded directly as "edited" and has no
+                editor submission record. To enable comments, re-route it
+                through the editing queue (create a task + submit a version).
+              </div>
+            ) : !composer.open ? (
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => setComposer({ open: true, body: '', ts: url ? currentTime : null, parentId: null })}
                   style={{
@@ -8390,6 +8404,7 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
    Sort: updated_at DESC by default (most recently approved on top —
    what's freshest). Toggle to ASC for "oldest waiting first" / FIFO. */
 function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched }) {
+  const adminIdentity = useAdminIdentity()
   const [rows, setRows] = useState([])
   const [offers, setOffers] = useState([])
   const [editorsList, setEditorsList] = useState([])
@@ -8780,6 +8795,7 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched }) {
           > preview_url. */}
       <LaunchPreviewModal
         row={previewing}
+        currentUser={adminIdentity}
         onClose={() => setPreviewing(null)} />
 
       {/* Detail drawer — same CreativeDetailModal as a Library matrix row
@@ -9208,60 +9224,81 @@ function relativeTime(iso) {
   return `${months}mo ago`
 }
 
-// Inline preview modal for a launch-queue creative. Same teardown pattern
-// as SubmissionPreviewModal — pause + clear src on unmount so the next
-// open doesn't stutter while the browser unwinds the prior decoder.
-// URL priority matches the rest of the codebase: final_cut_url first
-// (editor's approved cut, always full quality), then approved_url, then
-// drive_url, then preview_url as the last fallback.
-function LaunchPreviewModal({ row, onClose }) {
-  const videoRef = useRef(null)
-  // Same teardown shape as SubmissionPreviewModal — capture live element
-  // when row is set, tear down via cleanup. The earlier "if (row) return"
-  // shape was dead code: the early-return below unmounts the video before
-  // the body ever ran with row=null.
+// Launch-queue review surface. Pops the full Frame.io-style comment
+// surface (SubmissionPreviewModal) for the latest submission tied to
+// this creative — so the launch operator can leave / read review
+// comments without bouncing through the editing queue. For direct-
+// edited uploads that bypassed the task/submission flow (status='edited'
+// set via Library matrix dropdown, no associated task), we render a
+// synthetic submission whose video plays but whose comment composer
+// is disabled with an explanatory note.
+function LaunchPreviewModal({ row, onClose, currentUser }) {
+  const [resolved, setResolved] = useState(null)
+  const [loading, setLoading] = useState(false)
   useEffect(() => {
-    if (!row) return
-    const v = videoRef.current
-    return () => {
-      if (!v) return
-      try { v.pause() } catch {}
-      try { v.removeAttribute('src'); v.load() } catch {}
-    }
+    if (!row) { setResolved(null); return }
+    let mounted = true
+    setLoading(true)
+    ;(async () => {
+      // Find the most recent non-deleted submission for any task on this
+      // creative. The launch queue surfaces the most-recent edited cut,
+      // which is what the operator wants to comment on. Comments are tied
+      // to submission_id at the schema level.
+      const { data: tasks } = await supabase
+        .from('lib_editing_tasks')
+        .select('id')
+        .eq('creative_id', row.id)
+      const taskIds = (tasks || []).map(t => t.id)
+      let sub = null
+      if (taskIds.length > 0) {
+        const { data } = await supabase
+          .from('lib_task_submissions')
+          .select('*')
+          .in('task_id', taskIds)
+          .is('deleted_at', null)
+          .order('version_number', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        sub = data || null
+      }
+      if (!mounted) return
+      if (sub) {
+        setResolved(sub)
+      } else {
+        // No real submission. Fall through to a synthetic one so the
+        // video still plays. SubmissionPreviewModal renders nothing for
+        // the comments effect when submission.id is null — the composer
+        // is gated separately below.
+        const url = row.final_cut_url || row.approved_url || row.drive_url || row.preview_url
+        setResolved({
+          id: null,
+          file_url: url,
+          version_number: 1,
+          submitted_by_name: row.creator || 'Direct upload',
+          notes: row.description || null,
+          approved_at: row.stage_final_cut === 'done' ? row.updated_at : null,
+          // Tag so the modal can show "this creative has no submission
+          // record; comments unavailable" instead of pretending it does.
+          __synthetic: true,
+          __creative_name: rowDisplayName(row) || row.canonical_name || row.name,
+        })
+      }
+      setLoading(false)
+    })()
+    return () => { mounted = false }
   }, [row])
   if (!row) return null
-  const url = row.final_cut_url || row.approved_url || row.drive_url || row.preview_url
-  const title = rowDisplayName(row) || row.canonical_name || row.name || 'Creative'
-  const angle = row.messaging_angle_override || row.messaging_angle
+  if (loading || !resolved) {
+    // Brief loading state — modal doesn't render until the lookup is done.
+    // (The whole modal stays unmounted for the ~200ms lookup so we don't
+    // flash an empty state.)
+    return null
+  }
   return (
-    <Modal open={!!row} onClose={onClose} size="lg"
-      eyebrow="Launch preview"
-      title={title}
-      subtitle={angle ? `Messaging — ${angle}` : null}>
-      <div style={{ padding: '0 0 16px' }}>
-        <div style={{
-          background: '#000', maxHeight: '60vh',
-          display: 'flex', justifyContent: 'center', alignItems: 'center',
-        }}>
-          {url ? (
-            <video ref={videoRef} src={url} controls autoPlay preload="metadata"
-              style={{ maxWidth: '100%', maxHeight: '60vh', display: 'block' }} />
-          ) : (
-            <div style={{
-              padding: 40, color: 'rgba(255,255,255,0.6)',
-              fontFamily: 'var(--mono)', fontSize: 12,
-            }}>No playable file on this creative.</div>
-          )}
-        </div>
-        {row.description && (
-          <div style={{
-            padding: '12px 22px 0',
-            fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
-            color: 'var(--ink-2)',
-          }}>{row.description}</div>
-        )}
-      </div>
-    </Modal>
+    <SubmissionPreviewModal
+      submission={resolved}
+      currentUser={currentUser}
+      onClose={onClose} />
   )
 }
 
