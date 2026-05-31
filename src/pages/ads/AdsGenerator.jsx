@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Trash2 } from 'lucide-react'
 import { generateScripts, generateAngles, generateProofsForAngle,
          listAngles, listHookShapes, listMechanisms,
@@ -75,7 +75,15 @@ export default function AdsGenerator() {
   // active proofs for the angle (the Edge Function's default behavior).
   const [proofCharacters, setProofCharacters] = useState([])
   const [selectedProofNames, setSelectedProofNames] = useState([])
-  const [proofEditorOpen, setProofEditorOpen] = useState(false)
+  // Proof editor target: the angle being edited. Decoupled from
+  // primaryAngleSlug so the gear icon on each chip can open the editor
+  // for ANY angle regardless of selection state (Ben 2026-06-01).
+  // null = closed.
+  const [proofEditorAngle, setProofEditorAngle] = useState(null)
+  // Per-angle proof counts so each chip can show a "no proofs yet"
+  // indicator. Populated lazily — fetched when the angle library loads
+  // and refreshed after auto-generation. Map<slug, number>.
+  const [proofCountByAngle, setProofCountByAngle] = useState({})
 
   // Template-based generator (Ben 2026-05-31). Templates is now the
   // only path — Mode toggle was removed in the /generate overhaul.
@@ -140,21 +148,46 @@ export default function AdsGenerator() {
   // selected angle is no longer in the offer's list, reset the picker
   // to avoid silent "wrong-angle" generations.
   useEffect(() => {
-    if (!offerSlug) { setAngles([]); setAngleSlugs([]); return }
+    if (!offerSlug) { setAngles([]); setAngleSlugs([]); setProofCountByAngle({}); return }
     let cancelled = false
     listAngles({ offer_slug: offerSlug })
-      .then(rows => {
+      .then(async rows => {
         if (cancelled) return
         setAngles(rows)
         // Keep any selected angles that still belong to this offer; drop
         // ones that don't. If nothing remains, leave empty (no auto-pick —
         // forces explicit selection, which avoids accidental multi-runs).
         setAngleSlugs(prev => prev.filter(s => rows.some(r => r.slug === s)))
+        // Fetch proof counts per angle so each chip can show a "needs
+        // proofs" indicator. Soft-fail per angle (one bad fetch shouldn't
+        // hide the indicator for the others).
+        const counts = await Promise.all(
+          rows.map(r => listProofCharactersForAngle(r.slug).then(p => p.length).catch(() => 0))
+        )
+        if (cancelled) return
+        const map = {}
+        rows.forEach((r, i) => { map[r.slug] = counts[i] })
+        setProofCountByAngle(map)
       })
-      .catch(() => { if (!cancelled) { setAngles([]); setAngleSlugs([]) } })
+      .catch(() => { if (!cancelled) { setAngles([]); setAngleSlugs([]); setProofCountByAngle({}) } })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offerSlug])
+
+  // Refresh a single angle's proof count — called after the editor
+  // saves so the chip indicator updates without a full refetch.
+  async function refreshProofCount(slug) {
+    if (!slug) return
+    try {
+      const rows = await listProofCharactersForAngle(slug)
+      setProofCountByAngle(prev => ({ ...prev, [slug]: rows.length }))
+      // Also refresh the picker's local list if this is the primary angle
+      if (slug === primaryAngleSlug) {
+        setProofCharacters(rows)
+        setSelectedProofNames(prev => prev.filter(n => rows.some(r => r.name === n)))
+      }
+    } catch {}
+  }
 
   // Refresh mechanism + proof lists whenever the single-selected angle changes.
   // Multi-angle mode hides those pickers — each angle uses its own defaults
@@ -810,27 +843,16 @@ export default function AdsGenerator() {
               </div>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {angles.map(a => {
-                const on = angleSlugs.includes(a.slug)
-                return (
-                  <button key={a.slug}
-                    onClick={() => setAngleSlugs(prev =>
-                      prev.includes(a.slug) ? prev.filter(s => s !== a.slug) : [...prev, a.slug])}
-                    title={a.qualifier}
-                    style={{
-                      padding: '10px 14px',
-                      border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                      background: on ? 'var(--ink)' : 'white',
-                      color: on ? 'var(--paper)' : 'var(--ink)',
-                      fontFamily: 'var(--sans)', fontSize: 14, fontWeight: on ? 600 : 400,
-                      cursor: 'pointer', borderRadius: 2,
-                      display: 'inline-flex', alignItems: 'center', gap: 8,
-                    }}>
-                    {on && <Check size={14} />}
-                    {a.name}
-                  </button>
-                )
-              })}
+              {angles.map(a => (
+                <AngleChip key={a.slug}
+                  angle={a}
+                  selected={angleSlugs.includes(a.slug)}
+                  proofCount={proofCountByAngle[a.slug] ?? null}
+                  onToggle={() => setAngleSlugs(prev =>
+                    prev.includes(a.slug) ? prev.filter(s => s !== a.slug) : [...prev, a.slug])}
+                  onOpenProofs={() => setProofEditorAngle(a)}
+                />
+              ))}
             </div>
             {primaryAngleSlug && (() => {
               const a = angles.find(x => x.slug === primaryAngleSlug)
@@ -1010,7 +1032,7 @@ export default function AdsGenerator() {
                   <Block title="Proof characters" dense
                     hint="Named clients with a one-line result. Generator rotates through them. (Multi-angle runs use each angle's own.)">
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-                      <button onClick={() => setProofEditorOpen(true)}
+                      <button onClick={() => setProofEditorAngle(angles.find(a => a.slug === primaryAngleSlug) || null)}
                         style={{
                           padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11,
                           letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
@@ -1222,10 +1244,12 @@ export default function AdsGenerator() {
             onSaved={handleMechanismSaved}
           />
           <ProofCharacterEditor
-            open={proofEditorOpen}
-            angle={angles.find(a => a.slug === primaryAngleSlug) || null}
-            onClose={() => setProofEditorOpen(false)}
-            onSaved={refreshProofCharacters}
+            open={!!proofEditorAngle}
+            angle={proofEditorAngle}
+            onClose={() => setProofEditorAngle(null)}
+            onSaved={() => {
+              if (proofEditorAngle?.slug) refreshProofCount(proofEditorAngle.slug)
+            }}
           />
         </>
       )}
@@ -1592,6 +1616,148 @@ function AdvancedExpander({ label = 'Advanced (optional)', defaultOpen = false, 
 
 // Pill-style mono button used for the angle-picker batch controls
 // (Select all / Clear). Same shape used in MechanismConfigModal etc.
+// Angle picker chip with hover popup + colored type accent + gear icon.
+// Visual rules (Ben 2026-06-01):
+//   - hover reveals a 3px left accent in the angle_type color (red for
+//     problem, blue for desire)
+//   - hover reveals a settings gear that opens the ProofCharacterEditor
+//     for THIS angle (independent of multi-select state)
+//   - if the angle has zero saved proofs, a tiny dot indicator shows on
+//     the chip so the operator sees which need setup
+//   - hover (after a ~200ms dwell) pops a themed card below the chip
+//     with the angle's voice/qualifier/promise/mechanism. No browser
+//     title tooltip — themed in-app popup per the UX rule.
+function AngleChip({ angle, selected, proofCount, onToggle, onOpenProofs }) {
+  const [hover, setHover] = useState(false)
+  const [popOpen, setPopOpen] = useState(false)
+  const dwellRef = useRef(null)
+
+  const isProblem = angle.angle_type === 'problem'
+  const typeColor = isProblem ? '#b53e3e' : '#3068b5'
+  const typeLabel = isProblem ? 'Problem' : 'Desire'
+  const needsProofs = proofCount === 0
+
+  function startHover() {
+    setHover(true)
+    clearTimeout(dwellRef.current)
+    dwellRef.current = setTimeout(() => setPopOpen(true), 220)
+  }
+  function endHover() {
+    setHover(false)
+    setPopOpen(false)
+    clearTimeout(dwellRef.current)
+  }
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={startHover} onMouseLeave={endHover}>
+      <div style={{
+        display: 'inline-flex', alignItems: 'stretch',
+        border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
+        borderLeft: `3px solid ${(hover || selected) ? typeColor : (selected ? 'var(--ink)' : 'var(--rule)')}`,
+        background: selected ? 'var(--ink)' : 'white',
+        borderRadius: 2,
+        transition: 'border-color 120ms ease',
+      }}>
+        <button onClick={onToggle}
+          style={{
+            padding: '10px 12px 10px 14px',
+            background: 'transparent', border: 'none',
+            color: selected ? 'var(--paper)' : 'var(--ink)',
+            fontFamily: 'var(--sans)', fontSize: 14, fontWeight: selected ? 600 : 400,
+            cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+          }}>
+          {selected && <Check size={14} />}
+          {angle.name}
+          {needsProofs && !selected && (
+            <span title="No proof characters saved yet"
+              style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: '#d68f00', display: 'inline-block', marginLeft: 2,
+              }} />
+          )}
+        </button>
+        {hover && (
+          <button onClick={(e) => { e.stopPropagation(); onOpenProofs() }}
+            title="Manage proof characters for this angle"
+            style={{
+              padding: '0 10px',
+              background: selected ? 'var(--ink-3)' : 'var(--paper)',
+              border: 'none',
+              borderLeft: `1px solid ${selected ? 'var(--ink-3)' : 'var(--rule)'}`,
+              color: selected ? 'var(--paper)' : 'var(--ink-3)',
+              cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center',
+            }}>
+            <Settings size={13} />
+          </button>
+        )}
+      </div>
+      {popOpen && (
+        <div style={{
+          position: 'absolute', zIndex: 60,
+          top: 'calc(100% + 6px)', left: 0,
+          minWidth: 320, maxWidth: 420,
+          padding: '12px 14px',
+          background: 'white',
+          border: '1px solid var(--rule)',
+          borderTop: `3px solid ${typeColor}`,
+          borderRadius: 2,
+          boxShadow: '0 16px 40px rgba(10,10,10,0.18)',
+          fontFamily: 'var(--sans)', color: 'var(--ink-2)',
+          pointerEvents: 'none',   // popup is read-only; lets mouse pass through
+        }}>
+          <div style={{
+            display: 'inline-block', padding: '2px 7px', marginBottom: 8,
+            background: typeColor, color: 'var(--paper)',
+            fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+            letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+          }}>{typeLabel}</div>
+          {angle.prospect_voice && (
+            <div style={{
+              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13.5,
+              color: 'var(--ink)', lineHeight: 1.5, marginBottom: 10,
+            }}>"{angle.prospect_voice}"</div>
+          )}
+          {angle.qualifier && (
+            <PopupRow label="Qualifier" value={angle.qualifier} />
+          )}
+          {angle.primary_promise && (
+            <PopupRow label="Promise" value={angle.primary_promise} />
+          )}
+          {angle.mechanism_short && (
+            <PopupRow label="Mechanism" value={angle.mechanism_short} />
+          )}
+          <div style={{
+            marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)',
+            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
+            color: 'var(--ink-4)', textTransform: 'uppercase',
+          }}>
+            {proofCount === null
+              ? 'Proofs: loading…'
+              : proofCount === 0
+                ? 'Proofs: none yet — will auto-generate on Generate'
+                : `Proofs: ${proofCount} saved`}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PopupRow({ label, value }) {
+  return (
+    <div style={{ marginBottom: 6, fontSize: 12.5, lineHeight: 1.4 }}>
+      <span style={{
+        fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: 'var(--ink-3)', marginRight: 6,
+      }}>{label}:</span>
+      <span style={{ fontFamily: 'var(--sans)', color: 'var(--ink-2)' }}>{value}</span>
+    </div>
+  )
+}
+
 function pillButtonStyle() {
   return {
     padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
