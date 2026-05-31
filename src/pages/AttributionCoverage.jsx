@@ -91,6 +91,13 @@ export default function AttributionCoverage() {
   const [busy, setBusy] = useState(true)
   const [err, setErr] = useState(null)
 
+  // QA queue (Ben 2026-06-01): rows the resolver flagged as low_confidence /
+  // orphan / missing_audience. Ben reviews and clicks to assign correct
+  // attribution. Writes go to close_attribution_overrides which the resolver
+  // honors as the highest-priority match.
+  const [qaQueue, setQaQueue] = useState([])
+  const [qaSaveBusy, setQaSaveBusy] = useState({})  // { closer_call_id: true }
+
   // Ad list — top-spending active ads with thumbnails. Each row gets an
   // inline audience picker. Default filter hides anything already overridden
   // (Ben 2026-05-31: "once I've assigned it, just see it as hidden").
@@ -134,7 +141,8 @@ export default function AttributionCoverage() {
       supabase.from('lib_attribution_freshness').select('*'),
       supabase.from('lib_attribution_unresolved_creatives').select('*').limit(100),
       supabase.from('lib_attribution_ad_kanban').select('*').limit(300),
-    ]).then(([s, g, u, f, c, k]) => {
+      supabase.from('lib_attribution_qa_queue').select('*').gte('d', from).limit(200),
+    ]).then(([s, g, u, f, c, k, qa]) => {
       if (!alive) return
       if (s.error) throw new Error(`coverage: ${s.error.message}`)
       if (g.error) throw new Error(`gap_ads: ${g.error.message}`)
@@ -142,13 +150,15 @@ export default function AttributionCoverage() {
       if (f.error) throw new Error(`freshness: ${f.error.message}`)
       if (c.error) throw new Error(`creatives: ${c.error.message}`)
       if (k.error) throw new Error(`kanban: ${k.error.message}`)
+      if (qa.error) throw new Error(`qa_queue: ${qa.error.message}`)
       setStages(s.data || [])
       setGapAds(g.data || [])
       setUnresolved(u.data || [])
       setFreshness(f.data || [])
       setUnresolvedCreatives(c.data || [])
       setKanbanAds(k.data || [])
-      setPendingVertical({})  // any in-flight optimistic writes are stale now
+      setQaQueue(qa.data || [])
+      setPendingVertical({})
     }).catch(e => { if (alive) setErr(e.message) })
       .finally(() => { if (alive) setBusy(false) })
     return () => { alive = false }
@@ -218,6 +228,76 @@ export default function AttributionCoverage() {
       setErr(`Auto-classify failed: ${e.message}`)
     } finally {
       setAutoBusy(false)
+    }
+  }
+
+  // Set audience for one QA queue row. Maps the audience to a known
+  // campaign string (so the marketing rollup buckets it correctly) and
+  // writes close_attribution_overrides.utm_campaign.
+  async function setQaAudience(closer_call_id, audience) {
+    if (!closer_call_id || !audience) return
+    setQaSaveBusy(prev => ({ ...prev, [closer_call_id]: true }))
+    setErr(null)
+    try {
+      // Map audience label to a representative campaign string that the
+      // marketing rollup parser will bucket. REFERRAL means no ad source.
+      const utmMap = {
+        'Restoration':  'SCIO -Restoration - Application - 4/22 - New Videos',
+        'Electricians': 'SCIO - Electricians - VSL - 5/4 images - Relaunch',
+        'Accounting':   'SCIO - Accounting - VSL',
+        'Plumbing':     'SCIO - Plumbing - VSL',
+        'HVAC':         'SCIO - HVAC - VSL',
+        'Roofing':      'SCIO - Roofing - VSL',
+        'REFERRAL':     'REFERRAL',
+      }
+      const utm_campaign = utmMap[audience] || audience
+      const { error } = await supabase
+        .from('close_attribution_overrides')
+        .upsert(
+          { closer_call_id, utm_campaign, note: `QA-assigned ${audience} on ${new Date().toISOString().slice(0,10)}`, updated_at: new Date().toISOString() },
+          { onConflict: 'closer_call_id' }
+        )
+      if (error) throw new Error(error.message)
+      setReloadKey(k => k + 1)
+    } catch (e) {
+      setErr(`QA save failed: ${e.message}`)
+    } finally {
+      setQaSaveBusy(prev => {
+        const next = { ...prev }
+        delete next[closer_call_id]
+        return next
+      })
+    }
+  }
+
+  // Bulk-assign all visible low-confidence rows to one audience.
+  async function bulkQa(audience) {
+    if (!audience || qaQueue.length === 0) return
+    const targets = qaQueue.filter(r => r.qa_flag === 'low_confidence' || r.qa_flag === 'orphan')
+    if (targets.length === 0) return
+    setBulkBusy(true); setErr(null)
+    try {
+      const utmMap = {
+        'Restoration':  'SCIO -Restoration - Application - 4/22 - New Videos',
+        'Electricians': 'SCIO - Electricians - VSL - 5/4 images - Relaunch',
+        'REFERRAL':     'REFERRAL',
+      }
+      const utm_campaign = utmMap[audience] || audience
+      const payload = targets.map(r => ({
+        closer_call_id: r.closer_call_id,
+        utm_campaign,
+        note: `Bulk QA ${audience} on ${new Date().toISOString().slice(0,10)}`,
+        updated_at: new Date().toISOString(),
+      }))
+      const { error } = await supabase
+        .from('close_attribution_overrides')
+        .upsert(payload, { onConflict: 'closer_call_id' })
+      if (error) throw new Error(error.message)
+      setReloadKey(k => k + 1)
+    } catch (e) {
+      setErr(`Bulk QA failed: ${e.message}`)
+    } finally {
+      setBulkBusy(false)
     }
   }
 
@@ -576,6 +656,96 @@ export default function AttributionCoverage() {
         autoBusy={autoBusy}
         busy={busy}
       />
+
+      {/* QA QUEUE (Ben 2026-06-01) — flagged calls that need your eyes */}
+      {qaQueue.length > 0 && (
+        <div style={{ marginTop: 32 }}>
+          <SectionHead
+            eyebrow="QA queue"
+            title={`${qaQueue.length} call${qaQueue.length === 1 ? '' : 's'} flagged for review`}
+            tagline="Calls the resolver isn't fully confident about. Click an audience chip to set the correct attribution — writes to close_attribution_overrides which the resolver respects as the highest-priority match."
+            right={
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Button variant="secondary" size="sm" onClick={() => bulkQa('Restoration')} disabled={bulkBusy}>
+                  {bulkBusy ? 'Saving…' : 'Bulk → Restoration'}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => bulkQa('REFERRAL')} disabled={bulkBusy}>
+                  Bulk → REFERRAL
+                </Button>
+              </div>
+            }
+          />
+          <Card padding={0}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--sans)', fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
+                  <th style={th}>Date</th>
+                  <th style={th}>Prospect</th>
+                  <th style={th}>Type</th>
+                  <th style={th}>Flag</th>
+                  <th style={th}>Current attribution</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Set audience</th>
+                </tr>
+              </thead>
+              <tbody>
+                {qaQueue.map(r => {
+                  const flagTone = r.qa_flag === 'orphan' ? 'red'
+                    : r.qa_flag === 'low_confidence' ? 'amber' : 'default'
+                  const saving = !!qaSaveBusy[r.closer_call_id]
+                  return (
+                    <tr key={r.closer_call_id} style={{ borderBottom: '1px solid var(--rule)' }}>
+                      <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>{r.d}</td>
+                      <td style={td}>
+                        <div style={{ fontWeight: 500 }}>{r.prospect_name}</div>
+                        {r.outcome && (
+                          <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{r.outcome}</div>
+                        )}
+                      </td>
+                      <td style={td}>
+                        <Pill tone={r.row_type === 'close' ? 'green' : 'default'} uppercase>{r.row_type}</Pill>
+                      </td>
+                      <td style={td}>
+                        <Pill tone={flagTone} uppercase>{r.qa_flag.replace(/_/g, ' ')}</Pill>
+                      </td>
+                      <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-2)' }}>
+                        <div>{r.current_audience}</div>
+                        {r.utm_campaign && (
+                          <div style={{ fontSize: 10, color: 'var(--ink-3)', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {r.utm_campaign}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ ...td, textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: 4 }}>
+                          {['Restoration', 'Electricians', 'REFERRAL'].map(aud => (
+                            <button
+                              key={aud}
+                              type="button"
+                              disabled={saving}
+                              onClick={() => setQaAudience(r.closer_call_id, aud)}
+                              style={{
+                                fontFamily: 'var(--mono)', fontSize: 10,
+                                letterSpacing: '0.06em', textTransform: 'uppercase',
+                                padding: '4px 8px',
+                                background: 'var(--paper)',
+                                border: '1px solid var(--rule)',
+                                color: aud === 'REFERRAL' ? 'var(--ink-3)' : 'var(--ink)',
+                                cursor: saving ? 'wait' : 'pointer',
+                                borderRadius: 2,
+                              }}>
+                              {saving ? '…' : aud === 'Restoration' ? 'Resto' : aud === 'Electricians' ? 'Elec' : 'Ref'}
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
 
       {/* WHAT TO DO NEXT */}
       <div style={{ marginTop: 32 }}>
