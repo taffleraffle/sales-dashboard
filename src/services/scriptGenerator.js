@@ -122,7 +122,7 @@ export async function upsertMechanism(mechanism) {
 export async function listAngles({ offer_slug } = {}) {
   let q = supabase
     .from('script_angles')
-    .select('slug,name,offer_slugs,qualifier,primary_promise,mechanism_short,angle_type,prospect_voice,hook_build_sketch,active')
+    .select('slug,name,offer_slugs,qualifier,primary_promise,mechanism_short,angle_type,prospect_voice,hook_build_sketch,pain_points,why_it_matters,evidence_examples,sources,active')
     .eq('active', true)
     .order('angle_type', { nullsFirst: false })
     .order('name')

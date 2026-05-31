@@ -333,7 +333,7 @@ Pick the shape that the angle's voice MOST NATURALLY implies.`
 
 const ANGLE_TOOL_NAME = 'generate_angles'
 
-function buildAngleToolSchema(n_problems: number, n_desires: number) {
+function buildAngleToolSchema(n_problems: number, n_desires: number, groundingCount: number) {
   const angleItem = {
     type: 'object',
     properties: {
@@ -355,8 +355,36 @@ function buildAngleToolSchema(n_problems: number, n_desires: number) {
         type: 'string',
         description: 'ONE LINE: which shape fits + first 12-20 words of how the hook would open. Format: "Shape C (Pain anchor). Opens \\"If you run a CPA firm doing $50k a month and you\'re watching Bench cold-pitch your bookkeeping clients...\\""',
       },
+      why_it_matters: {
+        type: 'string',
+        description: 'PROSE PARAGRAPH (4-6 sentences) on WHY this problem/desire bites for this audience. Cover: the consequences of NOT solving it (what falls apart), the deeper anxiety underneath (identity, status, peer comparison), what they have already tried that failed, and the specific moment of friction. Visceral, not abstract.',
+      },
+      evidence_examples: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '2-3 CONCRETE SITUATIONAL MOMENTS where this angle bites. Specific scenes, not summaries. E.g. "Refreshing the CRM at 9pm hoping a call came in.", "Asking his wife why he\'s stressed and not wanting to explain HomeAdvisor again.", "Walking past the new hire\'s empty desk because there\'s no work to give them."',
+      },
+      sources: groundingCount > 0
+        ? {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                index: { type: 'integer', description: '1-based index into the GROUNDING SOURCES block in the user message. Cite the index of every source you used to inform this angle.' },
+                relevance: { type: 'string', description: 'One sentence on what this source contributed to the angle (a phrase, a specific concern, a competitor name, etc).' },
+              },
+              required: ['index', 'relevance'],
+            },
+            description: `Cite the GROUNDING SOURCES (1-${groundingCount}) you actually used while writing this angle. Cite ONLY sources that informed THIS specific angle — do not include every source on every angle. If you wrote this angle purely from training-data reasoning without consulting the grounding block, return an empty array. Do NOT invent sources.`,
+          }
+        : {
+            type: 'array',
+            items: { type: 'object', properties: {}, additionalProperties: false },
+            description: 'No grounding sources were provided for this generation. Return an empty array. Never fabricate sources.',
+            maxItems: 0,
+          },
     },
-    required: ['angle_type', 'name', 'prospect_voice', 'hook_build_sketch'],
+    required: ['angle_type', 'name', 'prospect_voice', 'hook_build_sketch', 'why_it_matters', 'evidence_examples', 'sources'],
   }
   return {
     name: ANGLE_TOOL_NAME,
@@ -374,6 +402,52 @@ function buildAngleToolSchema(n_problems: number, n_desires: number) {
       required: ['angles'],
     },
   }
+}
+
+// ── Serper grounding ─────────────────────────────────────────────────
+// Pulls real top organic search results and feeds title+snippet+url to
+// Claude as grounding context. Degrades cleanly when SERPER_API_KEY is
+// unset — generation still runs, just without sources.
+//
+// Anti-hallucination contract (Ben 2026-05-31): if grounding is present,
+// Claude MAY cite indices into the grounding block. If grounding is
+// absent, the angle tool schema forbids any sources entries. Either way
+// Claude is told "do not invent sources".
+type GroundingHit = { title: string; url: string; snippet: string }
+
+async function fetchGrounding(query: string, n = 6): Promise<GroundingHit[]> {
+  const key = Deno.env.get('SERPER_API_KEY')
+  if (!key) return []
+  try {
+    const res = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': key,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ q: query, num: Math.min(20, Math.max(1, n)) }),
+    })
+    if (!res.ok) {
+      console.warn(`[grounding] serper ${res.status}: ${(await res.text()).slice(0, 200)}`)
+      return []
+    }
+    const data = await res.json()
+    const organic = Array.isArray(data?.organic) ? data.organic : []
+    return organic.slice(0, n).map((r: any) => ({
+      title: (r.title || '').toString().slice(0, 200),
+      url: (r.link || '').toString().slice(0, 500),
+      snippet: (r.snippet || '').toString().slice(0, 400),
+    })).filter((h: GroundingHit) => h.title && h.url)
+  } catch (e: any) {
+    console.warn(`[grounding] serper threw: ${e.message}`)
+    return []
+  }
+}
+
+function formatGroundingBlock(hits: GroundingHit[]): string {
+  if (!hits.length) return ''
+  const lines = hits.map((h, i) => `[${i + 1}] ${h.title}\n     ${h.url}\n     ${h.snippet}`)
+  return `\nGROUNDING SOURCES (use these to keep angles concrete and citable; reference by index in your sources field):\n\n${lines.join('\n\n')}\n\nIMPORTANT: only cite sources you actually drew from. Do NOT invent URLs. If you wrote an angle from training-data reasoning without using these sources, leave its sources array empty.\n`
 }
 
 // ── Legacy helpers (existing offer-based generator) ───────────────────
@@ -502,16 +576,34 @@ serve(async (req) => {
     try { offer = await loadOffer(supabase, offer_slug) }
     catch (e: any) { return json({ error: e.message }, 500) }
 
+    // Real grounding: pull top organic results so Claude has actual
+    // forum/article snippets to anchor why_it_matters + evidence_examples
+    // against. Empty array when SERPER_API_KEY is unset on the function
+    // — generation still runs, just without sources.
+    const groundingQuery = [
+      offer.vertical || '',
+      offer.primary_audience || '',
+      niche_hint || '',
+      'owner problems frustrations forum',
+    ].filter(Boolean).join(' ').slice(0, 220)
+    const grounding = await fetchGrounding(groundingQuery, 6)
+    const groundingBlock = formatGroundingBlock(grounding)
+
     const userMsg = [
       `OFFER: ${offer.name} (slug: ${offer.slug})`,
       `VERTICAL: ${offer.vertical}`,
       `PRIMARY AUDIENCE: ${offer.primary_audience || '(none defined)'}`,
       offer.mechanism_name ? `BRAND-NAMED MECHANISM (only mention in passing; the angles are upstream of mechanism): ${offer.mechanism_name}` : '',
       niche_hint ? `\nADDITIONAL CONTEXT FROM OPERATOR: ${niche_hint}\nUse this to bias the angles toward the specific niche / situation the operator named.` : '',
+      groundingBlock,
       '',
       `Generate exactly ${n_problems} PROBLEM angles and ${n_desires} DESIRE angles.`,
       'Problems = what the prospect is stuck on, phrased in their voice. Desires = what they want, phrased in their voice.',
       'Each angle must be specific to the audience qualifier (above). Generic "grow your business" angles will be rejected.',
+      'For each angle, ALSO write why_it_matters (consequences + deeper anxiety + what they\'ve tried) and 2-3 evidence_examples (concrete situational moments, not summaries). These are not optional.',
+      grounding.length
+        ? 'Cite only the GROUNDING SOURCES you actually drew from for each angle. If an angle came from reasoning alone, leave its sources array empty. NEVER invent URLs or titles.'
+        : 'No grounding sources were provided this run. Leave every sources array empty. NEVER invent sources.',
       `Return via the ${ANGLE_TOOL_NAME} tool with problems first, then desires.`,
       extraBlock,
     ].filter(Boolean).join('\n')
@@ -528,7 +620,7 @@ serve(async (req) => {
         max_tokens: 3500 + (n_problems + n_desires) * 400,
         system: ANGLE_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMsg }],
-        tools: [buildAngleToolSchema(n_problems, n_desires)],
+        tools: [buildAngleToolSchema(n_problems, n_desires, grounding.length)],
         tool_choice: { type: 'tool', name: ANGLE_TOOL_NAME },
       }),
     })
@@ -540,6 +632,29 @@ serve(async (req) => {
     const toolUseA = (resultA.content || []).find((c: any) => c.type === 'tool_use')
     if (!toolUseA) return json({ error: 'Claude did not return angle tool_use', raw: resultA }, 502)
     const generated_angles: any[] = toolUseA.input?.angles || []
+
+    // Resolve Claude's cited source indices back to {title, url, snippet}
+    // objects. We trust only indices into the grounding array — Claude
+    // can NOT fabricate URLs because the schema only accepts an index
+    // (when grounding is present) or rejects sources entirely (when not).
+    function resolveSources(rawSources: any): Array<{ title: string; url: string; snippet: string; relevance: string }> {
+      if (!Array.isArray(rawSources) || !grounding.length) return []
+      const out: Array<{ title: string; url: string; snippet: string; relevance: string }> = []
+      const seen = new Set<string>()
+      for (const s of rawSources) {
+        const idx = typeof s?.index === 'number' ? s.index - 1 : -1
+        const hit = idx >= 0 && idx < grounding.length ? grounding[idx] : null
+        if (!hit || seen.has(hit.url)) continue
+        seen.add(hit.url)
+        out.push({
+          title: hit.title,
+          url: hit.url,
+          snippet: hit.snippet,
+          relevance: typeof s?.relevance === 'string' ? s.relevance.slice(0, 280) : '',
+        })
+      }
+      return out
+    }
 
     // Auto-save each angle to script_angles with a generated slug. We
     // tag them with the offer's slug so the Angle picker filters them
@@ -557,10 +672,16 @@ serve(async (req) => {
     // collision inside the upsert array. Keep the first occurrence.
     const seenSlugs = new Set<string>()
     const inserts: any[] = []
+    // Resolve sources for each angle so the inserts (and the response
+    // payload) carry the same shape. Mutate the generated_angles entry
+    // too so the API response has the resolved URLs the UI can render
+    // without re-doing the index lookup.
     for (const a of generated_angles) {
       const slug = `${offer.slug}-${a.angle_type}-${slugify(a.name)}`
       if (!slug || seenSlugs.has(slug)) continue
       seenSlugs.add(slug)
+      const resolved = resolveSources(a.sources)
+      a.sources = resolved   // mutate so caller sees URLs not indices
       inserts.push({
         slug,
         name: a.name,
@@ -568,6 +689,9 @@ serve(async (req) => {
         prospect_voice: a.prospect_voice,
         hook_build_sketch: a.hook_build_sketch,
         pain_points: Array.isArray(a.pain_points) ? a.pain_points : [],
+        why_it_matters: typeof a.why_it_matters === 'string' ? a.why_it_matters : null,
+        evidence_examples: Array.isArray(a.evidence_examples) ? a.evidence_examples : [],
+        sources: resolved,
         offer_slugs: [offer.slug],
         qualifier: offer.primary_audience || '',
         primary_promise: '',       // filled by Claude or operator later when used in Scripts
@@ -599,6 +723,11 @@ serve(async (req) => {
       saved,
       save_error,
       model: ANTHROPIC_MODEL,
+      grounding: {
+        enabled: !!Deno.env.get('SERPER_API_KEY'),
+        query: groundingQuery,
+        hits: grounding.length,
+      },
     })
   }
 

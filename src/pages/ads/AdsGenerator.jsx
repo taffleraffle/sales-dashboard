@@ -595,6 +595,43 @@ export default function AdsGenerator() {
                 <h2 style={{ margin: 0, fontFamily: 'var(--serif)', fontSize: 26, fontWeight: 400 }}>
                   {messagingResult.angles.length} angles for {messagingResult.offer?.name}
                 </h2>
+                {/* Grounding banner — tells the operator whether Claude
+                    saw real forum/article snippets this run, or generated
+                    from training-data reasoning only. The Edge Function
+                    sets messagingResult.grounding = {enabled, query, hits}. */}
+                {messagingResult.grounding && (
+                  <div style={{
+                    marginTop: 10, padding: '10px 14px',
+                    background: messagingResult.grounding.hits > 0 ? '#eef6ee' : '#fef6e6',
+                    border: `1px solid ${messagingResult.grounding.hits > 0 ? '#bcd9be' : '#e8c98a'}`,
+                    fontFamily: 'var(--sans)', fontSize: 12.5,
+                    color: messagingResult.grounding.hits > 0 ? '#2f5f33' : '#7a5810',
+                    borderRadius: 2, lineHeight: 1.45,
+                  }}>
+                    {messagingResult.grounding.hits > 0 ? (
+                      <>
+                        <strong>Grounded</strong> · {messagingResult.grounding.hits} real
+                        source{messagingResult.grounding.hits === 1 ? '' : 's'} fed to
+                        Claude for query <code style={{ fontFamily: 'var(--mono)', fontSize: 11.5 }}>
+                          {messagingResult.grounding.query}
+                        </code>. Click any angle below to see which sources it cited.
+                      </>
+                    ) : messagingResult.grounding.enabled ? (
+                      <>
+                        <strong>No grounding hits</strong> · search ran but returned no
+                        usable results. Angles are reasoned from training data only —
+                        sources arrays will be empty.
+                      </>
+                    ) : (
+                      <>
+                        <strong>Grounding disabled</strong> · SERPER_API_KEY not set on
+                        the Edge Function. Angles are reasoned from training data only
+                        (no fabricated sources). Set the key in Supabase Studio →
+                        Edge Functions → secrets to enable real sourcing.
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               <div style={{ display: 'grid', gap: 12 }}>
                 {messagingResult.angles.map((a, i) => (
@@ -1381,31 +1418,59 @@ function AngleCard({ angle }) {
         fontFamily: 'var(--serif)', fontSize: 15, fontStyle: 'italic',
         color: 'var(--ink-2)', lineHeight: 1.55, marginBottom: 12,
       }}>"{angle.prospect_voice}"</div>
+      {angle.why_it_matters && (
+        <AngleSubBlock label="Why it matters">
+          <div style={{ fontFamily: 'var(--serif)', fontSize: 13.5,
+                        color: 'var(--ink-2)', lineHeight: 1.55 }}>
+            {angle.why_it_matters}
+          </div>
+        </AngleSubBlock>
+      )}
+      {angle.evidence_examples?.length > 0 && (
+        <AngleSubBlock label="Evidence — concrete moments">
+          <ul style={{ margin: 0, paddingLeft: 18, fontFamily: 'var(--serif)',
+                      fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.6 }}>
+            {angle.evidence_examples.map((ex, i) => <li key={i}>{ex}</li>)}
+          </ul>
+        </AngleSubBlock>
+      )}
       {angle.hook_build_sketch && (
-        <div style={{ marginBottom: 8 }}>
-          <div style={{
-            fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4,
-          }}>Hook build</div>
-          <div style={{
-            fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-2)',
-            lineHeight: 1.5,
-          }}>{angle.hook_build_sketch}</div>
-        </div>
+        <AngleSubBlock label="Hook build">
+          <div style={{ fontFamily: 'var(--sans)', fontSize: 13,
+                        color: 'var(--ink-2)', lineHeight: 1.5 }}>
+            {angle.hook_build_sketch}
+          </div>
+        </AngleSubBlock>
       )}
       {angle.pain_points?.length > 0 && (
-        <div>
-          <div style={{
-            fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
-            textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4,
-          }}>Pain points</div>
-          <ul style={{
-            margin: 0, paddingLeft: 18, fontFamily: 'var(--sans)', fontSize: 13,
-            color: 'var(--ink-3)', lineHeight: 1.5,
-          }}>
+        <AngleSubBlock label="Pain points">
+          <ul style={{ margin: 0, paddingLeft: 18, fontFamily: 'var(--sans)',
+                      fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5 }}>
             {angle.pain_points.map((p, i) => <li key={i}>{p}</li>)}
           </ul>
-        </div>
+        </AngleSubBlock>
+      )}
+      {angle.sources?.length > 0 && (
+        <AngleSubBlock label={`Sources cited (${angle.sources.length})`}>
+          <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none' }}>
+            {angle.sources.map((s, i) => (
+              <li key={i} style={{ marginBottom: 6, fontSize: 12.5, lineHeight: 1.45 }}>
+                <a href={s.url} target="_blank" rel="noopener noreferrer"
+                  style={{ fontFamily: 'var(--sans)', color: 'var(--ink-2)',
+                          textDecoration: 'underline', textDecorationColor: 'var(--rule)',
+                          textUnderlineOffset: 2, fontWeight: 500 }}>
+                  {s.title || s.url}
+                </a>
+                {s.relevance && (
+                  <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
+                                 color: 'var(--ink-4)', marginLeft: 6 }}>
+                    — {s.relevance}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </AngleSubBlock>
       )}
     </div>
   )
@@ -1566,33 +1631,76 @@ function SavedAngleRow({ angle, onRetire }) {
               color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 10,
             }}>"{angle.prospect_voice}"</div>
           )}
+          {angle.why_it_matters && (
+            <AngleSubBlock label="Why it matters">
+              <div style={{ fontFamily: 'var(--serif)', fontSize: 13.5,
+                            color: 'var(--ink-2)', lineHeight: 1.55 }}>
+                {angle.why_it_matters}
+              </div>
+            </AngleSubBlock>
+          )}
+          {angle.evidence_examples?.length > 0 && (
+            <AngleSubBlock label="Evidence — concrete moments">
+              <ul style={{ margin: 0, paddingLeft: 18, fontFamily: 'var(--serif)',
+                          fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.6 }}>
+                {angle.evidence_examples.map((ex, i) => <li key={i}>{ex}</li>)}
+              </ul>
+            </AngleSubBlock>
+          )}
           {angle.hook_build_sketch && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{
-                fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
-                textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4,
-              }}>Hook build</div>
-              <div style={{
-                fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5,
-              }}>{angle.hook_build_sketch}</div>
-            </div>
+            <AngleSubBlock label="Hook build">
+              <div style={{ fontFamily: 'var(--sans)', fontSize: 13,
+                            color: 'var(--ink-2)', lineHeight: 1.5 }}>
+                {angle.hook_build_sketch}
+              </div>
+            </AngleSubBlock>
           )}
           {angle.pain_points?.length > 0 && (
-            <div>
-              <div style={{
-                fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
-                textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4,
-              }}>Pain points</div>
-              <ul style={{
-                margin: 0, paddingLeft: 18, fontFamily: 'var(--sans)', fontSize: 13,
-                color: 'var(--ink-3)', lineHeight: 1.5,
-              }}>
+            <AngleSubBlock label="Pain points">
+              <ul style={{ margin: 0, paddingLeft: 18, fontFamily: 'var(--sans)',
+                          fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.5 }}>
                 {angle.pain_points.map((p, i) => <li key={i}>{p}</li>)}
               </ul>
-            </div>
+            </AngleSubBlock>
+          )}
+          {angle.sources?.length > 0 && (
+            <AngleSubBlock label={`Sources cited (${angle.sources.length})`}>
+              <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none' }}>
+                {angle.sources.map((s, i) => (
+                  <li key={i} style={{ marginBottom: 6, fontSize: 12.5, lineHeight: 1.45 }}>
+                    <a href={s.url} target="_blank" rel="noopener noreferrer"
+                      style={{ fontFamily: 'var(--sans)', color: 'var(--ink-2)',
+                              textDecoration: 'underline', textDecorationColor: 'var(--rule)',
+                              textUnderlineOffset: 2, fontWeight: 500 }}>
+                      {s.title || s.url}
+                    </a>
+                    {s.relevance && (
+                      <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
+                                     color: 'var(--ink-4)', marginLeft: 6 }}>
+                        — {s.relevance}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </AngleSubBlock>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// Small label-body subblock used inside SavedAngleRow + AngleCard.
+// Keeps the mono eyebrow / serif body pairing consistent across both.
+function AngleSubBlock({ label, children }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{
+        fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4,
+      }}>{label}</div>
+      {children}
     </div>
   )
 }
