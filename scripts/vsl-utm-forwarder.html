@@ -1,0 +1,138 @@
+<!--
+  VSL UTM Forwarder snippet (Ben 2026-06-01, Fix C).
+
+  Drop this <script> block into the body of EVERY VSL page that embeds a
+  Typeform iframe:
+    - https://optdigital.io/vsl-restoration/
+    - https://optdigital.io/electrician-vsl/
+    - any other landing page that forwards to Typeform
+
+  What it does:
+    1. Reads the current page's query string (the UTMs Meta appended at click)
+    2. Finds every Typeform iframe / embed on the page
+    3. Forwards the UTMs into the Typeform iframe src so Typeform's
+       hidden fields capture them and they end up in
+       typeform_responses.utm_* / ad_id at submit time
+
+  Forwards these params (case-insensitive):
+    utm_source, utm_medium, utm_campaign, utm_term, utm_content, utm_name,
+    fbclid, gclid, h_ad_id
+
+  Install:
+    1. WordPress: Add via "Custom HTML" widget in the page, or via the
+       theme's footer.php just before </body>.
+    2. Custom HTML page: paste anywhere before </body>.
+    3. Verify by clicking a Meta ad to the page, opening DevTools, and
+       checking that the Typeform iframe's src now has all the utm_*
+       params appended.
+
+  Idempotent: safe to load multiple times. Skips iframes already updated.
+-->
+<script>
+(function () {
+  if (window.__vslUtmForwarderLoaded) return
+  window.__vslUtmForwarderLoaded = true
+
+  // Which params to forward. lowercase keys; comparison is case-insensitive
+  // because some sources send uppercase.
+  var TRACKED = [
+    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+    'utm_name', 'fbclid', 'gclid', 'h_ad_id', 'h_adset_id', 'h_campaign_id',
+  ]
+
+  function pickUtms() {
+    var params = new URLSearchParams(window.location.search)
+    var out = {}
+    var entries = Array.from(params.entries())
+    for (var i = 0; i < entries.length; i++) {
+      var key = entries[i][0].toLowerCase()
+      if (TRACKED.indexOf(key) !== -1 && entries[i][1] !== '') {
+        out[key] = entries[i][1]
+      }
+    }
+    return out
+  }
+
+  function appendToUrl(url, params) {
+    try {
+      var u = new URL(url, window.location.origin)
+      Object.keys(params).forEach(function (k) {
+        // Don't overwrite if Typeform's iframe src already carries the value
+        // (the form author may have set defaults).
+        if (!u.searchParams.has(k)) u.searchParams.set(k, params[k])
+      })
+      return u.toString()
+    } catch (e) {
+      // Fallback for non-absolute URLs
+      var sep = url.indexOf('?') === -1 ? '?' : '&'
+      var qs = Object.keys(params).map(function (k) {
+        return encodeURIComponent(k) + '=' + encodeURIComponent(params[k])
+      }).join('&')
+      return url + sep + qs
+    }
+  }
+
+  function findTypeformIframes() {
+    // Typeform iframes have src containing typeform.com or are inside
+    // [data-tf-widget] containers. Catch both patterns.
+    var out = []
+    var iframes = document.querySelectorAll('iframe')
+    for (var i = 0; i < iframes.length; i++) {
+      var f = iframes[i]
+      var src = f.getAttribute('src') || ''
+      if (src.indexOf('typeform.com') !== -1) out.push(f)
+    }
+    return out
+  }
+
+  function patchIframes(params) {
+    var iframes = findTypeformIframes()
+    var patched = 0
+    for (var i = 0; i < iframes.length; i++) {
+      var iframe = iframes[i]
+      if (iframe.dataset.utmForwarded === '1') continue
+      var newSrc = appendToUrl(iframe.src, params)
+      if (newSrc !== iframe.src) {
+        iframe.src = newSrc
+        iframe.dataset.utmForwarded = '1'
+        patched++
+      }
+    }
+    return patched
+  }
+
+  function go() {
+    var params = pickUtms()
+    if (Object.keys(params).length === 0) return  // nothing to forward
+    var patched = patchIframes(params)
+    // Also patch Typeform popup/widget triggers: data-tf-popup,
+    // data-tf-slider attrs that get expanded by the Typeform JS later.
+    // We attach hidden-field params via the data-tf-hidden attr.
+    var hidden = Object.keys(params).map(function (k) {
+      return k + '=' + encodeURIComponent(params[k])
+    }).join(',')
+    var triggers = document.querySelectorAll('[data-tf-popup], [data-tf-slider], [data-tf-widget]')
+    for (var i = 0; i < triggers.length; i++) {
+      if (!triggers[i].dataset.tfHidden) {
+        triggers[i].dataset.tfHidden = hidden
+      }
+    }
+    // Console diagnostic so Ben can verify install
+    try { console.log('[vsl-utm-forwarder] forwarded:', params, 'iframes patched:', patched) } catch (e) {}
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', go)
+  } else {
+    go()
+  }
+  // Re-run on later DOM changes (Typeform sometimes injects iframes
+  // asynchronously after the script tag fires)
+  var attempts = 0
+  var poll = setInterval(function () {
+    attempts++
+    go()
+    if (attempts >= 10) clearInterval(poll)
+  }, 500)
+})()
+</script>
