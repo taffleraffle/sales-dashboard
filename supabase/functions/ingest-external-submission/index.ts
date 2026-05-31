@@ -61,6 +61,53 @@ function checkSize(declared: number | null): void {
   }
 }
 
+// Stream the upstream body into a Uint8Array with a hard memory cap.
+// When the upstream uses Transfer-Encoding: chunked (Dropbox direct
+// downloads do this routinely, and some S3 hosts do too), there is no
+// Content-Length, so the cheap `checkSize(declaredSize(...))` check
+// passes null → no-op → arrayBuffer() would happily buffer the whole
+// thing and OOM the 256 MB Deno runtime on a multi-GB file.
+//
+// This reader-based approach accumulates chunks, counts bytes as they
+// arrive, and aborts the upstream connection the moment we cross the
+// cap — bounding memory at MAX_BLOB_BYTES regardless of whether the
+// upstream declared a size.
+async function readBoundedBody(resp: Response): Promise<Uint8Array> {
+  if (!resp.body) {
+    // No body stream available — fall back to arrayBuffer with the
+    // cap enforced post-buffer (declaredSize check should have caught
+    // this earlier but we're defence-in-depth).
+    const buf = new Uint8Array(await resp.arrayBuffer())
+    if (buf.byteLength > MAX_BLOB_BYTES) {
+      throw new Error(`file too large (${Math.round(buf.byteLength / 1024 / 1024)} MB streamed > ${MAX_BLOB_BYTES / 1024 / 1024} MB cap)`)
+    }
+    return buf
+  }
+  const reader = resp.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (!value) continue
+    total += value.byteLength
+    if (total > MAX_BLOB_BYTES) {
+      // Cancel the upstream so we stop downloading bytes we'll never use.
+      try { await reader.cancel() } catch { /* best-effort */ }
+      throw new Error(`file too large (${Math.round(total / 1024 / 1024)} MB streamed > ${MAX_BLOB_BYTES / 1024 / 1024} MB cap) — upload via the dashboard's Upload button instead`)
+    }
+    chunks.push(value)
+  }
+  // Single allocation + copy beats Buffer.concat / repeated allocations.
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.byteLength
+  }
+  return out
+}
+
 interface SubmissionRow {
   id: string
   external_url: string | null
@@ -294,82 +341,33 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
 // Frame.io
 // -----------------------------------------------------------------------
 
-// Frame.io became Adobe's in 2024 and the v2 API was deprecated when
-// they migrated to v4 with Adobe IMS OAuth in 2025. Three strategies in
-// order of preference:
+// Frame.io: Adobe killed the v2 API + Personal Access Tokens when they
+// migrated to v4 with IMS OAuth2 in 2025. The v4 rebuild (Adobe Developer
+// Console project, client_credentials grant via IMS, /v4/accounts/{id}/
+// files endpoints) is intentionally NOT built — see
+// docs/INGEST-AND-REVIEW-SETUP.md for the full reasoning.
 //
-//   1. If the URL is already a direct media CDN URL (assets.frame.io,
-//      *.frameio.io, frame.io/v2/.../signed) — fetch it raw, no auth.
-//      This is the recommended editor workflow: "right-click the
-//      preview in Frame.io → Copy media URL → paste into the
-//      submission form here".
-//   2. If FRAMEIO_PAT is configured AND the URL is a share/review URL,
-//      attempt the legacy v2 API. Some legacy workspaces still resolve.
-//      On 401/403 we surface a doc-pointer error so the operator knows
-//      to migrate.
-//   3. Otherwise: throw a clear error explaining the v4 migration and
-//      pointing at the alternative workflow.
+// Supported workflow: editors copy the DIRECT media URL from Frame.io
+// (right-click the playing video → "Copy video address" / "Copy media
+// URL") and paste THAT into the submission form. Direct URLs on the
+// Frame.io CDN domains pass through fetchDirect with no auth.
+//
+// The host check is anchored to Frame.io's actual CDN hostnames (not
+// just any .mp4) so we don't accidentally swallow non-Frame.io URLs
+// that an editor pastes while the submission is tagged 'frameio'.
+const FRAMEIO_CDN_HOST_RE = /^https?:\/\/[^/]*(?:assets\.frame\.io|frameioassets\.com|frame\.io\/v\d+)/i
+
 async function fetchFromFrameio(url: string): Promise<FetchedVideo> {
-  // Path 1 — direct media URL passthrough. assets.frame.io is Frame.io's
-  // CDN host; frameio[content].com is the legacy bucket; if the URL
-  // contains the magic .mp4/.mov/.webm extension we treat it as direct
-  // too. No auth needed for any of these.
-  if (/(assets\.frame\.io|frameioassets\.|\.(mp4|mov|webm|m4v)(\?|$))/i.test(url)) {
+  if (FRAMEIO_CDN_HOST_RE.test(url)) {
     return await fetchDirect(url)
   }
-
-  // Path 2 — legacy v2 API with PAT. Only attempted when both a PAT is
-  // configured AND we can extract an asset UUID from the share URL.
-  const pat = Deno.env.get('FRAMEIO_PAT')
-  const assetId = extractFrameioAssetId(url)
-  if (pat && assetId) {
-    try {
-      const assetResp = await fetch(`https://api.frame.io/v2/assets/${assetId}`, {
-        headers: { Authorization: `Bearer ${pat}` },
-      })
-      if (assetResp.ok) {
-        const asset = await assetResp.json() as {
-          original?: string
-          name?: string
-          filetype?: string
-        }
-        const downloadUrl = asset.original
-        if (downloadUrl) {
-          const dlResp = await fetch(downloadUrl)
-          if (dlResp.ok) {
-            checkSize(declaredSize(dlResp))
-            const bytes = new Uint8Array(await dlResp.arrayBuffer())
-            return {
-              bytes,
-              contentType: asset.filetype || 'video/mp4',
-              suggestedName: asset.name || null,
-            }
-          }
-        }
-      }
-      // v2 path failed — fall through to the error below rather than
-      // throwing a misleading "PAT invalid" error. Adobe killed v2;
-      // the most likely cause is the API itself, not the PAT.
-    } catch { /* fall through */ }
-  }
-
-  // Path 3 — no usable path. Tell the operator what to do.
+  // Not a CDN URL — it's a share/review/app.frame.io URL that requires
+  // v4 auth. Surface the workaround in the editor notification.
   throw new Error(
     'Frame.io share URLs aren\'t supported (Adobe migrated to v4 OAuth2 in 2025). ' +
     'Workaround: in Frame.io, right-click the video preview → "Copy media URL" → ' +
-    'paste THAT URL instead of the share link. Or use Google Drive / Dropbox.'
+    'paste THAT URL here instead of the share link. Or use Drive / Dropbox.'
   )
-}
-
-function extractFrameioAssetId(url: string): string | null {
-  // Common formats:
-  //   https://app.frame.io/presentations/{uuid}
-  //   https://app.frame.io/player/{uuid}
-  //   https://app.frame.io/reviews/{review_uuid}/{asset_uuid}
-  //   https://f.io/{uuid}
-  // The UUID is the last path segment in most cases.
-  const m = url.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)
-  return m ? m[1] : null
 }
 
 // -----------------------------------------------------------------------
@@ -390,8 +388,10 @@ async function fetchFromDropbox(url: string): Promise<FetchedVideo> {
   if (contentType.includes('text/html')) {
     throw new Error('Dropbox returned HTML — link is probably private or revoked')
   }
+  // Cheap pre-check from header (often missing on Dropbox redirects);
+  // streaming check below is the real guarantee.
   checkSize(declaredSize(resp))
-  const bytes = new Uint8Array(await resp.arrayBuffer())
+  const bytes = await readBoundedBody(resp)
   const suggestedName = extractFilenameFromDisposition(resp.headers.get('content-disposition'))
   return { bytes, contentType, suggestedName }
 }
@@ -407,8 +407,10 @@ async function fetchDirect(url: string): Promise<FetchedVideo> {
   if (!contentType.startsWith('video/') && !contentType.startsWith('application/octet-stream')) {
     throw new Error(`expected video/* content-type, got ${contentType}`)
   }
+  // Cheap pre-check from header; streaming check is the real guarantee
+  // (some CDNs use Transfer-Encoding: chunked with no Content-Length).
   checkSize(declaredSize(resp))
-  const bytes = new Uint8Array(await resp.arrayBuffer())
+  const bytes = await readBoundedBody(resp)
   const suggestedName = extractFilenameFromDisposition(resp.headers.get('content-disposition'))
   return { bytes, contentType: contentType || 'video/mp4', suggestedName }
 }
