@@ -477,6 +477,54 @@ export default function AdsGenerator() {
     }
   }
 
+  // Bulk selection for the library tiles. Ben asked for this so he can
+  // mass-retire the duplicate clusters that pile up after a few 5+5+5 runs
+  // (e.g. 6 Maps Top-3 variants, 5 AI Citation variants). Selection is a
+  // Set of slugs so toggle is O(1). The "find similar" filter toggles a
+  // simple normalize-name-and-group view so he can see clusters at a glance.
+  const [selectedAngleSlugs, setSelectedAngleSlugs] = useState(() => new Set())
+  const [bulkRetireOpen, setBulkRetireOpen] = useState(false)
+  const [bulkRetireBusy, setBulkRetireBusy] = useState(false)
+  const [findSimilar, setFindSimilar] = useState(false)
+
+  function toggleSelectAngle(slug) {
+    setSelectedAngleSlugs(prev => {
+      const next = new Set(prev)
+      if (next.has(slug)) next.delete(slug); else next.add(slug)
+      return next
+    })
+  }
+  function clearAngleSelection() {
+    setSelectedAngleSlugs(new Set())
+  }
+  function selectAllVisible(visibleSlugs) {
+    setSelectedAngleSlugs(new Set(visibleSlugs))
+  }
+
+  async function performBulkRetire() {
+    if (selectedAngleSlugs.size === 0) return
+    setBulkRetireBusy(true)
+    // Capture into a fresh Set so the filter callbacks below don't depend
+    // on the live `selectedAngleSlugs` state (which gets cleared while
+    // the await is in flight). Caught by code-review 2026-06-01.
+    const slugs = Array.from(selectedAngleSlugs)
+    const slugSet = new Set(slugs)
+    try {
+      const { error } = await supabase.from('script_angles')
+        .update({ active: false }).in('slug', slugs)
+      if (error) throw new Error(error.message)
+      setMessagingLibrary(prev => prev.filter(a => !slugSet.has(a.slug)))
+      setAngles(prev => prev.filter(a => !slugSet.has(a.slug)))
+      setAngleSlugs(prev => prev.filter(s => !slugSet.has(s)))
+      setSelectedAngleSlugs(new Set())
+      setBulkRetireOpen(false)
+    } catch (e) {
+      setErr(`Bulk retire failed: ${e.message}`)
+    } finally {
+      setBulkRetireBusy(false)
+    }
+  }
+
   // Fan-out progress: how many sub-batches in flight + which combo each is on.
   // The Edge Function is one-shot per call, so for multi-angle/multi-type we
   // fire N parallel calls and aggregate. Progress is per-call so the operator
@@ -858,7 +906,7 @@ export default function AdsGenerator() {
               angle disappears from both this list and the Scripts picker. */}
           {offerSlug && (
             <div style={{ marginTop: 36, marginBottom: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
                 <div>
                   <Eyebrow style={{ marginBottom: 4 }}>Saved for this offer</Eyebrow>
                   <h2 style={{
@@ -869,14 +917,68 @@ export default function AdsGenerator() {
                       : `${messagingLibrary.length} ${messagingLibrary.length === 1 ? 'angle' : 'angles'} in library`}
                   </h2>
                 </div>
-                <button onClick={() => refreshMessagingLibrary(offerSlug)}
-                  style={{
-                    padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
-                    letterSpacing: '0.12em', textTransform: 'uppercase',
-                    border: '1px solid var(--rule)', background: 'transparent',
-                    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
-                  }}>Refresh</button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button onClick={() => setFindSimilar(s => !s)}
+                    title="Group near-duplicate angles by normalized name so you can spot clusters fast"
+                    style={{
+                      padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
+                      letterSpacing: '0.12em', textTransform: 'uppercase',
+                      border: `1px solid ${findSimilar ? '#3068b5' : 'var(--rule)'}`,
+                      background: findSimilar ? '#eaf1fb' : 'transparent',
+                      color: findSimilar ? '#3068b5' : 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                    }}>{findSimilar ? '✓ Grouped' : 'Find similar'}</button>
+                  <button onClick={() => refreshMessagingLibrary(offerSlug)}
+                    style={{
+                      padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
+                      letterSpacing: '0.12em', textTransform: 'uppercase',
+                      border: '1px solid var(--rule)', background: 'transparent',
+                      color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                    }}>Refresh</button>
+                </div>
               </div>
+              {/* Bulk action bar — appears when any tile is selected. Sticky at
+                  the top of the library so the operator never loses sight of
+                  what's selected while scrolling through 135 angles. */}
+              {selectedAngleSlugs.size > 0 && (
+                <div style={{
+                  position: 'sticky', top: 0, zIndex: 5,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  gap: 12, flexWrap: 'wrap',
+                  padding: '10px 14px', marginBottom: 12,
+                  background: '#1a242c', color: 'var(--paper)',
+                  border: '1px solid #1a242c', borderRadius: 2,
+                  fontFamily: 'var(--mono)', fontSize: 12,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <span style={{ fontWeight: 700, letterSpacing: '0.04em' }}>
+                      {selectedAngleSlugs.size} selected
+                    </span>
+                    <button onClick={() => selectAllVisible(messagingLibrary.map(a => a.slug))}
+                      title="Select every angle in the library (across all clusters and types)"
+                      style={{
+                        padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                        letterSpacing: '0.12em', textTransform: 'uppercase',
+                        background: 'transparent', color: 'var(--paper)',
+                        border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', borderRadius: 2,
+                      }}>Select all {messagingLibrary.length} in library</button>
+                    <button onClick={clearAngleSelection}
+                      style={{
+                        padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                        letterSpacing: '0.12em', textTransform: 'uppercase',
+                        background: 'transparent', color: 'var(--paper)',
+                        border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', borderRadius: 2,
+                      }}>Clear</button>
+                  </div>
+                  <button onClick={() => setBulkRetireOpen(true)}
+                    style={{
+                      padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 11,
+                      letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
+                      background: '#b53e3e', color: 'white',
+                      border: '1px solid #b53e3e', cursor: 'pointer', borderRadius: 2,
+                    }}>Retire {selectedAngleSlugs.size}</button>
+                </div>
+              )}
               {!messagingLibraryLoading && messagingLibrary.length === 0 ? (
                 <div style={{
                   padding: '16px 18px', background: 'var(--paper)',
@@ -887,6 +989,18 @@ export default function AdsGenerator() {
                   to build the library — they'll auto-save here and become
                   selectable in Scripts mode.
                 </div>
+              ) : findSimilar ? (
+                <LibraryClusterView
+                  angles={messagingLibrary}
+                  proofs={proofsByAngle}
+                  selected={selectedAngleSlugs}
+                  onToggleSelect={toggleSelectAngle}
+                  onSelectCluster={(slugs) => setSelectedAngleSlugs(prev => {
+                    const next = new Set(prev); slugs.forEach(s => next.add(s)); return next
+                  })}
+                  onRetire={(a) => setRetireAngleTarget({ slug: a.slug, name: a.name })}
+                  onOpenProofs={(a) => setProofEditorAngle(a)}
+                />
               ) : (
                 <div style={{
                   display: 'grid',
@@ -896,6 +1010,8 @@ export default function AdsGenerator() {
                   {messagingLibrary.map(a => (
                     <LibraryAngleTile key={a.slug} angle={a}
                       proofs={proofsByAngle[a.slug] || []}
+                      selected={selectedAngleSlugs.has(a.slug)}
+                      onToggleSelect={() => toggleSelectAngle(a.slug)}
                       onRetire={() => setRetireAngleTarget({ slug: a.slug, name: a.name })}
                       onOpenProofs={() => setProofEditorAngle(a)}
                     />
@@ -1828,6 +1944,16 @@ export default function AdsGenerator() {
         variant="danger"
         loading={retireAngleBusy}
       />
+      <ConfirmModal
+        open={bulkRetireOpen}
+        onClose={() => !bulkRetireBusy && setBulkRetireOpen(false)}
+        onConfirm={performBulkRetire}
+        title={`Retire ${selectedAngleSlugs.size} ${selectedAngleSlugs.size === 1 ? 'angle' : 'angles'}?`}
+        message={`All ${selectedAngleSlugs.size} selected angles will disappear from this library and from the Scripts > Angle picker. Historical scripts that reference them keep working — this is a soft delete (sets active = false on every selected row).`}
+        confirmLabel={`Retire ${selectedAngleSlugs.size}`}
+        variant="danger"
+        loading={bulkRetireBusy}
+      />
     </div>
   )
 }
@@ -2660,12 +2786,146 @@ async function upsertProofCharacterCall(payload) {
   return upsertProofCharacter(payload)
 }
 
+// Cluster view (Ben 2026-06-01) — groups angles by normalized name so
+// duplicate clusters surface visually. "Hit Six Figures Monthly" + "Just
+// Crossed $100K Monthly Revenue" end up in the same group with a single
+// "select all 2 in cluster" button. Clusters of 1 are listed below in a
+// "uniques" section so nothing hides. Same tile component, just grouped.
+function LibraryClusterView({ angles, proofs, selected, onToggleSelect, onSelectCluster, onRetire, onOpenProofs }) {
+  // Group by angle_type first, then by normalized name fingerprint.
+  // Normalize strips noise words (the, a, my, just, restoration, water, etc.)
+  // and punctuation, keeping the first 3 meaningful tokens as the cluster
+  // key. This matches roughly what a human sees as "the same idea."
+  function normalize(s) {
+    let out = (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ')
+    const stop = new Set([
+      'the','a','an','just','my','me','i','and','or','of','for','in','on','with','to',
+      'restoration','company','companies','damage','water','fire','mold','business',
+      'biggest','major','monthly','per','month','authority','dominance','status',
+      'position','leader','recently','currently',
+    ])
+    out = out.split(/\s+/).filter(w => w && !stop.has(w)).join(' ')
+    return out
+  }
+  const byType = {}
+  for (const a of angles) {
+    const t = a.angle_type || 'other'
+    if (!byType[t]) byType[t] = []
+    byType[t].push(a)
+  }
+  const ORDER = ['problem', 'circumstance', 'outcome', 'desire', 'other']
+  return (
+    <div>
+      {ORDER.filter(t => byType[t]).map(t => {
+        const meta = angleTypeMeta(t)
+        const items = byType[t]
+        const clusters = {}
+        for (const a of items) {
+          const key = normalize(a.name).split(' ').slice(0, 3).join(' ') || '_blank'
+          if (!clusters[key]) clusters[key] = []
+          clusters[key].push(a)
+        }
+        const dupClusters = Object.entries(clusters).filter(([_, v]) => v.length > 1)
+          .sort(([, a], [, b]) => b.length - a.length)
+        const singles = Object.values(clusters).filter(v => v.length === 1).flat()
+        return (
+          <div key={t} style={{ marginBottom: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{
+                display: 'inline-block', padding: '3px 8px',
+                background: meta.color, color: 'var(--paper)',
+                fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+              }}>{meta.label}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
+                {items.length} total · {dupClusters.length} duplicate cluster{dupClusters.length === 1 ? '' : 's'} · {singles.length} unique
+              </span>
+            </div>
+            {dupClusters.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                {dupClusters.map(([key, group]) => {
+                  const allSelected = group.every(a => selected.has(a.slug))
+                  return (
+                    <div key={key} style={{
+                      marginBottom: 14, padding: 12, background: '#fef6e6',
+                      border: '1px solid #e8c98a', borderRadius: 2,
+                    }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        gap: 10, marginBottom: 10, flexWrap: 'wrap',
+                      }}>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: '#7a5810', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 700 }}>
+                          Likely duplicates · {group.length} angles · "{key}"
+                        </div>
+                        <button
+                          onClick={() => onSelectCluster(group.map(a => a.slug))}
+                          disabled={allSelected}
+                          style={{
+                            padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
+                            letterSpacing: '0.12em', textTransform: 'uppercase',
+                            background: allSelected ? '#e8c98a' : 'white',
+                            color: '#7a5810', border: '1px solid #7a5810',
+                            cursor: allSelected ? 'default' : 'pointer', borderRadius: 2,
+                            opacity: allSelected ? 0.7 : 1,
+                          }}>
+                          {allSelected ? '✓ All in cluster selected' : `Select all ${group.length}`}
+                        </button>
+                      </div>
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+                        gap: 10,
+                      }}>
+                        {group.map(a => (
+                          <LibraryAngleTile key={a.slug} angle={a}
+                            proofs={proofs[a.slug] || []}
+                            selected={selected.has(a.slug)}
+                            onToggleSelect={() => onToggleSelect(a.slug)}
+                            onRetire={() => onRetire(a)}
+                            onOpenProofs={() => onOpenProofs(a)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {singles.length > 0 && (
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>
+                  Uniques ({singles.length})
+                </div>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+                  gap: 10,
+                }}>
+                  {singles.map(a => (
+                    <LibraryAngleTile key={a.slug} angle={a}
+                      proofs={proofs[a.slug] || []}
+                      selected={selected.has(a.slug)}
+                      onToggleSelect={() => onToggleSelect(a.slug)}
+                      onRetire={() => onRetire(a)}
+                      onOpenProofs={() => onOpenProofs(a)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // Tile view for the Messaging "Saved for this offer" library. Rendered
 // in a responsive grid (vs the old single-column thin-row pattern that
 // Ben hated). Big serif title, type tag, prospect voice, proof type
 // breakdown chips, and an expander for evidence_examples / why-it-matters.
 // Retire = soft-delete (active=false).
-function LibraryAngleTile({ angle, proofs, onRetire, onOpenProofs }) {
+function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, onOpenProofs }) {
   const [open, setOpen] = useState(false)
   const meta = angleTypeMeta(angle.angle_type)
   const typeColor = meta.color
@@ -2679,22 +2939,50 @@ function LibraryAngleTile({ angle, proofs, onRetire, onOpenProofs }) {
   const proofTypes = Object.keys(byType)
   return (
     <div style={{
-      background: 'white', border: '1px solid var(--rule)',
+      position: 'relative',
+      background: 'white',
+      border: `1px solid ${selected ? '#1a242c' : 'var(--rule)'}`,
       borderTop: `3px solid ${typeColor}`, borderRadius: 2,
       padding: 16, display: 'flex', flexDirection: 'column', gap: 10,
+      boxShadow: selected ? '0 0 0 2px #1a242c inset, 0 2px 8px rgba(26,36,44,0.18)' : 'none',
+      transition: 'box-shadow 120ms ease',
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-        <div>
-          <span style={{
-            display: 'inline-block', padding: '2px 7px', marginBottom: 6,
-            background: typeColor, color: 'var(--paper)',
-            fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
-            letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
-          }}>{typeLabel}</span>
-          <h3 style={{
-            margin: 0, fontFamily: 'var(--serif)', fontSize: 19, fontWeight: 500,
-            lineHeight: 1.25, color: 'var(--ink)', letterSpacing: '-0.005em',
-          }}>{angle.name}</h3>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flex: 1, minWidth: 0 }}>
+          {onToggleSelect && (
+            <label title={selected ? 'Deselect' : 'Select for bulk retire'}
+              style={{
+                position: 'relative',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 22, height: 22, marginTop: 4, flexShrink: 0,
+                border: `1.5px solid ${selected ? '#1a242c' : 'var(--rule)'}`,
+                background: selected ? '#1a242c' : 'white',
+                borderRadius: 2, cursor: 'pointer',
+                transition: 'all 100ms ease',
+              }}>
+              <input
+                type="checkbox"
+                checked={!!selected}
+                onChange={onToggleSelect}
+                style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', margin: 0 }}
+              />
+              {selected && (
+                <Check size={14} color="white" strokeWidth={3} />
+              )}
+            </label>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={{
+              display: 'inline-block', padding: '2px 7px', marginBottom: 6,
+              background: typeColor, color: 'var(--paper)',
+              fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+              letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+            }}>{typeLabel}</span>
+            <h3 style={{
+              margin: 0, fontFamily: 'var(--serif)', fontSize: 19, fontWeight: 500,
+              lineHeight: 1.25, color: 'var(--ink)', letterSpacing: '-0.005em',
+            }}>{angle.name}</h3>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
           <button onClick={onOpenProofs} title="Manage proof characters"
