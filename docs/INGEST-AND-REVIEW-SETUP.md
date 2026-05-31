@@ -78,12 +78,35 @@ Dropbox and direct URLs need no secrets (public link / direct download).
 6. Paste the **entire JSON file contents** as the `GOOGLE_SERVICE_ACCOUNT_KEY` Supabase secret.
 7. Tell editors: **share submitted Drive videos with `ingest-bot@<project>.iam.gserviceaccount.com`** (or share the whole submissions folder once). Without this, every Drive ingest fails with "Drive file not found or not shared with service account".
 
-### Creating the Frame.io PAT
+### Frame.io — what actually works in 2026
 
-1. Sign in to Frame.io → **Settings → Developer → Personal Access Tokens → New Token**
-2. Scope: `asset.read` (and `account.read` if it lets you).
-3. Copy the token (starts with `fio-u-…`). Paste as `FRAMEIO_PAT` Supabase secret.
-4. The PAT acts as your user — any asset you can see in Frame.io, the function can pull. If editors are sending Frame.io links from a workspace you're not in, you'll need a separate service account on Frame.io with shared access.
+**Adobe migrated Frame.io to v4 with OAuth2 in 2025 and killed the v2 PAT auth path.** Personal Access Tokens no longer work against share/review URLs. Three options, in descending order of "actually works today":
+
+**Option A (RECOMMENDED) — editors paste the direct media URL**
+
+The most reliable workflow. The edge function's Frame.io path now tries direct-fetch first for any URL containing `assets.frame.io`, `frameioassets.com`, or a video extension.
+
+Tell editors:
+1. Open the asset in Frame.io.
+2. Right-click the video preview → **Copy media URL** (or use the **Share → Allow downloads → Copy direct link** option).
+3. Paste THAT URL into the submission form — not the share/review URL.
+
+The function fetches the URL directly, no auth needed. Works for any video Frame.io serves.
+
+**Option B — legacy v2 PAT fallback (may work on older accounts)**
+
+If your Frame.io account is old enough that v2 endpoints still respond, you can configure a PAT:
+
+1. Sign in to Frame.io → **Settings → Developer → Personal Access Tokens → New Token**.
+2. Copy the token (starts with `fio-u-…`). Paste as `FRAMEIO_PAT` Supabase secret.
+
+The function will attempt v2 as a fallback when given a share URL. Most accounts will hit 401 here — that's Adobe's deprecation, not a config bug.
+
+**Option C (NOT BUILT) — full v4 OAuth2 rebuild**
+
+Frame.io v4 requires an Adobe Developer Console project, OAuth2 client_credentials grant via Adobe IMS, and the new `/v4/accounts/{id}/files/{id}` endpoint structure. This is a real piece of work and isn't built yet. If editors absolutely need share-URL ingestion and Option A isn't enough, this is the next chunk.
+
+**Bottom line**: for now, tell editors using Frame.io to use Option A's direct-URL workflow. The other supported sources (Drive, Dropbox, direct CDN URLs) all work without this complication.
 
 ## 4. Smoke test
 
@@ -99,7 +122,7 @@ Dropbox and direct URLs need no secrets (public link / direct download).
 | Chip / notification | Meaning | Fix |
 |---|---|---|
 | "Ingest failed — Drive file not found or not shared…" | The service account doesn't have access | Tell the editor to share the file with the service account email |
-| "Ingest failed — Frame.io PAT invalid or expired" | PAT was rotated or never created | Regenerate the PAT, update the Supabase secret |
+| "Ingest failed — Frame.io share URLs aren't supported…" | Adobe killed Frame.io v2 PAT auth in 2025 | Editor pastes the direct media URL (right-click → Copy media URL) instead of the share URL, OR uses Drive/Dropbox |
 | "Ingest failed — Dropbox returned HTML" | The Dropbox link is private | Editor needs to set link sharing to "Anyone with the link" |
 | "Ingest failed — file too large (XXX MB > 220 MB cap)" | Single video exceeds the edge runtime memory cap | Editor should upload directly via TUS (the existing **Upload file** button on the task modal), which streams to storage |
 | "Ingest failed — expected video/* content-type" | The URL doesn't return a video MIME (might be a page, a PDF, etc.) | Verify the URL is a direct video link |

@@ -37,9 +37,29 @@ const CORS_HEADERS = {
 
 // Hard cap on the upstream download size — fetched as a blob into memory
 // before re-uploading, so larger than this risks OOMing the edge runtime
-// (256MB ceiling). When this trips we surface a clear "file too large"
-// error so the operator can fall back to TUS upload or a shorter cut.
+// (256MB ceiling). We check this TWICE: first against the upstream
+// Content-Length header BEFORE buffering (the cheap, fast bail), then
+// against the actual buffered byteLength (defence-in-depth for hosts
+// that don't return Content-Length).
 const MAX_BLOB_BYTES = 220 * 1024 * 1024  // 220 MB
+
+// Helper: read Content-Length off a Response, parse to bytes. Returns
+// null when the header is missing/unparseable (e.g. chunked transfers).
+function declaredSize(resp: Response): number | null {
+  const h = resp.headers.get('content-length')
+  if (!h) return null
+  const n = parseInt(h, 10)
+  return isFinite(n) && n > 0 ? n : null
+}
+
+// Helper: throw a "file too large" error if the declared size exceeds
+// the cap. Used by every fetcher right after the body fetch and BEFORE
+// arrayBuffer() so we never materialise a multi-GB upstream payload.
+function checkSize(declared: number | null): void {
+  if (declared != null && declared > MAX_BLOB_BYTES) {
+    throw new Error(`file too large (${Math.round(declared / 1024 / 1024)} MB > ${MAX_BLOB_BYTES / 1024 / 1024} MB cap) — upload via the dashboard's Upload button instead`)
+  }
+}
 
 interface SubmissionRow {
   id: string
@@ -202,6 +222,10 @@ async function fetchFromDrive(url: string): Promise<FetchedVideo> {
     const errText = await fileResp.text()
     throw new Error(`Drive download ${fileResp.status}: ${errText.slice(0, 200)}`)
   }
+  // Pre-check size before buffering. Drive's Content-Length is reliable
+  // because the metadata API also returns the file's size — but we use
+  // the response header here since arrayBuffer() doesn't expose progress.
+  checkSize(declaredSize(fileResp))
   const bytes = new Uint8Array(await fileResp.arrayBuffer())
   return { bytes, contentType: meta.mimeType || 'video/mp4', suggestedName: meta.name }
 }
@@ -270,42 +294,71 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
 // Frame.io
 // -----------------------------------------------------------------------
 
+// Frame.io became Adobe's in 2024 and the v2 API was deprecated when
+// they migrated to v4 with Adobe IMS OAuth in 2025. Three strategies in
+// order of preference:
+//
+//   1. If the URL is already a direct media CDN URL (assets.frame.io,
+//      *.frameio.io, frame.io/v2/.../signed) — fetch it raw, no auth.
+//      This is the recommended editor workflow: "right-click the
+//      preview in Frame.io → Copy media URL → paste into the
+//      submission form here".
+//   2. If FRAMEIO_PAT is configured AND the URL is a share/review URL,
+//      attempt the legacy v2 API. Some legacy workspaces still resolve.
+//      On 401/403 we surface a doc-pointer error so the operator knows
+//      to migrate.
+//   3. Otherwise: throw a clear error explaining the v4 migration and
+//      pointing at the alternative workflow.
 async function fetchFromFrameio(url: string): Promise<FetchedVideo> {
-  const pat = Deno.env.get('FRAMEIO_PAT')
-  if (!pat) throw new Error('FRAMEIO_PAT not configured')
+  // Path 1 — direct media URL passthrough. assets.frame.io is Frame.io's
+  // CDN host; frameio[content].com is the legacy bucket; if the URL
+  // contains the magic .mp4/.mov/.webm extension we treat it as direct
+  // too. No auth needed for any of these.
+  if (/(assets\.frame\.io|frameioassets\.|\.(mp4|mov|webm|m4v)(\?|$))/i.test(url)) {
+    return await fetchDirect(url)
+  }
 
-  // Share URLs come in several shapes. We extract the asset id (UUID).
-  // Frame.io v3 uses path segments like /reviews/{review_id} which doesn't
-  // expose the asset id directly; in that case we hit the share endpoint
-  // first to resolve assets, then download.
+  // Path 2 — legacy v2 API with PAT. Only attempted when both a PAT is
+  // configured AND we can extract an asset UUID from the share URL.
+  const pat = Deno.env.get('FRAMEIO_PAT')
   const assetId = extractFrameioAssetId(url)
-  if (!assetId) {
-    throw new Error('could not extract Frame.io asset id — paste the direct asset URL, not a share collection URL')
+  if (pat && assetId) {
+    try {
+      const assetResp = await fetch(`https://api.frame.io/v2/assets/${assetId}`, {
+        headers: { Authorization: `Bearer ${pat}` },
+      })
+      if (assetResp.ok) {
+        const asset = await assetResp.json() as {
+          original?: string
+          name?: string
+          filetype?: string
+        }
+        const downloadUrl = asset.original
+        if (downloadUrl) {
+          const dlResp = await fetch(downloadUrl)
+          if (dlResp.ok) {
+            checkSize(declaredSize(dlResp))
+            const bytes = new Uint8Array(await dlResp.arrayBuffer())
+            return {
+              bytes,
+              contentType: asset.filetype || 'video/mp4',
+              suggestedName: asset.name || null,
+            }
+          }
+        }
+      }
+      // v2 path failed — fall through to the error below rather than
+      // throwing a misleading "PAT invalid" error. Adobe killed v2;
+      // the most likely cause is the API itself, not the PAT.
+    } catch { /* fall through */ }
   }
-  const assetResp = await fetch(`https://api.frame.io/v2/assets/${assetId}`, {
-    headers: { Authorization: `Bearer ${pat}` },
-  })
-  if (!assetResp.ok) {
-    const errText = await assetResp.text()
-    if (assetResp.status === 401) throw new Error('Frame.io PAT invalid or expired')
-    if (assetResp.status === 403) throw new Error('Frame.io PAT lacks access to this asset')
-    throw new Error(`Frame.io asset ${assetResp.status}: ${errText.slice(0, 200)}`)
-  }
-  const asset = await assetResp.json() as {
-    original?: string
-    name?: string
-    filetype?: string
-  }
-  const downloadUrl = asset.original
-  if (!downloadUrl) throw new Error('Frame.io asset has no original download URL')
-  const dlResp = await fetch(downloadUrl)
-  if (!dlResp.ok) throw new Error(`Frame.io download ${dlResp.status}`)
-  const bytes = new Uint8Array(await dlResp.arrayBuffer())
-  return {
-    bytes,
-    contentType: asset.filetype || 'video/mp4',
-    suggestedName: asset.name || null,
-  }
+
+  // Path 3 — no usable path. Tell the operator what to do.
+  throw new Error(
+    'Frame.io share URLs aren\'t supported (Adobe migrated to v4 OAuth2 in 2025). ' +
+    'Workaround: in Frame.io, right-click the video preview → "Copy media URL" → ' +
+    'paste THAT URL instead of the share link. Or use Google Drive / Dropbox.'
+  )
 }
 
 function extractFrameioAssetId(url: string): string | null {
@@ -337,6 +390,7 @@ async function fetchFromDropbox(url: string): Promise<FetchedVideo> {
   if (contentType.includes('text/html')) {
     throw new Error('Dropbox returned HTML — link is probably private or revoked')
   }
+  checkSize(declaredSize(resp))
   const bytes = new Uint8Array(await resp.arrayBuffer())
   const suggestedName = extractFilenameFromDisposition(resp.headers.get('content-disposition'))
   return { bytes, contentType, suggestedName }
@@ -353,6 +407,7 @@ async function fetchDirect(url: string): Promise<FetchedVideo> {
   if (!contentType.startsWith('video/') && !contentType.startsWith('application/octet-stream')) {
     throw new Error(`expected video/* content-type, got ${contentType}`)
   }
+  checkSize(declaredSize(resp))
   const bytes = new Uint8Array(await resp.arrayBuffer())
   const suggestedName = extractFilenameFromDisposition(resp.headers.get('content-disposition'))
   return { bytes, contentType: contentType || 'video/mp4', suggestedName }
