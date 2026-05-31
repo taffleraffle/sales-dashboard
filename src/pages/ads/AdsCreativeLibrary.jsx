@@ -8443,7 +8443,12 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched }) {
     // assigned_editor join (creator = on-camera talent vs editor = the
     // cutter; Ben wants both visible per 2026-06-01 review), plus the
     // is_low_quality flag so the chip can render.
-    const cols = 'id,name,canonical_name,display_name,description,type,creator,status,offer_slug,has_been_run,stage_final_cut,thumbnail_url,preview_url,final_cut_url,approved_url,drive_url,messaging_angle,messaging_angle_override,added_at,updated_at,exclude_from_library,assigned_editor_id,is_low_quality,low_quality_reason,launch_queue_position'
+    const baseCols = 'id,name,canonical_name,display_name,description,type,creator,status,offer_slug,has_been_run,stage_final_cut,thumbnail_url,preview_url,final_cut_url,approved_url,drive_url,messaging_angle,messaging_angle_override,added_at,updated_at,exclude_from_library,assigned_editor_id,is_low_quality,low_quality_reason'
+    // Include launch_queue_position if migration 121 has been applied;
+    // fall back to the base columns on 42703 (undefined_column) so the
+    // queue still loads before Ben runs the migration. Same self-healing
+    // pattern as the is_bad_take fallback in LibraryTab.load (line ~2836).
+    const cols = `${baseCols},launch_queue_position`
     try {
       let q = supabase.from('lib_creative_library')
         .select(`${cols},assigned_editor:assigned_editor_id (id, name)`)
@@ -8461,7 +8466,7 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched }) {
       if (hideLowQuality) {
         q = q.or('is_low_quality.is.null,is_low_quality.eq.false')
       }
-      const [rowsRes, offersRes, editorsRes] = await Promise.all([
+      let [rowsRes, offersRes, editorsRes] = await Promise.all([
         q,
         supabase.from('offers').select('slug,name').eq('retired', false).order('slug'),
         // Editors list for the "edited by" line on the row card. The join
@@ -8470,6 +8475,22 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched }) {
         // null (e.g. editor was deleted but the FK is still pointing).
         supabase.from('lib_creative_editors').select('id,name'),
       ])
+      // Self-heal when migration 121 (launch_queue_position) hasn't
+      // been applied yet: PostgREST returns 42703 (undefined_column)
+      // on the column-not-found case. Strip the column from the SELECT
+      // and retry. Drag-drop reorder will still PATCH the column and
+      // fail until 121 lands, but at least the queue loads.
+      if (rowsRes.error?.code === '42703' && rowsRes.error.message?.includes('launch_queue_position')) {
+        let fbQ = supabase.from('lib_creative_library')
+          .select(`${baseCols},assigned_editor:assigned_editor_id (id, name)`)
+          .eq('status', 'edited')
+          .eq('has_been_run', false)
+          .eq('exclude_from_library', false)
+        if (hideLowQuality) {
+          fbQ = fbQ.or('is_low_quality.is.null,is_low_quality.eq.false')
+        }
+        rowsRes = await fbQ
+      }
       if (rowsRes.error) throw rowsRes.error
       // Flatten the assigned_editor.name into a top-level field so the
       // row card doesn't have to drill through a sub-object. Also keep
