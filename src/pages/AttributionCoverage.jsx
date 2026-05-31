@@ -6,9 +6,21 @@ import {
   fmtMoneyFull, fmtNum, fmtPct, PALETTE,
 } from '../components/editorial/atoms'
 import Modal from '../components/editorial/Modal'
-import {
-  DndContext, DragOverlay, PointerSensor, useSensor, useSensors, useDraggable, useDroppable, closestCenter,
-} from '@dnd-kit/core'
+
+// Per-stage explanatory caption. Renders under each row in the funnel
+// table so it's clear what each metric measures and how to move it.
+const STAGE_HELP = {
+  spend_total:      'Total Meta spend in the window. Source of truth: ad_daily_stats.',
+  spend_with_lead:  'Of all spend, how much went to ads that had at least one Typeform submit with the ad_id resolved. Low % = ad URLs aren\'t carrying {{ad.id}} — fix is account-level URL params on Meta, then re-sync. Classifying audiences in the list below does NOT move this number.',
+  submits:          'Total Typeform submissions in the window.',
+  submits_utms:     'Of submits, how many arrived with a utm_campaign set. Missing UTMs usually mean direct nav, refresh, or a bookmark.',
+  submits_ad_id:    'Of submits, how many resolved to a specific Meta ad_id (the strongest attribution). This is the # that fixing the URL macros will lift.',
+  ghl_matched:      'Of submits, how many we found in GHL by email match — means the contact actually entered the CRM.',
+  booked:           'Of submits, how many booked a call (matched_event_id or closer_call linked).',
+  showed:           'Of submits, how many actually showed up on the call.',
+  closed:           'Of submits, how many became closed sales.',
+  paid:             'Of submits, how many produced a payment in Stripe/Fanbasis.',
+}
 
 // Canonical audience slugs Ben uses. The picker lets him add new ones too.
 const KNOWN_AUDIENCES = [
@@ -79,10 +91,10 @@ export default function AttributionCoverage() {
   const [busy, setBusy] = useState(true)
   const [err, setErr] = useState(null)
 
-  // Ad kanban — the real workhorse view. Each card is one active ad with
-  // thumbnail / spend / leads / CPL. Columns = audiences. Drag to reassign.
+  // Ad list — top-spending active ads with thumbnails. Each row gets an
+  // inline audience picker. Default filter hides anything already overridden
+  // (Ben 2026-05-31: "once I've assigned it, just see it as hidden").
   const [kanbanAds, setKanbanAds] = useState([])
-  const [activeDragAdId, setActiveDragAdId] = useState(null)
   // Optimistic vertical-by-ad map; supabase round-trip writes the truth back.
   const [pendingVertical, setPendingVertical] = useState({}) // { ad_id: 'restoration' }
   // Triage queue (creative-grouped) kept for the bottom-of-page "still unresolved" sliver
@@ -460,14 +472,24 @@ export default function AttributionCoverage() {
                 const isUsd = s.unit === 'usd'
                 const fmt = isUsd ? fmtMoneyFull : fmtNum
                 const tone = covTone(Number(s.coverage_pct))
+                const help = STAGE_HELP[s.stage_key]
                 return (
                   <tr key={s.stage_key} style={{ borderBottom: '1px solid var(--rule)' }}>
                     <td style={td}>
-                      <span style={{
-                        fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
-                        marginRight: 10,
-                      }}>{String(s.stage_order).padStart(2, '0')}</span>
-                      {s.stage_label}
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                        <span style={{
+                          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
+                        }}>{String(s.stage_order).padStart(2, '0')}</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div>{s.stage_label}</div>
+                          {help && (
+                            <div style={{
+                              marginTop: 3, fontSize: 11, color: 'var(--ink-3)',
+                              fontStyle: 'italic', lineHeight: 1.4, maxWidth: 540,
+                            }}>{help}</div>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(Number(s.total))}</td>
                     <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(Number(s.traced))}</td>
@@ -543,27 +565,12 @@ export default function AttributionCoverage() {
         </Card>
       </div>
 
-      {/* AD KANBAN — the workhorse view */}
-      <AdKanban
+      {/* AD LIST — flat list of active ads, default = ones that still need classification */}
+      <AdList
         ads={kanbanAds}
         pendingVertical={pendingVertical}
-        activeDragAdId={activeDragAdId}
-        onDragStart={(id) => setActiveDragAdId(id)}
-        onDragEnd={async (event) => {
-          setActiveDragAdId(null)
-          const { active, over } = event
-          if (!over || !active) return
-          const ad_id = String(active.id)
-          // column ids are 'col:slug' so we strip the prefix.
-          const toAud = String(over.id).startsWith('col:') ? String(over.id).slice(4) : null
-          if (!toAud) return
-          const current = pendingVertical[ad_id] ?? (kanbanAds.find(a => a.ad_id === ad_id)?.current_vertical || null)
-          if (current === toAud) return
-          // If dropping on the 'unclassified' column, we set vertical to null
-          // by writing the placeholder slug 'unclassified' so the override is
-          // explicit and survives a campaign-name change. (DB stores 'unclassified'.)
-          await updateAdVertical(ad_id, toAud)
-        }}
+        existingAudiences={existingAudiences}
+        onAssign={updateAdVertical}
         autoClassifiableCount={autoClassifiableCount}
         onAutoClassify={autoClassifyByUtm}
         autoBusy={autoBusy}
@@ -602,81 +609,76 @@ export default function AttributionCoverage() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// AdKanban
-// Top-spending active ads laid out across audience columns. Drag any card
-// to a different column to reassign — writes creative_attributes.vertical.
-// One source of truth for every lead from that ad going forward.
+// AdList (Ben 2026-05-31, replaces the kanban)
 //
-// Columns: the union of canonical audiences + any audience that already has
-// an ad. "Unclassified" is the leftmost column = ads with no vertical and no
-// parser hit yet — this is where new ads land until you sort them.
+// Flat list of top-spending active ads. Default filter: only show ads that
+// haven't been explicitly classified (vertical_source != 'override') so the
+// page shrinks as you work through it. Toggle "Show all" to see the ones
+// you already classified — useful when you assigned the wrong audience by
+// accident.
+//
+// Per-row controls:
+//  - Small thumbnail (52×52 image, no decorative color blocks)
+//  - Ad name + campaign + spend / leads / CPL
+//  - Inline audience picker (chip group): click a chip → writes
+//    creative_attributes.vertical for that ad → row hides under the
+//    default filter.
+//
+// No drag-and-drop. No kanban columns. Just a list.
 // ───────────────────────────────────────────────────────────────────────────
 
-const KANBAN_CANONICAL_COLUMNS = [
-  'unclassified', 'restoration', 'electrician', 'accounting',
+const AUDIENCE_OPTIONS = [
+  'restoration', 'electrician', 'accounting',
   'pool_builders', 'real_estate', 'roofing', 'plumbing', 'hvac',
 ]
 
-function AdKanban({
-  ads, pendingVertical, activeDragAdId, onDragStart, onDragEnd,
+function AdList({
+  ads, pendingVertical, existingAudiences, onAssign,
   autoClassifiableCount, onAutoClassify, autoBusy, busy,
 }) {
-  // Sensors: 5px movement before drag starts so plain clicks (e.g. card
-  // body click) don't get hijacked by dnd.
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  const [showAssigned, setShowAssigned] = useState(false)
+  const [search, setSearch] = useState('')
 
-  // Derive the column list: canonical first, plus any audience present in data
-  // that isn't already in the canonical list.
-  const columns = useMemo(() => {
-    const present = new Set(KANBAN_CANONICAL_COLUMNS)
-    for (const a of ads) {
-      const v = pendingVertical[a.ad_id] ?? a.current_vertical
-      if (v) present.add(v)
-    }
-    // Sort: canonical order first, then any extras alphabetically
-    const canonicalIdx = new Map(KANBAN_CANONICAL_COLUMNS.map((s, i) => [s, i]))
-    return Array.from(present).sort((a, b) => {
-      const ai = canonicalIdx.get(a) ?? 999
-      const bi = canonicalIdx.get(b) ?? 999
-      if (ai !== bi) return ai - bi
-      return a.localeCompare(b)
-    })
-  }, [ads, pendingVertical])
-
-  // Group ads into their (effective) column.
-  const grouped = useMemo(() => {
-    const out = {}
-    for (const slug of columns) out[slug] = []
-    for (const a of ads) {
-      const v = pendingVertical[a.ad_id] ?? a.current_vertical ?? 'unclassified'
-      if (!out[v]) out[v] = []
-      out[v].push(a)
-    }
-    // Sort each column by spend DESC
-    for (const slug of Object.keys(out)) {
-      out[slug].sort((a, b) => Number(b.spend_30d) - Number(a.spend_30d))
-    }
-    return out
-  }, [ads, pendingVertical, columns])
-
-  const activeAd = activeDragAdId ? ads.find(a => a.ad_id === activeDragAdId) : null
-
-  // Totals per column for the header.
-  function colTotals(slug) {
-    const list = grouped[slug] || []
-    return {
-      count: list.length,
-      spend: list.reduce((s, a) => s + Number(a.spend_30d || 0), 0),
-      leads: list.reduce((s, a) => s + Number(a.leads_30d || 0), 0),
-    }
+  // Effective vertical for a row (optimistic > view).
+  function effective(ad) {
+    const v = pendingVertical[ad.ad_id] ?? ad.current_vertical
+    const source = pendingVertical[ad.ad_id] ? 'override' : ad.vertical_source
+    return { vertical: v, source }
   }
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return ads.filter(a => {
+      if (q) {
+        const blob = `${a.ad_name || ''} ${a.campaign_name || ''} ${a.adset_name || ''}`.toLowerCase()
+        if (!blob.includes(q)) return false
+      }
+      if (showAssigned) return true
+      // Default filter: hide rows whose vertical was explicitly set
+      // (override). Keep auto-parsed + unknown — those still need a human eye.
+      const { source } = effective(a)
+      return source !== 'override'
+    })
+  }, [ads, search, showAssigned, pendingVertical])
+
+  const overrideCount = useMemo(
+    () => ads.filter(a => effective(a).source === 'override').length,
+    [ads, pendingVertical],
+  )
+
+  // Union of canonical + previously-used audiences (the picker shows both).
+  const audienceChips = useMemo(() => {
+    const seen = new Set(AUDIENCE_OPTIONS)
+    for (const a of existingAudiences || []) seen.add(a)
+    return Array.from(seen)
+  }, [existingAudiences])
 
   return (
     <div style={{ marginTop: 32 }}>
       <SectionHead
-        eyebrow="Ad kanban · last 30 days"
-        title="Drag any ad to its audience"
-        tagline="One card per spending ad. Drop it on a column to set its vertical — every current and future lead from that ad inherits the audience. Auto-classify resolves anything whose campaign name already names the vertical."
+        eyebrow="Active ads · last 30 days"
+        title="Classify each ad once"
+        tagline="Pick the audience for every ad that's still unclassified. Every current and future lead from that ad inherits the audience. Rows you've already classified hide automatically — toggle 'Show all' if you need to fix a wrong assignment."
         right={
           autoClassifiableCount > 0 ? (
             <Button
@@ -691,336 +693,179 @@ function AdKanban({
         }
       />
 
-      {ads.length === 0 ? (
+      {/* Toolbar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        padding: '10px 14px', marginBottom: 12,
+        background: 'var(--paper-2)', border: '1px solid var(--rule)',
+      }}>
+        <button
+          type="button"
+          onClick={() => setShowAssigned(false)}
+          style={{
+            ...chipBtn,
+            background: !showAssigned ? 'var(--ink)' : 'var(--paper)',
+            color: !showAssigned ? 'var(--paper)' : 'var(--ink-2)',
+            borderColor: !showAssigned ? 'var(--ink)' : 'var(--rule)',
+          }}>
+          Needs classification ({ads.length - overrideCount})
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowAssigned(true)}
+          style={{
+            ...chipBtn,
+            background: showAssigned ? 'var(--ink)' : 'var(--paper)',
+            color: showAssigned ? 'var(--paper)' : 'var(--ink-2)',
+            borderColor: showAssigned ? 'var(--ink)' : 'var(--rule)',
+          }}>
+          Show all ({ads.length})
+        </button>
+
+        <span style={{ color: 'var(--ink-3)', margin: '0 4px' }}>·</span>
+
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search ad name or campaign…"
+          style={{
+            flex: 1, minWidth: 240, padding: '7px 12px',
+            fontFamily: 'var(--sans)', fontSize: 13,
+            border: '1px solid var(--rule)', background: 'var(--paper)',
+            color: 'var(--ink)', outline: 'none', borderRadius: 2,
+          }} />
+
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.08em' }}>
+          {filtered.length} of {ads.length} ads
+        </span>
+      </div>
+
+      {/* List */}
+      {filtered.length === 0 ? (
         <Card padding={24}>
           <div style={{ textAlign: 'center', color: 'var(--ink-3)', fontFamily: 'var(--sans)', fontSize: 13 }}>
-            {busy ? 'Loading ads…' : 'No active ads with spend in the last 30 days.'}
+            {busy ? 'Loading…'
+             : ads.length === 0 ? 'No active ads with spend in the last 30 days.'
+             : !showAssigned ? 'Every active ad is classified. Toggle "Show all" to review.'
+             : 'No ads match your search.'}
           </div>
         </Card>
       ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragStart={(e) => onDragStart(e.active.id)}
-          onDragEnd={onDragEnd}
-        >
-          <div style={{
-            display: 'flex', gap: 14, overflowX: 'auto',
-            paddingBottom: 12,
-            // Allow vertical scroll within columns
-            alignItems: 'flex-start',
-          }}>
-            {columns.map(slug => (
-              <KanbanColumn
-                key={slug}
-                slug={slug}
-                ads={grouped[slug] || []}
-                totals={colTotals(slug)}
-              />
-            ))}
-          </div>
-
-          <DragOverlay>
-            {activeAd ? <KanbanAdCard ad={activeAd} dragging /> : null}
-          </DragOverlay>
-        </DndContext>
+        <Card padding={0}>
+          {filtered.map((ad, i) => (
+            <AdListRow
+              key={ad.ad_id}
+              ad={ad}
+              effective={effective(ad)}
+              audienceChips={audienceChips}
+              onAssign={onAssign}
+              isLast={i === filtered.length - 1}
+            />
+          ))}
+        </Card>
       )}
     </div>
   )
 }
 
-function KanbanColumn({ slug, ads, totals }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `col:${slug}` })
-  const isUnclassified = slug === 'unclassified'
-  const headerAccent = isUnclassified ? PALETTE.red : 'var(--ink)'
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={{
-        flex: '0 0 320px',
-        background: isOver ? 'var(--accent-soft, #fef9cc)' : 'var(--paper-2)',
-        border: `1px solid ${isOver ? 'var(--ink)' : 'var(--rule)'}`,
-        transition: 'background 0.12s, border 0.12s',
-        display: 'flex', flexDirection: 'column',
-        maxHeight: '78vh',
-      }}>
-      {/* Column header */}
-      <div style={{
-        padding: '14px 16px',
-        borderBottom: `2px solid ${headerAccent}`,
-        flexShrink: 0,
-      }}>
-        <div style={{
-          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
-          letterSpacing: '0.14em', textTransform: 'uppercase',
-          color: 'var(--ink-3)', marginBottom: 4,
-        }}>{slug.replace(/_/g, ' ')}</div>
-        <div style={{
-          display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-          gap: 8,
-        }}>
-          <div style={{
-            fontFamily: 'var(--serif)', fontSize: 22, lineHeight: 1.1,
-            color: 'var(--ink)', fontVariantNumeric: 'tabular-nums',
-            letterSpacing: '-0.015em',
-          }}>
-            {fmtMoneyFull(totals.spend)}
-          </div>
-          <div style={{
-            fontFamily: 'var(--mono)', fontSize: 10.5,
-            color: 'var(--ink-3)', letterSpacing: '0.06em',
-          }}>
-            {totals.count} ad{totals.count === 1 ? '' : 's'} · {totals.leads} lead{totals.leads === 1 ? '' : 's'}
-          </div>
-        </div>
-      </div>
-
-      {/* Cards — scrollable */}
-      <div style={{
-        flex: 1, minHeight: 0, overflowY: 'auto',
-        padding: 10, display: 'flex', flexDirection: 'column', gap: 10,
-      }}>
-        {ads.length === 0 && (
-          <div style={{
-            padding: '24px 12px', textAlign: 'center',
-            fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink-3)',
-            fontStyle: 'italic',
-            border: '1px dashed var(--rule)',
-          }}>
-            {isUnclassified ? 'No unclassified ads.' : 'Drop ads here.'}
-          </div>
-        )}
-        {ads.map(a => (
-          <KanbanAdCard key={a.ad_id} ad={a} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function KanbanAdCard({ ad, dragging = false }) {
-  const { attributes, listeners, setNodeRef, isDragging, transform } = useDraggable({ id: ad.ad_id })
-  const transformStyle = transform
-    ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
-    : undefined
-  const hasThumb = !!ad.thumbnail_url
+function AdListRow({ ad, effective: eff, audienceChips, onAssign, isLast }) {
   const cpl = ad.cpl_30d != null ? Number(ad.cpl_30d) : null
   const cplTone = cpl == null ? 'default'
     : cpl > 200 ? 'red'
     : cpl > 100 ? 'amber'
     : 'green'
-  return (
-    <div
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      style={{
-        background: 'var(--paper)',
-        border: '1px solid var(--rule)',
-        opacity: isDragging && !dragging ? 0.35 : 1,
-        cursor: 'grab',
-        transform: transformStyle,
-        transition: dragging ? 'none' : 'transform 0.16s, box-shadow 0.16s, border 0.12s',
-        boxShadow: dragging ? '0 12px 32px rgba(10,10,10,0.18)' : 'none',
-        display: 'flex', flexDirection: 'column',
-        userSelect: 'none',
-      }}>
-      {/* Thumbnail */}
-      <div style={{
-        height: 110, background: '#0a0a0a',
-        backgroundImage: hasThumb ? `url(${ad.thumbnail_url})` : 'none',
-        backgroundSize: 'cover', backgroundPosition: 'center',
-        borderBottom: '1px solid var(--rule)',
-        position: 'relative',
-        flexShrink: 0,
-      }}>
-        {/* Spend pill */}
-        <div style={{
-          position: 'absolute', top: 6, right: 6,
-          background: 'var(--ink)', color: 'var(--paper)',
-          fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
-          fontSize: 13, fontWeight: 500,
-          padding: '3px 8px',
-        }}>
-          {fmtMoneyFull(Number(ad.spend_30d))}
-        </div>
-        {ad.asset_type && (
-          <div style={{
-            position: 'absolute', bottom: 6, left: 6,
-            background: 'rgba(0,0,0,0.6)', color: 'white',
-            fontFamily: 'var(--mono)', fontSize: 9.5,
-            letterSpacing: '0.1em', textTransform: 'uppercase',
-            padding: '2px 6px',
-          }}>
-            {ad.asset_type}
-          </div>
-        )}
-      </div>
-
-      {/* Body */}
-      <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div style={{
-          fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 500,
-          color: 'var(--ink)', lineHeight: 1.25,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {ad.ad_name || '—'}
-        </div>
-        <div style={{
-          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {ad.campaign_name || '—'}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-          <span style={{
-            fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
-            letterSpacing: '0.06em', textTransform: 'uppercase',
-          }}>
-            {ad.leads_30d} lead{ad.leads_30d === 1 ? '' : 's'}
-          </span>
-          <span style={{ color: 'var(--ink-3)' }}>·</span>
-          <Pill tone={cplTone}>
-            {cpl != null ? `${fmtMoneyFull(cpl)}/lead` : '∞ / lead'}
-          </Pill>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// CreativeCard
-// One card per (utm_campaign, utm_content) cluster. Shows the ad thumbnail
-// when ads sync has caught up, otherwise a deterministic-color placeholder
-// with the creative name overlaid. Checkbox in the corner for multi-select.
-// Click anywhere on the card body to toggle selection.
-// ───────────────────────────────────────────────────────────────────────────
-
-function CreativeCard({ creative, selected, onToggle, audience, audienceSource }) {
-  const c = creative
-  const hasThumb = !!c.thumbnail_url
-  const placeholderColor = colorFromString(`${c.utm_campaign}-${c.utm_content}`)
-  const audTone = audienceSource === 'response_override' ? 'green'
-                : audienceSource === 'campaign_override' ? 'teal'
-                : audienceSource === 'parsed'            ? 'amber'
+  const audTone = eff.source === 'override' ? 'green'
+                : eff.source === 'parsed'   ? 'amber'
                 : 'red'
 
   return (
-    <div
-      onClick={onToggle}
-      style={{
-        position: 'relative',
-        background: 'var(--paper)',
-        border: `1px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
-        outline: selected ? '2px solid var(--accent, #f4e14a)' : 'none',
-        outlineOffset: -1,
-        cursor: 'pointer',
-        display: 'flex', flexDirection: 'column',
-        transition: 'border 0.12s, outline 0.12s',
-      }}>
-      {/* Thumbnail / placeholder */}
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '56px minmax(220px, 1.4fr) minmax(220px, 1.6fr) 110px 80px 100px 1.4fr',
+      gap: 14, alignItems: 'center',
+      padding: '12px 16px',
+      borderBottom: isLast ? 'none' : '1px solid var(--rule)',
+      fontFamily: 'var(--sans)', fontSize: 13,
+    }}>
+      {/* Thumbnail */}
       <div style={{
-        position: 'relative',
-        height: 160,
-        background: hasThumb ? '#0a0a0a' : placeholderColor,
-        backgroundImage: hasThumb ? `url(${c.thumbnail_url})` : 'none',
-        backgroundSize: 'cover', backgroundPosition: 'center',
-        display: 'flex', alignItems: 'flex-end',
-        borderBottom: '1px solid var(--rule)',
-      }}>
-        {/* Checkbox */}
+        width: 52, height: 52,
+        background: ad.thumbnail_url ? `url(${ad.thumbnail_url}) center/cover` : 'var(--paper-2)',
+        border: '1px solid var(--rule)',
+        flexShrink: 0,
+      }} />
+
+      {/* Ad name + ad_id */}
+      <div style={{ minWidth: 0 }}>
         <div style={{
-          position: 'absolute', top: 8, left: 8,
-          width: 22, height: 22,
-          background: 'var(--paper)',
-          border: `1px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--ink)',
-        }}>
-          {selected ? '✓' : ''}
-        </div>
-
-        {/* Leads pill (right) */}
+          fontWeight: 500, color: 'var(--ink)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{ad.ad_name || '—'}</div>
         <div style={{
-          position: 'absolute', top: 8, right: 8,
-          background: 'var(--ink)', color: 'var(--paper)',
-          fontFamily: 'var(--mono)', fontSize: 11,
-          letterSpacing: '0.04em', padding: '4px 8px',
-        }}>
-          {c.leads_count} lead{c.leads_count === 1 ? '' : 's'}
-        </div>
-
-        {/* Creative name overlay (placeholder) */}
-        {!hasThumb && (
-          <div style={{
-            padding: 14,
-            color: 'var(--paper)',
-            fontFamily: 'var(--serif)', fontSize: 22, lineHeight: 1.15,
-            textShadow: '0 1px 4px rgba(0,0,0,0.4)',
-          }}>
-            <em>{c.utm_content === '<no_content>' ? 'no creative' : c.utm_content}</em>
-          </div>
-        )}
-
-        {/* Asset type pill (video / image) when known */}
-        {hasThumb && c.asset_type && (
-          <div style={{
-            position: 'absolute', bottom: 8, left: 8,
-            background: 'rgba(0,0,0,0.6)', color: 'white',
-            fontFamily: 'var(--mono)', fontSize: 9.5,
-            letterSpacing: '0.1em', textTransform: 'uppercase',
-            padding: '3px 7px',
-          }}>
-            {c.asset_type}
-          </div>
-        )}
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)',
+          marginTop: 2,
+        }}>{ad.ad_id}</div>
       </div>
 
-      {/* Body */}
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* Campaign + adset */}
+      <div style={{ minWidth: 0 }}>
         <div style={{
-          fontFamily: 'var(--mono)', fontSize: 10.5,
-          letterSpacing: '0.06em', textTransform: 'uppercase',
-          color: 'var(--ink-3)',
-        }}>
-          {c.utm_campaign === '<no_campaign>' ? 'no campaign · direct nav' : c.utm_campaign}
-        </div>
+          fontSize: 12, color: 'var(--ink-2)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{ad.campaign_name || '—'}</div>
+        <div style={{
+          fontSize: 11, color: 'var(--ink-3)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{ad.adset_name || ''}</div>
+      </div>
 
-        {hasThumb && (
-          <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink)', fontWeight: 500 }}>
-            {c.utm_content === '<no_content>' ? '—' : c.utm_content}
-          </div>
-        )}
+      {/* Spend */}
+      <div style={{
+        fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+        fontSize: 17, color: 'var(--ink)', textAlign: 'right',
+      }}>
+        {fmtMoneyFull(Number(ad.spend_30d))}
+      </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          {audience ? (
-            <Pill tone={audTone} uppercase>{audience.replace(/_/g, ' ')}</Pill>
-          ) : (
-            <Pill tone="red" uppercase>unknown</Pill>
-          )}
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-3)' }}>
-            {audienceSource?.replace(/_/g, ' ')}
-          </span>
-        </div>
+      {/* Leads */}
+      <div style={{
+        fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
+        fontSize: 15, color: 'var(--ink-2)', textAlign: 'right',
+      }}>
+        {ad.leads_30d}
+      </div>
 
-        {c.ad_id && (
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
-            ad_id · {c.ad_id}
-          </div>
-        )}
+      {/* CPL pill */}
+      <div style={{ textAlign: 'right' }}>
+        <Pill tone={cplTone}>{cpl != null ? `${fmtMoneyFull(cpl)}/lead` : '∞'}</Pill>
+      </div>
+
+      {/* Audience picker */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <Pill tone={audTone} uppercase>
+          {eff.vertical ? eff.vertical.replace(/_/g, ' ') : 'unclassified'}
+        </Pill>
+        <select
+          value={eff.vertical || ''}
+          onChange={(e) => onAssign(ad.ad_id, e.target.value)}
+          style={{
+            fontFamily: 'var(--sans)', fontSize: 12,
+            padding: '5px 8px',
+            border: '1px solid var(--rule)', background: 'var(--paper)',
+            color: 'var(--ink)', outline: 'none', borderRadius: 2,
+            cursor: 'pointer',
+            minWidth: 140,
+          }}>
+          <option value="" disabled>Set audience…</option>
+          {audienceChips.map(slug => (
+            <option key={slug} value={slug}>{slug.replace(/_/g, ' ')}</option>
+          ))}
+        </select>
       </div>
     </div>
   )
 }
 
-// Deterministic background color for placeholder thumbnails.
-function colorFromString(s) {
-  const palette = ['#2a4a5e', '#5b3a8f', '#b86a0c', '#3e5a4e', '#7a2c3e', '#2a3a55']
-  const h = (s || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0)
-  return palette[h % palette.length]
-}
 
 // ───────────────────────────────────────────────────────────────────────────
 // AssignAudienceModal
