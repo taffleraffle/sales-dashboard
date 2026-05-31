@@ -2871,6 +2871,24 @@ export default function MarketingPerformance() {
     return () => { alive = false }
   }, [])
 
+  // Per-audience daily rollup. Source: lib_marketing_by_audience_daily view
+  // (migration 123). One row per (date, audience). We aggregate by audience
+  // selection back into a marketing_tracker-shaped daily array, so all the
+  // downstream code (KPIs, trailing comparison, charts) just sees daily rows
+  // — same shape, same fields, different math when audience is filtered.
+  // (Ben 2026-06-01: "When I click Restoration it says I have zero ad spend
+  // for restoration. That just factually is not correct.")
+  const [audienceDaily, setAudienceDaily] = useState([])
+  useEffect(() => {
+    let alive = true
+    supabase.from('lib_marketing_by_audience_daily').select('*').limit(2000)
+      .then(({ data, error }) => {
+        if (!alive || error || !data) return
+        setAudienceDaily(data)
+      })
+    return () => { alive = false }
+  }, [])
+
   // All distinct audiences present in the dataset, sorted by total spend
   // so the chip strip shows the heaviest audiences first. Includes
   // "Unknown" so the operator can see misparses.
@@ -2896,10 +2914,71 @@ export default function MarketingPerformance() {
 
   // Apply audience filter BEFORE date filtering so every downstream
   // computation (KPIs, trailing table, comparison view) inherits it.
-  const audienceFilteredEntries = useMemo(
-    () => filterByAudience(entries, selectedAudiences, audienceOverrides),
-    [entries, selectedAudiences, audienceOverrides],
-  )
+  //
+  // When no audience is selected → marketing_tracker daily totals (the
+  // closer-reported aggregates, unchanged).
+  //
+  // When audience(s) are selected → aggregate the per-audience daily view
+  // back to one marketing_tracker-shaped row per day. This is what makes
+  // "Restoration" actually show $21k of spend instead of $0 — the previous
+  // filter tried to read entry.campaign_name which doesn't exist on
+  // marketing_tracker rows (they're daily aggregates with no campaign
+  // info). Now we replace entries with attribution-derived per-audience
+  // rollups when filtering.
+  const audienceFilteredEntries = useMemo(() => {
+    if (!selectedAudiences || selectedAudiences.size === 0) return entries
+    if (!audienceDaily.length) return []  // wait for the view to load
+    const wanted = selectedAudiences  // Set of audience strings
+    const byDate = {}
+    for (const row of audienceDaily) {
+      if (!wanted.has(row.audience)) continue
+      const d = row.date  // 'YYYY-MM-DD'
+      if (!byDate[d]) {
+        byDate[d] = {
+          date: d,
+          adspend: 0,
+          leads: 0,
+          qualified_bookings: 0,
+          live_calls: 0,
+          new_live_calls: 0,
+          net_live_calls: 0,
+          net_new_calls: 0,
+          net_fu_calls: 0,
+          auto_bookings: 0,
+          calls_on_calendar: 0,
+          offers: 0,
+          closes: 0,
+          trial_cash: 0,
+          trial_revenue: 0,
+          ascensions: 0,
+          ascend_cash: 0,
+          ascend_revenue: 0,
+          ar_collected: 0,
+          ar_defaulted: 0,
+          refund_count: 0,
+          refund_amount: 0,
+          finance_offers: 0,
+          finance_accepted: 0,
+          monthly_offers: 0,
+          monthly_accepted: 0,
+          reschedules: 0,
+          no_shows: 0,
+          cancelled_dtf: 0,
+          cancelled_by_prospect: 0,
+        }
+      }
+      const r = byDate[d]
+      r.adspend            += Number(row.adspend) || 0
+      r.leads              += Number(row.leads) || 0
+      r.qualified_bookings += Number(row.qualified_bookings) || 0
+      r.live_calls         += Number(row.live_calls) || 0
+      r.new_live_calls     += Number(row.live_calls) || 0
+      r.closes             += Number(row.closes) || 0
+      r.trial_revenue      += Number(row.trial_revenue) || 0
+      r.trial_cash         += Number(row.trial_cash) || 0
+    }
+    return Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date))
+  }, [entries, audienceDaily, selectedAudiences])
 
   const rangeEntries = useMemo(() => filterByDays(audienceFilteredEntries, range), [audienceFilteredEntries, range])
   const mtdEntries = useMemo(() => filterByDays(audienceFilteredEntries, 'mtd'), [audienceFilteredEntries])
