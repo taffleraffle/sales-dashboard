@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Check, AlertCircle } from 'lucide-react'
+import { X, Check, AlertCircle, Trash2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
 /*
@@ -60,6 +60,29 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
   if (!open) return null
 
   const isEdit = !!existing
+
+  async function handleRetire() {
+    if (!existing?.slug) return
+    const ok = confirm(
+      `Retire "${existing.name}"?\n\n` +
+      `It will disappear from the offer picker and all dropdowns. ` +
+      `Historical scripts that reference this offer keep working — this ` +
+      `is a soft delete (sets retired = true). You can un-retire it ` +
+      `later directly in Supabase if needed.`
+    )
+    if (!ok) return
+    setSaving(true); setErr(null)
+    try {
+      const { error } = await supabase.from('offers')
+        .update({ retired: true }).eq('slug', existing.slug)
+      if (error) throw new Error(error.message)
+      onSaved(null)   // null = retired, parent should refresh + pick a different offer
+    } catch (e) {
+      setErr(`Retire failed: ${e.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function handleSave() {
     setSaving(true); setErr(null)
@@ -212,24 +235,44 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
 
         {/* Footer */}
         <div style={{ padding: '16px 24px', borderTop: '1px solid var(--rule)',
-                      display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button onClick={onClose}
-            style={{ padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
-                    letterSpacing: '0.12em', textTransform: 'uppercase',
-                    border: '1px solid var(--rule)', background: 'transparent',
-                    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2 }}>
-            Cancel
-          </button>
-          <button onClick={handleSave} disabled={saving}
-            style={{ padding: '10px 22px', fontFamily: 'var(--mono)', fontSize: 11,
-                    letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
-                    border: '2px solid var(--ink)', background: 'var(--ink)',
-                    color: 'var(--paper)', cursor: saving ? 'wait' : 'pointer',
-                    opacity: saving ? 0.6 : 1, borderRadius: 2,
-                    boxShadow: !saving ? '3px 3px 0 var(--accent)' : 'none' }}>
-            <Check size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
-            {saving ? 'Saving…' : isEdit ? 'Save offer' : 'Create offer'}
-          </button>
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          {/* Retire lives on the left so destructive action is visually
+              separated from the primary Save action. Edit mode only —
+              creating a new offer + immediately retiring it makes no sense. */}
+          <div>
+            {isEdit && (
+              <button onClick={handleRetire} disabled={saving}
+                title="Soft delete — hides from picker, keeps historical references intact"
+                style={{ padding: '10px 16px', fontFamily: 'var(--mono)', fontSize: 11,
+                        letterSpacing: '0.12em', textTransform: 'uppercase',
+                        border: '1px solid #b53e3e', background: 'transparent',
+                        color: '#b53e3e', cursor: saving ? 'wait' : 'pointer',
+                        opacity: saving ? 0.5 : 1, borderRadius: 2,
+                        display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Trash2 size={12} />
+                Retire offer
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={onClose}
+              style={{ padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
+                      letterSpacing: '0.12em', textTransform: 'uppercase',
+                      border: '1px solid var(--rule)', background: 'transparent',
+                      color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2 }}>
+              Cancel
+            </button>
+            <button onClick={handleSave} disabled={saving}
+              style={{ padding: '10px 22px', fontFamily: 'var(--mono)', fontSize: 11,
+                      letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
+                      border: '2px solid var(--ink)', background: 'var(--ink)',
+                      color: 'var(--paper)', cursor: saving ? 'wait' : 'pointer',
+                      opacity: saving ? 0.6 : 1, borderRadius: 2,
+                      boxShadow: !saving ? '3px 3px 0 var(--accent)' : 'none' }}>
+              <Check size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
+              {saving ? 'Saving…' : isEdit ? 'Save offer' : 'Create offer'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

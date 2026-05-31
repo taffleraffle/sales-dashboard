@@ -1,12 +1,11 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Link2 } from 'lucide-react'
-import { generateScripts, generateAngles, listGeneratedScripts, linkScriptToAd,
+import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Trash2 } from 'lucide-react'
+import { generateScripts, generateAngles,
          listAngles, listHookShapes, listMechanisms } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import { listTestBatches, addScriptsToBatch } from '../../services/testBatches'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
 import MechanismConfigModal from '../../components/ads/MechanismConfigModal'
-import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Eyebrow } from '../../components/editorial/atoms'
 
@@ -45,11 +44,9 @@ export default function AdsGenerator() {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [result, setResult] = useState(null)
-  const [history, setHistory] = useState([])
   const [err, setErr] = useState(null)
   const [offerModalOpen, setOfferModalOpen] = useState(false)
   const [offerModalExisting, setOfferModalExisting] = useState(null)
-  const [assignScript, setAssignScript] = useState(null)
 
   // 2026-05-31 overhaul: top-level toggle is now Scripts vs Messaging.
   // Scripts = the existing hook/body/joined template generator.
@@ -71,7 +68,7 @@ export default function AdsGenerator() {
   // only path — Mode toggle was removed in the /generate overhaul.
   // generatorMode useState below is kept so handleGenerate keeps its
   // branch logic; in practice it's always 'templates' going forward.
-  // who already learned it.
+  // eslint-disable-next-line no-unused-vars
   const [generatorMode, setGeneratorMode] = useState('templates')
   const [scriptType, setScriptType] = useState('hook')        // 'hook' | 'body' | 'joined'
   const [angleSlug, setAngleSlug] = useState('')
@@ -91,9 +88,9 @@ export default function AdsGenerator() {
   }
 
   useEffect(() => {
-    Promise.all([listOffers(), getAttributeVocab(), listGeneratedScripts({ limit: 25 })])
-      .then(([o, v, h]) => {
-        setOffers(o); setVocab(v); setHistory(h)
+    Promise.all([listOffers(), getAttributeVocab()])
+      .then(([o, v]) => {
+        setOffers(o); setVocab(v)
         const live = o.find(x => !x.slug.includes('stub') && !x.slug.includes('template')) || o[0]
         if (live) setOfferSlug(live.slug)
       })
@@ -102,22 +99,39 @@ export default function AdsGenerator() {
     listTestBatches({ launched: false })
       .then(setDraftBatches)
       .catch(() => setDraftBatches([]))
-    // Template-mode catalog: angles + global hook shapes + mechanisms.
-    // All surface as picker UI. If the tables haven't been migrated yet
-    // (pre-105/108), the calls return empty arrays and the template UI
-    // shows an inline help notice telling the operator to apply the
-    // missing migration.
+    // Template-mode catalog: hook shapes are global, mechanisms reload
+    // per-angle below. Angles reload per-offer in the offer-change effect.
     Promise.all([
-      listAngles().catch(() => []),
       listHookShapes().catch(() => []),
       listMechanisms().catch(() => []),
-    ]).then(([a, hs, ms]) => {
-      setAngles(a)
+    ]).then(([hs, ms]) => {
       setHookShapes(hs)
       setMechanisms(ms)
-      if (a.length && !angleSlug) setAngleSlug(a[0].slug)
     })
   }, [])
+
+  // Refetch the angle library whenever the operator switches offers.
+  // Angles tagged with offer_slug get filtered server-side via the
+  // .includes-or-untagged convention in listAngles. If the previously
+  // selected angle is no longer in the offer's list, reset the picker
+  // to avoid silent "wrong-angle" generations.
+  useEffect(() => {
+    if (!offerSlug) { setAngles([]); setAngleSlug(''); return }
+    let cancelled = false
+    listAngles({ offer_slug: offerSlug })
+      .then(rows => {
+        if (cancelled) return
+        setAngles(rows)
+        // Keep current angle if it still belongs to this offer, else pick
+        // the first one (or clear so the empty state shows).
+        if (!rows.some(r => r.slug === angleSlug)) {
+          setAngleSlug(rows[0]?.slug || '')
+        }
+      })
+      .catch(() => { if (!cancelled) { setAngles([]); setAngleSlug('') } })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerSlug])
 
   // Refresh mechanism list whenever angle changes (so the picker filters
   // to mechanisms compatible with the current angle).
@@ -125,6 +139,40 @@ export default function AdsGenerator() {
     if (!angleSlug) return
     listMechanisms({ angle_slug: angleSlug }).then(setMechanisms).catch(() => {})
   }, [angleSlug])
+
+  // Messaging tab: the full saved-angle library for the current offer.
+  // Kept separate from `angles` (which is the Scripts picker source — same
+  // data, but I want this reactive even when the user isn't on Scripts).
+  // Dedup by case-insensitive name so DB-level dupes don't pollute the
+  // UI (the Edge Function slug formula can produce dupes per regen).
+  const [messagingLibrary, setMessagingLibrary] = useState([])
+  const [messagingLibraryLoading, setMessagingLibraryLoading] = useState(false)
+
+  async function refreshMessagingLibrary(slug) {
+    const target = slug || offerSlug
+    if (!target) { setMessagingLibrary([]); return }
+    setMessagingLibraryLoading(true)
+    try {
+      const rows = await listAngles({ offer_slug: target })
+      // Dedup by lowercased name, keep first occurrence (rows arrive
+      // ordered by angle_type then name from the service).
+      const seen = new Set()
+      const deduped = []
+      for (const r of rows) {
+        const key = (r.name || '').trim().toLowerCase()
+        if (!key || seen.has(key)) continue
+        seen.add(key)
+        deduped.push(r)
+      }
+      setMessagingLibrary(deduped)
+    } catch {
+      setMessagingLibrary([])
+    } finally {
+      setMessagingLibraryLoading(false)
+    }
+  }
+
+  useEffect(() => { refreshMessagingLibrary(offerSlug) /* eslint-disable-next-line */ }, [offerSlug])
 
   function openNewMechanism() {
     setMechanismModalExisting(null)
@@ -153,8 +201,19 @@ export default function AdsGenerator() {
 
   async function handleOfferSaved(saved) {
     setOfferModalOpen(false)
-    await refreshOffers()
-    if (saved?.slug) setOfferSlug(saved.slug)
+    const fresh = await refreshOffers()
+    if (saved?.slug) {
+      // Save or edit — select the saved offer.
+      setOfferSlug(saved.slug)
+    } else {
+      // Retire — `saved` is null. If the currently selected offer was just
+      // retired (no longer in the fresh list), fall back to the first live
+      // offer so all the offer-derived state effects re-fire cleanly.
+      if (!fresh.some(o => o.slug === offerSlug)) {
+        const live = fresh.find(o => !o.slug.includes('stub') && !o.slug.includes('template')) || fresh[0]
+        setOfferSlug(live?.slug || '')
+      }
+    }
   }
 
   function toggleTarget(field, value) {
@@ -179,13 +238,30 @@ export default function AdsGenerator() {
         niche_hint: nicheHint || undefined,
       })
       setMessagingResult(res)
-      // Refresh the angle library so newly-saved angles appear in the
-      // Scripts picker on the next switch.
+      // Refresh angles for both the Scripts picker and the persistent
+      // Messaging library list below the Generate button. New entries
+      // for this offer will be visible immediately.
       listAngles({ offer_slug: offerSlug }).then(setAngles).catch(() => {})
+      refreshMessagingLibrary(offerSlug)
     } catch (e) {
       setErr(e.message)
     } finally {
       setMessagingBusy(false)
+    }
+  }
+
+  async function handleDeleteSavedAngle(slug) {
+    if (!slug) return
+    if (!confirm('Retire this angle? It will disappear from the picker but stay in the database (set active = false).')) return
+    try {
+      const { error } = await supabase.from('script_angles')
+        .update({ active: false }).eq('slug', slug)
+      if (error) throw new Error(error.message)
+      setMessagingLibrary(prev => prev.filter(a => a.slug !== slug))
+      setAngles(prev => prev.filter(a => a.slug !== slug))
+      if (angleSlug === slug) setAngleSlug('')
+    } catch (e) {
+      setErr(`Retire failed: ${e.message}`)
     }
   }
 
@@ -223,8 +299,6 @@ export default function AdsGenerator() {
         try { await addScriptsToBatch(saveToBatchId, newIds) }
         catch (e) { setErr(`Generated but attaching to batch failed: ${e.message}`) }
       }
-      const h = await listGeneratedScripts({ limit: 25 })
-      setHistory(h)
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -426,6 +500,9 @@ export default function AdsGenerator() {
                 ? `Generating ${nProblems + nDesires} angles…`
                 : `Generate ${nProblems} problems + ${nDesires} desires`}
             </button>
+            {messagingBusy && (
+              <GenProgress kind="angles" total={nProblems + nDesires} />
+            )}
             {messagingResult?.save_error && (
               <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef2f2',
                             border: '1px solid #fca5a5', color: '#b53e3e', fontSize: 13 }}>
@@ -433,6 +510,53 @@ export default function AdsGenerator() {
               </div>
             )}
           </Section>
+
+          {/* Persistent saved-angle library for this offer. Always visible
+              so the operator can review prior messaging without re-running.
+              Dedup happens in refreshMessagingLibrary (case-insensitive
+              name). Retire button calls .update({active:false}) so the
+              angle disappears from both this list and the Scripts picker. */}
+          {offerSlug && (
+            <div style={{ marginTop: 36, marginBottom: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div>
+                  <Eyebrow style={{ marginBottom: 4 }}>Saved for this offer</Eyebrow>
+                  <h2 style={{
+                    margin: 0, fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 400,
+                  }}>
+                    {messagingLibraryLoading
+                      ? 'Loading…'
+                      : `${messagingLibrary.length} ${messagingLibrary.length === 1 ? 'angle' : 'angles'} in library`}
+                  </h2>
+                </div>
+                <button onClick={() => refreshMessagingLibrary(offerSlug)}
+                  style={{
+                    padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
+                    letterSpacing: '0.12em', textTransform: 'uppercase',
+                    border: '1px solid var(--rule)', background: 'transparent',
+                    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                  }}>Refresh</button>
+              </div>
+              {!messagingLibraryLoading && messagingLibrary.length === 0 ? (
+                <div style={{
+                  padding: '16px 18px', background: 'var(--paper)',
+                  border: '1px dashed var(--rule)', fontFamily: 'var(--serif)',
+                  fontSize: 14, fontStyle: 'italic', color: 'var(--ink-4)',
+                }}>
+                  Nothing saved yet for this offer. Generate problems/desires above
+                  to build the library — they'll auto-save here and become
+                  selectable in Scripts mode.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {messagingLibrary.map(a => (
+                    <SavedAngleRow key={a.slug} angle={a}
+                      onRetire={() => handleDeleteSavedAngle(a.slug)} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Output — generated angles, auto-saved */}
           {messagingResult?.angles?.length > 0 && (
@@ -456,14 +580,26 @@ export default function AdsGenerator() {
       {/* ──── SCRIPTS MODE — template-based generator ──── */}
       {genTarget === 'scripts' && (
         <>
-          {angles.length === 0 && (
+          {!offerSlug && (
+            <div style={{
+              padding: '14px 18px', marginBottom: 20,
+              background: 'var(--paper)', border: '1px solid var(--rule)',
+              fontFamily: 'var(--serif)', fontSize: 14, fontStyle: 'italic',
+              color: 'var(--ink-3)',
+            }}>
+              Pick an offer above to load its angle library.
+            </div>
+          )}
+          {offerSlug && angles.length === 0 && (
             <div style={{
               padding: '14px 18px', marginBottom: 20,
               background: '#fff3d1', border: '1px solid #d68f00', borderLeft: '4px solid #d68f00',
               fontFamily: 'var(--mono)', fontSize: 12.5, color: '#4d3000',
+              lineHeight: 1.5,
             }}>
-              No script angles found. Apply migrations 105 + 106 to enable template-based generation.
-              In the meantime switch to <strong>Attributes</strong> mode above.
+              No angles saved for <strong>{selectedOffer?.name || offerSlug}</strong> yet.
+              Switch to <strong>Messaging</strong> above to generate problems + desires
+              for this offer — they auto-save to the library and become selectable here.
             </div>
           )}
 
@@ -1016,6 +1152,12 @@ export default function AdsGenerator() {
                 ? `Generate ${nConcepts} ${scriptType}${nConcepts > 1 ? (scriptType === 'body' ? ' bodies' : scriptType === 'joined' ? ' joined scripts' : 's') : ''}`
                 : `Generate ${nConcepts} ${mode === 'diverse' ? 'diverse' : 'targeted'} concept${nConcepts > 1 ? 's' : ''}`}
           </button>
+          {generating && (
+            <GenProgress
+              kind={scriptType === 'hook' ? 'hooks' : scriptType === 'body' ? 'bodies' : 'joined'}
+              total={nConcepts}
+            />
+          )}
           <label style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-3)',
                         display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
             <input type="checkbox" checked={saveAsDrafts} onChange={e => setSaveAsDrafts(e.target.checked)} />
@@ -1082,85 +1224,6 @@ export default function AdsGenerator() {
         </div>
       )}
 
-      {/* History */}
-      {history.length > 0 && (
-        <div style={{ marginTop: 48 }}>
-          <Eyebrow style={{ marginBottom: 4 }}>History</Eyebrow>
-          <h2 style={{
-            margin: '0 0 14px', fontSize: 18, lineHeight: 1.2, color: 'var(--ink)',
-            letterSpacing: '-0.005em', fontFamily: 'var(--sans)', fontWeight: 600,
-          }}>
-            Recent drafts
-          </h2>
-          <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
-            <table style={{ width: '100%', fontSize: 13, fontFamily: 'var(--sans)' }}>
-              <thead>
-                <tr style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                            textTransform: 'uppercase', color: 'var(--ink-4)',
-                            borderBottom: '1px solid var(--rule)' }}>
-                  <th style={{ textAlign: 'left', padding: '12px 16px' }}>When</th>
-                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Offer</th>
-                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Title</th>
-                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Frame</th>
-                  <th style={{ textAlign: 'left', padding: '12px 14px 12px 0' }}>Status</th>
-                  <th style={{ textAlign: 'right', padding: '12px 16px 12px 0' }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map(h => (
-                  <tr key={h.id} style={{ borderTop: '1px solid var(--rule)' }}>
-                    <td style={{ padding: '12px 16px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
-                      {new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </td>
-                    <td style={{ padding: '12px 14px 12px 0' }}>{h.offer_slug?.replace('opt-', '')}</td>
-                    <td style={{ fontFamily: 'var(--serif)', padding: '12px 14px 12px 0' }}>{h.title || '—'}</td>
-                    <td style={{ padding: '12px 14px 12px 0' }}>
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10,
-                                    padding: '3px 7px', background: 'var(--paper)',
-                                    border: '1px solid var(--rule)', borderRadius: 2 }}>
-                        {h.frame || '—'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px 14px 12px 0' }}>
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10,
-                                    padding: '3px 7px', borderRadius: 2,
-                                    background: h.status === 'shipped' ? 'var(--accent)' : 'var(--paper)',
-                                    color: 'var(--ink-3)',
-                                    border: '1px solid var(--rule)' }}>
-                        {h.status}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '12px 16px 12px 0' }}>
-                      {h.status !== 'shipped' && (
-                        <button onClick={() => setAssignScript(h)}
-                          style={{
-                            padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10,
-                            letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
-                            border: '1px solid var(--rule)', background: 'white', color: 'var(--ink-3)',
-                            cursor: 'pointer', borderRadius: 2,
-                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                          }}>
-                          <Link2 size={11} /> Link to ad
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      <AddOrLinkCreativeDrawer
-        open={!!assignScript}
-        presetScript={assignScript}
-        onClose={() => setAssignScript(null)}
-        onSaved={async () => {
-          setAssignScript(null)
-          const h = await listGeneratedScripts({ limit: 25 })
-          setHistory(h)
-        }} />
     </div>
   )
 }
@@ -1266,6 +1329,192 @@ function AngleCard({ angle }) {
           }}>
             {angle.pain_points.map((p, i) => <li key={i}>{p}</li>)}
           </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Generation progress feedback. The Edge Function is a single
+// request/response so there's no real per-step signal — this is an
+// elapsed-time + phase-cycler that gives the operator something to read
+// while Claude runs (60–120s for a normal batch). Phases are tailored
+// per `kind` so it reads correctly for hooks / bodies / joined / angles.
+function GenProgress({ kind, total }) {
+  const [elapsed, setElapsed] = useState(0)
+  const [phaseIdx, setPhaseIdx] = useState(0)
+
+  const phases = useMemo(() => {
+    if (kind === 'angles') {
+      return [
+        `Loading offer + audience profile`,
+        `Drafting ${total} angles in the prospect's voice`,
+        `Checking each angle is specific to the audience`,
+        `Saving to the offer's angle library`,
+      ]
+    }
+    if (kind === 'bodies') {
+      return [
+        `Loading angle, mechanism, and proof characters`,
+        `Drafting ${total} bodies against the 7-beat skeleton`,
+        `Reviewing for voice + banned-phrase compliance`,
+        `Saving drafts`,
+      ]
+    }
+    if (kind === 'joined') {
+      return [
+        `Loading angle, hook shapes, and body skeleton`,
+        `Drafting ${total} hooks, then continuing each into its body`,
+        `Reviewing chained scripts for proof-character continuity`,
+        `Saving drafts`,
+      ]
+    }
+    // hooks (default)
+    return [
+      `Loading angle + hook shapes`,
+      `Drafting ${total} hooks across the selected shapes`,
+      `Reviewing for voice + banned-phrase compliance`,
+      `Saving drafts`,
+    ]
+  }, [kind, total])
+
+  useEffect(() => {
+    const startedAt = Date.now()
+    const id = setInterval(() => {
+      const secs = Math.floor((Date.now() - startedAt) / 1000)
+      setElapsed(secs)
+      // Walk phases roughly in proportion to expected runtime.
+      // Per-concept: ~3s base + 2s/item. Phase boundaries at 15/45/75% of expected.
+      const expected = Math.max(30, 8 + total * 4)
+      const ratio = Math.min(0.99, secs / expected)
+      const idx = ratio < 0.15 ? 0 : ratio < 0.45 ? 1 : ratio < 0.85 ? 2 : 3
+      setPhaseIdx(Math.min(idx, phases.length - 1))
+    }, 500)
+    return () => clearInterval(id)
+  }, [total, phases.length])
+
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
+  const ss = String(elapsed % 60).padStart(2, '0')
+
+  return (
+    <div style={{
+      marginTop: 14, padding: '14px 16px',
+      background: 'var(--paper)', border: '1px solid var(--rule)',
+      borderLeft: '3px solid var(--accent)',
+      borderRadius: 2, maxWidth: 560,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+        <span style={{
+          display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+          background: 'var(--ink)', animation: 'pulse 1s ease-in-out infinite',
+        }} />
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
+        }}>
+          Step {phaseIdx + 1} of {phases.length}
+        </span>
+        <span style={{
+          marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 11,
+          color: 'var(--ink-4)', fontVariantNumeric: 'tabular-nums',
+        }}>{mm}:{ss}</span>
+      </div>
+      <div style={{
+        fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)',
+        lineHeight: 1.4,
+      }}>
+        {phases[phaseIdx]}
+        <span style={{ display: 'inline-block', width: 16, color: 'var(--ink-4)' }}>
+          {'.'.repeat((elapsed % 3) + 1)}
+        </span>
+      </div>
+      {/* Tracked-progress hint so the operator knows Claude calls don't stream */}
+      <div style={{
+        marginTop: 8, fontFamily: 'var(--serif)', fontSize: 11.5, fontStyle: 'italic',
+        color: 'var(--ink-4)', lineHeight: 1.4,
+      }}>
+        Claude runs the whole batch in one pass — phases are an estimate, not a real-time signal.
+        A {total}-item batch usually finishes in {Math.round((8 + total * 4) / 6) * 6}–{Math.round((8 + total * 4) / 6) * 6 + 30}s.
+      </div>
+      <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }`}</style>
+    </div>
+  )
+}
+
+// Single row in the "Saved for this offer" list (Messaging tab). Compact
+// vs AngleCard — meant for scanning a library of 20-50 entries, not for
+// reviewing fresh output. Click expands to show the prospect_voice +
+// hook_build_sketch + pain_points. Retire = soft-delete (active=false).
+function SavedAngleRow({ angle, onRetire }) {
+  const [open, setOpen] = useState(false)
+  const isProblem = angle.angle_type === 'problem'
+  const tagColor = isProblem ? '#b53e3e' : '#3068b5'
+  const tagLabel = isProblem ? 'Problem' : 'Desire'
+  return (
+    <div style={{
+      background: 'white', border: '1px solid var(--rule)',
+      borderLeft: `3px solid ${tagColor}`, borderRadius: 2,
+    }}>
+      <div style={{
+        padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
+        cursor: 'pointer',
+      }} onClick={() => setOpen(o => !o)}>
+        <span style={{
+          padding: '2px 7px', background: tagColor, color: 'var(--paper)',
+          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+          letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+          flexShrink: 0,
+        }}>{tagLabel}</span>
+        <span style={{
+          flex: 1, fontFamily: 'var(--serif)', fontSize: 15, color: 'var(--ink)',
+          lineHeight: 1.3,
+        }}>{angle.name}</span>
+        <button onClick={(e) => { e.stopPropagation(); onRetire() }}
+          title="Retire (hide from picker)"
+          style={{
+            padding: 6, background: 'transparent', border: 'none',
+            color: 'var(--ink-4)', cursor: 'pointer', borderRadius: 2,
+            display: 'inline-flex',
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.color = '#b53e3e'}
+          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--ink-4)'}>
+          <Trash2 size={14} />
+        </button>
+        {open ? <ChevronUp size={14} color="var(--ink-4)" /> : <ChevronDown size={14} color="var(--ink-4)" />}
+      </div>
+      {open && (
+        <div style={{ padding: '0 16px 14px 16px' }}>
+          {angle.prospect_voice && (
+            <div style={{
+              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 14,
+              color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 10,
+            }}>"{angle.prospect_voice}"</div>
+          )}
+          {angle.hook_build_sketch && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+                textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4,
+              }}>Hook build</div>
+              <div style={{
+                fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5,
+              }}>{angle.hook_build_sketch}</div>
+            </div>
+          )}
+          {angle.pain_points?.length > 0 && (
+            <div>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+                textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4,
+              }}>Pain points</div>
+              <ul style={{
+                margin: 0, paddingLeft: 18, fontFamily: 'var(--sans)', fontSize: 13,
+                color: 'var(--ink-3)', lineHeight: 1.5,
+              }}>
+                {angle.pain_points.map((p, i) => <li key={i}>{p}</li>)}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -535,22 +535,37 @@ serve(async (req) => {
     // tag them with the offer's slug so the Angle picker filters them
     // by offer cleanly. existing angles with the same slug get updated
     // (idempotent) so re-generating doesn't error.
-    const slugify = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)
-    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-    const inserts = generated_angles.map((a: any, i: number) => ({
-      slug: `${offer.slug}-${a.angle_type}-${slugify(a.name)}-${stamp}-${i + 1}`,
-      name: a.name,
-      angle_type: a.angle_type,
-      prospect_voice: a.prospect_voice,
-      hook_build_sketch: a.hook_build_sketch,
-      pain_points: Array.isArray(a.pain_points) ? a.pain_points : [],
-      offer_slugs: [offer.slug],
-      qualifier: offer.primary_audience || '',
-      primary_promise: '',       // filled by Claude or operator later when used in Scripts
-      mechanism_short: '',       // mechanism comes from script_mechanisms (migration 108)
-      guarantee_close: '',       // operator can set or use offer default
-      active: true,
-    }))
+    //
+    // Slug is derived from offer + angle_type + name only (NO timestamp,
+    // NO index). This is intentional — when the operator regenerates for
+    // the same offer and Claude returns an angle with the same name, we
+    // want the existing row to be updated in place rather than
+    // accumulating dupes in the library (Ben 2026-05-31).
+    const slugify = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80)
+    // Dedupe within this batch first: if Claude ever returns two angles
+    // with the same name in one call, we'd otherwise hit a unique-key
+    // collision inside the upsert array. Keep the first occurrence.
+    const seenSlugs = new Set<string>()
+    const inserts: any[] = []
+    for (const a of generated_angles) {
+      const slug = `${offer.slug}-${a.angle_type}-${slugify(a.name)}`
+      if (!slug || seenSlugs.has(slug)) continue
+      seenSlugs.add(slug)
+      inserts.push({
+        slug,
+        name: a.name,
+        angle_type: a.angle_type,
+        prospect_voice: a.prospect_voice,
+        hook_build_sketch: a.hook_build_sketch,
+        pain_points: Array.isArray(a.pain_points) ? a.pain_points : [],
+        offer_slugs: [offer.slug],
+        qualifier: offer.primary_audience || '',
+        primary_promise: '',       // filled by Claude or operator later when used in Scripts
+        mechanism_short: '',       // mechanism comes from script_mechanisms (migration 108)
+        guarantee_close: '',       // operator can set or use offer default
+        active: true,
+      })
+    }
 
     let saved: any[] = []
     let save_error: string | undefined
