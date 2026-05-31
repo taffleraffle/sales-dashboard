@@ -2187,6 +2187,12 @@ export default function AdsCreativeLibrary({ editorScope }) {
   // "ship me next" backlog. Surfaces on the Launch queue tab button so the
   // operator can see at a glance how many ads are waiting on a launch.
   // Yellow badge (positive/ready state) vs Triage's red (action required).
+  //
+  // Filter: stage_final_cut='done' — that's what the actual approval flow
+  // sets (see approveSubmission at line ~9861, and the direct-edited-upload
+  // path at line ~838). The originally-spec'd stage_approved column exists
+  // in the schema but is never populated by any code path, so filtering on
+  // it returned zero rows (Ben 2026-06-01).
   const [launchCount, setLaunchCount] = useState(0)
   const refreshLaunchCount = useCallback(async () => {
     if (scope.isEditorView) return  // editors don't ship ads
@@ -2194,7 +2200,7 @@ export default function AdsCreativeLibrary({ editorScope }) {
       const { count, error } = await supabase
         .from('lib_creative_library')
         .select('id', { count: 'exact', head: true })
-        .eq('stage_approved', 'done')
+        .eq('stage_final_cut', 'done')
         .eq('has_been_run', false)
         .eq('exclude_from_library', false)
       if (!error && typeof count === 'number') setLaunchCount(count)
@@ -7856,7 +7862,11 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
       const [rowsRes, offersRes] = await Promise.all([
         supabase.from('lib_creative_library')
           .select(cols)
-          .eq('stage_approved', 'done')
+          // stage_final_cut='done' is what the actual approval flow sets
+          // (admin Approve action + direct-edited uploads). The schema also
+          // has a stage_approved column but nothing ever writes to it, so
+          // filtering on that returned 0 rows (Ben 2026-06-01).
+          .eq('stage_final_cut', 'done')
           .eq('has_been_run', false)
           .eq('exclude_from_library', false),
         supabase.from('offers').select('slug,name').eq('retired', false).order('slug'),
