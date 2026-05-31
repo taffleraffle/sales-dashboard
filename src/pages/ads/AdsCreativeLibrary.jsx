@@ -2175,6 +2175,42 @@ export default function AdsCreativeLibrary({ editorScope }) {
     return () => clearInterval(t)
   }, [refreshTriageCount])
 
+  // Launch queue count — approved cuts that haven't been run yet, i.e. the
+  // "ship me next" backlog. Surfaces on the Launch queue tab button so the
+  // operator can see at a glance how many ads are waiting on a launch.
+  // Yellow badge (positive/ready state) vs Triage's red (action required).
+  const [launchCount, setLaunchCount] = useState(0)
+  const refreshLaunchCount = useCallback(async () => {
+    if (scope.isEditorView) return  // editors don't ship ads
+    try {
+      const { count, error } = await supabase
+        .from('lib_creative_library')
+        .select('id', { count: 'exact', head: true })
+        .eq('stage_approved', 'done')
+        .eq('has_been_run', false)
+        .eq('exclude_from_library', false)
+      if (!error && typeof count === 'number') setLaunchCount(count)
+    } catch { /* defensive — same pattern as refreshTriageCount */ }
+  }, [scope.isEditorView])
+  useEffect(() => {
+    refreshLaunchCount()
+    const t = setInterval(refreshLaunchCount, 30_000)
+    return () => clearInterval(t)
+  }, [refreshLaunchCount])
+
+  // Deep-link from Launch queue → Library detail drawer. Clicking "Open"
+  // on a launch-queue row switches to Library tab and pushes a request
+  // that LibraryTab picks up via prop + useEffect, calling its existing
+  // openRowById helper. We use a bumped timestamp instead of just the id
+  // so re-clicking the same row (after closing the drawer) re-opens it —
+  // a bare id-equality check would no-op the second click.
+  const [pendingLibraryOpen, setPendingLibraryOpen] = useState(null)
+  const openInLibrary = useCallback((creativeId) => {
+    if (!creativeId) return
+    setTab('library')
+    setPendingLibraryOpen({ id: creativeId, ts: Date.now() })
+  }, [])
+
   return (
     <div style={{ padding: '12px 0 60px' }}>
       <div style={{
@@ -2185,7 +2221,12 @@ export default function AdsCreativeLibrary({ editorScope }) {
           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
           letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
         }}>
-          {scope.isEditorView ? 'Editor portal · ' : ''}{tab === 'library' ? 'Library' : tab === 'triage' ? 'Triage' : 'Editing queue'}
+          {scope.isEditorView ? 'Editor portal · ' : ''}{
+            tab === 'library' ? 'Library'
+            : tab === 'triage' ? 'Triage'
+            : tab === 'launch' ? 'Launch queue'
+            : 'Editing queue'
+          }
         </div>
         <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper)' }}>
           <TabBtn active={tab === 'library'} onClick={() => setTab('library')}>Library</TabBtn>
@@ -2193,6 +2234,9 @@ export default function AdsCreativeLibrary({ editorScope }) {
             <TabBtn active={tab === 'triage'} onClick={() => setTab('triage')} badge={triageCount}>Triage</TabBtn>
           )}
           <TabBtn active={tab === 'queue'}   onClick={() => setTab('queue')}>Editing queue</TabBtn>
+          {!scope.isEditorView && (
+            <TabBtn active={tab === 'launch'} onClick={() => setTab('launch')} badge={launchCount} badgeTone="ready">Launch queue</TabBtn>
+          )}
         </div>
       </div>
 
@@ -2204,7 +2248,7 @@ export default function AdsCreativeLibrary({ editorScope }) {
           of paint time. Keeping both mounted means switching is a
           near-instant visibility flip and the user's filters survive. */}
       <div style={{ display: tab === 'library' ? 'block' : 'none' }}>
-        <LibraryTab scope={scope} />
+        <LibraryTab scope={scope} pendingOpen={pendingLibraryOpen} />
       </div>
       {!scope.isEditorView && (
         <div style={{ display: tab === 'triage' ? 'block' : 'none' }}>
@@ -2214,11 +2258,24 @@ export default function AdsCreativeLibrary({ editorScope }) {
       <div style={{ display: tab === 'queue' ? 'block' : 'none' }}>
         <EditingQueueTab scope={scope} />
       </div>
+      {!scope.isEditorView && (
+        <div style={{ display: tab === 'launch' ? 'block' : 'none' }}>
+          <LaunchQueueTab
+            scope={scope}
+            onLaunched={refreshLaunchCount}
+            onOpenInLibrary={openInLibrary} />
+        </div>
+      )}
     </div>
   )
 }
 
-function TabBtn({ active, onClick, children, badge }) {
+// badgeTone='alert' (default) = red — for "needs action" counts like
+// untriaged uploads. badgeTone='ready' = yellow — for "ready to ship"
+// counts where the number being big is a positive signal of inventory.
+function TabBtn({ active, onClick, children, badge, badgeTone = 'alert' }) {
+  const inactiveBg = badgeTone === 'ready' ? '#f4e14a' : '#b53e3e'
+  const inactiveColor = badgeTone === 'ready' ? 'var(--ink)' : 'white'
   return (
     <button onClick={onClick} style={{
       padding: '8px 16px',
@@ -2230,13 +2287,14 @@ function TabBtn({ active, onClick, children, badge }) {
       display: 'inline-flex', alignItems: 'center', gap: 6,
     }}>
       <span>{children}</span>
-      {/* Badge for unread/untriaged counts. Hidden at zero. Color flips
-          to accent when the parent tab is active. */}
+      {/* Badge for unread/untriaged/launch counts. Hidden at zero. When the
+          parent tab is active, the badge flips to paper-on-ink for contrast
+          against the dark active button. */}
       {badge != null && badge > 0 && (
         <span style={{
           minWidth: 18, height: 16, padding: '0 5px', borderRadius: 999,
-          background: active ? 'var(--paper)' : '#b53e3e',
-          color: active ? 'var(--ink)' : 'white',
+          background: active ? 'var(--paper)' : inactiveBg,
+          color: active ? 'var(--ink)' : inactiveColor,
           fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           letterSpacing: 0, lineHeight: 1,
@@ -2527,7 +2585,7 @@ function useCoordinatorEditorId(scope) {
   return coordinatorId
 }
 
-function LibraryTab({ scope = ADMIN_SCOPE }) {
+function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // Assignment coordinator (e.g. Kirill) gets the editor-style bell so
   // new_upload_needs_assignment notifications surface inside the dashboard.
   // Null for everyone else (editors already have scope.editorId).
@@ -2714,6 +2772,20 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       })
     }
   }, [rows])
+
+  // Cross-tab open request. The Launch queue (and any future sibling tab)
+  // hands the parent a { id, ts } object when the user clicks "Open in
+  // library". The parent switches to the library tab and forwards the
+  // request down here; we observe the timestamp-bumped object so the
+  // SAME id can re-fire (closing the drawer + clicking the same row again
+  // a few seconds later should re-open, not silently no-op).
+  const pendingOpenSeenRef = useRef(0)
+  useEffect(() => {
+    if (!pendingOpen || !pendingOpen.id) return
+    if (pendingOpen.ts === pendingOpenSeenRef.current) return
+    pendingOpenSeenRef.current = pendingOpen.ts
+    openRowById(pendingOpen.id)
+  }, [pendingOpen, openRowById])
 
   // Lean column list — everything EXCEPT `transcript` (which can be 5-16KB
   // per row and is only needed inside the detail modal). 200+ rows × ~3KB
@@ -7722,6 +7794,512 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
           A thin progress bar shows at the top of the screen, and full per-file progress
           shows in the floating dock (bottom-right). Cancel any upload from the dock.
         </div>
+      </div>
+    </Modal>
+  )
+}
+
+/* ─────────────────────────── LAUNCH QUEUE TAB ─────────────────────────── */
+
+/* The launch queue surfaces every creative that has been approved by an
+   editor (stage_approved='done') but hasn't been marked as having run
+   in an ad set yet (has_been_run=false). It's the "ship me next" pile —
+   the buffer between editing and live media.
+
+   Mirror-image of the Editing queue tab: editing queue is the work
+   coming IN to production, launch queue is the work going OUT. Same
+   data source (lib_creative_library) just with a different filter,
+   ordering, and per-row action ("Mark launched" instead of submit/
+   approve).
+
+   Sort: updated_at DESC by default (most recently approved on top —
+   what's freshest). Toggle to ASC for "oldest waiting first" / FIFO. */
+function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
+  const [rows, setRows] = useState([])
+  const [offers, setOffers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState(null)
+  // Search across name + canonical_name + display_name + messaging angle +
+  // description so the operator can find a specific clip without scrolling.
+  const [q, setQ] = useState('')
+  const deferredQ = useDeferredValue(q)
+  // Offer multi-select filter — matches the chip pattern used by LibraryTab.
+  const [offerFilter, setOfferFilter] = useState(() => new Set())
+  // Sort: 'newest' (most recently approved on top — default; what just
+  // landed in the queue) or 'oldest' (FIFO — what's been waiting longest).
+  const [sortMode, setSortMode] = useState(() => {
+    try { return localStorage.getItem('launch.sort') || 'newest' } catch { return 'newest' }
+  })
+  useEffect(() => { try { localStorage.setItem('launch.sort', sortMode) } catch {} }, [sortMode])
+  // Inline video preview state — same pattern as SubmissionPreviewModal
+  // for editor submissions. Click thumbnail → opens a Modal-hosted player.
+  const [previewing, setPreviewing] = useState(null)
+
+  const load = useCallback(async () => {
+    if (scope.isEditorView) return
+    setLoading(true)
+    setErr(null)
+    // Match the columns LibraryTab uses for matrix rows + a couple extras
+    // for the messaging-angle display. Lean — no transcript (heavy, not
+    // needed in this view).
+    const cols = 'id,name,canonical_name,display_name,description,type,creator,offer_slug,has_been_run,stage_approved,thumbnail_url,preview_url,final_cut_url,approved_url,drive_url,messaging_angle,messaging_angle_override,added_at,updated_at,exclude_from_library'
+    try {
+      const [rowsRes, offersRes] = await Promise.all([
+        supabase.from('lib_creative_library')
+          .select(cols)
+          .eq('stage_approved', 'done')
+          .eq('has_been_run', false)
+          .eq('exclude_from_library', false),
+        supabase.from('offers').select('slug,name').eq('retired', false).order('slug'),
+      ])
+      if (rowsRes.error) throw rowsRes.error
+      setRows(rowsRes.data || [])
+      setOffers(offersRes.data || [])
+    } catch (e) {
+      // AbortError from auth-lock contention — silently retry, same
+      // pattern LibraryTab.load uses.
+      if (e?.name === 'AbortError') {
+        setTimeout(() => load(), 50)
+        return
+      }
+      setErr(e.message || 'Load failed')
+    } finally {
+      setLoading(false)
+    }
+  }, [scope.isEditorView])
+
+  useEffect(() => { load() }, [load])
+
+  // Mark a creative as launched. Optimistic remove from the local list +
+  // bump the parent's count. Reverts on DB error.
+  const markLaunched = useCallback(async (id) => {
+    const snapshot = rows
+    setRows(curr => curr.filter(r => r.id !== id))
+    const { error } = await supabase.from('lib_creative_library')
+      .update({ has_been_run: true })
+      .eq('id', id)
+    if (error) {
+      setRows(snapshot)
+      setErr(error.message)
+      return
+    }
+    onLaunched?.()
+  }, [rows, onLaunched])
+
+  // Filter + sort applied as a single useMemo so re-renders are cheap.
+  // Search is case-insensitive across the same field blob LibraryTab uses.
+  const visible = useMemo(() => {
+    const search = deferredQ.trim().toLowerCase()
+    let list = rows
+    if (offerFilter.size > 0) {
+      list = list.filter(r => offerFilter.has(r.offer_slug || '__none__'))
+    }
+    if (search) {
+      list = list.filter(r => {
+        const angle = r.messaging_angle_override || r.messaging_angle || ''
+        const blob = `${r.name || ''} ${r.canonical_name || ''} ${r.display_name || ''} ${angle} ${r.description || ''} ${r.creator || ''}`.toLowerCase()
+        return blob.includes(search)
+      })
+    }
+    const dir = sortMode === 'oldest' ? 1 : -1
+    return [...list].sort((a, b) => {
+      const at = new Date(a.updated_at || a.added_at || 0).getTime()
+      const bt = new Date(b.updated_at || b.added_at || 0).getTime()
+      return (at - bt) * dir
+    })
+  }, [rows, offerFilter, deferredQ, sortMode])
+
+  // Offers as a quick id→label map so per-row chip rendering is O(1).
+  const offerLabel = useMemo(() => {
+    const map = new Map()
+    for (const o of offers) map.set(o.slug, o.name || o.slug)
+    return map
+  }, [offers])
+
+  return (
+    <div>
+      {/* Toolbar — single compact row: search, sort, offer filter. Matches
+          the visual weight of the LibraryTab toolbar so the operator
+          recognises the surface immediately. */}
+      <div style={{
+        padding: '10px 14px', background: 'var(--paper-2)',
+        border: '1px solid var(--rule)', marginBottom: 14,
+        display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+      }}>
+        <input type="text" value={q} onChange={e => setQ(e.target.value)}
+          placeholder="Search name, messaging, description, creator…"
+          style={{
+            flex: '1 1 280px', maxWidth: 420,
+            padding: '7px 11px',
+            fontFamily: 'var(--mono)', fontSize: 12,
+            background: 'white', border: '1px solid var(--rule)', outline: 'none',
+          }} />
+        <LaunchSortToggle value={sortMode} onChange={setSortMode} />
+        <LaunchOfferChip
+          offers={offers}
+          rows={rows}
+          selected={offerFilter}
+          onChange={setOfferFilter} />
+        <span style={{ flex: 1 }} />
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
+          letterSpacing: '0.06em', textTransform: 'uppercase',
+        }}>{visible.length} ready</span>
+      </div>
+
+      {err && (
+        <ErrorBanner msg={err} onRetry={load} />
+      )}
+
+      {loading && rows.length === 0 && <LoadingState />}
+
+      {!loading && visible.length === 0 && (
+        <div style={{
+          padding: '56px 28px 64px', textAlign: 'center',
+          border: '1px dashed var(--rule)', background: 'var(--paper-2)',
+        }}>
+          <div style={{
+            fontFamily: 'var(--serif)', fontSize: 18, fontStyle: 'italic',
+            color: 'var(--ink-2)', marginBottom: 8,
+          }}>{rows.length === 0
+            ? 'Nothing approved is waiting to launch.'
+            : 'Nothing matches the current filters.'}</div>
+          <div style={{
+            fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--ink-3)',
+            maxWidth: 380, margin: '0 auto', lineHeight: 1.55,
+          }}>{rows.length === 0
+            ? 'Approve creatives in the Editing Queue and they’ll appear here ready to ship.'
+            : 'Clear the search or offer filter to see all ready creatives.'}</div>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gap: 10 }}>
+        {visible.map(r => (
+          <LaunchQueueRow
+            key={r.id}
+            row={r}
+            offerLabel={offerLabel.get(r.offer_slug)}
+            onPlay={() => setPreviewing(r)}
+            onOpen={() => onOpenInLibrary?.(r.id)}
+            onMarkLaunched={() => markLaunched(r.id)} />
+        ))}
+      </div>
+
+      {/* Inline video preview — reuses the same Modal+video pattern as the
+          editor SubmissionPreviewModal. The URL priority matches the
+          rest of the codebase: final_cut_url > approved_url > drive_url
+          > preview_url. */}
+      <LaunchPreviewModal
+        row={previewing}
+        onClose={() => setPreviewing(null)} />
+    </div>
+  )
+}
+
+// Sort toggle for the launch queue toolbar. Two buttons in a single
+// pill — matches the visual style of the Tiles/List/Matrix toggle on
+// the library toolbar so the surface looks familiar.
+function LaunchSortToggle({ value, onChange }) {
+  const btn = (mode, label) => ({
+    padding: '6px 11px',
+    fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+    background: value === mode ? 'var(--ink)' : 'transparent',
+    color: value === mode ? 'var(--paper)' : 'var(--ink-3)',
+    border: 'none', cursor: 'pointer',
+  })
+  return (
+    <div style={{
+      display: 'inline-flex',
+      border: '1px solid var(--rule)', background: 'white',
+    }}>
+      <button onClick={() => onChange('newest')} style={btn('newest')}>Newest first</button>
+      <button onClick={() => onChange('oldest')} style={btn('oldest')}>Oldest first</button>
+    </div>
+  )
+}
+
+// Offer multi-select chip with a dropdown. Lightweight version of the
+// FilterDropdown LibraryTab uses — this list is rarely more than 5-8
+// offers so we don't need the full search-and-clear UI.
+function LaunchOfferChip({ offers, rows, selected, onChange }) {
+  const [open, setOpen] = useState(false)
+  // Only show offers that actually have rows in this queue — no point
+  // letting the operator filter to "ACCOUNTANTS" if there are no
+  // accountant creatives waiting to ship.
+  const present = useMemo(() => {
+    const seen = new Set()
+    for (const r of rows) seen.add(r.offer_slug || '__none__')
+    return offers.filter(o => seen.has(o.slug))
+  }, [offers, rows])
+  const toggle = (slug) => {
+    const next = new Set(selected)
+    if (next.has(slug)) next.delete(slug); else next.add(slug)
+    onChange(next)
+  }
+  const label = selected.size === 0
+    ? 'All offers'
+    : selected.size === 1
+      ? (offers.find(o => o.slug === [...selected][0])?.name || [...selected][0])
+      : `${selected.size} offers`
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(v => !v)} style={{
+        padding: '6px 11px',
+        fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        background: selected.size > 0 ? 'var(--ink)' : 'white',
+        color: selected.size > 0 ? 'var(--paper)' : 'var(--ink-2)',
+        border: '1px solid var(--rule)', cursor: 'pointer',
+      }}>Offer: {label}</button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{
+            position: 'fixed', inset: 0, zIndex: 50,
+          }} />
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, marginTop: 4,
+            background: 'white', border: '1px solid var(--rule)',
+            boxShadow: '0 8px 24px rgba(10,10,10,0.12)',
+            minWidth: 220, maxHeight: 320, overflowY: 'auto', zIndex: 51,
+          }}>
+            {present.length === 0 && (
+              <div style={{
+                padding: 12, fontFamily: 'var(--mono)', fontSize: 11,
+                color: 'var(--ink-4)',
+              }}>No offers in queue</div>
+            )}
+            {present.map(o => (
+              <label key={o.slug} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '7px 12px', cursor: 'pointer',
+                fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink)',
+                background: selected.has(o.slug) ? 'rgba(244,225,74,0.16)' : 'transparent',
+              }}>
+                <input type="checkbox" checked={selected.has(o.slug)}
+                  onChange={() => toggle(o.slug)} />
+                <span>{o.name || o.slug}</span>
+              </label>
+            ))}
+            {selected.size > 0 && (
+              <button onClick={() => onChange(new Set())} style={{
+                width: '100%', padding: '8px 12px',
+                background: 'var(--paper-2)', border: 'none',
+                borderTop: '1px solid var(--rule)', cursor: 'pointer',
+                fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: 'var(--ink-3)',
+              }}>Clear</button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// Per-creative card in the launch queue. Three columns: thumbnail (with
+// play-overlay), main content (title + chips + messaging + description +
+// meta), actions (Open, Mark launched). Click thumbnail → preview modal.
+// Not wrapped in React.memo — the parent passes fresh inline handlers per
+// row each render, which would defeat the memo every time. With <50 rows
+// in this list the re-render cost is negligible.
+function LaunchQueueRow({ row, offerLabel, onPlay, onOpen, onMarkLaunched }) {
+  const title = rowDisplayName(row) || row.canonical_name || row.name || '(unnamed)'
+  const angle = row.messaging_angle_override || row.messaging_angle
+  const offerSlug = row.offer_slug
+  const offerName = offerLabel || offerSlug || null
+  const thumb = row.thumbnail_url || row.preview_url
+  // Friendly relative time. Approved-at proxy = updated_at (no dedicated
+  // approval timestamp on lib_creative_library; updated_at gets bumped when
+  // stage_approved flips to 'done').
+  const when = row.updated_at || row.added_at
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: '88px 1fr auto',
+      gap: 14, alignItems: 'stretch',
+      padding: 12,
+      background: 'var(--paper)',
+      border: '1px solid var(--rule)',
+      borderLeft: '3px solid #3e8a5e',  // green = ready/approved
+    }}>
+      {/* Thumbnail with play overlay. Black background so partial-transparent
+          thumbs don't show the paper colour underneath. */}
+      <button onClick={onPlay} title="Play"
+        style={{
+          width: 88, height: 64, padding: 0,
+          background: '#000', border: 'none', cursor: 'pointer',
+          position: 'relative', overflow: 'hidden',
+        }}>
+        {thumb ? (
+          <img src={thumb} alt="" loading="lazy"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <div style={{
+            width: '100%', height: '100%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: 'var(--mono)', fontSize: 9, color: 'rgba(255,255,255,0.4)',
+          }}>{row.type || 'VIDEO'}</div>
+        )}
+        {/* Play glyph in a translucent disc — same approach as the
+            matrix-view hover-to-play affordance. */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.15)',
+          color: 'rgba(255,255,255,0.92)', fontSize: 20, lineHeight: 1,
+        }}>▶</div>
+      </button>
+
+      {/* Main content column. Three lines: title row (with chips), messaging
+          row, description row. Bottom row collapses messaging+desc into
+          a single block for narrow widths. */}
+      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{
+          display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap',
+        }}>
+          <span style={{
+            fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500,
+            color: 'var(--ink)', letterSpacing: '-0.005em',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            maxWidth: '100%',
+          }} title={title}>{title}</span>
+          {offerName && (
+            <span style={{
+              padding: '2px 8px',
+              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+              letterSpacing: '0.1em', textTransform: 'uppercase',
+              background: 'rgba(62,138,94,0.12)', color: '#2f6a48',
+              border: '1px solid rgba(62,138,94,0.3)', borderRadius: 2,
+            }}>{offerName}</span>
+          )}
+          {row.type && (
+            <span style={{
+              padding: '2px 8px',
+              fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+              letterSpacing: '0.1em', textTransform: 'uppercase',
+              background: 'var(--paper-2)', color: 'var(--ink-3)',
+              border: '1px solid var(--rule)', borderRadius: 2,
+            }}>{row.type}</span>
+          )}
+        </div>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+          color: 'var(--ink-2)', letterSpacing: '0.04em',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          <span style={{
+            color: 'var(--ink-4)', marginRight: 6,
+            textTransform: 'uppercase', fontSize: 9.5, letterSpacing: '0.12em',
+          }}>Messaging</span>
+          {angle ? angle : <span style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>angle pending</span>}
+        </div>
+        {row.description && (
+          <div style={{
+            fontFamily: 'var(--sans)', fontSize: 12.5,
+            color: 'var(--ink-2)', lineHeight: 1.45,
+            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}>{row.description}</div>
+        )}
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 10.5,
+          color: 'var(--ink-4)', letterSpacing: '0.06em',
+          marginTop: 2,
+        }}>
+          {row.creator || 'creator pending'} · approved {relativeTime(when)}
+        </div>
+      </div>
+
+      {/* Actions column. Open = deep-link to library detail drawer.
+          Mark launched = flip has_been_run + remove from list. */}
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: 6,
+        justifyContent: 'center', alignItems: 'flex-end',
+      }}>
+        <button onClick={onOpen} style={{
+          padding: '6px 12px',
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          background: 'white', color: 'var(--ink-2)',
+          border: '1px solid var(--rule)', cursor: 'pointer',
+          minWidth: 132,
+        }}>Open in library</button>
+        <button onClick={onMarkLaunched} style={{
+          padding: '7px 12px',
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          background: 'var(--ink)', color: 'var(--paper)',
+          border: '1px solid var(--ink)', cursor: 'pointer',
+          minWidth: 132,
+        }}>Mark launched</button>
+      </div>
+    </div>
+  )
+}
+
+// Relative-time helper local to this tab. Same shape as the bell's
+// relTime — pulled out so per-render allocations stay outside the row.
+function relativeTime(iso) {
+  if (!iso) return 'recently'
+  const t = new Date(iso).getTime()
+  const diff = Date.now() - t
+  const mins = Math.round(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.round(hrs / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.round(days / 30)
+  return `${months}mo ago`
+}
+
+// Inline preview modal for a launch-queue creative. Same teardown pattern
+// as SubmissionPreviewModal — pause + clear src on unmount so the next
+// open doesn't stutter while the browser unwinds the prior decoder.
+// URL priority matches the rest of the codebase: final_cut_url first
+// (editor's approved cut, always full quality), then approved_url, then
+// drive_url, then preview_url as the last fallback.
+function LaunchPreviewModal({ row, onClose }) {
+  const videoRef = useRef(null)
+  useEffect(() => {
+    if (row) return
+    const v = videoRef.current
+    if (!v) return
+    try { v.pause(); v.removeAttribute('src'); v.load() } catch {}
+  }, [row])
+  if (!row) return null
+  const url = row.final_cut_url || row.approved_url || row.drive_url || row.preview_url
+  const title = rowDisplayName(row) || row.canonical_name || row.name || 'Creative'
+  const angle = row.messaging_angle_override || row.messaging_angle
+  return (
+    <Modal open={!!row} onClose={onClose} size="lg"
+      eyebrow="Launch preview"
+      title={title}
+      subtitle={angle ? `Messaging — ${angle}` : null}>
+      <div style={{ padding: '0 0 16px' }}>
+        <div style={{
+          background: '#000', maxHeight: '60vh',
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+        }}>
+          {url ? (
+            <video ref={videoRef} src={url} controls autoPlay preload="metadata"
+              style={{ maxWidth: '100%', maxHeight: '60vh', display: 'block' }} />
+          ) : (
+            <div style={{
+              padding: 40, color: 'rgba(255,255,255,0.6)',
+              fontFamily: 'var(--mono)', fontSize: 12,
+            }}>No playable file on this creative.</div>
+          )}
+        </div>
+        {row.description && (
+          <div style={{
+            padding: '12px 22px 0',
+            fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
+            color: 'var(--ink-2)',
+          }}>{row.description}</div>
+        )}
       </div>
     </Modal>
   )
