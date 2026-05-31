@@ -3049,8 +3049,18 @@ export default function MarketingPerformance() {
   // Accepts either a numeric day count, 'mtd', or { from, to }. byRange now
   // accepts the same union so custom historical ranges use the exact same
   // window as the filterByDays() data view above.
+  //
+  // SKIP override when an audience filter is active (Ben 2026-06-01).
+  // prospectMetricsByRange counts ALL closer_calls in the window — it has no
+  // audience filter. When the user clicks Electricians, the audience-aware
+  // view sources (lib_marketing_by_audience_daily) correctly report 0 closes
+  // for that audience, but this override stomps that with the global closed
+  // count (4) — leaving Ben staring at "Electricians has 4 closes" when only
+  // Restoration actually closed anything. Audience-filtered stats are
+  // already correct from the view; don't second-guess them.
   const applyProspectMetrics = (statsBundle, rangeOrDays) => {
     if (!statsBundle) return statsBundle
+    if (selectedAudiences && selectedAudiences.size > 0) return statsBundle
     const pm = prospectMetricsByRange(rangeOrDays)
     const liveProspects = pm.liveProspects
     const closedProspects = pm.closedProspects
