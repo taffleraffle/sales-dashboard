@@ -1852,15 +1852,23 @@ const NotificationBell = forwardRef(function NotificationBell(
    the default action is just watch. */
 function SubmissionPreviewModal({ submission, onClose }) {
   const videoRef = useRef(null)
-  // Pause + release the decoder when the modal closes — same teardown
-  // pattern as the matrix detail preview. Without this the video
-  // continues buffering in the background and the next modal open
-  // can stutter while the browser unwinds the previous decoder.
+  // Pause + release the decoder when the modal closes. The previous
+  // implementation tried to do the teardown in the effect body, but the
+  // early-return below (`if (!submission) return null`) unmounts the
+  // <video> before the effect ever sees a live ref. Using the cleanup
+  // function fixes this: we capture the live element when the effect
+  // runs with submission set, and the cleanup closure-tearing-down
+  // happens on the next deps change OR component unmount — at which
+  // point the captured element is detached but still pause-able and
+  // src-clearable. Matches the pattern in PreviewVideo (line ~2050).
   useEffect(() => {
-    if (submission) return
+    if (!submission) return
     const v = videoRef.current
-    if (!v) return
-    try { v.pause(); v.removeAttribute('src'); v.load() } catch {}
+    return () => {
+      if (!v) return
+      try { v.pause() } catch {}
+      try { v.removeAttribute('src'); v.load() } catch {}
+    }
   }, [submission])
   if (!submission) return null
   const url = submission.file_url
@@ -2794,7 +2802,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // in a follow-up query after first paint so library search still works.
   const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason'
 
-  const load = useCallback(async (background = false) => {
+  const load = useCallback(async (background = false, attempt = 0) => {
     if (!background) setLoading(true)
     setErr(null)
     // 20s hard timeout. supabase-js has no built-in timeout, so when
@@ -2821,12 +2829,13 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
         timeoutErr,
       ])
     } catch (e) {
-      // AbortError from Supabase auth-lock contention is transient — the
-      // request resolves on the next tick. Retry once silently instead of
-      // showing a scary banner. Anything else, surface.
-      if (e?.name === 'AbortError') {
+      // AbortError from Supabase auth-lock contention is usually transient —
+      // retry with a tiny backoff. Capped at 3 attempts so a real abort
+      // (e.g. genuine 401 wrapped in AbortError) eventually surfaces
+      // instead of pegging the API forever.
+      if (e?.name === 'AbortError' && attempt < 3) {
         if (!background) setLoading(false)
-        setTimeout(() => load(background), 50)
+        setTimeout(() => load(background, attempt + 1), 50 * (attempt + 1))
         return
       }
       setErr(e.message || 'Load failed')
@@ -7835,7 +7844,7 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
   // for editor submissions. Click thumbnail → opens a Modal-hosted player.
   const [previewing, setPreviewing] = useState(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (attempt = 0) => {
     if (scope.isEditorView) return
     setLoading(true)
     setErr(null)
@@ -7856,10 +7865,12 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
       setRows(rowsRes.data || [])
       setOffers(offersRes.data || [])
     } catch (e) {
-      // AbortError from auth-lock contention — silently retry, same
-      // pattern LibraryTab.load uses.
-      if (e?.name === 'AbortError') {
-        setTimeout(() => load(), 50)
+      // AbortError from auth-lock contention is usually transient — retry
+      // with a tiny backoff. Capped at 3 attempts so a persistent abort
+      // (e.g. real 401 wrapped in AbortError) eventually surfaces instead
+      // of pegging the API at 20 req/s forever.
+      if (e?.name === 'AbortError' && attempt < 3) {
+        setTimeout(() => load(attempt + 1), 50 * (attempt + 1))
         return
       }
       setErr(e.message || 'Load failed')
@@ -7871,20 +7882,32 @@ function LaunchQueueTab({ scope = ADMIN_SCOPE, onLaunched, onOpenInLibrary }) {
   useEffect(() => { load() }, [load])
 
   // Mark a creative as launched. Optimistic remove from the local list +
-  // bump the parent's count. Reverts on DB error.
+  // bump the parent's count. Per-row rollback: capture only the removed
+  // row, and on error re-insert ONLY that row instead of restoring a
+  // whole-list snapshot. Whole-list snapshots clobber concurrent removals
+  // — click row A, click row B, A fails: setRows(snapshotA) would restore
+  // BOTH A and B even though B's removal was healthy.
   const markLaunched = useCallback(async (id) => {
-    const snapshot = rows
-    setRows(curr => curr.filter(r => r.id !== id))
+    let removedRow = null
+    setRows(curr => {
+      const r = curr.find(x => x.id === id)
+      if (!r) return curr
+      removedRow = r
+      return curr.filter(x => x.id !== id)
+    })
+    if (!removedRow) return  // nothing to remove (double-click race)
     const { error } = await supabase.from('lib_creative_library')
       .update({ has_been_run: true })
       .eq('id', id)
     if (error) {
-      setRows(snapshot)
+      // Re-insert only if it's not already back in the list (defensive
+      // against a parallel re-fetch that already picked it up).
+      setRows(curr => curr.find(x => x.id === id) ? curr : [...curr, removedRow])
       setErr(error.message)
       return
     }
     onLaunched?.()
-  }, [rows, onLaunched])
+  }, [onLaunched])
 
   // Filter + sort applied as a single useMemo so re-renders are cheap.
   // Search is case-insensitive across the same field blob LibraryTab uses.
@@ -8263,11 +8286,18 @@ function relativeTime(iso) {
 // drive_url, then preview_url as the last fallback.
 function LaunchPreviewModal({ row, onClose }) {
   const videoRef = useRef(null)
+  // Same teardown shape as SubmissionPreviewModal — capture live element
+  // when row is set, tear down via cleanup. The earlier "if (row) return"
+  // shape was dead code: the early-return below unmounts the video before
+  // the body ever ran with row=null.
   useEffect(() => {
-    if (row) return
+    if (!row) return
     const v = videoRef.current
-    if (!v) return
-    try { v.pause(); v.removeAttribute('src'); v.load() } catch {}
+    return () => {
+      if (!v) return
+      try { v.pause() } catch {}
+      try { v.removeAttribute('src'); v.load() } catch {}
+    }
   }, [row])
   if (!row) return null
   const url = row.final_cut_url || row.approved_url || row.drive_url || row.preview_url
@@ -8423,7 +8453,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     })
   }, [])
 
-  const load = useCallback(async (background = false) => {
+  const load = useCallback(async (background = false, attempt = 0) => {
     if (!background) setLoading(true)
     setErr(null)
     // 20s hard timeout (see LibraryTab.load — same reasoning).
@@ -8442,11 +8472,12 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         timeoutErr,
       ])
     } catch (err) {
-      // Same AbortError-from-auth-lock retry as LibraryTab.load — silently
-      // re-run the fetch instead of blanking the queue with the raw error.
-      if (err?.name === 'AbortError') {
+      // Bounded AbortError-from-auth-lock retry. Same shape as LibraryTab.load
+      // and LaunchQueueTab.load — cap at 3 attempts so a genuine 401-as-Abort
+      // surfaces instead of looping forever.
+      if (err?.name === 'AbortError' && attempt < 3) {
         if (!background) setLoading(false)
-        setTimeout(() => load(background), 50)
+        setTimeout(() => load(background, attempt + 1), 50 * (attempt + 1))
         return
       }
       setErr(err.message || 'Load failed')
