@@ -172,6 +172,10 @@ function buildAngleContext(angle: any, proofs: any[]): string {
   const proofRoster = proofs.length
     ? proofs.map((p, i) => `${i + 1}. ${p.name} — ${p.result_short}  (long: "${p.name} ${p.result_long}")`).join('\n')
     : '(no proof characters defined for this angle)'
+  const pains = angle.pain_points || []
+  const painBlock = pains.length
+    ? `\nPAIN POINTS (use these as the lived-reality of the prospect — Shape C "Pain anchor" hooks especially must lean on specific items from this list, NOT generic competitor language. Other shapes can reference one or two of these as supporting context):\n${pains.map((p: string) => `  - ${p}`).join('\n')}`
+    : ''
   return [
     `ANGLE: ${angle.name}`,
     `QUALIFIER (the audience-filter opening line shape): ${angle.qualifier}`,
@@ -181,8 +185,9 @@ function buildAngleContext(angle: any, proofs: any[]): string {
     `GUARANTEE CLOSE: ${angle.guarantee_close}`,
     angle.cta_teeup ? `CTA TEE-UP (body beat 1 opener template): ${angle.cta_teeup}` : '',
     angle.anchor_vocab?.length ? `ANCHOR VOCAB (rotate so anchors don't become a structural tic): ${angle.anchor_vocab.join(' · ')}` : '',
+    painBlock,
     '',
-    `PROOF CHARACTERS (you may name only these, in only these forms):`,
+    `PROOF CHARACTERS (you may name only these, in only these forms — if there's only one, use them as the single focal proof and lean into BOTH their result_short and result_long color rather than padding with fabricated others):`,
     proofRoster,
   ].filter(Boolean).join('\n')
 }
