@@ -2401,6 +2401,41 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
     startTransition(() => setDrawerRow(row))
   }, [])
 
+  // Deep-link: ?creative=<id> in the URL auto-opens the detail modal for
+  // that creative once rows load. Used by external links (e.g. the
+  // low-quality spreadsheet export, Slack messages, Sentinel deep-links)
+  // so an editor can click a row identifier anywhere and land directly
+  // on its modal instead of scrolling 200+ matrix rows. If the creative
+  // isn't in the current filter window (e.g. hideLowQuality is on and
+  // the linked row is flagged), we fall back to a one-shot DB fetch so
+  // the link still works.
+  const deepLinkOpenedRef = useRef(false)
+  useEffect(() => {
+    if (deepLinkOpenedRef.current) return
+    const url = new URL(window.location.href)
+    const creativeId = url.searchParams.get('creative')
+    if (!creativeId) return
+    const stripParam = () => {
+      url.searchParams.delete('creative')
+      window.history.replaceState({}, '', url.toString())
+    }
+    const local = rows.find(r => r.id === creativeId)
+    if (local) {
+      deepLinkOpenedRef.current = true
+      openDrawer(local)
+      stripParam()
+      return
+    }
+    // Not in current rows (filter hiding it OR not yet loaded). If rows
+    // are empty, wait for the next render. If rows are loaded but the
+    // creative isn't present, fetch directly.
+    if (!rows.length) return
+    deepLinkOpenedRef.current = true
+    supabase.from('lib_creative_library').select('*').eq('id', creativeId).maybeSingle()
+      .then(({ data }) => { if (data) openDrawer(data) })
+      .finally(stripParam)
+  }, [rows, openDrawer])
+
   // Cross-modal navigation: when a user clicks a "Used in" or "Made from"
   // link inside the detail modal, jump the modal to that row. Looks up the
   // full row from our local rows state first (no network) and only fetches
