@@ -557,96 +557,75 @@ export default function AdsGenerator() {
       {/* ──── MESSAGING MODE ──── */}
       {genTarget === 'messaging' && (
         <>
-          <Section label="02" title="Optional context">
-            <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                        color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
-              Niche, situation, or specifics you want the angles biased toward. Empty = use the
-              offer's primary audience as-is. Example: "CPA firms at $50k+/month, referral-driven,
-              watching Bench and Pilot eat bookkeeping clients."
-            </p>
-            <textarea value={nicheHint} onChange={e => setNicheHint(e.target.value)}
-              rows={3} placeholder="(optional)"
-              style={{
-                width: '100%', maxWidth: 720, padding: '10px 12px',
-                fontFamily: 'var(--sans)', fontSize: 14,
-                border: '1px solid var(--rule)', background: 'var(--paper)',
-                color: 'var(--ink)', resize: 'vertical', borderRadius: 2,
-              }} />
-          </Section>
-
-          <Section label="03" title="How many angles">
+          {/* Count + Generate row — primary action. */}
+          <div style={{
+            marginBottom: 6,
+            padding: '16px 18px', background: 'white',
+            border: '1px solid var(--rule)', borderTop: '3px solid var(--ink)',
+            borderRadius: 2,
+          }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
               <div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                              textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 6 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
+                              textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
                   Problems
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 4 }}>
                   {[3, 5, 10, 15].map(n => (
                     <button key={n} onClick={() => setNProblems(n)}
                       style={{
-                        padding: '8px 16px',
+                        padding: '8px 14px',
                         border: `1px solid ${nProblems === n ? 'var(--ink)' : 'var(--rule)'}`,
-                        background: nProblems === n ? 'var(--accent)' : 'var(--paper)',
+                        background: nProblems === n ? 'var(--accent)' : 'white',
                         color: 'var(--ink)',
                         fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
-                        cursor: 'pointer', borderRadius: 2, minWidth: 60,
+                        cursor: 'pointer', borderRadius: 2, minWidth: 50,
                       }}>{n}</button>
                   ))}
                 </div>
               </div>
               <div>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                              textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 6 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
+                              textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>
                   Desires
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 4 }}>
                   {[3, 5, 10, 15].map(n => (
                     <button key={n} onClick={() => setNDesires(n)}
                       style={{
-                        padding: '8px 16px',
+                        padding: '8px 14px',
                         border: `1px solid ${nDesires === n ? 'var(--ink)' : 'var(--rule)'}`,
-                        background: nDesires === n ? 'var(--accent)' : 'var(--paper)',
+                        background: nDesires === n ? 'var(--accent)' : 'white',
                         color: 'var(--ink)',
                         fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
-                        cursor: 'pointer', borderRadius: 2, minWidth: 60,
+                        cursor: 'pointer', borderRadius: 2, minWidth: 50,
                       }}>{n}</button>
                   ))}
                 </div>
               </div>
+              <button onClick={handleGenerateMessaging}
+                disabled={messagingBusy || !offerSlug}
+                style={{
+                  marginLeft: 'auto',
+                  padding: '14px 24px', fontFamily: 'var(--mono)', fontSize: 12,
+                  letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700,
+                  border: '2px solid var(--ink)',
+                  background: messagingBusy ? 'var(--ink-3)' : 'var(--ink)',
+                  color: 'var(--paper)', cursor: messagingBusy ? 'wait' : 'pointer',
+                  opacity: !offerSlug ? 0.4 : 1, borderRadius: 2,
+                  boxShadow: !messagingBusy && offerSlug ? '4px 4px 0 var(--accent)' : 'none',
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                }}>
+                <Sparkles size={14} />
+                {messagingBusy
+                  ? `Generating ${nProblems + nDesires}…`
+                  : `Generate ${nProblems + nDesires} angles`}
+              </button>
             </div>
-          </Section>
-
-          <Section label="03b" title="Anything specific to mention? (optional)">
-            <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                        color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
-              Free-text instructions appended to Claude's prompt. Use this to call
-              out specific case studies, named clients, banned phrases, or framing
-              tweaks for THIS batch only. Example: "Lead with Eric's $215K close",
-              "don't mention guarantees", or "bias toward founders in their first 12 months".
-            </p>
-            <ExtraInstructionsField value={extraInstructions} onChange={setExtraInstructions} />
-          </Section>
-
-          <Section label="04" title="Generate">
-            <button onClick={handleGenerateMessaging}
-              disabled={messagingBusy || !offerSlug}
-              style={{
-                padding: '14px 28px', fontFamily: 'var(--mono)', fontSize: 12,
-                letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700,
-                border: '2px solid var(--ink)',
-                background: messagingBusy ? 'var(--ink-3)' : 'var(--ink)',
-                color: 'var(--paper)', cursor: messagingBusy ? 'wait' : 'pointer',
-                opacity: !offerSlug ? 0.4 : 1, borderRadius: 2,
-                boxShadow: !messagingBusy && offerSlug ? '4px 4px 0 var(--accent)' : 'none',
-              }}>
-              <Sparkles size={14} style={{ display: 'inline', marginRight: 8, verticalAlign: 'middle' }} />
-              {messagingBusy
-                ? `Generating ${nProblems + nDesires} angles…`
-                : `Generate ${nProblems} problems + ${nDesires} desires`}
-            </button>
             {messagingBusy && (
-              <GenProgress kind="angles" total={nProblems + nDesires} />
+              <div style={{ marginTop: 14 }}>
+                <GenProgress kind="angles" total={nProblems + nDesires} />
+              </div>
             )}
             {messagingResult?.save_error && (
               <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef2f2',
@@ -654,7 +633,31 @@ export default function AdsGenerator() {
                 Save error: {messagingResult.save_error}
               </div>
             )}
-          </Section>
+          </div>
+
+          {/* Advanced expander — niche hint + extra instructions live here. */}
+          {(() => {
+            const advHasContent = !!(nicheHint.trim() || extraInstructions.trim())
+            return (
+              <AdvancedExpander defaultOpen={advHasContent}>
+                <Block title="Niche or situation (optional)" dense
+                  hint='Bias the angles toward a specific niche. Empty = use the offer&apos;s primary audience as-is. Example: "CPA firms at $50k+/month watching Bench eat bookkeeping clients."'>
+                  <textarea value={nicheHint} onChange={e => setNicheHint(e.target.value)}
+                    rows={3} placeholder="(optional)"
+                    style={{
+                      width: '100%', maxWidth: 720, padding: '10px 12px',
+                      fontFamily: 'var(--sans)', fontSize: 14,
+                      border: '1px solid var(--rule)', background: 'white',
+                      color: 'var(--ink)', resize: 'vertical', borderRadius: 2, outline: 'none',
+                    }} />
+                </Block>
+                <Block title="Anything specific to mention?" dense
+                  hint='Free-text appended to Claude. e.g. "Lead with Eric&apos;s $215K close", "don&apos;t mention guarantees", "bias toward founders in their first 12 months".'>
+                  <ExtraInstructionsField value={extraInstructions} onChange={setExtraInstructions} />
+                </Block>
+              </AdvancedExpander>
+            )
+          })()}
 
           {/* Persistent saved-angle library for this offer. Always visible
               so the operator can review prior messaging without re-running.
@@ -759,7 +762,7 @@ export default function AdsGenerator() {
         </>
       )}
 
-      {/* ──── SCRIPTS MODE — template-based generator ──── */}
+      {/* ──── SCRIPTS MODE — simplified flow (Ben 2026-05-31) ──── */}
       {genTarget === 'scripts' && (
         <>
           {!offerSlug && (
@@ -785,72 +788,24 @@ export default function AdsGenerator() {
             </div>
           )}
 
-          {/* Step 01: type — multi-select. Pick any combination. */}
-          <Section label="02" title="Script types">
-            <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                        color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
-              Pick one or more. Each selected type runs its own batch — selecting Hooks + Bodies
-              gives you N hooks AND N bodies for the same angle in one click.
-            </p>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              {[
-                { v: 'hook',   label: 'Hooks',    desc: 'Standalone openings — 60-90 words each. Filter by hook shape (A-H).' },
-                { v: 'body',   label: 'Bodies',   desc: 'Full body copy following the 7-beat skeleton. Standalone — pair with any hook later.' },
-                { v: 'joined', label: 'Joined',   desc: 'Hook + Body chained. Body continues the same proof character + posture as its hook.' },
-              ].map(opt => {
-                const on = scriptTypes.includes(opt.v)
-                return (
-                  <button key={opt.v}
-                    onClick={() => setScriptTypes(prev =>
-                      prev.includes(opt.v) ? prev.filter(t => t !== opt.v) : [...prev, opt.v])}
-                    style={{
-                      flex: '1 1 240px', maxWidth: 380,
-                      padding: '14px 16px', textAlign: 'left',
-                      border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                      background: on ? 'var(--ink)' : 'white',
-                      color: on ? 'var(--paper)' : 'var(--ink)',
-                      cursor: 'pointer', borderRadius: 2,
-                      display: 'flex', flexDirection: 'column', gap: 4,
-                      position: 'relative',
-                    }}>
-                    {on && (
-                      <Check size={14} style={{ position: 'absolute', top: 12, right: 12 }} />
-                    )}
-                    <span style={{
-                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
-                      letterSpacing: '0.12em', textTransform: 'uppercase',
-                    }}>{opt.label}</span>
-                    <span style={{ fontFamily: 'var(--serif)', fontSize: 12.5,
-                                   fontStyle: 'italic', opacity: 0.85, lineHeight: 1.4 }}>
-                      {opt.desc}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </Section>
-
-          {/* Step 02: angles — multi-select. Pick 1+. */}
-          <Section label="03" title="Angles">
-            <div style={{
-              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-              marginBottom: 10, gap: 12, flexWrap: 'wrap',
-            }}>
-              <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                          color: 'var(--ink-4)', margin: 0, maxWidth: 640 }}>
-                Click any angle to add it to the batch. Each selected angle gets its own run
-                — selecting three angles × two script types = six batches in parallel.
-              </p>
+          {/* Angles — primary decision. */}
+          <Block title="Angles"
+            hint="Click any angle to add it to the batch. Each selected angle gets its own run — pick 3 angles × 2 script types = 6 batches in parallel.">
+            <div style={{ display: 'flex', alignItems: 'baseline',
+                          justifyContent: 'space-between', marginBottom: 10, gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5,
+                            letterSpacing: '0.14em', textTransform: 'uppercase',
+                            color: 'var(--ink-4)' }}>
+                {angleSlugs.length === 0
+                  ? 'Nothing selected yet'
+                  : `${angleSlugs.length} selected · ${angles.length - angleSlugs.length} remaining`}
+              </div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <button onClick={() => setAngleSlugs(angles.map(a => a.slug))}
-                  style={pillButtonStyle(false)}>
-                  Select all ({angles.length})
-                </button>
+                  style={pillButtonStyle(false)}>Select all ({angles.length})</button>
                 {angleSlugs.length > 0 && (
                   <button onClick={() => setAngleSlugs([])}
-                    style={pillButtonStyle(false)}>
-                    Clear ({angleSlugs.length})
-                  </button>
+                    style={pillButtonStyle(false)}>Clear</button>
                 )}
               </div>
             </div>
@@ -877,9 +832,6 @@ export default function AdsGenerator() {
                 )
               })}
             </div>
-            {/* Preview block: only when EXACTLY one selected. With many
-                selected the preview would be noise — each angle uses its
-                own qualifier / promise / mechanism server-side. */}
             {primaryAngleSlug && (() => {
               const a = angles.find(x => x.slug === primaryAngleSlug)
               if (!a) return null
@@ -902,197 +854,365 @@ export default function AdsGenerator() {
                 </div>
               )
             })()}
-            {angleSlugs.length > 1 && (
-              <div style={{
-                marginTop: 12, padding: '10px 14px',
-                background: 'var(--paper)', border: '1px solid var(--rule)',
-                fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                color: 'var(--ink-3)', lineHeight: 1.5,
-              }}>
-                {angleSlugs.length} angles selected. Each will use its own mechanism + proof
-                characters server-side. The Mechanism + Proof character pickers below are
-                hidden in multi-angle mode — re-select a single angle to override per-angle.
-              </div>
-            )}
-          </Section>
+          </Block>
 
-          {/* Step 03b: proof characters (per angle) — picker + opener for editor.
-              Single-angle mode only; multi-angle runs use each angle's own proofs. */}
-          {primaryAngleSlug && (
-            <Section label="03b" title="Proof characters">
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8, gap: 12, flexWrap: 'wrap' }}>
-                <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                            color: 'var(--ink-4)', margin: 0, maxWidth: 640 }}>
-                  Named clients with a one-line result. The generator rotates through them.
-                  Leave the chip row at <strong>All</strong> to use every active character —
-                  or click to subset which appear in this batch.
-                </p>
-                <button onClick={() => setProofEditorOpen(true)}
-                  style={{
-                    padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11,
-                    letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
-                    border: '1px solid var(--ink)', background: 'var(--paper)',
-                    color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                  }}>
-                  <Settings size={12} />
-                  Manage ({proofCharacters.length})
-                </button>
-              </div>
-              {proofCharacters.length === 0 ? (
-                <div style={{
-                  padding: '12px 14px', background: '#fff3d1',
-                  border: '1px solid #d68f00', borderLeft: '4px solid #d68f00',
-                  fontFamily: 'var(--mono)', fontSize: 12, color: '#4d3000', lineHeight: 1.5,
-                }}>
-                  No proof characters saved for this angle. Click <strong>Manage</strong> to
-                  add 3-5 (Eric — closed a $215K job in 90 days; Adam — booked top-3 in 60d;
-                  etc). Without proofs the generator falls back to generic placeholders.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  <button onClick={() => setSelectedProofNames([])}
+          {/* Script types — multi-select. */}
+          <Block title="Script types"
+            hint="Pick one or more. Each selected type runs its own batch.">
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {[
+                { v: 'hook',   label: 'Hooks',    desc: 'Standalone openings — 60-90 words. Filter by shape (A-H) under Advanced.' },
+                { v: 'body',   label: 'Bodies',   desc: 'Full body copy on the 7-beat skeleton. Pair with any hook later.' },
+                { v: 'joined', label: 'Joined',   desc: 'Hook + Body chained. Same proof character + posture through both.' },
+              ].map(opt => {
+                const on = scriptTypes.includes(opt.v)
+                return (
+                  <button key={opt.v}
+                    onClick={() => setScriptTypes(prev =>
+                      prev.includes(opt.v) ? prev.filter(t => t !== opt.v) : [...prev, opt.v])}
                     style={{
-                      padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11,
-                      letterSpacing: '0.1em', textTransform: 'uppercase',
-                      fontWeight: selectedProofNames.length === 0 ? 700 : 500,
-                      border: `1px solid ${selectedProofNames.length === 0 ? 'var(--ink)' : 'var(--rule)'}`,
-                      background: selectedProofNames.length === 0 ? 'var(--ink)' : 'white',
-                      color: selectedProofNames.length === 0 ? 'var(--paper)' : 'var(--ink-3)',
+                      flex: '1 1 240px', maxWidth: 380,
+                      padding: '14px 16px', textAlign: 'left',
+                      border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                      background: on ? 'var(--ink)' : 'white',
+                      color: on ? 'var(--paper)' : 'var(--ink)',
                       cursor: 'pointer', borderRadius: 2,
+                      display: 'flex', flexDirection: 'column', gap: 4,
+                      position: 'relative',
                     }}>
-                    All ({proofCharacters.length})
+                    {on && <Check size={14} style={{ position: 'absolute', top: 12, right: 12 }} />}
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                      letterSpacing: '0.12em', textTransform: 'uppercase',
+                    }}>{opt.label}</span>
+                    <span style={{ fontFamily: 'var(--serif)', fontSize: 12.5,
+                                   fontStyle: 'italic', opacity: 0.85, lineHeight: 1.4 }}>
+                      {opt.desc}
+                    </span>
                   </button>
-                  {proofCharacters.map(p => {
-                    const on = selectedProofNames.includes(p.name)
-                    return (
-                      <button key={p.id}
-                        onClick={() => setSelectedProofNames(prev =>
-                          prev.includes(p.name) ? prev.filter(n => n !== p.name) : [...prev, p.name])}
-                        title={p.result_short}
+                )
+              })}
+            </div>
+          </Block>
+
+          {/* Count + Generate row — no Section eyebrow, just an inline cluster. */}
+          {(() => {
+            const totalBatches = angleSlugs.length * scriptTypes.length
+            const totalScripts = totalBatches * nConcepts
+            const disabled = generating || !angleSlugs.length || !scriptTypes.length
+            const buttonLabel = (() => {
+              if (generating) return `Generating ${totalScripts}…`
+              if (totalBatches === 0) return 'Pick angles + script types'
+              if (totalBatches === 1) {
+                const t = scriptTypes[0]
+                return `Generate ${nConcepts} ${t === 'body' ? 'bodies' : t === 'joined' ? 'joined scripts' : t + (nConcepts > 1 ? 's' : '')}`
+              }
+              return `Generate ${totalScripts} (${angleSlugs.length} × ${scriptTypes.length} × ${nConcepts})`
+            })()
+            return (
+              <div style={{
+                marginTop: 8, marginBottom: 6,
+                padding: '16px 18px', background: 'white',
+                border: '1px solid var(--rule)', borderTop: '3px solid var(--ink)',
+                borderRadius: 2,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10,
+                                  letterSpacing: '0.14em', textTransform: 'uppercase',
+                                  color: 'var(--ink-4)', marginBottom: 6 }}>
+                      Per batch
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {[3, 5, 10, 15, 20, 30].map(n => (
+                        <button key={n} onClick={() => setNConcepts(n)}
+                          style={{
+                            padding: '8px 14px',
+                            border: `1px solid ${nConcepts === n ? 'var(--ink)' : 'var(--rule)'}`,
+                            background: nConcepts === n ? 'var(--accent)' : 'white',
+                            color: 'var(--ink)',
+                            fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
+                            cursor: 'pointer', borderRadius: 2, minWidth: 50,
+                          }}>{n}</button>
+                      ))}
+                      <input type="number" min={1} max={30} value={nConcepts}
+                        onChange={e => setNConcepts(Math.max(1, Math.min(30, parseInt(e.target.value) || 1)))}
+                        title="Custom count (1-30)"
                         style={{
-                          padding: '8px 12px', fontFamily: 'var(--sans)', fontSize: 12.5,
-                          border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                          background: on ? 'var(--ink)' : 'white',
-                          color: on ? 'var(--paper)' : 'var(--ink-2)',
+                          width: 56, padding: '8px 10px',
+                          fontFamily: 'var(--mono)', fontSize: 13, textAlign: 'center',
+                          border: '1px solid var(--rule)', background: 'white',
+                          borderRadius: 2,
+                        }} />
+                    </div>
+                  </div>
+                  <button onClick={handleGenerate} disabled={disabled}
+                    style={{
+                      marginLeft: 'auto',
+                      padding: '14px 24px', fontFamily: 'var(--mono)', fontSize: 12,
+                      letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700,
+                      border: '2px solid var(--ink)',
+                      background: generating ? 'var(--ink-3)' : 'var(--ink)',
+                      color: 'var(--paper)', cursor: disabled ? 'not-allowed' : (generating ? 'wait' : 'pointer'),
+                      opacity: disabled && !generating ? 0.4 : 1, borderRadius: 2,
+                      boxShadow: !disabled ? '4px 4px 0 var(--accent)' : 'none',
+                      transition: 'all 140ms ease',
+                      display: 'inline-flex', alignItems: 'center', gap: 8,
+                    }}>
+                    <Sparkles size={14} />
+                    {buttonLabel}
+                  </button>
+                </div>
+                {selectedOffer?.has_dual_guarantee && (
+                  <div style={{
+                    marginTop: 12, fontFamily: 'var(--serif)', fontSize: 12.5,
+                    fontStyle: 'italic', color: 'var(--ink-4)', lineHeight: 1.45,
+                  }}>
+                    Dual-guarantee close in play: top 3 Maps + crews booked, money back if neither.
+                  </div>
+                )}
+                {generating && (
+                  <div style={{ marginTop: 14 }}>
+                    <GenProgress
+                      kind={scriptTypes.length === 1
+                        ? (scriptTypes[0] === 'hook' ? 'hooks' : scriptTypes[0] === 'body' ? 'bodies' : 'joined')
+                        : 'mixed'}
+                      total={totalScripts}
+                      fanout={totalBatches > 1 ? fanProgress : null}
+                    />
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* Advanced expander — everything optional lives here. Auto-opens
+              when the operator has anything non-default set so they can see
+              their settings without an extra click. */}
+          {(() => {
+            const advHasContent = !!(
+              extraInstructions.trim() ||
+              mechanismSlug ||
+              targetShapes.length ||
+              selectedProofNames.length ||
+              (primaryAngleSlug && proofCharacters.length === 0)   // surface the "needs proofs" state
+            )
+            return (
+              <AdvancedExpander defaultOpen={advHasContent}>
+                {/* Extra instructions — most-used; first inside Advanced. */}
+                <Block title="Anything specific to mention?" dense
+                  hint='Free-text instructions appended to Claude. Use this for "lead with Eric&apos;s $215K close", "don&apos;t mention guarantees", or "use Adam as proof character for all hooks". Blank = default prompt.'>
+                  <ExtraInstructionsField value={extraInstructions} onChange={setExtraInstructions} />
+                </Block>
+
+                {/* Proof characters — single-angle only. */}
+                {primaryAngleSlug && (
+                  <Block title="Proof characters" dense
+                    hint="Named clients with a one-line result. Generator rotates through them. (Multi-angle runs use each angle's own.)">
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                      <button onClick={() => setProofEditorOpen(true)}
+                        style={{
+                          padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11,
+                          letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
+                          border: '1px solid var(--ink)', background: 'var(--paper)',
+                          color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                        }}>
+                        <Settings size={12} />
+                        Manage ({proofCharacters.length})
+                      </button>
+                    </div>
+                    {proofCharacters.length === 0 ? (
+                      <div style={{
+                        padding: '10px 14px', background: '#fef6e6',
+                        border: '1px solid #e8c98a',
+                        fontFamily: 'var(--serif)', fontStyle: 'italic',
+                        fontSize: 12.5, color: '#7a5810', lineHeight: 1.5,
+                      }}>
+                        None saved yet. Generate will auto-create 4 proofs for this angle
+                        before drafting scripts. Click <strong>Manage</strong> if you want
+                        to edit them yourself first.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        <button onClick={() => setSelectedProofNames([])}
+                          style={{
+                            padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11,
+                            letterSpacing: '0.1em', textTransform: 'uppercase',
+                            fontWeight: selectedProofNames.length === 0 ? 700 : 500,
+                            border: `1px solid ${selectedProofNames.length === 0 ? 'var(--ink)' : 'var(--rule)'}`,
+                            background: selectedProofNames.length === 0 ? 'var(--ink)' : 'white',
+                            color: selectedProofNames.length === 0 ? 'var(--paper)' : 'var(--ink-3)',
+                            cursor: 'pointer', borderRadius: 2,
+                          }}>
+                          All ({proofCharacters.length})
+                        </button>
+                        {proofCharacters.map(p => {
+                          const on = selectedProofNames.includes(p.name)
+                          return (
+                            <button key={p.id}
+                              onClick={() => setSelectedProofNames(prev =>
+                                prev.includes(p.name) ? prev.filter(n => n !== p.name) : [...prev, p.name])}
+                              title={p.result_short}
+                              style={{
+                                padding: '8px 12px', fontFamily: 'var(--sans)', fontSize: 12.5,
+                                border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                                background: on ? 'var(--ink)' : 'white',
+                                color: on ? 'var(--paper)' : 'var(--ink-2)',
+                                cursor: 'pointer', borderRadius: 2,
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                              }}>
+                              {on && <Check size={12} />}
+                              <span style={{ fontWeight: on ? 600 : 400 }}>{p.name}</span>
+                              <span style={{ opacity: 0.7, fontSize: 11 }}>
+                                — {(p.result_short || '').slice(0, 48)}{(p.result_short || '').length > 48 ? '…' : ''}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </Block>
+                )}
+
+                {/* Mechanism — single-angle only. */}
+                {primaryAngleSlug && (
+                  <Block title="Mechanism" dense
+                    hint='A named system you sell — "The Direct CPA Engine", "The Pipe Flow Method". Not a strategy or transition. Leave unselected to use the angle&apos;s default.'>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                      <button onClick={() => setMechanismSlug('')}
+                        style={{
+                          padding: '10px 14px',
+                          border: `2px dashed ${mechanismSlug === '' ? 'var(--ink)' : 'var(--rule)'}`,
+                          background: mechanismSlug === '' ? 'var(--ink)' : 'var(--paper)',
+                          color: mechanismSlug === '' ? 'var(--paper)' : 'var(--ink-3)',
+                          fontFamily: 'var(--sans)', fontSize: 14, fontWeight: mechanismSlug === '' ? 600 : 400,
+                          cursor: 'pointer', borderRadius: 2,
+                        }}>None — use angle default</button>
+                      {mechanisms.map(m => {
+                        const on = m.slug === mechanismSlug
+                        return (
+                          <div key={m.slug} style={{ display: 'inline-flex', alignItems: 'stretch' }}>
+                            <button onClick={() => setMechanismSlug(m.slug)}
+                              title={m.summary || ''}
+                              style={{
+                                padding: '10px 14px',
+                                border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                                borderRight: on ? '2px solid var(--ink)' : 'none',
+                                background: on ? 'var(--ink)' : 'white',
+                                color: on ? 'var(--paper)' : 'var(--ink)',
+                                fontFamily: 'var(--sans)', fontSize: 14, fontWeight: on ? 600 : 400,
+                                cursor: 'pointer', borderRadius: '2px 0 0 2px',
+                                display: 'inline-flex', alignItems: 'center', gap: 8,
+                              }}>
+                              {on && <Check size={14} />}
+                              <span>{m.name}</span>
+                            </button>
+                            <button onClick={() => openConfigureMechanism(m)}
+                              title="Configure mechanism"
+                              style={{
+                                padding: '10px 8px',
+                                border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                                borderLeft: '1px solid var(--rule)',
+                                background: on ? 'var(--ink)' : 'white',
+                                color: on ? 'var(--paper)' : 'var(--ink-3)',
+                                cursor: 'pointer', borderRadius: '0 2px 2px 0',
+                                display: 'inline-flex', alignItems: 'center',
+                              }}>
+                              <Settings size={14} />
+                            </button>
+                          </div>
+                        )
+                      })}
+                      <button onClick={openNewMechanism}
+                        style={{
+                          padding: '10px 16px',
+                          border: '2px dashed var(--rule)', background: 'transparent',
+                          color: 'var(--ink-3)',
+                          fontFamily: 'var(--sans)', fontSize: 14,
                           cursor: 'pointer', borderRadius: 2,
                           display: 'inline-flex', alignItems: 'center', gap: 6,
                         }}>
-                        {on && <Check size={12} />}
-                        <span style={{ fontWeight: on ? 600 : 400 }}>{p.name}</span>
-                        <span style={{ opacity: 0.7, fontSize: 11 }}>
-                          — {(p.result_short || '').slice(0, 48)}{(p.result_short || '').length > 48 ? '…' : ''}
-                        </span>
+                        <Plus size={14} />
+                        New mechanism
                       </button>
-                    )
-                  })}
-                </div>
-              )}
-            </Section>
-          )}
+                    </div>
+                  </Block>
+                )}
 
-          {/* Step 04: mechanism (optional). Single-angle mode only — when
-              multiple angles are selected each angle uses its own default
-              mechanism server-side. */}
-          {primaryAngleSlug && (
-          <Section label="04" title="Mechanism (optional)">
-            <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                        color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
-              A mechanism is a <strong>named system</strong> you sell — e.g. "The Direct CPA Engine",
-              "The Banker Referral Loop", "The Pipe Flow Method". Not a strategy or transition.
-              Leave unselected to use the angle's default mechanism wording.
-            </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-              <button onClick={() => setMechanismSlug('')}
-                style={{
-                  padding: '10px 14px',
-                  border: `2px dashed ${mechanismSlug === '' ? 'var(--ink)' : 'var(--rule)'}`,
-                  background: mechanismSlug === '' ? 'var(--ink)' : 'var(--paper)',
-                  color: mechanismSlug === '' ? 'var(--paper)' : 'var(--ink-3)',
-                  fontFamily: 'var(--sans)', fontSize: 14, fontWeight: mechanismSlug === '' ? 600 : 400,
-                  cursor: 'pointer', borderRadius: 2,
-                }}>None — use angle default</button>
-              {mechanisms.map(m => {
-                const on = m.slug === mechanismSlug
-                return (
-                  <div key={m.slug} style={{ display: 'inline-flex', alignItems: 'stretch' }}>
-                    <button onClick={() => setMechanismSlug(m.slug)}
-                      title={m.summary || ''}
-                      style={{
-                        padding: '10px 14px',
-                        border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                        borderRight: on ? '2px solid var(--ink)' : 'none',
-                        background: on ? 'var(--ink)' : 'white',
-                        color: on ? 'var(--paper)' : 'var(--ink)',
-                        fontFamily: 'var(--sans)', fontSize: 14, fontWeight: on ? 600 : 400,
-                        cursor: 'pointer', borderRadius: '2px 0 0 2px',
-                        display: 'inline-flex', alignItems: 'center', gap: 8,
-                      }}>
-                      {on && <Check size={14} />}
-                      <span>{m.name}</span>
-                    </button>
-                    <button onClick={() => openConfigureMechanism(m)}
-                      title="Configure mechanism"
-                      style={{
-                        padding: '10px 8px',
-                        border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                        borderLeft: '1px solid var(--rule)',
-                        background: on ? 'var(--ink)' : 'white',
-                        color: on ? 'var(--paper)' : 'var(--ink-3)',
-                        cursor: 'pointer', borderRadius: '0 2px 2px 0',
-                        display: 'inline-flex', alignItems: 'center',
-                      }}>
-                      <Settings size={14} />
-                    </button>
-                  </div>
-                )
-              })}
-              <button onClick={openNewMechanism}
-                style={{
-                  padding: '10px 16px',
-                  border: '2px dashed var(--rule)', background: 'transparent',
-                  color: 'var(--ink-3)',
-                  fontFamily: 'var(--sans)', fontSize: 14,
-                  cursor: 'pointer', borderRadius: 2,
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                }}>
-                <Plus size={14} />
-                New mechanism
-              </button>
-            </div>
-            {mechanismSlug && (() => {
-              const m = mechanisms.find(x => x.slug === mechanismSlug)
-              if (!m) return null
-              // Preview formatting matches the angle preview directly above:
-              // mono eyebrow on its own line, serif body underneath. Per the
-              // OPT design system the eyebrow/body pair is the canonical way
-              // to label-data rows in the editorial language.
-              const row = (label, body) => body ? (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{
-                    fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
-                    textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 2,
-                  }}>{label}</div>
-                  <div style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-                    {body}
-                  </div>
-                </div>
-              ) : null
-              return (
-                <div style={{
-                  marginTop: 12, padding: '12px 16px',
-                  background: 'var(--paper)', border: '1px solid var(--rule)',
-                }}>
-                  {row('Short', m.mechanism_short)}
-                  {row('Beat 5a — Foundation', m.beat_5a)}
-                  {row('Beat 5b — Surface', m.beat_5b)}
-                  {row('Beat 5c — Authority', m.beat_5c)}
-                </div>
-              )
-            })()}
-          </Section>
-          )}
+                {/* Hook shapes — when hooks or joined are in scriptTypes. */}
+                {(scriptTypes.includes('hook') || scriptTypes.includes('joined')) && (
+                  <Block title="Hook shapes filter" dense
+                    hint={`Leave empty = all 8 shapes rotate. Pick a subset to constrain (e.g. A/B test Pain anchor vs Reframe = C + F).`}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {hookShapes.map(s => {
+                        const on = targetShapes.includes(s.code)
+                        return (
+                          <button key={s.code}
+                            onClick={() => setTargetShapes(prev =>
+                              prev.includes(s.code) ? prev.filter(c => c !== s.code) : [...prev, s.code])}
+                            title={s.description}
+                            style={{
+                              padding: '8px 12px', fontSize: 12.5,
+                              fontFamily: 'var(--sans)',
+                              border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                              background: on ? 'var(--ink)' : 'white',
+                              color: on ? 'var(--paper)' : 'var(--ink-3)',
+                              cursor: 'pointer', borderRadius: 2,
+                              display: 'inline-flex', alignItems: 'center', gap: 6,
+                            }}>
+                            <span style={{
+                              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                              padding: '1px 4px', background: on ? 'var(--paper)' : 'var(--paper-2)',
+                              color: on ? 'var(--ink)' : 'var(--ink-3)', borderRadius: 1,
+                            }}>{s.code}</span>
+                            {s.name}
+                          </button>
+                        )
+                      })}
+                      {targetShapes.length > 0 && (
+                        <button onClick={() => setTargetShapes([])}
+                          style={{ padding: '8px 12px', fontSize: 12.5,
+                                  fontFamily: 'var(--mono)', background: 'transparent',
+                                  color: 'var(--ink-4)', border: 'none', cursor: 'pointer',
+                                  textDecoration: 'underline' }}>
+                          Clear ({targetShapes.length})
+                        </button>
+                      )}
+                    </div>
+                  </Block>
+                )}
 
+                {/* Target length — when bodies or joined are in scriptTypes. */}
+                {(scriptTypes.includes('body') || scriptTypes.includes('joined')) && (
+                  <Block title="Target length" dense>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {[
+                        { v: 'under_60s', label: 'Under 60s', desc: 'Tight body, single proof beat' },
+                        { v: '60_75s',    label: '60-75s',    desc: 'Canonical OPT length, full skeleton' },
+                        { v: '75s_plus',  label: '75s+',      desc: 'Full scene paint, extended proof roster' },
+                      ].map(opt => {
+                        const on = targetLength === opt.v
+                        return (
+                          <button key={opt.v} onClick={() => setTargetLength(opt.v)}
+                            title={opt.desc}
+                            style={{
+                              padding: '10px 16px',
+                              border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                              background: on ? 'var(--accent)' : 'white',
+                              color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
+                              cursor: 'pointer', borderRadius: 2,
+                            }}>{opt.label}</button>
+                        )
+                      })}
+                    </div>
+                  </Block>
+                )}
+              </AdvancedExpander>
+            )
+          })()}
+
+          {/* Modal mounts — outside the expander so they render on top. */}
           <MechanismConfigModal
             open={mechanismModalOpen}
             existing={mechanismModalExisting}
@@ -1101,117 +1221,12 @@ export default function AdsGenerator() {
             onClose={() => setMechanismModalOpen(false)}
             onSaved={handleMechanismSaved}
           />
-
           <ProofCharacterEditor
             open={proofEditorOpen}
             angle={angles.find(a => a.slug === primaryAngleSlug) || null}
             onClose={() => setProofEditorOpen(false)}
             onSaved={refreshProofCharacters}
           />
-
-          {/* Step 05: shape filter (when any of hook/joined is in scriptTypes)
-              and/or length picker (when any of body/joined is in scriptTypes). */}
-          {(scriptTypes.includes('hook') || scriptTypes.includes('joined')) && (
-            <Section label="05" title="Hook shapes">
-              <div style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                            color: 'var(--ink-4)', marginBottom: 10, maxWidth: 720 }}>
-                Pick the opening-move shapes the generator can use. Leave empty = all 8 shapes
-                rotate evenly across the {nConcepts} concepts. Pick a subset to constrain
-                (e.g. for an A/B test on Pain anchor vs Reframe, select C + F).
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {hookShapes.map(s => {
-                  const on = targetShapes.includes(s.code)
-                  return (
-                    <button key={s.code}
-                      onClick={() => setTargetShapes(prev =>
-                        prev.includes(s.code) ? prev.filter(c => c !== s.code) : [...prev, s.code])}
-                      title={s.description}
-                      style={{
-                        padding: '8px 12px', fontSize: 12.5,
-                        fontFamily: 'var(--sans)',
-                        border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                        background: on ? 'var(--ink)' : 'white',
-                        color: on ? 'var(--paper)' : 'var(--ink-3)',
-                        cursor: 'pointer', borderRadius: 2,
-                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                      }}>
-                      <span style={{
-                        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                        padding: '1px 4px', background: on ? 'var(--paper)' : 'var(--paper-2)',
-                        color: on ? 'var(--ink)' : 'var(--ink-3)', borderRadius: 1,
-                      }}>{s.code}</span>
-                      {s.name}
-                    </button>
-                  )
-                })}
-                {targetShapes.length > 0 && (
-                  <button onClick={() => setTargetShapes([])}
-                    style={{ padding: '8px 12px', fontSize: 12.5,
-                            fontFamily: 'var(--mono)', background: 'transparent',
-                            color: 'var(--ink-4)', border: 'none', cursor: 'pointer',
-                            textDecoration: 'underline' }}>
-                    Clear ({targetShapes.length})
-                  </button>
-                )}
-              </div>
-            </Section>
-          )}
-          {(scriptTypes.includes('body') || scriptTypes.includes('joined')) && (
-            <Section label={scriptTypes.includes('hook') || scriptTypes.includes('joined') ? '05b' : '05'} title="Target length">
-              <div style={{ display: 'flex', gap: 8 }}>
-                {[
-                  { v: 'under_60s', label: 'Under 60s', desc: 'Tight body, single proof beat' },
-                  { v: '60_75s',    label: '60-75s',    desc: 'Canonical OPT length, full skeleton' },
-                  { v: '75s_plus',  label: '75s+',      desc: 'Full scene paint, extended proof roster' },
-                ].map(opt => {
-                  const on = targetLength === opt.v
-                  return (
-                    <button key={opt.v} onClick={() => setTargetLength(opt.v)}
-                      title={opt.desc}
-                      style={{
-                        padding: '10px 16px',
-                        border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                        background: on ? 'var(--accent)' : 'white',
-                        color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
-                        cursor: 'pointer', borderRadius: 2,
-                      }}>{opt.label}</button>
-                  )
-                })}
-              </div>
-            </Section>
-          )}
-
-          {/* Step 06: how many concepts (template mode) */}
-          <Section label="06" title="How many concepts">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {[3, 5, 10, 15, 20, 30].map(n => (
-                  <button key={n} onClick={() => setNConcepts(n)}
-                    style={{
-                      padding: '10px 20px',
-                      border: `1px solid ${nConcepts === n ? 'var(--ink)' : 'var(--rule)'}`,
-                      background: nConcepts === n ? 'var(--accent)' : 'white',
-                      color: 'var(--ink)',
-                      fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600,
-                      cursor: 'pointer', borderRadius: 2, minWidth: 70,
-                    }}>{n}</button>
-                ))}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em',
-                              textTransform: 'uppercase', color: 'var(--ink-4)' }}>Custom:</span>
-                <input type="number" min={1} max={30} value={nConcepts}
-                  onChange={e => setNConcepts(Math.max(1, Math.min(30, parseInt(e.target.value) || 1)))}
-                  style={{
-                    width: 70, padding: '8px 10px',
-                    fontFamily: 'var(--mono)', fontSize: 14, textAlign: 'center',
-                    border: '1px solid var(--rule)', background: 'white',
-                    borderRadius: 2,
-                  }} />
-              </div>
-            </div>
-          </Section>
         </>
       )}
 
@@ -1447,87 +1462,6 @@ export default function AdsGenerator() {
       </>
       )}
 
-      {/* Step 06b: anything specific to mention this batch (Scripts mode) */}
-      {genTarget === 'scripts' && angles.length > 0 && (
-        <Section label="06b" title="Anything specific to mention? (optional)">
-          <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                      color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
-            Free-text instructions appended to Claude's prompt. Use this to call
-            out specific case studies, named clients, banned phrases, or framing
-            tweaks for THIS batch only. Example: "Lead with Eric's $215K close",
-            "don't mention guarantees", or "use Adam as proof character for all hooks".
-          </p>
-          <ExtraInstructionsField value={extraInstructions} onChange={setExtraInstructions} />
-        </Section>
-      )}
-
-      {/* Step 07: generate (Scripts mode only). Stripped layout:
-          - Button on its own row.
-          - GenProgress sits BELOW the button (full width, not floated beside).
-          - Drafts are always saved. No batch dropdown (manage batches elsewhere).
-          - Dual-guarantee reminder kept as a one-line note above the button. */}
-      {genTarget === 'scripts' && (() => {
-        const totalBatches = generatorMode === 'templates'
-          ? angleSlugs.length * scriptTypes.length
-          : 1
-        const totalScripts = totalBatches * nConcepts
-        const disabled = generating || (generatorMode === 'templates'
-          ? (!angleSlugs.length || !scriptTypes.length)
-          : !offerSlug)
-        const buttonLabel = (() => {
-          if (generating) return `Generating ${totalScripts}…`
-          if (generatorMode !== 'templates') {
-            return `Generate ${nConcepts} ${mode === 'diverse' ? 'diverse' : 'targeted'} concept${nConcepts > 1 ? 's' : ''}`
-          }
-          if (totalBatches === 0) return 'Pick angles + script types to enable'
-          if (totalBatches === 1) {
-            const t = scriptTypes[0]
-            return `Generate ${nConcepts} ${t === 'body' ? 'bodies' : t === 'joined' ? 'joined scripts' : t + (nConcepts > 1 ? 's' : '')}`
-          }
-          return `Generate ${totalScripts} scripts (${angleSlugs.length} angle${angleSlugs.length > 1 ? 's' : ''} × ${scriptTypes.length} type${scriptTypes.length > 1 ? 's' : ''} × ${nConcepts})`
-        })()
-        return (
-          <Section label="07" title="Generate">
-            {selectedOffer?.has_dual_guarantee && (
-              <div style={{
-                marginBottom: 12, padding: '8px 12px',
-                background: 'var(--paper)', border: '1px solid var(--rule)',
-                fontFamily: 'var(--serif)', fontSize: 12.5, fontStyle: 'italic',
-                color: 'var(--ink-3)', maxWidth: 720, borderRadius: 2,
-              }}>
-                Dual-guarantee close in play: top 3 Maps + crews booked, money back if neither.
-              </div>
-            )}
-            <button onClick={handleGenerate} disabled={disabled}
-              style={{
-                padding: '14px 28px', fontFamily: 'var(--mono)', fontSize: 12,
-                letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700,
-                border: '2px solid var(--ink)',
-                background: generating ? 'var(--ink-3)' : 'var(--ink)',
-                color: 'var(--paper)', cursor: disabled ? 'not-allowed' : (generating ? 'wait' : 'pointer'),
-                opacity: disabled && !generating ? 0.4 : 1, borderRadius: 2,
-                boxShadow: !disabled ? '4px 4px 0 var(--accent)' : 'none',
-                transition: 'all 140ms ease',
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-              }}>
-              <Sparkles size={14} />
-              {buttonLabel}
-            </button>
-            {generating && (
-              <div style={{ marginTop: 14, maxWidth: 720 }}>
-                <GenProgress
-                  kind={scriptTypes.length === 1
-                    ? (scriptTypes[0] === 'hook' ? 'hooks' : scriptTypes[0] === 'body' ? 'bodies' : 'joined')
-                    : 'mixed'}
-                  total={totalScripts}
-                  fanout={totalBatches > 1 ? fanProgress : null}
-                />
-              </div>
-            )}
-          </Section>
-        )
-      })()}
-
       {/* Result panel — Scripts mode only */}
       {genTarget === 'scripts' && result?.scripts?.length > 0 && (
         <div style={{ marginTop: 40, marginBottom: 32 }}>
@@ -1586,6 +1520,72 @@ function Section({ label, title, children }) {
         {title}
       </h2>
       {children}
+    </div>
+  )
+}
+
+// Un-numbered section — same visual rhythm as Section but no "Step N"
+// eyebrow. Used in the simplified /generate flow (Ben 2026-05-31) where
+// numbered steps were reading like a tax form.
+function Block({ eyebrow, title, children, hint, dense }) {
+  return (
+    <div style={{ marginBottom: dense ? 20 : 28 }}>
+      {eyebrow && <Eyebrow style={{ marginBottom: 6 }}>{eyebrow}</Eyebrow>}
+      {title && (
+        <h2 style={{
+          margin: 0, fontSize: dense ? 14 : 17, lineHeight: 1.2, color: 'var(--ink)',
+          letterSpacing: '-0.005em', fontFamily: 'var(--sans)', fontWeight: 600,
+          marginBottom: hint ? 6 : 12,
+        }}>
+          {title}
+        </h2>
+      )}
+      {hint && (
+        <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                    color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720, lineHeight: 1.5 }}>
+          {hint}
+        </p>
+      )}
+      {children}
+    </div>
+  )
+}
+
+// Collapsible "Advanced (optional)" block. Defaults closed; opens
+// automatically when defaultOpen is true (e.g. the operator has set a
+// non-default value in one of the contained fields). State is
+// controlled-via-props so the parent can force-open it when it
+// detects activity inside.
+function AdvancedExpander({ label = 'Advanced (optional)', defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen)
+  // Sync open state when defaultOpen flips true — but never auto-close
+  // on the operator (otherwise they'd lose their work mid-edit).
+  useEffect(() => {
+    if (defaultOpen && !open) setOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultOpen])
+  return (
+    <div style={{ marginTop: 28, marginBottom: 16,
+                  border: '1px solid var(--rule)', background: 'var(--paper)',
+                  borderRadius: 2 }}>
+      <button onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', padding: '12px 16px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.14em',
+          textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 600,
+        }}>
+        <span>{label}</span>
+        {open
+          ? <ChevronUp size={14} color="var(--ink-4)" />
+          : <ChevronDown size={14} color="var(--ink-4)" />}
+      </button>
+      {open && (
+        <div style={{ padding: '6px 18px 18px', borderTop: '1px solid var(--rule)' }}>
+          {children}
+        </div>
+      )}
     </div>
   )
 }
