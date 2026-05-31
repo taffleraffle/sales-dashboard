@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Link2 } from 'lucide-react'
-import { generateScripts, listGeneratedScripts, linkScriptToAd,
+import { generateScripts, generateAngles, listGeneratedScripts, linkScriptToAd,
          listAngles, listHookShapes, listMechanisms } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import { listTestBatches, addScriptsToBatch } from '../../services/testBatches'
@@ -51,9 +51,26 @@ export default function AdsGenerator() {
   const [offerModalExisting, setOfferModalExisting] = useState(null)
   const [assignScript, setAssignScript] = useState(null)
 
-  // Template-based generator (Ben 2026-05-31). Mode toggle lives at the
-  // very top — defaults to 'templates' so new users land on the new path.
-  // 'attributes' keeps the old 8-attribute flow available for power users
+  // 2026-05-31 overhaul: top-level toggle is now Scripts vs Messaging.
+  // Scripts = the existing hook/body/joined template generator.
+  // Messaging = generate angles (problems + desires) for an offer, auto-
+  // saved to the angle library so they immediately appear in the
+  // Scripts > Angle picker. The legacy 8-attribute generator is no
+  // longer surfaced in the UI — the Edge Function still supports it for
+  // any external callers, but new users only see the Scripts/Messaging
+  // tiles.
+  const [genTarget, setGenTarget] = useState('scripts')   // 'scripts' | 'messaging'
+  // Messaging-mode state
+  const [nicheHint, setNicheHint] = useState('')
+  const [nProblems, setNProblems] = useState(5)
+  const [nDesires, setNDesires] = useState(5)
+  const [messagingBusy, setMessagingBusy] = useState(false)
+  const [messagingResult, setMessagingResult] = useState(null)
+
+  // Template-based generator (Ben 2026-05-31). Templates is now the
+  // only path — Mode toggle was removed in the /generate overhaul.
+  // generatorMode useState below is kept so handleGenerate keeps its
+  // branch logic; in practice it's always 'templates' going forward.
   // who already learned it.
   const [generatorMode, setGeneratorMode] = useState('templates')
   const [scriptType, setScriptType] = useState('hook')        // 'hook' | 'body' | 'joined'
@@ -151,6 +168,27 @@ export default function AdsGenerator() {
     })
   }
 
+  async function handleGenerateMessaging() {
+    if (!offerSlug) { setErr('Pick an offer first'); return }
+    setMessagingBusy(true); setErr(null); setMessagingResult(null)
+    try {
+      const res = await generateAngles({
+        offer_slug: offerSlug,
+        n_problems: nProblems,
+        n_desires: nDesires,
+        niche_hint: nicheHint || undefined,
+      })
+      setMessagingResult(res)
+      // Refresh the angle library so newly-saved angles appear in the
+      // Scripts picker on the next switch.
+      listAngles({ offer_slug: offerSlug }).then(setAngles).catch(() => {})
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setMessagingBusy(false)
+    }
+  }
+
   async function handleGenerate() {
     setGenerating(true); setErr(null); setResult(null)
     try {
@@ -213,34 +251,210 @@ export default function AdsGenerator() {
         </div>
       )}
 
-      {/* Mode toggle — routing-grade decision between Templates (new
-          2026-05-31, angle library) and Attributes (legacy 8-axis variance).
-          Two completely different generation pipelines, so the visual
-          weight uses ModeCard rather than a pill toggle (per the OPT
-          editorial design system: routing decisions get routing-grade
-          weight). */}
+      {/* Top-level: WHAT do you want to generate?
+          Two routing-grade choices — Scripts (hook/body/joined from the
+          angle library) vs Messaging (angles themselves — problems +
+          desires — for an offer, auto-saved to the library). */}
       <div style={{ marginBottom: 28 }}>
-        <Eyebrow style={{ marginBottom: 10 }}>Mode</Eyebrow>
+        <Eyebrow style={{ marginBottom: 10 }}>What do you want to generate?</Eyebrow>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <ModeCard
-            selected={generatorMode === 'templates'}
-            onClick={() => setGeneratorMode('templates')}
+            selected={genTarget === 'scripts'}
+            onClick={() => setGenTarget('scripts')}
             icon={<Sparkles size={18} />}
-            title="Templates"
-            desc={`Hook / Body / Joined via the angle library — ${angles.length} angle${angles.length === 1 ? '' : 's'} loaded, ${hookShapes.length} hook shapes available. Generates from problems and desires; attaches mechanism + proof at generation time.`}
+            title="Scripts"
+            desc="Generate hooks, bodies, or joined hook+body scripts from an angle in your library. Mechanism and proof attach at generation time."
           />
           <ModeCard
-            selected={generatorMode === 'attributes'}
-            onClick={() => setGeneratorMode('attributes')}
-            icon={<Layers size={18} />}
-            title="Attributes"
-            desc="Legacy 8-axis variance system. Pick offer → set targeted attribute values → generate. Best when you already know which hook_type / message_frame / pain_angle you want to A/B test."
+            selected={genTarget === 'messaging'}
+            onClick={() => setGenTarget('messaging')}
+            icon={<FileText size={18} />}
+            title="Messaging"
+            desc="Generate angles (problems + desires) for an offer in the prospect's voice. Auto-saved to your angle library so they appear in the Scripts picker."
           />
         </div>
       </div>
 
-      {/* ──── TEMPLATE MODE SECTIONS ──── */}
-      {generatorMode === 'templates' && (
+      {/* Offer selection — shared between both targets. Always visible. */}
+      <Section label="01" title="Offer">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          {offers.map(o => {
+            const selected = o.slug === offerSlug
+            const isStub = o.slug.includes('stub') || o.slug.includes('template')
+            const incomplete = !o.mechanism_name || !o.primary_audience
+            return (
+              <div key={o.slug} style={{ display: 'inline-flex', alignItems: 'stretch' }}>
+                <button
+                  onClick={() => setOfferSlug(o.slug)}
+                  style={{
+                    padding: '10px 14px',
+                    border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
+                    borderRight: selected ? '2px solid var(--ink)' : 'none',
+                    background: selected ? 'var(--ink)' : 'var(--paper)',
+                    color: selected ? 'var(--paper)' : isStub ? 'var(--ink-4)' : 'var(--ink)',
+                    fontFamily: 'var(--sans)', fontSize: 14, fontWeight: selected ? 600 : 400,
+                    cursor: 'pointer', borderRadius: '2px 0 0 2px',
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    transition: 'all 140ms ease',
+                  }}>
+                  {selected && <Check size={14} />}
+                  <span>{o.name}</span>
+                  {incomplete && (
+                    <span style={{ fontSize: 9, fontFamily: 'var(--mono)', letterSpacing: '0.1em',
+                                  background: '#e0a93e', color: '#3b2a04', padding: '2px 5px',
+                                  borderRadius: 2, textTransform: 'uppercase' }}>
+                      needs config
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => openConfigureOffer(o)}
+                  title="Configure offer"
+                  style={{
+                    padding: '10px 8px',
+                    border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
+                    borderLeft: '1px solid var(--rule)',
+                    background: selected ? 'var(--ink)' : 'var(--paper)',
+                    color: selected ? 'var(--paper)' : 'var(--ink-3)',
+                    cursor: 'pointer', borderRadius: '0 2px 2px 0',
+                    display: 'inline-flex', alignItems: 'center',
+                  }}>
+                  <Settings size={14} />
+                </button>
+              </div>
+            )
+          })}
+          <button onClick={openNewOffer}
+            style={{
+              padding: '10px 16px',
+              border: '2px dashed var(--rule)', background: 'transparent',
+              color: 'var(--ink-3)',
+              fontFamily: 'var(--sans)', fontSize: 14,
+              cursor: 'pointer', borderRadius: 2,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}>
+            <Plus size={14} />
+            New offer
+          </button>
+        </div>
+      </Section>
+
+      <OfferConfigModal
+        open={offerModalOpen}
+        existing={offerModalExisting}
+        onClose={() => setOfferModalOpen(false)}
+        onSaved={handleOfferSaved}
+      />
+
+      {/* ──── MESSAGING MODE ──── */}
+      {genTarget === 'messaging' && (
+        <>
+          <Section label="02" title="Optional context">
+            <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                        color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
+              Niche, situation, or specifics you want the angles biased toward. Empty = use the
+              offer's primary audience as-is. Example: "CPA firms at $50k+/month, referral-driven,
+              watching Bench and Pilot eat bookkeeping clients."
+            </p>
+            <textarea value={nicheHint} onChange={e => setNicheHint(e.target.value)}
+              rows={3} placeholder="(optional)"
+              style={{
+                width: '100%', maxWidth: 720, padding: '10px 12px',
+                fontFamily: 'var(--sans)', fontSize: 14,
+                border: '1px solid var(--rule)', background: 'var(--paper)',
+                color: 'var(--ink)', resize: 'vertical', borderRadius: 2,
+              }} />
+          </Section>
+
+          <Section label="03" title="How many angles">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+                              textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 6 }}>
+                  Problems
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {[3, 5, 10, 15].map(n => (
+                    <button key={n} onClick={() => setNProblems(n)}
+                      style={{
+                        padding: '8px 16px',
+                        border: `1px solid ${nProblems === n ? 'var(--ink)' : 'var(--rule)'}`,
+                        background: nProblems === n ? 'var(--accent)' : 'var(--paper)',
+                        color: 'var(--ink)',
+                        fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
+                        cursor: 'pointer', borderRadius: 2, minWidth: 60,
+                      }}>{n}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+                              textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 6 }}>
+                  Desires
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {[3, 5, 10, 15].map(n => (
+                    <button key={n} onClick={() => setNDesires(n)}
+                      style={{
+                        padding: '8px 16px',
+                        border: `1px solid ${nDesires === n ? 'var(--ink)' : 'var(--rule)'}`,
+                        background: nDesires === n ? 'var(--accent)' : 'var(--paper)',
+                        color: 'var(--ink)',
+                        fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
+                        cursor: 'pointer', borderRadius: 2, minWidth: 60,
+                      }}>{n}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Section>
+
+          <Section label="04" title="Generate">
+            <button onClick={handleGenerateMessaging}
+              disabled={messagingBusy || !offerSlug}
+              style={{
+                padding: '14px 28px', fontFamily: 'var(--mono)', fontSize: 12,
+                letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700,
+                border: '2px solid var(--ink)',
+                background: messagingBusy ? 'var(--ink-3)' : 'var(--ink)',
+                color: 'var(--paper)', cursor: messagingBusy ? 'wait' : 'pointer',
+                opacity: !offerSlug ? 0.4 : 1, borderRadius: 2,
+                boxShadow: !messagingBusy && offerSlug ? '4px 4px 0 var(--accent)' : 'none',
+              }}>
+              <Sparkles size={14} style={{ display: 'inline', marginRight: 8, verticalAlign: 'middle' }} />
+              {messagingBusy
+                ? `Generating ${nProblems + nDesires} angles…`
+                : `Generate ${nProblems} problems + ${nDesires} desires`}
+            </button>
+            {messagingResult?.save_error && (
+              <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef2f2',
+                            border: '1px solid #fca5a5', color: '#b53e3e', fontSize: 13 }}>
+                Save error: {messagingResult.save_error}
+              </div>
+            )}
+          </Section>
+
+          {/* Output — generated angles, auto-saved */}
+          {messagingResult?.angles?.length > 0 && (
+            <div style={{ marginTop: 32, marginBottom: 24 }}>
+              <div style={{ marginBottom: 14 }}>
+                <Eyebrow style={{ marginBottom: 4 }}>Output · auto-saved to library</Eyebrow>
+                <h2 style={{ margin: 0, fontFamily: 'var(--serif)', fontSize: 26, fontWeight: 400 }}>
+                  {messagingResult.angles.length} angles for {messagingResult.offer?.name}
+                </h2>
+              </div>
+              <div style={{ display: 'grid', gap: 12 }}>
+                {messagingResult.angles.map((a, i) => (
+                  <AngleCard key={i} angle={a} />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ──── SCRIPTS MODE — template-based generator ──── */}
+      {genTarget === 'scripts' && (
         <>
           {angles.length === 0 && (
             <div style={{
@@ -254,7 +468,7 @@ export default function AdsGenerator() {
           )}
 
           {/* Step 01: type */}
-          <Section label="01" title="Script type">
+          <Section label="02" title="Script type">
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               {[
                 { v: 'hook',   label: 'Hooks',    desc: 'Standalone openings — 60-90 words each. Filter by hook shape (A-H).' },
@@ -288,7 +502,7 @@ export default function AdsGenerator() {
           </Section>
 
           {/* Step 02: angle */}
-          <Section label="02" title="Angle">
+          <Section label="03" title="Angle">
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {angles.map(a => {
                 const on = a.slug === angleSlug
@@ -335,7 +549,7 @@ export default function AdsGenerator() {
           </Section>
 
           {/* Step 02b: mechanism (optional) */}
-          <Section label="02b" title="Mechanism (optional)">
+          <Section label="04" title="Mechanism (optional)">
             <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
                         color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
               What OPT does to deliver the outcome for this angle. Leave unselected to use
@@ -443,7 +657,7 @@ export default function AdsGenerator() {
 
           {/* Step 03: shapes (Hook + Joined) and/or length (Body + Joined) */}
           {(scriptType === 'hook' || scriptType === 'joined') && (
-            <Section label="03" title="Hook shapes">
+            <Section label="05" title="Hook shapes">
               <div style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
                             color: 'var(--ink-4)', marginBottom: 10, maxWidth: 720 }}>
                 Pick the opening-move shapes the generator can use. Leave empty = all 8 shapes
@@ -489,7 +703,7 @@ export default function AdsGenerator() {
             </Section>
           )}
           {(scriptType === 'body' || scriptType === 'joined') && (
-            <Section label={scriptType === 'joined' ? '03b' : '03'} title="Target length">
+            <Section label={scriptType === 'joined' ? '05b' : '05'} title="Target length">
               <div style={{ display: 'flex', gap: 8 }}>
                 {[
                   { v: 'under_60s', label: 'Under 60s', desc: 'Tight body, single proof beat' },
@@ -513,8 +727,8 @@ export default function AdsGenerator() {
             </Section>
           )}
 
-          {/* Step 04: how many concepts (template mode) */}
-          <Section label="04" title="How many concepts">
+          {/* Step 06: how many concepts (template mode) */}
+          <Section label="06" title="How many concepts">
             <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 {[3, 5, 10, 15, 20, 30].map(n => (
@@ -778,8 +992,10 @@ export default function AdsGenerator() {
       </>
       )}
 
-      {/* Step 4/5: generate (shared between modes) */}
-      <Section label={generatorMode === 'templates' ? '05' : '04'} title="Generate">
+      {/* Step 07: generate (Scripts mode only — Messaging has its own
+          Generate button in its panel) */}
+      {genTarget === 'scripts' && (
+      <Section label="07" title="Generate">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
           <button onClick={handleGenerate}
             disabled={generating || (generatorMode === 'templates' ? !angleSlug : !offerSlug)}
@@ -835,9 +1051,10 @@ export default function AdsGenerator() {
           )}
         </div>
       </Section>
+      )}
 
-      {/* Result panel */}
-      {result?.scripts?.length > 0 && (
+      {/* Result panel — Scripts mode only */}
+      {genTarget === 'scripts' && result?.scripts?.length > 0 && (
         <div style={{ marginTop: 40, marginBottom: 32 }}>
           <div style={{
             display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
@@ -994,6 +1211,64 @@ function ModeCard({ selected, onClick, icon, title, desc }) {
         {desc}
       </p>
     </button>
+  )
+}
+
+// Card for a generated angle in Messaging mode. Renders the angle in
+// the prospect's voice + the hook-build sketch + any pain points.
+// Tag color follows the OPT palette via PALETTE in atoms.jsx.
+function AngleCard({ angle }) {
+  const isProblem = angle.angle_type === 'problem'
+  const tagColor = isProblem ? '#b53e3e' : '#3068b5'   // PALETTE.red / blueLight
+  const tagLabel = isProblem ? 'Problem' : 'Desire'
+  return (
+    <div style={{
+      padding: '18px 22px', background: 'var(--paper)',
+      border: '1px solid var(--rule)', borderLeft: `4px solid ${tagColor}`,
+      borderRadius: 2,
+    }}>
+      <div style={{
+        display: 'inline-block', padding: '2px 8px', marginBottom: 10,
+        background: tagColor, color: 'var(--paper)',
+        fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+        letterSpacing: '0.14em', textTransform: 'uppercase',
+        borderRadius: 2,
+      }}>{tagLabel}</div>
+      <h3 style={{
+        margin: '0 0 8px', fontFamily: 'var(--serif)', fontSize: 19, fontWeight: 500,
+        lineHeight: 1.25, color: 'var(--ink)',
+      }}>{angle.name}</h3>
+      <div style={{
+        fontFamily: 'var(--serif)', fontSize: 15, fontStyle: 'italic',
+        color: 'var(--ink-2)', lineHeight: 1.55, marginBottom: 12,
+      }}>"{angle.prospect_voice}"</div>
+      {angle.hook_build_sketch && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+            textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4,
+          }}>Hook build</div>
+          <div style={{
+            fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-2)',
+            lineHeight: 1.5,
+          }}>{angle.hook_build_sketch}</div>
+        </div>
+      )}
+      {angle.pain_points?.length > 0 && (
+        <div>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
+            textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4,
+          }}>Pain points</div>
+          <ul style={{
+            margin: 0, paddingLeft: 18, fontFamily: 'var(--sans)', fontSize: 13,
+            color: 'var(--ink-3)', lineHeight: 1.5,
+          }}>
+            {angle.pain_points.map((p, i) => <li key={i}>{p}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }
 

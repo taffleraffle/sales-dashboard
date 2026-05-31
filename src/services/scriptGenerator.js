@@ -115,14 +115,48 @@ export async function upsertMechanism(mechanism) {
 }
 
 /** List all active script angles (template mode). */
-export async function listAngles() {
-  const { data, error } = await supabase
+export async function listAngles({ offer_slug } = {}) {
+  let q = supabase
     .from('script_angles')
-    .select('slug,name,offer_slugs,qualifier,primary_promise,mechanism_short,active')
+    .select('slug,name,offer_slugs,qualifier,primary_promise,mechanism_short,angle_type,prospect_voice,hook_build_sketch,active')
     .eq('active', true)
+    .order('angle_type', { nullsFirst: false })
     .order('name')
+  const { data, error } = await q
   if (error) throw new Error(error.message)
-  return data || []
+  const rows = data || []
+  if (offer_slug) {
+    return rows.filter(a => !a.offer_slugs?.length || a.offer_slugs.includes(offer_slug))
+  }
+  return rows
+}
+
+/**
+ * Generate N problems + M desires for an offer. Auto-saves to
+ * script_angles tagged with the offer (Ben 2026-05-31 — Messaging mode
+ * on /generate page). Returns the saved angle rows plus the raw
+ * Claude output for inline display.
+ *
+ * @param {object} opts
+ * @param {string} opts.offer_slug
+ * @param {number} [opts.n_problems=5]
+ * @param {number} [opts.n_desires=5]
+ * @param {string} [opts.niche_hint]   — optional context (niche, situation, vertical specifics)
+ */
+export async function generateAngles({ offer_slug, n_problems = 5, n_desires = 5, niche_hint } = {}) {
+  if (!offer_slug) throw new Error('generateAngles: offer_slug required')
+  const { data, error } = await supabase.functions.invoke('creative-generate-script', {
+    body: {
+      generation_target: 'angles',
+      offer_slug,
+      n_problems,
+      n_desires,
+      niche_hint: niche_hint || undefined,
+    },
+  })
+  if (error) throw new Error(error.message || 'angle generation failed')
+  if (data?.error) throw new Error(data.error)
+  return data
 }
 
 /** List the catalog of opening-move shapes (A-H). */

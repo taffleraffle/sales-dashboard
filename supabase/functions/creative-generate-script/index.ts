@@ -296,6 +296,86 @@ function buildTemplateToolSchema(script_type: string, n: number, shape_codes: st
   }
 }
 
+// ── Messaging (angles) generator — Ben 2026-05-31 ────────────────────
+//
+// New "Messaging" mode that produces script_angles rows from an offer
+// directly. The output is N problem angles + M desire angles, each in
+// the prospect's first-person voice, with a Claude-written one-line
+// hook_build_sketch describing which shape fits + the opening posture.
+// Auto-saved to the angle library so they appear in the Scripts >
+// Angle picker on the very next page render.
+
+const ANGLE_SYSTEM_PROMPT = `You are OPT Digital's senior direct-response strategist. You write ANGLES — not headlines, not hooks, not bodies — ANGLES.
+
+An angle is the EMOTIONAL DOOR a prospect walks through. It is a problem they are stuck on OR a desire they are chasing, phrased in the prospect's own first-person voice. Mechanism (what the company sells) attaches LATER. Proof characters attach LATER. The angle is upstream of both.
+
+Rules:
+- Each angle is ONE problem or ONE desire. Not a solution.
+- Phrased in the prospect's voice — "I can't hire a senior accountant" not "Senior accountant hiring is hard."
+- Specific to the lived reality of the prospect at the audience qualifier (e.g. CPA firms at $50k/month have specific pains that $5k/month bookkeepers don't share).
+- Visceral and concrete. Names specific things: software names, dollar amounts, scenarios.
+- Banned: generic agency-speak ("grow your business", "scale your firm", "stand out from competitors"). Specific over abstract.
+- Banned: solutions in the angle. The angle is the door; the solution comes after.
+
+For each angle, also produce a hook_build_sketch — ONE LINE describing how the angle becomes a hook. Format: "Shape {X} ({shape name}). Opens '{first 12-20 words of the hook leading with the angle's voice}...'"
+
+Hook shapes available:
+  A. Direct offer — open with qualifier + flat offer + guarantee
+  B. Hypothetical question — "If we told you we could ___, would you take us up on it?"
+  C. Pain anchor — open with conditional pain ("If you... and you're tired of ___...")
+  D. Reality statement — flat truth about the prospect's current state
+  E. Curiosity question — "How is it possible some ___ while others ___?"
+  F. Reframe — "The X isn't Y, it's Z"
+  G. Desire question — "Want to be the ___?"
+  H. Trend/future — "The ___ that survive 2027 won't be ___"
+
+Pick the shape that the angle's voice MOST NATURALLY implies.`
+
+const ANGLE_TOOL_NAME = 'generate_angles'
+
+function buildAngleToolSchema(n_problems: number, n_desires: number) {
+  const angleItem = {
+    type: 'object',
+    properties: {
+      angle_type: { type: 'string', enum: ['problem', 'desire'] },
+      name: {
+        type: 'string',
+        description: 'A short title (3-7 words) summarizing the angle. Will be displayed in the picker.',
+      },
+      prospect_voice: {
+        type: 'string',
+        description: "The angle phrased in the prospect's own first-person voice, 1 sentence. E.g. \"I can't hire a senior accountant for love or money.\" or \"I want to be the CPA every banker in my city refers to.\"",
+      },
+      pain_points: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '2-4 specific lived-reality details that make this angle visceral. E.g. for the bookkeeping pain: ["watching Bench cold-pitch $300/mo clients", "QBO Live offering software-plus-human at half my price", "every renewal becoming a price negotiation"]. Used as PAIN POINTS block in script generation.',
+      },
+      hook_build_sketch: {
+        type: 'string',
+        description: 'ONE LINE: which shape fits + first 12-20 words of how the hook would open. Format: "Shape C (Pain anchor). Opens \\"If you run a CPA firm doing $50k a month and you\'re watching Bench cold-pitch your bookkeeping clients...\\""',
+      },
+    },
+    required: ['angle_type', 'name', 'prospect_voice', 'hook_build_sketch'],
+  }
+  return {
+    name: ANGLE_TOOL_NAME,
+    description: `Return exactly ${n_problems} problem angles + ${n_desires} desire angles for this offer's prospect. Problems first, then desires.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        angles: {
+          type: 'array',
+          items: angleItem,
+          minItems: n_problems + n_desires,
+          maxItems: n_problems + n_desires,
+        },
+      },
+      required: ['angles'],
+    },
+  }
+}
+
 // ── Legacy helpers (existing offer-based generator) ───────────────────
 async function loadOffer(supabase: any, slug: string) {
   const { data, error } = await supabase.from('offers').select('*').eq('slug', slug).maybeSingle()
@@ -390,12 +470,112 @@ serve(async (req) => {
   const offer_slug = body?.offer_slug
   const angle_slug = body?.angle_slug
   const mechanism_slug = body?.mechanism_slug    // migration 108 — optional
+  const generation_target = body?.generation_target  // 'angles' | undefined
   const script_type = body?.script_type   // 'hook' | 'body' | 'joined'
   const target_shapes_raw = body?.target_shapes
   const target_length    = body?.target_length      // 'under_60s' | '60_75s' | '75s_plus'
   const n_concepts = Math.max(1, Math.min(30, body?.n_concepts || 5))
   const target_attributes_raw = body?.target_attributes || {}
   const save_as_drafts = !!body?.save_as_drafts
+
+  // ── BRANCH: Messaging mode (Ben 2026-05-31) — generate angles ──
+  // Produces N problem + M desire angles for an offer and auto-saves to
+  // script_angles so they appear in the Scripts > Angle picker immediately.
+  if (generation_target === 'angles') {
+    if (!offer_slug) return json({ error: 'offer_slug required for angle generation' }, 400)
+    const n_problems = Math.max(0, Math.min(20, body?.n_problems ?? 5))
+    const n_desires  = Math.max(0, Math.min(20, body?.n_desires ?? 5))
+    if (n_problems + n_desires === 0) return json({ error: 'n_problems + n_desires must be > 0' }, 400)
+    const niche_hint = (body?.niche_hint || '').trim()
+
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } })
+    let offer: any
+    try { offer = await loadOffer(supabase, offer_slug) }
+    catch (e: any) { return json({ error: e.message }, 500) }
+
+    const userMsg = [
+      `OFFER: ${offer.name} (slug: ${offer.slug})`,
+      `VERTICAL: ${offer.vertical}`,
+      `PRIMARY AUDIENCE: ${offer.primary_audience || '(none defined)'}`,
+      offer.mechanism_name ? `BRAND-NAMED MECHANISM (only mention in passing; the angles are upstream of mechanism): ${offer.mechanism_name}` : '',
+      niche_hint ? `\nADDITIONAL CONTEXT FROM OPERATOR: ${niche_hint}\nUse this to bias the angles toward the specific niche / situation the operator named.` : '',
+      '',
+      `Generate exactly ${n_problems} PROBLEM angles and ${n_desires} DESIRE angles.`,
+      'Problems = what the prospect is stuck on, phrased in their voice. Desires = what they want, phrased in their voice.',
+      'Each angle must be specific to the audience qualifier (above). Generic "grow your business" angles will be rejected.',
+      `Return via the ${ANGLE_TOOL_NAME} tool with problems first, then desires.`,
+    ].filter(Boolean).join('\n')
+
+    const upstreamA = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_KEY!,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 3500 + (n_problems + n_desires) * 400,
+        system: ANGLE_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userMsg }],
+        tools: [buildAngleToolSchema(n_problems, n_desires)],
+        tool_choice: { type: 'tool', name: ANGLE_TOOL_NAME },
+      }),
+    })
+    if (!upstreamA.ok) {
+      const errText = await upstreamA.text()
+      return json({ error: `Anthropic ${upstreamA.status}: ${errText.slice(0, 400)}` }, 502)
+    }
+    const resultA = await upstreamA.json()
+    const toolUseA = (resultA.content || []).find((c: any) => c.type === 'tool_use')
+    if (!toolUseA) return json({ error: 'Claude did not return angle tool_use', raw: resultA }, 502)
+    const generated_angles: any[] = toolUseA.input?.angles || []
+
+    // Auto-save each angle to script_angles with a generated slug. We
+    // tag them with the offer's slug so the Angle picker filters them
+    // by offer cleanly. existing angles with the same slug get updated
+    // (idempotent) so re-generating doesn't error.
+    const slugify = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const inserts = generated_angles.map((a: any, i: number) => ({
+      slug: `${offer.slug}-${a.angle_type}-${slugify(a.name)}-${stamp}-${i + 1}`,
+      name: a.name,
+      angle_type: a.angle_type,
+      prospect_voice: a.prospect_voice,
+      hook_build_sketch: a.hook_build_sketch,
+      pain_points: Array.isArray(a.pain_points) ? a.pain_points : [],
+      offer_slugs: [offer.slug],
+      qualifier: offer.primary_audience || '',
+      primary_promise: '',       // filled by Claude or operator later when used in Scripts
+      mechanism_short: '',       // mechanism comes from script_mechanisms (migration 108)
+      guarantee_close: '',       // operator can set or use offer default
+      active: true,
+    }))
+
+    let saved: any[] = []
+    let save_error: string | undefined
+    try {
+      const { data, error } = await supabase
+        .from('script_angles')
+        .upsert(inserts, { onConflict: 'slug' })
+        .select()
+      if (error) save_error = error.message
+      else saved = data || []
+    } catch (e: any) {
+      save_error = e.message
+    }
+
+    return json({
+      ok: true,
+      mode: 'messaging',
+      target: 'angles',
+      offer: { slug: offer.slug, name: offer.name, vertical: offer.vertical },
+      angles: generated_angles,
+      saved,
+      save_error,
+      model: ANTHROPIC_MODEL,
+    })
+  }
 
   // ── BRANCH: template-based generator (new Ben 2026-05-31 path) ──
   if (script_type && angle_slug) {
