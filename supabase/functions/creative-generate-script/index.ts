@@ -57,6 +57,10 @@ function handleCors(req: Request): Response | null {
 // ── Env ───────────────────────────────────────────────────────────────
 const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY')
 const ANTHROPIC_MODEL = Deno.env.get('ANTHROPIC_MODEL') || 'claude-sonnet-4-20250514'
+// Angle generation is structured tool-use output — Haiku is ~3x faster
+// throughput at this task with no meaningful quality drop. Override per
+// the operator's "this should be fast" complaint (Ben 2026-06-01).
+const ANTHROPIC_ANGLE_MODEL = Deno.env.get('ANTHROPIC_ANGLE_MODEL') || 'claude-haiku-4-5-20251001'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
@@ -889,6 +893,14 @@ serve(async (req) => {
     async function runOneBucketCall(bucket: 'problem'|'circumstance'|'outcome', count: number, chunkIdx: number, chunksOfThisBucket: number): Promise<any[]> {
       const userMsg = buildBucketUserMsg(bucket, count, chunkIdx, chunksOfThisBucket)
       const rankMinForThisCall = bucket === 'outcome' && chunkIdx === 0 ? Math.min(count, rankMin) : 0
+      // Conservative payload (Ben 2026-06-01): keep Sonnet + string
+      // system prompt (proven working v20). Haiku 4.5 + cache_control
+      // was attempted but broke the background fetch silently — direct
+      // Anthropic test confirms the payload shape is valid, so the
+      // breakage is somewhere in the Deno fetch path. Revisiting after
+      // proper Supabase log access. The big speed-up here is the
+      // TRIMMED schema descriptions ("1-2 sentences" instead of "4-6")
+      // — Claude generates ~50% less prose per angle.
       const upstream = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -898,6 +910,10 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           model: ANTHROPIC_MODEL,
+          // Generous max_tokens so Claude can complete all required
+          // prose fields (why_it_matters paragraph + evidence array)
+          // without truncation. Truncated tool_use responses get
+          // dropped client-side and look like missing angles.
           max_tokens: Math.min(8192, 1500 + count * 500),
           system: ANGLE_SYSTEM_PROMPT,
           messages: [{ role: 'user', content: userMsg }],
@@ -907,11 +923,18 @@ serve(async (req) => {
       })
       if (!upstream.ok) {
         const errText = await upstream.text()
-        throw new Error(`Anthropic ${upstream.status} (${bucket}): ${errText.slice(0, 300)}`)
+        const msg = `Anthropic ${upstream.status} (${bucket}): ${errText.slice(0, 300)}`
+        console.error(`[messaging:${bucket}] upstream fail: ${msg}`)
+        throw new Error(msg)
       }
       const result = await upstream.json()
       const toolUse = (result.content || []).find((c: any) => c.type === 'tool_use')
-      if (!toolUse) throw new Error(`Claude returned no tool_use for ${bucket} call`)
+      if (!toolUse) {
+        console.error(`[messaging:${bucket}] no tool_use in response`, JSON.stringify(result).slice(0, 400))
+        throw new Error(`Claude returned no tool_use for ${bucket} call`)
+      }
+      const u = result.usage || {}
+      console.log(`[messaging:${bucket}] in=${u.input_tokens} out=${u.output_tokens}`)
       return Array.isArray(toolUse.input?.angles) ? toolUse.input.angles : []
     }
 
