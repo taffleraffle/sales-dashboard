@@ -130,7 +130,14 @@ export default function Modal({
           position: 'fixed', top: '50%', left: '50%',
           transform: 'translate(-50%, -50%)',
           width: `min(${maxW}px, 94vw)`,
+          // 'full' size always renders at the max viewport height so
+          // the review surface doesn't shrink/grow based on how many
+          // comments are in the sidebar (Ben 2026-06-01: "I just want
+          // it to be that size by default and not be this small one
+          // at the start"). Other sizes still hug their content via
+          // maxHeight only.
           maxHeight: '90vh',
+          ...(size === 'full' ? { height: '90vh' } : {}),
           background: 'var(--paper)',
           borderTop: '3px solid var(--accent)',
           borderLeft: '1px solid var(--rule)',

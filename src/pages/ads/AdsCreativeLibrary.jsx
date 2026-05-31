@@ -2178,15 +2178,20 @@ const OptVideoPlayer = forwardRef(function OptVideoPlayer(
       }}>
       {/* Video element with native controls killed. Click toggles
           play/pause; double-click toggles fullscreen. The video FILLS
-          the container with object-fit: contain — earlier `maxWidth:
-          100%, maxHeight: 100%, width: auto` left the video at its
-          natural intrinsic size, which on a 320×176 sample video meant
-          a tiny rectangle in the middle of a giant black box (Ben
-          2026-06-01). */}
+          the container with object-fit: contain — vertical (9:16)
+          videos pillar-box with black bars on the sides, square (1:1)
+          videos pillar-box less, horizontal (16:9) fills edge-to-edge.
+          Container is flex-grow so it eats every spare vertical pixel
+          inside the modal — that's what keeps the player size
+          consistent regardless of source aspect ratio (Ben 2026-06-01:
+          "make sure that if I'm doing it in a short form, like 9:16,
+          it is still going to keep the current size that it has and
+          the bars will just be black"). */}
       <div style={{
-        flex: '1 1 auto', minHeight: 0, position: 'relative',
+        flex: '1 1 auto', minHeight: 400, position: 'relative',
         background: '#000', display: 'flex',
         justifyContent: 'center', alignItems: 'center',
+        overflow: 'hidden',
       }}>
         {src ? (
           <video ref={videoRef} src={src} preload="metadata" autoPlay
@@ -2997,13 +3002,21 @@ function CommentThread({ comment, replies, onSeek, onReply, onResolve, onDelete,
         marginBottom: 10,
         padding: 10,
         background: isHovered
-          ? 'rgba(244,225,74,0.18)'
+          ? 'rgba(244,225,74,0.32)'
           : comment.resolved_at ? 'rgba(62,138,94,0.06)' : 'white',
         border: '1px solid ' + (isHovered ? '#f4e14a' : 'var(--rule)'),
-        borderLeft: `3px solid ${comment.resolved_at ? '#3e8a5e' : '#3e7eba'}`,
+        borderLeft: `3px solid ${
+          isHovered ? '#f4e14a'
+            : comment.resolved_at ? '#3e8a5e' : '#3e7eba'
+        }`,
         opacity: comment.resolved_at ? 0.78 : 1,
         cursor: 'pointer',
-        transition: 'background 100ms ease, border-color 100ms ease',
+        transition: 'background 120ms ease, border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease',
+        transform: isHovered ? 'translateX(-2px)' : 'translateX(0)',
+        boxShadow: isHovered
+          ? '0 4px 14px rgba(244,225,74,0.35), 0 0 0 1px rgba(244,225,74,0.6)'
+          : 'none',
+        position: 'relative',
       }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
