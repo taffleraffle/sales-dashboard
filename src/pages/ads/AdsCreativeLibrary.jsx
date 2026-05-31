@@ -1240,6 +1240,87 @@ function RenameUnnamedButton({ rows, onComplete }) {
   )
 }
 
+// Strip mangled control / replacement chars that occasionally land in
+// notification bodies (the U+FFFD diamond from a cp1252-on-utf8 round-trip,
+// or a stray bullet that got transliterated). Also rewrite the cosmetic
+// trigger fallback "from unknown creator" into something less embarrassing
+// — at INSERT time the creator/description are NULL because the
+// identify-actor + describe Edge Functions haven't run yet. The body field
+// is a snapshot from that moment; we shouldn't pretend to know more than
+// we do, but we shouldn't shout "UNKNOWN" at the user either.
+function sanitizeNotifText(s) {
+  if (!s) return s
+  return String(s)
+    .replace(/�/g, '')
+    .replace(/\s+from unknown creator\b\.?/i, ' — creator pending')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+// Small text under the modal title summarising what's in the list.
+// Examples:
+//   1 unread · 3 total
+//   3 new uploads need an editor
+//   2 unread · 5 total
+// The summary is more useful than a flat "3 this month" because it
+// answers what the operator actually wants to know on open: how much
+// is waiting on me?
+function notificationsSubtitle(notifications, unseenCount, _seenAt) {
+  if (!notifications.length) return null
+  const total = notifications.length
+  const parts = []
+  if (unseenCount > 0) parts.push(`${unseenCount} unread`)
+  parts.push(`${total} total`)
+  return parts.join(' · ')
+}
+
+// Cluster notifications by kind so the modal reads as
+//   NEEDS EDITOR (2)        Feedback (1)         Approved (1)
+// instead of a flat list where the operator has to mentally sort which
+// rows are actionable. Preserves created_at order within each group.
+// Order of groups themselves matches kind urgency (action items first).
+function groupNotifications(notifications) {
+  const KIND_ORDER = [
+    'new_upload_needs_assignment',
+    'revision_requested',
+    'feedback',
+    'assignment',
+    'reassignment',
+    'source_replaced',
+    'approved',
+    'reply',
+  ]
+  const KIND_META = {
+    new_upload_needs_assignment: { label: 'Needs editor',   color: '#b53e3e' },
+    revision_requested:          { label: 'Revision asked', color: '#d09c08' },
+    feedback:                    { label: 'Feedback',       color: '#e8b408' },
+    assignment:                  { label: 'New tasks',      color: '#3e7eba' },
+    reassignment:                { label: 'Reassigned',     color: '#3e7eba' },
+    source_replaced:             { label: 'Source updated', color: '#a05810' },
+    approved:                    { label: 'Approved',       color: '#3e8a5e' },
+    reply:                       { label: 'Replies',        color: '#3e7eba' },
+  }
+  const buckets = new Map()
+  for (const n of notifications) {
+    const k = n.kind || '__other'
+    if (!buckets.has(k)) buckets.set(k, [])
+    buckets.get(k).push(n)
+  }
+  const out = []
+  for (const k of KIND_ORDER) {
+    if (!buckets.has(k)) continue
+    const meta = KIND_META[k] || { label: 'Update', color: 'var(--ink-3)' }
+    out.push({ kind: k, label: meta.label, color: meta.color, items: buckets.get(k) })
+    buckets.delete(k)
+  }
+  // Any unknown kinds — surface at the bottom under a generic header rather
+  // than dropping them silently.
+  for (const [k, items] of buckets) {
+    out.push({ kind: k, label: 'Other', color: 'var(--ink-3)', items })
+  }
+  return out
+}
+
 /* Editor-side notification bell. Distinct from the admin
    NotificationBell which reads from lib_task_submissions. This one
    reads from lib_editor_notifications (migration 095) — the editor
@@ -1328,24 +1409,6 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
-  // Kind -> short text label + accent color. Drives the per-card left
-  // border so the editor can scan the list and pick out feedback (yellow)
-  // vs assignments (blue) vs approvals (green) at a glance. Per Ben's
-  // OPT design system: no emojis or icon glyphs; the eyebrow text + the
-  // colored left border do the visual sorting.
-  const kindStyle = (kind) => {
-    switch (kind) {
-      case 'feedback':                     return { label: 'Feedback',     color: '#e8b408' }
-      case 'revision_requested':           return { label: 'Revision',     color: '#d09c08' }
-      case 'assignment':                   return { label: 'New task',     color: '#3e7eba' }
-      case 'reassignment':                 return { label: 'Reassigned',   color: '#3e7eba' }
-      case 'source_replaced':              return { label: 'Source updated', color: '#a05810' }
-      case 'approved':                     return { label: 'Approved',     color: '#3e8a5e' }
-      case 'new_upload_needs_assignment':  return { label: 'Needs editor', color: '#b53e3e' }
-      default:                             return { label: 'Update',       color: 'var(--ink-3)' }
-    }
-  }
-
   if (!editorId) return null
   return (
     <>
@@ -1383,72 +1446,100 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
           (per Ben 2026-05-31 + 2026-05-18 design preference logged in
           Modal.jsx). No overlap with page content; backdrop click + Esc
           to close, same as every other modal in the codebase. */}
-      <Modal open={open} onClose={() => setOpen(false)} size="md"
-        eyebrow="Notifications"
-        title={notifications.length === 0
-          ? 'Nothing yet'
-          : `${notifications.length} this month${unseenCount > 0 ? ` · ${unseenCount} new` : ''}`}>
-        {notifications.length === 0 && (
+      <Modal open={open} onClose={() => setOpen(false)} size="sm"
+        eyebrow="Inbox"
+        title="Notifications"
+        subtitle={notificationsSubtitle(notifications, unseenCount, seenAt)}>
+        {notifications.length === 0 ? (
           <div style={{
-            padding: 40, textAlign: 'center',
-            fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
-          }}>You're all caught up. Notifications about feedback, new tasks, source updates, and approvals show up here.</div>
-        )}
-        <div style={{ display: 'grid', gap: 8 }}>
-          {notifications.map(n => {
-            const k = kindStyle(n.kind)
-            const isNew = !seenAt || n.created_at > seenAt
-            return (
-              <button key={n.id}
-                onClick={() => handleNotificationClick(n)}
-                style={{
-                  display: 'block',
-                  padding: '10px 12px',
-                  background: n.read_at ? 'var(--paper)' : '#fffaea',
-                  border: '1px solid ' + (isNew ? '#3e7eba' : 'var(--rule)'),
-                  borderLeft: `3px solid ${k.color}`,
-                  cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit',
-                  width: '100%',
+            padding: '48px 28px 56px', textAlign: 'center',
+          }}>
+            <div style={{
+              fontFamily: 'var(--serif)', fontSize: 18, fontStyle: 'italic',
+              color: 'var(--ink-2)', marginBottom: 8,
+            }}>You're all caught up.</div>
+            <div style={{
+              fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--ink-3)',
+              lineHeight: 1.55, maxWidth: 340, margin: '0 auto',
+            }}>Feedback, new task assignments, source-video updates, and approvals show up here.</div>
+          </div>
+        ) : (
+          <div>
+            {groupNotifications(notifications).map(group => (
+              <div key={group.kind}>
+                <div style={{
+                  padding: '12px 22px 6px',
+                  fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+                  letterSpacing: '0.16em', textTransform: 'uppercase',
+                  color: 'var(--ink-3)',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
                 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{
-                    fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
-                    letterSpacing: '0.12em', textTransform: 'uppercase',
-                    color: k.color, marginBottom: 4,
-                  }}>{k.label}</div>
-                  <div style={{
-                    fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 600,
-                    color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis',
-                    display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
-                  }}>
-                    <span style={{
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      maxWidth: 280,
-                    }}>{n.title}</span>
-                    {isNew && (
-                      <span style={{
-                        padding: '1px 5px', background: '#3e7eba', color: 'white',
-                        borderRadius: 2, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
-                      }}>NEW</span>
-                    )}
-                  </div>
-                  {n.body && (
-                    <div style={{
-                      marginTop: 3, fontFamily: 'var(--serif)', fontSize: 12,
-                      color: 'var(--ink-2)', lineHeight: 1.45,
-                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
-                    }}>{n.body}</div>
-                  )}
-                  <div style={{
-                    marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10,
-                    color: 'var(--ink-4)', letterSpacing: '0.04em',
-                  }}>{relTime(n.created_at)}</div>
+                  <span style={{ color: group.color }}>{group.label}</span>
+                  <span style={{ color: 'var(--ink-4)', fontSize: 9 }}>
+                    {group.items.length}
+                  </span>
                 </div>
-              </button>
-            )
-          })}
-        </div>
+                {group.items.map(n => {
+                  const isNew = !seenAt || n.created_at > seenAt
+                  const cleanTitle = sanitizeNotifText(n.title)
+                  const cleanBody = sanitizeNotifText(n.body)
+                  return (
+                    <button key={n.id}
+                      onClick={() => handleNotificationClick(n)}
+                      style={{
+                        display: 'block', width: '100%',
+                        padding: '12px 22px 13px',
+                        background: n.read_at ? 'transparent' : 'rgba(244,225,74,0.08)',
+                        border: 'none',
+                        borderTop: '1px solid var(--rule)',
+                        borderLeft: `3px solid ${group.color}`,
+                        cursor: 'pointer', textAlign: 'left',
+                        font: 'inherit', color: 'inherit',
+                        transition: 'background 100ms ease',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--paper-2)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = n.read_at ? 'transparent' : 'rgba(244,225,74,0.08)' }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'baseline',
+                        gap: 10, marginBottom: cleanBody ? 4 : 0,
+                      }}>
+                        <div style={{
+                          flex: 1, minWidth: 0,
+                          fontFamily: 'var(--serif)', fontSize: 14.5, fontWeight: 500,
+                          color: 'var(--ink)', lineHeight: 1.3,
+                          letterSpacing: '-0.005em',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>{cleanTitle}</div>
+                        {isNew && (
+                          <span style={{
+                            flexShrink: 0,
+                            width: 6, height: 6, borderRadius: '50%',
+                            background: group.color,
+                            display: 'inline-block',
+                          }} />
+                        )}
+                      </div>
+                      {cleanBody && (
+                        <div style={{
+                          fontFamily: 'var(--sans)', fontSize: 12.5,
+                          color: 'var(--ink-2)', lineHeight: 1.45,
+                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          marginBottom: 5,
+                        }}>{cleanBody}</div>
+                      )}
+                      <div style={{
+                        fontFamily: 'var(--mono)', fontSize: 9.5,
+                        color: 'var(--ink-4)', letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                      }}>{relTime(n.created_at)}</div>
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        )}
       </Modal>
     </>
   )
@@ -2512,6 +2603,14 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         timeoutErr,
       ])
     } catch (e) {
+      // AbortError from Supabase auth-lock contention is transient — the
+      // request resolves on the next tick. Retry once silently instead of
+      // showing a scary banner. Anything else, surface.
+      if (e?.name === 'AbortError') {
+        if (!background) setLoading(false)
+        setTimeout(() => load(background), 50)
+        return
+      }
       setErr(e.message || 'Load failed')
       setLoading(false)
       return
@@ -7605,6 +7704,13 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         timeoutErr,
       ])
     } catch (err) {
+      // Same AbortError-from-auth-lock retry as LibraryTab.load — silently
+      // re-run the fetch instead of blanking the queue with the raw error.
+      if (err?.name === 'AbortError') {
+        if (!background) setLoading(false)
+        setTimeout(() => load(background), 50)
+        return
+      }
       setErr(err.message || 'Load failed')
       setLoading(false)
       return
