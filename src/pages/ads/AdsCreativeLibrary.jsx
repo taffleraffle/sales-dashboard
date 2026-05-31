@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef, memo, useDeferredValue, startTransition } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef, memo, useDeferredValue, startTransition, forwardRef, useImperativeHandle } from 'react'
 import { createPortal } from 'react-dom'
 import * as tus from 'tus-js-client'
 import { supabase } from '../../lib/supabase'
@@ -1331,7 +1331,10 @@ function groupNotifications(notifications) {
    corresponding task modal in the parent. Persists last-open timestamp
    in localStorage so unread-count survives reloads even if the editor
    hasn't actually clicked into anything yet. */
-function EditorNotificationBell({ editorId, onOpenTask }) {
+const EditorNotificationBell = forwardRef(function EditorNotificationBell(
+  { editorId, onOpenTask, onOpenCreative, companionLabel, onCompanion },
+  ref,
+) {
   const [notifications, setNotifications] = useState([])
   const [open, setOpen] = useState(false)
   const [seenAt, setSeenAt] = useState(() => {
@@ -1372,6 +1375,9 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
     setOpen(true)
     setTimeout(markSeen, 300)
   }
+  // Expose imperative open() so a companion bell (Activity ↔ Inbox) can
+  // pop us open without lifting all of this internal state to the parent.
+  useImperativeHandle(ref, () => ({ open: handleOpen }), [])
   const handleNotificationClick = async (n) => {
     // Mark this specific notification read in the DB so future bell
     // opens don't show it as unseen.
@@ -1382,11 +1388,23 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
         ? { ...x, read_at: new Date().toISOString() } : x))
     }
     setOpen(false)
+    // Prefer opening the creative drawer in-place over any kind of full
+    // navigation. new_upload_needs_assignment notifications carry the
+    // creative_id but no task_id (a task hasn't been created yet — that's
+    // the whole point of "needs editor"). Previously the fallback path
+    // did `window.location.href = link_path` which reloaded the entire
+    // dashboard just to land back on the same route. Now: if the parent
+    // gave us onOpenCreative + the notification has a creative_id, open
+    // the drawer instead. Single-frame, no nav, modal pops on top.
+    if (n.creative_id && onOpenCreative) {
+      onOpenCreative(n.creative_id)
+      return
+    }
     // Task-bound notifications open the task modal in the portal.
     if (n.task_id) { onOpenTask?.(n.task_id); return }
-    // Otherwise, use the notification's link_path for navigation. This is
-    // how new_upload_needs_assignment notifications (which don't have a
-    // task yet — that's the whole point) deep-link to the library view.
+    // Last resort: deep-link via link_path. Same-route navigation will
+    // still reload, so this is a fallback for notifications that have
+    // neither a creative_id nor a task_id (rare; e.g. system messages).
     if (n.link_path) {
       try { window.location.href = n.link_path } catch {}
     }
@@ -1449,7 +1467,12 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
       <Modal open={open} onClose={() => setOpen(false)} size="sm"
         eyebrow="Inbox"
         title="Notifications"
-        subtitle={notificationsSubtitle(notifications, unseenCount, seenAt)}>
+        subtitle={notificationsSubtitle(notifications, unseenCount, seenAt)}
+        right={companionLabel && onCompanion ? (
+          <button
+            onClick={() => { setOpen(false); onCompanion() }}
+            style={bellSwitchBtn}>{companionLabel}</button>
+        ) : null}>
         {notifications.length === 0 ? (
           <div style={{
             padding: '48px 28px 56px', textAlign: 'center',
@@ -1543,14 +1566,32 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
       </Modal>
     </>
   )
+})
+
+// Small mono button used in the bell modal header to hop between
+// Inbox and Activity without closing-then-re-finding the other bell.
+const bellSwitchBtn = {
+  padding: '4px 10px',
+  fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+  letterSpacing: '0.1em', textTransform: 'uppercase',
+  background: 'transparent', color: 'var(--ink-2)',
+  border: '1px solid var(--rule)', borderRadius: 2,
+  cursor: 'pointer',
 }
 
 /* Notification bell — floating button in the top-right of the Library
    tab. Click to open a right-side slider with the recent submissions
    feed. Unseen count (anything created since last open) shows as a
    red dot on the bell. */
-function NotificationBell({ submissions, onOpenCreative }) {
+const NotificationBell = forwardRef(function NotificationBell(
+  { submissions, onOpenCreative, companionLabel, onCompanion },
+  ref,
+) {
   const [open, setOpen] = useState(false)
+  // Submission currently being previewed inline (Supabase-hosted files only).
+  // External review links (Frame.io / Drive / Dropbox) can't be embedded —
+  // they keep their external-link UX. Null = no preview open.
+  const [previewing, setPreviewing] = useState(null)
   // "Seen" timestamp — anything created AFTER this counts as new.
   // Persists in localStorage so the bell remembers across reloads.
   const [seenAt, setSeenAt] = useState(() => {
@@ -1572,6 +1613,9 @@ function NotificationBell({ submissions, onOpenCreative }) {
     // can play before disappearing.
     setTimeout(markSeen, 300)
   }
+  // Expose imperative open() so the companion bell (Inbox ↔ Activity)
+  // can hop into us without lifting the state to the parent.
+  useImperativeHandle(ref, () => ({ open: handleOpen }), [])
   const relTime = (iso) => {
     const t = new Date(iso).getTime()
     const diff = Date.now() - t
@@ -1622,10 +1666,15 @@ function NotificationBell({ submissions, onOpenCreative }) {
       </button>
       {/* Centered Modal popup — replaces the right-side slide drawer
           (Ben 2026-05-31 + earlier 2026-05-18 design preference). */}
-      <Modal open={open} onClose={() => setOpen(false)} size="md"
+      <Modal open={open} onClose={() => setOpen(false)} size="lg"
         eyebrow="Recent activity"
         title={`${submissions.length} submission${submissions.length === 1 ? '' : 's'} this week`}
-        subtitle={pendingApproval > 0 ? `${pendingApproval} awaiting review` : 'All caught up'}>
+        subtitle={pendingApproval > 0 ? `${pendingApproval} awaiting review` : 'All caught up'}
+        right={companionLabel && onCompanion ? (
+          <button
+            onClick={() => { setOpen(false); onCompanion() }}
+            style={bellSwitchBtn}>{companionLabel}</button>
+        ) : null}>
         {/* Per-editor breakdown — pinned at the top of the panel so
             you see who has stuff in flight without scrolling. */}
         {(() => {
@@ -1738,7 +1787,7 @@ function NotificationBell({ submissions, onOpenCreative }) {
                             }}>NEW</span>
                           )}
                         </div>
-                        {/* Row 3: status + open-external link */}
+                        {/* Row 3: status + view-submission action */}
                         <div style={{
                           marginTop: 3, display: 'flex', alignItems: 'center', gap: 10,
                           fontSize: 10, color: 'var(--ink-3)',
@@ -1747,17 +1796,36 @@ function NotificationBell({ submissions, onOpenCreative }) {
                             fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
                             color: s.approved_at ? '#3e8a5e' : '#3e7eba',
                           }}>{s.approved_at ? 'Approved' : 'In review'}</span>
-                          {(s.file_url || s.external_url) && (
-                            // toDownloadUrl wraps Supabase storage URLs with
-                            // ?download=<filename> so the browser actually
-                            // saves the bytes instead of streaming in a tab.
-                            // External (Drive/Frame.io) URLs pass through
-                            // unchanged — they have their own download UX.
-                            <a href={s.file_url ? toDownloadUrl(s.file_url, `v${s.version_number || 1}.mp4`) : s.external_url}
+                          {s.file_url && (
+                            // In-place preview for Supabase-hosted files. Old
+                            // behaviour was `target="_blank"` + the toDownloadUrl
+                            // wrapper, which (a) opened a new tab and (b) forced
+                            // a binary download via Content-Disposition. Ben
+                            // wants to watch it from the dashboard — so we open
+                            // a video preview Modal here instead. Download is
+                            // still available as a secondary action inside the
+                            // preview modal.
+                            <button type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setPreviewing(s)
+                              }}
+                              style={{
+                                background: 'transparent', border: 'none',
+                                padding: 0, cursor: 'pointer',
+                                color: 'var(--ink-2)', textDecoration: 'underline',
+                                fontFamily: 'inherit', fontSize: 'inherit',
+                              }}>Play submission</button>
+                          )}
+                          {!s.file_url && s.external_url && (
+                            // External review tools (Frame.io / Drive / Dropbox)
+                            // block iframe embedding, so the only sensible
+                            // affordance is "open in new tab".
+                            <a href={s.external_url}
                               target="_blank" rel="noreferrer"
                               onClick={(e) => e.stopPropagation()}
                               style={{ color: 'var(--ink-2)', textDecoration: 'underline' }}>
-                              Open submission ↗
+                              Open review link ↗
                             </a>
                           )}
                         </div>
@@ -1767,7 +1835,78 @@ function NotificationBell({ submissions, onOpenCreative }) {
                 })}
               </div>
       </Modal>
+      {/* Inline video preview for the submission Play action above. Rendered
+          inside this same Fragment so it stacks above the Activity modal
+          (the Modal primitive auto-increments z-index by mount depth). */}
+      <SubmissionPreviewModal
+        submission={previewing}
+        onClose={() => setPreviewing(null)} />
     </>
+  )
+})
+
+/* In-place video preview for an editor submission. Plays the Supabase
+   file_url directly via the native <video> element. The optional
+   "Download" link below the player wraps the URL in toDownloadUrl()
+   so the operator can still grab the original bytes if they want — but
+   the default action is just watch. */
+function SubmissionPreviewModal({ submission, onClose }) {
+  const videoRef = useRef(null)
+  // Pause + release the decoder when the modal closes — same teardown
+  // pattern as the matrix detail preview. Without this the video
+  // continues buffering in the background and the next modal open
+  // can stutter while the browser unwinds the previous decoder.
+  useEffect(() => {
+    if (submission) return
+    const v = videoRef.current
+    if (!v) return
+    try { v.pause(); v.removeAttribute('src'); v.load() } catch {}
+  }, [submission])
+  if (!submission) return null
+  const url = submission.file_url
+  const filename = `v${submission.version_number || 1}.mp4`
+  const editor = submission.submitted_by_name || 'Unknown editor'
+  return (
+    <Modal open={!!submission} onClose={onClose} size="lg"
+      eyebrow="Submission"
+      title={`v${submission.version_number || 1} · ${editor}`}
+      subtitle={submission.approved_at ? 'Approved' : 'In review'}>
+      <div style={{ padding: '0 0 16px' }}>
+        <div style={{
+          background: '#000', maxHeight: '60vh',
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+        }}>
+          {url ? (
+            <video ref={videoRef} src={url} controls autoPlay preload="metadata"
+              style={{ maxWidth: '100%', maxHeight: '60vh', display: 'block' }} />
+          ) : (
+            <div style={{
+              padding: 40, color: 'rgba(255,255,255,0.6)',
+              fontFamily: 'var(--mono)', fontSize: 12,
+            }}>No playable file on this submission.</div>
+          )}
+        </div>
+        {submission.notes && (
+          <div style={{
+            padding: '12px 22px 0',
+            fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
+            color: 'var(--ink-2)',
+          }}>{submission.notes}</div>
+        )}
+        {url && (
+          <div style={{
+            padding: '14px 22px 0',
+            fontFamily: 'var(--mono)', fontSize: 10.5,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+          }}>
+            <a href={toDownloadUrl(url, filename)}
+              style={{ color: 'var(--ink-3)', textDecoration: 'underline' }}>
+              Download original
+            </a>
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }
 
@@ -2393,6 +2532,13 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
   // new_upload_needs_assignment notifications surface inside the dashboard.
   // Null for everyone else (editors already have scope.editorId).
   const coordinatorEditorId = useCoordinatorEditorId(scope)
+  // Cross-bell refs: the inbox modal and the activity modal each expose an
+  // imperative open() so the other one can hop into it via the "Activity →"
+  // / "← Inbox" companion button in the modal header. Keeps each bell's
+  // open/seen state self-contained while still letting the user toggle
+  // between them without closing back to the page first.
+  const inboxBellRef = useRef(null)
+  const activityBellRef = useRef(null)
   // Hydrate from module cache so tab-switches don't re-show a blank
   // "Loading…" — we show the previous data instantly and revalidate.
   const cached = scope.isEditorView ? null : PAGE_CACHE
@@ -3143,15 +3289,26 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
       }}>
         {!scope.isEditorView && coordinatorEditorId && (
           <EditorNotificationBell
+            ref={inboxBellRef}
             editorId={coordinatorEditorId}
-            onOpenTask={() => {
-              // Coordinator bell — clicking a notification deep-links to
-              // the library with the raw_unused filter pre-set (via the
-              // notification's link_path). The default onOpenTask path
-              // assumes editor portal; for the admin coordinator we just
-              // navigate to the standard library route.
-              try { window.location.href = '/sales/ads/creative/library?stage=raw_unused' } catch {}
+            onOpenCreative={(creativeId) => {
+              // Same in-place drawer open the Activity bell uses — find in
+              // rows, fall back to a one-shot fetch if filtered out. This
+              // replaces the previous window.location.href reload that
+              // blanked the whole dashboard just to land back here.
+              const local = rows.find(r => r.id === creativeId)
+              if (local) {
+                openDrawer(local)
+              } else {
+                supabase.from('lib_creative_library')
+                  .select('*')
+                  .eq('id', creativeId)
+                  .maybeSingle()
+                  .then(({ data }) => { if (data) openDrawer(data) })
+              }
             }}
+            companionLabel="Activity →"
+            onCompanion={() => activityBellRef.current?.open()}
           />
         )}
         {scope.isEditorView && scope.editorId && (
@@ -3179,6 +3336,7 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
         )}
         {!scope.isEditorView && (
           <NotificationBell
+            ref={activityBellRef}
             submissions={recentSubmissions}
             onOpenCreative={(creativeId) => {
               // Find the creative in rows + open the detail modal. If it's not
@@ -3195,6 +3353,8 @@ function LibraryTab({ scope = ADMIN_SCOPE }) {
                   .then(({ data }) => { if (data) openDrawer(data) })
               }
             }}
+            companionLabel={coordinatorEditorId ? '← Inbox' : null}
+            onCompanion={coordinatorEditorId ? () => inboxBellRef.current?.open() : null}
           />
         )}
       </div>
