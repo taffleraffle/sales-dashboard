@@ -174,10 +174,16 @@ async function probeMediaDimensions(file) {
 async function verifyUploaded(bucket, path) {
   const url = `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`
   for (let attempt = 0; attempt < 2; attempt++) {
+    // Timeout the verify request itself — without this, a hung CDN response
+    // would stall onSuccess forever and leave the user stuck at 100%.
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 10000)
     try {
-      const r = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' } })
+      const r = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, signal: ctrl.signal })
       if (r.ok) return true // 200 / 206
-    } catch { /* transient network error — fall through to retry */ }
+    } catch { /* timeout or transient network error — fall through to retry */ } finally {
+      clearTimeout(timer)
+    }
     if (attempt === 0) await new Promise((r) => setTimeout(r, 1500))
   }
   return false
