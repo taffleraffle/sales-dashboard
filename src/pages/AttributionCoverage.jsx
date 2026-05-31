@@ -2,9 +2,32 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import {
-  SectionHead, Eyebrow, Pill, Card, Button, BigNumber,
+  SectionHead, Eyebrow, Pill, Card, Button, BigNumber, Icon,
   fmtMoneyFull, fmtNum, fmtPct, PALETTE,
 } from '../components/editorial/atoms'
+import Modal from '../components/editorial/Modal'
+
+// Canonical audience slugs Ben uses. The picker lets him add new ones too.
+const KNOWN_AUDIENCES = [
+  'restoration', 'electrician', 'accounting', 'bookkeeping',
+  'pool_builders', 'real_estate', 'roofing', 'plumbing', 'hvac',
+]
+
+// Heuristic that mirrors the SQL parser in lib_typeform_audience_resolved.
+// Returns null when the campaign string doesn't match any known audience.
+function parseAudienceFromCampaign(utm_campaign) {
+  if (!utm_campaign) return null
+  const s = utm_campaign.toLowerCase()
+  if (s.includes('restoration'))                 return 'restoration'
+  if (s.includes('electrician'))                 return 'electrician'
+  if (s.includes('accounting') || s.includes('bookkeep')) return 'accounting'
+  if (s.includes('pool'))                        return 'pool_builders'
+  if (s.includes('real estate') || s.includes('realtor')) return 'real_estate'
+  if (s.includes('roofing') || s.includes('roofer'))     return 'roofing'
+  if (s.includes('plumb'))                       return 'plumbing'
+  if (s.includes('hvac'))                        return 'hvac'
+  return null
+}
 
 /*
   Attribution Coverage Report (Ben 2026-05-31).
@@ -53,6 +76,15 @@ export default function AttributionCoverage() {
   const [busy, setBusy] = useState(true)
   const [err, setErr] = useState(null)
 
+  // Assign-audience edit modal state. editTarget is the row being edited
+  // (an object from `unresolved`) or null when closed.
+  const [editTarget, setEditTarget] = useState(null)
+  const [saveBusy, setSaveBusy] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)   // bump to force a re-fetch
+  // Audience slugs we already have on file — feeds the picker as quick-pick chips.
+  const [existingAudiences, setExistingAudiences] = useState([])
+
   const windowDays = useMemo(
     () => WINDOW_OPTIONS.find(w => w.key === windowKey)?.days ?? 90,
     [windowKey],
@@ -81,7 +113,81 @@ export default function AttributionCoverage() {
     }).catch(e => { if (alive) setErr(e.message) })
       .finally(() => { if (alive) setBusy(false) })
     return () => { alive = false }
-  }, [windowDays])
+  }, [windowDays, reloadKey])
+
+  // Build the union of known + previously-used audience slugs for the picker.
+  useEffect(() => {
+    let alive = true
+    supabase.from('typeform_response_overrides').select('audience_slug')
+      .then(({ data }) => {
+        if (!alive) return
+        const seen = new Set(KNOWN_AUDIENCES)
+        ;(data || []).forEach(r => r.audience_slug && seen.add(r.audience_slug))
+        setExistingAudiences(Array.from(seen).sort())
+      })
+    return () => { alive = false }
+  }, [reloadKey])
+
+  // Save one row's override (audience_slug required, ad_id + notes optional).
+  async function saveOverride({ response_id, audience_slug, ad_id, notes }) {
+    if (!response_id || !audience_slug) return
+    setSaveBusy(true); setErr(null)
+    try {
+      const payload = {
+        response_id,
+        audience_slug: audience_slug.trim().toLowerCase().replace(/\s+/g, '_'),
+        ad_id: (ad_id || '').trim() || null,
+        notes: (notes || '').trim() || null,
+        set_at: new Date().toISOString(),
+      }
+      const { error } = await supabase
+        .from('typeform_response_overrides')
+        .upsert(payload, { onConflict: 'response_id' })
+      if (error) throw new Error(error.message)
+      setEditTarget(null)
+      setReloadKey(k => k + 1)
+    } catch (e) {
+      setErr(`Save failed: ${e.message}`)
+    } finally {
+      setSaveBusy(false)
+    }
+  }
+
+  // Bulk-classify every unresolved row whose utm_campaign matches a known
+  // audience pattern AND that doesn't already have an override.
+  async function bulkClassify() {
+    const rows = unresolved
+      .filter(r => !r.override_audience_slug)
+      .map(r => ({ r, slug: parseAudienceFromCampaign(r.utm_campaign) }))
+      .filter(x => x.slug)
+    if (rows.length === 0) return
+    setBulkBusy(true); setErr(null)
+    try {
+      const payload = rows.map(({ r, slug }) => ({
+        response_id: r.response_id,
+        audience_slug: slug,
+        notes: `auto-classified from utm_campaign on ${new Date().toISOString().slice(0,10)}`,
+        set_at: new Date().toISOString(),
+      }))
+      const { error } = await supabase
+        .from('typeform_response_overrides')
+        .upsert(payload, { onConflict: 'response_id' })
+      if (error) throw new Error(error.message)
+      setReloadKey(k => k + 1)
+    } catch (e) {
+      setErr(`Bulk classify failed: ${e.message}`)
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  // Count of rows the bulk-classify button would touch.
+  const bulkClassifiableCount = useMemo(
+    () => unresolved.filter(
+      r => !r.override_audience_slug && parseAudienceFromCampaign(r.utm_campaign)
+    ).length,
+    [unresolved],
+  )
 
   const headline = useMemo(() => {
     const stage = stages.find(s => s.stage_key === 'spend_with_lead')
@@ -310,7 +416,19 @@ export default function AttributionCoverage() {
         <SectionHead
           eyebrow="Triage queue"
           title="Typeform submits without an ad_id"
-          tagline="These rows didn't match any ad. The raw UTM fields tell you why — manually classify or fix the ad URL macro."
+          tagline="These rows didn't match any ad. Click Assign to tag any row with an audience (restoration / electrician / etc.) and optionally pin a specific ad_id. The auto-classify button fills audience for every row whose utm_campaign already names one."
+          right={
+            bulkClassifiableCount > 0 ? (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={bulkClassify}
+                disabled={bulkBusy}
+              >
+                {bulkBusy ? 'Classifying…' : `Auto-classify ${bulkClassifiableCount} row${bulkClassifiableCount === 1 ? '' : 's'}`}
+              </Button>
+            ) : null
+          }
         />
         <Card padding={0}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--sans)', fontSize: 12 }}>
@@ -320,32 +438,59 @@ export default function AttributionCoverage() {
                 <th style={th}>Email</th>
                 <th style={th}>utm_campaign</th>
                 <th style={th}>utm_content</th>
+                <th style={th}>Audience</th>
                 <th style={th}>Likely cause</th>
+                <th style={{ ...th, textAlign: 'right' }}>Action</th>
               </tr>
             </thead>
             <tbody>
-              {unresolved.slice(0, 30).map(r => (
-                <tr key={r.response_id} style={{ borderBottom: '1px solid var(--rule)' }}>
-                  <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
-                    {r.submitted_at?.slice(0, 10)}
-                  </td>
-                  <td style={td}>
-                    <div>{r.first_name} {r.last_name}</div>
-                    <div style={{ color: 'var(--ink-3)', fontSize: 11 }}>{r.email}</div>
-                  </td>
-                  <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)' }}>
-                    {r.utm_campaign || <span style={{ color: 'var(--ink-3)' }}>—</span>}
-                  </td>
-                  <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)' }}>
-                    {r.utm_content || <span style={{ color: 'var(--ink-3)' }}>—</span>}
-                  </td>
-                  <td style={td}>
-                    <Pill tone={causeTone(r.likely_cause)} uppercase>
-                      {r.likely_cause?.replace(/_/g, ' ') || '—'}
-                    </Pill>
-                  </td>
-                </tr>
-              ))}
+              {unresolved.slice(0, 50).map(r => {
+                const aud = r.current_audience_slug
+                const source = r.audience_source
+                const audTone = source === 'response_override' ? 'green'
+                              : source === 'campaign_override' ? 'teal'
+                              : source === 'parsed'            ? 'amber'
+                              : 'red'
+                return (
+                  <tr key={r.response_id} style={{ borderBottom: '1px solid var(--rule)' }}>
+                    <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
+                      {r.submitted_at?.slice(0, 10)}
+                    </td>
+                    <td style={td}>
+                      <div>{r.first_name} {r.last_name}</div>
+                      <div style={{ color: 'var(--ink-3)', fontSize: 11 }}>{r.email}</div>
+                    </td>
+                    <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)' }}>
+                      {r.utm_campaign || <span style={{ color: 'var(--ink-3)' }}>—</span>}
+                    </td>
+                    <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)' }}>
+                      {r.utm_content || <span style={{ color: 'var(--ink-3)' }}>—</span>}
+                    </td>
+                    <td style={td}>
+                      {aud ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <Pill tone={audTone} uppercase>{aud.replace(/_/g, ' ')}</Pill>
+                          <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-3)' }}>
+                            {source?.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                      ) : (
+                        <Pill tone="red" uppercase>unknown</Pill>
+                      )}
+                    </td>
+                    <td style={td}>
+                      <Pill tone={causeTone(r.likely_cause)} uppercase>
+                        {r.likely_cause?.replace(/_/g, ' ') || '—'}
+                      </Pill>
+                    </td>
+                    <td style={{ ...td, textAlign: 'right' }}>
+                      <Button size="sm" variant="secondary" onClick={() => setEditTarget(r)} leftIcon={Icon.edit(12)}>
+                        {r.override_audience_slug ? 'Edit' : 'Assign'}
+                      </Button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
           {!busy && unresolved.length === 0 && (
@@ -375,8 +520,181 @@ export default function AttributionCoverage() {
           textDecoration: 'underline', textUnderlineOffset: 4,
         }}>← Back to Marketing Performance</Link>
       </div>
+
+      <AssignAudienceModal
+        target={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSave={saveOverride}
+        busy={saveBusy}
+        audiences={existingAudiences}
+      />
     </div>
   )
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// AssignAudienceModal
+// Lets Ben tag any unresolved typeform row with an audience and (optionally)
+// a specific ad_id. Saves to public.typeform_response_overrides. Suggests the
+// parser's inferred audience as a quick-pick when utm_campaign already names
+// one (so the common case is two clicks: Suggested chip → Save).
+// ───────────────────────────────────────────────────────────────────────────
+
+function AssignAudienceModal({ target, onClose, onSave, busy, audiences }) {
+  const [audience, setAudience] = useState('')
+  const [customAudience, setCustomAudience] = useState('')
+  const [adId, setAdId] = useState('')
+  const [notes, setNotes] = useState('')
+
+  // Reset when opening for a new target.
+  useEffect(() => {
+    if (!target) return
+    setAudience(target.override_audience_slug || target.current_audience_slug || '')
+    setCustomAudience('')
+    setAdId(target.override_ad_id || '')
+    setNotes(target.override_notes || '')
+  }, [target?.response_id])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!target) return null
+
+  const suggested = parseAudienceFromCampaign(target.utm_campaign)
+  const finalAudience = (customAudience || audience).trim().toLowerCase().replace(/\s+/g, '_')
+  const canSave = !!finalAudience && !busy
+
+  function handleSave() {
+    onSave({
+      response_id: target.response_id,
+      audience_slug: finalAudience,
+      ad_id: adId,
+      notes,
+    })
+  }
+
+  return (
+    <Modal
+      open={!!target}
+      onClose={onClose}
+      eyebrow="Assign attribution"
+      title={`${target.first_name || ''} ${target.last_name || target.email || target.response_id}`.trim()}
+      subtitle={`Submitted ${target.submitted_at?.slice(0, 10)} · ${target.form_name || target.utm_campaign || ''}`}
+      size="md"
+      footer={
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button variant="primary" onClick={handleSave} disabled={!canSave}>
+            {busy ? 'Saving…' : 'Save assignment'}
+          </Button>
+        </div>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '4px 0' }}>
+        {/* Raw UTMs — context */}
+        <div style={{
+          background: 'var(--paper-2)', border: '1px solid var(--rule)',
+          padding: 12, fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--ink-2)',
+          lineHeight: 1.65,
+        }}>
+          <div><span style={{ color: 'var(--ink-3)' }}>utm_campaign:</span> {target.utm_campaign || '—'}</div>
+          <div><span style={{ color: 'var(--ink-3)' }}>utm_content:</span> {target.utm_content || '—'}</div>
+          <div><span style={{ color: 'var(--ink-3)' }}>utm_term:</span> {target.utm_term || '—'}</div>
+          <div><span style={{ color: 'var(--ink-3)' }}>utm_source / medium:</span> {target.utm_source || '—'} / {target.utm_medium || '—'}</div>
+        </div>
+
+        {/* Audience picker */}
+        <div>
+          <Eyebrow style={{ marginBottom: 8 }}>Audience *</Eyebrow>
+          {suggested && (
+            <div style={{ marginBottom: 10, fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink-3)' }}>
+              Suggested from utm_campaign:{' '}
+              <button
+                type="button"
+                onClick={() => { setAudience(suggested); setCustomAudience('') }}
+                style={{
+                  ...chipBtn,
+                  background: audience === suggested && !customAudience ? 'var(--ink)' : 'var(--paper-2)',
+                  color: audience === suggested && !customAudience ? 'var(--paper)' : 'var(--ink)',
+                  borderColor: 'var(--ink)',
+                }}>
+                {suggested.replace(/_/g, ' ')}
+              </button>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+            {audiences.map(slug => (
+              <button
+                key={slug}
+                type="button"
+                onClick={() => { setAudience(slug); setCustomAudience('') }}
+                style={{
+                  ...chipBtn,
+                  background: audience === slug && !customAudience ? 'var(--ink)' : 'transparent',
+                  color: audience === slug && !customAudience ? 'var(--paper)' : 'var(--ink-2)',
+                  borderColor: audience === slug && !customAudience ? 'var(--ink)' : 'var(--rule)',
+                }}>
+                {slug.replace(/_/g, ' ')}
+              </button>
+            ))}
+          </div>
+          <input
+            value={customAudience}
+            onChange={e => setCustomAudience(e.target.value)}
+            placeholder="Or type a new audience slug (e.g. dentists)"
+            style={textInput}
+          />
+        </div>
+
+        {/* Optional ad_id */}
+        <div>
+          <Eyebrow style={{ marginBottom: 8 }}>Pin to ad_id (optional)</Eyebrow>
+          <p style={{ margin: '0 0 8px', fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink-3)' }}>
+            Leave blank unless you know exactly which ad this lead came from. Format: Meta numeric ad_id like <code style={{ fontFamily: 'var(--mono)' }}>120245092538750530</code>.
+          </p>
+          <input
+            value={adId}
+            onChange={e => setAdId(e.target.value)}
+            placeholder="120245…"
+            style={{ ...textInput, fontFamily: 'var(--mono)' }}
+          />
+        </div>
+
+        {/* Notes */}
+        <div>
+          <Eyebrow style={{ marginBottom: 8 }}>Notes (optional)</Eyebrow>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            rows={3}
+            placeholder="Why you classified it this way — useful for the audit trail."
+            style={{ ...textInput, resize: 'vertical' }}
+          />
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+const chipBtn = {
+  fontFamily: 'var(--mono)',
+  fontSize: 11,
+  letterSpacing: '0.04em',
+  textTransform: 'uppercase',
+  padding: '6px 12px',
+  border: '1px solid var(--rule)',
+  borderRadius: 2,
+  cursor: 'pointer',
+  background: 'transparent',
+}
+
+const textInput = {
+  width: '100%',
+  padding: '9px 12px',
+  fontFamily: 'var(--sans)',
+  fontSize: 13,
+  border: '1px solid var(--rule)',
+  borderRadius: 2,
+  background: 'white',
+  color: 'var(--ink)',
+  outline: 'none',
 }
 
 const th = {

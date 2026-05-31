@@ -2874,11 +2874,22 @@ export default function MarketingPerformance() {
   // All distinct audiences present in the dataset, sorted by total spend
   // so the chip strip shows the heaviest audiences first. Includes
   // "Unknown" so the operator can see misparses.
+  //
+  // Canonical audiences (Restoration, Electricians, etc.) are pinned even
+  // when zero entries match in the current window — Ben wants them always
+  // visible/clickable as filters, not popping in and out by date range
+  // (request 2026-05-31).
+  const CANONICAL_AUDIENCES = ['Restoration', 'Electricians', 'Accounting']
   const audienceList = useMemo(() => {
     const totals = {}
     for (const e of entries || []) {
       const a = audienceForEntry(e, audienceOverrides)
       totals[a] = (totals[a] || 0) + Number(e.adspend || 0)
+    }
+    // Pin canonical audiences with 0 spend so they appear at the end if
+    // currently empty, but immediately re-sort to the top when data lands.
+    for (const a of CANONICAL_AUDIENCES) {
+      if (!(a in totals)) totals[a] = 0
     }
     return Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([a]) => a)
   }, [entries, audienceOverrides])
