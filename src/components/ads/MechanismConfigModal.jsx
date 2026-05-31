@@ -173,9 +173,13 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
             onChange={v => setForm({ ...form, mechanism_long: v })}
             multiline />
 
+          {/* 3-part HOW group container. NO accent left-stripe — that
+              treatment is reserved for the .what-it-means callout per
+              the OPT editorial design system. This is a form group, so
+              we use the plain paper-2 + rule border. */}
           <div style={{
             marginTop: 6, padding: '14px 16px', background: 'var(--paper-2)',
-            border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
+            border: '1px solid var(--rule)',
             marginBottom: 16,
           }}>
             <div style={{
@@ -235,7 +239,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
                             padding: '5px 10px', fontSize: 12,
                             fontFamily: 'var(--sans)',
                             border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                            background: on ? 'var(--ink)' : 'white',
+                            background: on ? 'var(--ink)' : 'var(--paper)',
                             color: on ? 'var(--paper)' : 'var(--ink-3)',
                             cursor: 'pointer', borderRadius: 2,
                           }}>
@@ -262,7 +266,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
                             padding: '5px 10px', fontSize: 12,
                             fontFamily: 'var(--sans)',
                             border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                            background: on ? 'var(--ink)' : 'white',
+                            background: on ? 'var(--ink)' : 'var(--paper)',
                             color: on ? 'var(--paper)' : 'var(--ink-3)',
                             cursor: 'pointer', borderRadius: 2,
                           }}>
@@ -318,7 +322,7 @@ function Field({ label, required, helper, value, onChange, placeholder, multilin
     borderRadius: 2, resize: multiline ? 'vertical' : undefined,
   }
   return (
-    <div style={{ marginBottom: 14 }}>
+    <div style={{ marginBottom: 16 }}>
       <label style={{ display: 'block', fontFamily: 'var(--mono)', fontSize: 11,
                      letterSpacing: '0.12em', textTransform: 'uppercase',
                      color: 'var(--ink-3)', marginBottom: 6 }}>

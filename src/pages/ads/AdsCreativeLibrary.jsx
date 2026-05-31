@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef, memo, useDeferredVal
 import { createPortal } from 'react-dom'
 import * as tus from 'tus-js-client'
 import { supabase } from '../../lib/supabase'
-import { SectionHead, Icon } from '../../components/editorial/atoms'
+import { SectionHead, Icon, PALETTE } from '../../components/editorial/atoms'
 import Modal from '../../components/editorial/Modal'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
 
@@ -1364,7 +1364,7 @@ function EditorNotificationBell({ editorId, onOpenTask }) {
         }}>
         <span style={{
           fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
-          letterSpacing: '0.08em', textTransform: 'uppercase',
+          letterSpacing: '0.12em', textTransform: 'uppercase',
           color: 'var(--ink-2)', lineHeight: 1,
         }}>Inbox</span>
         {unseenCount > 0 && (
@@ -1514,7 +1514,7 @@ function NotificationBell({ submissions, onOpenCreative }) {
         }}>
         <span style={{
           fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
-          letterSpacing: '0.08em', textTransform: 'uppercase',
+          letterSpacing: '0.12em', textTransform: 'uppercase',
           color: 'var(--ink-2)', lineHeight: 1,
         }}>Activity</span>
         {unseenCount > 0 && (
@@ -7803,24 +7803,29 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           alongside Overdue / In progress / Queued / Done — Ben 2026-05-31
           wanted needs_revision visible at a glance (was buried in the
           status filter chip). Click a tile to filter the queue to that
-          status; click again to clear. */}
+          status; click again to clear. Auto-fit so it gracefully drops
+          to 5/4/3 columns on narrower viewports. */}
       <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10, marginBottom: 18,
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10, marginBottom: 18,
       }}>
-        <KpiTile label="Overdue"     value={overdue}  accent={overdue > 0 ? '#b53e3e' : null} />
-        <KpiTile label="In progress" value={inProg}   accent={inProg > 0 ? '#e0853e' : null}
+        {/* All tile accent colors come from PALETTE so they stay in sync
+            with VALUE_COLORS used elsewhere (status pips, Triage row
+            borders, REVISE/REVIEW badges). Per the OPT design system,
+            status surfaces all consume the same semantic palette. */}
+        <KpiTile label="Overdue"     value={overdue}  accent={overdue > 0 ? PALETTE.red : null} />
+        <KpiTile label="In progress" value={inProg}   accent={inProg > 0 ? PALETTE.amber : null}
           onClick={() => setSelectedStatuses(prev => prev.has('in_progress') ? new Set([...prev].filter(s => s !== 'in_progress')) : new Set([...prev, 'in_progress']))}
           active={selectedStatuses.has('in_progress')} />
-        <KpiTile label="Review"      value={review}   accent={review > 0 ? '#3e7eba' : null}
+        <KpiTile label="Review"      value={review}   accent={review > 0 ? PALETTE.blueLight : null}
           onClick={() => setSelectedStatuses(prev => prev.has('review') ? new Set([...prev].filter(s => s !== 'review')) : new Set([...prev, 'review']))}
           active={selectedStatuses.has('review')} />
-        <KpiTile label="Revision"    value={revision} accent={revision > 0 ? '#c47a1a' : null}
+        <KpiTile label="Revision"    value={revision} accent={revision > 0 ? PALETTE.orange : null}
           onClick={() => setSelectedStatuses(prev => prev.has('needs_revision') ? new Set([...prev].filter(s => s !== 'needs_revision')) : new Set([...prev, 'needs_revision']))}
           active={selectedStatuses.has('needs_revision')} />
         <KpiTile label="Queued"      value={queued}
           onClick={() => setSelectedStatuses(prev => prev.has('queued') ? new Set([...prev].filter(s => s !== 'queued')) : new Set([...prev, 'queued']))}
           active={selectedStatuses.has('queued')} />
-        <KpiTile label="Done"        value={done}     accent={done > 0 ? '#3e8a5e' : null}
+        <KpiTile label="Done"        value={done}     accent={done > 0 ? PALETTE.green : null}
           onClick={() => setSelectedStatuses(prev => prev.has('done') ? new Set([...prev].filter(s => s !== 'done')) : new Set([...prev, 'done']))}
           active={selectedStatuses.has('done')} />
       </div>
@@ -12572,8 +12577,11 @@ function KpiTile({ label, value, accent, onClick, active }) {
       <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
         {label}
       </div>
+      {/* Numerals are serif per the OPT editorial design system — "Every
+          number is serif + tabular-nums. Numbers in Inter sans are a bug." */}
       <div style={{
-        fontFamily: 'var(--sans)', fontSize: 32, fontWeight: 500,
+        fontFamily: 'var(--serif)', fontSize: 36, fontWeight: 400,
+        letterSpacing: '-0.02em',
         color: accent || 'var(--ink)', marginTop: 4,
         lineHeight: 1, fontVariantNumeric: 'tabular-nums',
       }}>{value}</div>

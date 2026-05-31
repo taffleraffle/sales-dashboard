@@ -213,44 +213,30 @@ export default function AdsGenerator() {
         </div>
       )}
 
-      {/* Mode toggle — Templates (new, 2026-05-31) vs Attributes (legacy).
-          Templates uses the angle / hook-shape / body-skeleton library
-          seeded in migration 105; Attributes uses the original 8-axis
-          variance system. Saved drafts go into the same generated_scripts
-          table either way (template mode also tags script_type + angle_slug). */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24,
-        padding: '12px 16px', background: 'var(--paper-2)', border: '1px solid var(--rule)',
-      }}>
-        <span style={{
-          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-          letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
-        }}>Mode</span>
-        {[
-          { v: 'templates',  label: 'Templates',  hint: 'Hook / Body / Joined via angle library' },
-          { v: 'attributes', label: 'Attributes', hint: 'Legacy 8-axis variance' },
-        ].map(opt => {
-          const on = generatorMode === opt.v
-          return (
-            <button key={opt.v} onClick={() => setGeneratorMode(opt.v)}
-              title={opt.hint}
-              style={{
-                padding: '6px 14px',
-                border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                background: on ? 'var(--ink)' : 'white',
-                color: on ? 'var(--paper)' : 'var(--ink-3)',
-                fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
-                letterSpacing: '0.08em', textTransform: 'uppercase',
-                cursor: 'pointer', borderRadius: 2,
-              }}>{opt.label}</button>
-          )
-        })}
-        <span style={{ flex: 1 }} />
-        <span style={{ fontFamily: 'var(--serif)', fontSize: 12, fontStyle: 'italic', color: 'var(--ink-4)' }}>
-          {generatorMode === 'templates'
-            ? `${angles.length} angle${angles.length === 1 ? '' : 's'} loaded · ${hookShapes.length} hook shapes`
-            : 'Pick offer → pick attributes → generate'}
-        </span>
+      {/* Mode toggle — routing-grade decision between Templates (new
+          2026-05-31, angle library) and Attributes (legacy 8-axis variance).
+          Two completely different generation pipelines, so the visual
+          weight uses ModeCard rather than a pill toggle (per the OPT
+          editorial design system: routing decisions get routing-grade
+          weight). */}
+      <div style={{ marginBottom: 28 }}>
+        <Eyebrow style={{ marginBottom: 10 }}>Mode</Eyebrow>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <ModeCard
+            selected={generatorMode === 'templates'}
+            onClick={() => setGeneratorMode('templates')}
+            icon={<Sparkles size={18} />}
+            title="Templates"
+            desc={`Hook / Body / Joined via the angle library — ${angles.length} angle${angles.length === 1 ? '' : 's'} loaded, ${hookShapes.length} hook shapes available. Generates from problems and desires; attaches mechanism + proof at generation time.`}
+          />
+          <ModeCard
+            selected={generatorMode === 'attributes'}
+            onClick={() => setGeneratorMode('attributes')}
+            icon={<Layers size={18} />}
+            title="Attributes"
+            desc="Legacy 8-axis variance system. Pick offer → set targeted attribute values → generate. Best when you already know which hook_type / message_frame / pain_angle you want to A/B test."
+          />
+        </div>
       </div>
 
       {/* ──── TEMPLATE MODE SECTIONS ──── */}
@@ -360,10 +346,10 @@ export default function AdsGenerator() {
               <button onClick={() => setMechanismSlug('')}
                 style={{
                   padding: '10px 14px',
-                  border: `2px solid ${mechanismSlug === '' ? 'var(--ink)' : 'var(--rule)'}`,
-                  background: mechanismSlug === '' ? 'var(--ink)' : 'white',
+                  border: `2px dashed ${mechanismSlug === '' ? 'var(--ink)' : 'var(--rule)'}`,
+                  background: mechanismSlug === '' ? 'var(--ink)' : 'var(--paper)',
                   color: mechanismSlug === '' ? 'var(--paper)' : 'var(--ink-3)',
-                  fontFamily: 'var(--sans)', fontSize: 13, fontStyle: 'italic',
+                  fontFamily: 'var(--sans)', fontSize: 14, fontWeight: mechanismSlug === '' ? 600 : 400,
                   cursor: 'pointer', borderRadius: 2,
                 }}>None — use angle default</button>
               {mechanisms.map(m => {
@@ -417,21 +403,30 @@ export default function AdsGenerator() {
             {mechanismSlug && (() => {
               const m = mechanisms.find(x => x.slug === mechanismSlug)
               if (!m) return null
+              // Preview formatting matches the angle preview directly above:
+              // mono eyebrow on its own line, serif body underneath. Per the
+              // OPT design system the eyebrow/body pair is the canonical way
+              // to label-data rows in the editorial language.
+              const row = (label, body) => body ? (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{
+                    fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+                    textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 2,
+                  }}>{label}</div>
+                  <div style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+                    {body}
+                  </div>
+                </div>
+              ) : null
               return (
                 <div style={{
-                  marginTop: 12, padding: '10px 14px',
+                  marginTop: 12, padding: '12px 16px',
                   background: 'var(--paper)', border: '1px solid var(--rule)',
-                  fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink-2)',
-                  lineHeight: 1.5,
                 }}>
-                  <strong style={{ fontFamily: 'var(--mono)', fontSize: 10.5,
-                                   letterSpacing: '0.1em', textTransform: 'uppercase',
-                                   color: 'var(--ink-3)' }}>Short:</strong> {m.mechanism_short}<br/>
-                  {m.beat_5a && (
-                    <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>
-                      HOW: {m.beat_5a} / {m.beat_5b} / {m.beat_5c}
-                    </span>
-                  )}
+                  {row('Short', m.mechanism_short)}
+                  {row('Beat 5a — Foundation', m.beat_5a)}
+                  {row('Beat 5b — Surface', m.beat_5b)}
+                  {row('Beat 5c — Authority', m.beat_5c)}
                 </div>
               )
             })()}
