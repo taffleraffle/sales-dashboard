@@ -1,10 +1,11 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Link2 } from 'lucide-react'
 import { generateScripts, listGeneratedScripts, linkScriptToAd,
-         listAngles, listHookShapes } from '../../services/scriptGenerator'
+         listAngles, listHookShapes, listMechanisms } from '../../services/scriptGenerator'
 import { listOffers, getAttributeVocab } from '../../services/creativeTagger'
 import { listTestBatches, addScriptsToBatch } from '../../services/testBatches'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
+import MechanismConfigModal from '../../components/ads/MechanismConfigModal'
 import AddOrLinkCreativeDrawer from '../../components/ads/AddOrLinkCreativeDrawer'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Eyebrow } from '../../components/editorial/atoms'
@@ -57,10 +58,14 @@ export default function AdsGenerator() {
   const [generatorMode, setGeneratorMode] = useState('templates')
   const [scriptType, setScriptType] = useState('hook')        // 'hook' | 'body' | 'joined'
   const [angleSlug, setAngleSlug] = useState('')
+  const [mechanismSlug, setMechanismSlug] = useState('')      // optional (migration 108)
   const [targetShapes, setTargetShapes] = useState([])        // string[] of A-H codes; empty = all
   const [targetLength, setTargetLength] = useState('60_75s')
   const [angles, setAngles] = useState([])
   const [hookShapes, setHookShapes] = useState([])
+  const [mechanisms, setMechanisms] = useState([])
+  const [mechanismModalOpen, setMechanismModalOpen] = useState(false)
+  const [mechanismModalExisting, setMechanismModalExisting] = useState(null)
 
   async function refreshOffers() {
     const o = await listOffers()
@@ -80,17 +85,44 @@ export default function AdsGenerator() {
     listTestBatches({ launched: false })
       .then(setDraftBatches)
       .catch(() => setDraftBatches([]))
-    // Template-mode catalog: angles + global hook shapes. Both surface
-    // as picker UI. If the tables haven't been migrated yet (pre-105),
-    // both calls just return empty arrays and the template UI shows
-    // an inline help notice telling the operator to apply 105/106.
-    Promise.all([listAngles().catch(() => []), listHookShapes().catch(() => [])])
-      .then(([a, hs]) => {
-        setAngles(a)
-        setHookShapes(hs)
-        if (a.length && !angleSlug) setAngleSlug(a[0].slug)
-      })
+    // Template-mode catalog: angles + global hook shapes + mechanisms.
+    // All surface as picker UI. If the tables haven't been migrated yet
+    // (pre-105/108), the calls return empty arrays and the template UI
+    // shows an inline help notice telling the operator to apply the
+    // missing migration.
+    Promise.all([
+      listAngles().catch(() => []),
+      listHookShapes().catch(() => []),
+      listMechanisms().catch(() => []),
+    ]).then(([a, hs, ms]) => {
+      setAngles(a)
+      setHookShapes(hs)
+      setMechanisms(ms)
+      if (a.length && !angleSlug) setAngleSlug(a[0].slug)
+    })
   }, [])
+
+  // Refresh mechanism list whenever angle changes (so the picker filters
+  // to mechanisms compatible with the current angle).
+  useEffect(() => {
+    if (!angleSlug) return
+    listMechanisms({ angle_slug: angleSlug }).then(setMechanisms).catch(() => {})
+  }, [angleSlug])
+
+  function openNewMechanism() {
+    setMechanismModalExisting(null)
+    setMechanismModalOpen(true)
+  }
+  function openConfigureMechanism(m) {
+    setMechanismModalExisting(m)
+    setMechanismModalOpen(true)
+  }
+  async function handleMechanismSaved(saved) {
+    setMechanismModalOpen(false)
+    const fresh = await listMechanisms({ angle_slug: angleSlug }).catch(() => [])
+    setMechanisms(fresh)
+    if (saved?.slug) setMechanismSlug(saved.slug)
+  }
 
   function openNewOffer() {
     setOfferModalExisting(null)
@@ -129,6 +161,7 @@ export default function AdsGenerator() {
         ? {
             script_type: scriptType,
             angle_slug: angleSlug,
+            mechanism_slug: mechanismSlug || undefined,
             target_shapes: targetShapes.length ? targetShapes : undefined,
             target_length: (scriptType === 'body' || scriptType === 'joined') ? targetLength : undefined,
             n_concepts: nConcepts,
@@ -314,6 +347,104 @@ export default function AdsGenerator() {
               )
             })()}
           </Section>
+
+          {/* Step 02b: mechanism (optional) */}
+          <Section label="02b" title="Mechanism (optional)">
+            <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                        color: 'var(--ink-4)', margin: '0 0 12px', maxWidth: 720 }}>
+              What OPT does to deliver the outcome for this angle. Leave unselected to use
+              the angle's default mechanism wording. Pick one to override — the body's
+              Beat 4 reveal and Beat 5 (3-part HOW) come from here.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <button onClick={() => setMechanismSlug('')}
+                style={{
+                  padding: '10px 14px',
+                  border: `2px solid ${mechanismSlug === '' ? 'var(--ink)' : 'var(--rule)'}`,
+                  background: mechanismSlug === '' ? 'var(--ink)' : 'white',
+                  color: mechanismSlug === '' ? 'var(--paper)' : 'var(--ink-3)',
+                  fontFamily: 'var(--sans)', fontSize: 13, fontStyle: 'italic',
+                  cursor: 'pointer', borderRadius: 2,
+                }}>None — use angle default</button>
+              {mechanisms.map(m => {
+                const on = m.slug === mechanismSlug
+                return (
+                  <div key={m.slug} style={{ display: 'inline-flex', alignItems: 'stretch' }}>
+                    <button onClick={() => setMechanismSlug(m.slug)}
+                      title={m.summary || ''}
+                      style={{
+                        padding: '10px 14px',
+                        border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                        borderRight: on ? '2px solid var(--ink)' : 'none',
+                        background: on ? 'var(--ink)' : 'white',
+                        color: on ? 'var(--paper)' : 'var(--ink)',
+                        fontFamily: 'var(--sans)', fontSize: 14, fontWeight: on ? 600 : 400,
+                        cursor: 'pointer', borderRadius: '2px 0 0 2px',
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
+                      }}>
+                      {on && <Check size={14} />}
+                      <span>{m.name}</span>
+                    </button>
+                    <button onClick={() => openConfigureMechanism(m)}
+                      title="Configure mechanism"
+                      style={{
+                        padding: '10px 8px',
+                        border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                        borderLeft: '1px solid var(--rule)',
+                        background: on ? 'var(--ink)' : 'white',
+                        color: on ? 'var(--paper)' : 'var(--ink-3)',
+                        cursor: 'pointer', borderRadius: '0 2px 2px 0',
+                        display: 'inline-flex', alignItems: 'center',
+                      }}>
+                      <Settings size={14} />
+                    </button>
+                  </div>
+                )
+              })}
+              <button onClick={openNewMechanism}
+                style={{
+                  padding: '10px 16px',
+                  border: '2px dashed var(--rule)', background: 'transparent',
+                  color: 'var(--ink-3)',
+                  fontFamily: 'var(--sans)', fontSize: 14,
+                  cursor: 'pointer', borderRadius: 2,
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                }}>
+                <Plus size={14} />
+                New mechanism
+              </button>
+            </div>
+            {mechanismSlug && (() => {
+              const m = mechanisms.find(x => x.slug === mechanismSlug)
+              if (!m) return null
+              return (
+                <div style={{
+                  marginTop: 12, padding: '10px 14px',
+                  background: 'var(--paper)', border: '1px solid var(--rule)',
+                  fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink-2)',
+                  lineHeight: 1.5,
+                }}>
+                  <strong style={{ fontFamily: 'var(--mono)', fontSize: 10.5,
+                                   letterSpacing: '0.1em', textTransform: 'uppercase',
+                                   color: 'var(--ink-3)' }}>Short:</strong> {m.mechanism_short}<br/>
+                  {m.beat_5a && (
+                    <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>
+                      HOW: {m.beat_5a} / {m.beat_5b} / {m.beat_5c}
+                    </span>
+                  )}
+                </div>
+              )
+            })()}
+          </Section>
+
+          <MechanismConfigModal
+            open={mechanismModalOpen}
+            existing={mechanismModalExisting}
+            offers={offers}
+            angles={angles}
+            onClose={() => setMechanismModalOpen(false)}
+            onSaved={handleMechanismSaved}
+          />
 
           {/* Step 03: shapes (Hook + Joined) and/or length (Body + Joined) */}
           {(scriptType === 'hook' || scriptType === 'joined') && (

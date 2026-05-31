@@ -35,6 +35,7 @@ import { supabase } from '../lib/supabase'
 export async function generateScripts({
   script_type,
   angle_slug,
+  mechanism_slug,     // optional (migration 108)
   target_shapes,
   target_length,
   offer_slug,
@@ -49,6 +50,7 @@ export async function generateScripts({
   if (script_type && angle_slug) {
     body.script_type = script_type
     body.angle_slug = angle_slug
+    if (mechanism_slug) body.mechanism_slug = mechanism_slug
     if (target_shapes?.length) body.target_shapes = target_shapes
     if (target_length) body.target_length = target_length
   } else {
@@ -58,6 +60,57 @@ export async function generateScripts({
   const { data, error } = await supabase.functions.invoke('creative-generate-script', { body })
   if (error) throw new Error(error.message || 'creative-generate-script failed')
   if (data?.error) throw new Error(data.error)
+  return data
+}
+
+/* ─────────────────────── Mechanism CRUD ─────────────────────── */
+// Mechanisms = the WHAT-OPT-DELIVERS layer. Migration 108. They sit
+// between angles (the prospect's door) and offers (the package).
+
+export async function listMechanisms({ offer_slug, angle_slug, active_only = true } = {}) {
+  let q = supabase
+    .from('script_mechanisms')
+    .select('slug,name,summary,mechanism_short,mechanism_long,beat_5a,beat_5b,beat_5c,offer_slugs,angle_slugs,active,notes')
+    .order('name')
+  if (active_only) q = q.eq('active', true)
+  // Filter by offer/angle compat using overlaps + the empty-array "applies to all" convention
+  // (filtering is applied client-side because PostgREST's overlaps op doesn't combine with
+  // an empty-array fallback cleanly).
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  const rows = data || []
+  return rows.filter(m => {
+    if (offer_slug && m.offer_slugs?.length && !m.offer_slugs.includes(offer_slug)) return false
+    if (angle_slug && m.angle_slugs?.length && !m.angle_slugs.includes(angle_slug)) return false
+    return true
+  })
+}
+
+export async function upsertMechanism(mechanism) {
+  if (!mechanism?.slug || !mechanism?.name || !mechanism?.mechanism_short || !mechanism?.mechanism_long) {
+    throw new Error('upsertMechanism: slug, name, mechanism_short, mechanism_long are required')
+  }
+  const payload = {
+    slug: mechanism.slug.trim(),
+    name: mechanism.name.trim(),
+    summary: (mechanism.summary || '').trim() || null,
+    mechanism_short: mechanism.mechanism_short.trim(),
+    mechanism_long: mechanism.mechanism_long.trim(),
+    beat_5a: (mechanism.beat_5a || '').trim() || null,
+    beat_5b: (mechanism.beat_5b || '').trim() || null,
+    beat_5c: (mechanism.beat_5c || '').trim() || null,
+    offer_slugs: Array.isArray(mechanism.offer_slugs) ? mechanism.offer_slugs : [],
+    angle_slugs: Array.isArray(mechanism.angle_slugs) ? mechanism.angle_slugs : [],
+    active: mechanism.active !== false,
+    notes: (mechanism.notes || '').trim() || null,
+    updated_at: new Date().toISOString(),
+  }
+  const { data, error } = await supabase
+    .from('script_mechanisms')
+    .upsert(payload, { onConflict: 'slug' })
+    .select()
+    .maybeSingle()
+  if (error) throw new Error(error.message)
   return data
 }
 

@@ -132,6 +132,14 @@ async function loadAngle(supabase: any, slug: string) {
   return data
 }
 
+async function loadMechanism(supabase: any, slug: string) {
+  if (!slug) return null
+  const { data, error } = await supabase.from('script_mechanisms').select('*').eq('slug', slug).maybeSingle()
+  if (error) throw new Error(`mechanism fetch: ${error.message}`)
+  if (!data) throw new Error(`mechanism "${slug}" not found`)
+  return data
+}
+
 async function loadProofCharacters(supabase: any, angle_slug: string) {
   const { data, error } = await supabase
     .from('script_proof_characters')
@@ -168,26 +176,42 @@ async function loadBodySkeletons(supabase: any, length_bucket?: string) {
 }
 
 // Build the angle-context block that prefixes every template-based prompt.
-function buildAngleContext(angle: any, proofs: any[]): string {
+// When mechanism is provided (migration 108), its short/long/3-part-HOW
+// take precedence over the angle's legacy mechanism fields. This lets the
+// same angle (problem/desire door) be paired with different mechanisms
+// across campaigns without editing the angle row.
+function buildAngleContext(angle: any, proofs: any[], mechanism: any = null): string {
   const proofRoster = proofs.length
     ? proofs.map((p, i) => `${i + 1}. ${p.name} — ${p.result_short}  (long: "${p.name} ${p.result_long}")`).join('\n')
-    : '(no proof characters defined for this angle)'
+    : '(no proof characters defined for this angle — generate WITHOUT naming any specific clients; use generic phrasing like "our clients" only if absolutely required, and prefer omitting proof entirely so the operator can drop a real win in later)'
   const pains = angle.pain_points || []
   const painBlock = pains.length
     ? `\nPAIN POINTS (use these as the lived-reality of the prospect — Shape C "Pain anchor" hooks especially must lean on specific items from this list, NOT generic competitor language. Other shapes can reference one or two of these as supporting context):\n${pains.map((p: string) => `  - ${p}`).join('\n')}`
+    : ''
+  // Mechanism precedence: explicit mechanism > angle's legacy fields.
+  const mech_short = mechanism?.mechanism_short || angle.mechanism_short
+  const mech_long  = mechanism?.mechanism_long  || angle.mechanism_long
+  const mechBlock = mechanism
+    ? `\nMECHANISM PICKED: ${mechanism.name}${mechanism.summary ? ' — ' + mechanism.summary : ''}`
+    : ''
+  // 3-part HOW for body Beat 5 — comes from mechanism table when available.
+  const howBlock = (mechanism?.beat_5a || mechanism?.beat_5b || mechanism?.beat_5c)
+    ? `\n3-PART HOW (use these as Beat 5a / 5b / 5c in the body skeleton — one sentence each, in order):\n  5a: ${mechanism.beat_5a || '(unset)'}\n  5b: ${mechanism.beat_5b || '(unset)'}\n  5c: ${mechanism.beat_5c || '(unset)'}`
     : ''
   return [
     `ANGLE: ${angle.name}`,
     `QUALIFIER (the audience-filter opening line shape): ${angle.qualifier}`,
     `PRIMARY PROMISE (every script must deliver on exactly this): ${angle.primary_promise}`,
-    `MECHANISM (short, for hook use): ${angle.mechanism_short}`,
-    angle.mechanism_long ? `MECHANISM (long, for body reveal beat): ${angle.mechanism_long}` : '',
+    `MECHANISM (short, for hook use): ${mech_short}`,
+    mech_long ? `MECHANISM (long, for body reveal beat 4): ${mech_long}` : '',
+    mechBlock,
+    howBlock,
     `GUARANTEE CLOSE: ${angle.guarantee_close}`,
     angle.cta_teeup ? `CTA TEE-UP (body beat 1 opener template): ${angle.cta_teeup}` : '',
     angle.anchor_vocab?.length ? `ANCHOR VOCAB (rotate so anchors don't become a structural tic): ${angle.anchor_vocab.join(' · ')}` : '',
     painBlock,
     '',
-    `PROOF CHARACTERS (you may name only these, in only these forms — if there's only one, use them as the single focal proof and lean into BOTH their result_short and result_long color rather than padding with fabricated others):`,
+    `PROOF CHARACTERS (you may name only these, in only these forms — if there's only one, use them as the single focal proof and lean into BOTH their result_short and result_long color rather than padding with fabricated others. If there are ZERO, omit proof beats entirely or use [CLIENT NAME — fill] placeholder markers):`,
     proofRoster,
   ].filter(Boolean).join('\n')
 }
@@ -365,6 +389,7 @@ serve(async (req) => {
 
   const offer_slug = body?.offer_slug
   const angle_slug = body?.angle_slug
+  const mechanism_slug = body?.mechanism_slug    // migration 108 — optional
   const script_type = body?.script_type   // 'hook' | 'body' | 'joined'
   const target_shapes_raw = body?.target_shapes
   const target_length    = body?.target_length      // 'under_60s' | '60_75s' | '75s_plus'
@@ -382,12 +407,13 @@ serve(async (req) => {
       ? target_shapes_raw.filter((s: any) => typeof s === 'string')
       : (typeof target_shapes_raw === 'string' && target_shapes_raw ? [target_shapes_raw] : [])
 
-    let angle: any, proofs: any[], shapes: any[], skeletons: any[]
+    let angle: any, mechanism: any = null, proofs: any[], shapes: any[], skeletons: any[]
     try {
       const needsShapes = script_type === 'hook' || script_type === 'joined'
       const needsSkeletons = script_type === 'body' || script_type === 'joined'
-      ;[angle, proofs, shapes, skeletons] = await Promise.all([
+      ;[angle, mechanism, proofs, shapes, skeletons] = await Promise.all([
         loadAngle(supabase, angle_slug),
+        mechanism_slug ? loadMechanism(supabase, mechanism_slug) : Promise.resolve(null),
         loadProofCharacters(supabase, angle_slug),
         needsShapes ? loadHookShapes(supabase, target_shapes.length ? target_shapes : undefined) : Promise.resolve([]),
         needsSkeletons ? loadBodySkeletons(supabase, target_length) : Promise.resolve([]),
@@ -405,7 +431,7 @@ serve(async (req) => {
     const shapeRotation = (script_type === 'hook' || script_type === 'joined')
       ? planShapeRotation(shapes, n_concepts) : []
 
-    const angleCtx = buildAngleContext(angle, proofs)
+    const angleCtx = buildAngleContext(angle, proofs, mechanism)
     const shapesBlock = (script_type === 'hook' || script_type === 'joined')
       ? `\n\nHOOK SHAPES AVAILABLE:\n${buildHookShapesBlock(shapes)}` : ''
     const skeletonsBlock = (script_type === 'body' || script_type === 'joined')
@@ -469,9 +495,10 @@ serve(async (req) => {
       const inserts = scriptsT.map((s: any) => ({
         offer_slug: angle.offer_slugs?.[0] || null,
         angle_slug,
+        mechanism_slug: mechanism_slug || null,
         script_type: typeMap[script_type] || script_type,
         ref: s.ref,
-        title: `${typeMap[script_type] || script_type} via ${angle.slug} (shape ${s.shape_code || '—'})`,
+        title: `${typeMap[script_type] || script_type} via ${angle.slug}${mechanism ? ' × ' + mechanism.slug : ''} (shape ${s.shape_code || '—'})`,
         frame: script_type === 'body' ? 'OUTCOME' : 'OUTCOME',
         body: s.body,
         target_attributes: {
@@ -480,7 +507,7 @@ serve(async (req) => {
           length_bucket: target_length || null,
         },
         generated_by_model: ANTHROPIC_MODEL,
-        generation_params: { angle_slug, script_type, target_shapes, n_concepts },
+        generation_params: { angle_slug, mechanism_slug, script_type, target_shapes, n_concepts },
       }))
       const { data, error } = await supabase.from('generated_scripts').insert(inserts).select('id')
       if (error) save_error_t = error.message
@@ -492,6 +519,7 @@ serve(async (req) => {
       mode: 'template',
       script_type,
       angle: { slug: angle.slug, name: angle.name },
+      mechanism: mechanism ? { slug: mechanism.slug, name: mechanism.name } : null,
       shape_rotation: shapeRotation,
       scripts: scriptsT,
       saved_variant_ids: saved_variant_ids_t,
