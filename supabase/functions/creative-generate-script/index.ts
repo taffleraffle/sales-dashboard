@@ -349,14 +349,36 @@ Rules:
 - Banned: generic agency-speak ("grow your business", "scale your firm", "stand out from competitors"). Specific over abstract.
 - Banned: solutions in the angle. The angle is the door; the solution comes after.
 
-WHAT'S CONVERTING for OPT right now (Ben 2026-06-01) — BOTTOM-OF-FUNNEL, MECHANISM-EXPLICIT desires:
-OPT's best-performing angles are outcome-explicit, vertical-named, rank-anchored desires. Examples:
-  • "I want to be the #1 [vertical] company in [my area] on Google."
-  • "I want to rank in the top 3 Google Maps results for [service] in [city]."
-  • "I want to be the company every insurance adjuster in town refers."
+WHAT'S CONVERTING for OPT right now (Ben 2026-06-01) — RANK-EXPLICIT, BOTTOM-OF-FUNNEL desires:
+OPT's best-performing angles are outcome-explicit, vertical-named, rank-anchored desires. Be specific about WHICH rank (Maps top-3 vs AI citation vs Local Service Ads vs organic position 1) — the bluntness IS the conversion edge.
+
+CORE RANK-EXPLICIT DESIRE FAMILIES (use these as templates; substitute the actual vertical + city/area in the prospect_voice):
+  • Maps top-3:  "I want to rank in the top 3 Google Maps results for [service] in [city]." / "I want to own the local pack for [vertical] in [area]."
+  • Map pin #1:  "I want to be the first pin every homeowner in [city] sees when they Google '[service] near me'."
+  • AI citation: "I want to be the company ChatGPT names when someone asks 'best [vertical] in [city]'." / "I want to be the AI-recommended [vertical] in [area]." / "I want to show up when prospects ask Perplexity / Gemini / Claude for a [vertical]."
+  • LSA dominance: "I want my Local Service Ads to outrank every other [vertical] in [zip]." / "I want the Google Guaranteed badge to be the first thing prospects see for [service]."
+  • Organic SERP: "I want page-one organic for '[service] [city]' so I'm not paying for every click." / "I want the featured snippet when someone searches '[service] cost in [city]'."
+  • Review velocity: "I want enough reviews to bury the competition in Maps." (rank-adjacent — review volume is a Maps ranking factor)
+  • Brand recall: "I want to be the only [vertical] name people remember in [area]."
+
+MECHANISM-FRUSTRATION DESIRES (also high-converting — "I'm tired of X and want Y"):
   • "I want my ads to actually convert instead of burning $5K/month on shared HomeAdvisor leads."
   • "I want the predictable booking calendar HomeAdvisor promised but never delivered."
-At least 30-40% of any DESIRE batch should land in this register — explicit-rank / explicit-outcome / specific-mechanism-frustration. These are Most-Aware angles where the prospect already knows the category exists and is shopping. They are on-the-nose by design — that bluntness IS the conversion edge.
+  • "I want to fire my SEO agency that's been charging me $2k/mo for two years with nothing to show."
+  • "I want exclusive leads, not the same lead sold to 4 other [vertical] companies."
+  • "I want to stop being held hostage by Yelp's pay-to-play."
+
+VERTICAL-AWARENESS NOTES — calibrate which families to lean into per the offer's vertical:
+  • RESTORATION (water damage, fire, mold, biohazard): VERY rank-aware. Emergency leads = revenue. Lean heavily on Maps top-3, LSA, AI-citation, and HomeAdvisor / TPA frustration. These owners explicitly want rank-1 because they know the ROI per call.
+  • ROOFING: VERY rank-aware, especially storm-driven markets. Maps + LSA + storm-season SERP. Hail/wind triggers searches.
+  • PLUMBING / HVAC / ELECTRICAL: VERY rank-aware (emergency vertical). Same dynamic as restoration. License-required + emergency = high-intent leads.
+  • PEST CONTROL / LOCKSMITH / GARAGE DOOR: rank-aware (emergency-ish), Maps-dominant.
+  • DENTAL / VETERINARY / MED-SPA: moderately rank-aware. Maps + organic both matter. Local pack desire is real but secondary to reputation/reviews.
+  • ACCOUNTING / CPA / LAW (non-PI): LESS rank-aware. Referral-driven. The "I want to rank #1" desire is weaker; the "I want to be the firm bankers refer" or "I want LinkedIn authority" desire is stronger. Use referral-network + authority-positioning desires here, NOT Maps top-3.
+  • E-COMMERCE / D2C: not local-rank focused. Skip the Maps angle entirely; lean on ROAS, CAC, paid social efficiency desires.
+  • B2B SAAS: completely different game. No local-rank desires.
+
+DISTRIBUTION RULE: For verticals tagged HIGH rank-aware (restoration, roofing, plumbing, HVAC, electrical, pest, locksmith, garage), at least 40% of the DESIRE batch should be rank-explicit. For MODERATE rank-aware (dental, vet, med-spa), 20%. For LOW (CPA, law non-PI, B2B), skip rank desires entirely and substitute the vertical-appropriate authority desire.
 The rest of the desire batch should span Problem-Aware and Solution-Aware tiers so the operator has range.
 
 For each angle, also produce a hook_build_sketch — ONE LINE describing how the angle becomes a hook. Format: "Shape {X} ({shape name}). Opens '{first 12-20 words of the hook leading with the angle's voice}...'"
@@ -970,6 +992,37 @@ serve(async (req) => {
       ])
     } catch (e: any) {
       return json({ error: e.message }, 500)
+    }
+    // Merge in per-OFFER proofs (migration 120) — these apply across
+    // every script for the offer, on top of the angle-specific proofs.
+    // Dedup by lowercased name to avoid the same proof appearing twice
+    // if the operator named it identically in both scopes.
+    try {
+      const offerSlugForAngle = angle?.offer_slugs?.[0]
+      if (offerSlugForAngle) {
+        const offerForProofs = await loadOffer(supabase, offerSlugForAngle).catch(() => null)
+        const offerProofs = Array.isArray(offerForProofs?.offer_proof_items)
+          ? offerForProofs.offer_proof_items.map((p: any) => ({
+              name: (p?.name || '').toString(),
+              result_short: (p?.result_short || '').toString(),
+              result_long: p?.result_long || null,
+              industry_context: p?.industry_context || null,
+              metric_kind: p?.metric_kind || null,
+              proof_type: p?.proof_type || 'case_study',
+              _origin: 'offer',
+            })).filter((p: any) => p.name && p.result_short)
+          : []
+        if (offerProofs.length) {
+          const seenNames = new Set(proofs.map((p: any) => (p?.name || '').toLowerCase()))
+          for (const op of offerProofs) {
+            if (seenNames.has(op.name.toLowerCase())) continue
+            proofs.push(op)
+            seenNames.add(op.name.toLowerCase())
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[offer_proof_items] merge failed: ${(e as any)?.message}`)
     }
     // Subset proof characters if the operator picked specific names. If
     // the subset is non-empty but doesn't match any loaded proofs, we

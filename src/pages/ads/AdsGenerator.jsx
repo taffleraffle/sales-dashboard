@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Trash2 } from 'lucide-react'
+import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Trash2, X } from 'lucide-react'
 import { generateScripts, generateAngles, generateProofsForAngle,
          listAngles, listHookShapes, listMechanisms,
          listProofCharactersForAngle,
@@ -995,6 +995,11 @@ export default function AdsGenerator() {
                     )}
                   </>
                 )}
+                <InlineProofAdder
+                  angleSlugs={angleSlugs}
+                  angles={angles}
+                  onAdded={(slug) => refreshProofCount(slug)}
+                />
               </div>
             )
           })()}
@@ -2332,6 +2337,179 @@ function GenProgress({ kind, total, fanout }) {
       <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }`}</style>
     </div>
   )
+}
+
+// Inline quick-add for proofs on the Scripts tab. Lives under the
+// "Will pull proofs from" preview. Lets the operator type a Proof N + type
+// + result and attach it to a single selected angle without opening the
+// full ProofCharacterEditor modal. For multi-angle selection, an "Attach
+// to" dropdown picks which angle receives the new proof.
+function InlineProofAdder({ angleSlugs, angles, onAdded }) {
+  const [open, setOpen] = useState(false)
+  const [targetSlug, setTargetSlug] = useState(angleSlugs[0] || '')
+  const [proofType, setProofType] = useState('case_study')
+  const [name, setName] = useState('')
+  const [result, setResult] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState(null)
+  const [okMsg, setOkMsg] = useState(null)
+
+  // Keep targetSlug in sync if the selected angles change.
+  useEffect(() => {
+    if (!angleSlugs.includes(targetSlug)) setTargetSlug(angleSlugs[0] || '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [angleSlugs.join('|')])
+
+  const typeMeta = PROOF_TYPES_LOCAL.find(t => t.value === proofType) || PROOF_TYPES_LOCAL[0]
+
+  async function save() {
+    if (!targetSlug) { setErr('Pick an angle to attach to'); return }
+    if (!name.trim() || !result.trim()) { setErr('Name and result are required'); return }
+    setSaving(true); setErr(null); setOkMsg(null)
+    try {
+      await upsertProofCharacterCall({
+        angle_slug: targetSlug,
+        name: name.trim(),
+        result_short: result.trim(),
+        proof_type: proofType,
+      })
+      const angleName = angles.find(a => a.slug === targetSlug)?.name || targetSlug
+      setOkMsg(`Saved "${name.trim()}" to ${angleName}`)
+      setName(''); setResult('')
+      onAdded?.(targetSlug)
+      setTimeout(() => setOkMsg(null), 2500)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--rule)' }}>
+      {!open ? (
+        <button onClick={() => setOpen(true)}
+          style={{
+            padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10.5,
+            letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+            border: '1px dashed var(--ink-3)', background: 'transparent',
+            color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}>
+          <Plus size={12} /> Add a proof inline
+        </button>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: 'var(--ink-3)',
+            }}>Attach to</span>
+            <select value={targetSlug} onChange={e => setTargetSlug(e.target.value)}
+              style={inlineSelectStyle}>
+              {angleSlugs.map(s => {
+                const a = angles.find(x => x.slug === s)
+                return <option key={s} value={s}>{a?.name || s}</option>
+              })}
+            </select>
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: 'var(--ink-3)',
+            }}>·</span>
+            <select value={proofType} onChange={e => setProofType(e.target.value)}
+              style={inlineSelectStyle}>
+              {PROOF_TYPES_LOCAL.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <span style={{
+              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 11.5,
+              color: 'var(--ink-4)',
+            }}>{typeMeta.hint}</span>
+            <button onClick={() => setOpen(false)}
+              title="Close inline adder"
+              style={{
+                marginLeft: 'auto', padding: 4, background: 'transparent',
+                border: 'none', color: 'var(--ink-4)', cursor: 'pointer',
+              }}>
+              <X size={13} />
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr auto', gap: 8 }}>
+            <input type="text" value={name} placeholder={typeMeta.namePh}
+              onChange={e => setName(e.target.value)} style={inlineInputStyle} />
+            <input type="text" value={result} placeholder={typeMeta.resultPh}
+              onChange={e => setResult(e.target.value)} style={inlineInputStyle}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !saving) save() }} />
+            <button onClick={save} disabled={saving || !name.trim() || !result.trim()}
+              style={{
+                padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11,
+                letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
+                border: '1px solid var(--ink)',
+                background: (!name.trim() || !result.trim() || saving) ? 'var(--rule)' : 'var(--ink)',
+                color: (!name.trim() || !result.trim() || saving) ? 'var(--ink-4)' : 'var(--paper)',
+                cursor: (saving || !name.trim() || !result.trim()) ? 'not-allowed' : 'pointer',
+                borderRadius: 2, display: 'inline-flex', alignItems: 'center', gap: 5,
+              }}>
+              {saving ? '...' : <><Plus size={12} /> Add</>}
+            </button>
+          </div>
+          {err && (
+            <div style={{
+              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12,
+              color: '#b53e3e',
+            }}>{err}</div>
+          )}
+          {okMsg && (
+            <div style={{
+              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12,
+              color: '#2f5f33',
+            }}>{okMsg}</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Local catalog of proof types with placeholders — used by the inline
+// adder. Mirrors the service's PROOF_TYPES + adds namePh / resultPh
+// (which the editor modal generates inline; we duplicate here to keep
+// this component self-contained).
+const PROOF_TYPES_LOCAL = [
+  { value: 'case_study',    label: 'Case study',    hint: 'Named client + result',
+    namePh: 'Eric',                      resultPh: 'Closed a $215K job in 90 days' },
+  { value: 'testimonial',   label: 'Testimonial',   hint: 'Direct quote',
+    namePh: 'Mark — plumber, NC',        resultPh: '"My closing rate doubled in week 2."' },
+  { value: 'statistic',     label: 'Statistic',     hint: 'Numeric data point',
+    namePh: 'HomeAdvisor burnout rate',  resultPh: '67% of restoration owners burn out on it in year 2' },
+  { value: 'authority',     label: 'Authority',     hint: 'Industry / institution citation',
+    namePh: 'Roto-Rooter franchise manual', resultPh: 'Explicitly recommends abandoning shared-lead platforms' },
+  { value: 'demonstration', label: 'Demonstration', hint: 'Before / after, show-not-tell',
+    namePh: 'Month 1 vs month 6 dashboard', resultPh: '$14K → $48K MRR by month 6, charted' },
+  { value: 'social_volume', label: 'Social volume', hint: 'Aggregate-count proof',
+    namePh: 'Restoration cohort 2024',   resultPh: '38 companies, average $32K/mo lift' },
+  { value: 'comparison',    label: 'Comparison',    hint: 'Vs alternative',
+    namePh: 'vs HomeAdvisor',            resultPh: '3.2x bookings, 1/4 the cost-per-lead' },
+]
+
+const inlineSelectStyle = {
+  padding: '5px 8px', fontFamily: 'var(--mono)', fontSize: 10.5,
+  letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600,
+  border: '1px solid var(--rule)', background: 'white',
+  color: 'var(--ink)', borderRadius: 2, outline: 'none', cursor: 'pointer',
+}
+const inlineInputStyle = {
+  width: '100%', padding: '8px 10px',
+  fontFamily: 'var(--sans)', fontSize: 13,
+  border: '1px solid var(--rule)', background: 'white',
+  color: 'var(--ink)', borderRadius: 2, outline: 'none',
+}
+
+// Thin wrapper around upsertProofCharacter so this component doesn't
+// have to import from a service that's already imported at the top of
+// the file (keeps the InlineProofAdder colocated + readable).
+async function upsertProofCharacterCall(payload) {
+  const { upsertProofCharacter } = await import('../../services/scriptGenerator')
+  return upsertProofCharacter(payload)
 }
 
 // Tile view for the Messaging "Saved for this offer" library. Rendered

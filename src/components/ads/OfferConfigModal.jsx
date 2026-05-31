@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Check, AlertCircle, Trash2 } from 'lucide-react'
+import { X, Check, AlertCircle, Trash2, Plus } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import ConfirmModal from '../ConfirmModal'
 
@@ -17,6 +17,22 @@ import ConfirmModal from '../ConfirmModal'
   Optional: brand_voice_md, kb_doc_url
 */
 
+// Per-offer structured proof items shape (mirrors migration 120 column).
+// Each entry: { proof_type, name, result_short, result_long?, industry_context?, metric_kind? }
+const OFFER_PROOF_TYPES = [
+  { value: 'case_study',    label: 'Case study',    namePh: 'Eric',                         resultPh: 'Closed a $215K job in 90 days' },
+  { value: 'testimonial',   label: 'Testimonial',   namePh: 'Mark — plumber, NC',           resultPh: '"My closing rate doubled in week 2."' },
+  { value: 'statistic',     label: 'Statistic',     namePh: 'HomeAdvisor burnout rate',     resultPh: '67% of restoration owners burn out in year 2' },
+  { value: 'authority',     label: 'Authority',     namePh: 'Roto-Rooter franchise manual', resultPh: 'Explicitly recommends abandoning shared-lead platforms' },
+  { value: 'demonstration', label: 'Demonstration', namePh: 'Month 1 vs 6 dashboard',       resultPh: '$14K → $48K MRR by month 6, charted' },
+  { value: 'social_volume', label: 'Social volume', namePh: 'Restoration cohort 2024',      resultPh: '38 companies, avg $32K/mo lift' },
+  { value: 'comparison',    label: 'Comparison',    namePh: 'vs HomeAdvisor',               resultPh: '3.2x bookings, 1/4 the cost-per-lead' },
+]
+
+function emptyOfferProof() {
+  return { proof_type: 'case_study', name: '', result_short: '', result_long: '' }
+}
+
 export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
   const [form, setForm] = useState({
     slug: '',
@@ -27,6 +43,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
     default_proof_characters: '',
     has_dual_guarantee: false,
     brand_voice_md: '',
+    offer_proof_items: [],
   })
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
@@ -44,6 +61,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
         default_proof_characters: (existing.default_proof_characters || []).join(', '),
         has_dual_guarantee: !!existing.has_dual_guarantee,
         brand_voice_md: existing.brand_voice_md || '',
+        offer_proof_items: Array.isArray(existing.offer_proof_items) ? existing.offer_proof_items : [],
       })
     } else if (open) {
       setForm({
@@ -55,6 +73,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
         default_proof_characters: '',
         has_dual_guarantee: false,
         brand_voice_md: '',
+        offer_proof_items: [],
       })
     }
     setErr(null)
@@ -93,6 +112,18 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
           .split(',').map(s => s.trim()).filter(Boolean),
         has_dual_guarantee: form.has_dual_guarantee,
         brand_voice_md: form.brand_voice_md.trim() || null,
+        // Filter out incomplete inline proofs (both name + result must be
+        // present) and normalize fields. proof_type defaults to case_study.
+        offer_proof_items: (form.offer_proof_items || [])
+          .map(p => ({
+            proof_type: p.proof_type || 'case_study',
+            name: (p.name || '').trim(),
+            result_short: (p.result_short || '').trim(),
+            result_long: (p.result_long || '').trim() || undefined,
+            industry_context: (p.industry_context || '').trim() || undefined,
+            metric_kind: (p.metric_kind || '').trim() || undefined,
+          }))
+          .filter(p => p.name && p.result_short),
       }
       if (!payload.slug || !payload.name) {
         throw new Error('slug and name are required')
@@ -197,11 +228,62 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
             onChange={v => setForm({ ...form, primary_audience: v })}
             multiline />
 
-          <Field label="Proof characters (comma-separated)"
-            helper="Real client names with brief context. The generator picks one per script."
+          <Field label="Quick proof names (comma-separated · legacy)"
+            helper="Just the names — fast way to seed the rotation. For typed proofs with results, use the Proofs section below."
             placeholder="e.g. Eric, Adam, Belinda, Morgan"
             value={form.default_proof_characters}
             onChange={v => setForm({ ...form, default_proof_characters: v })} />
+
+          {/* Structured per-offer proof roster (migration 120). Numbered
+              rows — Proof 1, Proof 2, etc — that apply across every script
+              generated for this offer, on top of any per-angle proofs. */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', fontFamily: 'var(--mono)', fontSize: 11,
+                          letterSpacing: '0.12em', textTransform: 'uppercase',
+                          color: 'var(--ink-3)', marginBottom: 6 }}>
+              Proofs (apply across all scripts for this offer)
+            </label>
+            <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
+                        fontSize: 12.5, color: 'var(--ink-4)',
+                        margin: '0 0 10px', lineHeight: 1.5 }}>
+              Numbered proof items the generator can pull from on top of any
+              per-angle proofs. Mix types — case studies build specificity,
+              statistics build scale, authority builds borrowed credibility.
+              Add 3-5 for healthy rotation.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {(form.offer_proof_items || []).map((p, i) => (
+                <OfferProofRow key={i}
+                  index={i}
+                  proof={p}
+                  onChange={(patch) => {
+                    const next = [...(form.offer_proof_items || [])]
+                    next[i] = { ...next[i], ...patch }
+                    setForm({ ...form, offer_proof_items: next })
+                  }}
+                  onRemove={() => {
+                    const next = (form.offer_proof_items || []).filter((_, j) => j !== i)
+                    setForm({ ...form, offer_proof_items: next })
+                  }}
+                />
+              ))}
+              <button type="button"
+                onClick={() => setForm({
+                  ...form,
+                  offer_proof_items: [...(form.offer_proof_items || []), emptyOfferProof()],
+                })}
+                style={{
+                  padding: '10px 14px', fontFamily: 'var(--mono)', fontSize: 11,
+                  letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
+                  border: '1px dashed var(--ink-3)', background: 'transparent',
+                  color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  alignSelf: 'flex-start',
+                }}>
+                <Plus size={12} /> Add proof {(form.offer_proof_items?.length || 0) + 1}
+              </button>
+            </div>
+          </div>
 
           <Field label="Brand voice notes (optional)"
             helper="Banned phrases, tone, or specific words/cadence to use. Markdown OK."
@@ -282,6 +364,66 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
         variant="danger"
         loading={retiring}
       />
+    </div>
+  )
+}
+
+// Single row in the offer-proofs editor — numbered card with a type
+// dropdown, name + result inputs, and a remove button. Saves on form
+// submit (parent controls dirty state).
+function OfferProofRow({ index, proof, onChange, onRemove }) {
+  const typeMeta = OFFER_PROOF_TYPES.find(t => t.value === proof.proof_type) || OFFER_PROOF_TYPES[0]
+  return (
+    <div style={{
+      padding: 12, background: 'white',
+      border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
+      borderRadius: 2,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+          letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
+          minWidth: 60,
+        }}>Proof {index + 1}</span>
+        <select value={proof.proof_type || 'case_study'}
+          onChange={e => onChange({ proof_type: e.target.value })}
+          style={{
+            padding: '5px 8px', fontFamily: 'var(--mono)', fontSize: 10.5,
+            letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600,
+            border: '1px solid var(--rule)', background: 'white',
+            color: 'var(--ink)', borderRadius: 2, outline: 'none', cursor: 'pointer',
+          }}>
+          {OFFER_PROOF_TYPES.map(t => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+        <button type="button" onClick={onRemove}
+          style={{
+            marginLeft: 'auto', padding: 6, background: 'transparent',
+            border: '1px solid var(--rule)', color: 'var(--ink-4)',
+            cursor: 'pointer', borderRadius: 2,
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.color = '#b53e3e'}
+          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--ink-4)'}>
+          <Trash2 size={12} />
+        </button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 8 }}>
+        <input type="text" value={proof.name || ''} placeholder={typeMeta.namePh}
+          onChange={e => onChange({ name: e.target.value })}
+          style={{
+            padding: '8px 10px', fontFamily: 'var(--sans)', fontSize: 13,
+            border: '1px solid var(--rule)', background: 'white',
+            color: 'var(--ink)', borderRadius: 2, outline: 'none',
+          }} />
+        <input type="text" value={proof.result_short || ''} placeholder={typeMeta.resultPh}
+          onChange={e => onChange({ result_short: e.target.value })}
+          style={{
+            padding: '8px 10px', fontFamily: 'var(--sans)', fontSize: 13,
+            border: '1px solid var(--rule)', background: 'white',
+            color: 'var(--ink)', borderRadius: 2, outline: 'none',
+          }} />
+      </div>
     </div>
   )
 }
