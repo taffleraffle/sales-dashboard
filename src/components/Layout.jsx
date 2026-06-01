@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, Headphones, DollarSign, Bot, Mail, ChevronDown, Workflow, Megaphone, FileText, TrendingDown, Building2, LayoutDashboard, Home, BookOpen, Trophy, Link2, Inbox, History, Sparkles } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, Headphones, DollarSign, Bot, Mail, ChevronDown, Workflow, Megaphone, FileText, TrendingDown, Building2, LayoutDashboard, Home, BookOpen, Trophy, Link2, Inbox, History, Sparkles, Target } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -18,6 +18,7 @@ const navItems = [
   // ROM-first surfaces
   { to: '/hq', icon: Home, label: 'HQ' },
   { to: '/hq/wins', icon: Sparkles, label: 'Wins' },
+  { to: '/hq/strategy', icon: Target, label: 'Strategy' },
   { to: '/clients', icon: Building2, label: 'Clients' },
   { to: '/ceo', icon: LayoutDashboard, label: 'CEO' },
 

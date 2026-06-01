@@ -9,6 +9,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 import { slackPost } from "../_shared/slack.ts";
+import { enqueueForStrategist, notifyStrategistSlack } from "../_shared/strategist-queue.ts";
 
 function fmtUSD(n: number | null | undefined): string {
   if (!n) return "$0";
@@ -129,6 +130,40 @@ serve(async (req) => {
         { type: "mrkdwn", text: `RANK ON MAPS · WEEKLY RECEIPTS` },
       ]},
     ];
+
+    // Controlled narrative: any rank drops or weak metrics → strategist must approve before publish
+    const { data: rankDrops } = await supa
+      .from("rank_history")
+      .select("delta_vs_yesterday, position")
+      .eq("client_id", client.id)
+      .gte("checked_at", since.toISOString())
+      .lt("delta_vs_yesterday", -2);
+    const hasNegative = (rankDrops || []).length > 0 || (organicSessions < 50 && organicSessions > 0);
+
+    if (hasNegative && !dry_run) {
+      // Route to strategist queue with proposed publish + paired response framing
+      const queue = await enqueueForStrategist({
+        client_id: client.id,
+        kind: "weekly_recap_curation",
+        priority: 80,
+        proposed_payload: {
+          week_starting: weekKey,
+          proposed_lines: lines,
+          proposed_blocks: blocks,
+          target_channel: client.client_slack_channel_id,
+          metrics: { leadsCount, quotableCount, totalValue, organicSessions, organicConversions, rankJumpsCount: rankJumps.length, indexedCount: indexed.length, reviewsCount: newReviews.length },
+          negatives: { rank_drops: (rankDrops || []).length, low_organic: organicSessions < 50 },
+        },
+        source_function: "evidence-reel-friday",
+        source_payload: { client_id: client.id, week_starting: weekKey },
+      });
+      await notifyStrategistSlack(
+        queue.queue_id,
+        `Weekly recap held for review: *${client.business_name}* — has negatives to frame before client sees it.`,
+      );
+      out.push({ client: client.business_name, posted: false, reason: "held_for_strategist" });
+      continue;
+    }
 
     if (dry_run) {
       out.push({ client: client.business_name, posted: false, reason: "dry_run" });
