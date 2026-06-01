@@ -1526,7 +1526,7 @@ BANNED in an educational hook (these are violations, not preferences):
   ✗ Specific numeric claims from a proof character (Marcus's 47 days, Diego's 31 days)
   ✗ Verbatim copying of the example closes above — rewrite them in the angle's idiom
 
-ANTI-MIMICRY CHECK: If your draft hook opens with "How is it possible that...", "Most [vertical] owners think...", "Quick question...", "If we told you...", or any other phrase that sounds like a copywriter pattern you might have seen before, you've defaulted to a template — STOP and rewrite the opener fresh in the prospect's own vocabulary. The opening sentence should be the kind of thing a smart practitioner would say at the start of a podcast episode about their craft, not the kind of thing an ad-copy template generates.
+BATCH DIVERSITY (Ben 2026-06-01 — "I want a wide breadth and diversity of stuff, I have a whole bunch to pick from"): Across the N hooks you return, REACH FOR DIFFERENT OPENING STYLES. Worn patterns ("How is it possible that...", "Most [vertical] owners think...", "The reason X is wrong...") are FINE for one or two hooks in the batch — they work — but if all your hooks open with the same rhetorical move, the operator can't A/B test diversity of attention-grabs. A batch of 5+ hooks should touch at least three distinct opening rhetorics from the menu in [1] above (contrast question, reframe, trend, AND any other shape-natural opener the angle suggests). Lean on different signals / industry moves / mechanism fragments across the batch so each hook teaches a slightly different lesson.
 
 ═══ SELF-CHECK BEFORE RETURNING ═══
 
