@@ -1046,7 +1046,45 @@ function resolveRange(range) {
   return { from: etDateOffset(-Math.max(0, days - 1)), to: today }
 }
 
-async function fetchLiveCalls({ from, to }) {
+// Helper: build a Set<string> of LOWER(prospect_name) that belong to the
+// requested audiences. Used by fetchLiveCalls / fetchCloses / fetchAscensions
+// to filter their closer_calls rows by audience (closer_calls has no
+// native audience column — the only way to attribute is via the resolved
+// booking chain).
+async function prospectNamesInAudience(audiences, { from, to }) {
+  if (!audiences || audiences.size === 0) return null  // no filter active
+  // Window the booking lookup to ±90d around the call window so a call
+  // attributed via an earlier booking still matches.
+  const start = new Date(from); start.setUTCDate(start.getUTCDate() - 90)
+  const end = new Date(to); end.setUTCDate(end.getUTCDate() + 30)
+  const { data } = await supabase
+    .from('lib_strategy_booking_resolved')
+    .select('contact_name, audience')
+    .in('audience', [...audiences])
+    .gte('booked_at', start.toISOString().slice(0, 10))
+    .lte('booked_at', end.toISOString().slice(0, 10))
+  const set = new Set()
+  for (const r of (data || [])) {
+    if (!r.contact_name) continue
+    // Strip the closer suffix "X and Daniel Gomez De Le Vega" → "X"
+    const prospect = r.contact_name.split(' and ')[0].trim().toLowerCase()
+    if (prospect) set.add(prospect)
+  }
+  return set
+}
+
+function prospectMatches(prospectName, allowedSet) {
+  if (!allowedSet) return true
+  if (!prospectName) return false
+  // closer_calls.prospect_name may be "Hector  - RestorationConnect Strategy
+  // Call" — extract the part before any ' - ' or ' and '.
+  const cleaned = prospectName.split(/ - | and /)[0].trim().toLowerCase()
+  if (!cleaned) return false
+  return allowedSet.has(cleaned)
+}
+
+async function fetchLiveCalls({ from, to, audiences } = {}) {
+  const allowed = await prospectNamesInAudience(audiences, { from, to })
   const { data: reports } = await supabase
     .from('closer_eod_reports')
     .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
@@ -1060,25 +1098,28 @@ async function fetchLiveCalls({ from, to }) {
     .in('eod_report_id', reportIds)
     .in('outcome', ['not_closed', 'closed'])
     .eq('call_type', 'new_call') // "Net New" = NEW CALLS only (no follow-ups, no ascensions)
-  const rows = (callRows || []).map(c => ({
-    date: reportMap[c.eod_report_id]?.report_date,
-    closer: reportMap[c.eod_report_id]?.closer?.name || '—',
-    type: c.call_type,
-    prospect: c.prospect_name || '—',
-    email: null,
-    outcome: c.outcome,
-    revenue: c.revenue,
-    cash: c.cash_collected,
-  })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  const rows = (callRows || [])
+    .filter(c => prospectMatches(c.prospect_name, allowed))
+    .map(c => ({
+      date: reportMap[c.eod_report_id]?.report_date,
+      closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+      type: c.call_type,
+      prospect: c.prospect_name || '—',
+      email: null,
+      outcome: c.outcome,
+      revenue: c.revenue,
+      cash: c.cash_collected,
+    })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 
   await enrichRowsWithProspectEmails(rows)
   return rows
 }
 
-async function fetchCloses({ from, to }) {
+async function fetchCloses({ from, to, audiences } = {}) {
   // Every closed deal in window — closes only (not ascensions). Includes both
   // new_call and follow_up call types since a follow-up that closes is still
   // a marketing-attributed close.
+  const allowed = await prospectNamesInAudience(audiences, { from, to })
   const { data: reports } = await supabase
     .from('closer_eod_reports')
     .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
@@ -1092,20 +1133,23 @@ async function fetchCloses({ from, to }) {
     .in('eod_report_id', reportIds)
     .eq('outcome', 'closed')
     .neq('call_type', 'ascension')
-  return (callRows || []).map(c => ({
-    date: reportMap[c.eod_report_id]?.report_date,
-    closer: reportMap[c.eod_report_id]?.closer?.name || '—',
-    type: c.call_type,
-    prospect: c.prospect_name || '—',
-    revenue: c.revenue,
-    cash: c.cash_collected,
-    finance: c.offered_finance ? 'yes' : 'no',
-  })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  return (callRows || [])
+    .filter(c => prospectMatches(c.prospect_name, allowed))
+    .map(c => ({
+      date: reportMap[c.eod_report_id]?.report_date,
+      closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+      type: c.call_type,
+      prospect: c.prospect_name || '—',
+      revenue: c.revenue,
+      cash: c.cash_collected,
+      finance: c.offered_finance ? 'yes' : 'no',
+    })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
-async function fetchAscensions({ from, to }) {
+async function fetchAscensions({ from, to, audiences } = {}) {
   // Every ascension in window — call_type = 'ascension'. Includes both ascended
   // and not-ascended outcomes so the user can see the full ascension funnel.
+  const allowed = await prospectNamesInAudience(audiences, { from, to })
   const { data: reports } = await supabase
     .from('closer_eod_reports')
     .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
@@ -1118,48 +1162,49 @@ async function fetchAscensions({ from, to }) {
     .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected, offered_finance')
     .in('eod_report_id', reportIds)
     .eq('call_type', 'ascension')
-  return (callRows || []).map(c => ({
-    date: reportMap[c.eod_report_id]?.report_date,
-    closer: reportMap[c.eod_report_id]?.closer?.name || '—',
-    prospect: c.prospect_name || '—',
-    outcome: c.outcome,
-    revenue: c.revenue,
-    cash: c.cash_collected,
-    finance: c.offered_finance ? 'yes' : 'no',
-  })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  return (callRows || [])
+    .filter(c => prospectMatches(c.prospect_name, allowed))
+    .map(c => ({
+      date: reportMap[c.eod_report_id]?.report_date,
+      closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+      prospect: c.prospect_name || '—',
+      outcome: c.outcome,
+      revenue: c.revenue,
+      cash: c.cash_collected,
+      finance: c.offered_finance ? 'yes' : 'no',
+    })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
-async function fetchBookings({ from, to }) {
-  // Every strategy-calendar booking made in window (by booked_at), DEDUPED
-  // by prospect (ghl_contact_id). If Khaled books 3 times in the window, he
-  // counts as 1. Earliest booking in the window wins so the displayed call
-  // date matches the prospect's first commitment, not their latest reshuffle.
-  const { data } = await supabase
-    .from('ghl_appointments')
-    .select('contact_name, calendar_name, booked_at, appointment_date, revenue_tier, appointment_status, ghl_contact_id')
-    .in('calendar_name', STRATEGY_CALL_CALENDARS)
-    .neq('appointment_status', 'cancelled')
-    .gte('booked_at', from).lte('booked_at', to + ' 23:59:59')
-  const byContact = new Map()
-  for (const r of data || []) {
-    // Use ghl_contact_id as the dedupe key; fall back to contact_name for
-    // legacy rows missing the contact link.
-    const key = r.ghl_contact_id || `name:${r.contact_name}`
-    const existing = byContact.get(key)
-    if (!existing || (r.booked_at || '') < (existing.booked_at || '')) {
-      byContact.set(key, r)
-    }
-  }
-  return [...byContact.values()].map(r => ({
-    booked: String(r.booked_at).split(' ')[0].split('T')[0],
+async function fetchBookings({ from, to, audiences } = {}) {
+  // Every non-cancelled strategy-call booking in window, audience-resolved
+  // via lib_strategy_booking_resolved (migration 130). Resolution ladder:
+  //   typeform email → typeform phone → typeform first_name → calendar hint
+  // Achieves ~96% coverage for the 55 active bookings in the last 30d.
+  //
+  // When called from an audience-filtered Marketing tab, `audiences` is a
+  // Set of Title-Case names (e.g. {'Restoration'}) and we drop rows whose
+  // resolved audience isn't in the set. Without that filter, this used to
+  // bleed Electrician bookings (Hector) into the Restoration drilldown.
+  const wanted = (audiences && audiences.size > 0) ? audiences : null
+  let q = supabase
+    .from('lib_strategy_booking_resolved')
+    .select('contact_name, contact_email, calendar_name, booked_at, appointment_date, revenue_tier, is_dq, audience, audience_source')
+    .gte('booked_at', from).lte('booked_at', to)
+  if (wanted) q = q.in('audience', [...wanted])
+  const { data } = await q
+  return (data || []).map(r => ({
+    booked: String(r.booked_at).split('T')[0],
     prospect: r.contact_name,
     revenue_tier: r.revenue_tier,
     appt_date: r.appointment_date,
-    is_dq: DQ_BOOKING_CALENDARS.includes(r.calendar_name) || (r.revenue_tier ? isDQRevenueTier(r.revenue_tier) : false),
+    is_dq: r.is_dq || (r.revenue_tier ? isDQRevenueTier(r.revenue_tier) : false),
+    audience: r.audience,
+    audience_source: r.audience_source,
   })).sort((a, b) => (b.booked || '').localeCompare(a.booked || ''))
 }
 
-async function fetchNoShows({ from, to }) {
+async function fetchNoShows({ from, to, audiences } = {}) {
+  const allowed = await prospectNamesInAudience(audiences, { from, to })
   // NC no-shows only — follow-up no-shows happen on different funnel
   // events and shouldn't pollute the "did this booking happen" metric.
   // Matches the no_show_rate calculation in useMarketingTracker.js.
@@ -1176,11 +1221,13 @@ async function fetchNoShows({ from, to }) {
     .in('eod_report_id', reportIds)
     .eq('outcome', 'no_show')
     .eq('call_type', 'new_call')
-  return (callRows || []).map(c => ({
-    date: reportMap[c.eod_report_id]?.report_date,
-    closer: reportMap[c.eod_report_id]?.closer?.name || '—',
-    prospect: c.prospect_name || '—',
-  })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  return (callRows || [])
+    .filter(c => prospectMatches(c.prospect_name, allowed))
+    .map(c => ({
+      date: reportMap[c.eod_report_id]?.report_date,
+      closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+      prospect: c.prospect_name || '—',
+    })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
 async function fetchShowRate({ from, to }) {
@@ -1216,8 +1263,32 @@ async function fetchShowRate({ from, to }) {
     })
 }
 
-async function fetchCpNew({ from, to }) {
+async function fetchCpNew({ from, to, audiences } = {}) {
   // Daily Cost/New Live Call — spend / new_live_calls per day.
+  if (audiences && audiences.size > 0) {
+    const { data } = await supabase
+      .from('lib_marketing_by_audience_daily')
+      .select('date, audience, adspend, live_calls')
+      .in('audience', [...audiences])
+      .gte('date', from).lte('date', to)
+    const byDate = {}
+    for (const r of (data || [])) {
+      const d = r.date
+      if (!byDate[d]) byDate[d] = { date: d, adspend: 0, new_live_calls: 0 }
+      byDate[d].adspend         += Number(r.adspend) || 0
+      byDate[d].new_live_calls  += Number(r.live_calls) || 0
+    }
+    return Object.values(byDate)
+      .filter(r => r.adspend > 0 || r.new_live_calls > 0)
+      .map(r => ({
+        date: r.date,
+        adspend: r.adspend * NZD_TO_USD,
+        new_live_calls: r.new_live_calls,
+        live_calls: r.new_live_calls,
+        cpn: r.new_live_calls > 0 ? (r.adspend * NZD_TO_USD) / r.new_live_calls : null,
+      }))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  }
   const { data } = await supabase
     .from('marketing_tracker')
     .select('date, adspend, new_live_calls, live_calls')
@@ -1234,8 +1305,31 @@ async function fetchCpNew({ from, to }) {
     }))
 }
 
-async function fetchCpaTrial({ from, to }) {
+async function fetchCpaTrial({ from, to, audiences } = {}) {
   // Daily CPA (Trial) — spend / closes per day.
+  if (audiences && audiences.size > 0) {
+    const { data } = await supabase
+      .from('lib_marketing_by_audience_daily')
+      .select('date, audience, adspend, closes')
+      .in('audience', [...audiences])
+      .gte('date', from).lte('date', to)
+    const byDate = {}
+    for (const r of (data || [])) {
+      const d = r.date
+      if (!byDate[d]) byDate[d] = { date: d, adspend: 0, closes: 0 }
+      byDate[d].adspend += Number(r.adspend) || 0
+      byDate[d].closes  += Number(r.closes) || 0
+    }
+    return Object.values(byDate)
+      .filter(r => r.adspend > 0 || r.closes > 0)
+      .map(r => ({
+        date: r.date,
+        adspend: r.adspend * NZD_TO_USD,
+        closes: r.closes,
+        cpa: r.closes > 0 ? (r.adspend * NZD_TO_USD) / r.closes : null,
+      }))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  }
   const { data: tracker } = await supabase
     .from('marketing_tracker')
     .select('date, adspend, closes')
@@ -1251,7 +1345,8 @@ async function fetchCpaTrial({ from, to }) {
     }))
 }
 
-async function fetchReschCancel({ from, to }) {
+async function fetchReschCancel({ from, to, audiences } = {}) {
+  const allowed = await prospectNamesInAudience(audiences, { from, to })
   const { data: reports } = await supabase
     .from('closer_eod_reports')
     .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
@@ -1264,16 +1359,58 @@ async function fetchReschCancel({ from, to }) {
     .select('eod_report_id, prospect_name, call_type, outcome')
     .in('eod_report_id', reportIds)
     .in('outcome', ['rescheduled', 'canceled'])
-  return (callRows || []).map(c => ({
-    date: reportMap[c.eod_report_id]?.report_date,
-    closer: reportMap[c.eod_report_id]?.closer?.name || '—',
-    type: c.call_type,
-    prospect: c.prospect_name || '—',
-    outcome: c.outcome,
-  })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  return (callRows || [])
+    .filter(c => prospectMatches(c.prospect_name, allowed))
+    .map(c => ({
+      date: reportMap[c.eod_report_id]?.report_date,
+      closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+      type: c.call_type,
+      prospect: c.prospect_name || '—',
+      outcome: c.outcome,
+    })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
-async function fetchLeads({ from, to }) {
+async function fetchLeads({ from, to, audiences } = {}) {
+  // When an audience filter is active, source leads from typeform_responses
+  // (which carries the ad_id → audience chain) instead of the GHL
+  // opportunities mirror. This is the only path that lets us attribute a
+  // lead to Restoration / Electricians / Australia correctly. Without
+  // this branch the drilldown showed ALL leads regardless of tab.
+  if (audiences && audiences.size > 0) {
+    const sinceTs = `${from}T00:00:00Z`
+    const untilTs = `${to}T23:59:59Z`
+    // Pull every typeform_responses row in the window joined to lib_ad_audience
+    // via ad_id (so we know each lead's audience). Then filter by the picked set.
+    const { data } = await supabase
+      .from('typeform_responses')
+      .select('submitted_at, first_name, last_name, email, phone, form_name, utm_campaign, ad_id')
+      .gte('submitted_at', sinceTs).lte('submitted_at', untilTs)
+      .order('submitted_at', { ascending: false })
+    if (!data?.length) return []
+    // Resolve each ad_id → audience by fetching lib_ad_audience for the unique set.
+    const adIds = [...new Set(data.map(r => r.ad_id).filter(Boolean))]
+    const audMap = {}
+    if (adIds.length) {
+      const { data: aaRows } = await supabase
+        .from('lib_ad_audience')
+        .select('ad_id, audience')
+        .in('ad_id', adIds)
+      for (const r of (aaRows || [])) audMap[r.ad_id] = r.audience
+    }
+    const wanted = audiences
+    return data
+      .map(r => ({
+        created: (r.submitted_at || '').split('T')[0],
+        name: [r.first_name, r.last_name].filter(Boolean).join(' ') || '—',
+        email: r.email || '—',
+        phone: r.phone || '—',
+        source: r.form_name || r.utm_campaign || 'Typeform',
+        audience: audMap[r.ad_id] || 'Unknown',
+      }))
+      .filter(r => wanted.has(r.audience))
+      .sort((a, b) => (b.created || '').localeCompare(a.created || ''))
+  }
+
   // Query the local ghl_opportunities mirror — instant (~100ms) vs the
   // 10-15s live GHL fetch. The mirror is populated by
   // fetchGHLLeadsByDate (auto-sync) so this stays current. The opportunity
@@ -1366,7 +1503,39 @@ async function fetchLeads({ from, to }) {
     .sort((a, b) => (b.created || '').localeCompare(a.created || ''))
 }
 
-async function fetchAdspend({ from, to }) {
+async function fetchAdspend({ from, to, audiences } = {}) {
+  // When audience filter is active, source from lib_marketing_by_audience_daily
+  // (NZD pre-multiplied by the JS view aggregator). Otherwise read from
+  // marketing_tracker (closer EOD self-report — USD).
+  if (audiences && audiences.size > 0) {
+    const { data } = await supabase
+      .from('lib_marketing_by_audience_daily')
+      .select('date, audience, adspend, leads, qualified_bookings')
+      .in('audience', [...audiences])
+      .gte('date', from).lte('date', to)
+    // Aggregate per-day across the picked audiences. adspend here is still
+    // NZD (the page applies × NZD_TO_USD elsewhere); convert at display time.
+    const byDate = {}
+    for (const r of (data || [])) {
+      const d = r.date
+      if (!byDate[d]) byDate[d] = { date: d, adspend: 0, leads: 0, bookings: 0 }
+      byDate[d].adspend  += Number(r.adspend) || 0
+      byDate[d].leads    += Number(r.leads) || 0
+      byDate[d].bookings += Number(r.qualified_bookings) || 0
+    }
+    return Object.values(byDate)
+      .filter(r => r.adspend > 0 || r.leads > 0)
+      .map(r => ({
+        date: r.date,
+        // Convert NZD → USD so the drilldown agrees with the All-view USD totals.
+        adspend: r.adspend * NZD_TO_USD,
+        leads: r.leads,
+        cpl: r.leads > 0 ? (r.adspend * NZD_TO_USD) / r.leads : null,
+        bookings: r.bookings,
+      }))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  }
+
   // Daily adspend from marketing_tracker — used by the Adspend drilldown.
   const { data } = await supabase
     .from('marketing_tracker')
@@ -2170,18 +2339,21 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
   )
 }
 
-function DrilldownModal({ kind, range, onClose, spendByDate }) {
+function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }) {
   const config = DRILLDOWN_CONFIG[kind]
   const [rows, setRows] = useState(null)
+  // Stable key for the audience set so the effect re-runs when filter changes.
+  const audKey = selectedAudiences ? [...selectedAudiences].sort().join('|') : ''
   useEffect(() => {
     if (!config) return
     let cancelled = false
     setRows(null)
-    config.fetcher(resolveRange(range))
+    const args = { ...resolveRange(range), audiences: selectedAudiences }
+    config.fetcher(args)
       .then(r => { if (!cancelled) setRows(r) })
       .catch(e => { if (!cancelled) { console.warn(`${kind} drilldown failed:`, e); setRows([]) } })
     return () => { cancelled = true }
-  }, [kind, range, config])
+  }, [kind, range, audKey, config])
 
   if (!config) return null
 
@@ -4018,7 +4190,7 @@ export default function MarketingPerformance() {
         for (const e of (entries || [])) {
           if (e.date) spendByDate[e.date] = parseFloat(e.adspend || 0)
         }
-        return <DrilldownModal kind={drilldown} range={range} onClose={() => setDrilldown(null)} spendByDate={spendByDate} />
+        return <DrilldownModal kind={drilldown} range={range} onClose={() => setDrilldown(null)} spendByDate={spendByDate} selectedAudiences={selectedAudiences} />
       })()}
     </div>
   )
