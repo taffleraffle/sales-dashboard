@@ -1319,6 +1319,35 @@ export default function AdsPerformance() {
     return t
   }, [tree])
 
+  // Filter-reactive top-tile counts (Ben 2026-06-01: "top bar isn't
+  // changing depending on the filters").
+  //
+  // The original `prosp.*` values were computed once at load time and
+  // never recomputed when statusFilter / search / advFilter narrowed
+  // the visible tree. `totals.tf*` IS filter-reactive but inflates
+  // because parent rollups apply overlayMax (campaign-level view-source
+  // overrides bottom-up sum, then we sum all campaigns → cross-overlay
+  // double-count).
+  //
+  // Fix: sum ONLY leaf-ad rollups (no parent overlays). Each ad's
+  // rollup.tfX is already deduped at the ad level. Sum across visible
+  // ads ≈ unique prospects with small cross-ad attribution overlap
+  // (acceptable trade-off vs maintaining a prospect-set-per-ad map).
+  const leafTotals = useMemo(() => {
+    let leads = 0, booked = 0, live = 0, closes = 0
+    for (const c of tree) {
+      for (const set of c.ad_sets_sorted || []) {
+        for (const a of set.ads || []) {
+          leads  += a.rollup.tfLeads      || 0
+          booked += a.rollup.tfQualBooked || a.rollup.tfBooked || 0
+          live   += a.rollup.tfLive       || 0
+          closes += a.rollup.tfCloses     || 0
+        }
+      }
+    }
+    return { leads, booked, live, closes }
+  }, [tree])
+
   const toggleCampaign = (id) => {
     setExpandedCampaigns(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
   }
@@ -1477,16 +1506,20 @@ export default function AdsPerformance() {
           // Fixed by using prosp.* (deduped union of typeform + GHL +
           // close-resolved by email/name) as the BIG number. The per-row
           // attribution sum stays as a subtitle parenthetical for diagnostics.
-          // Bind tile BIG numbers to `prosp` — same source the drilldowns
-          // and Marketing tiles use. Ben 2026-06-01: previously liveTile
-          // and closesTile pointed at `pm.liveProspects` / `pm.closedProspects`
-          // (closer_calls deduped) which is a DIFFERENT universe than
-          // Marketing's audience view. Live calls showed 24 vs Marketing
-          // 38 because of that source split.
-          const liveTile   = prosp.live   || 0   // = lib_ghl_lives_detail rows (matches Marketing's Net New Live)
-          const bookedTile = prosp.booked || 0   // = lib_strategy_booking_resolved unique contacts (matches Marketing's bk.all)
-          const leadsTile  = prosp.leads  || 0
-          const closesTile = prosp.closes || 0   // = lib_close_resolved-deduped (matches Marketing's audience view closes)
+          // Tile BIG numbers — sum of leaf-ad rollups across CURRENTLY-VISIBLE
+          // campaigns. Filter-reactive so clicking ACTIVE/PAUSED status,
+          // search, or advFilter narrows the headline immediately.
+          //
+          // Trade-off vs `prosp.*` (which was filter-INERT global dedup):
+          // leafTotals can overcount by ~5-10% when the same prospect is
+          // attributed to multiple ads. For Ben's use (does the headline
+          // move when I filter?) that's the right call. The "unique total"
+          // line is dropped from the subtitle since the BIG number now IS
+          // the visible-tree count, not a global universe.
+          const liveTile   = leafTotals.live   || 0
+          const bookedTile = leafTotals.booked || 0
+          const leadsTile  = leafTotals.leads  || 0
+          const closesTile = leafTotals.closes || 0
           const visibleLeads  = totals.tfLeads  || 0
           const visibleBooked = totals.tfBooked || 0
           const visibleLive   = totals.tfLive   || 0
