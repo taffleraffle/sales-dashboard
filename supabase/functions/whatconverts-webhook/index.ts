@@ -381,6 +381,22 @@ serve(async (req) => {
                 headline,
                 detail: `Attributable revenue to date: $${lifetimeRev.toLocaleString()}.`,
               });
+
+              // Auto-fire case study draft for 4x and 10x ROI crossings
+              if (t === 4 || t === 10) {
+                fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/case-study-generator`, {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    client_id: clientId,
+                    trigger_kind: t === 10 ? "10x_roi" : "4x_roi",
+                    trigger_payload: { multiplier: t, lifetime_revenue: lifetimeRev, days_since_start: daysSinceStart, horizon: horizonLabel },
+                  }),
+                }).catch((e) => console.error("case study trigger:", e));
+              }
             }
           }
 
