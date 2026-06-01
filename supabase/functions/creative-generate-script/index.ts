@@ -92,7 +92,30 @@ const LOCKED_PRINCIPLES = `LOCKED PRINCIPLES (from ad-creative-kb/written-docs/,
 
 8. LENGTH DISCIPLINE — Target length bucket determines the structural shape: under_60s scripts use piercing hook + tight body + CTA; 60-75s scripts add one proof beat; 75s+ scripts paint a full scene.
 
-9. CTA STRUCTURE — End with one clear conditional CTA + the guarantee. For dual-guarantee offers: "[Outcome 1] in 90 days. [Outcome 2] in 90 days. Money back if neither happens. Tap below." For single-guarantee: "Crews booked from direct homeowner calls in 90 days. Money back if not. Tap below."`
+9. CTA STRUCTURE — End with one clear conditional CTA + the guarantee. For dual-guarantee offers: "[Outcome 1] in 90 days. [Outcome 2] in 90 days. Money back if neither happens. Tap below." For single-guarantee: "Crews booked from direct homeowner calls in 90 days. Money back if not. Tap below."
+
+10. VOICE — 5TH-GRADE READING LEVEL + TALK-TO-A-FRIEND (Ben 2026-06-01, after seeing scripts read like academic reports).
+   Treat this like Alex Hormozi's $100M Hooks Playbook. Write the way you'd actually talk to a friend who happens to own a restoration company over a beer — not the way a copywriter writes for a brand. Rules:
+
+   a) READING LEVEL: target a 5th-grade reading level. If a 10-year-old wouldn't get the word, don't use it. HARD BANNED (every occurrence is a defect — do a final pass to remove these): "dependency" (say "depending on" / "stuck on"), "engineered" (say "we built" / "we set up"), "optimize" / "optimized" / "optimizing" / "optimization" (say "fix" / "tune up" / "rebuild"), "leverage", "utilize", "implement", "facilitate", "methodology", "architecture", "infrastructure", "topical authority" (say "Google trusts you on the topic"), "preferred-vendor API" (say "their secret vendor list" / "their internal app"), "service radius weighting" (say "how big an area Google shows you in"), "review velocity" / "velocity signals" (say "how fast new reviews come in"), "proximity algorithm" (say "how close you are to the search"), "systematic application", "burnout rate" (say "burn out and leave"), "ranking factor" (say "ranking signal" or just "what Google looks at"), "asymmetric" / "asymmetry", "pipeline" (in business sense — say "calls" / "leads" / "the flow of work"), "vertical" (say the actual industry name), "ascension", "iteration", "saturation" (say "everyone's doing it"), "calibrate", "stack" (as verb), "monetize", "scalability", "consolidate", "operationalize", "framework" (just say "system"). FINAL CHECK before returning: scan your draft for any of these — if found, rewrite in plain words. Use the actual word a restoration owner would say at a job site.
+
+   b) SENTENCE LENGTH: short. Most sentences 6-14 words. Fragments are fine. Two-word punches are fine. ("It works." "Three days." "Money back."). Long sentences should be rare — and when you write one, it should earn its length with rhythm. No "Here's what 73% of restoration owners don't realize until it's too late: adjuster dependency has an 18-month burnout rate" — that's a research paper sentence. Rewrite as: "Most adjusters move on in under two years. Then your phone goes quiet. Travis lost his guy in February."
+
+   c) RHYTHM: vary sentence length deliberately. Long. Short. Short. Long. Short. Like Hormozi. Like a podcast host. Like you're explaining something at a bar. The cadence is what makes it engaging — even when the information is the same.
+
+   d) FRIEND-TALK MARKERS: contractions everywhere ("you're", "they're", "it's", "we'll"). Second person throughout ("you", "your"). Direct address ("Here's the thing..." "Look..." "Listen..."). Imperfect grammar OK if it sounds natural. "Three things. One: ..." beats "First, ...".
+
+   e) HORMOZI $100M HOOK FORMULAS — use these as PATTERNS (do not copy verbatim, write fresh in the angle's voice):
+      • Identity + Pain + Promise: "If you're a restoration owner doing $50k+/mo and you're sick of [specific pain], here's the [specific fix]."
+      • False Belief Pattern: "Most restoration owners think [false belief]. They're wrong. Here's what actually works."
+      • Just Talked To Story: "Just got off the phone with [name]. He told me something wild about [topic]. Listen to this."
+      • Numbered List Tease: "Three things winning restoration owners do differently. The third one's the kicker."
+      • Stop Doing X / Do Y: "If you're a restoration owner, stop chasing [thing]. Here's what to do instead."
+      • Curiosity Question: "How do some restoration guys book $100k/mo from Google while others spend the same on ads and get crickets?"
+
+   f) WHAT THIS LOOKS LIKE IN PRACTICE — opening of the body Ben pasted as the GOOD example: "Your biggest adjuster just called. They're relocating to another state. The adjuster who fed you $40,000 in jobs every month for the last two years is gone. And you're staring at a calendar that went from booked solid to half-empty overnight." Notice: short sentences, second person, concrete numbers, scene-painted, no jargon. That's the register. The script's BAD half: "Here's what 73% of restoration owners don't realize until it's too late: adjuster dependency has an 18-month burnout rate. Most adjusters either move markets, change companies, or get promoted out of field work within 18 months." Notice: stat-paper opener, jargon ("dependency"), long winding sentence, no rhythm. Rewrite ALL beats in the good register. If a beat reads academic, rewrite it like you'd say it to a friend.
+
+   g) SELF-CHECK BEFORE RETURNING: read your script out loud in your head. If any sentence sounds like a LinkedIn post, a press release, or a textbook — rewrite it shorter, with simpler words, more like a person actually talking. If the prospect reads it and thinks "this person GETS it" rather than "this is an ad" — you've hit the voice.`
 
 // ── System prompt ─────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `You are a senior direct-response copywriter for OPT Digital. You write Meta-ad scripts (60-90s talking-head / UGC) that apply Eugene Schwartz Breakthrough Advertising + Truth-vs-Trust + the OPT structural-discipline rules locked from 21 versions of iteration.
@@ -1404,9 +1427,15 @@ serve(async (req) => {
     // the script POSTURE (mechanism-led teaching, soft offer) not about
     // forcing curiosity-shape openers exclusively. Hybrid keeps its
     // broader allowlist. Direct still uses all shapes.
+    // Ben 2026-06-01 PM: dropping Shape B (Hypothetical Question — "Quick
+    // question... if we told you... would you take us up on that?") from
+    // Educational. The shape's natural cadence is a single run-on sentence
+    // 25-30 words long, which violates the 5th-grade reading level rule.
+    // Direct and Hybrid keep it because they tolerate slightly longer
+    // sentences, but the model is told elsewhere to break it into two.
     const MODE_SHAPE_ALLOWLIST: Record<string, string[]> = {
       educational: ['A', 'D', 'E', 'F', 'H'],
-      hybrid:      ['A', 'B', 'D', 'E', 'F', 'G', 'H'],
+      hybrid:      ['A', 'D', 'E', 'F', 'G', 'H'],
       direct:      [],   // empty = use all
     }
     const modeAllowed = MODE_SHAPE_ALLOWLIST[script_mode] || []
@@ -1458,10 +1487,10 @@ CTA RULES (CRITICAL — apply to body + joined; hooks have their own ending):
 
     const typeSpecificInstructions =
       script_type === 'hook'
-        ? `Each hook is a SINGLE PARAGRAPH (no body, no CTA tee-up). It opens with the angle's qualifier (you may rephrase slightly per shape), states the promise + mechanism, includes the assigned shape's signature opening move, and closes with the guarantee. Length: 60-75 words (hard cap at 75). The hook must be standalone — an editor will pair it with a body later.`
+        ? `Each hook is a SINGLE PARAGRAPH. Length: 40-65 words HARD CAP at 65 (Ben 2026-06-01 PM: hooks were too long; Hormozi-style hooks punch). Friend-talk voice. Short sentences. Identity + pain or curiosity or false-belief — pick one of the $100M hook formulas from rule 10(e). NO CTA tee-up in the hook. The hook is standalone — an editor pairs it with a body later.`
         : script_type === 'body'
-          ? `Each body follows the 9-entry skeleton above (7 logical beats; beat 5 is split 5a/5b/5c). CRITICAL — Beat 1 is the STATE-OF-PLAY / SCENE OPENER, not a CTA. The CTA appears ONLY in Beat 7 (Final CTA). NEVER open the body with "So if that sounds [adjective], click the link" — that line belongs at the END, not the start. Beat 1 grounds the reader in a concrete moment or underlying truth of the angle. Beat 2 (pattern statement) zooms out to the systemic claim. Beats 3 (proof roster — NAME the proof characters), 4 (mechanism reveal), 5a/5b/5c (3-part HOW), 6 (guarantee), and 7 (final CTA — THIS is where "click the link below" lives) follow the skeleton tightly. Length: 250-380 words. Do NOT include a hook — bodies are standalone too.`
-          : `Each joined script is HOOK + BODY chained. Write the hook FIRST using the rotation's assigned shape (60-75 words), then write a body that explicitly continues from THAT hook's proof character + opening posture (don't switch proof characters between hook and body). Body follows the skeleton above — Beat 1 is the state-of-play opener, NOT a CTA. CTA appears ONLY in Beat 7. Return them as separate strings (hook_text + body_text) and also as the combined body field. Length: 350-470 words total.`
+          ? `Each body follows the 9-entry skeleton above (7 logical beats; beat 5 is split 5a/5b/5c) but EVERY BEAT MUST READ LIKE A FRIEND TALKING — short sentences, simple words, conversational rhythm. CRITICAL — Beat 1 is the STATE-OF-PLAY / SCENE OPENER, not a CTA. The CTA appears ONLY in Beat 7 (Final CTA). NEVER open the body with "So if that sounds [adjective], click the link." Beat 1 grounds the reader in a concrete moment from the angle. Beat 2 (pattern statement) says the underlying truth in plain words — no academic dropouts, no "dependency" / "engineered" / "topical authority" / "ranking factor" jargon. Beats 3 (proof — ONE named character with a real story, NOT a roster of names), 4 (mechanism reveal — friendly name + plain explanation of WHAT it actually does), 5a/5b/5c (3-step HOW — each step a short sentence about what gets fixed), 6 (guarantee in plain words), 7 (final CTA — "click the link below" lives ONLY here). Length: 200-300 words HARD CAP at 300 (Ben 2026-06-01 PM: previous bodies were too long and lost the conversational rhythm). If you find yourself over 300, cut filler — the rhythm gets BETTER when the script gets shorter.`
+          : `Each joined script is HOOK + BODY chained. Write the hook FIRST using the rotation's assigned shape (40-65 words, friend-talk voice), then write a body that explicitly continues from THAT hook's posture (don't switch proof characters between hook and body). Body follows the skeleton above — Beat 1 is the state-of-play opener, NOT a CTA. CTA appears ONLY in Beat 7. Return as separate strings (hook_text + body_text) and as the combined body field. Length: 250-360 words total HARD CAP at 360.`
 
     // Script mode directive (Ben 2026-06-01, rewritten Schwartz-first after
     // he flagged that examples were being copied verbatim and that
@@ -1486,40 +1515,27 @@ CTA RULES (CRITICAL — apply to body + joined; hooks have their own ending):
     const scriptModeBlock = (() => {
       if (script_mode === 'direct') {
         return script_type === 'hook'
-          ? `\n\nSCRIPT MODE: DIRECT (Schwartz Stage 1-2 — claim-led, HIGH-SALES ENERGY).
-Hook leads with a SHARP CLAIM the prospect actually wants. Qualifier (call them out by revenue + situation, specifically) + promise (a tangible outcome with NUMBERS) + mechanism named in 4-6 words + guarantee with a money-back kicker. This is not a polite ad — it's the kind of pitch the prospect would lean forward for. Length: 60-75 words.
+          ? `\n\nSCRIPT MODE: DIRECT (Schwartz Stage 1-2 — claim-led, FRIEND-TALK).
+Talk to a restoration owner like you actually know one. Identity (revenue band + situation) + a punchy promise with a real number + a money-back. Use one of the Hormozi $100M formulas from system rule 10(e). Length: 40-65 words. Short sentences. Simple words. No jargon.
 
-VOICE: confident, specific, urgent. Stack benefits — name the outcome AND the secondary outcome it unlocks. Examples of energy level (do NOT copy these — write fresh in the angle's voice):
-  - "Restoration owners doing $50k+/mo who want to OWN the Google Guaranteed calls in your zip — not just appear in them — here's how we'll get you to position 1 and triple your call volume in 90 days, or you don't pay." (energy stacked, money-back kicker)
-  - "If you've spent more than $2k on LSA bids in the last 90 days with nothing to show for it, here's why your bid is the wrong lever — and what we'll fix to put you at #1 inside 60 days, guaranteed."
+REGISTER CHECK: would your hook sound natural said out loud at a job site? If it sounds like a LinkedIn post or a TED talk intro, rewrite shorter and plainer. Avoid stacking ALL benefits — pick the sharpest one and lead with it. The hook should make a busy operator stop scrolling for 3 seconds, not read like a brochure.`
+          : `\n\nSCRIPT MODE: DIRECT (Schwartz Stage 1-2 — claim-led, FRIEND-TALK BODY).
+Open with a scene the operator lives — a specific search they're losing, a competitor's truck in their neighborhood, a number on their dashboard. Short. Concrete. Then drive: claim → ONE named proof with a real story → mechanism (friendly name, plain what-it-does) → 3 short steps → guarantee in plain words → CTA. Length: 200-300 words.
 
-ANTI-BLAND CHECK: if your draft sounds like a copywriting template ("If you want X, here's what we'll do for you"), it's too generic — rewrite with sharper specifics, a number, and an urgency cue (timeframe, status of the market, what they're losing).`
-          : `\n\nSCRIPT MODE: DIRECT (Schwartz Stage 1-2 — claim-led, HIGH-SALES ENERGY).
-Body drives. State-of-play opener that grounds the reader in a CONCRETE missed opportunity or pain (a specific search they're not winning, a competitor stealing their calls, money they're burning) — then attack → claim → proof → mechanism (named, not explained) → 3-part HOW → guarantee → CTA. Beat 2 makes the underlying CLAIM with conviction. Proof characters get NAMED with specific numbers ($X, Y days, Z position lift). 3-part HOW reads like a system, not a feature list.
-
-VOICE: confident, specific, urgent. Stack what they're losing now, then stack what they get. Use concrete restoration vocabulary (Google Guaranteed calls, water-extraction jobs, insurance adjuster referrals, ServPro-level competitors) — not abstract "growth" / "scale" language. End with a CTA that names the next concrete step + reinforces the guarantee.
-
-ANTI-BLAND CHECK: if the body reads like a generic agency pitch ("we'll help you grow your business"), it's wrong. Every claim must be anchored to a specific number, signal, or named proof.`
+VOICE CHECK every paragraph: does this sound like a friend explaining how to fix the operator's problem at a bar? Or does it sound like an ad agency? If it's an agency, rewrite shorter + plainer. Banned phrases: "leverage", "engineered", "dependency", "topical authority", "service radius weighting" — say what these actually mean in plain words. The body is a 60-second conversation that ends with "tap below."`
       }
       if (script_mode === 'hybrid') {
         return script_type === 'hook'
-          ? `\n\nSCRIPT MODE: HYBRID (Schwartz Stage 2-3 — claim + emerging mechanism, HIGH-SALES ENERGY).
-Hook leads with the offer's claim, but inserts ONE compressed mechanism-reveal sentence that REFRAMES why the obvious approach is wrong. The reveal is a 6-12 word insight (a signal name, a stat, an industry move) — then the claim doubles down with that reveal as backing. Length: 60-75 words. Shape from the allowed set.
+          ? `\n\nSCRIPT MODE: HYBRID (Schwartz Stage 2-3 — claim + reveal, FRIEND-TALK).
+One sentence that flips what the operator thinks they know — said in plain words, not jargon. Then the claim doubles down on that flip. Then the money-back. Length: 40-65 words.
 
-Structure pattern (substitute the angle's specifics):
-  - REFRAME: "Higher LSA bids don't get you to #1 — Google weighs response time 3.2x more than bid"
-  - CLAIM that USES the reframe: "We rebuild your response-time + review-velocity signals so position 1 becomes engineering, not auction"
-  - GUARANTEE: "Top 3 placement in 90 days or your money back"
+Plain-words example of the flip (do NOT copy, write fresh in the angle's voice): "Most restoration guys think Google ranks them by who bids highest. They don't. They rank by who answers the phone fastest." — short, friend-talk, surprising. Then the claim leans on that surprise.
 
-VOICE: confident operator with technical edge. Stronger sell energy than pure Direct — the reframe gives you AUTHORITY which earns the right to make a bigger claim. NOT a soft educational tease. The reframe SETS UP the offer.
+If the flip is jargon ("response-time signal weighting") → rewrite it the way you'd say it at a bar.`
+          : `\n\nSCRIPT MODE: HYBRID (Schwartz Stage 2-3 — claim + reveal, FRIEND-TALK BODY).
+Direct body shape with ONE plain-words mechanism flip woven into Beat 2 — said the way a friend would tell you. The reveal is 1-2 sentences MAX. After that, return to direct flow: ONE named proof story → mechanism (friendly name + plain explanation) → 3 short steps → guarantee → CTA. Length: 200-300 words.
 
-If hybrid hook reads identical to Direct (no reframe) → wrong. If it reads identical to Educational (no offer in close) → also wrong.`
-          : `\n\nSCRIPT MODE: HYBRID (Schwartz Stage 2-3 — claim + emerging mechanism, HIGH-SALES ENERGY).
-Body is a DIRECT body with ONE mechanism-reveal beat woven into Beat 2 (pattern statement) AND echoed in Beat 4 (mechanism reveal). The reveal is the SPECIFIC technical edge that makes the offer work — a real algorithm signal, a real industry move. Beats 3 (proof) and onward use the reveal as the spine — proof characters demonstrate the reveal at work, not generic "we got results."
-
-VOICE: confident operator. Sell energy throughout. The reveal gives credibility for a BIGGER claim than pure Direct could carry. Educational teaches throughout — Hybrid teaches ONE thing then SELLS HARDER because that one thing earned attention.
-
-If Hybrid body reads identical to Educational (teach-throughout, soft CTA) → wrong. If identical to Direct (no reveal at all, just a claim) → also wrong.`
+VOICE CHECK: the flip sentence must be the kind of insight that makes the operator think "huh, I didn't know that." NOT "I've heard that in every ad." If it sounds like every other restoration ad — rewrite the flip with a sharper, more specific angle the prospect hasn't been told before.`
       }
       // educational — Schwartz Stage 3-4: MECHANISM-LED headline.
       // Stage 3 = "your market has heard all the claims; what they need
@@ -1527,67 +1543,57 @@ If Hybrid body reads identical to Educational (teach-throughout, soft CTA) → w
       // Stage 4 = the mechanism itself becomes overworked, so you have
       // to find a SHARPER version of the mechanism or a contrarian angle.
       return script_type === 'hook'
-        ? `\n\nSCRIPT MODE: EDUCATIONAL (Schwartz Stage 3-4 — mechanism-led, direct-leaning).
+        ? `\n\nSCRIPT MODE: EDUCATIONAL (Schwartz Stage 3-4 — mechanism-led, FRIEND-TALK).
 
-The saturated market has heard every claim. They need a new MECHANISM to make the old promise believable. Educational hooks LEAD WITH THE MECHANISM and then SELL FROM THE AUTHORITY THAT MECHANISM EARNS. Updated 2026-06-01 (PM) per Ben: "make the educational ones a lot more direct." So educational is NOT a soft TOFU tease — it's a SHARPER sell that opens by naming the technical edge, then closes with an offer + guarantee.
+The market has heard every claim. They need a fresh angle on HOW it actually works to believe you. Educational hooks lead with that fresh angle in PLAIN WORDS — then close with the offer + money-back.
 
 ═══ STRUCTURE ═══
 
-[1] OPEN with the mechanism. Pick from:
-   - Direct mechanism-claim (Shape A allowed): "Restoration owners doing $50k+/mo: Position 1 in LSA is decided by response time, review velocity, and proximity signals — NOT bid amount. Here's how we engineer all three…"
-   - Reality-statement (Shape D): "The restoration companies dominating Maps in 2026 aren't outbidding ServPro — they've engineered Google's three primary ranking signals to win automatically."
-   - Curiosity contrast (Shape E): "Why do some restoration companies capture 11 Google Guaranteed calls per week while others stay at 3, even with bigger LSA budgets? Three ranking signals you've never optimized."
-   - Reframe (Shape F): "Your LSA budget isn't the problem — Google's algorithm weighs response time 3.2x more than bid. That's why the rebuild we run beats higher bidders."
-   - Trend (Shape H): "By Q3 2026 the restoration companies winning emergency calls won't be the highest bidders — they'll be the operators who rebuilt their LSA foundation signals."
+[1] OPEN with one of these moves (pick whichever fits the angle; write the wording fresh in the prospect's voice, do NOT copy):
+   - The contrast question (Hormozi's curiosity formula): "Why do some restoration guys book 10 Google calls a week while others spend the same and get 2?"
+   - The flip / reframe in plain words: "It's not about your bid. It's about how fast you pick up the phone."
+   - The trend-on-the-ground: "The guys winning Maps in 2026 aren't the biggest bidders. They figured out something different."
+   - The "just talked to..." opener: "Just got off the phone with a guy in Charlotte. He told me how he moved from spot 5 to spot 1 in 47 days. It blew my mind."
+   - The identity + revealed pain: "If you're a restoration owner spending $2k+/mo on LSA and still buried, you're fighting the wrong battle."
 
-[2] DELIVER a real mechanism fragment in the hook itself. Name actual signals / algorithm factors / industry moves (response time benchmark, review velocity, service radius weighting, AI citation graph, preferred-vendor API rollout, topical authority). NOT abstract "we know the algorithm" claims.
+[2] DROP THE INSIGHT in plain words. Name the actual thing — response time, fresh reviews, how big an area Google shows you in — but say it the way a friend would say it. NOT "review velocity signals" → say "how fast new reviews come in." NOT "service radius weighting" → say "how big an area Google trusts you to serve." NOT "topical authority" → say "Google sees you as the expert on water damage."
 
-[3] CLOSE with one of these (this is the change from prior versions):
-   - A soft mechanism-promise: "We'll rebuild yours to hit position 1 in 90 days, guaranteed or you don't pay."
-   - A reframe-into-CTA: "Click below to see exactly which signals your LSA is missing."
-   - A guarantee anchored to the mechanism: "Engineering not luck — top 3 in 90 days or money back."
-   Educational CAN close with an offer + guarantee. The difference from Direct: the offer is EARNED by the mechanism-reveal in the open, not bolted on.
+[3] CLOSE with a soft offer + money-back: "We do this for restoration guys. Top 3 in 90 days or your money back." Short. Direct. Plain.
 
 ═══ HARD RULES ═══
 
-Length: 60-90 words (slightly longer than Direct to fit the mechanism-fragment).
+Length: 50-75 words HARD CAP at 75 (Ben 2026-06-01 PM: prior version was too long-winded).
 
-Voice: confident operator with technical edge. Sell energy is OK + encouraged. Anchor every claim to a specific signal / number / mechanism.
+VOICE — this is the biggest rule: write like you're explaining the insight to a friend who runs a restoration company. Contractions everywhere. Short sentences. Fragments OK. Direct address. NO "engineered" / "dependency" / "algorithm" / "optimize" / any LinkedIn-bro language. If your draft hook sounds like a podcast intro to a marketing show, you've nailed it. If it sounds like a SaaS landing page, rewrite.
 
-VARIETY ACROSS A BATCH (Ben 2026-06-01): across N hooks, vary the opening shape — don't ship 5 hooks that all open "How is it possible that..." or 5 that all open "Restoration owners doing $50k+/mo:". A batch of 5 should touch at least 3 distinct opening moves from [1].
+VARIETY ACROSS A BATCH: across N hooks, mix the opening moves above. A batch of 5 should hit at least 3 different moves. Banned: starting more than 2 hooks with "Restoration owners doing $50k+/mo:" — that's a tic, vary the open.`
+        : `\n\nSCRIPT MODE: EDUCATIONAL (Schwartz Stage 3-4 — mechanism-led body, FRIEND-TALK BODY).
 
-BANNED:
-  ✗ Generic "you didn't know" tease without naming the actual signal
-  ✗ Pure curiosity hook with no mechanism payoff in the hook itself
-  ✗ Copying the example wording verbatim — write fresh in the angle's specific vocabulary`
-        : `\n\nSCRIPT MODE: EDUCATIONAL (Schwartz Stage 3-4 — mechanism-led body, direct-leaning).
+You're explaining to a friend who runs a restoration company how the game actually works — and you happen to do this for a living. The body teaches AND sells, both in friend-talk. No academic dropouts. No jargon. Short sentences. Concrete scenes.
 
-The body teaches WHILE SELLING. Each beat advances the lesson AND moves the prospect closer to the offer. The mechanism is the spine of conviction. Updated 2026-06-01 (PM) per Ben: "make the educational ones a lot more direct." So this is NOT a pure-teach essay — it's a SHARPER sell that uses the mechanism reveal as authority.
+You don't have to follow the 9-entry skeleton beat-for-beat. The CONVERSATION drives the order — reorder or merge where the friend-talk flows better.
 
-You DO NOT have to follow the 9-entry Beat 1-7 skeleton above one-for-one. The lesson + offer drive the structure together. Use the skeleton as a checklist of beats that need to happen, but reorder/merge/expand where the lesson demands.
+═══ WHAT MUST HAPPEN (in plain words, conversational order) ═══
 
-═══ WHAT MUST HAPPEN (in any order that serves the script) ═══
+1. SCENE OPENER — paint the moment in 2-4 short sentences. Their dashboard read. A search they ran. A competitor's truck. Concrete + specific.
+2. THE INSIGHT in plain words — the angle's mechanism reframe, but said the way you'd say it at a bar. NOT "Google's algorithm weighs response time 3.2x more than bid amount." YES "Google cares more about how fast you pick up than how much you bid. Most guys don't know this."
+3. ONE NAMED PROOF — short story (4-6 sentences max). One person, real numbers, real outcome. NOT a roster. Show how the insight played out for them.
+4. THE MECHANISM in plain words — name your system with a friendly name + explain what it actually does in 2-3 sentences. NOT "the LSA Signal Engineering System tunes proximity weighting." YES "We call it the Pin-1 Rebuild. It's three things we fix on your Google profile so the calls come to you instead of ServPro."
+5. THE 3 STEPS — each in 1-2 short sentences. What gets fixed. Plain words.
+6. GUARANTEE in plain words — "Top 3 in 90 days or your money back." Not "we guarantee positioning above the fold." Just say what they get and what happens if they don't.
+7. CTA — "Tap below. Let's talk." Or "Click the link and we'll walk through your numbers." Short.
 
-1. STATE-OF-PLAY opener grounded in a specific scene the prospect lives (a search they're not winning, a competitor's truck in their neighborhood, a dashboard read).
-2. MECHANISM REVEAL — name the actual signal / algorithm factor / industry move that changes the game (response time, review velocity, service radius weighting, AI citation graph, preferred-vendor API rollout, topical authority). NOT abstract "the market is changing."
-3. PROOF as case studies of the mechanism — named characters with specific numbers ($X, Y days, Z% lift). Each proof DEMONSTRATES the mechanism, not just "we got results."
-4. SYSTEMATIC APPLICATION — name your mechanism as the engineering process for hitting those signals ("the Maps Pin-1 Foundation Rebuild", "the LSA Signal Engineering System"). Position it as engineering, not luck.
-5. 3-PART HOW — three concrete sub-steps the mechanism executes. Each is a teachable concept the prospect can verify.
-6. GUARANTEE that's anchored to the mechanism: "Because this is engineering, not auction, we can guarantee X in Y days or you don't pay." This is a HARD guarantee — the educational mode EARNED it by teaching.
-7. CTA that closes — "Click below to see your specific signal gaps" / "Click below to book your LSA audit and see exactly which signals are losing you calls." The educational CTA frames LEARNING FIRST + BOOKING SECOND, but the booking IS the close.
+═══ VOICE — THIS IS THE BIGGEST RULE ═══
 
-═══ VOICE ═══
+Read every paragraph out loud in your head. If it sounds like an ad, a LinkedIn post, or a SaaS sales page — rewrite shorter and plainer. If it sounds like a person talking to a person — keep it.
 
-Confident operator with technical edge. Sales energy is ON. Stack what they're losing now (calls going to competitors, dollars burning on bids) and what they get (position 1, X Google Guaranteed calls/week, Y guaranteed timeframe). The teach + the sell run in parallel, not sequentially.
+BANNED vocabulary (rewrite in plain words): dependency, engineered, optimize, algorithm (say "what Google looks at"), topical authority, ranking factor, service radius weighting, proximity algorithm, review velocity, preferred-vendor API, systematic application, methodology, infrastructure, framework, pipeline (in business sense).
 
-BANNED:
-  ✗ Pure-teach essays with no sell energy
-  ✗ Generic "the market is changing" / "Google is getting smarter" — name the SPECIFIC signal
-  ✗ Soft no-CTA closes — close with a clear next-step and the guarantee
+BANNED rhythm: any sentence longer than 25 words unless it earns it with rhythm. Long. Short. Short. Long. Vary deliberately. Hormozi style.
 
-Length: 280-420 words.
+Length: 200-300 words HARD CAP at 300 (Ben 2026-06-01 PM: shorter wins). If you're at 280 and the script feels good, ship it. If you're at 290 looking for filler — STOP, the script is done.
 
-ANTI-TEMPLATE CHECK: if your body could be swapped onto any vertical with minor edits ("restoration" → "roofing"), it's too generic — anchor on this angle's specific signals, mechanism vocabulary, and prospect pain.`
+ANTI-TEMPLATE CHECK: if your body could be swapped to roofing or plumbing with 3-word find-replace, it's too generic — anchor on this angle's specific scene, specific named proof, specific in-the-trenches detail.`
     })()
 
     const userMsg = [
