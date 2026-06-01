@@ -1477,10 +1477,16 @@ export default function AdsPerformance() {
           // Fixed by using prosp.* (deduped union of typeform + GHL +
           // close-resolved by email/name) as the BIG number. The per-row
           // attribution sum stays as a subtitle parenthetical for diagnostics.
-          const liveTile   = liveCount   || 0
-          const bookedTile = prosp.booked || 0
+          // Bind tile BIG numbers to `prosp` — same source the drilldowns
+          // and Marketing tiles use. Ben 2026-06-01: previously liveTile
+          // and closesTile pointed at `pm.liveProspects` / `pm.closedProspects`
+          // (closer_calls deduped) which is a DIFFERENT universe than
+          // Marketing's audience view. Live calls showed 24 vs Marketing
+          // 38 because of that source split.
+          const liveTile   = prosp.live   || 0   // = lib_ghl_lives_detail rows (matches Marketing's Net New Live)
+          const bookedTile = prosp.booked || 0   // = lib_strategy_booking_resolved unique contacts (matches Marketing's bk.all)
           const leadsTile  = prosp.leads  || 0
-          const closesTile = closesCount || 0
+          const closesTile = prosp.closes || 0   // = lib_close_resolved-deduped (matches Marketing's audience view closes)
           const visibleLeads  = totals.tfLeads  || 0
           const visibleBooked = totals.tfBooked || 0
           const visibleLive   = totals.tfLive   || 0
