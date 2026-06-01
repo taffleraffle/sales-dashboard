@@ -1441,32 +1441,52 @@ export default function AdsPerformance() {
           // report + attributed total so the gap is visible. Drilldown
           // still queries the global universe so clicking a top tile
           // shows ALL prospects, not just the attributed subset.
+          // Top-tile BIG numbers = deduped prospect counts. Same source as
+          // the drilldown panel so the tile and the drilldown ALWAYS match.
+          //
+          // Ben (2026-06-01): "Says we had 49 live calls but the drilldown
+          // shows 24, says 5 closes but the drilldown shows 4. This data is
+          // all over the place."
+          //
+          // Root cause: the old BIG numbers (totals.tfLive etc.) summed
+          // per-row attribution across visible campaigns + adset/campaign
+          // overlays. A prospect attributable to an ad AND its parent
+          // campaign got counted twice. Drilldown deduped by prospect →
+          // smaller number → tile ≠ drilldown.
+          //
+          // Fixed by using prosp.* (deduped union of typeform + GHL +
+          // close-resolved by email/name) as the BIG number. The per-row
+          // attribution sum stays as a subtitle parenthetical for diagnostics.
+          const liveTile   = liveCount   || 0
+          const bookedTile = prosp.booked || 0
+          const leadsTile  = prosp.leads  || 0
+          const closesTile = closesCount || 0
           const visibleLeads  = totals.tfLeads  || 0
           const visibleBooked = totals.tfBooked || 0
           const visibleLive   = totals.tfLive   || 0
           const visibleCloses = totals.tfCloses || 0
-          // Show "N global unique" when the visible sum differs (cross-
-          // campaign prospects only count once globally but in each
-          // campaign here; orphan bookings are global but not in rows).
-          const subRows = (eodVal, visibleVal, globalVal, extra = '') => {
+          // Subtitle shows EOD-reported (closer self-report) +
+          // attributed-to-visible-rows (sum of per-row tfX) so the operator
+          // can see all three numbers for reconciliation.
+          const subRows = (eodVal, attributedVal, extra = '') => {
             const parts = []
-            if (eodVal > 0)                       parts.push(`${fmtN(eodVal)} EOD-reported`)
-            if (globalVal && globalVal !== visibleVal) parts.push(`${fmtN(globalVal)} unique total`)
+            if (eodVal > 0)         parts.push(`${fmtN(eodVal)} EOD-reported`)
+            if (attributedVal > 0)  parts.push(`${fmtN(attributedVal)} attributed`)
             return parts.length ? parts.join(' · ') + extra : null
           }
-          const tipProspect = 'Sum of every visible campaign-row attribution in this window. Drilldown queries the global universe so the panel may list more prospects than this count (cross-campaign dedup) — the panel header explains the math.'
-          const tipLive   = 'Sum of every visible row\'s Live count. Source: typeform is_live ∪ ghl_lives ∪ closes (a close implies a live). Compare with the closer-EOD self-reported count in the subtitle.'
-          const tipCloses = 'Sum of every visible row\'s Close count. Source: lib_close_resolved ∪ typeform is_closed. Compare with the closer-EOD count.'
+          const tipProspect = 'Unique prospects in this window — deduped by email + name across typeform, GHL, and lib_close_resolved. Matches the drilldown count exactly. The "attributed" subtitle is the sum of per-row attribution across visible campaigns (a prospect attributed to multiple ads counts once here but multiple times in the per-row sum).'
+          const tipLive   = 'Unique prospects who had a live call. Source: typeform is_live ∪ ghl_lives ∪ closes (close ⇒ live). Drilldown panel shows the same list one-for-one.'
+          const tipCloses = 'Unique prospects who closed. Source: lib_close_resolved ∪ typeform is_closed. Excludes ascensions.'
           return (
             <>
-              <TotalsTile label="Leads"      value={fmtN(visibleLeads)}  sub={subRows(eod.leads,  visibleLeads,  prosp.leads)}  onClick={click('leads')}  tip={tipProspect} />
-              <TotalsTile label="Booked"     value={fmtN(visibleBooked)} sub={subRows(eod.booked, visibleBooked, prosp.booked)} onClick={click('booked')} tip={tipProspect} />
-              <TotalsTile label="Live calls" value={fmtN(visibleLive)}   sub={subRows(eod.live,   visibleLive,   liveCount)}    onClick={click('live')}   tip={tipLive} />
+              <TotalsTile label="Leads"      value={fmtN(leadsTile)}  sub={subRows(eod.leads,  visibleLeads)}  onClick={click('leads')}  tip={tipProspect} />
+              <TotalsTile label="Booked"     value={fmtN(bookedTile)} sub={subRows(eod.booked, visibleBooked)} onClick={click('booked')} tip={tipProspect} />
+              <TotalsTile label="Live calls" value={fmtN(liveTile)}   sub={subRows(eod.live,   visibleLive)}   onClick={click('live')}   tip={tipLive} />
               <TotalsTile
                 label="Closes"
-                value={fmtN(visibleCloses)}
-                sub={subRows(eod.closes, visibleCloses, closesCount, eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : '')}
-                valueColor={visibleCloses > 0 ? '#1f7a3a' : undefined}
+                value={fmtN(closesTile)}
+                sub={subRows(eod.closes, visibleCloses, eod.revenue > 0 ? ` · ${fmt$(eod.revenue)} rev` : '')}
+                valueColor={closesTile > 0 ? '#1f7a3a' : undefined}
                 onClick={click('closed')}
                 tip={tipCloses}
               />
