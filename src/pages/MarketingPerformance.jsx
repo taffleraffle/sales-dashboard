@@ -1116,34 +1116,66 @@ async function fetchLiveCalls({ from, to, audiences } = {}) {
 }
 
 async function fetchCloses({ from, to, audiences } = {}) {
-  // Every closed deal in window — closes only (not ascensions). Includes both
-  // new_call and follow_up call types since a follow-up that closes is still
-  // a marketing-attributed close.
-  const allowed = await prospectNamesInAudience(audiences, { from, to })
-  const { data: reports } = await supabase
-    .from('closer_eod_reports')
-    .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
-    .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
-  const reportIds = (reports || []).map(r => r.id)
-  const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
-  if (reportIds.length === 0) return []
-  const { data: callRows } = await supabase
-    .from('closer_calls')
-    .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected, offered_finance')
-    .in('eod_report_id', reportIds)
-    .eq('outcome', 'closed')
-    .neq('call_type', 'ascension')
-  return (callRows || [])
-    .filter(c => prospectMatches(c.prospect_name, allowed))
-    .map(c => ({
-      date: reportMap[c.eod_report_id]?.report_date,
+  // Every closed deal in window. Source of truth: lib_close_audience —
+  // the same close-resolver chain lib_marketing_by_audience_daily uses for
+  // the tile count. Drilldown count now matches the tile.
+  //
+  // Previously this used closer_calls + prospect_name → strategy_booking
+  // matching. That missed every close whose prospect never booked a
+  // strategy call (e.g. typeform-resolved closes like George Sidhom). The
+  // drilldown showed 2 closes while the tile read 4 — same window, two
+  // methodologies. Fixed by reading from the resolved-close view directly
+  // and JOINing closer_calls only for closer name + call_type.
+  const sinceTs = `${from}T00:00:00Z`
+  const untilTs = `${to}T23:59:59Z`
+
+  let q = supabase
+    .from('lib_close_audience')
+    .select('closer_call_id, prospect_name, revenue, cash_collected, created_at, audience')
+    .gte('created_at', sinceTs).lte('created_at', untilTs)
+  if (audiences && audiences.size > 0) {
+    q = q.in('audience', [...audiences])
+  }
+  const { data: closeRows } = await q
+  if (!closeRows?.length) return []
+
+  // Look up closer name + call_type via closer_call_id. Some lib_close_audience
+  // rows have null closer_call_id (GHL-attributed closes with no EOD entry).
+  const callIds = closeRows.map(r => r.closer_call_id).filter(Boolean)
+  let closerById = {}
+  if (callIds.length) {
+    const { data: calls } = await supabase
+      .from('closer_calls')
+      .select('id, call_type, eod_report_id')
+      .in('id', callIds)
+    const reportIds = [...new Set((calls || []).map(c => c.eod_report_id).filter(Boolean))]
+    let reportMap = {}
+    if (reportIds.length) {
+      const { data: reports } = await supabase
+        .from('closer_eod_reports')
+        .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
+        .in('id', reportIds)
+      reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
+    }
+    closerById = Object.fromEntries((calls || []).map(c => [c.id, {
+      call_type: c.call_type,
       closer: reportMap[c.eod_report_id]?.closer?.name || '—',
-      type: c.call_type,
-      prospect: c.prospect_name || '—',
-      revenue: c.revenue,
-      cash: c.cash_collected,
-      finance: c.offered_finance ? 'yes' : 'no',
-    })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    }]))
+  }
+
+  return closeRows.map(r => {
+    const ci = closerById[r.closer_call_id] || {}
+    return {
+      date: String(r.created_at || '').split('T')[0],
+      closer: ci.closer || '—',
+      type: ci.call_type || '—',
+      prospect: r.prospect_name || '—',
+      revenue: r.revenue,
+      cash: r.cash_collected,
+      audience: r.audience,
+      finance: 'no',
+    }
+  }).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
 async function fetchAscensions({ from, to, audiences } = {}) {
