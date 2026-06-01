@@ -231,7 +231,7 @@ export default function AdsGenerator() {
     if (!target) { setHistory([]); return }
     setHistoryLoading(true)
     try {
-      const rows = await listGeneratedScripts({ offer_slug: target, limit: 50 })
+      const rows = await listGeneratedScripts({ offer_slug: target, limit: 200 })
       setHistory(rows)
     } catch {
       setHistory([])
@@ -2013,6 +2013,11 @@ export default function AdsGenerator() {
           if (!buckets[k]) { buckets[k] = []; order.push(k) }
           buckets[k].push(r)
         }
+        // angle slug -> angle row, so the History rows can show the angle name.
+        // Build from the messagingLibrary if available (covers retired angles too
+        // since History rows may reference angles that have since been retired)
+        // and fall back to the active `angles` list.
+        const angleLookup = buildAngleLookup([...(messagingLibrary || []), ...(angles || [])])
         return (
           <div style={{ marginTop: 48, marginBottom: 24 }}>
             <div style={{ display: 'flex', alignItems: 'baseline',
@@ -2032,7 +2037,9 @@ export default function AdsGenerator() {
             </div>
             <div style={{ display: 'grid', gap: 10 }}>
               {order.map(k => (
-                <HistoryRunRow key={k} bucket={k} rows={buckets[k]} />
+                <HistoryRunRow key={k} bucket={k} rows={buckets[k]}
+                  angleLookup={angleLookup}
+                  currentOfferSlug={offerSlug} />
               ))}
             </div>
           </div>
@@ -2154,16 +2161,52 @@ function AdvancedExpander({ label = 'Advanced (optional)', defaultOpen = false, 
 // of generated_scripts. Default closed; expands to show the actual body
 // previews for each draft inside the bucket. Replaces the old "Recent
 // drafts" flat table whose titles were uninformative.
-function HistoryRunRow({ bucket, rows }) {
+// Mode color palette — keep in sync with the Mode Mix Block. Per
+// Schwartz stage:
+//   direct      Stage 1-2 = warm gray ink
+//   hybrid      Stage 2-3 = amber middle ground
+//   educational Stage 3-4 = blue (where the conversion lift lives)
+const SCRIPT_MODE_META = {
+  direct:      { label: 'Direct',      color: '#5a6770', tint: '#eef1f3' },
+  hybrid:      { label: 'Hybrid',      color: '#a87a1e', tint: '#fbf3df' },
+  educational: { label: 'Educational', color: '#3068b5', tint: '#e8f0fb' },
+}
+function scriptModeMeta(m) {
+  return SCRIPT_MODE_META[m] || { label: m || '—', color: 'var(--ink-4)', tint: 'transparent' }
+}
+
+// Lookup helper: angle slug → angle name + type. Passed down from the
+// AdsGenerator parent so every row can show "for which angle this was
+// generated" without an extra fetch per row.
+function buildAngleLookup(angles) {
+  const out = {}
+  for (const a of angles || []) out[a.slug] = a
+  return out
+}
+
+function HistoryRunRow({ bucket, rows, angleLookup, currentOfferSlug }) {
   const [open, setOpen] = useState(false)
-  // Group within the bucket by script_type so the operator scans Hooks /
-  // Bodies / Joined separately even within one run.
-  const byType = {}
-  const typeOrder = []
+  // Within a batch, group by ANGLE first (the most important context — Ben:
+  // "I can't tell what these are for"), then by script type. So the operator
+  // sees the angle name as a heading, then "Hook · 4", "Body · 3" beneath it.
+  const byAngle = {}
+  const angleOrder = []
   for (const r of rows) {
-    const t = (r.script_type || 'Other').toString()
-    if (!byType[t]) { byType[t] = []; typeOrder.push(t) }
-    byType[t].push(r)
+    const k = r.angle_slug || '_unknown'
+    if (!byAngle[k]) { byAngle[k] = { rows: [], types: new Set(), modes: new Set() }; angleOrder.push(k) }
+    byAngle[k].rows.push(r)
+    if (r.script_type) byAngle[k].types.add(r.script_type)
+    const m = r.target_attributes?.script_mode
+    if (m) byAngle[k].modes.add(m)
+  }
+  // Batch-level summaries for the collapsed header
+  const allTypes = {}
+  const allModes = {}
+  for (const r of rows) {
+    const t = r.script_type || '—'
+    allTypes[t] = (allTypes[t] || 0) + 1
+    const m = r.target_attributes?.script_mode
+    if (m) allModes[m] = (allModes[m] || 0) + 1
   }
   const ts = new Date(bucket + ':00Z')
   const when = isNaN(ts) ? bucket : ts.toLocaleString('en-US', {
@@ -2176,90 +2219,212 @@ function HistoryRunRow({ bucket, rows }) {
     }}>
       <button onClick={() => setOpen(o => !o)}
         style={{
-          width: '100%', padding: '10px 14px', background: 'transparent',
+          width: '100%', padding: '12px 16px', background: 'transparent',
           border: 'none', cursor: 'pointer', textAlign: 'left',
-          display: 'flex', alignItems: 'center', gap: 12,
+          display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
         }}>
         <span style={{
           fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.12em',
-          textTransform: 'uppercase', color: 'var(--ink-4)', minWidth: 130,
+          textTransform: 'uppercase', color: 'var(--ink-4)', minWidth: 110,
         }}>{when}</span>
         <span style={{
-          fontFamily: 'var(--sans)', fontSize: 13.5, color: 'var(--ink-2)', flex: 1,
+          fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 600, color: 'var(--ink)',
         }}>
           {rows.length} {rows.length === 1 ? 'draft' : 'drafts'}
-          {typeOrder.length > 1 && (
-            <span style={{ color: 'var(--ink-4)', marginLeft: 6 }}>
-              ({typeOrder.map(t => `${byType[t].length} ${t.toLowerCase()}`).join(' · ')})
-            </span>
-          )}
         </span>
-        {open ? <ChevronUp size={14} color="var(--ink-4)" /> : <ChevronDown size={14} color="var(--ink-4)" />}
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.06em',
+          color: 'var(--ink-3)',
+        }}>
+          across {angleOrder.length} angle{angleOrder.length === 1 ? '' : 's'}
+        </span>
+        {/* Type counts as chips */}
+        <span style={{ display: 'inline-flex', gap: 6 }}>
+          {Object.entries(allTypes).map(([t, n]) => (
+            <span key={t} style={{
+              fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
+              textTransform: 'uppercase', padding: '2px 7px',
+              background: 'var(--paper)', border: '1px solid var(--rule)',
+              color: 'var(--ink-2)', borderRadius: 2,
+            }}>
+              {t} · {n}
+            </span>
+          ))}
+        </span>
+        {/* Mode counts as color-coded chips */}
+        {Object.keys(allModes).length > 0 && (
+          <span style={{ display: 'inline-flex', gap: 6 }}>
+            {Object.entries(allModes).map(([m, n]) => {
+              const mm = scriptModeMeta(m)
+              return (
+                <span key={m} style={{
+                  fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
+                  textTransform: 'uppercase', padding: '2px 7px',
+                  background: mm.tint, border: `1px solid ${mm.color}`,
+                  color: mm.color, borderRadius: 2, fontWeight: 600,
+                }}>
+                  {mm.label} · {n}
+                </span>
+              )
+            })}
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto' }}>
+          {open ? <ChevronUp size={14} color="var(--ink-4)" /> : <ChevronDown size={14} color="var(--ink-4)" />}
+        </span>
       </button>
       {open && (
-        <div style={{ borderTop: '1px solid var(--rule)', padding: '8px 14px 14px' }}>
-          {typeOrder.map(t => (
-            <div key={t} style={{ marginTop: 10 }}>
-              <div style={{
-                fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.14em',
-                textTransform: 'uppercase', color: 'var(--ink-3)',
-                marginBottom: 6, fontWeight: 600,
-              }}>
-                {t} · {byType[t].length}
+        <div style={{ borderTop: '1px solid var(--rule)', padding: '14px 16px 16px', background: '#fafaf7' }}>
+          {angleOrder.map(angleSlug => {
+            const group = byAngle[angleSlug]
+            const angle = angleLookup?.[angleSlug]
+            const tMeta = angle ? angleTypeMeta(angle.angle_type) : { color: 'var(--rule)', label: '—' }
+            // Within this angle, group by type so the operator sees Hooks then Bodies.
+            const byType = {}
+            const typeOrder = []
+            for (const r of group.rows) {
+              const t = r.script_type || '—'
+              if (!byType[t]) { byType[t] = []; typeOrder.push(t) }
+              byType[t].push(r)
+            }
+            return (
+              <div key={angleSlug} style={{ marginBottom: 18 }}>
+                {/* Angle heading — type-colored left bar so the operator
+                    can scan problem/circumstance/outcome at a glance */}
+                <div style={{
+                  display: 'flex', alignItems: 'baseline', gap: 10,
+                  padding: '6px 0 8px 12px', marginBottom: 8,
+                  borderLeft: `3px solid ${tMeta.color}`,
+                  borderBottom: '1px solid var(--rule)',
+                }}>
+                  <span style={{
+                    fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em',
+                    textTransform: 'uppercase', fontWeight: 700,
+                    color: tMeta.color,
+                  }}>{tMeta.label}</span>
+                  <span style={{
+                    fontFamily: 'var(--serif)', fontSize: 16, fontWeight: 500,
+                    color: 'var(--ink)', lineHeight: 1.25,
+                  }}>{angle?.name || angleSlug}</span>
+                  <span style={{
+                    marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10,
+                    letterSpacing: '0.08em', color: 'var(--ink-4)',
+                  }}>
+                    {group.rows.length} · {typeOrder.map(t => `${byType[t].length} ${t.toLowerCase()}`).join(' / ')}
+                  </span>
+                </div>
+                {typeOrder.map(t => (
+                  <div key={t} style={{ marginBottom: 12 }}>
+                    <div style={{
+                      fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.16em',
+                      textTransform: 'uppercase', color: 'var(--ink-3)',
+                      marginBottom: 6, fontWeight: 700,
+                    }}>
+                      {t} · {byType[t].length}
+                    </div>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      {byType[t].map(r => <HistoryDraftRow key={r.id} row={r} angleName={angle?.name} />)}
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div style={{ display: 'grid', gap: 8 }}>
-                {byType[t].map(r => <HistoryDraftRow key={r.id} row={r} />)}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
   )
 }
 
-function HistoryDraftRow({ row }) {
+function HistoryDraftRow({ row, angleName }) {
   const [expanded, setExpanded] = useState(false)
-  const preview = (row.body || '').replace(/\s+/g, ' ').trim().slice(0, 180)
+  const preview = (row.body || '').replace(/\s+/g, ' ').trim().slice(0, 220)
+  const mode = row.target_attributes?.script_mode
+  const modeMeta = scriptModeMeta(mode)
+  const shape = row.target_attributes?.shape_code
+  const proofChar = row.target_attributes?.proof_character
+  const teachFocus = row.target_attributes?.teach_focus
+  const wordCount = (row.body || '').trim().split(/\s+/).filter(Boolean).length
   function copy(e) {
     e.stopPropagation()
     navigator.clipboard.writeText(row.body || '')
   }
   return (
     <div style={{
-      padding: '10px 12px', background: 'var(--paper)',
-      border: '1px solid var(--rule)', borderRadius: 2,
-      cursor: 'pointer',
+      padding: '11px 14px', background: 'white',
+      border: '1px solid var(--rule)',
+      borderLeft: mode ? `3px solid ${modeMeta.color}` : '1px solid var(--rule)',
+      borderRadius: 2, cursor: 'pointer',
     }} onClick={() => setExpanded(e => !e)}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-        <span style={{
-          fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.12em',
-          textTransform: 'uppercase', color: 'var(--ink-4)',
-        }}>
-          {row.target_attributes?.shape_code ? `Shape ${row.target_attributes.shape_code}` : '—'}
-          {row.target_attributes?.proof_character ? ` · ${row.target_attributes.proof_character}` : ''}
-        </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+        {/* Mode badge — primary visual anchor */}
+        {mode && (
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
+            textTransform: 'uppercase', fontWeight: 700,
+            padding: '3px 8px', background: modeMeta.tint, color: modeMeta.color,
+            border: `1px solid ${modeMeta.color}`, borderRadius: 2,
+          }}>{modeMeta.label}</span>
+        )}
+        {/* Shape code — secondary */}
+        {shape && (
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
+            textTransform: 'uppercase', color: 'var(--ink-3)',
+            padding: '2px 7px', background: 'var(--paper)',
+            border: '1px solid var(--rule)', borderRadius: 2,
+          }}>Shape {shape}</span>
+        )}
+        {/* Proof character — only if present */}
+        {proofChar && (
+          <span style={{
+            fontFamily: 'var(--serif)', fontSize: 11.5, fontStyle: 'italic',
+            color: 'var(--ink-3)',
+          }}>· {proofChar}</span>
+        )}
+        {/* Word count, right-aligned */}
         <span style={{
           marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 9.5,
-          padding: '2px 6px', background: 'white', border: '1px solid var(--rule)',
+          color: 'var(--ink-4)', letterSpacing: '0.06em',
+        }}>{wordCount}w</span>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 9.5,
+          padding: '2px 6px', background: 'var(--paper)', border: '1px solid var(--rule)',
           color: 'var(--ink-4)', borderRadius: 2, letterSpacing: '0.08em',
           textTransform: 'uppercase',
         }}>{row.status || 'draft'}</span>
-        <button onClick={copy} title="Copy body"
+        <button onClick={copy} title="Copy script body"
           style={{
             padding: 4, background: 'transparent', border: 'none',
             color: 'var(--ink-4)', cursor: 'pointer',
           }}>
-          <Copy size={11} />
+          <Copy size={12} />
         </button>
       </div>
+      {/* Optional teach focus (educational/hybrid hint) */}
+      {teachFocus && (
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.04em',
+          color: 'var(--ink-3)', marginBottom: 4,
+        }}>
+          Teach: <span style={{ color: 'var(--ink-2)' }}>{teachFocus}</span>
+        </div>
+      )}
       <div style={{
         fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
         color: 'var(--ink-2)',
         whiteSpace: expanded ? 'pre-wrap' : 'normal',
       }}>
-        {expanded ? row.body : (preview + ((row.body || '').length > 180 ? '…' : ''))}
+        {expanded ? row.body : (preview + ((row.body || '').length > 220 ? '…' : ''))}
       </div>
+      {!expanded && (row.body || '').length > 220 && (
+        <div style={{
+          marginTop: 4, fontFamily: 'var(--mono)', fontSize: 9.5,
+          color: 'var(--ink-4)', letterSpacing: '0.06em',
+        }}>
+          Click to expand
+        </div>
+      )}
     </div>
   )
 }

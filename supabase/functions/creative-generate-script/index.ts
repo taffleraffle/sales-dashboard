@@ -1617,9 +1617,11 @@ For COLD / TOFU traffic. You earn the right to offer by demonstrating you know t
           shape_code: s.shape_code || null,
           proof_character: s.proof_character || null,
           length_bucket: target_length || null,
+          script_mode,                          // Ben 2026-06-01 — surface in UI
+          teach_focus: s.teach_focus || null,   // populated when n_concepts > 1
         },
         generated_by_model: ANTHROPIC_MODEL,
-        generation_params: { angle_slug, mechanism_slug, script_type, target_shapes, n_concepts },
+        generation_params: { angle_slug, mechanism_slug, script_type, target_shapes, n_concepts, script_mode },
       }))
       const { data, error } = await supabase.from('generated_scripts').insert(inserts).select('id')
       if (error) save_error_t = error.message
