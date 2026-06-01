@@ -1995,6 +1995,15 @@ const NotificationBell = forwardRef(function NotificationBell(
    Keyboard: space = play/pause, ← / → = ±5s, F = fullscreen. */
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
+// Module-level wrapperStyle constants for OptVideoPlayer call sites.
+// Inline `{ height: N }` objects would create a new prop reference on
+// every parent render and silently defeat the memo() wrap on
+// OptVideoPlayer (caught in code-review 2026-06-01). Hoisting these
+// here gives each call site a stable identity.
+const OPT_PLAYER_WRAP_FILL = { height: '100%' }
+const OPT_PLAYER_WRAP_360 = { height: 360 }
+const OPT_PLAYER_WRAP_320 = { height: 320 }
+
 // memo-wrapped so SubmissionPreviewModal's 1Hz state ticks don't cascade
 // into a player re-render unless an actual prop changes (markers,
 // hoveredMarkerId, etc.). All callbacks passed by the parent are
@@ -2172,8 +2181,21 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
 
   // Fullscreen state sync — the browser can leave fullscreen on Esc
   // without us telling it to, so we need to listen for the change event.
+  // Document-level events fire for ANY element entering/exiting
+  // fullscreen, including OTHER OptVideoPlayer instances mounted in
+  // the same SubmissionsPanel. Without the wrapRef containment check,
+  // player A entering fullscreen would flip isFullscreen=true on
+  // players B/C/D too (code-review P1, 2026-06-01). Now each player
+  // only flips its own state when ITS wrapper is the fullscreen
+  // element (or when leaving fullscreen entirely).
   useEffect(() => {
-    const onFs = () => setIsFullscreen(!!document.fullscreenElement)
+    const onFs = () => {
+      const fsEl = document.fullscreenElement
+      const isOurs = fsEl === wrapRef.current
+      // Update only if this changes OUR state — either we're now
+      // fullscreen (fsEl === our wrap) or we're not (anything else).
+      setIsFullscreen(prev => isOurs !== prev ? isOurs : prev)
+    }
     document.addEventListener('fullscreenchange', onFs)
     return () => document.removeEventListener('fullscreenchange', onFs)
   }, [])
@@ -2462,7 +2484,19 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <button onClick={() => {
                 const v = videoRef.current
-                if (v) { v.muted = !v.muted; setMuted(v.muted) }
+                if (!v) return
+                // Silent-unmute guard: if the slider was dragged to 0
+                // (which auto-mutes), clicking the speaker would
+                // otherwise unmute a volume=0 track — visually
+                // appears playing but no sound (code-review P0,
+                // 2026-06-01). When unmuting from volume=0, bump
+                // back to 0.5 so the user actually hears audio.
+                if (v.muted && v.volume === 0) {
+                  v.volume = 0.5
+                  setVolume(0.5)
+                }
+                v.muted = !v.muted
+                setMuted(v.muted)
               }}
               aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}
               title={muted ? 'Unmute (M)' : 'Mute (M)'}
@@ -8168,7 +8202,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         {playbackKind === 'video' && (
           <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
             <OptVideoPlayer src={row.preview_url} compact
-              wrapperStyle={{ height: '100%' }} />
+              wrapperStyle={OPT_PLAYER_WRAP_FILL} />
           </div>
         )}
         {playbackKind === 'iframe' && (
@@ -11811,7 +11845,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         {task.preview_url ? (
           <div style={{ background: '#000', border: '1px solid var(--rule)' }}>
             <OptVideoPlayer src={task.preview_url} compact
-              wrapperStyle={{ height: 360 }} />
+              wrapperStyle={OPT_PLAYER_WRAP_360} />
             <div style={{
               padding: '8px 12px', background: 'var(--paper-2)',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
@@ -12545,7 +12579,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                     src={sub.file_url}
                     markers={commentsBySubId[sub.id]?.markers || []}
                     compact
-                    wrapperStyle={{ height: 320 }} />
+                    wrapperStyle={OPT_PLAYER_WRAP_320} />
                   <div style={{
                     padding: '6px 12px', background: 'var(--paper-2)',
                     borderTop: '1px solid var(--rule)',
