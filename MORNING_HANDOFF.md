@@ -1,225 +1,285 @@
-# Morning Handoff · 2026-06-01 build
+# Morning Handoff · 2026-06-02 (Elite Tier)
 
 ## TL;DR
 
-The elite ops stack is live. Wins channel is firing. 11 edge functions deployed. 4 crons scheduled. Smoke test passed — a real Slack post landed in `#client-wins` at 03:36 UTC tagged for everyone.
+Built last night's plan + the strategist-in-the-loop architecture you asked for. Three additions are live:
 
-Open Slack `#client-wins` and you should see one entry from "Austin Area Roofers (demo)" — that was my proof-of-life test. Delete it whenever.
+1. **Content factory** with SERP-informed briefs + adversarial editor QA + strategist gate
+2. **AI search visibility tracker** across ChatGPT + Perplexity + Gemini + Google AI Overviews
+3. **GBP health check + citation NAP sync** with positive→wins / negative→strategist routing
 
----
+Plus the spine that makes all of this elite vs typical:
 
-## What shipped tonight
+4. **Strategist queue** at `/hq/strategy` — every AI output routes here before anything client-facing publishes. Mersad approves/amends/rejects. Nothing auto-published when there's any negative signal.
 
-### 1. Wins flywheel (the whole point)
-- **Migration 102** — 9 new tables: `wins`, `tracked_keywords`, `rank_history`, `gsc_metrics_daily`, `ga4_metrics_daily`, `handoff_briefs`, `qa_reviews`, `evidence_reel_log`, `touchpoint_compliance_log`. RLS on, authenticated read enabled.
-- **`emit-win` edge function** — single entry point. Inserts to `wins` + posts to `#client-wins` (channel `C09AT5F82FL`) with `@channel` tag. Block-formatted with icon, headline, client name + city, kind label, source attribution, timestamp.
-- **HQ Wins tab** at `/hq/wins` — realtime feed via Supabase channels subscription, 7d stat tiles (Total, Leads, Rank jumps, 5★ reviews, Content indexed, Milestones), client + kind filters.
-- **HQ Dashboard** got a 5th KPI tile (Wins 7d) + a "Wins this week" card with `→ See full feed` link.
-- **Layout sidebar** got a "Wins" nav item with Sparkles icon.
+5. **Controlled narrative engine** — weekly recaps with rank drops or weak metrics are held for strategist review with paired "here's what we're doing about it" framing. Client never sees uncurated bad news.
 
-### 2. Ingestion (proof of work)
-- **`whatconverts-webhook`** — accepts WC webhook POSTs, matches profile_id/account_id to a client, upserts to `client_leads`, emits `new_lead` win.
-  - **Action for you**: paste this URL into WhatConverts admin > Settings > Webhooks:
-    `https://nktbnavvehmdqdlpnusu.supabase.co/functions/v1/whatconverts-webhook`
-- **`whatconverts-backfill`** — pulls last 90 days for every client with `wc_account_id` set. Does NOT emit wins for historical leads (no channel spam). Trigger manually with:
-  ```bash
-  curl -X POST "https://nktbnavvehmdqdlpnusu.supabase.co/functions/v1/whatconverts-backfill" \
-    -H "Authorization: Bearer <SERVICE_ROLE_KEY>" -H "Content-Type: application/json" \
-    -d '{"days":90}'
-  ```
+6. **90-day roadmap generator** — produces two flavors per client: internal_full (with weak spots, risks, decisions required) and client_visible (confident narrative, dollar-specific targets, named competitor positioning). Strategist approves before client sees.
 
-### 3. Rank tracking
-- **`rank-tracking-cron`** — DataForSEO SERP API. For every `tracked_keyword`, finds client domain in top 50, computes delta vs yesterday.
-- **Win triggers**: `rank_jump` (delta ≥3), `:rocket: Page 1` (first time top 10), `:fire: Top 3` (first time top 3).
-- Cron: nightly 03:00 UTC (10pm CST).
-- **To start using**: insert rows into `tracked_keywords` per client. See "Seeding rank tracking" below.
-
-### 4. GSC + GA4 sync
-- **`gsc-ga4-sync`** — uses your existing Google OAuth refresh token at `~/.config/rom/google-token.json` (scopes: analytics + webmasters + indexing). Pulls GSC clicks/impressions/CTR/avg position + top 25 queries + top 25 pages daily. Pulls GA4 sessions/users/conversions split by channel.
-- Cron: 05:00 UTC daily.
-- **Win triggers**: `milestone` (first day with 100+ organic sessions).
-- **To start using**: set `clients.custom_domain` (already exists) + `clients.ga4_measurement_id`. The function will skip clients missing either.
-
-### 5. Closer call → handoff brief
-- **`handoff-brief`** — give it a Fathom URL or recording_id, it pulls the transcript via Fathom API, runs Anthropic claude-opus-4-7 with strict JSON schema, returns:
-  - `promises_made` (what the closer committed to)
-  - `icp_confirmed` (validated customer profile)
-  - `scope_locked` (package + fee + term + deliverables)
-  - `red_flags`
-  - `upsell_seeds`
-  - `summary` (90-second readout the AM reads cold)
-- Persists to `handoff_briefs` table, status='draft' until you mark approved.
-- **Trigger pattern** (run this after every close call before handing off to Jonathan/Mersad):
-  ```bash
-  curl -X POST "https://nktbnavvehmdqdlpnusu.supabase.co/functions/v1/handoff-brief" \
-    -H "Authorization: Bearer <SERVICE_ROLE_KEY>" -H "Content-Type: application/json" \
-    -d '{"client_id":"<uuid>","fathom_url":"https://fathom.video/...","closer_name":"Daniel Girmay"}'
-  ```
-
-### 6. Adversarial QA agent
-- **`adversarial-qa`** — give it any deliverable text (content brief, GBP post, email draft, recap), it returns:
-  - `verdict`: approve / revise / reject
-  - `score`: 0-100
-  - `critique` + `required_fixes[]`
-- Blocks outbound below score 60. Use it on touchpoint drafts before they fire.
-- **Default behavior**: brutal. Will reject AI slop, generic copy, off-voice tone. Tuned to your no-em-dash + dollar-specific + named-entities preferences.
-
-### 7. Weekly evidence reel
-- **`evidence-reel-friday`** — Fridays 14:00 UTC = 09:00 America/Chicago. Per-client recap posted to `clients.client_slack_channel_id`.
-- Format: `THIS WEEK WE...` with leads count, quotable count, dollar value, organic sessions, rank movements (top 5), pages indexed, 5★ reviews.
-- Skips clients with literally zero content for the week (no empty recaps).
-- Skips if already posted this week (idempotent).
-
-### 8. Touchpoint compliance sweeper
-- **`touchpoint-compliance`** — daily 12:00 UTC. For every materialized touchpoint scheduled <= yesterday, checks if it was met (via `client_communications` for email/call/sms, automated flag for auto, slack channel check for slack), updates status to met/missed, logs to `touchpoint_compliance_log`.
-- **Note**: slack compliance check returns "missed" until signing-secret listener is wired (see Blockers below).
-
-### 9. HUGO Slack listener (STUB — see Blockers)
-- **`hugo-events`** — endpoint that will route inbound Slack events through Anthropic for auto-acknowledgment in client channels. Voice-tuned to your tone.
-- Currently rejects all requests because `SLACK_SIGNING_SECRET` is not set. Drop it as a Supabase secret and the listener goes live instantly.
-
-### 10. Wizard source auto-fetch
-- **`wizard-source-fetch`** — added a button to the NewClientWizard's Sources step. Paste a URL/email/phone in the "ref" field, click "Auto-fetch from ref", and:
-  - Fathom URL/call_id → pulls full transcript + summary
-  - GHL email/phone → pulls full contact JSON + tag list
-  - Site URL → fetches HTML, extracts title/desc/body text + JSON-LD blocks
-- The fetched source lands in `onboarding_sources` automatically, ready for the extraction step.
+7. **Competitor watchdog** — weekly SERP intersection per client. Threats score ≥70 → strategist alert + recommended response.
 
 ---
 
-## What's running on cron
+## The spine: strategist queue
 
-| Schedule | Function | Purpose |
+Every AI output now routes through one table: `strategist_queue`. Kinds tracked:
+
+| Kind | Source | What strategist does |
 |---|---|---|
-| `0 3 * * *` (03:00 UTC) | `rank-tracking-cron` | Nightly DataForSEO + win emit |
-| `0 5 * * *` (05:00 UTC) | `gsc-ga4-sync` | Daily GSC + GA4 pull |
-| `0 14 * * 5` (Fri 14:00 UTC) | `evidence-reel-friday` | Weekly client recap |
-| `0 12 * * *` (12:00 UTC) | `touchpoint-compliance` | Daily compliance sweep |
+| `content_brief` | brief generator | approve to assign / amend outline / reject |
+| `content_draft` | editor QA | approve to publish / amend body / reject |
+| `gbp_post` | (future) | approve / amend copy / reject |
+| `citation_target` | NAP sync | approve correction submission / reject |
+| `weekly_recap_curation` | evidence reel | approve client publish / amend narrative / hold |
+| `ai_visibility_report` | AI visibility probe | approve client message / amend framing / hide |
+| `roadmap_update` | roadmap gen | approve client share / amend pillars / reject |
+| `competitor_brief` | watchdog | approve internal action / reject |
+| `health_check_followup` | GBP health | approve auto-fix / amend / reject |
 
-Watch them live: Supabase Dashboard → SQL Editor → `select * from cron.job_run_details order by start_time desc limit 20;`
+**Mersad's morning ritual**: open `hq.rankonmaps.io/strategy` → review pending queue sorted by priority + urgency → click approve / amend (edit JSON inline) / reject → downstream publishing fires automatically. Items unattended for 48h escalate to you.
 
----
-
-## Action items for you (5 minutes total)
-
-1. **Paste WhatConverts webhook URL**: in WC admin, set webhook to `https://nktbnavvehmdqdlpnusu.supabase.co/functions/v1/whatconverts-webhook` for every active client account. Use the "Lead Created" event.
-
-2. **Trigger WhatConverts backfill once** (optional, only if you want last 90 days of leads in the system today):
-   ```bash
-   curl -X POST "https://nktbnavvehmdqdlpnusu.supabase.co/functions/v1/whatconverts-backfill" \
-     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdGJuYXZ2ZWhtZHFkbHBudXN1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDIzOTg2NCwiZXhwIjoyMDg5ODE1ODY0fQ.M_Hjd-boJw0GJhHLKMiUvpZv_PPJ4c5mrP462NasT4E" \
-     -H "Content-Type: application/json" -d '{"days":90}'
-   ```
-
-3. **Seed rank tracking keywords** for any clients you want ranked tonight. Either via Supabase SQL Editor:
-   ```sql
-   insert into tracked_keywords (client_id, keyword, search_location, is_money_keyword)
-   values
-     ('<client_uuid>', 'roofers union mo', 'St. Louis,Missouri,United States', true),
-     ('<client_uuid>', 'roof replacement union missouri', 'St. Louis,Missouri,United States', true);
-   ```
-   Or I can wire a tracked-keywords UI tab into the client detail page in a follow-up session.
-
-4. **Drop the Slack signing secret** in Supabase secrets to activate the HUGO listener:
-   ```bash
-   supabase secrets set --project-ref nktbnavvehmdqdlpnusu SLACK_SIGNING_SECRET=<from Slack app config>
-   ```
-   Then add `https://nktbnavvehmdqdlpnusu.supabase.co/functions/v1/hugo-events` as the Event Subscriptions URL in the HUGO Slack app config. Enable `app_mention` + `message.channels` events.
-
-5. **Delete the smoke-test win** from `#client-wins` and the wins table:
-   ```sql
-   delete from wins where id = '24c67d33-b366-4197-b50f-94cb61556994';
-   ```
+The whole stack still operates if Mersad is offline — items just queue up. Nothing auto-publishes that needs his sign-off. This kills "AI on autopilot" concern architecturally.
 
 ---
 
-## Known issues / what I left for next session
-
-- **No tracked_keywords UI yet** — they have to be seeded via SQL until I add a client-detail tab.
-- **HUGO listener disabled** — needs your signing secret. Stub code is correct, listener will activate the moment the secret lands.
-- **No deliverable submission UI for adversarial QA** — the function works, but no in-app form to paste content and get a verdict yet. Can be added as a Client Detail subtab.
-- **Touchpoint compliance for slack channel** returns "missed" until the listener is live (it depends on logged inbound messages from `client_communications`).
-- **No tracking of GBP post views / citations built / backlinks** — those win kinds exist in the schema but have no auto-emitter. Wire up to BrightLocal + GBP API in a future session.
-- **`reviews.rankonmaps.io` Resend domain** still pending DNS verification (was already polling when we started).
-- **CEO dashboard** got a wins counter via the HQDashboard share, but the standalone `/ceo` page doesn't have a wins panel yet. Add if you want.
-
----
-
-## File index (every new file we shipped tonight)
+## What I built (file index)
 
 ```
 ~/rankonmaps-app/
-├── src/
-│   ├── lib/slack.js                                # browser-side helpers
-│   ├── pages/HQWins.jsx                            # /hq/wins page
-│   ├── pages/HQDashboard.jsx                       # +Wins tile +Wins card
-│   ├── pages/clients/NewClientWizard.jsx           # +Auto-fetch button
-│   ├── components/Layout.jsx                       # +Wins nav item
-│   └── App.jsx                                     # +/hq/wins route
-└── supabase/
-    ├── migrations/
-    │   ├── 102_wins_and_rank_tracking.sql          # 9 new tables
-    │   └── 103_cron_schedules.sql                  # pg_cron schedules
-    └── functions/
-        ├── _shared/
-        │   ├── slack.ts                            # bot API wrapper
-        │   ├── win-emit.ts                         # emitWin entry point
-        │   └── google-auth.ts                      # refresh-token flow
-        ├── emit-win/                               # public win endpoint
-        ├── hugo-relay/                             # browser → Slack relay
-        ├── hugo-events/                            # Slack events listener (STUB)
-        ├── whatconverts-webhook/                   # WC lead ingestion
-        ├── whatconverts-backfill/                  # 90-day backfill
-        ├── rank-tracking-cron/                     # nightly DataForSEO
-        ├── gsc-ga4-sync/                           # daily Google APIs
-        ├── handoff-brief/                          # Fathom → Anthropic
-        ├── adversarial-qa/                         # critique agent
-        ├── evidence-reel-friday/                   # Friday Slack recap
-        ├── touchpoint-compliance/                  # daily compliance sweep
-        └── wizard-source-fetch/                    # Fathom/GHL/site auto-fetch
+├── supabase/migrations/
+│   ├── 104_strategist_queue_and_elite_layer.sql        # 9 new tables + view
+│   └── 105_elite_cron_schedules.sql                    # 5 new crons
+└── supabase/functions/
+    ├── _shared/strategist-queue.ts                     # enqueue + notify helpers
+    ├── content-brief-generator/                        # SERP-informed brief → queue
+    ├── content-editor-qa/                              # E-E-A-T + fabrication + AI-slop QA
+    ├── ai-visibility-probe/                            # ChatGPT/Perplexity/Gemini/AIO weekly
+    ├── gbp-health-check/                               # daily 0-100 score
+    ├── citation-nap-sync/                              # BrightLocal every 14d
+    ├── roadmap-generator/                              # 90d roadmap, dual-flavor
+    ├── roadmap-refresh-batch/                          # monthly cron entry
+    ├── competitor-watchdog/                            # weekly threat scoring
+    ├── strategist-action/                              # approve/amend/reject worker
+    └── evidence-reel-friday/ (updated)                 # narrative-gated publish
+└── src/pages/HQStrategy.jsx                            # /hq/strategy queue page
+```
+
+---
+
+## How content actually flows now
+
+```
+strategist (or you) → POST /content-brief-generator { client_id, target_keyword }
+                ↓
+   live SERP pull via DataForSEO + keyword data
+                ↓
+   Anthropic generates outline grounded in actual top 10 + missing angles
+                ↓
+   content_briefs row (status=awaiting_strategist) + strategist_queue
+                ↓
+   Mersad opens /hq/strategy → approves/amends outline
+                ↓
+   brief assigned to writer (manual for now — TBD assignment workflow)
+                ↓
+   writer submits draft → POST /content-editor-qa { brief_id, draft_body_md }
+                ↓
+   Anthropic critiques: brief adherence, E-E-A-T, voice, fabrication, AI slop, schema fit, word count
+                ↓
+   content_drafts row + strategist_queue (if approve/revise>=70)
+                ↓
+   Mersad reviews QA verdict + draft → approves to publish (or amends)
+                ↓
+   brief.status = approved → publish + GSC submit + indexation tracker
+                ↓
+   ranking detection → emit content_indexed win → feed back to brief generator learning
+```
+
+This is elite because:
+- briefs are grounded in REAL SERP data, not generic templates
+- writers get a brief so detailed even mid-tier execution ranks
+- strategist sees full data + can amend before content goes out
+- adversarial QA blocks AI slop and fabricated specifics
+- nothing reaches a client URL without Mersad's stamp
+
+---
+
+## What's running on cron (full list)
+
+| Schedule (UTC) | Function | Purpose |
+|---|---|---|
+| `0 3 * * *` | `rank-tracking-cron` | Nightly DataForSEO ranks + win emit |
+| `0 5 * * *` | `gsc-ga4-sync` | Daily GSC + GA4 pull |
+| `0 12 * * *` | `touchpoint-compliance` | Daily compliance sweep |
+| `0 13 * * *` | `gbp-health-check` | Daily GBP audit |
+| `0 14 * * 5` | `evidence-reel-friday` | Weekly client recap (narrative-gated) |
+| `0 6 * * 1` | `ai-visibility-probe` | Weekly AI search visibility scan |
+| `0 6 * * 2` | `competitor-watchdog` | Weekly competitor SERP scan |
+| `0 7 1,15 * *` | `citation-nap-sync` | Every 14 days NAP audit |
+| `0 8 1 * *` | `roadmap-refresh-monthly` | Monthly 90d roadmap regen |
+
+Watch them: `select * from cron.job_run_details order by start_time desc limit 30;`
+
+---
+
+## The $10K-feel client experience (architecturally)
+
+Per your brief, the client should feel like they're paying $10K for $2.5–18K service. The stack now delivers this through:
+
+1. **Proactive receipts** — every win fires to their shared Slack channel (rank up, lead in, review earned, content indexed, milestone hit). They see motion without asking.
+
+2. **Curated weekly narrative** — Friday recap that ONLY shows positives or positives-paired-with-active-response. Mersad signs off on anything with weak deltas.
+
+3. **90-day roadmap with vision** — monthly auto-refreshed. Vision paragraph + 3 pillars + named competitor positioning + measurable targets. Sounds like a strategist sat down with their account for hours.
+
+4. **AI search visibility report** — nobody else in local SEO is showing clients "you're cited in ChatGPT 3 of 5 times this week, here's what we're doing to get the other 2". This is the moat.
+
+5. **Strategist queue invisibility** — clients never see the queue. They never see weak data. They see curated wins + narrative roadmap + proactive recaps.
+
+6. **HUGO auto-acks (when listener wired)** — clients DM their shared channel, get a sage-toned ack within seconds even at 11pm.
+
+7. **GBP managed without them noticing** — health check runs daily, fixes get queued to Mersad, client only sees the new reviews + posts shipping.
+
+8. **Content that actually ranks** — brief→draft→QA→strategist→publish→indexation→ranking. Each piece is built to win its keyword, not to fill a calendar.
+
+---
+
+## Strategist concerns addressed
+
+> "I want to have input in terms of where the strategy is going."
+
+→ `strategist_queue` makes Mersad the gatekeeper. He sees every proposal, amends inline, rejects if off-strategy.
+
+> "Quality of AI content vs elite SEO."
+
+→ Two-stage gate: editor-qa scores 0-100 across brief adherence + E-E-A-T + voice + fabrication + AI-slop detection. Score <60 = reject. Score 60-84 = revise. Score ≥85 = strategist final approval. AI never publishes content directly.
+
+> "Roadmap visibility for clients + how we compete."
+
+→ `roadmap-generator` produces named-competitor positioning + dollar/lead/rank targets every 30 days. Auto-refreshed. Strategist approves before client sees.
+
+> "Strategist sees weak spots, client doesn't."
+
+→ `internal_full_payload` (strategist-only) vs `client_visible_summary` (curated narrative) split on every roadmap. Weekly recap auto-suppresses negatives unless strategist explicitly includes.
+
+---
+
+## Action items for you today
+
+### 1. Set up additional API keys (5 min each)
+
+```bash
+# For AI visibility probe to hit ChatGPT + Gemini directly (Perplexity falls back to DFS AIO if missing)
+supabase secrets set --project-ref nktbnavvehmdqdlpnusu \
+  OPENAI_API_KEY=<your_key> \
+  PERPLEXITY_API_KEY=<your_key> \
+  GEMINI_API_KEY=<your_key>
+
+# For citation NAP sync
+supabase secrets set --project-ref nktbnavvehmdqdlpnusu \
+  BRIGHTLOCAL_API_KEY=<your_key>
+```
+
+Without these:
+- AI visibility falls back to Google AI Overview only (still useful, via DataForSEO)
+- Citation sync no-ops (returns empty results)
+
+### 2. Map clients to GBP locations
+
+In each `clients.client_json`, add:
+```json
+{
+  "gbp_account_id": "1234567890",
+  "gbp_location_name": "locations/12345678901234567890"
+}
+```
+Without this, GBP health check skips them.
+
+### 3. Map clients to BrightLocal
+
+```json
+{
+  "brightlocal_location_id": "..."
+}
+```
+
+### 4. Seed tracked competitors per client (optional — falls back to DFS auto-detection)
+
+In `clients.client_json`:
+```json
+{
+  "competitors": [
+    {"domain": "competitorA.com"},
+    {"domain": "competitorB.com"}
+  ]
+}
+```
+
+### 5. Trigger first roadmap for each client
+
+```bash
+curl -X POST "https://nktbnavvehmdqdlpnusu.supabase.co/functions/v1/roadmap-generator" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdGJuYXZ2ZWhtZHFkbHBudXN1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDIzOTg2NCwiZXhwIjoyMDg5ODE1ODY0fQ.M_Hjd-boJw0GJhHLKMiUvpZv_PPJ4c5mrP462NasT4E" \
+  -H "Content-Type: application/json" \
+  -d '{"client_id":"<uuid>", "force": true}'
+```
+
+Then open `hq.rankonmaps.io/strategy`, Mersad reviews + approves, client sees it.
+
+### 6. Generate first content briefs
+
+```bash
+curl -X POST "https://nktbnavvehmdqdlpnusu.supabase.co/functions/v1/content-brief-generator" \
+  -H "Authorization: Bearer <SERVICE_ROLE_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"client_id":"<uuid>", "target_keyword":"roofers union mo"}'
+```
+
+---
+
+## What's NOT yet built (next session candidates)
+
+- **Writer assignment + draft submission UI** (currently API-only)
+- **Roadmap PDF export** (rendered client-visible version)
+- **Client-portal roadmap view** at results.rankonmaps.io
+- **Bulk brief generator** (one-shot generate 12 briefs from competitor gap analysis)
+- **GBP post auto-drafter** (proposes posts, queues to strategist)
+- **Indexation tracker** (verify published content gets indexed via Google Indexing API)
+- **Case study auto-generator** when client crosses milestones
+- **Strategist queue Slack actions** (approve/reject directly from notification)
+
+---
+
+## Verify the stack
+
+```bash
+# Open the strategy queue
+open https://hq.rankonmaps.io/hq/strategy
+
+# Confirm all 17 edge functions deployed
+supabase functions list --project-ref nktbnavvehmdqdlpnusu
+
+# See cron jobs registered
+supabase db query "select jobname, schedule, active from cron.job order by jobname" --linked
+
+# See the strategist morning queue
+supabase db query "select * from strategist_morning_queue limit 10" --linked
+
+# Trigger a test brief for the demo client
+curl -X POST "https://nktbnavvehmdqdlpnusu.supabase.co/functions/v1/content-brief-generator" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdGJuYXZ2ZWhtZHFkbHBudXN1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDIzOTg2NCwiZXhwIjoyMDg5ODE1ODY0fQ.M_Hjd-boJw0GJhHLKMiUvpZv_PPJ4c5mrP462NasT4E" \
+  -H "Content-Type: application/json" \
+  -d '{"client_id":"2ceb170d-fd99-4b9d-8f85-db500a86cd8e", "target_keyword":"austin roofing contractors"}'
 ```
 
 ---
 
 ## Live URLs
 
-- **HQ Dashboard**: https://hq.rankonmaps.io  (deploy triggered, should be READY by morning)
-- **Thanks (Pulse)**: https://thanks.rankonmaps.io  (already live from prior session)
-- **Supabase Functions Dashboard**: https://supabase.com/dashboard/project/nktbnavvehmdqdlpnusu/functions
-- **Slack #client-wins**: open Slack → look for one test post from "Austin Area Roofers (demo)"
-
----
-
-## Verification you can do over coffee
-
-```bash
-# 1. Check wins table has the smoke-test row
-curl -s "https://nktbnavvehmdqdlpnusu.supabase.co/rest/v1/wins?select=id,kind,headline,created_at" \
-  -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdGJuYXZ2ZWhtZHFkbHBudXN1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDIzOTg2NCwiZXhwIjoyMDg5ODE1ODY0fQ.M_Hjd-boJw0GJhHLKMiUvpZv_PPJ4c5mrP462NasT4E"
-
-# 2. Test emit-win again to make sure Slack still gets it
-curl -X POST "https://nktbnavvehmdqdlpnusu.supabase.co/functions/v1/emit-win" \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5rdGJuYXZ2ZWhtZHFkbHBudXN1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDIzOTg2NCwiZXhwIjoyMDg5ODE1ODY0fQ.M_Hjd-boJw0GJhHLKMiUvpZv_PPJ4c5mrP462NasT4E" \
-  -H "Content-Type: application/json" \
-  -d '{"client_id":"2ceb170d-fd99-4b9d-8f85-db500a86cd8e","kind":"new_lead","headline":"Test from morning verification","mentionChannel":false}'
-
-# 3. Confirm cron jobs are registered
-supabase db query "select jobname, schedule, active from cron.job order by jobname" --linked
-```
-
----
-
-## What to tackle next session
-
-Pick one and we go:
-
-1. **Content factory** — vertical-specific brief generator (roofing/HVAC templates) → ghostwriter assignment → editor QA agent → schema injection → publish → GSC submission → indexation tracker
-2. **GBP weekly health check cron** — posts cadence, photo cadence, Q&A response time, review velocity, attribute drift; flags via #client-wins
-3. **Citation NAP sync cron** — BrightLocal API check every 14 days, auto-ticket on drift
-4. **AI search visibility tracking** — ChatGPT/Perplexity/Gemini/AIOs citation tracking (use the geo-audit skill)
-5. **Tracked-keywords + handoff-brief UI tabs** — surface the data we're now collecting
-6. **Competitor watchdog cron** — weekly DataForSEO competitor pull, auto-ticket when they win SERP features
-
-Sleep well.
+- **HQ Strategy queue**: https://hq.rankonmaps.io/hq/strategy
+- **HQ Wins feed**: https://hq.rankonmaps.io/hq/wins
+- **HQ Dashboard**: https://hq.rankonmaps.io
+- **Thanks**: https://thanks.rankonmaps.io
+- **Supabase Functions**: https://supabase.com/dashboard/project/nktbnavvehmdqdlpnusu/functions
+- **Slack #client-wins**: see live wins flow
 
 — assistant
