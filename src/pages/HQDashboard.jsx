@@ -39,7 +39,7 @@ export default function HQDashboard() {
       const dayEnd = new Date(); dayEnd.setHours(23, 59, 59, 999)
 
       try {
-        const [clients, leads30, leads7, unackedComms, todayTouchpoints, queuedDrafts, activeSessions, recentActivity] = await Promise.all([
+        const [clients, leads30, leads7, unackedComms, todayTouchpoints, queuedDrafts, activeSessions, recentActivity, wins7] = await Promise.all([
           supabase.from('clients').select('id, slug, business_name, status, vertical, monthly_fee, primary_city, state_abbr, created_at, primary_am'),
           supabase.from('client_leads').select('id, converted, deal_value, source, created_at').gte('created_at', since30.toISOString()),
           supabase.from('client_leads').select('id', { count: 'exact', head: true }).gte('created_at', since7.toISOString()),
@@ -48,6 +48,7 @@ export default function HQDashboard() {
           supabase.from('client_touchpoints').select('id, client_id, touchpoint_key, channel, template_key').in('status', ['queued_for_review','draft']).limit(10),
           supabase.from('onboarding_sessions').select('id, business_name_draft, vertical_draft, status, started_at, last_active_at').not('status', 'in', '("launched","aborted")').order('last_active_at', { ascending: false }).limit(5),
           supabase.from('onboarding_audit_log').select('actor, action, target_kind, created_at').order('created_at', { ascending: false }).limit(8),
+          supabase.from('wins').select('id, kind, headline, client_id, created_at, clients(business_name, slug)').gte('created_at', since7.toISOString()).order('created_at', { ascending: false }).limit(50),
         ])
         if (!mounted) return
 
@@ -75,6 +76,8 @@ export default function HQDashboard() {
           recentActivity: recentActivity.data || [],
           verticalCount,
           clientsByLookup: Object.fromEntries(cl.map(c => [c.id, c])),
+          wins7: wins7.data || [],
+          wins7Count: wins7.data?.length || 0,
         })
       } finally {
         if (mounted) setLoading(false)
@@ -115,11 +118,14 @@ export default function HQDashboard() {
       </div>
 
       {/* ─── KPI strip ───────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <KPI label="Active clients" value={data.activeClients} sub={`+${data.newClients30d} this month`} accent />
         <KPI label="MRR" value={`$${data.mrr.toLocaleString()}`} sub={`ARR $${data.arr.toLocaleString()}`} />
         <KPI label="Client revenue (30d)" value={`$${data.monthlyAttributableRev.toLocaleString()}`} sub={`${data.conversions30d} conversions`} />
         <KPI label="Leads (7d)" value={data.leads7d} sub={`${data.leads30d} in 30d`} />
+        <Link to="/hq/wins" className="block">
+          <KPI label="Wins (7d)" value={data.wins7Count} sub="#client-wins live feed" accent />
+        </Link>
       </div>
 
       {/* ─── Two-column body ─────────────────────────────────────── */}
@@ -241,6 +247,30 @@ export default function HQDashboard() {
                     </li>
                   ))}
                 </ul>}
+          </Card>
+
+          {/* Wins this week */}
+          <Card title="Wins this week" icon={Sparkles} count={data.wins7Count}>
+            {data.wins7.length === 0
+              ? <Empty>No wins yet this week. New leads, rank jumps and reviews stream here automatically.</Empty>
+              : <ul className="space-y-2 text-xs">
+                  {data.wins7.slice(0, 8).map((w) => (
+                    <li key={w.id} className="flex items-start gap-2">
+                      <span style={{ color: SAGE, marginTop: 3 }}>↑</span>
+                      <div className="flex-1 min-w-0">
+                        <div style={{ color: 'var(--ink)' }} className="truncate">{w.headline}</div>
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>
+                          {w.clients?.business_name || 'Unknown'} · {timeAgo(w.created_at)}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>}
+            <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--rule)' }}>
+              <Link to="/hq/wins" className="text-xs uppercase tracking-wider" style={{ color: SAGE, fontFamily: 'var(--mono)' }}>
+                See full feed →
+              </Link>
+            </div>
           </Card>
 
           {/* Recent platform activity */}

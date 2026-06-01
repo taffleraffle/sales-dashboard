@@ -216,6 +216,7 @@ function StepSources({ session, onProgress }) {
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(null)
   const [pasted, setPasted] = useState({ type: 'fathom_transcript', ref: '', body: '' })
+  const [fetchingAuto, setFetchingAuto] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -224,6 +225,26 @@ function StepSources({ session, onProgress }) {
     setLoading(false)
   }
   useEffect(() => { load() }, [session.id])
+
+  async function autoFetch() {
+    if (!pasted.ref) { alert('Add a URL or contact email/phone in the reference field first.'); return }
+    setFetchingAuto(true)
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wizard-source-fetch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ session_id: session.id, source_type: pasted.type, ref: pasted.ref }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) { alert(`Auto-fetch failed: ${data.error || res.statusText}`); return }
+      setPasted({ type: pasted.type, ref: '', body: '' })
+      await load()
+    } catch (e) {
+      alert(`Auto-fetch error: ${e.message}`)
+    } finally {
+      setFetchingAuto(false)
+    }
+  }
 
   async function addSource() {
     if (!pasted.body || !pasted.type) return
@@ -297,7 +318,11 @@ function StepSources({ session, onProgress }) {
               className="px-3 py-1.5 bg-emerald-700 text-white rounded-md text-sm font-medium hover:bg-emerald-800 disabled:opacity-50">
               Add source
             </button>
-            <span className="text-xs text-zinc-400">Next-session features: auto-fetch by Fathom ID, GHL contact ID lookup, full site crawl.</span>
+            <button disabled={!pasted.ref || fetchingAuto || !['fathom_transcript','ghl_contact','site_crawl'].includes(pasted.type)} onClick={autoFetch}
+              className="px-3 py-1.5 border border-emerald-700 text-emerald-700 rounded-md text-sm font-medium hover:bg-emerald-50 disabled:opacity-50">
+              {fetchingAuto ? 'Fetching…' : 'Auto-fetch from ref'}
+            </button>
+            <span className="text-xs text-zinc-400">Fathom: paste URL or call_id. GHL: paste email or phone. Site crawl: paste URL.</span>
           </div>
         </div>
 
