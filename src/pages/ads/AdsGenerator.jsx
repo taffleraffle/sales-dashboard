@@ -2335,7 +2335,7 @@ function HistoryRunRow({ bucket, rows, angleLookup, currentOfferSlug }) {
                       gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
                       gap: 12,
                     }}>
-                      {byType[t].map(r => <HistoryDraftRow key={r.id} row={r} angleName={angle?.name} />)}
+                      {byType[t].map(r => <HistoryDraftRow key={r.id} row={r} angle={angle} />)}
                     </div>
                   </div>
                 ))}
@@ -2353,7 +2353,7 @@ function HistoryRunRow({ bucket, rows, angleLookup, currentOfferSlug }) {
 // proof + word count. Body: teach-focus subtitle + clamped preview.
 // Footer: status + copy. Click anywhere on the body opens a full-text
 // modal so expanding doesn't disrupt the grid layout.
-function HistoryDraftRow({ row, angleName }) {
+function HistoryDraftRow({ row, angle, angleName }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const mode = row.target_attributes?.script_mode
@@ -2363,6 +2363,11 @@ function HistoryDraftRow({ row, angleName }) {
   const teachFocus = row.target_attributes?.teach_focus
   const wordCount = (row.body || '').trim().split(/\s+/).filter(Boolean).length
   const preview = (row.body || '').replace(/\s+/g, ' ').trim()
+  // Resolve angle context — angle prop is the canonical input; angleName
+  // is the legacy fallback so any old call site still gets a sensible
+  // string. Without angle.angle_type we can't color-code the tag box.
+  const resolvedAngleName = angle?.name || angleName || (row.angle_slug || '').replace(/^opt-[^-]+-(?:outcome|problem|circumstance|desire)-/, '').replace(/-/g, ' ')
+  const angleTypeMetaResolved = angle ? angleTypeMeta(angle.angle_type) : null
   function copyBody(e) {
     e.stopPropagation()
     navigator.clipboard.writeText(row.body || '')
@@ -2417,6 +2422,34 @@ function HistoryDraftRow({ row, angleName }) {
             color: 'var(--ink-4)', letterSpacing: '0.04em',
           }}>{wordCount}w</span>
         </div>
+
+        {/* Angle tag box (Ben 2026-06-01 PM — "below the mode have what
+            the angle is in a box, so I know what the script is for
+            without referencing the section header above"). Color-coded
+            by angle_type so it visually echoes the section heading bar. */}
+        {resolvedAngleName && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 8px 6px 10px',
+            background: angleTypeMetaResolved ? `${angleTypeMetaResolved.color}0d` : 'var(--paper)',
+            border: `1px solid ${angleTypeMetaResolved ? angleTypeMetaResolved.color : 'var(--rule)'}`,
+            borderLeft: `3px solid ${angleTypeMetaResolved ? angleTypeMetaResolved.color : 'var(--ink-3)'}`,
+            borderRadius: 2,
+          }}>
+            {angleTypeMetaResolved && (
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '0.14em',
+                textTransform: 'uppercase', fontWeight: 700,
+                color: angleTypeMetaResolved.color, flexShrink: 0,
+              }}>{angleTypeMetaResolved.label}</span>
+            )}
+            <span style={{
+              fontFamily: 'var(--serif)', fontSize: 13, fontWeight: 500,
+              color: 'var(--ink)', lineHeight: 1.3,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }} title={resolvedAngleName}>{resolvedAngleName}</span>
+          </div>
+        )}
 
         {/* Proof character (when present) — italic serif, like the angle tile */}
         {proofChar && (
@@ -2523,10 +2556,21 @@ function HistoryDraftRow({ row, angleName }) {
                   border: '1px solid var(--rule)', borderRadius: 2,
                 }}>Shape {shape}</span>
               )}
-              {angleName && (
+              {resolvedAngleName && (
                 <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
                   fontFamily: 'var(--serif)', fontSize: 15, color: 'var(--ink)',
-                }}>{angleName}</span>
+                }}>
+                  {angleTypeMetaResolved && (
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '0.14em',
+                      textTransform: 'uppercase', fontWeight: 700,
+                      color: 'var(--paper)', background: angleTypeMetaResolved.color,
+                      padding: '2px 6px', borderRadius: 2,
+                    }}>{angleTypeMetaResolved.label}</span>
+                  )}
+                  {resolvedAngleName}
+                </span>
               )}
               <span style={{
                 marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10,
