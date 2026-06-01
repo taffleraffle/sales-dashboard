@@ -1231,7 +1231,8 @@ async function fetchBookings({ from, to, audiences } = {}) {
   // window includes the full day (#6/#22 in code-review 2026-06-01).
   let q = supabase
     .from('lib_strategy_booking_resolved')
-    .select('contact_name, contact_email, calendar_name, booked_at, appointment_date, revenue_tier, is_dq, audience, audience_source')
+    .select('contact_name, contact_email, calendar_name, booked_at, appointment_date, revenue_tier, is_dq, is_spam, audience, audience_source')
+    .eq('is_spam', false)
     .gte('booked_at', from).lte('booked_at', `${to} 23:59:59`)
   if (wanted) q = q.in('audience', [...wanted])
   const { data } = await q
@@ -2764,13 +2765,15 @@ export default function MarketingPerformance() {
       // map below is empty and the bucketing falls back to booked_at —
       // i.e. behaves identically to before.
       // Source bookings from lib_strategy_booking_resolved so each row carries
-      // its audience tag. Without that, the Bookings KPI tile (bk.all) was
-      // global — same 68 number on every audience tab. The view already filters
-      // to non-cancelled strategy-calendar bookings, deduped by contact.
+      // its audience tag. The view already filters to non-cancelled strategy-
+      // calendar bookings, deduped by contact, and flags is_spam (123, J,
+      // Tj, dsd etc.) which we exclude here so spam never enters any
+      // booking-derived count.
       const [{ data, error }, { data: oppRows, error: oppErr }] = await Promise.all([
         supabase
           .from('lib_strategy_booking_resolved')
-          .select('booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name, is_dq, audience')
+          .select('booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name, is_dq, is_spam, audience')
+          .eq('is_spam', false)
           .gte('booked_at', sinceStr),
         supabase
           .from('ghl_opportunities')
@@ -3193,8 +3196,14 @@ export default function MarketingPerformance() {
       r.adspend            += (Number(row.adspend) || 0) * NZD_TO_USD
       r.leads              += Number(row.leads) || 0
       r.qualified_bookings += Number(row.qualified_bookings) || 0
+      // `live_calls` = lib_ghl_lives_detail row count (all held strategy
+      // calls including FU + ascensions + closes). Useful for "did the
+      // call happen" but NOT for "Net NEW Live calls" which is the
+      // NC-only count the closer logs in their EOD. We populate
+      // `new_live_calls` from marketing_tracker.new_live_calls below
+      // (in the EOD-layer loop) so the tile labeled "Net New Live"
+      // matches the closer_calls NC drilldown.
       r.live_calls         += Number(row.live_calls) || 0
-      r.new_live_calls     += Number(row.live_calls) || 0
       r.closes             += Number(row.closes) || 0
       r.trial_revenue      += Number(row.trial_revenue) || 0
       r.trial_cash         += Number(row.trial_cash) || 0
@@ -3234,6 +3243,12 @@ export default function MarketingPerformance() {
       byDate[d].net_new_calls       = Number(mt.net_new_calls) || 0
       byDate[d].net_fu_calls        = Number(mt.net_fu_calls) || 0
       byDate[d].net_live_calls      = Number(mt.net_live_calls) || 0
+      // new_live_calls (used by the "Net New Live" tile) = closer-EOD's
+      // NC-only live count, matching the fetchLiveCalls drilldown source
+      // (closer_calls call_type='new_call'). Without this the tile read
+      // lib_ghl_lives_detail (38, includes FU+ascensions+closes) while
+      // drilldown read closer_calls NC (25) — same label, two universes.
+      byDate[d].new_live_calls      = Number(mt.new_live_calls) || 0
       byDate[d].auto_bookings       = Number(mt.auto_bookings) || 0
       byDate[d].calls_on_calendar   = Number(mt.calls_on_calendar) || 0
     }
