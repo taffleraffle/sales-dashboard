@@ -5,6 +5,7 @@ import {
   SectionHead, Eyebrow, Pill, Card, Button, BigNumber, Icon,
   fmtMoneyFull, fmtNum, fmtPct, PALETTE, WinnerBadge, PodiumRank,
 } from '../components/editorial/atoms'
+import { useAudiences } from '../hooks/useAudiences'
 
 // ad_daily_stats.spend is NZD (Meta bills the OPT account in NZD; the
 // sync-meta-ads-full Edge Function writes raw spend without conversion).
@@ -54,20 +55,25 @@ const STAGE_HELP = {
   paid:             'Of submits, how many produced a payment in Stripe/Fanbasis.',
 }
 
-const KNOWN_AUDIENCES = [
+// KNOWN_AUDIENCES is now derived from useAudiences() at render time
+// (migration 131). The constant below is a fallback while the hook loads
+// so chip pickers don't briefly render empty.
+const FALLBACK_KNOWN_AUDIENCES = [
   'restoration', 'electrician', 'accounting', 'bookkeeping',
   'pool_builders', 'real_estate', 'roofing', 'plumbing', 'hvac',
 ]
 
-// Kanban columns shown by default. "Other" catches everything not in this list.
-const KANBAN_COLUMNS = [
-  { slug: 'unclassified', label: 'Needs review',  color: PALETTE.red,     hint: 'No vertical set yet — these are leaking.' },
-  { slug: 'restoration',  label: 'Restoration',   color: PALETTE.red,     hint: '' },
-  { slug: 'electrician',  label: 'Electricians',  color: PALETTE.teal,    hint: '' },
-  { slug: 'accounting',   label: 'Accounting',    color: PALETTE.orange,  hint: '' },
-  { slug: 'australia',    label: 'Australia',     color: PALETTE.purple,  hint: 'AU market — TRADIES campaigns.' },
-  { slug: 'other',        label: 'Other verticals', color: PALETTE.ink3,  hint: '' },
-]
+// Two fixed columns wrap the data-driven middle: "Needs review" on the left
+// (orphans), "Other verticals" on the right (anything not in the active
+// audience_definitions list). The middle columns are generated from the hook.
+const FIXED_LEFT_COLUMN = {
+  slug: 'unclassified', label: 'Needs review',     color: PALETTE.red,
+  hint: 'No vertical set yet — these are leaking.',
+}
+const FIXED_RIGHT_COLUMN = {
+  slug: 'other', label: 'Other verticals',         color: PALETTE.ink3,
+  hint: '',
+}
 
 const WINDOW_OPTIONS = [
   { key: '7d',  label: '7 days',  days: 7 },
@@ -90,17 +96,20 @@ const UTM_CAMPAIGN_MAP = {
 // Helpers
 // ───────────────────────────────────────────────────────────────────────
 
-function parseAudienceFromCampaign(utm_campaign) {
+// Client-side mirror of the SQL audience_from_campaign_name parser. Pass the
+// hook's `audiences` array; lowest sort_order wins (matches SQL ORDER BY).
+// Returns the audience slug or null.
+function parseAudienceFromCampaign(utm_campaign, audiences) {
   if (!utm_campaign) return null
   const s = utm_campaign.toLowerCase()
-  if (s.includes('restoration'))                          return 'restoration'
-  if (s.includes('electrician'))                          return 'electrician'
-  if (s.includes('accounting') || s.includes('bookkeep')) return 'accounting'
-  if (s.includes('pool'))                                 return 'pool_builders'
-  if (s.includes('real estate') || s.includes('realtor')) return 'real_estate'
-  if (s.includes('roofing') || s.includes('roofer'))      return 'roofing'
-  if (s.includes('plumb'))                                return 'plumbing'
-  if (s.includes('hvac'))                                 return 'hvac'
+  const sorted = [...(audiences || [])]
+    .filter(a => a.is_active !== false)
+    .sort((a, b) => (a.sort_order ?? 100) - (b.sort_order ?? 100))
+  for (const a of sorted) {
+    for (const kw of (a.keywords || [])) {
+      if (s.includes(String(kw).toLowerCase())) return a.slug
+    }
+  }
   return null
 }
 
@@ -169,13 +178,12 @@ function effectiveVertical(ad, pending) {
 }
 
 // Bucket an ad into a kanban column slug.
-function bucketAdToColumn(ad, pending) {
+// `audienceSlugs` is the Set of slugs that have a dedicated kanban column.
+// Anything not in the set lands in the catch-all 'other' column.
+function bucketAdToColumn(ad, pending, audienceSlugs) {
   const { vertical, source } = effectiveVertical(ad, pending)
   if (source === 'unknown' || !vertical) return 'unclassified'
-  if (vertical === 'restoration')        return 'restoration'
-  if (vertical === 'electrician')        return 'electrician'
-  if (vertical === 'accounting')         return 'accounting'
-  if (vertical === 'australia')          return 'australia'
+  if (audienceSlugs && audienceSlugs.has(vertical)) return vertical
   return 'other'
 }
 
@@ -184,6 +192,11 @@ function bucketAdToColumn(ad, pending) {
 // ───────────────────────────────────────────────────────────────────────
 
 export default function AttributionCoverage() {
+  // Self-service audiences (migration 131). Every kanban column / chip /
+  // override map flows from this hook — add an audience on the Settings
+  // page and it appears here without a deploy.
+  const { audiences, bySlug: audBySlug } = useAudiences()
+
   const [windowKey, setWindowKey] = useState('30d')
   const [stages, setStages] = useState([])
   const [gapAds, setGapAds] = useState([])
@@ -255,12 +268,13 @@ export default function AttributionCoverage() {
     supabase.from('typeform_response_overrides').select('audience_slug')
       .then(({ data }) => {
         if (!alive) return
-        const seen = new Set(KNOWN_AUDIENCES)
+        // Union of audience_definitions slugs + any previously-used overrides.
+        const seen = new Set(audiences.length ? audiences.map(a => a.slug) : FALLBACK_KNOWN_AUDIENCES)
         ;(data || []).forEach(r => r.audience_slug && seen.add(r.audience_slug))
         setExistingAudiences(Array.from(seen).sort())
       })
     return () => { alive = false }
-  }, [reloadKey])
+  }, [reloadKey, audiences])
 
   // ── Mutations ───────────────────────────────────────────────────────
 
@@ -300,7 +314,7 @@ export default function AttributionCoverage() {
   async function autoClassifyByUtm() {
     const rows = unresolved
       .filter(r => !r.override_audience_slug)
-      .map(r => ({ r, slug: parseAudienceFromCampaign(r.utm_campaign) }))
+      .map(r => ({ r, slug: parseAudienceFromCampaign(r.utm_campaign, audiences) }))
       .filter(x => x.slug)
     if (rows.length === 0) return
     setAutoBusy(true); setErr(null)
@@ -394,9 +408,9 @@ export default function AttributionCoverage() {
 
   const autoClassifiableCount = useMemo(
     () => unresolved.filter(
-      r => !r.override_audience_slug && parseAudienceFromCampaign(r.utm_campaign)
+      r => !r.override_audience_slug && parseAudienceFromCampaign(r.utm_campaign, audiences)
     ).length,
-    [unresolved],
+    [unresolved, audiences],
   )
 
   // Top performers: ads with the most traced leads at the lowest CPL.
@@ -414,25 +428,41 @@ export default function AttributionCoverage() {
       .slice(0, 6)
   }, [kanbanAds])
 
-  // Bucket the kanban by audience column.
+  // Kanban columns: [Needs review, …per-audience…, Other verticals].
+  // Generated from useAudiences() so adding a vertical in Settings just
+  // makes a new column appear here.
+  const kanbanColumns = useMemo(() => {
+    const middle = (audiences || []).map(a => ({
+      slug: a.slug,
+      label: a.display_name,
+      color: a.color || PALETTE.ink3,
+      hint: a.notes || '',
+    }))
+    return [FIXED_LEFT_COLUMN, ...middle, FIXED_RIGHT_COLUMN]
+  }, [audiences])
+
+  const audienceSlugSet = useMemo(
+    () => new Set((audiences || []).map(a => a.slug)),
+    [audiences],
+  )
+
   const kanbanBuckets = useMemo(() => {
-    const out = Object.fromEntries(KANBAN_COLUMNS.map(c => [c.slug, []]))
+    const out = Object.fromEntries(kanbanColumns.map(c => [c.slug, []]))
     for (const ad of kanbanAds) {
-      const slug = bucketAdToColumn(ad, pendingVertical)
+      const slug = bucketAdToColumn(ad, pendingVertical, audienceSlugSet)
       ;(out[slug] || out.other).push(ad)
     }
-    // Sort each bucket by spend DESC so biggest leaks float to the top.
     for (const slug of Object.keys(out)) {
       out[slug].sort((a, b) => Number(b.spend_30d || 0) - Number(a.spend_30d || 0))
     }
     return out
-  }, [kanbanAds, pendingVertical])
+  }, [kanbanAds, pendingVertical, kanbanColumns, audienceSlugSet])
 
   const audienceChips = useMemo(() => {
-    const seen = new Set(KNOWN_AUDIENCES)
+    const seen = new Set(audiences.length ? audiences.map(a => a.slug) : FALLBACK_KNOWN_AUDIENCES)
     for (const a of existingAudiences || []) seen.add(a)
     return Array.from(seen)
-  }, [existingAudiences])
+  }, [audiences, existingAudiences])
 
   // ── Render ──────────────────────────────────────────────────────────
 
@@ -565,6 +595,7 @@ export default function AttributionCoverage() {
 
       {/* ── Kanban by audience ─────────────────────────────────── */}
       <KanbanByAudience
+        columns={kanbanColumns}
         buckets={kanbanBuckets}
         pendingVertical={pendingVertical}
         onPick={setDrawerAd}
@@ -782,7 +813,7 @@ function StatCell({ label, value, color }) {
 // ───────────────────────────────────────────────────────────────────────
 
 function KanbanByAudience({
-  buckets, pendingVertical, onPick, busy,
+  columns, buckets, pendingVertical, onPick, busy,
   autoClassifiableCount, onAutoClassify, autoBusy,
 }) {
   const totalAds = Object.values(buckets).reduce((a, b) => a + b.length, 0)
@@ -826,7 +857,7 @@ function KanbanByAudience({
           gap: 16,
           alignItems: 'start',
         }}>
-          {KANBAN_COLUMNS.map(col => (
+          {columns.map(col => (
             <KanbanColumn
               key={col.slug}
               column={col}

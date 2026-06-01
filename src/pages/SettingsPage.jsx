@@ -171,6 +171,8 @@ export default function SettingsPage() {
       {isAdmin && <InviteSection />}
 
       <TeamMembersSection />
+
+      {isAdmin && <AudiencesSection />}
     </div>
   )
 }
@@ -600,6 +602,380 @@ function TeamMembersSection() {
           Found {wavvUserIds.length} WAVV user ID{wavvUserIds.length !== 1 ? 's' : ''} in call data: {wavvUserIds.join(', ')}
         </p>
       )}
+    </div>
+  )
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// AudiencesSection — self-service audience management.
+//
+// Adds/edits/deletes rows in public.audience_definitions (migration 131).
+// Every parser/view/page reads from the same table, so saving an audience
+// here makes it appear on Marketing tabs, the AttributionCoverage kanban,
+// the booking resolver, etc. — no deploy needed.
+//
+// Live preview: when editing keywords, queries `ads` table and shows how
+// many campaign names the keyword list would match. Lets Ben confirm the
+// keywords are right before saving.
+// ───────────────────────────────────────────────────────────────────────
+
+function AudiencesSection() {
+  const [rows, setRows] = useState([])
+  const [busy, setBusy] = useState(true)
+  const [err, setErr] = useState(null)
+  const [editing, setEditing] = useState(null)         // row being edited, or 'new'
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    let alive = true
+    setBusy(true)
+    supabase
+      .from('audience_definitions')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .then(({ data, error }) => {
+        if (!alive) return
+        if (error) { setErr(error.message); setRows([]); return }
+        setRows(data || [])
+        setErr(null)
+      })
+      .then(() => { if (alive) setBusy(false) })
+    return () => { alive = false }
+  }, [reloadKey])
+
+  const refresh = () => setReloadKey(k => k + 1)
+
+  return (
+    <div className="space-y-4 mt-8">
+      <div className="flex items-center justify-between">
+        <h2 className="kicker">Audiences</h2>
+        <button
+          onClick={() => setEditing('new')}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-bg-primary border border-border-default text-text-secondary hover:text-text-primary">
+          <UserPlus size={12} /> Add audience
+        </button>
+      </div>
+
+      <p className="text-[11px] text-text-400 max-w-xl">
+        Drives audience tabs, kanban columns, and the parser that auto-classifies
+        new campaigns. Keywords ILIKE the campaign name — lowest <em>sort order</em>
+        wins, so put narrow brand keywords (TRADIES → Australia) above broad ones
+        (electrician). Adding a row here flows through to Marketing &amp;
+        Attribution Coverage immediately.
+      </p>
+
+      {err && (
+        <div className="text-xs text-danger">{err}</div>
+      )}
+
+      {busy ? (
+        <div className="text-xs text-text-400">Loading…</div>
+      ) : (
+        <div className="border border-border-default rounded">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-bg-primary border-b border-border-default">
+                <th className="text-left px-3 py-2 font-medium text-text-secondary">Audience</th>
+                <th className="text-left px-3 py-2 font-medium text-text-secondary">Keywords</th>
+                <th className="text-right px-3 py-2 font-medium text-text-secondary">Sort</th>
+                <th className="text-left px-3 py-2 font-medium text-text-secondary">Active</th>
+                <th className="text-right px-3 py-2 font-medium text-text-secondary">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.slug} className="border-b border-border-default last:border-b-0">
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      {r.color && (
+                        <span style={{
+                          display: 'inline-block', width: 10, height: 10,
+                          borderRadius: 2, background: r.color, flexShrink: 0,
+                        }} />
+                      )}
+                      <span className="font-medium">{r.display_name}</span>
+                      <span className="text-[10px] text-text-400">{r.slug}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-text-secondary">
+                    <div className="flex flex-wrap gap-1">
+                      {(r.keywords || []).map(k => (
+                        <code key={k} className="px-1.5 py-0.5 bg-bg-primary rounded text-[10px]">{k}</code>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">{r.sort_order}</td>
+                  <td className="px-3 py-2">
+                    {r.is_active ? <Check size={12} className="text-success" /> : <X size={12} className="text-text-400" />}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => setEditing(r)}
+                      className="text-text-secondary hover:text-text-primary underline underline-offset-2">
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={5} className="text-center p-4 text-text-400">No audiences yet — click <em>Add audience</em> to create one.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && (
+        <AudienceEditorModal
+          row={editing === 'new' ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); refresh() }}
+        />
+      )}
+    </div>
+  )
+}
+
+function AudienceEditorModal({ row, onClose, onSaved }) {
+  const isNew = !row
+  const [slug, setSlug] = useState(row?.slug || '')
+  const [displayName, setDisplayName] = useState(row?.display_name || '')
+  const [keywords, setKeywords] = useState((row?.keywords || []).join(', '))
+  const [color, setColor] = useState(row?.color || '#0e7c86')
+  const [sortOrder, setSortOrder] = useState(row?.sort_order ?? 100)
+  const [exampleUtm, setExampleUtm] = useState(row?.example_utm || '')
+  const [isActive, setIsActive] = useState(row?.is_active ?? true)
+  const [calendarIdsCsv, setCalendarIdsCsv] = useState((row?.calendar_ids || []).join(', '))
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState(null)
+  const [preview, setPreview] = useState({ matched: 0, total: 0, sample: [], busy: false })
+
+  // Live preview: how many current campaigns would this keyword list match?
+  const kwArray = keywords.split(',').map(k => k.trim().toLowerCase()).filter(Boolean)
+  useEffect(() => {
+    let alive = true
+    if (kwArray.length === 0) { setPreview({ matched: 0, total: 0, sample: [], busy: false }); return }
+    setPreview(p => ({ ...p, busy: true }))
+    supabase.from('ads').select('campaign_name', { count: 'exact', head: false }).limit(2000)
+      .then(({ data, count }) => {
+        if (!alive) return
+        const unique = [...new Set((data || []).map(r => r.campaign_name).filter(Boolean))]
+        const matched = unique.filter(cn => {
+          const s = cn.toLowerCase()
+          return kwArray.some(kw => s.includes(kw))
+        })
+        setPreview({ matched: matched.length, total: unique.length, sample: matched.slice(0, 8), busy: false })
+      })
+    return () => { alive = false }
+  }, [keywords])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleSave() {
+    if (!slug.trim() || !displayName.trim() || kwArray.length === 0) {
+      setErr('Slug, display name, and at least one keyword are required.')
+      return
+    }
+    setSaving(true); setErr(null)
+    try {
+      const payload = {
+        slug: slug.trim().toLowerCase().replace(/\s+/g, '_'),
+        display_name: displayName.trim(),
+        keywords: kwArray,
+        color: color || null,
+        sort_order: Number(sortOrder) || 100,
+        example_utm: exampleUtm.trim() || null,
+        is_active: !!isActive,
+        calendar_ids: calendarIdsCsv.split(',').map(s => s.trim()).filter(Boolean),
+      }
+      const { error } = await supabase
+        .from('audience_definitions')
+        .upsert(payload, { onConflict: 'slug' })
+      if (error) throw new Error(error.message)
+      onSaved()
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!row || !confirm(`Delete audience "${row.display_name}"? Campaigns currently overridden to this slug will fall back to the parser.`)) return
+    setSaving(true); setErr(null)
+    try {
+      const { error } = await supabase.from('audience_definitions').delete().eq('slug', row.slug)
+      if (error) throw new Error(error.message)
+      onSaved()
+    } catch (e) {
+      setErr(e.message); setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        background: 'rgba(10,10,10,0.5)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        className="bg-bg-card border border-border-default rounded-sm w-full"
+        style={{ maxWidth: 640, maxHeight: '88vh', overflow: 'auto' }}
+      >
+        <div className="px-5 py-3 border-b border-border-default flex items-center justify-between">
+          <h3 className="text-sm font-semibold">{isNew ? 'Add audience' : `Edit ${row.display_name}`}</h3>
+          <button onClick={onClose} className="text-text-400 hover:text-text-primary">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] uppercase tracking-wide text-text-400 block mb-1">Slug</label>
+              <input
+                value={slug}
+                onChange={e => setSlug(e.target.value)}
+                placeholder="dentists"
+                disabled={!isNew}
+                className="w-full px-2 py-1.5 text-xs bg-bg-primary border border-border-default rounded text-text-primary font-mono disabled:opacity-60"
+              />
+              <p className="text-[10px] text-text-400 mt-1">Stored in campaign_audience_overrides. Lowercase + underscores.</p>
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-wide text-text-400 block mb-1">Display name</label>
+              <input
+                value={displayName}
+                onChange={e => setDisplayName(e.target.value)}
+                placeholder="Dentists"
+                className="w-full px-2 py-1.5 text-xs bg-bg-primary border border-border-default rounded text-text-primary"
+              />
+              <p className="text-[10px] text-text-400 mt-1">Shown on tabs, kanban, drilldowns.</p>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[11px] uppercase tracking-wide text-text-400 block mb-1">Keywords (comma-separated)</label>
+            <input
+              value={keywords}
+              onChange={e => setKeywords(e.target.value)}
+              placeholder="dentist, dental, orthodontist"
+              className="w-full px-2 py-1.5 text-xs bg-bg-primary border border-border-default rounded text-text-primary font-mono"
+            />
+            <p className="text-[10px] text-text-400 mt-1">Any campaign or form name containing one of these substrings auto-classifies to this audience.</p>
+          </div>
+
+          {/* Live preview */}
+          <div className="border border-border-default rounded p-3 bg-bg-primary">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] uppercase tracking-wide text-text-400">Live match preview</span>
+              {preview.busy && <span className="text-[10px] text-text-400">Checking…</span>}
+            </div>
+            {kwArray.length === 0 ? (
+              <p className="text-xs text-text-400">Type one or more keywords to see what they match.</p>
+            ) : (
+              <>
+                <p className="text-xs text-text-secondary mb-2">
+                  Matches <strong className="text-text-primary tabular-nums">{preview.matched}</strong> of {preview.total} unique campaign names in the ad library.
+                </p>
+                {preview.sample.length > 0 && (
+                  <div className="space-y-1">
+                    {preview.sample.map(name => (
+                      <div key={name} className="text-[10.5px] font-mono text-text-secondary truncate">{name}</div>
+                    ))}
+                    {preview.matched > preview.sample.length && (
+                      <div className="text-[10px] text-text-400 italic">+ {preview.matched - preview.sample.length} more</div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-[11px] uppercase tracking-wide text-text-400 block mb-1">Color</label>
+              <input
+                type="color"
+                value={color}
+                onChange={e => setColor(e.target.value)}
+                className="w-full h-7 rounded border border-border-default bg-bg-primary"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-wide text-text-400 block mb-1">Sort order</label>
+              <input
+                type="number"
+                value={sortOrder}
+                onChange={e => setSortOrder(e.target.value)}
+                className="w-full px-2 py-1.5 text-xs bg-bg-primary border border-border-default rounded text-text-primary tabular-nums"
+              />
+              <p className="text-[10px] text-text-400 mt-1">Lower wins first.</p>
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-wide text-text-400 block mb-1">Active</label>
+              <label className="flex items-center gap-2 mt-1.5">
+                <input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)} />
+                <span className="text-xs">{isActive ? 'Yes' : 'No'}</span>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[11px] uppercase tracking-wide text-text-400 block mb-1">GHL strategy-call calendar IDs (optional, comma-separated)</label>
+            <input
+              value={calendarIdsCsv}
+              onChange={e => setCalendarIdsCsv(e.target.value)}
+              placeholder="cEyqCFAsPLDkUV8n982h, woLoGzGKe5fPKZU1jxY7"
+              className="w-full px-2 py-1.5 text-xs bg-bg-primary border border-border-default rounded text-text-primary font-mono"
+            />
+            <p className="text-[10px] text-text-400 mt-1">Bookings on these calendars fall back to this audience when typeform/email resolution misses.</p>
+          </div>
+
+          <div>
+            <label className="text-[11px] uppercase tracking-wide text-text-400 block mb-1">Example utm_campaign (optional)</label>
+            <input
+              value={exampleUtm}
+              onChange={e => setExampleUtm(e.target.value)}
+              placeholder="SCIO - Dentists - VSL"
+              className="w-full px-2 py-1.5 text-xs bg-bg-primary border border-border-default rounded text-text-primary font-mono"
+            />
+            <p className="text-[10px] text-text-400 mt-1">Used by the QA bulk-tag buttons on Attribution Coverage.</p>
+          </div>
+
+          {err && <div className="text-xs text-danger">{err}</div>}
+        </div>
+
+        <div className="px-5 py-3 border-t border-border-default flex items-center justify-between">
+          <div>
+            {!isNew && (
+              <button
+                onClick={handleDelete}
+                disabled={saving}
+                className="text-xs text-danger underline underline-offset-2 hover:opacity-80 disabled:opacity-40">
+                Delete
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              disabled={saving}
+              className="px-3 py-1.5 rounded text-xs bg-bg-primary border border-border-default text-text-secondary hover:text-text-primary">
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-3 py-1.5 rounded text-xs bg-text-primary text-bg-primary border border-text-primary hover:opacity-90 disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save audience'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
