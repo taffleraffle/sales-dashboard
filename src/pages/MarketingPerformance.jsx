@@ -3156,38 +3156,43 @@ export default function MarketingPerformance() {
       r.trial_revenue      += Number(row.trial_revenue) || 0
       r.trial_cash         += Number(row.trial_cash) || 0
     }
-    // For the All view (no filter active), layer in the EOD-only KPIs from
-    // marketing_tracker (offers, ascensions, refunds, etc. — closer-self-
-    // reported daily aggregates not derivable from attribution). These fields
-    // can't be reliably split by audience, so they're only meaningful when
-    // looking at the All bucket.
-    if (!wanted) {
-      const mtByDate = {}
-      for (const e of entries) mtByDate[e.date] = e
-      for (const d in byDate) {
-        const mt = mtByDate[d]; if (!mt) continue
-        byDate[d].offers              = Number(mt.offers) || 0
-        byDate[d].ascensions          = Number(mt.ascensions) || 0
-        byDate[d].ascend_cash         = Number(mt.ascend_cash) || 0
-        byDate[d].ascend_revenue      = Number(mt.ascend_revenue) || 0
-        byDate[d].ar_collected        = Number(mt.ar_collected) || 0
-        byDate[d].ar_defaulted        = Number(mt.ar_defaulted) || 0
-        byDate[d].refund_count        = Number(mt.refund_count) || 0
-        byDate[d].refund_amount       = Number(mt.refund_amount) || 0
-        byDate[d].finance_offers      = Number(mt.finance_offers) || 0
-        byDate[d].finance_accepted    = Number(mt.finance_accepted) || 0
-        byDate[d].monthly_offers      = Number(mt.monthly_offers) || 0
-        byDate[d].monthly_accepted    = Number(mt.monthly_accepted) || 0
-        byDate[d].reschedules         = Number(mt.reschedules) || 0
-        byDate[d].no_shows            = Number(mt.no_shows) || 0
-        byDate[d].cancelled_dtf       = Number(mt.cancelled_dtf) || 0
-        byDate[d].cancelled_by_prospect = Number(mt.cancelled_by_prospect) || 0
-        byDate[d].net_new_calls       = Number(mt.net_new_calls) || 0
-        byDate[d].net_fu_calls        = Number(mt.net_fu_calls) || 0
-        byDate[d].net_live_calls      = Number(mt.net_live_calls) || 0
-        byDate[d].auto_bookings       = Number(mt.auto_bookings) || 0
-        byDate[d].calls_on_calendar   = Number(mt.calls_on_calendar) || 0
-      }
+    // Layer in EOD-only KPIs from marketing_tracker — offers, ascensions,
+    // refunds, no_shows, reschedules, etc. These are closer-self-reported
+    // daily aggregates with no per-event row + no audience column, so they
+    // can't be split. Layer them in for BOTH the All view AND audience-
+    // filtered views (Ben 2026-06-01: prior code zeroed these when a filter
+    // was active, which made "No Shows 6 → 0" and "Offers 3 → 0" the moment
+    // you clicked Restoration — looked like the page broke).
+    //
+    // Caveat: these counts stay global. When filtered they don't reflect
+    // "no-shows for Restoration leads specifically" — they reflect "no-shows
+    // for everyone in the window". Tooltips on the affected tiles call this
+    // out so the operator isn't surprised.
+    const mtByDate = {}
+    for (const e of entries) mtByDate[e.date] = e
+    for (const d in byDate) {
+      const mt = mtByDate[d]; if (!mt) continue
+      byDate[d].offers              = Number(mt.offers) || 0
+      byDate[d].ascensions          = Number(mt.ascensions) || 0
+      byDate[d].ascend_cash         = Number(mt.ascend_cash) || 0
+      byDate[d].ascend_revenue      = Number(mt.ascend_revenue) || 0
+      byDate[d].ar_collected        = Number(mt.ar_collected) || 0
+      byDate[d].ar_defaulted        = Number(mt.ar_defaulted) || 0
+      byDate[d].refund_count        = Number(mt.refund_count) || 0
+      byDate[d].refund_amount       = Number(mt.refund_amount) || 0
+      byDate[d].finance_offers      = Number(mt.finance_offers) || 0
+      byDate[d].finance_accepted    = Number(mt.finance_accepted) || 0
+      byDate[d].monthly_offers      = Number(mt.monthly_offers) || 0
+      byDate[d].monthly_accepted    = Number(mt.monthly_accepted) || 0
+      byDate[d].reschedules         = Number(mt.reschedules) || 0
+      byDate[d].no_shows            = Number(mt.no_shows) || 0
+      byDate[d].cancelled_dtf       = Number(mt.cancelled_dtf) || 0
+      byDate[d].cancelled_by_prospect = Number(mt.cancelled_by_prospect) || 0
+      byDate[d].net_new_calls       = Number(mt.net_new_calls) || 0
+      byDate[d].net_fu_calls        = Number(mt.net_fu_calls) || 0
+      byDate[d].net_live_calls      = Number(mt.net_live_calls) || 0
+      byDate[d].auto_bookings       = Number(mt.auto_bookings) || 0
+      byDate[d].calls_on_calendar   = Number(mt.calls_on_calendar) || 0
     }
     return Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date))
   }, [entries, audienceDaily, selectedAudiences])
@@ -3253,71 +3258,23 @@ export default function MarketingPerformance() {
   // count (4) — leaving Ben staring at "Electricians has 4 closes" when only
   // Restoration actually closed anything. Audience-filtered stats are
   // already correct from the view; don't second-guess them.
-  const applyProspectMetrics = (statsBundle, rangeOrDays) => {
-    if (!statsBundle) return statsBundle
-    if (selectedAudiences && selectedAudiences.size > 0) return statsBundle
-    const pm = prospectMetricsByRange(rangeOrDays)
-    const liveProspects = pm.liveProspects
-    const closedProspects = pm.closedProspects
-    // Only override when we actually have call-row data; if a window had
-    // no closer_calls rows, keep the original numbers.
-    if (liveProspects === 0 && closedProspects === 0) return statsBundle
-    const new_live_calls = liveProspects
-    const closes = closedProspects
-    const close_rate = new_live_calls > 0 ? (closes / new_live_calls) * 100 : 0
-    const cpa_trial = closes > 0 ? statsBundle.adspend / closes : 0
-    const ascend_rate = closes > 0 ? (statsBundle.ascensions / closes) * 100 : 0
-    const trial_cash_per_close = closes > 0 ? statsBundle.trial_cash / closes : 0
-    // CRITICAL: every derived field that divided by t.new_live_calls or
-    // t.closes inside computeMarketingStats is now stale because we just
-    // swapped the denominator. If we don't recompute them here, the live
-    // page shows cost_per_new_live_call against EOD-count while the What-If
-    // cascade (which reads stats.new_live_calls — the OVERRIDDEN value)
-    // computes against the deduped count. That mismatch is the 2026-05-14
-    // bug Ben hit: increasing adspend made cost/new APPEAR to drop because
-    // the baseline divisor was smaller than the cascade's divisor.
-    const denom = new_live_calls
-    const nc = statsBundle.nc_booked || 0
-    const cancels = statsBundle.cancels || 0
-    const reschedules = statsBundle.reschedules || 0
-    const netDenom = Math.max(0, nc - cancels - reschedules)
-    // Also override live_calls (NC + FU combined denominator used by
-    // offer_rate). We scale the original NC+FU total by the same factor
-    // we just applied to NC, preserving the FU contribution. Without
-    // this, Offer Rate read against the un-overridden EOD live_calls
-    // while every other rate read against the deduped denominator —
-    // same drift class as the cost_per_new_live_call bug Ben hit.
-    const origNew = statsBundle.new_live_calls_original ?? statsBundle.new_live_calls ?? 0
-    const fuRatio = origNew > 0 ? (statsBundle.live_calls || 0) / origNew : 1
-    const live_calls = Math.round(new_live_calls * fuRatio)
-    // no_shows recompute precedes no_show_rate so we can reuse the value.
-    const no_shows = statsBundle.no_shows > 0
-      ? statsBundle.no_shows
-      : Math.max(0, nc - denom - cancels - reschedules)
-    return {
-      ...statsBundle,
-      new_live_calls,
-      new_live_calls_original: origNew,  // preserved for downstream consumers
-      live_calls,
-      closes,
-      close_rate,
-      cpa_trial,
-      ascend_rate,
-      trial_cash_per_close,
-      no_shows,
-      // Recomputed against overridden denominators so every tile reads
-      // from the same numerator the cascade uses.
-      cost_per_new_live_call: denom > 0 ? statsBundle.adspend / denom : 0,
-      cost_per_live_call:     live_calls > 0 ? statsBundle.adspend / live_calls : 0,
-      offer_rate:             live_calls > 0 ? ((statsBundle.offers || 0) / live_calls) * 100 : 0,
-      cost_per_offer: statsBundle.offers > 0 ? statsBundle.adspend / statsBundle.offers : (statsBundle.cost_per_offer || 0),
-      gross_show_rate: nc > 0 ? Math.min(100, (denom / nc) * 100) : 0,
-      net_show_rate: netDenom > 0 ? Math.min(100, (denom / netDenom) * 100) : 0,
-      show_rate: nc > 0 ? Math.min(100, (denom / nc) * 100) : 0,
-      no_show_rate: nc > 0 ? (no_shows / nc) * 100 : 0,
-      _prospect_metrics_applied: true,
-    }
-  }
+  // Disabled (Ben 2026-06-01). This override used to swap view-sourced
+  // live_calls / closes with closer_calls-deduped prospect counts. Two
+  // problems:
+  //   1. It only ran on the All view (audience filter skipped it), which
+  //      meant clicking Restoration+Electricians flipped Net New Live
+  //      3 → 5 — same data, two different sources, different numbers,
+  //      no explanation visible to the operator.
+  //   2. closer_calls deduped counts couldn't be split by audience, so
+  //      keeping them only on All meant the All ↔ filtered split used
+  //      different methodologies.
+  //
+  // Single source of truth now: lib_marketing_by_audience_daily (view) for
+  // both All and audience-filtered states. Equal apples in every tile.
+  // The original closer_calls drift-protection that motivated this function
+  // is now handled at the view layer (lib_close_resolved, lib_ghl_lives_detail).
+  // Keeping the function signature so call sites don't have to change.
+  const applyProspectMetrics = (statsBundle /* , rangeOrDays */) => statsBundle
 
   // MTD = first-of-month → today (variable day count). For everything else,
   // `range` is already a day count.
