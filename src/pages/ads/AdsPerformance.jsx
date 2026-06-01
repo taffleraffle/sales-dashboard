@@ -616,17 +616,37 @@ export default function AdsPerformance() {
       // Filter resolver-view bookings down to qualified (not DQ) for the
       // booked totals. The view's `id` is unique per contact already.
       const resolvedQualBookings = (resolvedBookingRows || []).filter(r => !r.is_dq)
+      // Source alignment with Marketing dashboard (Ben 2026-06-01):
+      // Marketing reads strict views (lib_strategy_booking_resolved for
+      // strategy-call bookings, lib_ghl_lives_detail for held lives,
+      // lib_marketing_by_audience_daily.leads from typeform JOIN ad_audience).
+      // Ads previously unioned typeform.is_booked AND ghl_booked_detail AND
+      // resolver — which over-counted because ghl_booked_detail includes
+      // intro/auto calendars and typeform.is_booked includes anything ever
+      // flagged. Result: Ads said 145 bookings while Marketing said 63 for
+      // the same 30d window. Same gap on lives (56 vs 38).
+      //
+      // Fix: each source narrows to the same population Marketing uses.
+      //   booked = lib_strategy_booking_resolved unique contacts (incl. DQ)
+      //   live   = lib_ghl_lives_detail unique prospects
+      //   leads  = typeform_response_detail unique (still the broadest
+      //            sensible "lead universe" — Marketing's view-sourced 100
+      //            and Ads' 106 differ by ~6 GHL-only contacts, within
+      //            tolerance because both pull typeform as primary)
+      //   closes = lib_close_resolved-ish (closeRows union typeform.is_closed)
+      const allResolvedBookings = (resolvedBookingRows || [])  // qualified + DQ
       const prospects = {
         leads:  unionCountEmail(tfRows, ghlLeadRows),
-        // Three-way union for bookings: typeform.is_booked + ghl_booked +
-        // resolver-view qualified. The resolver catches bookings whose
-        // typeform record had no ad_id at submit time (email/phone/name match).
-        booked: unionCountEmail3(
-          tfRows.filter(r => r.is_booked),
-          ghlBookedRows,
-          resolvedQualBookings.map(r => ({ email: r.contact_email, display_name: r.contact_name })),
+        // Booked: strategy-call universe only (matches Marketing's bk.all).
+        booked: unionCountEmail(
+          allResolvedBookings.map(r => ({ email: r.contact_email, display_name: r.contact_name })),
+          [],
         ),
-        live:   unionCountName(tfRows.filter(r => r.is_live),   ghlLiveRows),
+        // Lives: GHL strategy lives only. Use row count (NOT deduped) so
+        // multiple calls for the same prospect each count — matches
+        // Marketing's audience view live_calls = COUNT(*) from
+        // lib_ghl_lives_detail.
+        live:   (ghlLiveRows || []).length,
         closes: unionCountName(tfRows.filter(r => r.is_closed), closeRows),
       }
       // Attributed = union (typeform with ad_id) ∪ (GHL row with ad_id),
