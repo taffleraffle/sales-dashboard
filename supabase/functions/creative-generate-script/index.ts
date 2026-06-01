@@ -94,7 +94,27 @@ const LOCKED_PRINCIPLES = `LOCKED PRINCIPLES (from ad-creative-kb/written-docs/,
 
 9. CTA STRUCTURE — End with one clear conditional CTA + the guarantee. For dual-guarantee offers: "[Outcome 1] in 90 days. [Outcome 2] in 90 days. Money back if neither happens. Tap below." For single-guarantee: "Crews booked from direct homeowner calls in 90 days. Money back if not. Tap below."
 
-10. VOICE — 5TH-GRADE READING LEVEL + TALK-TO-A-FRIEND (Ben 2026-06-01, after seeing scripts read like academic reports).
+10. REALITY-CHECK / NO-INVENTED-CAPABILITIES (Ben 2026-06-01 PM — after a hook claimed OPT runs a "carrier access program" it doesn't actually offer). EVERY promise in the script must trace to the offer's NAMED MECHANISM in the angle context. The offer is a SEO/marketing service that drives Google search visibility. It does NOT:
+   - Manage relationships with insurance carriers or adjusters
+   - Get you on a carrier's "preferred-vendor list" or "internal vendor app"
+   - Run any kind of "Carrier Access Program" / "Adjuster Network" / "Insurance Insider Track"
+   - Negotiate referral deals with TPAs or franchises
+   - Provide any non-Google distribution channel
+
+   What the offer DOES deliver (this is the universe of capabilities you can claim):
+   - Google Business Profile rebuilds so the prospect ranks higher in the local 3-pack
+   - Service-page rebuilds so the prospect ranks for emergency search terms (water damage near me, fire damage near me, mold remediation near me)
+   - LSA (Local Service Ads) foundation rebuilds so the prospect captures Google Guaranteed calls
+   - Review velocity systems so Google trusts the prospect's profile faster
+   - AI citation positioning so ChatGPT / Perplexity / Gemini name the prospect when asked "best [vertical] in [city]"
+   - First-pin / Maps top-3 positioning
+   - Direct homeowner calls via Google (this is the END outcome — the prospect's phone rings with people who searched and clicked, not adjuster referrals)
+
+   IF THE ANGLE IMPLIES AN OUTCOME THE OFFER CAN'T DELIVER (e.g. "Insurance Carrier Insider Status" implies getting on the carrier's internal list — which OPT cannot do directly), you MUST REFRAME the angle's promise through the offer's actual mechanism. For the Carrier Insider example, the correct reframe is: "You don't get on the inside by chasing adjusters. You get on the inside by being the company homeowners already called. Once you're the #1 Google result, the adjuster's just paperwork — they're approving the company the homeowner picked." Then sell the Google rankings as the lever that gets you there. NEVER invent a capability OPT doesn't actually deliver to fit the angle's wording.
+
+   FINAL SELF-CHECK before returning: scan your draft for claims like "we'll get you on [carrier]'s vendor list" / "we put you in the carrier's program" / "we connect you with adjusters" / "insider track" / "preferred-vendor approval" — if any of these appear, REWRITE the claim as a Google-rankings claim. The end-state for the prospect is the same (direct, predictable, high-value emergency calls); the LEVER OPT pulls is Google visibility, full stop.
+
+11. VOICE — 5TH-GRADE READING LEVEL + TALK-TO-A-FRIEND (Ben 2026-06-01, after seeing scripts read like academic reports).
    Treat this like Alex Hormozi's $100M Hooks Playbook. Write the way you'd actually talk to a friend who happens to own a restoration company over a beer — not the way a copywriter writes for a brand. Rules:
 
    a) READING LEVEL: target a 5th-grade reading level. If a 10-year-old wouldn't get the word, don't use it. HARD BANNED (every occurrence is a defect — do a final pass to remove these): "dependency" (say "depending on" / "stuck on"), "engineered" (say "we built" / "we set up"), "optimize" / "optimized" / "optimizing" / "optimization" (say "fix" / "tune up" / "rebuild"), "leverage", "utilize", "implement", "facilitate", "methodology", "architecture", "infrastructure", "topical authority" (say "Google trusts you on the topic"), "preferred-vendor API" (say "their secret vendor list" / "their internal app"), "service radius weighting" (say "how big an area Google shows you in"), "review velocity" / "velocity signals" (say "how fast new reviews come in"), "proximity algorithm" (say "how close you are to the search"), "systematic application", "burnout rate" (say "burn out and leave"), "ranking factor" (say "ranking signal" or just "what Google looks at"), "asymmetric" / "asymmetry", "pipeline" (in business sense — say "calls" / "leads" / "the flow of work"), "vertical" (say the actual industry name), "ascension", "iteration", "saturation" (say "everyone's doing it"), "calibrate", "stack" (as verb), "monetize", "scalability", "consolidate", "operationalize", "framework" (just say "system"). FINAL CHECK before returning: scan your draft for any of these — if found, rewrite in plain words. Use the actual word a restoration owner would say at a job site.
@@ -1487,7 +1507,7 @@ CTA RULES (CRITICAL — apply to body + joined; hooks have their own ending):
 
     const typeSpecificInstructions =
       script_type === 'hook'
-        ? `Each hook is a SINGLE PARAGRAPH. Length: 40-65 words HARD CAP at 65 (Ben 2026-06-01 PM: hooks were too long; Hormozi-style hooks punch). Friend-talk voice. Short sentences. Identity + pain or curiosity or false-belief — pick one of the $100M hook formulas from rule 10(e). NO CTA tee-up in the hook. The hook is standalone — an editor pairs it with a body later.`
+        ? `Each hook is a SINGLE PARAGRAPH. Length: 40-65 words HARD CAP at 65 (Ben 2026-06-01 PM: hooks were too long; Hormozi-style hooks punch). Friend-talk voice. Short sentences. Identity + pain or curiosity or false-belief — pick one of the $100M hook formulas from rule 11(e). NO CTA tee-up in the hook. The hook is standalone — an editor pairs it with a body later.`
         : script_type === 'body'
           ? `Each body follows the 9-entry skeleton above (7 logical beats; beat 5 is split 5a/5b/5c) but EVERY BEAT MUST READ LIKE A FRIEND TALKING — short sentences, simple words, conversational rhythm. CRITICAL — Beat 1 is the STATE-OF-PLAY / SCENE OPENER, not a CTA. The CTA appears ONLY in Beat 7 (Final CTA). NEVER open the body with "So if that sounds [adjective], click the link." Beat 1 grounds the reader in a concrete moment from the angle. Beat 2 (pattern statement) says the underlying truth in plain words — no academic dropouts, no "dependency" / "engineered" / "topical authority" / "ranking factor" jargon. Beats 3 (proof — ONE named character with a real story, NOT a roster of names), 4 (mechanism reveal — friendly name + plain explanation of WHAT it actually does), 5a/5b/5c (3-step HOW — each step a short sentence about what gets fixed), 6 (guarantee in plain words), 7 (final CTA — "click the link below" lives ONLY here). Length: 200-300 words HARD CAP at 300 (Ben 2026-06-01 PM: previous bodies were too long and lost the conversational rhythm). If you find yourself over 300, cut filler — the rhythm gets BETTER when the script gets shorter.`
           : `Each joined script is HOOK + BODY chained. Write the hook FIRST using the rotation's assigned shape (40-65 words, friend-talk voice), then write a body that explicitly continues from THAT hook's posture (don't switch proof characters between hook and body). Body follows the skeleton above — Beat 1 is the state-of-play opener, NOT a CTA. CTA appears ONLY in Beat 7. Return as separate strings (hook_text + body_text) and as the combined body field. Length: 250-360 words total HARD CAP at 360.`
@@ -1516,7 +1536,7 @@ CTA RULES (CRITICAL — apply to body + joined; hooks have their own ending):
       if (script_mode === 'direct') {
         return script_type === 'hook'
           ? `\n\nSCRIPT MODE: DIRECT (Schwartz Stage 1-2 — claim-led, FRIEND-TALK).
-Talk to a restoration owner like you actually know one. Identity (revenue band + situation) + a punchy promise with a real number + a money-back. Use one of the Hormozi $100M formulas from system rule 10(e). Length: 40-65 words. Short sentences. Simple words. No jargon.
+Talk to a restoration owner like you actually know one. Identity (revenue band + situation) + a punchy promise with a real number + a money-back. Use one of the Hormozi $100M formulas from system rule 11(e). Length: 40-65 words. Short sentences. Simple words. No jargon.
 
 REGISTER CHECK: would your hook sound natural said out loud at a job site? If it sounds like a LinkedIn post or a TED talk intro, rewrite shorter and plainer. Avoid stacking ALL benefits — pick the sharpest one and lead with it. The hook should make a busy operator stop scrolling for 3 seconds, not read like a brochure.`
           : `\n\nSCRIPT MODE: DIRECT (Schwartz Stage 1-2 — claim-led, FRIEND-TALK BODY).
