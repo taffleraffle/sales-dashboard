@@ -361,25 +361,25 @@ serve(async (req) => {
           if (!firstDealAlready) {
             winEvents.push({
               kind: "milestone",
-              headline: `First deal closed: $${incomingDealValue.toLocaleString()} · day ${daysSinceStart} of engagement`,
-              detail: `Inbound from ${lead.source || "search"}. ${monthlyFee ? `Service is $${monthlyFee.toLocaleString()}/mo.` : ""}`,
+              headline: `First deal closed in ${daysSinceStart} days · $${incomingDealValue.toLocaleString()}`,
+              detail: `Inbound from ${lead.source || "search"}.`,
             });
             await supa.from("clients").update({
               client_json: { ...(clientFull?.client_json as Record<string, unknown> || {}), records: { ...cjRecords, first_deal_at: new Date().toISOString(), first_deal_value: incomingDealValue } },
             }).eq("id", clientId);
           }
 
-          // ROI multiplier crossings: 1x, 2x, 4x, 10x
+          // ROI multiplier crossings: 1x, 2x, 4x, 10x — never expose what client pays
           const ROI_THRESHOLDS = [1, 2, 4, 10];
           for (const t of ROI_THRESHOLDS) {
             if (multiplier >= t && priorMultiplier < t) {
               const headline = t === 1
-                ? `Service paid back · $${lifetimeRev.toLocaleString()} in ${horizonLabel}`
-                : `${t}× ROI in ${horizonLabel} · $${lifetimeRev.toLocaleString()} from $${monthlyFee.toLocaleString()}/mo service`;
+                ? `Already returned what they invested · $${lifetimeRev.toLocaleString()} in ${horizonLabel}`
+                : `${t}× return on our service in ${horizonLabel} · $${lifetimeRev.toLocaleString()} generated`;
               winEvents.push({
                 kind: "milestone",
                 headline,
-                detail: `Cumulative attributable revenue: $${lifetimeRev.toLocaleString()}. Service cost to date: $${(monthlyFee * Math.max(1, daysSinceStart / 30)).toFixed(0)}.`,
+                detail: `Attributable revenue to date: $${lifetimeRev.toLocaleString()}.`,
               });
             }
           }
@@ -389,7 +389,7 @@ serve(async (req) => {
             winEvents.push({
               kind: "milestone",
               headline: `First 14 days: $${lifetimeRev.toLocaleString()} generated`,
-              detail: `Already exceeded monthly service cost. Day ${daysSinceStart} of engagement.`,
+              detail: `Already past their investment in the engagement.`,
             });
           }
 
@@ -397,8 +397,8 @@ serve(async (req) => {
           if (daysSinceStart <= 30 && lifetimeRev >= 10000 && priorLifetimeRev < 10000) {
             winEvents.push({
               kind: "milestone",
-              headline: `$10K in first month · ${horizonLabel}`,
-              detail: `$${lifetimeRev.toLocaleString()} in attributable revenue by day ${daysSinceStart}.`,
+              headline: `$10K generated in first month · day ${daysSinceStart}`,
+              detail: `$${lifetimeRev.toLocaleString()} in attributable revenue since engagement start.`,
             });
           }
         }
