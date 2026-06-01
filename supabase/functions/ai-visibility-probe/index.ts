@@ -153,7 +153,15 @@ async function probeGemini(query: string, clientDomain: string, brand: string): 
   const d = await r.json();
   const answer = d.candidates?.[0]?.content?.parts?.[0]?.text || "";
   const grounding = d.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-  const domains = grounding.map((g: { web?: { uri?: string } }) => domainFromUrl(g.web?.uri || "")).filter(Boolean);
+  // Gemini returns the real domain in web.title and a Vertex AI redirect in web.uri.
+  // Prefer title (the actual destination domain) — fall back to uri parse if title missing.
+  const domains = grounding
+    .map((g: { web?: { uri?: string; title?: string } }) => {
+      const titleAsDomain = g.web?.title?.toLowerCase().trim() || "";
+      if (titleAsDomain.includes(".")) return titleAsDomain.replace(/^www\./, "");
+      return domainFromUrl(g.web?.uri || "");
+    })
+    .filter(Boolean);
   const clientCited = domains.includes(clientDomain) || answer.toLowerCase().includes(brand.toLowerCase());
   return {
     platform: "gemini",
