@@ -38,16 +38,29 @@ export default function AdsGenerator() {
   const [offers, setOffers] = useState([])
   const [vocab, setVocab] = useState(null)
   const [offerSlug, setOfferSlug] = useState('')
-  const [nConcepts, setNConcepts] = useState(10)
-  // Script mode (Ben 2026-06-01) — how the script frames its argument.
-  //   direct      = "here's what we do, here's the proof, click to book"
-  //                 the classic OPT shape, fastest path to CTA.
-  //   educational = open by teaching one specific mechanism / market truth
-  //                 the prospect doesn't know, THEN offer. Longer build,
-  //                 higher trust, better for cold/Top-of-Funnel.
-  //   hybrid      = teach for the first 30% (hook + opening beats), then
-  //                 pivot into direct offer. The default A/B candidate.
-  const [scriptMode, setScriptMode] = useState('direct')
+  // Mode mix (Ben 2026-06-01, revised after "I can't find the option,
+  // and I want to control how many of each I get"). Three Schwartz-aligned
+  // modes; the batch is split across them per (angle × script-type):
+  //   direct      = Stage 1-2 claim-led — classic OPT shape, warm traffic.
+  //   hybrid      = Stage 2-3 claim + one mechanism-reveal — slightly cold.
+  //   educational = Stage 3-4 mechanism-led — saturated markets, cold/TOFU,
+  //                 where every claim has been heard and ONLY a new
+  //                 mechanism reframes the promise.
+  // Default = 10 Direct, 0 Hybrid, 0 Educational (matches prior behavior).
+  // Total = sum of all three; if a mode is 0 it gets skipped entirely.
+  const [modeQuotas, setModeQuotas] = useState({ direct: 10, hybrid: 0, educational: 0 })
+  const nConcepts = (modeQuotas.direct || 0) + (modeQuotas.hybrid || 0) + (modeQuotas.educational || 0)
+  // Convenience: when only one mode is set, this is "the" mode (used in
+  // history filtering, button labels, etc.). When 2+ modes are set,
+  // scriptMode = 'mixed'.
+  const activeModes = ['direct', 'hybrid', 'educational'].filter(m => (modeQuotas[m] || 0) > 0)
+  // eslint-disable-next-line no-unused-vars
+  const scriptMode = activeModes.length === 1 ? activeModes[0] : 'mixed'
+  // Noop shim — the legacy `generatorMode === 'attributes'` UI (dead since
+  // the 2026-05-31 simplification) still references setNConcepts directly.
+  // Rather than delete ~400 lines of dead JSX, keep the shim so build passes.
+  // eslint-disable-next-line no-unused-vars
+  const setNConcepts = () => {}
   const [mode, setMode] = useState('diverse')
   const [targets, setTargets] = useState({})
   const [saveAsDrafts, setSaveAsDrafts] = useState(true)
@@ -605,11 +618,17 @@ export default function AdsGenerator() {
         }
       }
 
-      // Now fan out the real script generation.
+      // Fan out per (angle × script-type × mode). Only modes with quota > 0
+      // get a batch. Each mode call uses its own n_concepts so the totals
+      // hit the operator's exact mix.
       const combos = []
       for (const slug of angleSlugs) {
         for (const type of scriptTypes) {
-          combos.push({ angle_slug: slug, script_type: type })
+          for (const mode of activeModes) {
+            const n = modeQuotas[mode] || 0
+            if (n <= 0) continue
+            combos.push({ angle_slug: slug, script_type: type, script_mode: mode, n_concepts: n })
+          }
         }
       }
       setFanProgress({ total: combos.length, done: 0, failed: 0, phase: 'scripts' })
@@ -623,8 +642,8 @@ export default function AdsGenerator() {
           target_length: (c.script_type === 'body' || c.script_type === 'joined') ? targetLength : undefined,
           target_proof_characters: angleSlugs.length === 1 && selectedProofNames.length
             ? selectedProofNames : undefined,
-          n_concepts: nConcepts,
-          script_mode: scriptMode,
+          n_concepts: c.n_concepts,
+          script_mode: c.script_mode,
           save_as_drafts: true,
           extra_instructions: extras,
         })
@@ -1302,11 +1321,104 @@ export default function AdsGenerator() {
             </div>
           </Block>
 
+          {/* Mode mix (Ben 2026-06-01) — Schwartz-aligned. Direct = Stage 1-2
+              claim-led. Hybrid = Stage 2-3 claim + emerging mechanism.
+              Educational = Stage 3-4 mechanism-led (where most of the
+              conversion lift is in saturated markets like restoration,
+              roofing, plumbing). Each mode runs its OWN batch with its
+              own quota, fanned out per (angle × script-type × mode). */}
+          <Block title="Mode mix"
+            hint="How many scripts of each mode per (angle × type). Set 0 to skip a mode. Total = sum.">
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {[
+                { v: 'direct',      label: 'Direct',      stage: 'Schwartz Stage 1-2 · claim-led',
+                  desc: 'Qualifier + promise + mechanism (named) + guarantee. Fastest path to CTA. Converts on warm traffic where the prospect already knows they have the problem.' },
+                { v: 'hybrid',      label: 'Hybrid',      stage: 'Stage 2-3 · claim + emerging mechanism',
+                  desc: 'Direct flow with ONE mechanism-reveal beat (e.g. "Google weighs response time 3x more than bid") woven into the pattern statement. Best A/B candidate against pure Direct on slightly-cold traffic.' },
+                { v: 'educational', label: 'Educational', stage: 'Stage 3-4 · mechanism-led',
+                  desc: 'Mechanism IS the headline; claim follows. Body teaches throughout — each beat advances the lesson. Hook uses curiosity / reframe / trend shape. Soft "learn more" CTA. For saturated markets where every claim has been heard.' },
+              ].map(opt => {
+                const n = modeQuotas[opt.v] || 0
+                const on = n > 0
+                return (
+                  <div key={opt.v}
+                    style={{
+                      flex: '1 1 280px', maxWidth: 420,
+                      padding: '14px 16px',
+                      border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                      background: on ? 'var(--paper)' : 'white',
+                      borderRadius: 2,
+                      display: 'flex', flexDirection: 'column', gap: 8,
+                    }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+                      <div>
+                        <div style={{
+                          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                          letterSpacing: '0.12em', textTransform: 'uppercase',
+                          color: 'var(--ink)',
+                        }}>{opt.label}</div>
+                        <div style={{
+                          fontFamily: 'var(--mono)', fontSize: 9.5,
+                          letterSpacing: '0.08em', textTransform: 'uppercase',
+                          color: 'var(--ink-4)', marginTop: 2,
+                        }}>{opt.stage}</div>
+                      </div>
+                      <input type="number" min={0} max={30} value={n}
+                        onChange={e => {
+                          const v = Math.max(0, Math.min(30, parseInt(e.target.value) || 0))
+                          setModeQuotas(prev => ({ ...prev, [opt.v]: v }))
+                        }}
+                        title="Number of scripts of this mode per (angle × type). Set 0 to skip."
+                        style={{
+                          width: 56, padding: '6px 8px',
+                          fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 700, textAlign: 'center',
+                          border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                          background: 'white', borderRadius: 2,
+                        }} />
+                    </div>
+                    <div style={{
+                      fontFamily: 'var(--serif)', fontSize: 12, fontStyle: 'italic',
+                      color: 'var(--ink-3)', lineHeight: 1.45,
+                    }}>
+                      {opt.desc}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, marginTop: 'auto', paddingTop: 6 }}>
+                      {[0, 3, 5, 10].map(q => (
+                        <button key={q}
+                          onClick={() => setModeQuotas(prev => ({ ...prev, [opt.v]: q }))}
+                          style={{
+                            padding: '4px 9px',
+                            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                            border: `1px solid ${n === q ? 'var(--ink)' : 'var(--rule)'}`,
+                            background: n === q ? 'var(--accent)' : 'transparent',
+                            color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
+                          }}>{q}</button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {nConcepts > 0 && (
+              <div style={{
+                marginTop: 12, padding: '8px 12px',
+                background: 'var(--paper)', border: '1px solid var(--rule)',
+                fontFamily: 'var(--mono)', fontSize: 11.5,
+                color: 'var(--ink-2)', letterSpacing: '0.04em', borderRadius: 2,
+              }}>
+                Total per (angle × type): <strong>{nConcepts}</strong>
+                {activeModes.length > 1 && (
+                  <> · split {activeModes.map(m => `${modeQuotas[m]} ${m}`).join(' + ')}</>
+                )}
+              </div>
+            )}
+          </Block>
+
           {/* Count + Generate row — no Section eyebrow, just an inline cluster. */}
           {(() => {
             const totalBatches = angleSlugs.length * scriptTypes.length
             const totalScripts = totalBatches * nConcepts
-            const disabled = generating || !angleSlugs.length || !scriptTypes.length
+            const disabled = generating || !angleSlugs.length || !scriptTypes.length || nConcepts === 0
             const buttonLabel = (() => {
               if (generating) return `Generating ${totalScripts}…`
               if (totalBatches === 0) return 'Pick angles + script types'
@@ -1324,69 +1436,15 @@ export default function AdsGenerator() {
                 borderRadius: 2,
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-                  <div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10,
-                                  letterSpacing: '0.14em', textTransform: 'uppercase',
-                                  color: 'var(--ink-4)', marginBottom: 6 }}>
-                      Per batch
-                    </div>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {[3, 5, 10, 15, 20, 30].map(n => (
-                        <button key={n} onClick={() => setNConcepts(n)}
-                          style={{
-                            padding: '8px 14px',
-                            border: `1px solid ${nConcepts === n ? 'var(--ink)' : 'var(--rule)'}`,
-                            background: nConcepts === n ? 'var(--accent)' : 'white',
-                            color: 'var(--ink)',
-                            fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
-                            cursor: 'pointer', borderRadius: 2, minWidth: 50,
-                          }}>{n}</button>
-                      ))}
-                      <input type="number" min={1} max={30} value={nConcepts}
-                        onChange={e => setNConcepts(Math.max(1, Math.min(30, parseInt(e.target.value) || 1)))}
-                        title="Custom count (1-30)"
-                        style={{
-                          width: 56, padding: '8px 10px',
-                          fontFamily: 'var(--mono)', fontSize: 13, textAlign: 'center',
-                          border: '1px solid var(--rule)', background: 'white',
-                          borderRadius: 2,
-                        }} />
-                    </div>
+                  <div style={{
+                    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)',
+                    letterSpacing: '0.06em',
+                  }}>
+                    {nConcepts > 0
+                      ? `${totalScripts} scripts queued · ${nConcepts}/angle×type${activeModes.length > 1 ? ` (${activeModes.map(m => `${modeQuotas[m]} ${m}`).join(' + ')})` : ` (${activeModes[0] || 'direct'})`}`
+                      : 'Set at least one mode quota above to enable generation.'}
                   </div>
-                  {/* Script-mode toggle (Ben 2026-06-01) — Direct vs Hybrid vs
-                      Educational. Direct = current default (offer-led, fastest
-                      to CTA). Educational = open by teaching one specific
-                      market truth before offering, better for cold traffic.
-                      Hybrid = teach for the opening, then pivot direct. */}
-                  <div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10,
-                                  letterSpacing: '0.14em', textTransform: 'uppercase',
-                                  color: 'var(--ink-4)', marginBottom: 6 }}>
-                      Mode
-                    </div>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      {[
-                        { v: 'direct',      label: 'Direct',      desc: "Offer-led. Open with qualifier + promise + guarantee. Fastest to CTA. OPT's classic shape — converts on warm traffic." },
-                        { v: 'hybrid',      label: 'Hybrid',      desc: 'Teach one specific market truth in the hook (e.g. "Google ranks LSAs on response time, not bid"), THEN pivot to the offer. Best A/B candidate against Direct.' },
-                        { v: 'educational', label: 'Educational', desc: 'Open by teaching the prospect something they did NOT know (algorithm signal, industry move, hidden constraint). Build trust through specificity, soft-offer at the end. Best for cold/TOFU.' },
-                      ].map(opt => {
-                        const on = scriptMode === opt.v
-                        return (
-                          <button key={opt.v} onClick={() => setScriptMode(opt.v)}
-                            title={opt.desc}
-                            style={{
-                              padding: '8px 14px',
-                              border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                              background: on ? 'var(--accent)' : 'white',
-                              color: 'var(--ink)',
-                              fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
-                              cursor: 'pointer', borderRadius: 2,
-                            }}>{opt.label}</button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                  <button onClick={handleGenerate} disabled={disabled}
+                  <button onClick={handleGenerate} disabled={disabled || nConcepts === 0}
                     style={{
                       marginLeft: 'auto',
                       padding: '14px 24px', fontFamily: 'var(--mono)', fontSize: 12,

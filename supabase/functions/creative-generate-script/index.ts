@@ -1451,41 +1451,106 @@ CTA RULES (CRITICAL — apply to body + joined; hooks have their own ending):
           ? `Each body follows the 9-entry skeleton above (7 logical beats; beat 5 is split 5a/5b/5c). CRITICAL — Beat 1 is the STATE-OF-PLAY / SCENE OPENER, not a CTA. The CTA appears ONLY in Beat 7 (Final CTA). NEVER open the body with "So if that sounds [adjective], click the link" — that line belongs at the END, not the start. Beat 1 grounds the reader in a concrete moment or underlying truth of the angle. Beat 2 (pattern statement) zooms out to the systemic claim. Beats 3 (proof roster — NAME the proof characters), 4 (mechanism reveal), 5a/5b/5c (3-part HOW), 6 (guarantee), and 7 (final CTA — THIS is where "click the link below" lives) follow the skeleton tightly. Length: 250-380 words. Do NOT include a hook — bodies are standalone too.`
           : `Each joined script is HOOK + BODY chained. Write the hook FIRST using the rotation's assigned shape (60-75 words), then write a body that explicitly continues from THAT hook's proof character + opening posture (don't switch proof characters between hook and body). Body follows the skeleton above — Beat 1 is the state-of-play opener, NOT a CTA. CTA appears ONLY in Beat 7. Return them as separate strings (hook_text + body_text) and also as the combined body field. Length: 350-470 words total.`
 
-    // Script mode directive (Ben 2026-06-01, sharpened after he flagged
-    // hybrid as "just teaching stuff in general"). The three modes are
-    // distinct postures, not gradients. Per-script-type so hook generation
-    // doesn't get body-style "Beat N" language that triggers it to write
-    // a 300-word body instead of a 70-word hook.
+    // Script mode directive (Ben 2026-06-01, rewritten Schwartz-first after
+    // he flagged that examples were being copied verbatim and that
+    // Educational still felt too templated).
+    //
+    // Mode = Schwartz Stage. Direct = Stage 1-2 (claim-led, market hasn't
+    // seen this promise yet). Hybrid = Stage 2-3 (claim + emerging
+    // mechanism). Educational = Stage 3-4 (saturated market — mechanism-led
+    // headlines, claim follows the mechanism). The restoration / roofing /
+    // plumbing markets are heavily Stage 3-4 in 2026, so Educational is
+    // where most of the conversion lift lives there.
+    //
+    // CRITICAL: this block describes SHAPE + RULES only. NO verbatim
+    // example sentences. Claude was copying my "How is it possible..."
+    // example word-for-word and the output read like the example. The
+    // shape descriptions below let Claude generate fresh openers in the
+    // angle's voice. (Schwartz, p.vii: "This book is about avoiding the
+    // need for copying or imitating any other product or advertisement.")
     //
     // NOTE: `offer` is NOT in scope in the template branch (only angle,
     // proofs, mechanism, shapes, skeletons). DO NOT reach for offer.* here.
     const scriptModeBlock = (() => {
       if (script_mode === 'direct') {
         return script_type === 'hook'
-          ? `\n\nSCRIPT MODE: DIRECT — hook leads with offer shape (qualifier + promise + mechanism + guarantee). NO teaching beats. Keep to 60-75 words.`
-          : `\n\nSCRIPT MODE: DIRECT (default).\nBody opens with state-of-play (Beat 1) and drives straight to claim → proof → mechanism → 3-part HOW → guarantee → CTA. Beat 2 (pattern statement) makes a CLAIM, it does NOT explain WHY. No teaching beats up-front. Fastest path to CTA, converts on warm traffic.`
+          ? `\n\nSCRIPT MODE: DIRECT (Schwartz Stage 1-2 — claim-led).
+The hook leads with the CLAIM. Qualifier + promise + mechanism (named in passing) + guarantee. NO teaching beats. The prospect already knows they have the problem; they're evaluating whether you can solve it. Length: 60-75 words. Shape: any (rotation already set).`
+          : `\n\nSCRIPT MODE: DIRECT (Schwartz Stage 1-2 — claim-led).
+Body opens with a state-of-play scene (Beat 1), then drives claim → proof → mechanism (named, not explained) → 3-part HOW → guarantee → CTA. Beat 2 makes the underlying CLAIM, it does NOT explain WHY the claim is true. The proof roster and 3-part HOW carry the conviction. Fastest path to CTA. Converts on warm traffic where the prospect knows they have the problem.`
       }
       if (script_mode === 'hybrid') {
         return script_type === 'hook'
-          ? `\n\nSCRIPT MODE: HYBRID — hook is a curiosity/reframe (Shape B/D/E/F/G/H — NOT Shape A) that surfaces ONE specific market-truth question, then ends with a soft promise. Example: "Quick question for restoration owners doing $50k+/mo: did you know Google weighs your LSA response time 3.2x more than your bid amount? If you want to use that to outrank ServPro in your zip, here's what we'll do for you..." Keep to 60-75 words. ONE teach-beat + soft promise + guarantee. NO full body, NO proof roster, NO 3-part HOW — those belong in the body.`
-          : `\n\nSCRIPT MODE: HYBRID.\nBody is a DIRECT body with ONE teaching beat woven into Beat 2 (pattern statement). The teach is ONE specific market-truth — an algorithm signal, an industry move, a hidden constraint — delivered as 1-2 sentences that justify why your mechanism works. After Beat 2, return to the standard direct flow: proof → mechanism → 3-part HOW → guarantee → CTA. If the body reads identical to Educational mode (teach-throughout) or to Direct mode (no teach at all), it's wrong. The teach must be RECOGNIZABLE as a discrete "here's why" insert.`
+          ? `\n\nSCRIPT MODE: HYBRID (Schwartz Stage 2-3 — claim + emerging mechanism).
+Hook still leads with the offer's claim, but inserts ONE compressed mechanism-reveal sentence that justifies why the claim is believable (e.g. one signal name, one industry move, one stat). Shape from the allowed set (NOT Shape A direct-offer). Length: 60-75 words. ONE teach-beat + soft promise + guarantee. NO full body, NO proof roster, NO 3-part HOW.`
+          : `\n\nSCRIPT MODE: HYBRID (Schwartz Stage 2-3 — claim + emerging mechanism).
+Body is a DIRECT body with ONE teaching beat woven into Beat 2 (pattern statement). The teach is ONE compressed market-truth — an algorithm signal, an industry move, a hidden constraint — delivered as 1-2 sentences that JUSTIFY why the mechanism works. After Beat 2, return to direct flow: proof → mechanism reveal → 3-part HOW → guarantee → CTA. If the body reads identical to Educational (teach-throughout) it's wrong. If it reads identical to Direct (no teach at all) it's wrong. The teach must be a RECOGNIZABLE discrete "here's why" insert.`
       }
-      // educational
+      // educational — Schwartz Stage 3-4: MECHANISM-LED headline.
+      // Stage 3 = "your market has heard all the claims; what they need
+      // now is A NEW MECHANISM — a new way to make the old promise work."
+      // Stage 4 = the mechanism itself becomes overworked, so you have
+      // to find a SHARPER version of the mechanism or a contrarian angle.
       return script_type === 'hook'
-        ? `\n\nSCRIPT MODE: EDUCATIONAL — hook MUST be a curiosity question (Shape E), reframe (Shape F), or trend statement (Shape H). NEVER Shape A (direct offer). The hook surfaces a SPECIFIC market truth the prospect doesn't know — name the actual algorithm signal, industry move, or technical mechanism. Examples:
-- "How is it possible that the restoration companies winning every Google Guaranteed call in their market aren't even bidding the highest? Here's what Google's LSA algorithm actually weighs..."
-- "The reason most restoration owners think 'I just need to rank #1' is wrong — here's what the data actually says about where the calls come from..."
-- "Why does ChatGPT name the same 3 restoration companies when homeowners ask 'best water damage in [city]'?"
-Keep to 60-75 words. The hook is a CURIOSITY OPEN — it sets up a lesson, it does NOT make the offer. NO "here's what we'll do for you" cadence. The body delivers the lesson; the hook just opens the door.`
-        : `\n\nSCRIPT MODE: EDUCATIONAL — the WHOLE body teaches, not just the opener. The prospect should finish watching and feel they LEARNED SOMETHING SPECIFIC about how their market works, and only at the end notice there's an offer. Rules per beat:
-- Beat 1 (state-of-play): paint the CONCRETE moment the lesson applies (a search that just happened, an algorithm change, a measurable shift).
-- Beat 2 (pattern statement): the underlying market truth — name the specific signal/mechanism ("Google weighs response time 3.2x more than bid amount", "Insurance carriers are rolling out their own vendor apps").
-- Beat 3 (proof roster): proof characters become CASE STUDIES OF THE LESSON — "Marcus didn't outbid ServPro; he hit the 3 signals." Each proof teaches a different facet.
-- Beat 4 (mechanism reveal): name the mechanism as the SYSTEMATIC APPLICATION of the lesson ("the Maps Pin-1 Foundation Rebuild — the engineering process for hitting every signal Google weighs").
-- Beats 5a/b/c (3-part HOW): explicit teaching of three sub-mechanisms. Each is a teachable concept, not a feature.
-- Beat 6 (guarantee): tie guarantee to the teach — "because this is engineering not luck, we can guarantee X".
-- Beat 7 (CTA — SOFT): NOT "click to book a call". Frame learning continuation: "If you want the full breakdown of which ranking factors Google weighs most for your market, click below and we'll walk you through your numbers." Book-a-call is SECONDARY.
-BANNED in Educational: "qualifier + here's what we'll do for you" openers. Hard sells. The word "guarantee" before Beat 6. Build authority through SPECIFICITY — real signal names ("review velocity", "service radius weighting", "response time benchmark", "AI citation graph", "topical authority"), not "the market is changing." For COLD/TOFU traffic; you earn the right to offer by showing you know the technical game.`
+        ? `\n\nSCRIPT MODE: EDUCATIONAL (Schwartz Stage 3-4 — mechanism-led).
+
+The market has heard every claim. Repetition no longer works. So the HEADLINE features the MECHANISM, and the claim follows. This is the literal opposite of Direct. Your hook earns attention by surfacing a piece of the technical machinery the prospect didn't know existed.
+
+═══ STRUCTURE OF AN EDUCATIONAL HOOK ═══
+
+[1] OPEN with one of these three rhetorical moves, picked to suit the angle:
+   - A question that contrasts two outcomes in the prospect's market (operator X is winning; operator Y isn't; why?) — the answer is the mechanism.
+   - A reframe that overturns what the prospect thinks they understand about a familiar surface (the thing they think is X is actually a different mechanism under the hood).
+   - A trend statement naming a shift happening in their industry right now that they haven't fully clocked.
+
+[2] DELIVER the mechanism-fragment in the hook itself. Name an actual signal, algorithm factor, or industry move the prospect can verify — drawn from the angle's mechanism / pain points / vocabulary above. NOT a generic "you didn't know this" tease; the hook gives them a SPECIFIC nugget of the lesson.
+
+[3] CLOSE with a forward-leaning teaser — NOT an offer, NOT a guarantee, NOT a CTA. The close is what makes them keep watching for the body. Valid closes for an educational hook:
+   - "Here's what the data actually says about that…"
+   - "I'll show you exactly which signals matter — and which ones every restoration agency is selling you that don't."
+   - "Watch the next 90 seconds and you'll see why bid amount stopped mattering in 2024."
+   - A second question that deepens the mystery: "And here's what almost nobody understands about how that ranking actually gets decided…"
+   The educational hook ENDS WITH FORWARD MOMENTUM, not with a closing offer.
+
+═══ HARD RULES ═══
+
+Length: 60-75 words.
+
+Voice: a peer with technical edge — NOT an agency pitching. Use the angle's specific signal names, mechanism vocabulary, and prospect idiom.
+
+BANNED in an educational hook (these are violations, not preferences):
+  ✗ "Here's what we'll do for you" / "We'll rebuild your X" / any first-person-plural offer cadence
+  ✗ Guarantee statement of any kind ("guaranteed or you don't pay", "money back if not")
+  ✗ CTA of any kind ("click the link", "book a call", "DM us")
+  ✗ Naming proof characters in the hook (proof belongs in the body)
+  ✗ Specific numeric claims from a proof character (Marcus's 47 days, Diego's 31 days)
+  ✗ Verbatim copying of the example closes above — rewrite them in the angle's idiom
+
+ANTI-MIMICRY CHECK: If your draft hook opens with "How is it possible that...", "Most [vertical] owners think...", "Quick question...", "If we told you...", or any other phrase that sounds like a copywriter pattern you might have seen before, you've defaulted to a template — STOP and rewrite the opener fresh in the prospect's own vocabulary. The opening sentence should be the kind of thing a smart practitioner would say at the start of a podcast episode about their craft, not the kind of thing an ad-copy template generates.
+
+═══ SELF-CHECK BEFORE RETURNING ═══
+
+Before you finalize each hook, ask: did the close mention what WE do, a guarantee, or a CTA? If yes, the hook is wrong — rewrite the close as a forward-leaning teaser into the body. The offer + guarantee + CTA appear in the BODY (Beats 5-7), never in an educational hook.`
+        : `\n\nSCRIPT MODE: EDUCATIONAL (Schwartz Stage 3-4 — mechanism-led body).
+
+The whole body teaches. Each beat advances the lesson. The prospect should finish watching and feel they LEARNED SOMETHING SPECIFIC about how their market machinery actually works — and only then notice there's a soft offer at the end.
+
+You DO NOT have to follow the 9-entry Beat 1-7 skeleton above one-for-one. The lesson IS the structure. Use the skeleton as a checklist of beats that need to happen SOMEWHERE in the script, but reorder, merge, or expand any beat that the lesson demands. For instance, an educational body that's teaching one specific algorithm signal might collapse Beats 3 (proof) and 4 (mechanism) into a single "here's how Marcus used this signal to move from position 5 to 1" walk-through, then expand Beats 5a/b/c into the three steps of HOW the signal gets engineered. Let the teach drive structure.
+
+What MUST happen, regardless of order:
+1. State-of-play opener that grounds the lesson in a concrete moment (a search, a dashboard read, a competitor's move).
+2. The PATTERN STATEMENT — the underlying market truth the prospect doesn't know. NAME the specific signal / mechanism / industry shift. Real signal names ("review velocity", "service radius weighting", "AI citation graph", "preferred-vendor API rollout"), not "the market is changing."
+3. Proof characters as CASE STUDIES OF THE LESSON — each named proof teaches a different facet of how the mechanism plays out in practice.
+4. The MECHANISM as the systematic application of the lesson — name it, position it as engineering not luck.
+5. Three sub-steps of HOW the mechanism gets executed — each sub-step is a teachable concept.
+6. Guarantee tied to the teach: "because this is engineering not luck, we can promise X."
+7. SOFT CTA — frame as learning continuation, not booking pressure. The prospect clicks because they want the rest of the lesson, not because they're ready to buy.
+
+BANNED in Educational: "qualifier + here's what we'll do for you" openers. Hard sells. The word "guarantee" before the final third of the script. Any phrasing that mimics my example sentences from the hook directive — write fresh in the angle's voice every time.
+
+Length: 280-420 words (educational tolerates slightly more length than direct because the teach needs room).
+
+For COLD / TOFU traffic. You earn the right to offer by demonstrating you know the technical machinery better than the prospect does.`
     })()
 
     const userMsg = [
