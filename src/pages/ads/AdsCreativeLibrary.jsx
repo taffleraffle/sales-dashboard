@@ -3312,8 +3312,19 @@ function normaliseTranscript(text) {
   return out
 }
 
-function PreviewVideo({ src, poster, style }) {
+const PreviewVideo = forwardRef(function PreviewVideo({ src, poster, style, onDuration }, parentRef) {
   const ref = useRef(null)
+  // Expose seekTo so the SubmissionsPanel marker strip can jump the
+  // inline player to a comment's timestamp without forcing the operator
+  // to bounce into the Review modal first.
+  useImperativeHandle(parentRef, () => ({
+    seekTo: (seconds) => {
+      const v = ref.current
+      if (!v) return
+      try { v.currentTime = Math.max(0, Math.min(seconds, v.duration || seconds)) } catch {}
+      try { v.play() } catch {}
+    },
+  }), [])
   useEffect(() => {
     const v = ref.current
     return () => {
@@ -3331,10 +3342,14 @@ function PreviewVideo({ src, poster, style }) {
       controls
       preload="metadata"
       poster={poster || undefined}
+      onLoadedMetadata={() => {
+        const v = ref.current
+        if (v && isFinite(v.duration) && onDuration) onDuration(v.duration)
+      }}
       style={style || { width: '100%', height: '100%', display: 'block' }}
     />
   )
-}
+})
 
 // Soft full-row background tint for library / queue rows so Ben can
 // scan status at a glance:
@@ -11391,18 +11406,34 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     const ids = submissions.map(s => s.id)
     const { data, error } = await supabase
       .from('lib_submission_comments')
-      .select('submission_id, parent_id, resolved_at, deleted_at')
+      .select('id, submission_id, parent_id, timestamp_seconds, body, author_name, resolved_at, deleted_at')
       .in('submission_id', ids)
       .is('deleted_at', null)
     if (error || !data) return
     const map = {}
-    for (const id of ids) map[id] = { total: 0, open: 0, openTimestamped: 0 }
+    for (const id of ids) map[id] = { total: 0, open: 0, markers: [] }
     for (const c of data) {
       const bucket = map[c.submission_id]
       if (!bucket) continue
       bucket.total += 1
       if (!c.parent_id && !c.resolved_at) bucket.open += 1
+      // Markers = top-level timestamped comments only. Replies stay
+      // attached to their parent thread in the Review modal; surfacing
+      // them here would visually clutter the inline strip without
+      // helping the user navigate.
+      if (!c.parent_id && c.timestamp_seconds != null) {
+        bucket.markers.push({
+          id: c.id,
+          ts: c.timestamp_seconds,
+          body: c.body,
+          author_name: c.author_name,
+          resolved: !!c.resolved_at,
+        })
+      }
     }
+    // Sort each bucket's markers by timestamp so the strip reads
+    // left-to-right in playback order.
+    for (const id of ids) map[id].markers.sort((a, b) => a.ts - b.ts)
     setCommentsBySubId(map)
   }, [submissionIdsKey]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { reloadCommentCounts() }, [reloadCommentCounts])
@@ -12140,6 +12171,21 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
    the old single-slot SubmittedWorkPanel. */
 function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onOpenReview, onFeedbackSaved, onRequestRevision, currentUserName, currentUserRole = 'admin', taskEditorId, taskName }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  // Per-submission video duration so the inline marker strip can
+  // position each comment dot at (ts / duration) * 100%. Populated by
+  // PreviewVideo's onDuration callback. Missing key = duration still
+  // loading, in which case the strip degrades to a flat row of pills.
+  const [videoDurations, setVideoDurations] = useState({})
+  // Refs to each PreviewVideo's imperative handle so marker click can
+  // seek the INLINE player (not just open the Review modal). One ref
+  // per submission id, lazily created.
+  const previewRefs = useRef({})
+  const getPreviewRef = (id) => {
+    if (!previewRefs.current[id]) {
+      previewRefs.current[id] = { current: null }
+    }
+    return previewRefs.current[id]
+  }
   // Per-card expand/collapse state. Default: only the LATEST (first
   // in the list) is expanded, older versions are collapsed so the
   // modal doesn't sprout three video players for a long revision
@@ -12467,8 +12513,79 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                   revision history. */}
               {isExpanded && sub.file_url && (
                 <>
-                  <PreviewVideo src={sub.file_url} poster={sub.thumbnail_url}
+                  <PreviewVideo
+                    ref={getPreviewRef(sub.id)}
+                    src={sub.file_url}
+                    poster={sub.thumbnail_url}
+                    onDuration={(d) => setVideoDurations(prev => prev[sub.id] === d ? prev : { ...prev, [sub.id]: d })}
                     style={{ display: 'block', width: '100%', maxHeight: 280, background: '#000', objectFit: 'contain' }} />
+                  {/* Inline comment-marker strip — gives the operator the
+                      same per-timestamp at-a-glance read that the Review
+                      modal's scrubber does. Dots positioned by
+                      (ts / duration) * 100%. Click a dot to seek the
+                      inline player; if the operator wants to read the
+                      thread or add a reply, the marker also doubles as
+                      a quick-jump into the Review modal via shift-click
+                      (or the "Open comments in Review" button below).
+                      Ben 2026-06-01: "this player still also doesn't
+                      have the comments in the preview where we left
+                      comments". */}
+                  {(() => {
+                    const cc = commentsBySubId[sub.id]
+                    if (!cc || !cc.markers || cc.markers.length === 0) return null
+                    const d = videoDurations[sub.id]
+                    return (
+                      <div style={{
+                        position: 'relative', height: 22, background: '#0a0a0a',
+                        borderTop: '1px solid rgba(255,255,255,0.08)',
+                      }}>
+                        {/* Track */}
+                        <div style={{
+                          position: 'absolute', left: 8, right: 8, top: '50%',
+                          height: 2, background: 'rgba(255,255,255,0.12)',
+                          transform: 'translateY(-50%)',
+                        }} />
+                        {/* Markers — positioned by duration when known,
+                            else flat-spaced as a fallback so the operator
+                            still sees them even before metadata loads.
+                            Clamped between 8px and (100% - 8px) so end
+                            markers don't hang off the strip edges. */}
+                        {cc.markers.map((m, idx) => {
+                          const pct = d && d > 0
+                            ? (m.ts / d) * 100
+                            : ((idx + 1) / (cc.markers.length + 1)) * 100
+                          return (
+                            <div
+                              key={m.id}
+                              title={`${m.author_name || 'Comment'} · ${fmtTime(m.ts)}\n${(m.body || '').slice(0, 160)}\n\nClick to seek inline · Shift-click to open Review`}
+                              onClick={(e) => {
+                                if (e.shiftKey && onOpenReview && sub.file_url) {
+                                  onOpenReview(sub)
+                                  return
+                                }
+                                previewRefs.current[sub.id]?.current?.seekTo(m.ts)
+                              }}
+                              style={{
+                                position: 'absolute',
+                                left: `clamp(8px, ${pct}%, calc(100% - 8px))`,
+                                top: '50%', transform: 'translate(-50%, -50%)',
+                                width: 10, height: 10, borderRadius: '50%',
+                                background: m.resolved ? 'rgba(255,255,255,0.45)' : '#3e7eba',
+                                border: '2px solid #0a0a0a',
+                                cursor: 'pointer',
+                                boxShadow: m.resolved
+                                  ? 'none'
+                                  : '0 0 0 1px rgba(62,126,186,0.5)',
+                                transition: 'transform 100ms ease',
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.transform = 'translate(-50%, -50%) scale(1.3)' }}
+                              onMouseLeave={e => { e.currentTarget.style.transform = 'translate(-50%, -50%) scale(1)' }}
+                            />
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
                   <div style={{
                     padding: '6px 12px', background: 'var(--paper-2)',
                     borderTop: '1px solid var(--rule)',
@@ -12563,21 +12680,6 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                         </span>
                       )}
                     </div>
-                    {/* Quick-jump CTA when there are timestamped comments —
-                        the inline panel can't show a player scrubber so
-                        the only way to read them is the Review modal. */}
-                    {!hasFeedback && hasComments && onOpenReview && sub.file_url && (
-                      <button type="button"
-                        onClick={() => onOpenReview(sub)}
-                        style={{
-                          padding: '5px 10px', marginBottom: hasFeedback ? 6 : 4,
-                          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                          letterSpacing: '0.08em', textTransform: 'uppercase',
-                          background: needsAction ? '#b53e3e' : '#3e8a5e',
-                          color: 'white', border: 'none', borderRadius: 2,
-                          cursor: 'pointer',
-                        }}>Open comments in Review ▶</button>
-                    )}
                     {/* Display mode */}
                     {hasFeedback && !isEditing && (
                       <div style={{
@@ -12631,24 +12733,59 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                         </div>
                       </>
                     )}
-                    {/* Trigger button */}
-                    {canFeedback && !isEditing && (
-                      <button type="button"
-                        onClick={() => setFeedbackEditingId(sub.id)}
-                        style={{
-                          padding: hasFeedback ? '4px 10px' : '8px 14px',
-                          fontFamily: 'var(--mono)',
-                          fontSize: hasFeedback ? 10 : 11,
-                          fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
-                          background: hasFeedback ? 'transparent' : '#e8b408',
-                          color: hasFeedback ? 'var(--ink-2)' : '#3a2904',
-                          border: hasFeedback ? '1px solid var(--rule)' : '1px solid #d09c08',
-                          cursor: 'pointer', borderRadius: 2,
-                        }}>
-                        {hasFeedback
-                          ? (currentUserRole === 'editor' ? 'Edit reply' : 'Edit feedback')
-                          : (currentUserRole === 'editor' ? 'Reply with feedback' : 'Leave feedback')}
-                      </button>
+                    {/* Action row — Open Comments + Leave/Edit feedback in
+                        one flex row with matched padding so they stack
+                        cleanly (no more uneven heights from mixed paddings,
+                        Ben 2026-06-01: "the OPEN COMMENTS IN REVIEW padding
+                        is a little bit messy"). */}
+                    {!isEditing && (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'stretch' }}>
+                        {/* Open Comments in Review — only when there are
+                            timestamped comments to jump into. Primary in
+                            the action row when shown because per-timestamp
+                            review is richer than free-text feedback. */}
+                        {!hasFeedback && hasComments && onOpenReview && sub.file_url && (
+                          <button type="button"
+                            onClick={() => onOpenReview(sub)}
+                            style={{
+                              padding: '7px 12px',
+                              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+                              letterSpacing: '0.08em', textTransform: 'uppercase',
+                              background: needsAction ? '#b53e3e' : '#3e8a5e',
+                              color: 'white', border: 'none', borderRadius: 2,
+                              cursor: 'pointer', lineHeight: 1.2,
+                            }}>Open comments in Review ▶</button>
+                        )}
+                        {/* Inline feedback trigger — same height as Open
+                            Comments so the row visually balances. */}
+                        {canFeedback && (
+                          <button type="button"
+                            onClick={() => setFeedbackEditingId(sub.id)}
+                            style={{
+                              padding: '7px 12px',
+                              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+                              letterSpacing: '0.08em', textTransform: 'uppercase',
+                              // When there's already feedback, demote this to
+                              // a ghost-style edit button. Otherwise primary
+                              // yellow CTA (or secondary outline when paired
+                              // with the Open Comments button).
+                              background: hasFeedback
+                                ? 'transparent'
+                                : (hasComments ? 'transparent' : '#e8b408'),
+                              color: hasFeedback
+                                ? 'var(--ink-2)'
+                                : (hasComments ? '#7a4e08' : '#3a2904'),
+                              border: hasFeedback
+                                ? '1px solid var(--rule)'
+                                : (hasComments ? '1px solid #d09c08' : '1px solid #d09c08'),
+                              cursor: 'pointer', borderRadius: 2, lineHeight: 1.2,
+                            }}>
+                            {hasFeedback
+                              ? (currentUserRole === 'editor' ? 'Edit reply' : 'Edit feedback')
+                              : (currentUserRole === 'editor' ? 'Reply with feedback' : 'Leave feedback')}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )
