@@ -1,30 +1,31 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { matchPaymentToClient } from '../_shared/matchPayment.ts'
 
 /*
   Advanced Stripe sync — subscription-aware money model.
 
   ROM sells mostly recurring subscriptions, so this pulls the full billing
   picture, not just charges:
-    1. Subscriptions  -> MRR (normalized to monthly), status, churn
-    2. Invoices       -> recurring revenue recognized + AR + failed/dunning
-    3. Charges        -> actual cash collected, fees, net (via balance_transaction)
+    1. Invoices       -> recurring revenue + AR + failed/dunning, and the
+                         native customer_email/customer_name (no customer scope needed)
+    2. Charges        -> actual cash collected, fees, net (via balance_transaction)
+    3. Subscriptions  -> MRR (normalized to monthly), status, churn
   Then writes a daily MRR snapshot for movement tracking.
 
-  Multi-account: set STRIPE_SECRET_KEY plus STRIPE_SECRET_KEY_2 / _3 / _4 for
-  each Stripe account. Optional STRIPE_ACCOUNT_LABELS="primary,coaching,uk".
-  Read-only restricted keys are expected (rk_live_...).
+  Deliberately does NOT expand `customer`, so it runs on a restricted key that
+  lacks Customers-read. Customer emails come from invoices/charges; subscriptions
+  inherit the client match via shared customer id. Adding Customers-read later
+  only improves matching, nothing breaks without it.
 
-  Idempotent: every object upserts on its Stripe id, so re-running backfills
-  safely. Invoke:  POST /sync-stripe?days=730
+  Multi-account: STRIPE_SECRET_KEY plus STRIPE_SECRET_KEY_2 / _3 ... for each
+  account. Optional STRIPE_ACCOUNT_LABELS="primary,coaching,uk".
+  Idempotent (upsert on Stripe id). Invoke:  POST /sync-stripe?days=730
 */
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
-
 const STRIPE_API = 'https://api.stripe.com/v1'
 
 interface Account { key: string; label: string }
@@ -41,11 +42,10 @@ function collectAccounts(): Account[] {
   return accounts
 }
 
-// Paginate any Stripe list endpoint, following has_more via starting_after.
 async function stripeList(key: string, path: string, params: Record<string, string> = {}) {
-  const out: Array<Record<string, unknown>> = []
+  const out: Array<Record<string, any>> = []
   let starting_after: string | undefined
-  for (let page = 0; page < 200; page++) {
+  for (let page = 0; page < 300; page++) {
     const qs = new URLSearchParams({ limit: '100', ...params })
     if (starting_after) qs.set('starting_after', starting_after)
     const res = await fetch(`${STRIPE_API}/${path}?${qs.toString()}`, {
@@ -62,24 +62,17 @@ async function stripeList(key: string, path: string, params: Record<string, stri
 }
 
 const cents = (n: unknown) => (Number(n) || 0) / 100
+const iso = (s: unknown) => (s ? new Date((s as number) * 1000).toISOString() : null)
 
-// Normalize any recurring price to monthly recurring revenue (major units).
 function monthlyize(unitAmount: number, interval: string, intervalCount: number, qty: number): number {
   const per = unitAmount * (qty || 1)
   const n = intervalCount || 1
   switch (interval) {
-    case 'year':  return per / (12 * n)
-    case 'week':  return (per * 52) / (12 * n)
-    case 'day':   return (per * 365) / (12 * n)
-    case 'month':
-    default:      return per / n
+    case 'year': return per / (12 * n)
+    case 'week': return (per * 52) / (12 * n)
+    case 'day':  return (per * 365) / (12 * n)
+    default:     return per / n
   }
-}
-
-function custOf(obj: Record<string, any>) {
-  const c = obj.customer
-  if (c && typeof c === 'object') return { id: c.id as string, email: c.email as string, name: c.name as string }
-  return { id: (typeof c === 'string' ? c : null) as string | null, email: null, name: null }
 }
 
 serve(async (req) => {
@@ -93,48 +86,85 @@ serve(async (req) => {
     }
 
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
-    const ghlApiKey = Deno.env.get('GHL_API_KEY') || ''
-    const ghlLocationId = Deno.env.get('GHL_LOCATION_ID') || ''
 
     const url = new URL(req.url)
     const days = parseInt(url.searchParams.get('days') || '730')
     const createdGte = Math.floor(Date.now() / 1000) - days * 86400
 
-    // Resolve a Stripe customer to a ROM client: prefer the stored stripe_customer_id,
-    // else fall back to fuzzy email/name match (and cache the id for next time).
-    const clientCache = new Map<string, string | null>()
-    async function resolveClient(customerId: string | null, email: string | null, name: string | null): Promise<string | null> {
-      if (customerId && clientCache.has(customerId)) return clientCache.get(customerId)!
-      let clientId: string | null = null
-      if (customerId) {
-        const { data } = await supabase.from('clients').select('id').eq('stripe_customer_id', customerId).limit(1).maybeSingle()
-        clientId = data?.id || null
-      }
-      if (!clientId && (email || name)) {
-        const m = await matchPaymentToClient(supabase, email, null, name, ghlApiKey, ghlLocationId)
-        clientId = m.clientId || null
-        if (clientId && customerId) await supabase.from('clients').update({ stripe_customer_id: customerId }).eq('id', clientId)
-      }
-      if (customerId) clientCache.set(customerId, clientId)
-      return clientId
-    }
+    // Preload client->stripe_customer linkage once. Matching is in-memory (O(1),
+    // no per-row DB or GHL calls) so the backfill finishes inside the function
+    // wall-clock. Fuzzy/GHL enrichment is a separate lighter pass, not the sync.
+    const { data: clientRows } = await supabase.from('clients').select('id, stripe_customer_id')
+    const clientByCustomer = new Map<string, string>()
+    for (const c of clientRows || []) if (c.stripe_customer_id) clientByCustomer.set(c.stripe_customer_id as string, c.id as string)
+    const resolveClient = (customerId: string | null): string | null =>
+      (customerId && clientByCustomer.get(customerId)) || null
 
     const totals = { subscriptions: 0, invoices: 0, charges: 0, mrr: 0, activeSubs: 0, trialing: 0, pastDue: 0, arOutstanding: 0 }
     const perAccount: Record<string, unknown>[] = []
 
     for (const acct of accounts) {
-      const a = { label: acct.label, subscriptions: 0, invoices: 0, charges: 0, mrr: 0, activeSubs: 0 }
+      const a = { label: acct.label, subscriptions: 0, invoices: 0, charges: 0, mrr: 0 }
+      // customer id -> best known {email, name}, harvested from invoices/charges,
+      // then used to match subscriptions without needing Customers-read.
+      const custInfo = new Map<string, { email: string | null; name: string | null }>()
 
-      // 1) SUBSCRIPTIONS -> MRR
-      const subs = await stripeList(acct.key, 'subscriptions', {
-        status: 'all',
-        'expand[]': 'data.customer',
-      })
-      // second expand has to be on the same call; Stripe allows multiple expand[]:
-      // we refetch items.price.product inline below if missing.
+      // 1) INVOICES (native customer_email/name) -> revenue + AR
+      const invoices = await stripeList(acct.key, 'invoices', { 'created[gte]': String(createdGte) })
+      for (const inv of invoices) {
+        const custId = (inv.customer as string) || null
+        const email = (inv.customer_email as string) || null
+        const name = (inv.customer_name as string) || null
+        if (custId && (email || name)) custInfo.set(custId, { email, name })
+        const clientId = resolveClient(custId)
+        const remaining = cents(inv.amount_remaining)
+        if (['open', 'uncollectible'].includes(inv.status as string)) totals.arOutstanding += remaining
+        await supabase.from('stripe_invoices').upsert({
+          id: inv.id, account_label: acct.label,
+          subscription_id: (inv.subscription as string) || null,
+          stripe_customer_id: custId, client_id: clientId, customer_email: email,
+          status: inv.status,
+          amount_due: cents(inv.amount_due), amount_paid: cents(inv.amount_paid), amount_remaining: remaining,
+          currency: inv.currency || 'usd',
+          period_start: iso(inv.period_start), period_end: iso(inv.period_end), due_date: iso(inv.due_date),
+          paid_at: iso(inv.status_transitions?.paid_at), attempt_count: Number(inv.attempt_count || 0),
+          raw: inv, synced_at: new Date().toISOString(),
+        }, { onConflict: 'id' })
+        a.invoices++
+      }
+
+      // 2) CHARGES -> cash, fees, net
+      const charges = await stripeList(acct.key, 'charges', { 'created[gte]': String(createdGte), 'expand[]': 'data.balance_transaction' })
+      for (const ch of charges) {
+        if (!ch.paid || ch.status !== 'succeeded') continue
+        const bt = ch.balance_transaction
+        const amount = cents(ch.amount)
+        const fee = bt && typeof bt === 'object' ? cents(bt.fee) : Number((amount * 0.029 + 0.30).toFixed(2))
+        const net = bt && typeof bt === 'object' ? cents(bt.net) : Number((amount - fee).toFixed(2))
+        const email = ch.billing_details?.email || (ch.receipt_email as string) || null
+        const name = ch.billing_details?.name || null
+        const custId = typeof ch.customer === 'string' ? ch.customer : null
+        if (custId && (email || name)) custInfo.set(custId, { email, name })
+        const clientId = resolveClient(custId)
+        await supabase.from('payments').upsert({
+          source: 'stripe', source_event_id: `stripe_${ch.id}`,
+          amount, fee, net_amount: net, currency: String(ch.currency || 'usd').toUpperCase(),
+          customer_email: email, customer_name: name,
+          payment_date: iso(ch.created),
+          payment_type: ch.invoice ? 'monthly' : 'one_time',
+          description: (ch.description as string) || null,
+          stripe_invoice_id: (ch.invoice as string) || null, account_label: acct.label,
+          metadata: { charge_id: ch.id }, client_id: clientId, matched: !!clientId,
+        }, { onConflict: 'source_event_id' })
+        a.charges++
+      }
+
+      // 3) SUBSCRIPTIONS -> MRR (match via harvested custInfo)
+      const subs = await stripeList(acct.key, 'subscriptions', { status: 'all', 'expand[]': 'data.items.data.price' })
       for (const sub of subs) {
-        const cu = custOf(sub)
-        const item = (sub.items as any)?.data?.[0] || {}
+        const custId = (sub.customer as string) || null
+        const info = (custId && custInfo.get(custId)) || { email: null, name: null }
+        const item = sub.items?.data?.[0] || {}
         const price = item.price || {}
         const rec = price.recurring || {}
         const unit = cents(price.unit_amount)
@@ -143,85 +173,26 @@ serve(async (req) => {
         const intervalCount = Number(rec.interval_count || 1)
         const isLive = ['active', 'trialing', 'past_due'].includes(sub.status as string)
         const mrr = isLive ? monthlyize(unit, interval, intervalCount, qty) : 0
-        const clientId = await resolveClient(cu.id, cu.email, cu.name)
+        const clientId = resolveClient(custId)
 
         await supabase.from('stripe_subscriptions').upsert({
           id: sub.id, account_label: acct.label,
-          stripe_customer_id: cu.id, client_id: clientId,
-          customer_email: cu.email, customer_name: cu.name,
-          status: sub.status, mrr: Number(mrr.toFixed(2)),
-          currency: price.currency || 'usd',
+          stripe_customer_id: custId, client_id: clientId,
+          customer_email: info.email, customer_name: info.name,
+          status: sub.status, mrr: Number(mrr.toFixed(2)), currency: price.currency || 'usd',
           interval, interval_count: intervalCount, quantity: qty, unit_amount: unit,
           product_name: typeof price.product === 'object' ? price.product?.name : null,
           plan_nickname: price.nickname || null,
-          started_at: sub.start_date ? new Date((sub.start_date as number) * 1000).toISOString() : null,
-          current_period_end: sub.current_period_end ? new Date((sub.current_period_end as number) * 1000).toISOString() : null,
-          trial_end: sub.trial_end ? new Date((sub.trial_end as number) * 1000).toISOString() : null,
-          canceled_at: sub.canceled_at ? new Date((sub.canceled_at as number) * 1000).toISOString() : null,
+          started_at: iso(sub.start_date), current_period_end: iso(sub.current_period_end),
+          trial_end: iso(sub.trial_end), canceled_at: iso(sub.canceled_at),
           raw: sub, synced_at: new Date().toISOString(),
         }, { onConflict: 'id' })
 
         a.subscriptions++
-        if (isLive) { a.mrr += mrr; a.activeSubs += (sub.status === 'active' ? 1 : 0) }
+        if (isLive) a.mrr += mrr
         if (sub.status === 'active') totals.activeSubs++
         if (sub.status === 'trialing') totals.trialing++
         if (sub.status === 'past_due') totals.pastDue++
-      }
-
-      // 2) INVOICES -> recurring revenue + AR + failed
-      const invoices = await stripeList(acct.key, 'invoices', {
-        'created[gte]': String(createdGte),
-        'expand[]': 'data.customer',
-      })
-      for (const inv of invoices) {
-        const cu = custOf(inv)
-        const clientId = await resolveClient(cu.id, cu.email, cu.name)
-        const remaining = cents(inv.amount_remaining)
-        if (['open', 'uncollectible'].includes(inv.status as string)) totals.arOutstanding += remaining
-        await supabase.from('stripe_invoices').upsert({
-          id: inv.id, account_label: acct.label,
-          subscription_id: (inv.subscription as string) || null,
-          stripe_customer_id: cu.id, client_id: clientId, customer_email: cu.email,
-          status: inv.status,
-          amount_due: cents(inv.amount_due), amount_paid: cents(inv.amount_paid), amount_remaining: remaining,
-          currency: inv.currency || 'usd',
-          period_start: inv.period_start ? new Date((inv.period_start as number) * 1000).toISOString() : null,
-          period_end: inv.period_end ? new Date((inv.period_end as number) * 1000).toISOString() : null,
-          due_date: inv.due_date ? new Date((inv.due_date as number) * 1000).toISOString() : null,
-          paid_at: inv.status_transitions?.paid_at ? new Date((inv.status_transitions.paid_at as number) * 1000).toISOString() : null,
-          attempt_count: Number(inv.attempt_count || 0),
-          raw: inv, synced_at: new Date().toISOString(),
-        }, { onConflict: 'id' })
-        a.invoices++
-      }
-
-      // 3) CHARGES -> cash collected, fees, net
-      const charges = await stripeList(acct.key, 'charges', {
-        'created[gte]': String(createdGte),
-        'expand[]': 'data.balance_transaction',
-      })
-      for (const ch of charges) {
-        if (!ch.paid || ch.status !== 'succeeded') continue
-        const bt = ch.balance_transaction as any
-        const amount = cents(ch.amount)
-        const fee = bt && typeof bt === 'object' ? cents(bt.fee) : Number((amount * 0.029 + 0.30).toFixed(2))
-        const net = bt && typeof bt === 'object' ? cents(bt.net) : Number((amount - fee).toFixed(2))
-        const email = (ch.billing_details as any)?.email || (ch.receipt_email as string) || null
-        const name = (ch.billing_details as any)?.name || null
-        const custId = typeof ch.customer === 'string' ? ch.customer : null
-        const clientId = await resolveClient(custId, email, name)
-        await supabase.from('payments').upsert({
-          source: 'stripe', source_event_id: `stripe_${ch.id}`,
-          amount, fee, net_amount: net, currency: String(ch.currency || 'usd').toUpperCase(),
-          customer_email: email, customer_name: name,
-          payment_date: new Date((ch.created as number) * 1000).toISOString(),
-          payment_type: ch.invoice ? 'monthly' : 'one_time',
-          description: (ch.description as string) || null,
-          stripe_invoice_id: (ch.invoice as string) || null,
-          account_label: acct.label,
-          metadata: { charge_id: ch.id }, client_id: clientId, matched: !!clientId,
-        }, { onConflict: 'source_event_id' })
-        a.charges++
       }
 
       totals.subscriptions += a.subscriptions
@@ -231,7 +202,6 @@ serve(async (req) => {
       perAccount.push(a)
     }
 
-    // Daily MRR snapshot (movement is derived day-over-day from these rows).
     const today = new Date().toISOString().split('T')[0]
     await supabase.from('mrr_snapshots').upsert({
       snapshot_date: today, account_label: 'all',
