@@ -2314,15 +2314,23 @@ function HistoryRunRow({ bucket, rows, angleLookup, currentOfferSlug }) {
                   </span>
                 </div>
                 {typeOrder.map(t => (
-                  <div key={t} style={{ marginBottom: 12 }}>
+                  <div key={t} style={{ marginBottom: 14 }}>
                     <div style={{
                       fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.16em',
                       textTransform: 'uppercase', color: 'var(--ink-3)',
-                      marginBottom: 6, fontWeight: 700,
+                      marginBottom: 8, fontWeight: 700,
                     }}>
                       {t} · {byType[t].length}
                     </div>
-                    <div style={{ display: 'grid', gap: 6 }}>
+                    {/* Tile grid (Ben 2026-06-01 PM — "should be tile view
+                        like when they really generate, not a list, they're
+                        messy as a list"). Responsive auto-fill so 1-4
+                        tiles per row depending on screen width. */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                      gap: 12,
+                    }}>
                       {byType[t].map(r => <HistoryDraftRow key={r.id} row={r} angleName={angle?.name} />)}
                     </div>
                   </div>
@@ -2336,96 +2344,231 @@ function HistoryRunRow({ bucket, rows, angleLookup, currentOfferSlug }) {
   )
 }
 
+// Tile-shaped draft card (Ben 2026-06-01 PM — list view was too messy,
+// tile view like the post-gen output). Header: mode badge + shape +
+// proof + word count. Body: teach-focus subtitle + clamped preview.
+// Footer: status + copy. Click anywhere on the body opens a full-text
+// modal so expanding doesn't disrupt the grid layout.
 function HistoryDraftRow({ row, angleName }) {
-  const [expanded, setExpanded] = useState(false)
-  const preview = (row.body || '').replace(/\s+/g, ' ').trim().slice(0, 220)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
   const mode = row.target_attributes?.script_mode
   const modeMeta = scriptModeMeta(mode)
   const shape = row.target_attributes?.shape_code
   const proofChar = row.target_attributes?.proof_character
   const teachFocus = row.target_attributes?.teach_focus
   const wordCount = (row.body || '').trim().split(/\s+/).filter(Boolean).length
-  function copy(e) {
+  const preview = (row.body || '').replace(/\s+/g, ' ').trim()
+  function copyBody(e) {
     e.stopPropagation()
     navigator.clipboard.writeText(row.body || '')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1100)
   }
   return (
-    <div style={{
-      padding: '11px 14px', background: 'white',
-      border: '1px solid var(--rule)',
-      borderLeft: mode ? `3px solid ${modeMeta.color}` : '1px solid var(--rule)',
-      borderRadius: 2, cursor: 'pointer',
-    }} onClick={() => setExpanded(e => !e)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-        {/* Mode badge — primary visual anchor */}
-        {mode && (
+    <>
+      <div
+        onClick={() => setModalOpen(true)}
+        style={{
+          position: 'relative',
+          background: 'white',
+          border: '1px solid var(--rule)',
+          borderTop: mode ? `3px solid ${modeMeta.color}` : '3px solid var(--rule)',
+          borderRadius: 2,
+          padding: '12px 14px 10px',
+          minHeight: 200,
+          display: 'flex', flexDirection: 'column', gap: 8,
+          cursor: 'pointer',
+          transition: 'box-shadow 120ms ease, transform 120ms ease',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.boxShadow = `0 4px 12px rgba(26,36,44,0.08)`
+          e.currentTarget.style.transform = 'translateY(-1px)'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.boxShadow = 'none'
+          e.currentTarget.style.transform = 'translateY(0)'
+        }}
+      >
+        {/* Header row: mode badge + word count */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {mode && (
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.14em',
+              textTransform: 'uppercase', fontWeight: 700,
+              padding: '3px 8px', background: modeMeta.tint, color: modeMeta.color,
+              border: `1px solid ${modeMeta.color}`, borderRadius: 2,
+            }}>{modeMeta.label}</span>
+          )}
+          {shape && (
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: 'var(--ink-3)',
+              padding: '2px 7px', background: 'var(--paper)',
+              border: '1px solid var(--rule)', borderRadius: 2,
+            }}>{shape}</span>
+          )}
           <span style={{
-            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
-            textTransform: 'uppercase', fontWeight: 700,
-            padding: '3px 8px', background: modeMeta.tint, color: modeMeta.color,
-            border: `1px solid ${modeMeta.color}`, borderRadius: 2,
-          }}>{modeMeta.label}</span>
-        )}
-        {/* Shape code — secondary */}
-        {shape && (
-          <span style={{
-            fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
-            textTransform: 'uppercase', color: 'var(--ink-3)',
-            padding: '2px 7px', background: 'var(--paper)',
-            border: '1px solid var(--rule)', borderRadius: 2,
-          }}>Shape {shape}</span>
-        )}
-        {/* Proof character — only if present */}
+            marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10,
+            color: 'var(--ink-4)', letterSpacing: '0.04em',
+          }}>{wordCount}w</span>
+        </div>
+
+        {/* Proof character (when present) — italic serif, like the angle tile */}
         {proofChar && (
-          <span style={{
-            fontFamily: 'var(--serif)', fontSize: 11.5, fontStyle: 'italic',
+          <div style={{
+            fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12.5,
             color: 'var(--ink-3)',
-          }}>· {proofChar}</span>
+          }}>{proofChar}</div>
         )}
-        {/* Word count, right-aligned */}
-        <span style={{
-          marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 9.5,
-          color: 'var(--ink-4)', letterSpacing: '0.06em',
-        }}>{wordCount}w</span>
-        <span style={{
-          fontFamily: 'var(--mono)', fontSize: 9.5,
-          padding: '2px 6px', background: 'var(--paper)', border: '1px solid var(--rule)',
-          color: 'var(--ink-4)', borderRadius: 2, letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-        }}>{row.status || 'draft'}</span>
-        <button onClick={copy} title="Copy script body"
-          style={{
-            padding: 4, background: 'transparent', border: 'none',
-            color: 'var(--ink-4)', cursor: 'pointer',
+
+        {/* Teach focus (educational/hybrid only) */}
+        {teachFocus && (
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.04em',
+            color: 'var(--ink-3)', lineHeight: 1.35,
           }}>
-          <Copy size={12} />
-        </button>
-      </div>
-      {/* Optional teach focus (educational/hybrid hint) */}
-      {teachFocus && (
+            <span style={{ color: 'var(--ink-4)' }}>Teaches:</span>{' '}
+            <span style={{ color: 'var(--ink-2)' }}>{teachFocus}</span>
+          </div>
+        )}
+
+        {/* Preview body — clamped to ~6 lines via webkit line-clamp + plain CSS fallback */}
         <div style={{
-          fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.04em',
-          color: 'var(--ink-3)', marginBottom: 4,
+          fontFamily: 'var(--serif)', fontSize: 13, lineHeight: 1.55,
+          color: 'var(--ink-2)',
+          flex: 1,
+          display: '-webkit-box',
+          WebkitLineClamp: 6,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
         }}>
-          Teach: <span style={{ color: 'var(--ink-2)' }}>{teachFocus}</span>
+          {preview}
+        </div>
+
+        {/* Footer row: status + copy */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          paddingTop: 6, borderTop: '1px solid var(--rule)',
+          marginTop: 'auto',
+        }}>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 9.5,
+            padding: '2px 6px', background: 'var(--paper)', border: '1px solid var(--rule)',
+            color: 'var(--ink-4)', borderRadius: 2, letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+          }}>{row.status || 'draft'}</span>
+          <span style={{
+            marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 9.5,
+            color: 'var(--ink-4)', letterSpacing: '0.08em', textTransform: 'uppercase',
+          }}>Click to read</span>
+          <button onClick={copyBody} title="Copy script body"
+            style={{
+              padding: '4px 8px', background: copied ? 'var(--accent)' : 'transparent',
+              border: '1px solid var(--rule)', color: 'var(--ink-3)',
+              cursor: 'pointer', borderRadius: 2,
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+            }}>
+            {copied ? <Check size={11} /> : <Copy size={11} />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+      </div>
+
+      {/* Full-text modal — opens on tile click. Themed, not a browser alert. */}
+      {modalOpen && (
+        <div
+          onClick={() => setModalOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(26,36,44,0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white', borderRadius: 4,
+              maxWidth: 720, width: '100%', maxHeight: '85vh',
+              display: 'flex', flexDirection: 'column',
+              borderTop: mode ? `4px solid ${modeMeta.color}` : '4px solid var(--ink)',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div style={{
+              padding: '18px 22px',
+              borderBottom: '1px solid var(--rule)',
+              display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            }}>
+              {mode && (
+                <span style={{
+                  fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
+                  textTransform: 'uppercase', fontWeight: 700,
+                  padding: '3px 8px', background: modeMeta.tint, color: modeMeta.color,
+                  border: `1px solid ${modeMeta.color}`, borderRadius: 2,
+                }}>{modeMeta.label}</span>
+              )}
+              {shape && (
+                <span style={{
+                  fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
+                  textTransform: 'uppercase', color: 'var(--ink-3)',
+                  padding: '2px 8px', background: 'var(--paper)',
+                  border: '1px solid var(--rule)', borderRadius: 2,
+                }}>Shape {shape}</span>
+              )}
+              {angleName && (
+                <span style={{
+                  fontFamily: 'var(--serif)', fontSize: 15, color: 'var(--ink)',
+                }}>{angleName}</span>
+              )}
+              <span style={{
+                marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10,
+                color: 'var(--ink-4)', letterSpacing: '0.06em',
+              }}>{wordCount} words</span>
+              <button onClick={() => setModalOpen(false)} title="Close"
+                style={{
+                  padding: 6, background: 'transparent', border: '1px solid var(--rule)',
+                  color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                }}>
+                <X size={14} />
+              </button>
+            </div>
+            <div style={{
+              padding: '20px 22px', overflow: 'auto', flex: 1,
+              fontFamily: 'var(--serif)', fontSize: 15, lineHeight: 1.65,
+              color: 'var(--ink-2)', whiteSpace: 'pre-wrap',
+            }}>
+              {row.body}
+            </div>
+            <div style={{
+              padding: '14px 22px', borderTop: '1px solid var(--rule)',
+              display: 'flex', alignItems: 'center', gap: 10, background: 'var(--paper)',
+            }}>
+              {teachFocus && (
+                <span style={{
+                  fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
+                }}>Teaches: <span style={{ color: 'var(--ink-2)' }}>{teachFocus}</span></span>
+              )}
+              <button onClick={copyBody}
+                style={{
+                  marginLeft: 'auto',
+                  padding: '8px 16px', fontFamily: 'var(--mono)', fontSize: 11,
+                  letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
+                  background: copied ? 'var(--accent)' : 'var(--ink)',
+                  color: copied ? 'var(--ink)' : 'var(--paper)',
+                  border: 'none', cursor: 'pointer', borderRadius: 2,
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                }}>
+                {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy script</>}
+              </button>
+            </div>
+          </div>
         </div>
       )}
-      <div style={{
-        fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
-        color: 'var(--ink-2)',
-        whiteSpace: expanded ? 'pre-wrap' : 'normal',
-      }}>
-        {expanded ? row.body : (preview + ((row.body || '').length > 220 ? '…' : ''))}
-      </div>
-      {!expanded && (row.body || '').length > 220 && (
-        <div style={{
-          marginTop: 4, fontFamily: 'var(--mono)', fontSize: 9.5,
-          color: 'var(--ink-4)', letterSpacing: '0.06em',
-        }}>
-          Click to expand
-        </div>
-      )}
-    </div>
+    </>
   )
 }
 

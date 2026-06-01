@@ -94,25 +94,13 @@ const LOCKED_PRINCIPLES = `LOCKED PRINCIPLES (from ad-creative-kb/written-docs/,
 
 9. CTA STRUCTURE — End with one clear conditional CTA + the guarantee. For dual-guarantee offers: "[Outcome 1] in 90 days. [Outcome 2] in 90 days. Money back if neither happens. Tap below." For single-guarantee: "Crews booked from direct homeowner calls in 90 days. Money back if not. Tap below."
 
-10. REALITY-CHECK / NO-INVENTED-CAPABILITIES (Ben 2026-06-01 PM — after a hook claimed OPT runs a "carrier access program" it doesn't actually offer). EVERY promise in the script must trace to the offer's NAMED MECHANISM in the angle context. The offer is a SEO/marketing service that drives Google search visibility. It does NOT:
-   - Manage relationships with insurance carriers or adjusters
-   - Get you on a carrier's "preferred-vendor list" or "internal vendor app"
-   - Run any kind of "Carrier Access Program" / "Adjuster Network" / "Insurance Insider Track"
-   - Negotiate referral deals with TPAs or franchises
-   - Provide any non-Google distribution channel
+10. REALITY-CHECK / NO-INVENTED-CAPABILITIES (Ben 2026-06-01 PM — generic, mechanism-aware version). Every promise in the script must trace to the offer's NAMED MECHANISM as described in the angle context above. Don't invent capabilities the current offer doesn't deliver just to fit the angle's wording. Equally, don't refuse to claim capabilities the offer DOES describe — if a future offer's mechanism says "we manage carrier-vendor relationships", the script is free to claim that.
 
-   What the offer DOES deliver (this is the universe of capabilities you can claim):
-   - Google Business Profile rebuilds so the prospect ranks higher in the local 3-pack
-   - Service-page rebuilds so the prospect ranks for emergency search terms (water damage near me, fire damage near me, mold remediation near me)
-   - LSA (Local Service Ads) foundation rebuilds so the prospect captures Google Guaranteed calls
-   - Review velocity systems so Google trusts the prospect's profile faster
-   - AI citation positioning so ChatGPT / Perplexity / Gemini name the prospect when asked "best [vertical] in [city]"
-   - First-pin / Maps top-3 positioning
-   - Direct homeowner calls via Google (this is the END outcome — the prospect's phone rings with people who searched and clicked, not adjuster referrals)
+   How to check: read the offer's mechanism_short + mechanism_long in the angle context — that's the LEVER this offer pulls. Whatever the script promises must be reachable via that lever. If the angle's wording implies an outcome the lever can't reach (e.g. an angle called "Insurance Carrier Insider Status" being run against an offer whose mechanism is purely Google-visibility), REFRAME the angle's underlying desire through the mechanism the offer actually has. End-state for the prospect stays the same (they get the high-value calls they wanted) — the LEVER your script names is the one the offer can actually pull.
 
-   IF THE ANGLE IMPLIES AN OUTCOME THE OFFER CAN'T DELIVER (e.g. "Insurance Carrier Insider Status" implies getting on the carrier's internal list — which OPT cannot do directly), you MUST REFRAME the angle's promise through the offer's actual mechanism. For the Carrier Insider example, the correct reframe is: "You don't get on the inside by chasing adjusters. You get on the inside by being the company homeowners already called. Once you're the #1 Google result, the adjuster's just paperwork — they're approving the company the homeowner picked." Then sell the Google rankings as the lever that gets you there. NEVER invent a capability OPT doesn't actually deliver to fit the angle's wording.
+   Worked reframe (Google-visibility offer × Carrier Insider angle): "You don't get on the inside by chasing the carrier. You get on the inside by being the company homeowners already picked. Once you're the #1 Google result, the adjuster's just paperwork — they're approving the company the homeowner picked." Same end-state (be the obvious choice for the high-value job), real lever (Google search visibility).
 
-   FINAL SELF-CHECK before returning: scan your draft for claims like "we'll get you on [carrier]'s vendor list" / "we put you in the carrier's program" / "we connect you with adjusters" / "insider track" / "preferred-vendor approval" — if any of these appear, REWRITE the claim as a Google-rankings claim. The end-state for the prospect is the same (direct, predictable, high-value emergency calls); the LEVER OPT pulls is Google visibility, full stop.
+   FINAL SELF-CHECK before returning: re-read your script's promise + CTA. Ask "could this offer's mechanism, as described in the angle context, actually produce this outcome?" If yes, ship. If no — even if the angle's title implies it — rewrite the promise through the mechanism that's actually real for THIS offer. The constraint travels with the offer, not with the wording.
 
 11. VOICE — 5TH-GRADE READING LEVEL + TALK-TO-A-FRIEND (Ben 2026-06-01, after seeing scripts read like academic reports).
    Treat this like Alex Hormozi's $100M Hooks Playbook. Write the way you'd actually talk to a friend who happens to own a restoration company over a beer — not the way a copywriter writes for a brand. Rules:
