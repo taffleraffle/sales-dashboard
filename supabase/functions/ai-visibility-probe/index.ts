@@ -222,17 +222,40 @@ serve(async (req) => {
         continue;
       }
 
+      // Rate limit: skip queries probed in the last 24h to avoid hammering client sites
+      // (AI platforms crawl roofingbyvalor.com etc to formulate answers; repeated probes
+      // fire bot-clicks in WhatConverts / CallRail and look like junk leads to clients).
+      const twentyFourHrAgo = new Date(Date.now() - 24 * 3600e3).toISOString();
+      const { data: recentProbes } = await supa
+        .from("ai_visibility_reports")
+        .select("query, platform, fetched_at")
+        .eq("client_id", client.id)
+        .gte("fetched_at", twentyFourHrAgo);
+      const recentKey = new Set((recentProbes || []).map((p) => `${p.query}|${p.platform}`));
+
       let citedCount = 0;
       let platformsRun = 0;
+      let skippedRateLimit = 0;
       const allResults: PlatformResult[] = [];
 
       for (const query of queries.slice(0, 5)) {
-        const results = await Promise.allSettled([
-          probeAIOverview(query, location, clientDomain, brand),
-          probePerplexity(query, clientDomain, brand),
-          probeChatGPT(query, clientDomain, brand),
-          probeGemini(query, clientDomain, brand),
-        ]);
+        // Check if all 4 platforms already probed for this query in last 24h
+        const skipPlatforms = new Set<string>();
+        for (const p of ["google_aio", "perplexity", "chatgpt", "gemini"]) {
+          if (recentKey.has(`${query}|${p}`)) skipPlatforms.add(p);
+        }
+        if (skipPlatforms.size === 4) {
+          skippedRateLimit++;
+          continue;
+        }
+
+        const tasks: Array<Promise<PlatformResult>> = [];
+        if (!skipPlatforms.has("google_aio")) tasks.push(probeAIOverview(query, location, clientDomain, brand));
+        if (!skipPlatforms.has("perplexity")) tasks.push(probePerplexity(query, clientDomain, brand));
+        if (!skipPlatforms.has("chatgpt")) tasks.push(probeChatGPT(query, clientDomain, brand));
+        if (!skipPlatforms.has("gemini")) tasks.push(probeGemini(query, clientDomain, brand));
+
+        const results = await Promise.allSettled(tasks);
         for (const r of results) {
           if (r.status !== "fulfilled") continue;
           platformsRun++;
