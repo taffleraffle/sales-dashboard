@@ -1,183 +1,283 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader, TrendingUp, Users, DollarSign, Activity, Target, Building2, ArrowRight } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { useMarketingTracker } from '../../hooks/useMarketingTracker'
+import { computeMarketingStats } from '../../hooks/useMarketingTracker'
+import { evaluateConstraints } from '../../lib/constraints'
+import {
+  PageShell, BrandedHero, Section, KpiStrip,
+  Th, Td, DataTable, EmptyRow,
+  ink, ink2, ink3, pos, neg, hair, hair2, fmt$, fmtPct, fmtNum,
+} from '../../components/ui'
 
 /*
-  CEODashboard — single-pane founder view.
+  CEO cockpit — the live version of the master tracker's Annual Dashboard.
 
-  Aggregates across all client and operational data:
-    - Active clients (count + new this month + churn)
-    - Total agency-attributable revenue (sum of client_leads.deal_value where converted)
-    - Pipeline value (open opportunities in GHL)
-    - Lead flow (last 7 days across all clients)
-    - Map Pack performance (avg position across all clients)
-    - Operator load (clients per AM + queue depth)
-    - "Needs attention" flags across portfolio
+  Layered per the plan: daily glance on top (north-star tiles + the single
+  biggest constraint), weekly deep-review below (acquisition scorecard scored
+  against KPI thresholds + trailing-period table + portfolio).
 
-  V1: the data sources are pulled directly from the existing tables we've already
-  built. Sales-team data (closer_eod_reports, marketing_tracker, payments, etc.)
-  is read from the OPT-era tables that remain in this Supabase project.
-
-  V2: add agency_metrics_monthly aggregates + sellability metrics (avg time-to-top-3
-  by vertical, lifetime ROI per dollar of fee, etc.).
+  Phase A runs on data already flowing (marketing_tracker via
+  computeMarketingStats, clients for MRR). LTGP:CAC, churn, and the P&L join in
+  Phase B/C.
 */
 
+const WARNING = '#b88200'
+const STATUS_COLOR = { healthy: pos, warning: WARNING, critical: neg, nodata: ink3 }
+const STATUS_LABEL = { healthy: 'On KPI', warning: 'Near KPI', critical: 'Below KPI', nodata: 'No data' }
+
+const todayStr = () => new Date().toISOString().split('T')[0]
+function cutoffStr(days) {
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  return d.toISOString().split('T')[0]
+}
+function monthStartStr() {
+  const n = new Date()
+  return new Date(n.getFullYear(), n.getMonth(), 1).toISOString().split('T')[0]
+}
+
 export default function CEODashboard() {
-  const [stats, setStats] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const { entries, loading: mktLoading } = useMarketingTracker()
+  const [portfolio, setPortfolio] = useState(null)
+  const [portfolioLoading, setPortfolioLoading] = useState(true)
 
   useEffect(() => {
     let mounted = true
     async function load() {
-      setLoading(true)
-      const since30 = new Date(); since30.setDate(since30.getDate() - 30)
-      const since7 = new Date(); since7.setDate(since7.getDate() - 7)
-
+      setPortfolioLoading(true)
       try {
-        const [clientsRes, leadsRes, leads7Res, attentionRes] = await Promise.all([
+        const [clientsRes, leads7Res, attentionRes] = await Promise.all([
           supabase.from('clients').select('id, status, vertical, monthly_fee, created_at'),
           supabase.from('client_leads')
-            .select('id, converted, deal_value, created_at')
-            .gte('created_at', since30.toISOString()),
-          supabase.from('client_leads')
-            .select('id, source', { count: 'exact', head: true })
-            .gte('created_at', since7.toISOString()),
+            .select('id', { count: 'exact', head: true })
+            .gte('created_at', new Date(cutoffStr(7)).toISOString()),
           supabase.from('client_communications')
             .select('id', { count: 'exact', head: true })
             .is('acknowledged_at', null)
             .eq('direction', 'inbound'),
         ])
-
         if (!mounted) return
-
         const clients = clientsRes.data || []
-        const leads30 = leadsRes.data || []
-        const activeClients = clients.filter(c => ['active','trial','onboarding'].includes(c.status))
-        const mrr = activeClients.reduce((sum, c) => sum + Number(c.monthly_fee || 0), 0)
-        const arr = mrr * 12
-        const monthlyRev = leads30.filter(l => l.converted && l.deal_value).reduce((s, l) => s + Number(l.deal_value), 0)
-        const newClientsThisMonth = clients.filter(c => new Date(c.created_at) > since30).length
-
-        const verticalBreakdown = activeClients.reduce((acc, c) => {
-          acc[c.vertical] = (acc[c.vertical] || 0) + 1
+        const active = clients.filter(c => ['active', 'trial', 'onboarding'].includes(c.status))
+        const mrr = active.reduce((s, c) => s + Number(c.monthly_fee || 0), 0)
+        const verticalBreakdown = active.reduce((acc, c) => {
+          const v = c.vertical || 'unspecified'
+          acc[v] = (acc[v] || 0) + 1
           return acc
         }, {})
-
-        setStats({
-          activeClients: activeClients.length,
-          newClientsThisMonth,
+        setPortfolio({
+          activeClients: active.length,
+          newThisMonth: clients.filter(c => c.created_at >= monthStartStr()).length,
           churned: clients.filter(c => c.status === 'churned').length,
-          mrr, arr,
-          monthlyAttributableRev: monthlyRev,
+          mrr, arr: mrr * 12,
           leads7d: leads7Res.count || 0,
-          leads30d: leads30.length,
-          conversions30d: leads30.filter(l => l.converted).length,
           unackedComms: attentionRes.count || 0,
           verticalBreakdown,
         })
       } finally {
-        if (mounted) setLoading(false)
+        if (mounted) setPortfolioLoading(false)
       }
     }
     load()
     return () => { mounted = false }
   }, [])
 
-  if (loading) return <div className="p-10 flex justify-center"><Loader className="animate-spin text-zinc-400" /></div>
-  if (!stats) return <div className="p-6 text-sm text-zinc-500">No data yet.</div>
+  // Trailing windows off the 90-day entries the hook already holds.
+  const windows = useMemo(() => {
+    const inWindow = (since) => entries.filter(e => e.date >= since && e.date <= todayStr())
+    return {
+      d7: computeMarketingStats(inWindow(cutoffStr(7))),
+      d30: computeMarketingStats(inWindow(cutoffStr(30))),
+      d90: computeMarketingStats(inWindow(cutoffStr(90))),
+      mtd: computeMarketingStats(inWindow(monthStartStr())),
+    }
+  }, [entries])
+
+  // Constraint is judged on a reconciled 30-day window (per the ToC method).
+  const { readings, constraint } = useMemo(() => evaluateConstraints(windows.d30), [windows])
+
+  if (mktLoading || portfolioLoading) {
+    return <PageShell><div style={{ padding: '80px 28px', textAlign: 'center', color: ink2 }}>Loading cockpit…</div></PageShell>
+  }
+
+  const p = portfolio || {}
+  const s30 = windows.d30
+  const periodLabel = `Trailing 30 days · ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
+
+  const northStars = [
+    { label: 'MRR', value: fmt$(p.mrr), ctx: `ARR ${fmt$(p.arr)}` },
+    { label: 'Cash collected · 30d', value: fmt$(s30.all_cash), ctx: `${s30.all_cash_roas.toFixed(2)}x all-cash ROAS` },
+    { label: 'Close rate · 30d', value: fmtPct(s30.close_rate), ctx: `${fmtNum(s30.closes)} closes` },
+    { label: 'Active clients', value: fmtNum(p.activeClients), ctx: `+${p.newThisMonth} this month · ${p.churned} churned` },
+    { label: 'Leads · 7d', value: fmtNum(p.leads7d), ctx: 'across all clients' },
+  ]
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-zinc-900">CEO Dashboard</h1>
-        <p className="text-sm text-zinc-500 mt-1">Portfolio view across every active client.</p>
+    <PageShell>
+      <BrandedHero eyebrow="Rank On Maps · CEO" title="Command center" sub={periodLabel} />
+
+      <KpiStrip cells={northStars} columns={5} />
+
+      {/* Biggest constraint — the one lever to pull. */}
+      <ConstraintBanner constraint={constraint} />
+
+      {/* Acquisition scorecard — every KPI against its threshold. */}
+      <Section title="Acquisition scorecard" action="Trailing 30 days vs KPI">
+        <div style={{
+          display: 'grid', gap: 0,
+          gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))',
+          border: hair, borderRadius: 4, overflow: 'hidden',
+        }}>
+          {readings.map((r, i) => <ScoreCell key={r.key} r={r} index={i} />)}
+        </div>
+        <div style={{ marginTop: 16, fontSize: 12, color: ink3, fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}>
+          Drill in: <Link to="/sales/marketing" style={{ color: ink2 }}>Marketing performance</Link> · <Link to="/sales" style={{ color: ink2 }}>Sales overview</Link>
+        </div>
+      </Section>
+
+      {/* Trailing-period table — the master tracker's rollup, live. */}
+      <Section title="Trailing periods" alt>
+        <DataTable>
+          <thead>
+            <tr>
+              <Th>Window</Th>
+              <Th right>Spend</Th>
+              <Th right>CPQBC</Th>
+              <Th right>Show %</Th>
+              <Th right>Close %</Th>
+              <Th right>CPA</Th>
+              <Th right>New cash</Th>
+              <Th right>Cash ROAS</Th>
+              <Th right>Rev ROAS</Th>
+              <Th right>All cash</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              { k: 'MTD', s: windows.mtd },
+              { k: '7 days', s: windows.d7 },
+              { k: '30 days', s: windows.d30 },
+              { k: '90 days', s: windows.d90 },
+            ].map(({ k, s }) => (
+              <tr key={k}>
+                <Td v>{k}</Td>
+                <Td right>{fmt$(s.adspend)}</Td>
+                <Td right>{s.cpb > 0 ? fmt$(s.cpb) : '—'}</Td>
+                <Td right>{fmtPct(s.show_rate)}</Td>
+                <Td right>{fmtPct(s.close_rate)}</Td>
+                <Td right>{s.cpa_trial > 0 ? fmt$(s.cpa_trial) : '—'}</Td>
+                <Td right>{fmt$(s.trial_cash)}</Td>
+                <Td right>{s.trial_fe_roas.toFixed(2)}x</Td>
+                <Td right>{s.revenue_roas.toFixed(2)}x</Td>
+                <Td right>{fmt$(s.all_cash)}</Td>
+              </tr>
+            ))}
+            {entries.length === 0 && <EmptyRow span={10}>No marketing tracker data in the last 90 days.</EmptyRow>}
+          </tbody>
+        </DataTable>
+      </Section>
+
+      {/* Portfolio + attention. */}
+      <Section title="Portfolio">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 28 }}>
+          <div>
+            <div style={eyebrowStyle}>Vertical mix</div>
+            {Object.keys(p.verticalBreakdown || {}).length === 0
+              ? <div style={{ fontSize: 13, color: ink3, marginTop: 12 }}>No active clients yet.</div>
+              : <div style={{ marginTop: 12 }}>
+                  {Object.entries(p.verticalBreakdown).sort((a, b) => b[1] - a[1]).map(([v, n]) => (
+                    <div key={v} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderBottom: hair2 }}>
+                      <span style={{ fontSize: 13, color: ink, textTransform: 'capitalize' }}>{v}</span>
+                      <div style={{ flex: 1, height: 4, background: 'var(--color-hairline)', borderRadius: 2, overflow: 'hidden', maxWidth: 120 }}>
+                        <div style={{ width: `${(n / p.activeClients) * 100}%`, height: '100%', background: 'var(--color-accent)' }} />
+                      </div>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: ink }}>{n}</span>
+                    </div>
+                  ))}
+                </div>
+            }
+          </div>
+          <div>
+            <div style={eyebrowStyle}>Needs attention</div>
+            <div style={{ marginTop: 12 }}>
+              {p.unackedComms > 0
+                ? <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: hair2, color: WARNING, fontSize: 13 }}>
+                    <span>Unacknowledged client messages</span>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>{p.unackedComms}</span>
+                  </div>
+                : <div style={{ fontSize: 13, color: ink3 }}>No flags right now.</div>}
+              <Link to="/clients" style={{ display: 'inline-block', marginTop: 14, fontSize: 12, color: 'var(--color-accent)' }}>Open clients →</Link>
+            </div>
+          </div>
+        </div>
+      </Section>
+    </PageShell>
+  )
+}
+
+const eyebrowStyle = {
+  fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600,
+  letterSpacing: '0.18em', textTransform: 'uppercase', color: ink2,
+}
+
+function ConstraintBanner({ constraint }) {
+  if (!constraint) {
+    return (
+      <div style={{ borderBottom: hair, background: 'var(--color-bg)' }}>
+        <div style={{ maxWidth: 1240, margin: '0 auto', padding: '24px 28px', display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: pos, flexShrink: 0 }} />
+          <div style={{ fontSize: 14, color: ink }}>
+            Every tracked KPI is on target. Ask the real question: <span style={{ color: ink2 }}>why can't we double ad spend tomorrow?</span>
+          </div>
+        </div>
       </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <BigStat label="MRR" value={`$${stats.mrr.toLocaleString()}`} sub={`ARR $${stats.arr.toLocaleString()}`} icon={DollarSign} />
-        <BigStat label="Active clients" value={stats.activeClients} sub={`+${stats.newClientsThisMonth} this month · ${stats.churned} churned`} icon={Building2} />
-        <BigStat label="Client revenue (30d)" value={`$${stats.monthlyAttributableRev.toLocaleString()}`} sub="from converted leads" icon={TrendingUp} />
-        <BigStat label="Leads (7d)" value={stats.leads7d} sub={`${stats.conversions30d} conversions/30d`} icon={Activity} />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Panel title="Vertical breakdown" icon={Target}>
-          {Object.keys(stats.verticalBreakdown).length === 0
-            ? <p className="text-sm text-zinc-400">No active clients yet.</p>
-            : <ul className="space-y-2 text-sm">
-                {Object.entries(stats.verticalBreakdown).sort((a,b) => b[1] - a[1]).map(([v, n]) => (
-                  <li key={v} className="flex items-center justify-between">
-                    <span className="capitalize text-zinc-700">{v}</span>
-                    <span className="font-mono text-zinc-900">{n}</span>
-                  </li>
-                ))}
-              </ul>
-          }
-        </Panel>
-
-        <Panel title="Needs attention" icon={Activity} accent="amber">
-          <ul className="space-y-2 text-sm">
-            {stats.unackedComms > 0 && (
-              <li className="flex items-center justify-between text-amber-700">
-                <span>Unacknowledged client messages</span>
-                <span className="font-mono">{stats.unackedComms}</span>
-              </li>
-            )}
-            {stats.unackedComms === 0 && <p className="text-sm text-zinc-400">No flags right now.</p>}
-          </ul>
-          <Link to="/clients" className="mt-3 text-xs text-emerald-700 hover:underline inline-flex items-center gap-1">Open clients <ArrowRight size={12} /></Link>
-        </Panel>
-
-        <Panel title="Data sources" icon={Users}>
-          <ul className="space-y-1 text-xs text-zinc-600">
-            <li>↳ <Link to="/sales" className="hover:text-emerald-700">Sales overview</Link></li>
-            <li>↳ <Link to="/sales/closers" className="hover:text-emerald-700">Closers</Link></li>
-            <li>↳ <Link to="/sales/setters" className="hover:text-emerald-700">Setters</Link></li>
-            <li>↳ <Link to="/sales/marketing" className="hover:text-emerald-700">Marketing performance</Link></li>
-            <li>↳ <Link to="/sales/contracts" className="hover:text-emerald-700">Contracts</Link></li>
-            <li>↳ <Link to="/sales/commissions" className="hover:text-emerald-700">Commissions</Link></li>
-            <li>↳ <Link to="/clients" className="hover:text-emerald-700">Clients</Link></li>
-          </ul>
-        </Panel>
-      </div>
-
-      <div className="mt-6 p-4 bg-white border border-zinc-200 rounded-lg">
-        <h3 className="font-semibold text-zinc-900 mb-2 text-sm">What's coming next on this dashboard</h3>
-        <ul className="text-xs text-zinc-600 space-y-1">
-          <li>• Sellability metrics — avg time-to-top-3 by vertical, lifetime ROI per fee dollar</li>
-          <li>• Operator load — clients per AM, queue depth, SLA breaches</li>
-          <li>• Cash flow + Stripe MRR live feed</li>
-          <li>• Churn risk early-warning (no contact &gt;14d, sentiment drop, ranking regression)</li>
-          <li>• White-label / multi-tenant agency metrics when other agencies onboard</li>
-        </ul>
+    )
+  }
+  const color = STATUS_COLOR[constraint.status]
+  return (
+    <div style={{ borderBottom: hair, background: 'linear-gradient(135deg, rgba(184,130,0,0.06) 0%, rgba(184,130,0,0.02) 100%)' }}>
+      <div style={{ maxWidth: 1240, margin: '0 auto', padding: '28px 28px' }}>
+        <div style={{ ...eyebrowStyle, color }}>Biggest constraint right now</div>
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+          <span className="font-display" style={{ fontSize: 26, fontWeight: 600, letterSpacing: '-0.02em', color: ink }}>
+            {constraint.label}
+          </span>
+          <span className="num" style={{ fontFamily: 'var(--font-display)', fontSize: 22, color, fontWeight: 600 }}>
+            {constraint.display}
+          </span>
+          <span style={{ fontSize: 13, color: ink2 }}>
+            vs {constraint.targetDisplay} target ({STATUS_LABEL[constraint.status]})
+          </span>
+        </div>
+        <div style={{ marginTop: 10, fontSize: 14, color: ink, maxWidth: 720, lineHeight: 1.5 }}>
+          {constraint.lever}
+        </div>
       </div>
     </div>
   )
 }
 
-function BigStat({ label, value, sub, icon: Icon }) {
+function ScoreCell({ r, index }) {
+  const color = STATUS_COLOR[r.status]
   return (
-    <div className="bg-white border border-zinc-200 rounded-lg p-4">
-      <div className="flex items-start justify-between mb-2">
-        <span className="text-xs uppercase tracking-wide text-zinc-500">{label}</span>
-        {Icon && <Icon size={16} className="text-zinc-400" />}
+    <div style={{
+      padding: '18px 18px',
+      borderRight: hair2, borderBottom: hair2,
+      background: 'var(--color-bg)',
+    }}>
+      <div style={{ ...eyebrowStyle, fontSize: 9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={r.label}>
+        {r.label}
       </div>
-      <div className="text-2xl font-semibold text-zinc-900">{value}</div>
-      {sub && <div className="text-xs text-zinc-500 mt-1">{sub}</div>}
-    </div>
-  )
-}
-
-function Panel({ title, icon: Icon, children, accent }) {
-  const accentClass = accent === 'amber' ? 'border-amber-200' : 'border-zinc-200'
-  return (
-    <div className={`bg-white border ${accentClass} rounded-lg p-4`}>
-      <div className="flex items-center gap-2 mb-3">
-        {Icon && <Icon size={16} className="text-zinc-500" />}
-        <h3 className="font-semibold text-zinc-900 text-sm">{title}</h3>
+      <div className="num" style={{
+        fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 600,
+        letterSpacing: '-0.025em', lineHeight: 1, marginTop: 10, color,
+      }}>
+        {r.display}
       </div>
-      {children}
+      <div style={{ marginTop: 8, fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '0.08em', textTransform: 'uppercase', color: ink3 }}>
+        {r.direction === 'below' ? '≤' : '≥'} {r.targetDisplay} · {STATUS_LABEL[r.status]}
+      </div>
     </div>
   )
 }
