@@ -2576,9 +2576,14 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
             setSource('closer_calls')
             const sinceDate = dateRange?.startStr || '2024-01-01'
             const untilDate = dateRange?.endStr   || '2099-12-31'
+            // is_confirmed=true to match useCloserCallProspectMetrics (tile
+            // source). Without it, unconfirmed EOD closes leak into the
+            // drilldown and the panel count exceeds the tile (#2 in
+            // code-review 2026-06-01).
             const { data: reports, error: rErr } = await supabase
               .from('closer_eod_reports')
               .select('id, report_date')
+              .eq('is_confirmed', true)
               .gte('report_date', sinceDate).lte('report_date', untilDate)
             if (rErr) throw new Error(rErr.message)
             const reportIds = (reports || []).map(r => r.id)
@@ -2740,12 +2745,13 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
             setSource('closer_calls')
             // Date window via closer_eod_reports.report_date so we filter
             // by EOD date, not call.created_at (which can lag if the EOD
-            // gets submitted late).
+            // gets submitted late). is_confirmed=true to match the tile.
             const sinceDate = dateRange?.startStr || '2024-01-01'
             const untilDate = dateRange?.endStr   || '2099-12-31'
             const { data: reports, error: rErr } = await supabase
               .from('closer_eod_reports')
               .select('id, report_date')
+              .eq('is_confirmed', true)
               .gte('report_date', sinceDate).lte('report_date', untilDate)
             if (rErr) throw new Error(rErr.message)
             const reportIds = (reports || []).map(r => r.id)

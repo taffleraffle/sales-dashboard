@@ -1135,6 +1135,13 @@ async function fetchCloses({ from, to, audiences } = {}) {
     .gte('created_at', sinceTs).lte('created_at', untilTs)
   if (audiences && audiences.size > 0) {
     q = q.in('audience', [...audiences])
+  } else {
+    // No audience filter active = ALL view. Marketing tile reads
+    // lib_marketing_by_audience_daily.closes which excludes Referral closes
+    // (close_d CTE filters resolved_campaign <> 'REFERRAL'). Match the tile
+    // by excluding Referral here too. Without this the All-view tile shows
+    // 4 closes but the drilldown lists 5 (#1 in code-review 2026-06-01).
+    q = q.neq('audience', 'Referral')
   }
   const { data: closeRows } = await q
   if (!closeRows?.length) return []
@@ -1218,10 +1225,14 @@ async function fetchBookings({ from, to, audiences } = {}) {
   // resolved audience isn't in the set. Without that filter, this used to
   // bleed Electrician bookings (Hector) into the Restoration drilldown.
   const wanted = (audiences && audiences.size > 0) ? audiences : null
+  // booked_at is a date in this view, but PostgREST treats `to` ('YYYY-MM-DD')
+  // as the start-of-day UTC. With .lte('booked_at', to) we clip every
+  // booking made on the `to` day after 00:00. Append ' 23:59:59' so the
+  // window includes the full day (#6/#22 in code-review 2026-06-01).
   let q = supabase
     .from('lib_strategy_booking_resolved')
     .select('contact_name, contact_email, calendar_name, booked_at, appointment_date, revenue_tier, is_dq, audience, audience_source')
-    .gte('booked_at', from).lte('booked_at', to)
+    .gte('booked_at', from).lte('booked_at', `${to} 23:59:59`)
   if (wanted) q = q.in('audience', [...wanted])
   const { data } = await q
   return (data || []).map(r => ({
