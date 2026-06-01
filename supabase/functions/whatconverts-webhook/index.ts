@@ -321,6 +321,87 @@ serve(async (req) => {
             break;
           }
         }
+
+        // ── ELITE MORALE WINS — these are the screenshot-worthy ones ──
+        // 1. ROI multiplier crossings against monthly_fee + first-N-days framing
+        const { data: clientFull } = await supa
+          .from("clients")
+          .select("monthly_fee, contract_start, client_json")
+          .eq("id", clientId)
+          .single();
+        const monthlyFee = Number(clientFull?.monthly_fee) || 0;
+        const contractStart = clientFull?.contract_start ? new Date(clientFull.contract_start) : null;
+        const cjRecords = ((clientFull?.client_json as Record<string, unknown>)?.records || {}) as Record<string, unknown>;
+
+        if (contractStart && monthlyFee > 0) {
+          const daysSinceStart = Math.floor((Date.now() - contractStart.getTime()) / 86400e3);
+
+          // Cumulative revenue since contract start
+          const { data: lifetimeDeals } = await supa
+            .from("client_leads")
+            .select("deal_value")
+            .eq("client_id", clientId)
+            .eq("converted", true)
+            .gte("converted_at", contractStart.toISOString());
+          const lifetimeRev = (lifetimeDeals || []).reduce((s, d) => s + (Number(d.deal_value) || 0), 0);
+          const priorLifetimeRev = lifetimeRev - incomingDealValue;
+          const multiplier = lifetimeRev / monthlyFee;
+          const priorMultiplier = priorLifetimeRev / monthlyFee;
+
+          // Time horizon framing
+          const horizonLabel =
+            daysSinceStart <= 14 ? `first 14 days` :
+            daysSinceStart <= 30 ? `first month` :
+            daysSinceStart <= 60 ? `first 60 days` :
+            daysSinceStart <= 90 ? `first 90 days` :
+            `${daysSinceStart} days`;
+
+          // First deal closed within engagement
+          const firstDealAlready = (cjRecords.first_deal_at as string | undefined);
+          if (!firstDealAlready) {
+            winEvents.push({
+              kind: "milestone",
+              headline: `First deal closed: $${incomingDealValue.toLocaleString()} · day ${daysSinceStart} of engagement`,
+              detail: `Inbound from ${lead.source || "search"}. ${monthlyFee ? `Service is $${monthlyFee.toLocaleString()}/mo.` : ""}`,
+            });
+            await supa.from("clients").update({
+              client_json: { ...(clientFull?.client_json as Record<string, unknown> || {}), records: { ...cjRecords, first_deal_at: new Date().toISOString(), first_deal_value: incomingDealValue } },
+            }).eq("id", clientId);
+          }
+
+          // ROI multiplier crossings: 1x, 2x, 4x, 10x
+          const ROI_THRESHOLDS = [1, 2, 4, 10];
+          for (const t of ROI_THRESHOLDS) {
+            if (multiplier >= t && priorMultiplier < t) {
+              const headline = t === 1
+                ? `Service paid back · $${lifetimeRev.toLocaleString()} in ${horizonLabel}`
+                : `${t}× ROI in ${horizonLabel} · $${lifetimeRev.toLocaleString()} from $${monthlyFee.toLocaleString()}/mo service`;
+              winEvents.push({
+                kind: "milestone",
+                headline,
+                detail: `Cumulative attributable revenue: $${lifetimeRev.toLocaleString()}. Service cost to date: $${(monthlyFee * Math.max(1, daysSinceStart / 30)).toFixed(0)}.`,
+              });
+            }
+          }
+
+          // First-14-days revenue threshold (separate from ROI)
+          if (daysSinceStart <= 14 && lifetimeRev >= monthlyFee && priorLifetimeRev < monthlyFee) {
+            winEvents.push({
+              kind: "milestone",
+              headline: `First 14 days: $${lifetimeRev.toLocaleString()} generated`,
+              detail: `Already exceeded monthly service cost. Day ${daysSinceStart} of engagement.`,
+            });
+          }
+
+          // First-30-days $10K threshold (impressive)
+          if (daysSinceStart <= 30 && lifetimeRev >= 10000 && priorLifetimeRev < 10000) {
+            winEvents.push({
+              kind: "milestone",
+              headline: `$10K in first month · ${horizonLabel}`,
+              detail: `$${lifetimeRev.toLocaleString()} in attributable revenue by day ${daysSinceStart}.`,
+            });
+          }
+        }
       }
     }
 
