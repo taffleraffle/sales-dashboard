@@ -1940,6 +1940,9 @@ export default function AdsGenerator() {
           if (!groups[t]) { groups[t] = []; order.push(t) }
           groups[t].push(s)
         }
+        // angle slug -> angle row, computed once and passed to every tile so
+        // each card can render the angle name + type without re-looking up.
+        const resultAngleLookup = buildAngleLookup([...(messagingLibrary || []), ...(angles || [])])
         const typeLabel = (t) => t === 'hook' ? 'Hooks'
           : t === 'body' ? 'Bodies'
           : t === 'joined' ? 'Joined' : 'All scripts'
@@ -1984,7 +1987,8 @@ export default function AdsGenerator() {
                   display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(440px, 1fr))',
                   gap: 16,
                 }}>
-                  {groups[t].map((s, i) => <ScriptCard key={`${t}-${i}`} script={s} index={i + 1} />)}
+                  {groups[t].map((s, i) => <ScriptCard key={`${t}-${i}`} script={s} index={i + 1}
+                    angleLookup={resultAngleLookup} />)}
                 </div>
               </div>
             ))}
@@ -3620,7 +3624,12 @@ function AngleSubBlock({ label, children }) {
   )
 }
 
-function ScriptCard({ script, index }) {
+// Result-panel tile. Header makes the ANGLE + MODE the dominant visual
+// (Ben 2026-06-01 PM — "when it generates these, I need a clear
+// understanding of what it actually is that the angle is targeting").
+// The angle name is the primary heading in serif; angle-type colored
+// pill + mode badge sit alongside; index + frame are subordinate.
+function ScriptCard({ script, index, angleLookup }) {
   const [copied, setCopied] = useState(false)
 
   function copyBody() {
@@ -3629,11 +3638,21 @@ function ScriptCard({ script, index }) {
     setTimeout(() => setCopied(false), 1500)
   }
 
+  // Frame color preserved as a thin top stripe (PROBLEM=red, CIRC=amber,
+  // OUTCOME=green) so the operator can scan the message-frame variety
+  // across a deck even without reading the angle name.
   const frameColor = {
     PROBLEM: '#b53e3e',
     CIRCUMSTANCE: '#e0a93e',
     OUTCOME: '#3e8a5e',
   }[script.frame] || 'var(--ink-4)'
+
+  const angleSlug = script._combo?.angle_slug
+  const angle = angleSlug ? angleLookup?.[angleSlug] : null
+  const angleName = angle?.name || script.title || '—'
+  const angleTypeMetaResolved = angle ? angleTypeMeta(angle.angle_type) : null
+  const mode = script._combo?.script_mode
+  const modeMeta = mode ? scriptModeMeta(mode) : null
 
   return (
     <div style={{ padding: 20, background: 'white', border: '1px solid var(--rule)',
@@ -3643,27 +3662,55 @@ function ScriptCard({ script, index }) {
                     background: frameColor }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-                    marginBottom: 12, marginTop: 4 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                    marginBottom: 12, marginTop: 4, gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* TAG ROW — angle type pill (color-coded) + mode badge (color-coded)
+              + #index + length. Most important visual signal on the card. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+            {angleTypeMetaResolved && (
+              <span style={{
+                display: 'inline-block',
+                padding: '3px 8px',
+                background: angleTypeMetaResolved.color, color: 'var(--paper)',
+                fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+                letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+              }}>{angleTypeMetaResolved.label}</span>
+            )}
+            {modeMeta && (
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em',
+                textTransform: 'uppercase', fontWeight: 700,
+                padding: '3px 8px', background: modeMeta.tint, color: modeMeta.color,
+                border: `1px solid ${modeMeta.color}`, borderRadius: 2,
+              }}>{modeMeta.label}</span>
+            )}
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
                           color: 'var(--ink-4)', letterSpacing: '0.08em' }}>
               #{String(index).padStart(2, '0')}
             </span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                          color: frameColor, letterSpacing: '0.12em',
-                          textTransform: 'uppercase' }}>
-              {script.frame}
-            </span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',
-                          letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              · {script.length_bucket?.replace('_', ' ')}
-            </span>
+            {script.length_bucket && (
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
+                            letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                · {script.length_bucket.replace('_', ' ')}
+              </span>
+            )}
           </div>
+          {/* ANGLE NAME — the primary readable heading. */}
           <div style={{ fontFamily: 'var(--serif)', fontSize: 19, color: 'var(--ink)',
-                        fontWeight: 400, lineHeight: 1.3 }}>
-            {script.title}
+                        fontWeight: 500, lineHeight: 1.25, letterSpacing: '-0.005em' }}>
+            {angleName}
           </div>
+          {/* Angle voice / qualifier — small hint of WHAT this angle promises
+              so the operator doesn't have to remember it from the picker. */}
+          {angle?.prospect_voice && (
+            <div style={{
+              marginTop: 4,
+              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12.5,
+              color: 'var(--ink-3)', lineHeight: 1.45,
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}>"{angle.prospect_voice}"</div>
+          )}
         </div>
         <button onClick={copyBody}
           style={{ padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
@@ -3671,19 +3718,21 @@ function ScriptCard({ script, index }) {
                   border: `1px solid ${copied ? 'var(--accent)' : 'var(--rule)'}`,
                   background: copied ? 'var(--accent)' : 'white',
                   color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
+                  flexShrink: 0,
                   display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           {copied ? <Check size={11} /> : <Copy size={11} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
 
-      {/* Attribute pills */}
+      {/* Attribute pills — proof character is the key one; others kept as
+          secondary hints since the angle + mode badges above carry the
+          primary signal now. */}
       <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 14 }}>
         {[
+          ['proof', script.proof_character || script.target_attributes?.proof_character],
           ['hook', script.hook_type],
           ['mech', script.mechanism_reveal],
-          ['pain', script.pain_angle],
-          ['proof', script.proof_character],
           ['stage', script.funnel_stage],
         ].filter(([_, v]) => v && v !== 'none').map(([k, v]) => (
           <span key={k} style={{ padding: '3px 7px', background: 'var(--paper)',
