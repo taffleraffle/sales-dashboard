@@ -2651,6 +2651,14 @@ export default function MarketingPerformance() {
   // booked_at when no opportunity is found for the contact.
   const [leadCohortBookingsByDate, setLeadCohortBookingsByDate] = useState({})
 
+  // Audience filter (multi-select). Hoisted above sumBookings et al because
+  // those useCallbacks include selectedAudiences in their dependency arrays —
+  // a TDZ violation if declared later in the function body. The actual
+  // setSelectedAudiences UI binds further down where the rest of the audience
+  // panel state lives. The two declarations stay in sync because they are
+  // the same `useState` call.
+  const [selectedAudiences, setSelectedAudiences] = useState(() => new Set())
+
   // Duplicate-pair resolutions (migration 057). Ben clicks a "possible
   // duplicate" pair and either merges them (secondary contact_id starts
   // collapsing into the primary in all counts) or marks them "not
@@ -3039,7 +3047,8 @@ export default function MarketingPerformance() {
   // Audience filter (Ben 2026-05-31). Multiselect via chips next to the
   // date range. Empty Set = show all. Overrides loaded from
   // campaign_audience_overrides table (migration 110).
-  const [selectedAudiences, setSelectedAudiences] = useState(() => new Set())
+  // (selectedAudiences itself is hoisted further up — see comment near
+  // leadCohortBookingsByDate. Keep these sibling states here.)
   const [audienceOverrides, setAudienceOverrides] = useState({})   // campaign_id → audience_slug
   const [overrideModal, setOverrideModal] = useState(null)         // { campaign_id, campaign_name, current_audience }
 
