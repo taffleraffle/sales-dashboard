@@ -187,7 +187,25 @@ Build the elite brief. Return ONLY the JSON.`,
 
     await supa.from("content_briefs").update({ queue_id: queue.queue_id }).eq("id", briefRow!.id);
 
-    await notifyStrategistSlack(queue.queue_id, `New brief for *${client.business_name}*: "${target_keyword}" (vol ${kwData.volume ?? "?"}, current pos ${currentPosition ?? "not ranking"})`);
+    const monthlyValueEst = (kwData.volume || 0) * 0.05 * 14_000; // 5% CTR × $14K avg roofing ticket × 0.3 close rate
+    await notifyStrategistSlack({
+      queue_id: queue.queue_id,
+      kind_label: "BRIEF READY",
+      emoji: ":memo:",
+      client_name: client.business_name,
+      client_location: `${client.primary_city}, ${client.state_abbr}`,
+      urgency: currentPosition && currentPosition <= 20 ? "high" : "med",
+      rows: [
+        { label: "keyword     ", value: `"${target_keyword}"` },
+        { label: "volume      ", value: `${kwData.volume?.toLocaleString() ?? "?"}/mo` },
+        { label: "current rank", value: currentPosition ? `#${currentPosition}` : "not ranking" },
+        { label: "target rank ", value: `#${brief.target_position || 3}` },
+        { label: "intent      ", value: brief.search_intent || "—" },
+        { label: "sections    ", value: `${brief.outline?.length || 0}` },
+        { label: "est value   ", value: monthlyValueEst ? `$${Math.round(monthlyValueEst).toLocaleString()}/mo if won` : "—" },
+      ],
+      preview: brief.writer_brief_summary?.slice(0, 280),
+    });
 
     return new Response(JSON.stringify({ ok: true, brief_id: briefRow!.id, queue_id: queue.queue_id, ...brief }), {
       status: 200,

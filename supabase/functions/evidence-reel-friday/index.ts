@@ -157,10 +157,22 @@ serve(async (req) => {
         source_function: "evidence-reel-friday",
         source_payload: { client_id: client.id, week_starting: weekKey },
       });
-      await notifyStrategistSlack(
-        queue.queue_id,
-        `Weekly recap held for review: *${client.business_name}* — has negatives to frame before client sees it.`,
-      );
+      await notifyStrategistSlack({
+        queue_id: queue.queue_id,
+        kind_label: "WEEKLY RECAP HELD",
+        emoji: ":speech_balloon:",
+        client_name: client.business_name,
+        urgency: "high",
+        rows: [
+          { label: "week ending  ", value: weekKey },
+          { label: "leads        ", value: `${leadsCount || 0} (${quotableCount || 0} quotable)` },
+          { label: "organic sess ", value: `${organicSessions.toLocaleString()}` },
+          { label: "rank drops   ", value: `${(rankDrops || []).length}` },
+          { label: "rank jumps   ", value: `${rankJumps.length}` },
+          { label: "value        ", value: fmtUSD(totalValue) },
+        ],
+        preview: "Has negatives. Curate the narrative before client sees this.",
+      });
       out.push({ client: client.business_name, posted: false, reason: "held_for_strategist" });
       continue;
     }

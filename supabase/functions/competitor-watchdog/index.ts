@@ -142,10 +142,21 @@ serve(async (req) => {
           source_function: "competitor-watchdog",
           source_payload: { client_id: client.id, competitor: comp.domain },
         });
-        await notifyStrategistSlack(
-          queue.queue_id,
-          `Competitor threat ${memo.threat_score}/100: *${comp.domain}* moving on *${client.business_name}*`,
-        );
+        await notifyStrategistSlack({
+          queue_id: queue.queue_id,
+          kind_label: "COMPETITOR THREAT",
+          emoji: ":crossed_swords:",
+          client_name: client.business_name,
+          client_location: client.primary_city,
+          urgency: memo.threat_score >= 85 ? "high" : "med",
+          rows: [
+            { label: "competitor   ", value: comp.domain },
+            { label: "threat score ", value: `${memo.threat_score}/100` },
+            { label: "kw they own  ", value: `${competitorOnlyKeywords.length} keywords client doesn't rank for` },
+            { label: "biggest opp  ", value: competitorOnlyKeywords[0]?.keyword || "—" },
+          ],
+          preview: memo.recommended_response?.slice(0, 280),
+        });
       }
     }
 

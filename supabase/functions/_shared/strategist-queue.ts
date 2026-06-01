@@ -51,22 +51,81 @@ export async function enqueueForStrategist(input: EnqueueInput): Promise<{ queue
   return { queue_id: data.id };
 }
 
-export async function notifyStrategistSlack(queueId: string, summary: string): Promise<void> {
+export interface StrategistNotice {
+  queue_id: string;
+  kind_label: string;        // "BRIEF READY", "AI VISIBILITY", "ROADMAP", etc
+  emoji: string;             // ":memo:", ":eyes:", ":compass:"
+  client_name: string;
+  client_location?: string;
+  rows: Array<{ label: string; value: string }>;
+  preview?: string;          // long-form excerpt below the table
+  cta_label?: string;        // default "Review at hq.rankonmaps.io/hq/strategy"
+  urgency?: "low" | "med" | "high";
+}
+
+export async function notifyStrategistSlack(notice: StrategistNotice): Promise<void> {
   const token = Deno.env.get("SLACK_BOT_TOKEN");
-  const channel = Deno.env.get("SLACK_CHANNEL_STRATEGY") || "C0B1QJJ1BT2";
+  const channel = Deno.env.get("SLACK_CHANNEL_STRATEGY") || "C0B7M5EF9MJ";
   if (!token) return;
+
+  const urgencyTag = notice.urgency === "high" ? " · HIGH" : notice.urgency === "low" ? "" : "";
+  const locationStr = notice.client_location ? ` · ${notice.client_location}` : "";
+
+  // Build the receipt-style row block
+  const maxLabel = Math.max(...notice.rows.map((r) => r.label.length));
+  const tableLines = notice.rows
+    .map((r) => `\`${r.label.padEnd(maxLabel)}\`  ${r.value}`)
+    .join("\n");
+
+  const headerText = `${notice.emoji} *${notice.kind_label}${urgencyTag}* · *${notice.client_name}*${locationStr}`;
+
+  const blocks: unknown[] = [
+    { type: "section", text: { type: "mrkdwn", text: headerText } },
+    { type: "section", text: { type: "mrkdwn", text: tableLines } },
+  ];
+
+  if (notice.preview) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `> ${notice.preview.replace(/\n/g, "\n> ")}`,
+      },
+    });
+  }
+
+  blocks.push({
+    type: "actions",
+    elements: [
+      {
+        type: "button",
+        text: { type: "plain_text", text: notice.cta_label || "Review in HQ", emoji: false },
+        url: `https://hq.rankonmaps.io/hq/strategy`,
+        style: notice.urgency === "high" ? "primary" : undefined,
+      },
+    ],
+  });
+
+  blocks.push({
+    type: "context",
+    elements: [
+      { type: "mrkdwn", text: `queue.id \`${notice.queue_id}\`` },
+    ],
+  });
+
+  // Fallback text for notifications
+  const fallback = `${notice.kind_label} · ${notice.client_name} · ${notice.rows[0]?.value || ""}`;
+
   try {
     await fetch("https://slack.com/api/chat.postMessage", {
       method: "POST",
       headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         channel,
-        text: summary,
-        blocks: [
-          { type: "section", text: { type: "mrkdwn", text: `:mag: *Strategist queue:* ${summary}\n_Review at hq.rankonmaps.io/strategy_` } },
-          { type: "context", elements: [{ type: "mrkdwn", text: `queue.id ${queueId}` }] },
-        ],
+        text: fallback,
+        blocks,
         unfurl_links: false,
+        unfurl_media: false,
       }),
     });
   } catch (e) {

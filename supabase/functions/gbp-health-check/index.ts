@@ -190,10 +190,22 @@ serve(async (req) => {
           source_function: "gbp-health-check",
           source_payload: { client_id: client.id },
         });
-        await notifyStrategistSlack(
-          queue.queue_id,
-          `GBP health ${overall}/100 for *${client.business_name}* — flags: ${flags.join(", ")}`,
-        );
+        await notifyStrategistSlack({
+          queue_id: queue.queue_id,
+          kind_label: "GBP HEALTH FLAG",
+          emoji: ":pushpin:",
+          client_name: client.business_name,
+          client_location: client.primary_city,
+          urgency: overall < 40 ? "high" : "med",
+          rows: [
+            { label: "overall score", value: `${overall}/100` },
+            { label: "posts 7d     ", value: `${postsLast7}` },
+            { label: "photos 7d    ", value: `${photosLast7}` },
+            { label: "Q&A pending  ", value: `${qaPending}` },
+            { label: "reviews 7d   ", value: `${reviewsLast7}${avgRating ? ` · avg ${avgRating.toFixed(2)}` : ""}` },
+            { label: "flags        ", value: flags.join(", ") || "none" },
+          ],
+        });
       }
 
       results.push({ client: client.business_name, score: overall, flags });

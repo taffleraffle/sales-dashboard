@@ -168,10 +168,26 @@ Build the 90-day roadmap. Return ONLY the JSON.`;
       source_payload: { client_id },
     });
 
-    await notifyStrategistSlack(
-      queue.queue_id,
-      `90-day roadmap drafted for *${client.business_name}*. Vision: ${roadmap.vision?.slice(0, 120)}...`,
-    );
+    const targets = roadmap.measurable_targets || [];
+    const headlineTarget = targets[0]
+      ? `${targets[0].metric}: ${targets[0].baseline} → ${targets[0].target}`
+      : "see vision below";
+    await notifyStrategistSlack({
+      queue_id: queue.queue_id,
+      kind_label: "90-DAY ROADMAP",
+      emoji: ":compass:",
+      client_name: client.business_name,
+      client_location: `${client.primary_city}, ${client.state_abbr}`,
+      urgency: "med",
+      rows: [
+        { label: "headline target", value: headlineTarget },
+        { label: "pillars        ", value: `${roadmap.three_pillars?.length || 0}` },
+        { label: "phases         ", value: `${roadmap.phase_plan?.length || 0}` },
+        { label: "kpi targets    ", value: `${targets.length}` },
+        { label: "effective from ", value: effective_from },
+      ],
+      preview: roadmap.vision?.slice(0, 320),
+    });
 
     return new Response(JSON.stringify({ ok: true, roadmap_id: row!.id, queue_id: queue.queue_id, ...roadmap }), {
       status: 200,

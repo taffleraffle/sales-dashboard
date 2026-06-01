@@ -139,7 +139,7 @@ async function probeGemini(query: string, clientDomain: string, brand: string): 
   if (!key) {
     return { platform: "gemini", query, client_cited: false, competitors_cited: [], total_citations: 0, raw: "GEMINI_API_KEY not set" };
   }
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -282,10 +282,23 @@ serve(async (req) => {
         source_payload: { week_starting: weekKey },
       });
 
-      await notifyStrategistSlack(
-        queue.queue_id,
-        `AI visibility scan: *${brand}* — cited ${citedCount}/${platformsRun} probes. Verdict: ${memo.verdict}.`,
-      );
+      const topCompetitorsCited = Array.from(new Set(allResults.flatMap((r) => r.competitors_cited))).slice(0, 3);
+      await notifyStrategistSlack({
+        queue_id: queue.queue_id,
+        kind_label: "AI SEARCH VISIBILITY",
+        emoji: ":eyes:",
+        client_name: brand,
+        client_location: location,
+        urgency: memo.verdict === "absent" ? "high" : memo.verdict === "cited" ? "low" : "med",
+        rows: [
+          { label: "cited         ", value: `${citedCount}/${platformsRun} probes` },
+          { label: "verdict       ", value: memo.verdict || "—" },
+          { label: "queries probed", value: `${queries.length}` },
+          { label: "platforms     ", value: "ChatGPT, Perplexity, Gemini, AIO" },
+          { label: "comps cited   ", value: topCompetitorsCited.length ? topCompetitorsCited.join(", ") : "none yet" },
+        ],
+        preview: memo.headline?.slice(0, 280),
+      });
 
       summary.push({ client: brand, platforms: platformsRun, cited: citedCount, total_queries: queries.length });
     }

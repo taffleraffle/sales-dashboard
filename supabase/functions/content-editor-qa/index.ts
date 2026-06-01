@@ -136,10 +136,22 @@ Return ONLY the JSON.`,
         source_function: "content-editor-qa",
         source_payload: { brief_id, draft_id: draft!.id },
       });
-      await notifyStrategistSlack(
-        queue.queue_id,
-        `Draft ready for review: *${(brief.clients as { business_name?: string }).business_name}* "${brief.target_keyword}" (QA ${qa.score}/100, ${qa.verdict})`,
-      );
+      await notifyStrategistSlack({
+        queue_id: queue.queue_id,
+        kind_label: "DRAFT READY",
+        emoji: ":scroll:",
+        client_name: (brief.clients as { business_name?: string }).business_name || "Unknown",
+        urgency: qa.verdict === "approve" ? "med" : "high",
+        rows: [
+          { label: "keyword       ", value: `"${brief.target_keyword}"` },
+          { label: "QA score      ", value: `${qa.score}/100` },
+          { label: "verdict       ", value: qa.verdict },
+          { label: "word count    ", value: `${wordCount} / target ${brief.word_count_target}` },
+          { label: "fabrications  ", value: `${(qa.fabrication_flags || []).length} flagged` },
+          { label: "fixes required", value: `${(qa.required_fixes || []).length}` },
+        ],
+        preview: qa.critique?.slice(0, 280),
+      });
       await supa.from("content_briefs").update({ status: "awaiting_strategist" }).eq("id", brief_id);
     } else {
       await supa.from("content_briefs").update({ status: "drafting" }).eq("id", brief_id);
