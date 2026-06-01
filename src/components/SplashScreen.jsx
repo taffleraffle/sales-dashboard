@@ -22,7 +22,7 @@ export default function SplashScreen({ onComplete }) {
           phase === 'enter' ? 'opacity-0 -translate-y-2' : 'opacity-100 translate-y-0'
         }`}
       >
-        <span className="eyebrow eyebrow-accent">OPT Digital · Sales</span>
+        <span className="eyebrow" style={{ color: '#1F4D3C', fontWeight: 600 }}>Rank On Maps · HQ</span>
       </div>
 
       {/* Title — serif with italic emphasis */}

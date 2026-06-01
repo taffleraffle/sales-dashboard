@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, Headphones, DollarSign, Bot, Mail, ChevronDown, Workflow, Megaphone, FileText, TrendingDown } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, Headphones, DollarSign, Bot, Mail, ChevronDown, Workflow, Megaphone, FileText, TrendingDown, Building2, LayoutDashboard, Home, BookOpen, Trophy, Link2, Inbox, History } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -15,15 +15,26 @@ import { ICON } from '../utils/constants'
 // Marketing data; Call Data hasn't been used as a primary surface in months.
 // Keeping the routes registered in App.jsx so any deep links survive.
 const navItems = [
-  { to: '/sales', icon: BarChart3, label: 'Overview', end: true },
+  // ROM-first surfaces
+  { to: '/hq', icon: Home, label: 'HQ' },
+  { to: '/clients', icon: Building2, label: 'Clients' },
+  { to: '/ceo', icon: LayoutDashboard, label: 'CEO' },
+
+  // Sales-team surfaces (ROM admin-dashboard + OPT-era legacy)
+  { to: '/sales', icon: BarChart3, label: 'Sales overview', end: true },
   { to: '/sales/closers', icon: UserCheck, label: 'Closers' },
   { to: '/sales/setters', icon: Users, label: 'Setters' },
-  { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
-  { to: '/sales/ads', icon: Megaphone, label: 'Ads' },
+  { to: '/sales/leaderboard', icon: Trophy, label: 'Leaderboard' },
+  { to: '/sales/incoming', icon: Inbox, label: 'Incoming' },
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
+  { to: '/sales/eod/backfill', icon: History, label: 'Backfill' },
+  { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
+  { to: '/sales/payment-links', icon: Link2, label: 'Payment links' },
+  { to: '/sales/handbook', icon: BookOpen, label: 'Handbook' },
+  { to: '/sales/commissions', icon: DollarSign, label: 'Commissions' },
+  { to: '/sales/ads', icon: Megaphone, label: 'Ads' },
   { to: '/sales/contracts', icon: FileText, label: 'Contracts' },
   { to: '/sales/downsells', icon: TrendingDown, label: 'Downsells' },
-  { to: '/sales/commissions', icon: DollarSign, label: 'Commissions' },
   { to: '/sales/setter-bot', icon: Bot, label: 'Setter Bot' },
   { to: '/sales/email-flows', icon: Mail, label: 'Email Flows' },
   { to: '/sales/settings', icon: Settings, label: 'Settings' },
@@ -199,16 +210,15 @@ export default function Layout() {
                 style={{ borderBottom: '1px solid var(--rule)' }}
               >
                 <div className="flex items-center gap-2">
-                  <div
-                    className="w-8 h-8 flex items-center justify-center"
-                    style={{ background: 'var(--accent)', borderRadius: '999px' }}
-                  >
-                    <BarChart3 size={15} style={{ color: 'var(--ink)' }} />
+                  <div className="w-8 h-8 flex items-center justify-center">
+                    <svg viewBox="0 0 512 512" width="28" height="28">
+                      <path fill="#1F4D3C" d="M256 56c-66.3 0-120 53.7-120 120 0 24 7 46.4 19.2 65.2L256 388l100.8-146.8C369 222.4 376 200 376 176c0-66.3-53.7-120-120-120zm0 162c-23.2 0-42-18.8-42-42s18.8-42 42-42 42 18.8 42 42-18.8 42-42 42z"/>
+                    </svg>
                   </div>
                   <div className="leading-tight">
-                    <span className="eyebrow eyebrow-bare" style={{ fontSize: 9 }}>OPT Digital</span>
+                    <span className="eyebrow eyebrow-bare" style={{ fontSize: 9, color: '#1F4D3C' }}>Rank On Maps</span>
                     <div style={{ fontFamily: 'var(--serif)', fontSize: 15, color: 'var(--ink)', marginTop: 2 }}>
-                      Sales <em style={{ fontStyle: 'italic' }}>Dashboard</em>
+                      HQ <em style={{ fontStyle: 'italic' }}>Dashboard</em>
                     </div>
                   </div>
                 </div>
@@ -286,7 +296,7 @@ export default function Layout() {
 
               {/* Wordmark — desktop */}
               <div className="hidden md:flex items-center gap-3">
-                <span className="eyebrow eyebrow-accent">OPT Digital · Sales</span>
+                <span className="eyebrow" style={{ color: '#1F4D3C', fontWeight: 600 }}>Rank On Maps · HQ</span>
               </div>
             </div>
 

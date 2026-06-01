@@ -22,7 +22,7 @@ export default function LoginPage() {
     )
   }
 
-  if (isAuthenticated) return <Navigate to="/sales" replace />
+  if (isAuthenticated) return <Navigate to="/hq" replace />
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -58,17 +58,21 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-bg-primary flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        {/* Logo + masthead — editorial */}
+        {/* Logo + masthead — ROM Sage Forest brand */}
         <div className="text-center mb-10">
           <div
             className="flex items-center justify-center mx-auto mb-5"
-            style={{ width: 52, height: 52, background: 'var(--accent)', borderRadius: 999 }}
+            style={{ width: 64, height: 64 }}
           >
-            <BarChart3 size={26} style={{ color: 'var(--ink)' }} />
+            <svg viewBox="0 0 512 512" role="img" aria-label="Rank On Maps" width="64" height="64">
+              <path fill="#1F4D3C" d="M256 56c-66.3 0-120 53.7-120 120 0 24 7 46.4 19.2 65.2L256 388l100.8-146.8C369 222.4 376 200 376 176c0-66.3-53.7-120-120-120zm0 162c-23.2 0-42-18.8-42-42s18.8-42 42-42 42 18.8 42 42-18.8 42-42 42z"/>
+              <path fill="none" stroke="#1F4D3C" strokeWidth="10" strokeLinecap="round"
+                d="M222 360 C 110 365, 56 388, 56 412 C 56 444, 145 466, 256 466 C 367 466, 456 444, 456 412 C 456 388, 402 365, 290 360"/>
+            </svg>
           </div>
-          <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center' }}>OPT Digital</span>
+          <span className="eyebrow" style={{ justifyContent: 'center', color: '#1F4D3C', fontWeight: 600 }}>Rank On Maps</span>
           <h1 className="h2 mt-3" style={{ fontSize: 36, lineHeight: 1.05 }}>
-            Sales <em>Dashboard</em>.
+            HQ <em>Dashboard</em>.
           </h1>
           <p
             className="mt-3"
@@ -114,7 +118,7 @@ export default function LoginPage() {
                     required
                     autoFocus
                     className="w-full bg-bg-primary border border-border-default rounded-sm px-4 py-3 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
-                    placeholder="you@optdigital.io"
+                    placeholder="you@rankonmaps.io"
                   />
                 </div>
 
@@ -127,7 +131,8 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="w-full flex items-center justify-center gap-2 bg-opt-yellow text-text-primary font-semibold rounded-sm px-4 py-3 text-sm hover:brightness-110 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
+                  style={{ background: '#1F4D3C', color: '#F4EFE3' }}
+                  className="w-full flex items-center justify-center gap-2 font-semibold rounded-sm px-4 py-3 text-sm hover:brightness-110 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(31,77,60,0.15)]"
                 >
                   {submitting ? <Loader size={16} className="animate-spin" /> : <Mail size={16} />}
                   {submitting ? 'Sending...' : 'Send Reset Link'}
@@ -156,7 +161,7 @@ export default function LoginPage() {
                   autoComplete="email"
                   autoFocus
                   className="w-full bg-bg-primary border border-border-default rounded-sm px-4 py-3 text-sm text-text-primary placeholder-text-400 focus:outline-none focus:border-opt-yellow/50 focus:ring-1 focus:ring-opt-yellow/20 transition-all"
-                  placeholder="you@optdigital.io"
+                  placeholder="you@rankonmaps.io"
                 />
               </div>
 
@@ -204,7 +209,8 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full flex items-center justify-center gap-2 bg-opt-yellow text-text-primary font-semibold rounded-sm px-4 py-3 text-sm hover:brightness-110 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,245,12,0.1)]"
+                style={{ background: '#1F4D3C', color: '#F4EFE3' }}
+                className="w-full flex items-center justify-center gap-2 font-semibold rounded-sm px-4 py-3 text-sm hover:brightness-110 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(31,77,60,0.15)]"
               >
                 {submitting ? <Loader size={16} className="animate-spin" /> : <LogIn size={16} />}
                 {submitting ? 'Signing in...' : 'Sign In'}

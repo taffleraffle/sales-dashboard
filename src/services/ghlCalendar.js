@@ -1,69 +1,23 @@
 import { supabase } from '../lib/supabase'
-import { BASE_URL, GHL_LOCATION_ID, ghlFetch } from './ghlClient'
-import { INTRO_CALENDARS, STRATEGY_CALL_CALENDARS } from '../utils/constants'
+import { getRegionFromCalendar } from '../lib/callTypes'
 
-// Raw key ref kept local so the "is GHL configured?" guards below can
-// short-circuit before any network call. Auth headers live in ghlClient.
 const GHL_API_KEY = import.meta.env.VITE_GHL_API_KEY
+const GHL_LOCATION_ID = import.meta.env.VITE_GHL_LOCATION_ID
+const BASE_URL = 'https://services.leadconnectorhq.com'
 
-/**
- * Parse a GHL `startTime` / `endTime` string into a normalized
- * `{ appointmentDate: 'YYYY-MM-DD', startTime: 'YYYY-MM-DD HH:MM:SS' }` pair
- * in America/Indiana/Indianapolis (the GHL location timezone).
- *
- * GHL returns two formats depending on the endpoint:
- *   - `/calendars/events` → ISO 8601 with offset, e.g. `2026-05-04T13:00:00-04:00`
- *   - legacy `/contacts/{id}/appointments` → `2026-05-04 13:00:00` (location-local)
- *
- * The legacy code did `(startTime||'').split(' ')[0]` which silently mangled
- * ISO inputs (the whole string ended up in `appointment_date`). This helper
- * normalizes both into the legacy storage format expected by readers.
- */
-function parseEventDateTime(s) {
-  if (!s) return null
-  if (s.includes('T')) {
-    const d = new Date(s)
-    if (isNaN(d.getTime())) return null
-    const fmt = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Indiana/Indianapolis',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false,
-    })
-    const parts = Object.fromEntries(fmt.formatToParts(d).map(p => [p.type, p.value]))
-    let hour = parts.hour
-    if (hour === '24') hour = '00' // en-CA midnight quirk
-    const datePart = `${parts.year}-${parts.month}-${parts.day}`
-    return { appointmentDate: datePart, startTime: `${datePart} ${hour}:${parts.minute}:${parts.second}` }
-  }
-  if (s.includes(' ')) {
-    return { appointmentDate: s.split(' ')[0], startTime: s }
-  }
-  return null
+const ghlHeaders = {
+  'Authorization': `Bearer ${GHL_API_KEY}`,
+  'Version': '2021-07-28',
 }
 
 /**
- * Sync GHL appointments for a date range into the `ghl_appointments` cache.
- *
- * Strategy: query `/calendars/events` two ways and dedupe by `ghl_event_id`.
- *
- *   1. Per `userId` (every team_member with a `ghl_user_id`). Critical because
- *      GHL's `/calendars/?locationId=` endpoint omits round-robin Calendly
- *      mirrors (e.g. `T5Zif5GjDwulya6novU0` "Opt Digital | Strategy Call
- *      (Calendly)"). The user-scoped events endpoint returns events from
- *      those hidden calendars, so a closer's full booked schedule is visible.
- *
- *   2. Per `calendarId` for every known intro + strategy calendar. Catches
- *      events with no `assignedUserId` (rare but happens for self-bookings).
- *
- * The previous implementation paged through up to 2000 contacts and queried
- * `/contacts/{id}/appointments` per contact — slow, capped, and missed any
- * Calendly bookings whose contact landed beyond the 2000-contact ceiling.
+ * Sync all GHL appointments for a date range to Supabase.
+ * Scans ALL contacts in the location and checks each for appointments.
+ * Slow (~30-60s) but comprehensive. Run from Settings page.
  *
  * @param {string} startDate - YYYY-MM-DD
- * @param {string} endDate - YYYY-MM-DD (extended +30d internally to capture
- *   future bookings created during the window)
- * @param {function} onProgress
+ * @param {string} endDate - YYYY-MM-DD
+ * @param {function} onProgress - callback(message)
  * @returns {{ synced: number, scanned: number }}
  */
 export async function syncGHLAppointments(startDate, endDate, onProgress = () => {}) {
@@ -71,130 +25,113 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
     throw new Error('GHL API key or Location ID not configured')
   }
 
-  // 1. Team-member roster — used for both user-scoped queries and assignedUserId → closer_id mapping.
+  // Get team members with GHL user IDs for mapping
   const { data: teamMembers } = await supabase
     .from('team_members')
-    .select('id, ghl_user_id, role')
+    .select('id, ghl_user_id')
     .not('ghl_user_id', 'is', null)
 
   const userIdToCloser = {}
   for (const m of teamMembers || []) {
-    // Only closers map to closer_id. Setters' GHL IDs are still queried (so we
-    // surface their assigned calls into ghl_appointments) but stored with closer_id=null.
-    if (m.role === 'closer') userIdToCloser[m.ghl_user_id] = m.id
+    if (m.ghl_user_id) userIdToCloser[m.ghl_user_id] = m.id
   }
 
-  // Date range as ms-since-epoch (what /calendars/events expects). Use ET
-  // boundaries since the location lives in ET; the +30d future window catches
-  // bookings made today for next month.
-  const startMs = new Date(`${startDate}T00:00:00-04:00`).getTime()
-  const endBase = new Date(`${endDate}T00:00:00-04:00`)
-  endBase.setDate(endBase.getDate() + 30)
-  const endMs = endBase.getTime()
+  // Paginate through ALL contacts in the location
+  let allContacts = []
+  let startAfterId = null
+  let startAfter = null
+  let page = 0
 
-  // Calendars to scan directly. Set ensures we don't double-fetch a calendar
-  // that lives in both lists.
-  const calendarsToScan = [...new Set([...INTRO_CALENDARS, ...STRATEGY_CALL_CALENDARS])]
+  onProgress('Fetching contacts...')
 
-  const eventsByEventId = new Map()
-
-  // 2. Per-user fetches. Sequential to respect GHL's 100 req / 10s limit;
-  // ghlFetch handles 429 backoff if we ever burst.
-  onProgress(`Fetching events for ${teamMembers?.length || 0} team members...`)
-  for (const m of teamMembers || []) {
-    const url = `${BASE_URL}/calendars/events?locationId=${GHL_LOCATION_ID}&userId=${encodeURIComponent(m.ghl_user_id)}&startTime=${startMs}&endTime=${endMs}`
-    try {
-      const r = await ghlFetch(url)
-      if (!r.ok) continue
-      const json = await r.json()
-      for (const e of (json.events || [])) {
-        if (e.id) eventsByEventId.set(e.id, e)
-      }
-    } catch (err) {
-      console.warn(`User-events fetch failed for ${m.ghl_user_id}: ${err.message}`)
-    }
-  }
-
-  // 3. Per-calendar fetches. Only sets if the event isn't already known —
-  // user-scoped responses already include assignedUserId, which we want preserved.
-  onProgress(`Fetching events for ${calendarsToScan.length} known calendars...`)
-  for (const calId of calendarsToScan) {
-    const url = `${BASE_URL}/calendars/events?locationId=${GHL_LOCATION_ID}&calendarId=${calId}&startTime=${startMs}&endTime=${endMs}`
-    try {
-      const r = await ghlFetch(url)
-      if (!r.ok) continue
-      const json = await r.json()
-      for (const e of (json.events || [])) {
-        if (e.id && !eventsByEventId.has(e.id)) eventsByEventId.set(e.id, e)
-      }
-    } catch (err) {
-      console.warn(`Calendar-events fetch failed for ${calId}: ${err.message}`)
-    }
-  }
-
-  onProgress(`Building ${eventsByEventId.size} appointment rows...`)
-
-  // Resolve a closer from an event. Round-robin Calendly calendars set
-  // `assignedUserId` to the agency admin (Ben) and put the real participant
-  // closers in the `users` array (e.g. ["<adminId>","<closerGhlId>"]). If the
-  // direct assignedUserId doesn't map to a closer we know about, scan `users`
-  // for one that does. The resolved GHL ID is also returned so it can be
-  // stored as `ghl_user_id` — that's what the per-closer OR filter
-  // (`closer_id.eq.X OR ghl_user_id.eq.Y`) compares against.
-  const resolveCloser = (e) => {
-    const direct = userIdToCloser[e.assignedUserId]
-    if (direct) return { closerId: direct, ghlUserId: e.assignedUserId }
-    if (Array.isArray(e.users)) {
-      for (const uid of e.users) {
-        if (userIdToCloser[uid]) return { closerId: userIdToCloser[uid], ghlUserId: uid }
-      }
-    }
-    return { closerId: null, ghlUserId: e.assignedUserId || '' }
-  }
-
-  // 4. Build upsert rows. Skip cancelled (matches prior sync behavior — cancelled
-  // events would inflate booked counts on the marketing tracker).
-  const rows = []
-  for (const e of eventsByEventId.values()) {
-    if (e.appointmentStatus === 'cancelled') continue
-    const startParsed = parseEventDateTime(e.startTime)
-    if (!startParsed) continue
-    const endParsed = parseEventDateTime(e.endTime)
-    const { closerId, ghlUserId } = resolveCloser(e)
-
-    rows.push({
-      ghl_event_id: e.id,
-      closer_id: closerId,
-      ghl_user_id: ghlUserId,
-      contact_name: e.title || 'Unknown',
-      // /calendars/events doesn't include contact email/phone. The form falls
-      // back gracefully when these are empty; if we need them we can do a
-      // second-pass /contacts/{id} fetch on a per-row basis.
-      contact_email: '',
-      contact_phone: '',
-      start_time: startParsed.startTime,
-      end_time: endParsed?.startTime || null,
-      // The column is named `calendar_name` for legacy reasons but stores the
-      // calendar ID, which is what the strategy/intro filters compare against.
-      calendar_name: e.calendarId || '',
-      appointment_status: e.appointmentStatus || 'confirmed',
-      appointment_date: startParsed.appointmentDate,
-      ghl_contact_id: e.contactId || '',
-      booked_at: e.dateAdded || null,
+  while (page < 20) { // Max 2000 contacts
+    const params = new URLSearchParams({
+      locationId: GHL_LOCATION_ID,
+      limit: '100',
     })
+    if (startAfterId) {
+      params.set('startAfterId', startAfterId)
+      params.set('startAfter', String(startAfter))
+    }
+
+    const res = await fetch(`${BASE_URL}/contacts/?${params}`, { headers: ghlHeaders })
+    if (!res.ok) break
+
+    const json = await res.json()
+    const contacts = json.contacts || []
+    allContacts = allContacts.concat(contacts)
+
+    onProgress(`Fetched ${allContacts.length} contacts...`)
+
+    if (!json.meta?.nextPageUrl || contacts.length === 0) break
+    startAfterId = json.meta.startAfterId
+    startAfter = json.meta.startAfter
+    page++
   }
 
-  // 5. Tag each appointment with the prospect's monthly-revenue tier (read
-  // from GHL contact custom field `Tb6fklGYdWcgl9vUS2q9`). The Marketing page
-  // uses this to split bookings into qualified (>$30k) vs DQ ($0-$30k) — a
-  // calendar-ID split is unreliable because the same calendar can hold both.
-  //
-  // Per-contact fetch is sequential to respect GHL's 100req/10s ceiling.
-  // Only fetches contacts we don't already have a tier for in this batch
-  // (de-duped by contactId). One miss per contact, then memoized.
-  await enrichRowsWithRevenueTier(rows, onProgress)
+  onProgress(`Scanning ${allContacts.length} contacts for appointments...`)
 
-  if (rows.length > 0) {
+  // Check each contact for appointments in the date range
+  const allAppointments = []
+  const dateStartFilter = `${startDate} 00:00:00`
+  const dateEndFilter = `${endDate} 23:59:59`
+
+  for (let i = 0; i < allContacts.length; i += 10) {
+    const batch = allContacts.slice(i, i + 10)
+    const results = await Promise.all(
+      batch.map(async (contact) => {
+        try {
+          const res = await fetch(
+            `${BASE_URL}/contacts/${contact.id}/appointments`,
+            { headers: ghlHeaders }
+          )
+          if (!res.ok) return []
+          const json = await res.json()
+          return (json.events || [])
+            .filter(e => {
+              const st = e.startTime || ''
+              return st >= dateStartFilter && st <= dateEndFilter
+                && e.appointmentStatus !== 'cancelled'
+            })
+            .map(e => ({
+              ...e,
+              _contact: contact,
+            }))
+        } catch {
+          return []
+        }
+      })
+    )
+    results.forEach(events => allAppointments.push(...events))
+    onProgress(`Scanned ${Math.min(i + 10, allContacts.length)}/${allContacts.length} contacts (${allAppointments.length} appointments found)`)
+  }
+
+  // Upsert to Supabase
+  if (allAppointments.length > 0) {
+    const rows = allAppointments.map(e => {
+      const apptDate = (e.startTime || '').split(' ')[0]
+      const closerId = userIdToCloser[e.assignedUserId] || null
+
+      return {
+        ghl_event_id: e.id,
+        closer_id: closerId,
+        ghl_user_id: e.assignedUserId || '',
+        contact_name: e.title || `${e._contact.firstName || ''} ${e._contact.lastName || ''}`.trim() || 'Unknown',
+        contact_email: e._contact.email || '',
+        contact_phone: e._contact.phone || '',
+        // GHL returns times in location timezone (America/Indiana/Indianapolis)
+        // Store as-is without Z suffix so they're interpreted as local time
+        start_time: e.startTime || null,
+        end_time: e.endTime || null,
+        calendar_name: e.calendarId || '',
+        appointment_status: e.appointmentStatus || 'confirmed',
+        appointment_date: apptDate,
+        ghl_contact_id: e.contactId || e._contact.id || '',
+        booked_at: e.dateAdded || null,
+        region: getRegionFromCalendar(e.calendarId),
+      }
+    })
+
     const { error } = await supabase
       .from('ghl_appointments')
       .upsert(rows, { onConflict: 'ghl_event_id' })
@@ -207,57 +144,7 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
     onProgress(`Synced ${rows.length} appointments to database`)
   }
 
-  return { synced: rows.length, scanned: (teamMembers?.length || 0) + calendarsToScan.length }
-}
-
-// GHL contact custom field that holds the monthly revenue tier captured by
-// the Typeform during qualification. The form mirrors it to a sibling field
-// (`eiTsafUsji5ZQHJpcGDk`) — same value, either works. We read the first.
-const REVENUE_TIER_FIELD_ID = 'Tb6fklGYdWcgl9vUS2q9'
-
-/**
- * For each row in `rows`, look up the contact's monthly revenue tier from
- * the GHL contact record and write it onto `row.revenue_tier`. Mutates
- * `rows` in place. De-duped by ghl_contact_id so we don't double-fetch.
- *
- * Failures are silent — a row without a revenue tier just classifies as
- * "unknown" downstream (treated as qualified by default to avoid false DQs).
- */
-async function enrichRowsWithRevenueTier(rows, onProgress = () => {}) {
-  if (!rows || rows.length === 0) return
-  const uniqueContactIds = [...new Set(rows.map(r => r.ghl_contact_id).filter(Boolean))]
-  if (uniqueContactIds.length === 0) return
-
-  onProgress(`Fetching revenue tiers for ${uniqueContactIds.length} contacts...`)
-  const tierByContactId = {}
-  for (const id of uniqueContactIds) {
-    try {
-      const r = await ghlFetch(`${BASE_URL}/contacts/${id}`)
-      if (!r.ok) continue
-      const j = await r.json()
-      const c = j.contact || j
-      const field = (c.customFields || []).find(f => f.id === REVENUE_TIER_FIELD_ID)
-      if (field?.value) tierByContactId[id] = field.value
-    } catch (err) {
-      console.warn(`Revenue tier fetch failed for contact ${id}: ${err.message}`)
-    }
-  }
-
-  for (const row of rows) {
-    if (row.ghl_contact_id && tierByContactId[row.ghl_contact_id]) {
-      row.revenue_tier = tierByContactId[row.ghl_contact_id]
-    }
-  }
-}
-
-/**
- * Classify a revenue tier value as DQ (≤$30k) or not. The form's tier values
- * include "$0-$30,000", "$30-$50,000", "$50k-$75k/m", "$75k-$100k/m",
- * "$100-250k/m", "$250,000/m+". Only the first one is DQ.
- */
-export function isDQRevenueTier(tier) {
-  if (!tier) return false
-  return /^\$\s*0\s*[-–]/.test(String(tier).trim())
+  return { synced: allAppointments.length, scanned: allContacts.length }
 }
 
 // Track sync state to avoid duplicate syncs
@@ -399,3 +286,9 @@ export async function fetchCloserCalendar(closerId, dateStr) {
 
   return { source: 'setter_leads', events }
 }
+
+// ─── Compat stub for OPT-era MarketingPerformance page ──────────
+// Original lived in rankonmaps-app's ghlCalendar.js before it was replaced
+// with admin-dashboard's version. The MarketingPerformance page uses it to
+// classify DQ revenue tiers. Stubbing to false until that page is refactored.
+export function isDQRevenueTier(_calendarId) { return false }

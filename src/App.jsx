@@ -100,6 +100,19 @@ const DownsellsListPage    = lazyWithReload(() => import('./pages/downsells/Down
 const DownsellsNewPage     = lazyWithReload(() => import('./pages/downsells/DownsellsNewPage'))
 const DownsellsSessionPage = lazyWithReload(() => import('./pages/downsells/DownsellsSessionPage'))
 
+const HQDashboard      = lazyWithReload(() => import('./pages/HQDashboard'))
+const ClientsOverview  = lazyWithReload(() => import('./pages/clients/ClientsOverview'))
+const ClientDetail     = lazyWithReload(() => import('./pages/clients/ClientDetail'))
+const NewClientWizard  = lazyWithReload(() => import('./pages/clients/NewClientWizard'))
+const CEODashboard     = lazyWithReload(() => import('./pages/ceo/CEODashboard'))
+
+// Incorporated from rankonmaps-admin-dashboard — ROM-specific sales-team surfaces
+const Handbook         = lazyWithReload(() => import('./pages/Handbook'))
+const Leaderboard      = lazyWithReload(() => import('./pages/Leaderboard'))
+const PaymentLinks     = lazyWithReload(() => import('./pages/PaymentLinks'))
+const IncomingBookings = lazyWithReload(() => import('./pages/IncomingBookings'))
+const QuickBackfill    = lazyWithReload(() => import('./pages/QuickBackfill'))
+
 import SetPasswordPage from './pages/SetPasswordPage'
 import SplashScreen from './components/SplashScreen'
 import { Loader } from 'lucide-react'
@@ -205,7 +218,8 @@ export default function App() {
             <Route path="/editor-view" element={<Suspense fallback={<PageSkeleton />}><EditorView /></Suspense>} />
             <Route path="/editor-view/:token" element={<Suspense fallback={<PageSkeleton />}><EditorView /></Suspense>} />
             <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-              <Route path="/" element={<Navigate to="/sales" replace />} />
+              <Route path="/" element={<Navigate to="/hq" replace />} />
+              <Route path="/hq" element={<Suspense fallback={<PageSkeleton />}><HQDashboard /></Suspense>} />
               <Route path="/sales" element={<SalesOverview />} />
               <Route path="/sales/closers" element={<CloserOverview />} />
               <Route path="/sales/closers/:id" element={<Suspense fallback={<PageSkeleton />}><CloserDetail /></Suspense>} />
@@ -269,6 +283,22 @@ export default function App() {
               <Route path="/sales/email-flows" element={<Suspense fallback={<PageSkeleton />}><EmailFlows /></Suspense>} />
               <Route path="/sales/email-flows/:flowId" element={<Suspense fallback={<PageSkeleton />}><EmailFlowDetail /></Suspense>} />
               <Route path="/sales/settings" element={<AdminRoute><Suspense fallback={<PageSkeleton />}><SettingsPage /></Suspense></AdminRoute>} />
+
+              {/* Client management — added 2026-05-31, powered by migration 100 */}
+              <Route path="/clients" element={<Suspense fallback={<PageSkeleton />}><ClientsOverview /></Suspense>} />
+              <Route path="/clients/new" element={<Suspense fallback={<PageSkeleton />}><NewClientWizard /></Suspense>} />
+              <Route path="/clients/new/:sessionId" element={<Suspense fallback={<PageSkeleton />}><NewClientWizard /></Suspense>} />
+              <Route path="/clients/:slug/*" element={<Suspense fallback={<PageSkeleton />}><ClientDetail /></Suspense>} />
+
+              {/* CEO Dashboard — single-pane founder view across portfolio */}
+              <Route path="/ceo" element={<Suspense fallback={<PageSkeleton />}><CEODashboard /></Suspense>} />
+
+              {/* Incorporated from rankonmaps-admin-dashboard (2026-06-01) */}
+              <Route path="/sales/handbook" element={<Suspense fallback={<PageSkeleton />}><Handbook /></Suspense>} />
+              <Route path="/sales/leaderboard" element={<Suspense fallback={<PageSkeleton />}><Leaderboard /></Suspense>} />
+              <Route path="/sales/payment-links" element={<Suspense fallback={<PageSkeleton />}><PaymentLinks /></Suspense>} />
+              <Route path="/sales/incoming" element={<Suspense fallback={<PageSkeleton />}><IncomingBookings /></Suspense>} />
+              <Route path="/sales/eod/backfill" element={<Suspense fallback={<PageSkeleton />}><QuickBackfill /></Suspense>} />
             </Route>
           </Routes>
         </BrowserRouter>

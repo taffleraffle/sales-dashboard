@@ -1,0 +1,454 @@
+{
+  "_doc": "ROM touchpoint cadence — day-by-day across the client lifecycle. The touchpoint engine reads this, materializes a touchpoint row per client per entry, and either auto-fires (automated:true) or queues for AM review (automated:false). Frequency is filtered by client.communication_frequency.",
+
+  "onboarding": [
+    {
+      "key": "welcome_email",
+      "day": 0,
+      "channel": "email",
+      "automated": true,
+      "frequency_min": "light",
+      "to": ["owner"],
+      "template_key": "welcome_email_v1",
+      "subject": "Welcome to Rank On Maps — here's what happens next",
+      "notes": "Fires 5 min after Closed Won. Sets day-by-day expectations."
+    },
+    {
+      "key": "welcome_sms_from_am",
+      "day": 0,
+      "channel": "sms",
+      "automated": false,
+      "frequency_min": "light",
+      "to": ["owner"],
+      "template_key": "welcome_sms_am_v1",
+      "notes": "Drafted by platform, AM reviews + sends from their OpenPhone within 1h of close."
+    },
+    {
+      "key": "slack_channel_provisioned",
+      "day": 0,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "light",
+      "template_key": "slack_intro_v1",
+      "notes": "Auto-creates #<slug> + #<slug>-internal. Both AMs introduce themselves in client channel."
+    },
+    {
+      "key": "questionnaire_sent",
+      "day": 0,
+      "channel": "email",
+      "automated": true,
+      "frequency_min": "light",
+      "to": ["owner", "marketing_lead"],
+      "template_key": "questionnaire_email_v1",
+      "notes": "Personalized Tally form link + 90-sec Loom intro video attached."
+    },
+    {
+      "key": "drive_folder_created",
+      "day": 0,
+      "channel": "portal",
+      "automated": true,
+      "frequency_min": "light",
+      "notes": "Auto-creates Google Drive folder + shares with all stakeholders. Photo dump destination."
+    },
+    {
+      "key": "questionnaire_reminder_1",
+      "day": 1,
+      "channel": "email",
+      "automated": true,
+      "condition": "questionnaire_not_started",
+      "frequency_min": "light"
+    },
+    {
+      "key": "competitive_scan_update",
+      "day": 1,
+      "channel": "slack_client",
+      "automated": false,
+      "frequency_min": "standard",
+      "template_key": "competitive_scan_v1",
+      "notes": "Mersad posts: 'Started your competitive scan today. Looking at your top 3 in [vertical] in [city].'"
+    },
+    {
+      "key": "stakeholder_map_form",
+      "day": 1,
+      "channel": "email",
+      "automated": true,
+      "frequency_min": "light",
+      "notes": "Asks who else should be CC'd on what topics. Populates client_stakeholders table."
+    },
+    {
+      "key": "kickoff_call",
+      "day": 2,
+      "channel": "call",
+      "automated": false,
+      "frequency_min": "light",
+      "notes": "Both Jonathan + Mersad present. Recorded in Fathom. Tag = 'onboarding-kickoff'."
+    },
+    {
+      "key": "kickoff_call_recap",
+      "day": 2,
+      "channel": "email",
+      "automated": true,
+      "frequency_min": "light",
+      "trigger": "kickoff_call.completed",
+      "template_key": "kickoff_recap_v1",
+      "notes": "Auto-summarized from Fathom transcript. Sent within 30 min of call."
+    },
+    {
+      "key": "scope_document_shared",
+      "day": 2,
+      "channel": "portal",
+      "automated": true,
+      "frequency_min": "light",
+      "notes": "Auto-built from sales-call + onboarding-call + questionnaire."
+    },
+    {
+      "key": "site_wireframe_preview",
+      "day": 3,
+      "channel": "slack_client",
+      "automated": false,
+      "frequency_min": "standard",
+      "notes": "Mersad shares preview URL + a 60-sec Loom walkthrough."
+    },
+    {
+      "key": "gbp_optimization_summary",
+      "day": 3,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "standard",
+      "template_key": "gbp_changes_v1",
+      "notes": "Before/after snapshot of GBP categories, services, description."
+    },
+    {
+      "key": "am_checkin_sms_day3",
+      "day": 3,
+      "channel": "sms",
+      "automated": false,
+      "frequency_min": "high",
+      "to": ["owner"]
+    },
+    {
+      "key": "site_preview_url",
+      "day": 4,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "light",
+      "template_key": "site_preview_v1"
+    },
+    {
+      "key": "photo_portal_reminder",
+      "day": 4,
+      "channel": "email",
+      "automated": true,
+      "condition": "photos_not_uploaded",
+      "frequency_min": "light"
+    },
+    {
+      "key": "schema_work_update",
+      "day": 4,
+      "channel": "slack_client",
+      "automated": false,
+      "frequency_min": "standard",
+      "notes": "Mersad: 'Wiring up structured data so AI search engines can read your site.'"
+    },
+    {
+      "key": "citation_batch_1",
+      "day": 5,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "light",
+      "template_key": "citation_report_v1",
+      "notes": "BrightLocal submission report shared."
+    },
+    {
+      "key": "first_review_request_fired",
+      "day": 5,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "standard",
+      "condition": "cloutly_active",
+      "notes": "Cloutly fires its first SMS request. Notify client."
+    },
+    {
+      "key": "preview_feedback_request",
+      "day": 5,
+      "channel": "sms",
+      "automated": false,
+      "frequency_min": "standard"
+    },
+    {
+      "key": "refinements_in_progress",
+      "day": 6,
+      "channel": "slack_client",
+      "automated": false,
+      "frequency_min": "standard"
+    },
+    {
+      "key": "gbp_categories_finalized",
+      "day": 6,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "standard"
+    },
+    {
+      "key": "launch_checklist_status",
+      "day": 6,
+      "channel": "portal",
+      "automated": true,
+      "frequency_min": "light",
+      "notes": "% complete progress card."
+    },
+    {
+      "key": "site_launched",
+      "day": 7,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "light",
+      "template_key": "launch_announcement_v1"
+    },
+    {
+      "key": "launch_email_to_stakeholders",
+      "day": 7,
+      "channel": "email",
+      "automated": true,
+      "frequency_min": "light",
+      "to": ["owner", "office_manager", "marketing_lead"]
+    },
+    {
+      "key": "am_launch_sms",
+      "day": 7,
+      "channel": "sms",
+      "automated": false,
+      "frequency_min": "light"
+    },
+    {
+      "key": "tracking_confirmed",
+      "day": 8,
+      "channel": "email",
+      "automated": true,
+      "frequency_min": "light",
+      "notes": "GA4 + GSC + WhatConverts all firing. Shown in portal."
+    },
+    {
+      "key": "indexing_kickoff",
+      "day": 8,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "standard"
+    },
+    {
+      "key": "first_psi_report",
+      "day": 8,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "standard"
+    },
+    {
+      "key": "review_velocity_update",
+      "day": 9,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "standard"
+    },
+    {
+      "key": "ranking_baseline_captured",
+      "day": 9,
+      "channel": "portal",
+      "automated": true,
+      "frequency_min": "light"
+    },
+    {
+      "key": "citation_completion_report",
+      "day": 10,
+      "channel": "slack_client",
+      "automated": true,
+      "frequency_min": "standard"
+    },
+    {
+      "key": "am_loom_checkin",
+      "day": 10,
+      "channel": "email",
+      "automated": false,
+      "frequency_min": "standard",
+      "notes": "AM records a 60-90s Loom walking through what's happened."
+    },
+    {
+      "key": "first_lead_activity",
+      "day": 11,
+      "channel": "slack_client",
+      "automated": true,
+      "condition": "first_lead_received",
+      "frequency_min": "light"
+    },
+    {
+      "key": "next_week_plan",
+      "day": 11,
+      "channel": "slack_client",
+      "automated": false,
+      "frequency_min": "standard"
+    },
+    {
+      "key": "trial_review_scheduled",
+      "day": 12,
+      "channel": "email",
+      "automated": true,
+      "condition": "client.path = 'trial'",
+      "frequency_min": "light"
+    },
+    {
+      "key": "week_1_wrapup_report",
+      "day": 12,
+      "channel": "portal",
+      "automated": true,
+      "frequency_min": "light"
+    },
+    {
+      "key": "trial_review_or_month1_checkin",
+      "day": 13,
+      "channel": "call",
+      "automated": false,
+      "frequency_min": "light"
+    },
+    {
+      "key": "month_2_roadmap",
+      "day": 13,
+      "channel": "email",
+      "automated": true,
+      "frequency_min": "light"
+    },
+    {
+      "key": "trial_conversion_fires_or_steady_state_begins",
+      "day": 14,
+      "channel": "dashboard",
+      "automated": true,
+      "frequency_min": "light"
+    }
+  ],
+
+  "steady_state": [
+    {
+      "key": "weekly_evidence_reel",
+      "cadence_days": 7,
+      "channel": "slack_client",
+      "automated": false,
+      "frequency_min": "light",
+      "template_key": "evidence_reel_v1",
+      "notes": "Auto-generated, AM reviews + sends. THE retention killer feature."
+    },
+    {
+      "key": "midweek_progress_post",
+      "cadence_days": 7,
+      "offset_days": 3,
+      "channel": "slack_client",
+      "automated": false,
+      "frequency_min": "standard"
+    },
+    {
+      "key": "biweekly_am_checkin",
+      "cadence_days": 14,
+      "channel": "call",
+      "automated": false,
+      "frequency_min": "light",
+      "notes": "15 min AM call."
+    },
+    {
+      "key": "monthly_full_report",
+      "cadence_days": 30,
+      "channel": "portal",
+      "automated": true,
+      "frequency_min": "light",
+      "template_key": "monthly_report_v1"
+    },
+    {
+      "key": "monthly_review_call",
+      "cadence_days": 30,
+      "channel": "call",
+      "automated": false,
+      "frequency_min": "light",
+      "notes": "30 min strategic review."
+    },
+    {
+      "key": "quarterly_strategic_review",
+      "cadence_days": 90,
+      "channel": "call",
+      "automated": false,
+      "frequency_min": "light",
+      "notes": "60 min. AM + closer if upsell opportunity present."
+    },
+    {
+      "key": "case_study_check",
+      "cadence_days": 90,
+      "channel": "dashboard",
+      "automated": true,
+      "frequency_min": "light",
+      "condition": "results_threshold_hit",
+      "notes": "If client has hit growth milestones, auto-draft a case study."
+    }
+  ],
+
+  "renewal": [
+    {
+      "key": "renewal_60d_warning",
+      "offset_from_renewal_days": -60,
+      "channel": "dashboard",
+      "automated": true,
+      "notes": "Flag to AM only. Not client-facing."
+    },
+    {
+      "key": "renewal_pitch_drafted",
+      "offset_from_renewal_days": -45,
+      "channel": "dashboard",
+      "automated": true,
+      "notes": "Platform builds renewal pitch deck using client's results history."
+    },
+    {
+      "key": "renewal_conversation",
+      "offset_from_renewal_days": -30,
+      "channel": "call",
+      "automated": false,
+      "notes": "AM + closer for upsell."
+    },
+    {
+      "key": "renewal_decision_deadline_reminder",
+      "offset_from_renewal_days": -7,
+      "channel": "email",
+      "automated": true
+    }
+  ],
+
+  "offboarding": [
+    {
+      "key": "offboard_kickoff",
+      "day": 0,
+      "channel": "email",
+      "automated": true,
+      "notes": "Confirms offboard path (A/B/C). Sets 30-day clock."
+    },
+    {
+      "key": "asset_handoff",
+      "day": 7,
+      "channel": "portal",
+      "automated": true,
+      "notes": "Photo pack, content drafts, citation list, GA4 access transfer."
+    },
+    {
+      "key": "domain_dns_transition",
+      "day": 14,
+      "channel": "email",
+      "automated": false,
+      "notes": "Only for path A — full handoff."
+    },
+    {
+      "key": "final_report",
+      "day": 25,
+      "channel": "portal",
+      "automated": true,
+      "notes": "Lifetime ROI summary. Becomes a reference document."
+    },
+    {
+      "key": "site_decommission_or_handover",
+      "day": 30,
+      "channel": "dashboard",
+      "automated": true
+    }
+  ]
+}

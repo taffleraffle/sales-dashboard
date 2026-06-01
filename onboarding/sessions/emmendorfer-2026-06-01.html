@@ -1,0 +1,987 @@
+<!doctype html>
+<html lang="en" class="rom">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EMMENDORFER EXTERIORS · ONBOARDING PREP · RANK ON MAPS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;700;800;900&family=Fraunces:ital,opsz,wght@0,9..144,400;1,9..144,400;1,9..144,600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  /* ─── ROM v2.0 tokens ──────────────────────────────────────── */
+  :root {
+    --rom-page:        #F1EFE9;
+    --rom-paper:       #FAF8F2;
+    --rom-tone:        #D9D4C5;
+    --rom-sage:        #1F4D3C;
+    --rom-sage-soft:   #3A6E5A;
+    --rom-sage-dark:   #163A2D;
+    --rom-ink:         #1A1F1B;
+    --rom-ink-2:       #5C6A5F;
+    --rom-rule:        rgba(26,31,27,0.10);
+    --rom-rule-strong: rgba(26,31,27,0.20);
+
+    --rom-display: "Inter Tight", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --rom-body:    "Inter Tight", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --rom-serif:   "Fraunces", Georgia, serif;
+    --rom-mono:    "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+
+  *,*::before,*::after { box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  body {
+    margin: 0;
+    background: var(--rom-page);
+    color: var(--rom-ink);
+    font-family: var(--rom-body);
+    font-size: 16px;
+    line-height: 1.55;
+    padding: 0 0 80px;
+  }
+
+  /* ─── Receipt strip (mono in corners, the ROM signature device) ─ */
+  .receipt {
+    font-family: var(--rom-mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--rom-ink-2);
+  }
+  .receipt-sage { color: var(--rom-sage); }
+
+  /* ─── Topbar ───────────────────────────────────────────────── */
+  .topbar {
+    background: var(--rom-paper);
+    border-bottom: 1px solid var(--rom-rule);
+    padding: 12px 24px;
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 20px;
+    backdrop-filter: blur(8px);
+  }
+  .pin {
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .pin svg { width: 100%; height: 100%; }
+
+  .topbar-titles {
+    display: flex; flex-direction: column; gap: 2px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .topbar-eyebrow {
+    font-family: var(--rom-mono);
+    font-size: 9px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--rom-sage);
+  }
+  .topbar-title {
+    font-family: var(--rom-display);
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+    font-size: 14px;
+    color: var(--rom-ink);
+  }
+
+  .progress-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 380px;
+    margin: 0 auto;
+  }
+  .progress-bar {
+    flex: 1;
+    height: 3px;
+    background: var(--rom-rule);
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--rom-sage);
+    width: 0%;
+    transition: width 0.4s cubic-bezier(.2,.7,.2,1);
+  }
+
+  .topbar-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid var(--rom-rule-strong);
+    color: var(--rom-ink-2);
+    padding: 5px 10px;
+    font-family: var(--rom-mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-ghost:hover {
+    border-color: var(--rom-sage);
+    color: var(--rom-sage);
+  }
+  .btn-sage {
+    background: var(--rom-sage);
+    border: 1px solid var(--rom-sage);
+    color: var(--rom-paper);
+    padding: 5px 12px;
+    font-family: var(--rom-mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-sage:hover { background: var(--rom-sage-dark); }
+
+  /* ─── Hero — the ONE Fraunces moment (≤2% rule) ───────────── */
+  .hero {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 56px 32px 24px;
+    position: relative;
+  }
+  .hero::before, .hero::after {
+    content: '';
+    position: absolute;
+    height: 1px;
+    background: var(--rom-rule);
+  }
+  .hero-receipts {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 32px;
+  }
+  .hero-eyebrow {
+    margin: 0 0 16px;
+    font-family: var(--rom-mono);
+    font-size: 10px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--rom-sage);
+  }
+
+  h1.hero-title {
+    margin: 0;
+    font-family: var(--rom-display);
+    font-weight: 900;
+    font-size: clamp(48px, 8.5vw, 92px);
+    line-height: 0.88;
+    letter-spacing: -0.045em;
+    text-transform: uppercase;
+    color: var(--rom-ink);
+  }
+  /* THE editorial whisper — Fraunces italic, single moment */
+  h1.hero-title .whisper {
+    font-family: var(--rom-serif);
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    text-transform: none;
+    color: var(--rom-sage);
+    display: inline;
+  }
+
+  .hero-sub {
+    font-size: 16px;
+    color: var(--rom-ink-2);
+    max-width: 640px;
+    line-height: 1.5;
+    margin: 28px 0 32px;
+  }
+
+  /* Hero meta grid — receipt-style */
+  .hero-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0;
+    border-top: 1px solid var(--rom-rule);
+    border-bottom: 1px solid var(--rom-rule);
+    margin-top: 32px;
+  }
+  .hero-meta-cell {
+    padding: 14px 0;
+    border-right: 1px solid var(--rom-rule);
+  }
+  .hero-meta-cell:last-child { border-right: none; }
+  .hero-meta-cell:nth-child(4n) { border-right: none; }
+  .hero-meta-cell .label {
+    font-family: var(--rom-mono);
+    font-size: 9px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--rom-sage);
+    margin-bottom: 6px;
+    display: block;
+  }
+  .hero-meta-cell .value {
+    font-family: var(--rom-display);
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+    color: var(--rom-ink);
+    text-transform: uppercase;
+  }
+
+  /* ─── Section ──────────────────────────────────────────────── */
+  .section {
+    max-width: 920px;
+    margin: 56px auto 0;
+    padding: 0 32px;
+  }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 0 0 8px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--rom-ink);
+  }
+  .section-head-left {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+  .section-num {
+    font-family: var(--rom-mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    color: var(--rom-sage);
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .section-title {
+    font-family: var(--rom-display);
+    font-weight: 900;
+    font-size: clamp(22px, 3vw, 32px);
+    line-height: 1;
+    letter-spacing: -0.035em;
+    text-transform: uppercase;
+    color: var(--rom-ink);
+    margin: 0;
+  }
+  /* one sage moment per section title — either an underline OR a color flip, never both */
+  .section-title .accent {
+    color: var(--rom-sage);
+  }
+  .section-meta {
+    font-family: var(--rom-mono);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--rom-ink-2);
+    font-weight: 700;
+  }
+  .section-hint {
+    font-size: 13px;
+    color: var(--rom-ink-2);
+    margin: 14px 0 22px;
+    line-height: 1.55;
+    max-width: 740px;
+  }
+
+  /* ─── Checkpoint card — straight edges, paper bg, sage accent on check ── */
+  .checkpoint {
+    background: var(--rom-paper);
+    border: 1px solid var(--rom-rule);
+    margin-bottom: 10px;
+    overflow: hidden;
+    transition: border-color 0.18s, background 0.18s;
+  }
+  .checkpoint.checked {
+    background: rgba(31,77,60,0.05);
+    border-color: var(--rom-sage);
+  }
+  .checkpoint-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 16px 20px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .checkpoint-checkbox {
+    width: 18px; height: 18px;
+    border: 1.5px solid var(--rom-rule-strong);
+    flex-shrink: 0;
+    margin-top: 3px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--rom-paper);
+    transition: all 0.15s;
+  }
+  .checkpoint.checked .checkpoint-checkbox {
+    background: var(--rom-sage);
+    border-color: var(--rom-sage);
+  }
+  .checkpoint.checked .checkpoint-checkbox::after {
+    content: '';
+    width: 5px;
+    height: 10px;
+    border-right: 2px solid var(--rom-paper);
+    border-bottom: 2px solid var(--rom-paper);
+    transform: rotate(45deg);
+    margin-top: -2px;
+  }
+  .checkpoint-body { flex: 1; min-width: 0; }
+  .checkpoint-num {
+    font-family: var(--rom-mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    color: var(--rom-sage);
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-right: 12px;
+  }
+  .question {
+    font-size: 15.5px;
+    line-height: 1.5;
+    color: var(--rom-ink);
+    font-weight: 500;
+  }
+  .checkpoint.checked .question {
+    color: var(--rom-ink-2);
+  }
+  .checkpoint-expand {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--rom-rule-strong);
+    color: var(--rom-ink-2);
+    font-family: var(--rom-mono);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding: 5px 9px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  .checkpoint-expand:hover { border-color: var(--rom-sage); color: var(--rom-sage); }
+  .checkpoint.open .checkpoint-expand { border-color: var(--rom-sage); color: var(--rom-sage); }
+
+  /* ─── Drawer ───────────────────────────────────────────────── */
+  .drawer {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    background: transparent;
+  }
+  .checkpoint.open .drawer {
+    max-height: 800px;
+  }
+  .drawer-inner {
+    padding: 0 20px 20px 54px;
+    margin-top: 8px;
+  }
+  .why {
+    border-left: 2px solid var(--rom-sage);
+    padding: 4px 16px;
+    margin-bottom: 14px;
+  }
+  .why-label {
+    font-family: var(--rom-mono);
+    font-size: 9px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--rom-sage);
+    font-weight: 700;
+    display: block;
+    margin-bottom: 5px;
+  }
+  .why-body {
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--rom-ink-2);
+  }
+
+  .notes-label {
+    font-family: var(--rom-mono);
+    font-size: 9px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--rom-ink-2);
+    font-weight: 700;
+    display: block;
+    margin-bottom: 6px;
+  }
+  .notes {
+    width: 100%;
+    min-height: 64px;
+    border: 1px solid var(--rom-rule);
+    padding: 10px 12px;
+    font-family: var(--rom-body);
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--rom-ink);
+    background: var(--rom-paper);
+    resize: vertical;
+  }
+  .notes:focus {
+    outline: none;
+    border-color: var(--rom-sage);
+  }
+  .notes::placeholder { color: var(--rom-ink-2); }
+
+  /* ─── Lead-with block — sage field, paper text ────────────── */
+  .lead-block {
+    background: var(--rom-sage);
+    color: var(--rom-paper);
+    padding: 32px 36px;
+    margin: 24px 0 12px;
+    position: relative;
+  }
+  .lead-block .lead-label {
+    font-family: var(--rom-mono);
+    font-size: 9px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: rgba(250,248,242,0.65);
+    font-weight: 700;
+    margin-bottom: 18px;
+    display: block;
+  }
+  .lead-block p {
+    margin: 0 0 14px;
+    font-family: var(--rom-display);
+    font-weight: 500;
+    font-size: 17px;
+    line-height: 1.5;
+    letter-spacing: -0.005em;
+  }
+  .lead-block p:last-child { margin-bottom: 0; }
+  .lead-block p strong { font-weight: 800; }
+
+  /* ─── Stakeholder table ────────────────────────────────────── */
+  table.stakeholders {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 24px;
+    font-size: 13px;
+    background: var(--rom-paper);
+  }
+  table.stakeholders th, table.stakeholders td {
+    border: 1px solid var(--rom-rule);
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  table.stakeholders th {
+    background: var(--rom-tone);
+    font-family: var(--rom-mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--rom-ink);
+  }
+  table.stakeholders td input {
+    width: 100%;
+    border: none;
+    background: transparent;
+    font-family: var(--rom-body);
+    font-size: 13px;
+    color: var(--rom-ink);
+  }
+  table.stakeholders td input:focus { outline: 1px solid var(--rom-sage); }
+
+  /* ─── Footer signature ─────────────────────────────────────── */
+  .signature {
+    max-width: 920px;
+    margin: 56px auto 0;
+    padding: 32px;
+    border-top: 1px solid var(--rom-rule);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .signature-left {
+    font-family: var(--rom-mono);
+    font-size: 10px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--rom-ink-2);
+    font-weight: 700;
+  }
+  .signature-left strong { color: var(--rom-sage); font-weight: 700; }
+  .signature-right {
+    font-family: var(--rom-display);
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+    font-size: 14px;
+    color: var(--rom-ink);
+  }
+  .signature-right .accent { color: var(--rom-sage); }
+
+  /* ─── Print ────────────────────────────────────────────────── */
+  @media print {
+    .topbar { display: none; }
+    body { background: white; padding: 0; }
+    .checkpoint, .drawer { max-height: none !important; overflow: visible !important; }
+    .drawer { display: block !important; }
+    .hero { padding-top: 16px; }
+    .lead-block { background: var(--rom-paper); color: var(--rom-ink); border: 2px solid var(--rom-sage); }
+    .lead-block .lead-label { color: var(--rom-sage); }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="pin">
+    <svg viewBox="0 0 512 512" role="img" aria-label="Rank On Maps">
+      <path fill="#1A1F1B" d="M256 56c-66.3 0-120 53.7-120 120 0 24 7 46.4 19.2 65.2L256 388l100.8-146.8C369 222.4 376 200 376 176c0-66.3-53.7-120-120-120zm0 162c-23.2 0-42-18.8-42-42s18.8-42 42-42 42 18.8 42 42-18.8 42-42 42z"/>
+      <path fill="none" stroke="#1A1F1B" stroke-width="10" stroke-linecap="round" d="M222 360 C 110 365, 56 388, 56 412 C 56 444, 145 466, 256 466 C 367 466, 456 444, 456 412 C 456 388, 402 365, 290 360"/>
+    </svg>
+  </div>
+  <div class="topbar-titles">
+    <span class="topbar-eyebrow">Rank On Maps</span>
+    <span class="topbar-title">Onboarding Prep</span>
+  </div>
+  <div class="progress-wrap">
+    <span class="receipt receipt-sage" id="progress-label">00 / 00 covered</span>
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn-ghost" onclick="window.print()">Print</button>
+    <button class="btn-ghost" onclick="resetAll()">Reset</button>
+  </div>
+</div>
+
+<div class="hero">
+  <div class="hero-receipts">
+    <span class="receipt">FIG.001 · ONBOARDING / EMMENDORFER</span>
+    <span class="receipt">2026-06-01 · CLOSER: DG</span>
+  </div>
+
+  <h1 class="hero-title">EMMENDORFER<br><span class="whisper">Exteriors,</span> READY.</h1>
+
+  <p class="hero-sub">
+    A 60-minute conversation, not an interrogation. The May 17 referral with John and the May 27 strategy walkthrough already mapped the terrain. What follows is curated to take that context one layer deeper — the questions that unlock the intel we need to build something elite.
+  </p>
+
+  <div class="hero-meta">
+    <div class="hero-meta-cell"><span class="label">Client</span><span class="value">Emmendorfer</span></div>
+    <div class="hero-meta-cell"><span class="label">Market</span><span class="value">Union · Franklin</span></div>
+    <div class="hero-meta-cell"><span class="label">Stakeholders</span><span class="value">Matt · Tom · Amy</span></div>
+    <div class="hero-meta-cell"><span class="label">Vertical</span><span class="value">Roof · Side · Gutter</span></div>
+    <div class="hero-meta-cell"><span class="label">Closer</span><span class="value">Daniel Girmay</span></div>
+    <div class="hero-meta-cell"><span class="label">Wizard Session</span><span class="value">507145df</span></div>
+    <div class="hero-meta-cell"><span class="label">Path</span><span class="value">Direct · No trial</span></div>
+    <div class="hero-meta-cell"><span class="label">Status</span><span class="value">Signed 26.05.27</span></div>
+  </div>
+</div>
+
+<!-- Lead-with section -->
+<div class="section">
+  <div class="section-head">
+    <div class="section-head-left">
+      <span class="section-num">00</span>
+      <h2 class="section-title">Open with <span class="accent">this.</span></h2>
+    </div>
+    <span class="section-meta">Frame · 90 SEC</span>
+  </div>
+  <p class="section-hint">Set the frame in the first ninety seconds. They'll know you've done your homework.</p>
+  <div class="lead-block">
+    <span class="lead-label">Suggested opener</span>
+    <p>"I want to start by saying — your two-domain, two-GBP situation is the single biggest unlock for the business right now. I've never seen a company with your reputation under-perform in search by this much, and the gap is going to close fast once we clean it up."</p>
+    <p>"<strong>RC Roofing's $80K-a-month</strong> in equivalent organic traffic value is real, but their footprint is built on the exact same agency playbook that left you blind. We know what they're doing. We also know what nobody's tried against them."</p>
+    <p>"Your <strong>35-year mentor reputation</strong> — including with Utes — is positioning gold. The fact that you're regarded as the guy who teaches the next generation is the kind of trust signal AI search engines literally cannot manufacture. We'll build the authority spine of the site around it."</p>
+    <p>"Three things in the next hour: I want to make sure I get your full story so the website carries it correctly. Lock in commercial terms and the team. And start the photo-and-asset flow so we're not waiting on a day-one bottleneck. Sound good?"</p>
+  </div>
+</div>
+
+<div id="prep"></div>
+
+<div class="signature">
+  <div class="signature-left">FIG.999 · END OF PREP · <strong>RANK WHERE IT MATTERS</strong></div>
+  <div class="signature-right">DANIEL GIRMAY · <span class="accent">FOUNDER</span> · RANK ON MAPS</div>
+</div>
+
+<script>
+const SECTIONS = [
+  {
+    title: "The financial <span class='accent'>engine.</span>",
+    hint: "Specific dollars beat ranges. We need this for the ROI receipt clients see weekly.",
+    items: [
+      { q: "What's the revenue split between roofing, siding, and gutters in a normal year? And how much does a storm year shift it?",
+        why: "Steady-state vs storm-event tells us whether to build the content engine for one or the other. Most agencies skip this." },
+      { q: "Ballpark — what's an average roofing replacement land at? Siding job? Gutter run?",
+        why: "Needed for the weekly ROI math. Asking 'ballpark' lowers their guard." },
+      { q: "What's the insurance vs cash-pay split in Franklin County?",
+        why: "Determines language on the hail-damage + insurance-claim pages, and whether we lead with 'we handle your claim' as a service." },
+      { q: "Walk-the-roof close rate — what percent of quotes sign?",
+        why: "Tells us if we're solving a volume problem or a quality problem. Storm-market roofers usually have high close rates if trust is in place." },
+      { q: "Of the three services, which is highest margin per labor hour?",
+        why: "Highest-volume isn't usually highest-margin. We prioritize content around margin, not popularity." },
+      { q: "When you do a roof, how often does that homeowner come back for gutters or siding later?",
+        why: "If LTV repeats, we build cross-service nurture. If one-shot, we focus on referral mining." },
+    ]
+  },
+  {
+    title: "The services in <span class='accent'>detail.</span>",
+    hint: "Each answer becomes a service page. We need the technical specifics that make competitors look generic.",
+    items: [
+      { q: "What shingle brand do you install most — IKO, GAF, Owens Corning?",
+        why: "Manufacturer cert is E-E-A-T spine. AI search weighs 'IKO ROOFPRO Union MO' way over 'best roofer Union MO'." },
+      { q: "What certifications do you actually hold? IKO ROOFPRO, GAF Master Elite, Decra, DaVinci?",
+        why: "Each cert needs a verification number for the site. Multi-cert businesses look elite." },
+      { q: "On metal — standing seam, 22 or 24 gauge? Stone-coated steel? Exposed-fastener panels?",
+        why: "Decides whether metal becomes a content cluster or stays incidental. 22-gauge is a content pillar in the right market." },
+      { q: "Siding — Hardie or LP SmartSide? Are you HardiePlank-certified?",
+        why: "James Hardie Preferred Contractor is huge for the siding page authority." },
+      { q: "How long does a typical 2,000 sq ft roof replacement take you?",
+        why: "Customers Google 'how long does a roof take' all the time. Specific timeline is content gold." },
+      { q: "What's the workmanship warranty? And do you handle manufacturer claims after year 1?",
+        why: "Warranty length is a buying decision. Manufacturer-claim-handling separates real installers from pop-up operators." },
+      { q: "Gutters — seamless on-site? K-style or half-round? Gutter guards bundled or upsold?",
+        why: "Gutter content is thin on competitor sites — easy authority win." },
+      { q: "The one technique you do on every job that most Franklin County roofers cut corners on?",
+        why: "Becomes the Signature Specialty card. Framing it as 'others cut corners' invites their pride answer." },
+    ]
+  },
+  {
+    title: "Matt — the <span class='accent'>founder</span> bio.",
+    hint: "We're writing your About page. Specific over vague. The story anchors everything.",
+    items: [
+      { q: "What year did you actually start in roofing? Personal first day on a roof, not the company year.",
+        why: "'18 years old in 1990' lands different than '35 years experience.'" },
+      { q: "Who taught you the trade?",
+        why: "Apprenticeship lineage is a brand asset. Three-generation roofers, learned from grandfather — all positioning gold." },
+      { q: "The recovery community connection — comfortable with that being on the site, or kept private?",
+        why: "Their call. If yes, hugely differentiating. If no, respect it. Asking matters — make it clearly opt-in." },
+      { q: "What made you start your own thing instead of working for someone else?",
+        why: "Founding-moment stories become brand DNA." },
+      { q: "The one thing you do on a roof you're most proud of?",
+        why: "Becomes a founder-quote on the home page." },
+      { q: "Worst job of your career — what happened?",
+        why: "For our understanding, not the site. Lessons from bad jobs reveal the values." },
+      { q: "Five years from now — Tom running day-to-day? You strategic? Still walking quotes?",
+        why: "Defines the 5-year arc. Tells us if we build for handoff, growth, or acquisition prep." },
+    ]
+  },
+  {
+    title: "Tom & Amy — the <span class='accent'>next</span> generation.",
+    hint: "Multi-generational family is one of the most defensible positions in local SEO.",
+    items: [
+      { q: "Tom — when did you start? Always around it, or came back from something else?",
+        why: "'Came back when I saw what Dad was building' beats 'I joined in 2020.'" },
+      { q: "Tom — what's yours today, what's coming from Matt next?",
+        why: "Defines current vs evolving role. The handoff story is a positioning asset." },
+      { q: "Amy — what do you handle, and what's growing for you?",
+        why: "Tells us what to route to whom operationally." },
+      { q: "Both of you — OK with photos and quotes on the site?",
+        why: "Three-generation family photo is genuine social proof. Has to be voluntary." },
+      { q: "One thing you'd want the brand to feel like that Matt might do differently?",
+        why: "Generational handoff is also a brand-tone handoff. That's where the freshest creative comes from." },
+    ]
+  },
+  {
+    title: "The <span class='accent'>competitive</span> map.",
+    hint: "RC, Frederick, A Roofing. Get the honest read on each.",
+    items: [
+      { q: "RC Roofing is #1 in the Map Pack. What do they actually do well operationally — pricing, crew, brand, storm response?",
+        why: "Don't let them be modest. The honest answer determines our positioning angle." },
+      { q: "What does RC do that you would NOT do, even to take their spot?",
+        why: "Their no-go list defines what to lead the brand with." },
+      { q: "Frederick and A Roofing — different agencies running them? Different pitches?",
+        why: "If they're all the same playbook, differentiation narrows. If different, we position against each." },
+      { q: "When you bid against RC on a $20K roof, how far apart are you usually?",
+        why: "Price gap determines positioning. $2K = value content. $500 = brand + trust content." },
+      { q: "Anyone newer in your market growing fast? Year-or-two-old companies?",
+        why: "Bigger 24-month threats usually come from 18-month-old companies, not the established #1." },
+      { q: "Which competitor's customer would you LEAST want?",
+        why: "Negative-persona definition. We'll write content that disqualifies the wrong customer." },
+    ]
+  },
+  {
+    title: "Your best <span class='accent'>customer</span>, vividly.",
+    hint: "Generic personas write generic websites. Paint the real best-fit customer.",
+    items: [
+      { q: "Describe your best customer from the last year. Age, neighborhood, storm-driven or planned, shopped you or came direct?",
+        why: "Best-fit profile becomes the voice the site speaks in." },
+      { q: "The #1 fear that walks in with every quote?",
+        why: "Whatever it is, we address it on the home page first paragraph." },
+      { q: "When a customer is choosing between you and RC, what tips them toward you?",
+        why: "Surfaces the actual USP as the customer sees it. Often different from what the business thinks." },
+      { q: "Phone seasonality — when does it go quiet, when does it explode?",
+        why: "Determines content + GBP cadence. We push hardest in pre-peak windows." },
+      { q: "The worst customer — what's the deal-from-hell profile?",
+        why: "We'll write 'who we don't work with' content if the negative profile is consistent." },
+    ]
+  },
+  {
+    title: "Conversion + <span class='accent'>tracking.</span>",
+    hint: "The old agency told you nothing. We need the honest tracking baseline.",
+    items: [
+      { q: "CRM today — even a spreadsheet, or AccuLynx, JobNimbus, RoofSnap?",
+        why: "Determines our tracking tier. T1 = WhatConverts. T2 = CRM API. T3 = manual. T4 = benchmark." },
+      { q: "Who picks up the phone? Business hours, after-hours, voicemail?",
+        why: "Response time is a lead leak. 4+ hours and we'll fix it Day 1." },
+      { q: "OK with us installing call-tracking on both numbers? We pay, you keep the data forever.",
+        why: "Removes the cost objection. Sets up T1 tracking. 'We pay, you keep' makes yes easy." },
+      { q: "Last 12 months — rough call volume? Rough close count?",
+        why: "Baseline to beat by month 3." },
+      { q: "What percent of business comes from pure word-of-mouth referrals?",
+        why: "If 60%+ is referral, SEO is augmenting that channel, not replacing it. Different content strategy." },
+    ]
+  },
+  {
+    title: "The <span class='accent'>brand cleanup.</span>",
+    hint: "Biggest single-day win. Decisions land today.",
+    items: [
+      { q: "The two domains — how did the second one come to exist?",
+        why: "History tells us if we redirect or keep as secondary asset. Old domains can preserve dormant authority." },
+      { q: "The two GBPs — same address? Same phone?",
+        why: "Same = clean merge. Different = keep the strong one, disable the other." },
+      { q: "Who has admin on each GBP today?",
+        why: "Step zero is reclaiming admin. Old agency still on either = formally boot Day 1." },
+      { q: "Have you formally terminated the old agency? Written confirmation?",
+        why: "Loose ends become sabotage risk." },
+      { q: "Does she still have admin to any of: domain hosting, GA4, GSC, Google Ads, Facebook, email marketing?",
+        why: "Each one is a backdoor. We revoke or rotate all of them." },
+      { q: "The new logo vs old — which is going forward?",
+        why: "Brand needs to be unified before we ship the site. If mid-rebrand, we offer to finalize the mark." },
+      { q: "When can we get on-site for the photo + drone shoot?",
+        why: "Photo bottleneck is the #1 launch delay. Book the shoot at this call." },
+    ]
+  },
+  {
+    title: "Authority — what we turn on <span class='accent'>day one.</span>",
+    hint: "Quick yes/no on credentials we leverage immediately.",
+    items: [
+      { q: "BBB-accredited? Rating?",
+        why: "BBB badge + consistent NAP = 5-10% Map Pack lift. Free authority." },
+      { q: "NRCA? MRCA? State-level industry body?",
+        why: "Each membership = sameAs link in schema + Authority page badge." },
+      { q: "Local chambers — Union, Washington, Pacific?",
+        why: "Chamber memberships = high-DA citations + trust signal." },
+      { q: "Any media coverage, awards, podcast spots?",
+        why: "Authority density beats single fancy awards for SEO." },
+      { q: "Preferred-contractor lists with State Farm, Allstate, USAA?",
+        why: "Insurance carrier relationships are gold for the hail-damage page." },
+      { q: "Manufacturer referrals — does IKO or GAF send you leads?",
+        why: "Top-tier roofers usually have at least one. Tells us where they sit in the trade hierarchy." },
+    ]
+  },
+  {
+    title: "Brand <span class='accent'>voice.</span>",
+    hint: "Voice is on every page. We want it consistent and theirs.",
+    items: [
+      { q: "Five words that describe how the brand should sound to a neighbor.",
+        why: "Voice anchor for every piece of copy." },
+      { q: "Three words we should NEVER use about the business.",
+        why: "What's off-limits is sometimes more useful than what's in-bounds." },
+      { q: "Are we writing for a homeowner who knows nothing, or for someone with technical questions?",
+        why: "Pick a side. Most roofers write for 'everyone' and end up beige." },
+      { q: "Matt — OK with direct first-person quotes on the site?",
+        why: "Founder voice is rare and trusted. Has to be voluntary." },
+    ]
+  },
+  {
+    title: "Compliance — what you <span class='accent'>can't</span> claim.",
+    hint: "Missouri-specific guardrails. Quick run.",
+    items: [
+      { q: "Registered with the Missouri AG for storm work? Any incidents?",
+        why: "Some states require contractor registration for storm claims. Know now." },
+      { q: "Anything in the public record we'll find — BBB complaints, lawsuits, disputes?",
+        why: "We'll find it on the next competitive scan. Better explained now." },
+      { q: "OK to name insurance carriers on the site? State Farm hail discount, etc.?",
+        why: "Some carriers care. Most don't. Ask before assuming." },
+      { q: "OK to position the brand against out-of-state storm chasers?",
+        why: "Winning angle in storm markets. Has to feel like their voice, not ours." },
+    ]
+  },
+  {
+    title: "Success at <span class='accent'>day 90.</span>",
+    hint: "Define the win condition. Both sides committed to the same target.",
+    items: [
+      { q: "Day 90 — the ONE measurable that makes you say this is working?",
+        why: "Anchors the contract to a measurable. Specific commitments beat vague ones." },
+      { q: "If we get you Map Pack #2 against RC by day 180, what does that unlock?",
+        why: "Second-order effects of success tell us how to frame the ongoing engagement." },
+      { q: "What would CHURNING us 6 months from now look like to you?",
+        why: "Know the failure signals so we can avoid them." },
+      { q: "Have you ever done thought-leadership content — podcasts, contributor articles?",
+        why: "Mentor reputation is a content goldmine. Plants the seed of the upsell." },
+    ]
+  },
+  {
+    title: "Photos + <span class='accent'>assets.</span>",
+    hint: "Photo bottleneck is the #1 launch delay. Solve it now.",
+    items: [
+      { q: "Drive folder of existing photos? Drone, befores-and-afters, install action, trucks, team?",
+        why: "Asset audit. If yes, get the link today. If no, we shoot from scratch." },
+      { q: "Use CompanyCam or any job-photo tool?",
+        why: "If yes, we plug in via API. Massive efficiency win." },
+      { q: "Any video content — testimonial clips, Matt on a roof?",
+        why: "Video is rare in roofing. Even rough phone footage is content gold." },
+      { q: "Written testimonials with permission to publish first names + photos?",
+        why: "Real testimonials with photos beat anonymous quotes 4-5x in conversion." },
+      { q: "Soonest we can get on-site for a proper photo + drone shoot?",
+        why: "Books the shoot now. Stops the launch-day bottleneck before it starts." },
+    ]
+  },
+  {
+    title: "The team — who routes <span class='accent'>what?</span>",
+    hint: "Populate live during the call.",
+    items: [
+      { q: "Who's the right contact for strategic vs operational vs office stuff?",
+        why: "Shows we already think in routing rules, not one-size-fits-all." },
+      { q: "Who handles billing? Card on file, ACH, or check?",
+        why: "Card on file is ideal for auto-renewal." },
+      { q: "Best time to reach each of you?",
+        why: "Signals deliberate contact cadence." },
+      { q: "Preferred day-to-day channel — Slack, email, text?",
+        why: "Channel preference matters. Slack is high-velocity but some founders hate it." },
+    ]
+  },
+  {
+    title: "Stakeholder <span class='accent'>map.</span>",
+    hint: "Capture inline. Skip if time is tight.",
+    items: [],
+    table: true
+  },
+  {
+    title: "Commercial — <span class='accent'>confirm.</span>",
+    hint: "Lock the numbers from May 27.",
+    items: [
+      { q: "Monthly fee, term length, trial or direct, contract start — confirm what we agreed?",
+        why: "Re-anchors the deal. Surface any drift before launch." },
+      { q: "Auto-renewal at 12 months, or manual conversation?",
+        why: "Auto is best practice for retention. Either is fine." },
+      { q: "14-day fast launch sprint — OK with that pace?",
+        why: "Permission to move fast. Most clients want fast but feel they should ask for slow." },
+    ]
+  },
+];
+
+const STORAGE_KEY = 'emmendorfer-prep-2026-06-01';
+function load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; } }
+function save(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+let state = load();
+
+const stakeholdersHTML = `
+<table class="stakeholders">
+  <thead>
+    <tr><th>Role</th><th>Name</th><th>Email</th><th>Phone</th><th>Channel</th><th>CC on</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>OWNER / FINAL SAY</td><td><input data-sk="matt-name"/></td><td><input data-sk="matt-email"/></td><td><input data-sk="matt-phone"/></td><td><input data-sk="matt-channel"/></td><td><input data-sk="matt-cc"/></td></tr>
+    <tr><td>OPS / PRODUCTION</td><td><input data-sk="tom-name"/></td><td><input data-sk="tom-email"/></td><td><input data-sk="tom-phone"/></td><td><input data-sk="tom-channel"/></td><td><input data-sk="tom-cc"/></td></tr>
+    <tr><td>OFFICE / BILLING</td><td><input data-sk="amy-name"/></td><td><input data-sk="amy-email"/></td><td><input data-sk="amy-phone"/></td><td><input data-sk="amy-channel"/></td><td><input data-sk="amy-cc"/></td></tr>
+  </tbody>
+</table>`;
+
+function escapeHTML(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+const root = document.getElementById('prep');
+let sectionN = 1;
+let totalQuestions = 0;
+const totalSections = SECTIONS.length;
+
+SECTIONS.forEach((sec, sIdx) => {
+  const sNum = String(sectionN).padStart(2, '0');
+  let html = `<div class="section">
+    <div class="section-head">
+      <div class="section-head-left">
+        <span class="section-num">${sNum} / ${String(totalSections).padStart(2,'0')}</span>
+        <h2 class="section-title">${sec.title}</h2>
+      </div>
+      <span class="section-meta">SECTION · ${sNum}</span>
+    </div>
+    <p class="section-hint">${sec.hint}</p>`;
+
+  if (sec.table) {
+    html += stakeholdersHTML;
+  } else {
+    sec.items.forEach((it, iIdx) => {
+      const id = `s${sIdx}-i${iIdx}`;
+      const checked = state[`${id}-checked`] ? 'checked' : '';
+      const open = state[`${id}-open`] ? 'open' : '';
+      const notes = (state[`${id}-notes`] || '').replace(/"/g, '&quot;');
+      totalQuestions++;
+      html += `
+        <div class="checkpoint ${checked} ${open}" id="cp-${id}">
+          <div class="checkpoint-header" onclick="toggleCheck('${id}', event)">
+            <div class="checkpoint-checkbox"></div>
+            <div class="checkpoint-body">
+              <div class="question"><span class="checkpoint-num">Q.${String(totalQuestions).padStart(2,'0')}</span>${escapeHTML(it.q)}</div>
+            </div>
+            <button class="checkpoint-expand" onclick="toggleDrawer('${id}', event)">Why · Notes</button>
+          </div>
+          <div class="drawer">
+            <div class="drawer-inner">
+              <div class="why"><span class="why-label">Idea behind</span><div class="why-body">${escapeHTML(it.why)}</div></div>
+              <span class="notes-label">Capture answer</span>
+              <textarea class="notes" placeholder="Their answer + your follow-up notes…" oninput="saveNotes('${id}', this.value)">${notes}</textarea>
+            </div>
+          </div>
+        </div>`;
+    });
+  }
+  html += `</div>`;
+  root.insertAdjacentHTML('beforeend', html);
+  sectionN++;
+});
+
+document.querySelectorAll('[data-sk]').forEach(el => {
+  const key = 'sk-' + el.dataset.sk;
+  if (state[key]) el.value = state[key];
+  el.addEventListener('input', () => { state[key] = el.value; save(state); });
+});
+
+function toggleCheck(id, ev) {
+  if (ev && ev.target.closest('.checkpoint-expand')) return;
+  if (ev && ev.target.tagName === 'TEXTAREA') return;
+  const cp = document.getElementById('cp-' + id);
+  const key = id + '-checked';
+  state[key] = !state[key];
+  cp.classList.toggle('checked', state[key]);
+  save(state);
+  refreshProgress();
+}
+function toggleDrawer(id, ev) {
+  ev.stopPropagation();
+  const cp = document.getElementById('cp-' + id);
+  const key = id + '-open';
+  state[key] = !state[key];
+  cp.classList.toggle('open', state[key]);
+  save(state);
+}
+function saveNotes(id, val) {
+  state[id + '-notes'] = val;
+  save(state);
+}
+function resetAll() {
+  if (!confirm('Clear all checkboxes, notes, and stakeholder fields?')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+}
+function refreshProgress() {
+  const total = totalQuestions;
+  const done = Object.keys(state).filter(k => k.endsWith('-checked') && state[k]).length;
+  const pct = total ? (done / total) * 100 : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-label').textContent = `${String(done).padStart(2,'0')} / ${String(total).padStart(2,'0')} COVERED`;
+}
+refreshProgress();
+</script>
+
+</body>
+</html>

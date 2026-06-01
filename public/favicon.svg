@@ -1,10 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="8" fill="#0a0a0f"/>
-  <g stroke="none" fill="#d4f50c">
-    <rect x="6" y="18" width="4" height="8" rx="1"/>
-    <rect x="12" y="13" width="4" height="13" rx="1"/>
-    <rect x="18" y="8" width="4" height="18" rx="1"/>
-    <rect x="24" y="4" width="4" height="22" rx="1" opacity="0.7"/>
-  </g>
-  <line x1="5" y1="27" x2="29" y2="27" stroke="#d4f50c" stroke-width="1" opacity="0.3"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Rank On Maps mark, sage forest">
+  <path fill="#1F4D3C" d="M256 56c-66.3 0-120 53.7-120 120 0 24 7 46.4 19.2 65.2L256 388l100.8-146.8C369 222.4 376 200 376 176c0-66.3-53.7-120-120-120zm0 162c-23.2 0-42-18.8-42-42s18.8-42 42-42 42 18.8 42 42-18.8 42-42 42z"/>
+  <path fill="none" stroke="#1F4D3C" stroke-width="10" stroke-linecap="round"
+        d="M222 360 C 110 365, 56 388, 56 412 C 56 444, 145 466, 256 466 C 367 466, 456 444, 456 412 C 456 388, 402 365, 290 360"/>
 </svg>

@@ -16,54 +16,76 @@
 */
 
 @theme {
-  /* ── Editorial canonical tokens ── */
-  --color-paper:        #fbfaf6;
-  --color-paper-2:      #f4f1e8;
-  --color-paper-3:      #ece8da;
-  --color-ink:          #0a0a0a;
-  --color-ink-2:        #2a2a2a;
-  --color-ink-3:        #5d5d5a;
-  --color-ink-4:        #8a8882;
-  --color-rule:         #d9d4c4;
-  --color-rule-2:       #ece8da;
-  --color-accent:       #f4e14a;
-  --color-accent-dk:    #e4cc00;
-  --color-accent-soft:  #fef9cc;
-  --color-accent-ink:   #0a0a0a;
-  --color-up:           #1f7a3a;
-  --color-up-soft:      #e3f2e6;
-  --color-down:         #b42318;
-  --color-down-soft:    #fbe7e3;
-  --color-flat:         #6b7280;
+  /* ────────────────────────────────────────────────────────────
+     Rank On Maps · brand-anchored tokens
+     Sage Forest #1F4D3C primary; warm cream paper; no second color.
+     Surfaces from brand.rankonmaps.io/dashboard.css.
+  ──────────────────────────────────────────────────────────── */
 
-  /* ── Legacy token names (remapped to editorial values) ── */
-  --color-bg-primary:        #fbfaf6;   /* paper — page bg */
-  --color-bg-card:           #fbfaf6;   /* cards = paper with hairline */
-  --color-bg-card-hover:     #f4f1e8;   /* paper-2 */
-  --color-bg-sidebar:        #fbfaf6;   /* paper */
-  --color-border-default:    #d9d4c4;   /* rule hairline */
-  --color-border-subtle:     #ece8da;   /* rule-2 */
+  /* Surfaces — warm cream paper, not white */
+  --color-paper:        #FAF8F2;   /* main paper */
+  --color-paper-2:      #F5EFE0;   /* warm cream */
+  --color-paper-3:      #F1EFE9;   /* page bg */
 
-  /* Yellow accent — editorial yellow (#f4e14a), not neon */
-  --color-opt-yellow:        #f4e14a;
-  --color-opt-yellow-muted:  #fef9cc;     /* soft callout bg */
-  --color-opt-yellow-subtle: rgba(244, 225, 74, 0.12);
-  --color-opt-yellow-glow:   rgba(244, 225, 74, 0.35);
+  /* Ink — green-tinged blacks, never pure */
+  --color-ink:          #1A1F1B;
+  --color-ink-2:        #2A2A2A;
+  --color-ink-3:        #5C6A5F;
+  --color-ink-4:        #8A8882;
 
-  /* Text hierarchy — ink scale */
-  --color-text-primary:      #0a0a0a;
-  --color-text-secondary:    #5d5d5a;
-  --color-text-400:          #8a8882;
+  /* Rules — hairlines on cream */
+  --color-rule:         #D9D4C5;
+  --color-rule-2:       #ECE8DA;
 
-  /* Status — directional pills/deltas only */
-  --color-success: #1f7a3a;
-  --color-warning: #b88200;
-  --color-danger:  #b42318;
+  /* Anchor — Sage Forest #1F4D3C is the ONE green. No yellow. */
+  --color-accent:       #1F4D3C;
+  --color-accent-dk:    #0F2E22;
+  --color-accent-soft:  #D4E0DA;
+  --color-accent-wash:  rgba(31, 77, 60, 0.08);
+  --color-accent-ink:   #FAF8F2;
+  --color-sage:         #1F4D3C;
+  --color-sage-soft:    #3A6E5A;
 
-  /* Fonts */
-  --font-sans:  'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  /* Clay — sparing critical accent ONLY (status-down + key alerts) */
+  --color-clay:         #B85A3F;
+  --color-clay-soft:    #E8C9BC;
+
+  /* Status — single-color system, not stoplight */
+  --color-up:           #1F4D3C;
+  --color-up-soft:      rgba(31, 77, 60, 0.12);
+  --color-down:         #B85A3F;
+  --color-down-soft:    #E8C9BC;
+  --color-flat:         #5C6A5F;
+
+  /* Legacy token names — remapped to ROM values so existing components inherit */
+  --color-bg-primary:        #F1EFE9;   /* page */
+  --color-bg-card:           #FAF8F2;   /* paper card */
+  --color-bg-card-hover:     #F5EFE0;   /* warm cream */
+  --color-bg-sidebar:        #FAF8F2;
+  --color-border-default:    #D9D4C5;
+  --color-border-subtle:     #ECE8DA;
+
+  /* opt-yellow token names kept ONLY so legacy components don't break;
+     remapped to Sage Forest so they render in brand. Mass-replace in v2. */
+  --color-opt-yellow:        #1F4D3C;
+  --color-opt-yellow-muted:  #D4E0DA;
+  --color-opt-yellow-subtle: rgba(31, 77, 60, 0.12);
+  --color-opt-yellow-glow:   rgba(31, 77, 60, 0.20);
+
+  /* Text */
+  --color-text-primary:      #1A1F1B;
+  --color-text-secondary:    #5C6A5F;
+  --color-text-400:          #8A8882;
+
+  /* Status alias */
+  --color-success: #1F4D3C;
+  --color-warning: #B88200;
+  --color-danger:  #B85A3F;
+
+  /* Fonts — Inter Tight for sans, Fraunces italic for serif emphasis, JetBrains Mono for receipts */
+  --font-sans:  'Inter Tight', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono:  'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-  --font-serif: 'Newsreader', ui-serif, 'Iowan Old Style', Georgia, serif;
+  --font-serif: 'Fraunces', 'Newsreader', ui-serif, 'Iowan Old Style', Georgia, serif;
 }
 
 /*
@@ -72,23 +94,31 @@
   Mirror the @theme values above (Tailwind doesn't expose @theme vars to plain CSS).
 */
 :root {
-  --paper:        #fbfaf6;
-  --paper-2:      #f4f1e8;
-  --paper-3:      #ece8da;
-  --ink:          #0a0a0a;
-  --ink-2:        #2a2a2a;
-  --ink-3:        #5d5d5a;
-  --ink-4:        #8a8882;
-  --ink-5:        #b8b3a8;
-  --rule:         #d9d4c4;
-  --rule-2:       #ece8da;
-  --rule-strong:  #2a2825;
-  --accent:       #f4e14a;
-  --accent-2:     #ead84a;
-  --accent-dk:    #e4cc00;
-  --accent-soft:  #fef9cc;
-  --accent-wash:  #fbf3a8;
-  --accent-ink:   #0a0a0a;
+  /* Rank On Maps brand surface tokens — Sage Forest anchor, warm cream paper */
+  --paper:        #FAF8F2;
+  --paper-2:      #F5EFE0;
+  --paper-3:      #F1EFE9;
+  --ink:          #1A1F1B;
+  --ink-2:        #2A2A2A;
+  --ink-3:        #5C6A5F;
+  --ink-4:        #8A8882;
+  --ink-5:        #B8B3A8;
+  --rule:         #D9D4C5;
+  --rule-2:       #ECE8DA;
+  --rule-strong:  #2A2825;
+
+  /* Sage Forest is THE accent. Replaces OPT yellow throughout. */
+  --accent:       #1F4D3C;
+  --accent-2:     #3A6E5A;
+  --accent-dk:    #0F2E22;
+  --accent-soft:  #D4E0DA;
+  --accent-wash:  rgba(31, 77, 60, 0.08);
+  --accent-ink:   #FAF8F2;
+
+  /* Sage aliases */
+  --sage:         #1F4D3C;
+  --sage-soft:    #3A6E5A;
+  --sage-mist:    #D4E0DA;
   --frame-problem:      #b53e3e;
   --frame-circumstance: #e0a93e;
   --frame-outcome:      #3e8a5e;
