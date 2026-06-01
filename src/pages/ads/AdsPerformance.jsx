@@ -224,6 +224,12 @@ export default function AdsPerformance() {
   const [ghlBookedAd, setGhlBookedAd] = useState({})
   const [ghlBookedAdset, setGhlBookedAdset] = useState({})
   const [ghlBookedCampaign, setGhlBookedCampaign] = useState({})
+  // Resolver-view bookings tallied per ad / adset / campaign so the per-row
+  // overlay can credit bookings whose typeform record lost ad_id at submit
+  // time (resolved via email/phone/first_name fallback chain in migration 131).
+  const [resolvedBookedAd, setResolvedBookedAd] = useState({})
+  const [resolvedBookedAdset, setResolvedBookedAdset] = useState({})
+  const [resolvedBookedCampaign, setResolvedBookedCampaign] = useState({})
   const [ghlLivesAd, setGhlLivesAd] = useState({})
   const [ghlLivesAdset, setGhlLivesAdset] = useState({})
   const [ghlLivesCampaign, setGhlLivesCampaign] = useState({})
@@ -460,6 +466,17 @@ export default function AdsPerformance() {
           .from('marketing_tracker')
           .select('date, leads, net_new_calls, new_live_calls, live_calls, closes, trial_cash, trial_revenue')
           .gte('date', startStr).lte('date', endStr)),
+        // lib_strategy_booking_resolved — every non-cancelled strategy
+        // booking in the window, with the resolver chain's resolved_ad_id
+        // attached (typeform email → phone → first_name fallback). Ben
+        // caught (2026-06-01) that the per-row Booked counts on this page
+        // were 4 short on the active Electrician campaign because the
+        // chain isn't applied here — without the resolver, bookings where
+        // the ad_id couldn't be set at submit time get dropped entirely.
+        fetchAllPaged(() => supabase
+          .from('lib_strategy_booking_resolved')
+          .select('id, contact_email, contact_name, booked_at, is_dq, audience, resolved_ad_id, resolved_adset_id, resolved_campaign_id, resolved_match_method')
+          .gte('booked_at', startStr).lte('booked_at', endStr)),
       ])
 
       // Per-query degradation: log any failure but use [] so downstream
@@ -473,7 +490,7 @@ export default function AdsPerformance() {
         newIssues.push(`${label}: ${reason}`)
         return []
       }
-      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows, mtRows] = [
+      const [statRows, tfRows, closeRows, ghlLeadRows, ghlBookedRows, ghlLiveRows, mtRows, resolvedBookingRows] = [
         unpack(0, 'Meta spend (ad_daily_stats)'),
         unpack(1, 'Typeform leads'),
         unpack(2, 'Resolved closes'),
@@ -481,6 +498,7 @@ export default function AdsPerformance() {
         unpack(4, 'GHL bookings'),
         unpack(5, 'GHL live calls'),
         unpack(6, 'EOD totals (marketing_tracker)'),
+        unpack(7, 'Resolved bookings (lib_strategy_booking_resolved)'),
       ]
       setDataIssues(newIssues)
 
@@ -557,6 +575,25 @@ export default function AdsPerformance() {
         }
         return n
       }
+      // Same dedup rules as unionCountEmail, three-way (resolver view added
+      // so bookings without typeform ad_id at submit time still count).
+      const unionCountEmail3 = (a, b, c) => {
+        const emails = new Set(), names = new Set()
+        let n = 0
+        const consume = (list) => {
+          for (const r of list) {
+            const e = lc(r.email), k = nameTok(r)
+            if (!e && !k) continue
+            if (e && emails.has(e)) continue
+            if (!e && k && names.has(k)) continue
+            if (e) emails.add(e)
+            if (k) names.add(k)
+            n++
+          }
+        }
+        consume(a); consume(b); consume(c)
+        return n
+      }
       const unionCountName = (tfList, otherList) => {
         const names = new Set()
         let n = 0
@@ -576,9 +613,19 @@ export default function AdsPerformance() {
         }
         return n
       }
+      // Filter resolver-view bookings down to qualified (not DQ) for the
+      // booked totals. The view's `id` is unique per contact already.
+      const resolvedQualBookings = (resolvedBookingRows || []).filter(r => !r.is_dq)
       const prospects = {
         leads:  unionCountEmail(tfRows, ghlLeadRows),
-        booked: unionCountEmail(tfRows.filter(r => r.is_booked), ghlBookedRows),
+        // Three-way union for bookings: typeform.is_booked + ghl_booked +
+        // resolver-view qualified. The resolver catches bookings whose
+        // typeform record had no ad_id at submit time (email/phone/name match).
+        booked: unionCountEmail3(
+          tfRows.filter(r => r.is_booked),
+          ghlBookedRows,
+          resolvedQualBookings.map(r => ({ email: r.contact_email, display_name: r.contact_name })),
+        ),
         live:   unionCountName(tfRows.filter(r => r.is_live),   ghlLiveRows),
         closes: unionCountName(tfRows.filter(r => r.is_closed), closeRows),
       }
@@ -590,9 +637,16 @@ export default function AdsPerformance() {
         tfRows.filter(r => r.ad_id),
         ghlLeadRows.filter(r => r.ad_id)
       )
-      const attrBooked = unionCountEmail(
+      // Attributed booked = three-way union including resolver-view rows
+      // that have resolved_ad_id set (typeform email/phone/name chain).
+      // Without this, bookings where the typeform record lost ad_id (the
+      // bulk of last-30d Electrician bookings) never got attributed.
+      const attrBooked = unionCountEmail3(
         tfRows.filter(r => r.is_booked && r.ad_id),
-        ghlBookedRows.filter(r => r.ad_id)
+        ghlBookedRows.filter(r => r.ad_id),
+        resolvedQualBookings
+          .filter(r => r.resolved_ad_id)
+          .map(r => ({ email: r.contact_email, display_name: r.contact_name }))
       )
       // Live/closes use name-token (lib_ghl_lives_detail + lib_close_resolved
       // expose no email column, so an email-first dedup silently double-
@@ -873,6 +927,39 @@ export default function AdsPerformance() {
       for (const [k, v] of Object.entries(mapsClose.adset))    cAdset[k] = { closes: v.count, revenue: v.revenue, cash: v.cash }
       for (const [k, v] of Object.entries(mapsClose.campaign)) cCamp[k]  = { closes: v.count, revenue: v.revenue, cash: v.cash }
 
+      // Fold resolver-view qualified bookings into tf*Map.booked_calls /
+      // qualified_booked_calls so per-row Booked counts pick up the email/
+      // phone/first_name fallback chain. MAX over typeform count (the
+      // resolver should be ≥ typeform-direct because it's a superset).
+      const adsByIdLocal = Object.fromEntries((adsCacheRef.data || []).map(a => [a.ad_id, a]))
+      const folded = { ad: {}, adset: {}, campaign: {} }
+      for (const r of resolvedQualBookings) {
+        if (!r.resolved_ad_id) continue
+        folded.ad[r.resolved_ad_id] = (folded.ad[r.resolved_ad_id] || 0) + 1
+        if (r.resolved_adset_id) folded.adset[r.resolved_adset_id] = (folded.adset[r.resolved_adset_id] || 0) + 1
+        const camp = adsByIdLocal[r.resolved_ad_id]?.campaign_name
+        if (camp) folded.campaign[camp] = (folded.campaign[camp] || 0) + 1
+      }
+      const ensure = (target, k) => {
+        if (!target[k]) target[k] = { leads: 0, qualified_leads: 0, booked_calls: 0, qualified_booked_calls: 0, live_calls: 0, closes: 0, revenue_attributed: 0, cash_attributed: 0 }
+        return target[k]
+      }
+      for (const [k, n] of Object.entries(folded.ad)) {
+        const t = ensure(tfAdMap, k)
+        if (n > (t.booked_calls || 0)) t.booked_calls = n
+        if (n > (t.qualified_booked_calls || 0)) t.qualified_booked_calls = n
+      }
+      for (const [k, n] of Object.entries(folded.adset)) {
+        const t = ensure(tfAdsetMap, k)
+        if (n > (t.booked_calls || 0)) t.booked_calls = n
+        if (n > (t.qualified_booked_calls || 0)) t.qualified_booked_calls = n
+      }
+      for (const [k, n] of Object.entries(folded.campaign)) {
+        const t = ensure(tfCampMap, k)
+        if (n > (t.booked_calls || 0)) t.booked_calls = n
+        if (n > (t.qualified_booked_calls || 0)) t.qualified_booked_calls = n
+      }
+
       setTfAd(tfAdMap); setTfAdset(tfAdsetMap); setTfCampaign(tfCampMap)
       setCloseAd(cAd); setCloseAdset(cAdset); setCloseCampaign(cCamp)
 
@@ -914,6 +1001,28 @@ export default function AdsPerformance() {
       setGhlLeadsAd(gLeadAd)
       setGhlLeadsAdset(gLeadAdset)
       setGhlLeadsCampaign(gLeadCamp)
+
+      // Tally resolver-view qualified bookings per ad / adset / campaign_id.
+      // Map ad_id → campaign_name via the local ads list so the campaign-level
+      // overlay key matches the existing tfCampaign / ghlBookedCampaign maps
+      // (both keyed by campaign_name, not id).
+      const adsById = Object.fromEntries((adsCacheRef.data || []).map(a => [a.ad_id, a]))
+      const [rBookAd, rBookAdset] = tally(
+        resolvedQualBookings.map(r => ({
+          ad_id: r.resolved_ad_id,
+          adset_id: r.resolved_adset_id,
+        }))
+      )
+      const rBookCamp = {}
+      for (const r of resolvedQualBookings) {
+        const ad = adsById[r.resolved_ad_id]
+        const camp = ad?.campaign_name
+        if (!camp) continue
+        rBookCamp[camp] = (rBookCamp[camp] || 0) + 1
+      }
+      setResolvedBookedAd(rBookAd)
+      setResolvedBookedAdset(rBookAdset)
+      setResolvedBookedCampaign(rBookCamp)
 
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
@@ -1057,6 +1166,7 @@ export default function AdsPerformance() {
         if (cs) overlayClose(set.rollup, cs)
         overlayMax(set.rollup, ghlLeadsAdset[set.id]  || 0, 'tfLeads')
         overlayMax(set.rollup, ghlBookedAdset[set.id] || 0, 'tfBooked')
+        overlayMax(set.rollup, resolvedBookedAdset[set.id] || 0, 'tfBooked')
         overlayMax(set.rollup, ghlLivesAdset[set.id]  || 0, 'tfLive')
       }
       const tfc = tfCampaign[camp.name]
@@ -1065,6 +1175,7 @@ export default function AdsPerformance() {
       if (cc) overlayClose(camp.rollup, cc)
       overlayMax(camp.rollup, ghlLeadsCampaign[camp.name]  || 0, 'tfLeads')
       overlayMax(camp.rollup, ghlBookedCampaign[camp.name] || 0, 'tfBooked')
+      overlayMax(camp.rollup, resolvedBookedCampaign[camp.name] || 0, 'tfBooked')
       overlayMax(camp.rollup, ghlLivesCampaign[camp.name]  || 0, 'tfLive')
     }
 
@@ -1167,7 +1278,7 @@ export default function AdsPerformance() {
     const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
     visibleCampaigns.sort(compareCamps)
     return visibleCampaigns
-  }, [ads, stats, hyros, attrsByAd, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, ghlBookedAd, ghlBookedAdset, ghlBookedCampaign, ghlLivesAd, ghlLivesAdset, ghlLivesCampaign, statusFilter, search, sortKey, sortDir, advFilter])
+  }, [ads, stats, hyros, attrsByAd, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, ghlBookedAd, ghlBookedAdset, ghlBookedCampaign, ghlLivesAd, ghlLivesAdset, ghlLivesCampaign, resolvedBookedAd, resolvedBookedAdset, resolvedBookedCampaign, statusFilter, search, sortKey, sortDir, advFilter])
 
   // When filter or data changes and the user hasn't manually toggled
   // anything, auto-expand the visible campaigns. This way Ben lands on a
