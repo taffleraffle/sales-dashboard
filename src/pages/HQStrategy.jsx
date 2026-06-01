@@ -1,6 +1,21 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { Sparkles, Check, X, Edit3, AlertCircle, Clock } from 'lucide-react'
+import {
+  Sparkles,
+  Check,
+  X,
+  Edit3,
+  AlertCircle,
+  Clock,
+  ChevronDown,
+  ChevronRight,
+  Target,
+  AlertTriangle,
+  ListChecks,
+  FileText,
+  Trash2,
+  Layers,
+} from 'lucide-react'
 
 const KIND_LABELS = {
   content_brief: 'CONTENT BRIEF',
@@ -14,12 +29,19 @@ const KIND_LABELS = {
   win_curation: 'WIN CURATION',
   red_flag_review: 'RED FLAG',
   health_check_followup: 'GBP HEALTH',
+  handoff_brief: 'HANDOFF BRIEF',
+  handoff_review: 'HANDOFF REVIEW',
 }
 
-const KIND_PRIORITY_COLOR = {
-  high: 'var(--rom-sage)',
-  med: 'var(--rom-tone)',
-  low: 'var(--rom-ink-2)',
+const STRUCTURED_KINDS = new Set([
+  'content_brief',
+  'roadmap_update',
+  'handoff_brief',
+  'handoff_review',
+])
+
+function isHandoffKind(kind) {
+  return typeof kind === 'string' && kind.toLowerCase().includes('handoff')
 }
 
 function timeAgo(iso) {
@@ -36,6 +58,20 @@ function timeUntil(iso) {
   if (s < 3600) return `${Math.floor(s / 60)}m`
   if (s < 86400) return `${Math.floor(s / 3600)}h`
   return `${Math.floor(s / 86400)}d`
+}
+
+function deriveHeadline(item) {
+  const p = item.proposed_payload || {}
+  return (
+    p.headline
+    || p.title
+    || p.target_keyword
+    || p.memo?.headline
+    || p.summary
+    || p.competitor
+    || (typeof p.vision === 'string' ? p.vision.slice(0, 80) : null)
+    || 'Untitled item'
+  )
 }
 
 export default function HQStrategy() {
@@ -183,6 +219,7 @@ export default function HQStrategy() {
           )}
           {selected && (
             <ReviewPanel
+              key={selected.id}
               item={selected}
               acting={acting}
               notes={notes}
@@ -213,16 +250,7 @@ function QueueRow({ item, selected, onClick }) {
   const overdue = new Date(item.expires_at) < new Date()
   const urgent = !overdue && (new Date(item.expires_at).getTime() - Date.now()) < 12 * 3600e3
   const label = KIND_LABELS[item.kind] || item.kind.toUpperCase()
-  const payload = item.proposed_payload || {}
-  const headline =
-    payload.headline
-    || payload.title
-    || payload.target_keyword
-    || payload.memo?.headline
-    || payload.summary
-    || payload.competitor
-    || payload.vision?.slice(0, 80)
-    || 'Untitled item'
+  const headline = deriveHeadline(item)
 
   return (
     <button onClick={onClick}
@@ -255,6 +283,8 @@ function QueueRow({ item, selected, onClick }) {
 function ReviewPanel({ item, acting, notes, onNotesChange, overrides, onOverridesChange, editing, onToggleEdit, onAction }) {
   const label = KIND_LABELS[item.kind] || item.kind.toUpperCase()
   const payload = item.proposed_payload || {}
+  const useStructured = STRUCTURED_KINDS.has(item.kind) || isHandoffKind(item.kind)
+
   return (
     <div className="bg-white border" style={{ borderColor: 'var(--rom-rule)' }}>
       <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--rom-rule)', background: 'var(--rom-paper)' }}>
@@ -270,10 +300,10 @@ function ReviewPanel({ item, acting, notes, onNotesChange, overrides, onOverride
         </div>
       </div>
 
-      <div className="px-5 py-5 max-h-[500px] overflow-auto">
-        <pre className="text-xs whitespace-pre-wrap" style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--rom-ink)', lineHeight: 1.65 }}>
-{JSON.stringify(payload, null, 2)}
-        </pre>
+      <div className="px-5 py-5 max-h-[600px] overflow-auto">
+        {useStructured
+          ? <StructuredView item={item} payload={payload} />
+          : <RawPayload payload={payload} />}
       </div>
 
       {editing && (
@@ -320,5 +350,401 @@ function ReviewPanel({ item, acting, notes, onNotesChange, overrides, onOverride
         </button>
       </div>
     </div>
+  )
+}
+
+// ---------- structured view ----------
+
+function StructuredView({ item, payload }) {
+  const headline = deriveHeadline(item)
+  const why = payload.why || payload.expected_impact || payload.rationale || payload.impact || null
+
+  // identify linked records
+  const handoffBriefId = payload.handoff_brief_id || payload.handoff_id || (isHandoffKind(item.kind) ? payload.brief_id : null) || null
+  const fathomRecordingId = payload.fathom_recording_id || payload.recording_id || null
+  const contentBriefId = (item.kind === 'content_brief') ? (payload.brief_id || payload.content_brief_id || null) : (payload.content_brief_id || null)
+
+  const [handoffBrief, setHandoffBrief] = useState(null)
+  const [handoffLoading, setHandoffLoading] = useState(false)
+  const [contentBrief, setContentBrief] = useState(null)
+  const [contentLoading, setContentLoading] = useState(false)
+  const [promisesLocal, setPromisesLocal] = useState(null)
+
+  // fetch handoff_briefs row
+  useEffect(() => {
+    let cancelled = false
+    async function go() {
+      if (!handoffBriefId && !fathomRecordingId) return
+      setHandoffLoading(true)
+      let query = supabase.from('handoff_briefs').select('*').limit(1)
+      if (handoffBriefId) query = query.eq('id', handoffBriefId)
+      else if (fathomRecordingId) query = query.eq('fathom_recording_id', fathomRecordingId)
+      const { data } = await query.maybeSingle()
+      if (!cancelled) {
+        setHandoffBrief(data || null)
+        setPromisesLocal(Array.isArray(data?.promises_made) ? data.promises_made : null)
+        setHandoffLoading(false)
+      }
+    }
+    go()
+    return () => { cancelled = true }
+  }, [handoffBriefId, fathomRecordingId])
+
+  // fetch content_briefs row
+  useEffect(() => {
+    let cancelled = false
+    async function go() {
+      if (!contentBriefId) return
+      setContentLoading(true)
+      const { data } = await supabase.from('content_briefs').select('*').eq('id', contentBriefId).maybeSingle()
+      if (!cancelled) {
+        setContentBrief(data || null)
+        setContentLoading(false)
+      }
+    }
+    go()
+    return () => { cancelled = true }
+  }, [contentBriefId])
+
+  async function deletePromise(idx) {
+    if (!handoffBrief?.id || !Array.isArray(promisesLocal)) return
+    const next = promisesLocal.filter((_, i) => i !== idx)
+    setPromisesLocal(next)
+    const { error } = await supabase
+      .from('handoff_briefs')
+      .update({ promises_made: next })
+      .eq('id', handoffBrief.id)
+    if (error) {
+      alert(`Couldn't prune promise: ${error.message}`)
+      setPromisesLocal(promisesLocal) // revert
+    }
+  }
+
+  // pretty proposed fields (skip the noisy stuff)
+  const proposedFields = useMemo(() => {
+    const skip = new Set([
+      'headline', 'title', 'why', 'expected_impact', 'rationale', 'impact',
+      'handoff_brief_id', 'handoff_id', 'fathom_recording_id', 'recording_id',
+      'brief_id', 'content_brief_id',
+    ])
+    return Object.entries(payload).filter(([k]) => !skip.has(k))
+  }, [payload])
+
+  return (
+    <div className="flex flex-col gap-5">
+      <HeadlineBlock headline={headline} kind={item.kind} />
+
+      <Section icon={<Target size={12} />} title="What was proposed">
+        {proposedFields.length === 0
+          ? <Empty>No additional fields beyond the headline.</Empty>
+          : <FieldGrid entries={proposedFields} />}
+      </Section>
+
+      {why && (
+        <Section icon={<Sparkles size={12} />} title="Why this matters" accent>
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--rom-ink)' }}>
+            {typeof why === 'string' ? why : JSON.stringify(why)}
+          </p>
+        </Section>
+      )}
+
+      {(handoffBriefId || fathomRecordingId) && (
+        <HandoffBriefBlock
+          loading={handoffLoading}
+          brief={handoffBrief}
+          promises={promisesLocal}
+          onDeletePromise={deletePromise}
+        />
+      )}
+
+      {contentBriefId && (
+        <ContentBriefBlock loading={contentLoading} brief={contentBrief} />
+      )}
+
+      <Collapsible title="Raw payload" defaultOpen={false}>
+        <RawPayload payload={payload} />
+      </Collapsible>
+    </div>
+  )
+}
+
+function HeadlineBlock({ headline, kind }) {
+  return (
+    <div className="border-l-2 pl-4 py-1" style={{ borderColor: 'var(--rom-sage)' }}>
+      <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--rom-sage)', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>
+        {KIND_LABELS[kind] || kind}
+      </div>
+      <div className="text-lg font-display font-black tracking-tight" style={{ color: 'var(--rom-ink)', lineHeight: 1.25 }}>
+        {headline}
+      </div>
+    </div>
+  )
+}
+
+function Section({ icon, title, accent, children }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-2 text-[10px] uppercase tracking-wider" style={{ color: accent ? 'var(--rom-sage)' : 'var(--rom-ink-2)', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>
+        {icon}
+        <span>{title}</span>
+      </div>
+      <div className="border bg-white" style={{ borderColor: 'var(--rom-rule)', padding: '12px 14px', background: accent ? 'var(--rom-paper)' : 'white' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function Empty({ children }) {
+  return <div className="text-xs italic" style={{ color: 'var(--rom-ink-2)' }}>{children}</div>
+}
+
+function FieldGrid({ entries }) {
+  return (
+    <div className="grid grid-cols-1 gap-3">
+      {entries.map(([k, v]) => (
+        <div key={k} className="grid grid-cols-12 gap-3 text-xs">
+          <div className="col-span-4 uppercase tracking-wider" style={{ color: 'var(--rom-ink-2)', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>
+            {k.replace(/_/g, ' ')}
+          </div>
+          <div className="col-span-8" style={{ color: 'var(--rom-ink)' }}>
+            <FieldValue value={v} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function FieldValue({ value }) {
+  if (value === null || value === undefined) return <span style={{ color: 'var(--rom-ink-2)' }}>—</span>
+  if (typeof value === 'string') return <span className="whitespace-pre-wrap">{value}</span>
+  if (typeof value === 'number' || typeof value === 'boolean') return <span className="tabular-nums">{String(value)}</span>
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <Empty>empty</Empty>
+    if (value.every((v) => typeof v === 'string' || typeof v === 'number')) {
+      return (
+        <ul className="list-disc pl-4 space-y-0.5">
+          {value.map((v, i) => <li key={i}>{String(v)}</li>)}
+        </ul>
+      )
+    }
+    return (
+      <pre className="text-[11px] whitespace-pre-wrap" style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--rom-ink-2)' }}>
+{JSON.stringify(value, null, 2)}
+      </pre>
+    )
+  }
+  if (typeof value === 'object') {
+    return (
+      <div className="space-y-1">
+        {Object.entries(value).map(([k, v]) => (
+          <div key={k} className="flex gap-2">
+            <span style={{ color: 'var(--rom-ink-2)', fontFamily: 'JetBrains Mono, monospace' }}>{k}:</span>
+            <span><FieldValue value={v} /></span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return <span>{String(value)}</span>
+}
+
+// ---------- handoff brief block ----------
+
+function HandoffBriefBlock({ loading, brief, promises, onDeletePromise }) {
+  if (loading) {
+    return (
+      <Section icon={<FileText size={12} />} title="Handoff brief">
+        <Empty>Loading handoff brief…</Empty>
+      </Section>
+    )
+  }
+  if (!brief) {
+    return (
+      <Section icon={<FileText size={12} />} title="Handoff brief">
+        <Empty>Linked handoff brief not found.</Empty>
+      </Section>
+    )
+  }
+
+  const icp = brief.icp_confirmed || {}
+  const redFlags = Array.isArray(brief.red_flags) ? brief.red_flags : []
+  const scope = brief.scope_locked
+
+  return (
+    <div className="flex flex-col gap-5">
+      {brief.summary && (
+        <Section icon={<FileText size={12} />} title="Handoff summary">
+          <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--rom-ink)' }}>{brief.summary}</p>
+        </Section>
+      )}
+
+      <Section icon={<ListChecks size={12} />} title="Promises made">
+        {(!promises || promises.length === 0)
+          ? <Empty>No promises captured. Or you've pruned them all.</Empty>
+          : (
+            <ul className="space-y-2">
+              {promises.map((p, i) => {
+                const text = typeof p === 'string' ? p : (p?.promise || p?.text || JSON.stringify(p))
+                return (
+                  <li key={i} className="flex items-start gap-3 text-sm group">
+                    <input type="checkbox" defaultChecked={false} className="mt-1 flex-shrink-0" style={{ accentColor: 'var(--rom-sage)' }} />
+                    <span className="flex-1" style={{ color: 'var(--rom-ink)' }}>{text}</span>
+                    <button
+                      onClick={() => onDeletePromise(i)}
+                      title="prune this promise"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      style={{ color: '#B91C1C' }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+      </Section>
+
+      <Section icon={<Target size={12} />} title="ICP confirmed">
+        {Object.keys(icp).length === 0
+          ? <Empty>ICP not captured.</Empty>
+          : <FieldGrid entries={Object.entries(icp)} />}
+      </Section>
+
+      {scope && (
+        <Section icon={<Layers size={12} />} title="Scope locked">
+          {typeof scope === 'string'
+            ? <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--rom-ink)' }}>{scope}</p>
+            : <FieldGrid entries={Object.entries(scope)} />}
+        </Section>
+      )}
+
+      {redFlags.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-2 text-[10px] uppercase tracking-wider" style={{ color: '#B91C1C', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>
+            <AlertTriangle size={12} />
+            <span>Red flags</span>
+          </div>
+          <div className="border" style={{ borderColor: '#FECACA', background: '#FEF3F2', padding: '12px 14px' }}>
+            <ul className="space-y-2">
+              {redFlags.map((f, i) => {
+                const text = typeof f === 'string' ? f : (f?.flag || f?.text || JSON.stringify(f))
+                return (
+                  <li key={i} className="flex items-start gap-2 text-sm" style={{ color: '#991B1B' }}>
+                    <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <span>{text}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- content brief block ----------
+
+function ContentBriefBlock({ loading, brief }) {
+  if (loading) {
+    return (
+      <Section icon={<FileText size={12} />} title="Content brief">
+        <Empty>Loading content brief…</Empty>
+      </Section>
+    )
+  }
+  if (!brief) {
+    return (
+      <Section icon={<FileText size={12} />} title="Content brief">
+        <Empty>Linked content brief not found.</Empty>
+      </Section>
+    )
+  }
+
+  const outline = brief.outline || brief.brief_outline || null
+  const entities = brief.entities || null
+  const schema = brief.schema_requirements || brief.schema || null
+
+  return (
+    <div className="flex flex-col gap-5">
+      {outline && (
+        <Section icon={<FileText size={12} />} title="Brief outline">
+          {Array.isArray(outline)
+            ? (
+              <ol className="list-decimal pl-5 space-y-1 text-sm" style={{ color: 'var(--rom-ink)' }}>
+                {outline.map((o, i) => (
+                  <li key={i}>{typeof o === 'string' ? o : (o?.heading || o?.title || JSON.stringify(o))}</li>
+                ))}
+              </ol>
+            )
+            : typeof outline === 'string'
+              ? <pre className="text-sm whitespace-pre-wrap" style={{ color: 'var(--rom-ink)' }}>{outline}</pre>
+              : <FieldGrid entries={Object.entries(outline)} />}
+        </Section>
+      )}
+
+      {entities && (
+        <Section icon={<Target size={12} />} title="Entities">
+          {Array.isArray(entities)
+            ? (
+              <div className="flex flex-wrap gap-1.5">
+                {entities.map((e, i) => (
+                  <span key={i} className="text-[11px] px-2 py-1 border" style={{ borderColor: 'var(--rom-rule)', background: 'var(--rom-paper)', color: 'var(--rom-ink)', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {typeof e === 'string' ? e : (e?.name || JSON.stringify(e))}
+                  </span>
+                ))}
+              </div>
+            )
+            : <FieldGrid entries={Object.entries(entities)} />}
+        </Section>
+      )}
+
+      {schema && (
+        <Section icon={<Layers size={12} />} title="Schema requirements">
+          {Array.isArray(schema)
+            ? (
+              <ul className="list-disc pl-5 space-y-1 text-sm" style={{ color: 'var(--rom-ink)' }}>
+                {schema.map((s, i) => (
+                  <li key={i}>{typeof s === 'string' ? s : (s?.type || JSON.stringify(s))}</li>
+                ))}
+              </ul>
+            )
+            : typeof schema === 'string'
+              ? <pre className="text-sm whitespace-pre-wrap" style={{ color: 'var(--rom-ink)' }}>{schema}</pre>
+              : <FieldGrid entries={Object.entries(schema)} />}
+        </Section>
+      )}
+    </div>
+  )
+}
+
+// ---------- shared bits ----------
+
+function Collapsible({ title, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="border" style={{ borderColor: 'var(--rom-rule)' }}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-[10px] uppercase tracking-wider"
+        style={{ color: 'var(--rom-ink-2)', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, background: 'var(--rom-paper)' }}>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <span>{title}</span>
+      </button>
+      {open && (
+        <div className="px-3 py-3 border-t" style={{ borderColor: 'var(--rom-rule)' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RawPayload({ payload }) {
+  return (
+    <pre className="text-xs whitespace-pre-wrap" style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--rom-ink)', lineHeight: 1.65 }}>
+{JSON.stringify(payload, null, 2)}
+    </pre>
   )
 }

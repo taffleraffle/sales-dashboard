@@ -39,8 +39,15 @@ Return STRICT JSON:
 
 Be brutal. A boring/generic article is worse than no article.`;
 
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 serve(async (req) => {
-  if (req.method !== "POST") return new Response("method", { status: 405 });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return new Response("method", { status: 405, headers: CORS });
 
   const supa = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -51,7 +58,7 @@ serve(async (req) => {
   try {
     const { brief_id, draft_body_md, writer } = await req.json();
     if (!brief_id || !draft_body_md) {
-      return new Response(JSON.stringify({ error: "brief_id + draft_body_md required" }), { status: 400 });
+      return new Response(JSON.stringify({ error: "brief_id + draft_body_md required" }), { status: 400 , headers: { ...CORS, "Content-Type": "application/json" }});
     }
 
     const { data: brief } = await supa
@@ -59,7 +66,7 @@ serve(async (req) => {
       .select("id, client_id, target_keyword, outline, entities, schema_requirements, internal_links, word_count_target, tone_notes, clients(business_name, vertical, primary_city)")
       .eq("id", brief_id)
       .single();
-    if (!brief) return new Response(JSON.stringify({ error: "brief not found" }), { status: 404 });
+    if (!brief) return new Response(JSON.stringify({ error: "brief not found" }), { status: 404 , headers: { ...CORS, "Content-Type": "application/json" }});
 
     const wordCount = (draft_body_md.match(/\b\w+\b/g) || []).length;
 
@@ -95,12 +102,12 @@ Return ONLY the JSON.`,
       }),
     });
     if (!aRes.ok) {
-      return new Response(JSON.stringify({ error: `Anthropic ${aRes.status}: ${await aRes.text()}` }), { status: 500 });
+      return new Response(JSON.stringify({ error: `Anthropic ${aRes.status}: ${await aRes.text()}` }), { status: 500 , headers: { ...CORS, "Content-Type": "application/json" }});
     }
     const aData = await aRes.json();
     const text = aData.content?.[0]?.text || "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return new Response(JSON.stringify({ error: "no JSON in qa", raw: text.slice(0, 500) }), { status: 500 });
+    if (!jsonMatch) return new Response(JSON.stringify({ error: "no JSON in qa", raw: text.slice(0, 500) }), { status: 500 , headers: { ...CORS, "Content-Type": "application/json" }});
     const qa = JSON.parse(jsonMatch[0]);
 
     // Persist the draft + qa
@@ -159,9 +166,9 @@ Return ONLY the JSON.`,
 
     return new Response(JSON.stringify({ ok: true, draft_id: draft!.id, ...qa }), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...CORS, "Content-Type": "application/json" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500 });
+    return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500 , headers: { ...CORS, "Content-Type": "application/json" }});
   }
 });

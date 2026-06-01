@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, NavLink, Outlet, Routes, Route, Navigate } from 'react-router-dom'
-import { Loader, ChevronLeft, ExternalLink, Phone, MapPin, Users, Calendar, DollarSign } from 'lucide-react'
+import { Loader, ChevronLeft, ExternalLink, Phone, MapPin, Users, Calendar, DollarSign, X, ArrowRight } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { buildValueReceipt, formatValueReceiptForSlack, ROI_TIER } from '../../lib/roi'
+import { useAuth } from '../../contexts/AuthContext'
+import { useToast } from '../../hooks/useToast'
 import ConveyorView from './ConveyorView'
 import TouchpointsQueue from './TouchpointsQueue'
 
@@ -23,6 +25,19 @@ import TouchpointsQueue from './TouchpointsQueue'
   stubbed with "Coming next" cards so the navigation is in place.
 */
 
+const TIER_OPTIONS = [
+  { value: 'maps_only',     label: 'Maps only' },
+  { value: 'full_stack',    label: 'Full stack' },
+  { value: 'custom',        label: 'Custom' },
+  { value: 'retainer_only', label: 'Retainer only' },
+]
+
+function isDowngrade(fromTier, toTier) {
+  // downgrade: moving to maps_only from full_stack or custom
+  if (toTier !== 'maps_only') return false
+  return fromTier === 'full_stack' || fromTier === 'custom'
+}
+
 const TABS = [
   { key: 'overview',    label: 'Overview',    path: '' },
   { key: 'conveyor',    label: 'Conveyor',    path: 'conveyor' },
@@ -39,6 +54,16 @@ export default function ClientDetail() {
   const [client, setClient] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  async function refetch() {
+    const { data, error: err } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('slug', slug)
+      .single()
+    if (err) { setError(err.message); return }
+    setClient(data)
+  }
 
   useEffect(() => {
     let mounted = true
@@ -83,7 +108,7 @@ export default function ClientDetail() {
         </Link>
       </div>
 
-      <ClientHeader client={client} />
+      <ClientHeader client={client} onConverted={refetch} onTierChanged={refetch} />
 
       <div className="border-b border-zinc-200">
         <div className="px-6 flex gap-1 overflow-x-auto">
@@ -121,7 +146,13 @@ export default function ClientDetail() {
   )
 }
 
-function ClientHeader({ client }) {
+function ClientHeader({ client, onConverted, onTierChanged }) {
+  const [convertOpen, setConvertOpen] = useState(false)
+  const [tierOpen, setTierOpen] = useState(false)
+
+  const showConvert = client.status === 'trial'
+  const showChangeTier = client.status === 'active' && !!client.tier
+
   return (
     <div className="px-6 pt-4 pb-6">
       <div className="flex items-start justify-between gap-6">
@@ -133,6 +164,10 @@ function ClientHeader({ client }) {
             <span className="capitalize">{client.vertical}</span>
             <span>·</span>
             <span className="capitalize">{client.status}</span>
+            {client.tier && <>
+              <span>·</span>
+              <span className="capitalize">{String(client.tier).replace(/_/g, ' ')}</span>
+            </>}
             {client.custom_domain && <>
               <span>·</span>
               <a href={`https://${client.custom_domain}`} target="_blank" rel="noreferrer"
@@ -148,7 +183,464 @@ function ClientHeader({ client }) {
               AM: {client.primary_am}
             </span>
           )}
+          {showConvert && (
+            <button
+              type="button"
+              onClick={() => setConvertOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-md text-xs font-medium transition-colors"
+            >
+              <ArrowRight size={14} /> Convert to active
+            </button>
+          )}
+          {showChangeTier && (
+            <button
+              type="button"
+              onClick={() => setTierOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-zinc-300 hover:border-emerald-700 hover:text-emerald-700 text-zinc-700 rounded-md text-xs font-medium transition-colors"
+            >
+              <ArrowRight size={14} /> Change tier
+            </button>
+          )}
         </div>
+      </div>
+
+      {convertOpen && (
+        <ConvertClientModal
+          client={client}
+          onClose={() => setConvertOpen(false)}
+          onSuccess={() => { setConvertOpen(false); onConverted && onConverted() }}
+        />
+      )}
+      {tierOpen && (
+        <ChangeTierModal
+          client={client}
+          onClose={() => setTierOpen(false)}
+          onSuccess={() => { setTierOpen(false); onTierChanged && onTierChanged() }}
+        />
+      )}
+    </div>
+  )
+}
+
+function ChangeTierModal({ client, onClose, onSuccess }) {
+  const toast = useToast()
+  const { profile } = useAuth()
+  const [toTier, setToTier] = useState('')
+  const [reason, setReason] = useState('')
+  const [triggeredBy, setTriggeredBy] = useState(profile?.name || profile?.email || '')
+  const [submitting, setSubmitting] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+
+  const fromTier = client.tier
+  const tierOptions = TIER_OPTIONS.filter(t => t.value !== fromTier)
+  const downgrade = toTier && isDowngrade(fromTier, toTier)
+
+  function fmtTier(t) {
+    const found = TIER_OPTIONS.find(x => x.value === t)
+    return found ? found.label : (t || '—')
+  }
+
+  async function doSubmit() {
+    setSubmitting(true)
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/client-tier-transition`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+          client_id: client.id,
+          to_tier: toTier,
+          reason,
+          triggered_by: triggeredBy,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.error) {
+        toast.error(`Tier change failed: ${data.error || res.statusText}`)
+        return
+      }
+      const sideEffects = data.side_effects_fired ?? data.side_effects?.length ?? data.fired ?? 0
+      toast.success(`Tier changed: ${fmtTier(fromTier)} → ${fmtTier(toTier)} · ${sideEffects} side effects fired`)
+      onSuccess && onSuccess()
+    } catch (e) {
+      toast.error(`Tier change failed: ${e.message}`)
+    } finally {
+      setSubmitting(false)
+      setConfirming(false)
+    }
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault()
+    if (!toTier) { toast.error('Pick a target tier'); return }
+    if (!reason.trim()) { toast.error('Reason is required'); return }
+    if (!triggeredBy.trim()) { toast.error('Triggered by is required'); return }
+    if (downgrade) {
+      setConfirming(true)
+      return
+    }
+    doSubmit()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-lg shadow-xl w-full max-w-md"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200">
+          <h2 className="text-lg font-semibold text-zinc-900">Change tier</h2>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        {confirming ? (
+          <div className="p-5 space-y-4">
+            <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-md">
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-amber-900">Downgrade confirmation</div>
+                <div className="text-sm text-amber-800 mt-1">
+                  Moving {client.business_name} from {fmtTier(fromTier)} to {fmtTier(toTier)} is a downgrade.
+                  Side effects will fire (paused services, refund prorations, Slack notifications).
+                  This cannot be undone in one click.
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                disabled={submitting}
+                className="px-3 py-1.5 text-sm text-zinc-700 hover:text-zinc-900"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={doSubmit}
+                disabled={submitting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-white rounded-md text-sm font-medium disabled:opacity-60"
+              >
+                {submitting && <Loader size={14} className="animate-spin" />}
+                Confirm downgrade
+              </button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="p-5 space-y-4">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Current tier</div>
+              <div className="px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-md text-sm text-zinc-700">
+                {fmtTier(fromTier)}
+              </div>
+            </div>
+
+            <label className="block">
+              <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Move to tier</div>
+              <select
+                value={toTier}
+                onChange={e => setToTier(e.target.value)}
+                className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:border-emerald-700"
+                required
+              >
+                <option value="">Select a tier</option>
+                {tierOptions.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Reason</div>
+              <textarea
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                rows={3}
+                required
+                placeholder="why this tier change, in plain words"
+                className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:border-emerald-700"
+              />
+            </label>
+
+            <label className="block">
+              <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Triggered by</div>
+              <input
+                type="text"
+                value={triggeredBy}
+                onChange={e => setTriggeredBy(e.target.value)}
+                required
+                className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:border-emerald-700"
+              />
+            </label>
+
+            {downgrade && (
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                This is a downgrade. You will be asked to confirm before it fires.
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-3 py-1.5 text-sm text-zinc-700 hover:text-zinc-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-md text-sm font-medium disabled:opacity-60"
+              >
+                {submitting && <Loader size={14} className="animate-spin" />}
+                {downgrade ? 'Review downgrade' : 'Change tier'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ConvertClientModal — trial to active conversion.
+// Calls client-conversion edge fn, auto-detects latest handoff_briefs row,
+// then refetches the client on success so the header re-renders without the Convert button.
+function ConvertClientModal({ client, onClose, onSuccess }) {
+  const { profile, session } = useAuth()
+  const toast = useToast()
+  const today = new Date().toISOString().slice(0, 10)
+  const defaultConvertedBy = profile?.name || profile?.email || session?.user?.email || ''
+
+  const [form, setForm] = useState({
+    to_tier: 'full_stack',
+    monthly_fee: '',
+    contract_start: today,
+    contract_end: '',
+    converted_by: defaultConvertedBy,
+    notes: '',
+  })
+  const [handoffBrief, setHandoffBrief] = useState(null)
+  const [handoffLoading, setHandoffLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+
+  // auto-detect latest handoff_briefs row for this client
+  useEffect(() => {
+    let mounted = true
+    async function loadHandoff() {
+      const { data, error } = await supabase
+        .from('handoff_briefs')
+        .select('id, created_at, source')
+        .eq('client_id', client.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (!mounted) return
+      if (!error && data) setHandoffBrief(data)
+      setHandoffLoading(false)
+    }
+    loadHandoff()
+    return () => { mounted = false }
+  }, [client.id])
+
+  function update(key, value) {
+    setForm(prev => ({ ...prev, [key]: value }))
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (submitting) return
+    setSubmitting(true)
+
+    try {
+      const body = {
+        client_id: client.id,
+        to_tier: form.to_tier,
+        monthly_fee: form.monthly_fee === '' ? null : Number(form.monthly_fee),
+        contract_start: form.contract_start || null,
+        contract_end: form.contract_end || null,
+        converted_by: form.converted_by || null,
+        notes: form.notes || null,
+        handoff_brief_id: handoffBrief?.id || null,
+      }
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+      const accessToken = session?.access_token
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/client-conversion`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken || anonKey}`,
+          'apikey': anonKey,
+        },
+        body: JSON.stringify(body),
+      })
+
+      const json = await res.json().catch(() => ({}))
+
+      if (!res.ok || json?.error) {
+        throw new Error(json?.error || json?.message || `Conversion failed (${res.status})`)
+      }
+
+      const sideEffectCount =
+        json?.side_effects_count ??
+        json?.side_effects_fired ??
+        (Array.isArray(json?.side_effects) ? json.side_effects.length : null) ??
+        (Array.isArray(json?.fired) ? json.fired.length : null) ??
+        0
+
+      toast.success(`Converted to active · ${sideEffectCount} side effects fired`, {
+        title: client.business_name,
+      })
+      onSuccess && onSuccess()
+    } catch (err) {
+      toast.error(err?.message || 'Conversion failed', { title: 'Could not convert' })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white border border-zinc-200 rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between px-5 py-4 border-b border-zinc-200">
+          <div>
+            <div
+              className="text-[11px] uppercase tracking-wider text-zinc-500"
+              style={{ fontFamily: 'var(--mono, "JetBrains Mono"), ui-monospace, monospace' }}
+            >
+              Trial to active
+            </div>
+            <h2
+              className="text-lg font-semibold text-zinc-900 mt-0.5"
+              style={{ fontFamily: 'var(--display, "Inter Tight"), system-ui, sans-serif', fontWeight: 900, letterSpacing: '-0.01em' }}
+            >
+              Convert {client.business_name}
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-zinc-400 hover:text-zinc-700"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <label className="block">
+            <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Tier</div>
+            <select
+              value={form.to_tier}
+              onChange={e => update('to_tier', e.target.value)}
+              className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:border-emerald-700 bg-white"
+            >
+              <option value="maps_only">maps_only</option>
+              <option value="full_stack">full_stack</option>
+              <option value="custom">custom</option>
+              <option value="retainer_only">retainer_only</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Monthly fee ($)</div>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={form.monthly_fee}
+              onChange={e => update('monthly_fee', e.target.value)}
+              placeholder="optional"
+              className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:border-emerald-700"
+              style={{ fontFamily: 'var(--mono, "JetBrains Mono"), ui-monospace, monospace' }}
+            />
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Contract start</div>
+              <input
+                type="date"
+                value={form.contract_start}
+                onChange={e => update('contract_start', e.target.value)}
+                className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:border-emerald-700"
+              />
+            </label>
+            <label className="block">
+              <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Contract end</div>
+              <input
+                type="date"
+                value={form.contract_end}
+                onChange={e => update('contract_end', e.target.value)}
+                className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:border-emerald-700"
+              />
+            </label>
+          </div>
+
+          <label className="block">
+            <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Converted by</div>
+            <input
+              type="text"
+              value={form.converted_by}
+              onChange={e => update('converted_by', e.target.value)}
+              className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:border-emerald-700"
+            />
+          </label>
+
+          <label className="block">
+            <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Notes</div>
+            <textarea
+              value={form.notes}
+              onChange={e => update('notes', e.target.value)}
+              rows={3}
+              placeholder="optional context for the conveyor log"
+              className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:border-emerald-700 resize-y"
+            />
+          </label>
+
+          <div className="px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-md">
+            <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Handoff brief</div>
+            <div
+              className="text-sm text-zinc-700"
+              style={{ fontFamily: 'var(--mono, "JetBrains Mono"), ui-monospace, monospace' }}
+            >
+              {handoffLoading
+                ? 'looking up latest...'
+                : handoffBrief
+                  ? `${handoffBrief.id} · ${new Date(handoffBrief.created_at).toLocaleDateString()}${handoffBrief.source ? ' · ' + handoffBrief.source : ''}`
+                  : 'none found · conversion will run without it'}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="px-3 py-1.5 text-sm font-medium text-zinc-700 hover:text-zinc-900 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            >
+              {submitting ? <><Loader size={14} className="animate-spin" /> Converting...</> : <>Convert to active <ArrowRight size={14} /></>}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )

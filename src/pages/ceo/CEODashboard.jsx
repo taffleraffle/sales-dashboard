@@ -47,7 +47,7 @@ export default function CEODashboard() {
     async function load() {
       setPortfolioLoading(true)
       try {
-        const [clientsRes, leads7Res, attentionRes] = await Promise.all([
+        const [clientsRes, leads7Res, attentionRes, mrrRes, payRes] = await Promise.all([
           supabase.from('clients').select('id, status, vertical, monthly_fee, created_at'),
           supabase.from('client_leads')
             .select('id', { count: 'exact', head: true })
@@ -56,21 +56,35 @@ export default function CEODashboard() {
             .select('id', { count: 'exact', head: true })
             .is('acknowledged_at', null)
             .eq('direction', 'inbound'),
+          // Real money model from Stripe (aggregate snapshot + cash).
+          supabase.from('mrr_snapshots').select('*').order('snapshot_date', { ascending: false }).limit(1),
+          supabase.from('payments').select('amount, payment_date').eq('source', 'stripe'),
         ])
         if (!mounted) return
         const clients = clientsRes.data || []
         const active = clients.filter(c => ['active', 'trial', 'onboarding'].includes(c.status))
-        const mrr = active.reduce((s, c) => s + Number(c.monthly_fee || 0), 0)
         const verticalBreakdown = active.reduce((acc, c) => {
           const v = c.vertical || 'unspecified'
           acc[v] = (acc[v] || 0) + 1
           return acc
         }, {})
+        // Stripe is the source of truth for MRR; fall back to contract sum if not synced.
+        const snap = (mrrRes.data && mrrRes.data[0]) || null
+        const contractMrr = active.reduce((s, c) => s + Number(c.monthly_fee || 0), 0)
+        const realMrr = snap ? Number(snap.active_mrr) : contractMrr
+        const since30 = cutoffStr(30)
+        const stripeCash30 = (payRes.data || [])
+          .filter(p => (p.payment_date || '') >= since30)
+          .reduce((s, p) => s + Number(p.amount || 0), 0)
         setPortfolio({
           activeClients: active.length,
           newThisMonth: clients.filter(c => c.created_at >= monthStartStr()).length,
           churned: clients.filter(c => c.status === 'churned').length,
-          mrr, arr: mrr * 12,
+          mrr: realMrr, arr: realMrr * 12,
+          activeSubs: snap ? snap.active_subs : null,
+          pastDueSubs: snap ? snap.past_due_subs : 0,
+          arOutstanding: snap ? Number(snap.ar_outstanding) : null,
+          stripeCash30,
           leads7d: leads7Res.count || 0,
           unackedComms: attentionRes.count || 0,
           verticalBreakdown,
@@ -106,11 +120,11 @@ export default function CEODashboard() {
   const periodLabel = `Trailing 30 days · ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
 
   const northStars = [
-    { label: 'MRR', value: fmt$(p.mrr), ctx: `ARR ${fmt$(p.arr)}` },
-    { label: 'Cash collected · 30d', value: fmt$(s30.all_cash), ctx: `${s30.all_cash_roas.toFixed(2)}x all-cash ROAS` },
+    { label: 'MRR', value: fmt$(p.mrr), ctx: p.activeSubs != null ? `${p.activeSubs} active subs${p.pastDueSubs ? ` · ${p.pastDueSubs} past due` : ''}` : `ARR ${fmt$(p.arr)}` },
+    { label: 'Cash collected · 30d', value: fmt$(p.stripeCash30), ctx: 'Stripe, this period' },
+    { label: 'AR outstanding', value: p.arOutstanding != null ? fmt$(p.arOutstanding) : '—', ctx: 'open invoices' },
     { label: 'Close rate · 30d', value: fmtPct(s30.close_rate), ctx: `${fmtNum(s30.closes)} closes` },
-    { label: 'Active clients', value: fmtNum(p.activeClients), ctx: `+${p.newThisMonth} this month · ${p.churned} churned` },
-    { label: 'Leads · 7d', value: fmtNum(p.leads7d), ctx: 'across all clients' },
+    { label: 'Active clients', value: fmtNum(p.activeClients), ctx: `+${p.newThisMonth} new · ${p.churned} churned` },
   ]
 
   return (

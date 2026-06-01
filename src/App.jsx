@@ -103,6 +103,7 @@ const DownsellsSessionPage = lazyWithReload(() => import('./pages/downsells/Down
 const HQDashboard      = lazyWithReload(() => import('./pages/HQDashboard'))
 const HQWins           = lazyWithReload(() => import('./pages/HQWins'))
 const HQStrategy       = lazyWithReload(() => import('./pages/HQStrategy'))
+const HQContent        = lazyWithReload(() => import('./pages/HQContent'))
 const ClientsOverview  = lazyWithReload(() => import('./pages/clients/ClientsOverview'))
 const ClientDetail     = lazyWithReload(() => import('./pages/clients/ClientDetail'))
 const NewClientWizard  = lazyWithReload(() => import('./pages/clients/NewClientWizard'))
@@ -224,6 +225,7 @@ export default function App() {
               <Route path="/hq" element={<Suspense fallback={<PageSkeleton />}><HQDashboard /></Suspense>} />
               <Route path="/hq/wins" element={<Suspense fallback={<PageSkeleton />}><HQWins /></Suspense>} />
               <Route path="/hq/strategy" element={<Suspense fallback={<PageSkeleton />}><HQStrategy /></Suspense>} />
+              <Route path="/hq/content" element={<Suspense fallback={<PageSkeleton />}><HQContent /></Suspense>} />
               <Route path="/sales" element={<SalesOverview />} />
               <Route path="/sales/closers" element={<CloserOverview />} />
               <Route path="/sales/closers/:id" element={<Suspense fallback={<PageSkeleton />}><CloserDetail /></Suspense>} />
