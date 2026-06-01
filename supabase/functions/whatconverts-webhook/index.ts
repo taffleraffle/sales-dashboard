@@ -198,40 +198,129 @@ serve(async (req) => {
       return new Response(JSON.stringify({ ok: false, error: error.message }), { status: 500 });
     }
 
-    // Win emission rules
+    // Win emission rules — signal not noise.
+    // Individual leads are SILENT. Fire only on:
+    //   1. AI-sourced lead (ChatGPT, Perplexity, Gemini etc cited the client → traffic landed)
+    //   2. Deal closed (sales_value attached)
+    //   3. Personal best: today's lead count exceeds prior best for this client
+    //   4. Milestone counts: 50/100/250/500/1000 leads this month, etc.
     const winEvents: Array<{ kind: "new_lead" | "milestone"; headline: string; detail: string }> = [];
 
+    // ── 1. AI-sourced lead detection ──
+    function detectAISource(): string | null {
+      const haystack = [lead.source, lead.medium, lead.campaign, lead.landing_url, lead.keyword]
+        .filter(Boolean).join(" ").toLowerCase();
+      if (haystack.includes("chatgpt") || haystack.includes("openai")) return "ChatGPT";
+      if (haystack.includes("perplexity")) return "Perplexity";
+      if (haystack.includes("gemini") || haystack.includes("bard")) return "Gemini";
+      if (haystack.includes("claude.ai")) return "Claude";
+      if (haystack.includes("copilot")) return "Copilot";
+      if (haystack.includes("ai-overview") || haystack.includes("aio") || haystack.includes("google_ai")) return "Google AI Overviews";
+      return null;
+    }
+
     if (!prior) {
-      // brand new lead
-      const headline = isQualified
-        ? `New qualified lead: ${lead.contact_name || phone || "unknown"}`
-        : `New lead: ${lead.contact_name || phone || "unknown"}`;
-      const detail = [
-        lead.lead_type ? `*Type:* ${lead.lead_type}` : null,
-        lead.source ? `*Source:* ${lead.source}` : null,
-        lead.keyword ? `*Keyword:* ${lead.keyword}` : null,
-        incomingDealValue ? `*Value:* $${incomingDealValue.toLocaleString()}` : null,
-      ].filter(Boolean).join(" · ");
-      winEvents.push({ kind: "new_lead", headline, detail });
-    } else {
-      // existing lead — only meaningful transitions emit wins
-      if (isQualified && !prior.qualified) {
+      // brand new lead — silent unless AI-sourced
+      const aiSource = detectAISource();
+      if (aiSource) {
         winEvents.push({
           kind: "new_lead",
-          headline: `Lead qualified: ${lead.contact_name || phone || "unknown"}`,
-          detail: lead.keyword ? `*Keyword:* ${lead.keyword}` : "Marked qualified.",
+          headline: `${aiSource} drove a lead`,
+          detail: [
+            lead.keyword ? `*Query:* "${lead.keyword}"` : null,
+            lead.lead_type ? `*Type:* ${lead.lead_type}` : null,
+            incomingDealValue ? `*Value:* $${incomingDealValue.toLocaleString()}` : null,
+          ].filter(Boolean).join(" · "),
         });
       }
+
+      // ── 3. Personal best detection: today's leads vs prior daily best ──
+      // Only fire once daily count crosses prior best (not on every subsequent lead today)
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const { count: todayCount } = await supa
+        .from("client_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("client_id", clientId)
+        .gte("created_at", todayStart.toISOString());
+
+      const { data: clientMeta } = await supa
+        .from("clients")
+        .select("client_json, business_name")
+        .eq("id", clientId)
+        .single();
+      const cj = (clientMeta?.client_json || {}) as { records?: { best_daily_leads?: number } };
+      const priorBest = cj.records?.best_daily_leads || 0;
+
+      if ((todayCount || 0) > priorBest && (todayCount || 0) >= 5) {
+        // Only fire if we crossed it on THIS insert (today's count just hit priorBest + 1)
+        if ((todayCount || 0) === priorBest + 1) {
+          winEvents.push({
+            kind: "milestone",
+            headline: `Best lead day ever: ${todayCount} leads`,
+            detail: `Prior best: ${priorBest}. ${lead.source ? `Latest from ${lead.source}.` : ""}`,
+          });
+          // persist the new record
+          const newRecords = { ...(cj.records || {}), best_daily_leads: todayCount };
+          await supa.from("clients").update({ client_json: { ...cj, records: newRecords } }).eq("id", clientId);
+        }
+      }
+
+      // ── 4. Round-number milestone detection (monthly leads) ──
+      const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+      const { count: monthCount } = await supa
+        .from("client_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("client_id", clientId)
+        .gte("created_at", monthStart.toISOString());
+
+      const LEAD_MILESTONES = [50, 100, 250, 500, 1000];
+      for (const ms of LEAD_MILESTONES) {
+        if ((monthCount || 0) === ms) {
+          const monthName = monthStart.toLocaleString("en-US", { month: "long" });
+          winEvents.push({
+            kind: "milestone",
+            headline: `${ms} leads this ${monthName.toLowerCase()}`,
+            detail: `Client just crossed ${ms} inbound leads for the month.`,
+          });
+          break;
+        }
+      }
+    } else {
+      // Existing lead update — only fire on:
+      //   - Deal closed (sales_value attached or upgraded)
+      // qualified flip is no longer client-wins material; track silently
       const priorValue = Number(prior.deal_value) || 0;
       if (incomingDealValue != null && incomingDealValue > priorValue && incomingDealValue > 0) {
         winEvents.push({
           kind: "milestone",
-          headline: `Deal closed: $${incomingDealValue.toLocaleString()} from ${lead.contact_name || phone || "lead"}`,
+          headline: `Deal closed: $${incomingDealValue.toLocaleString()}`,
           detail: [
+            lead.contact_name ? `${lead.contact_name}` : null,
             lead.keyword ? `*Keyword:* ${lead.keyword}` : null,
             lead.source ? `*Source:* ${lead.source}` : null,
           ].filter(Boolean).join(" · "),
         });
+
+        // Also detect monthly revenue milestone
+        const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+        const { data: monthDeals } = await supa
+          .from("client_leads")
+          .select("deal_value")
+          .eq("client_id", clientId)
+          .eq("converted", true)
+          .gte("converted_at", monthStart.toISOString());
+        const monthRev = (monthDeals || []).reduce((s, d) => s + (Number(d.deal_value) || 0), 0);
+        const REV_MILESTONES = [5000, 10000, 25000, 50000, 100000];
+        for (const ms of REV_MILESTONES) {
+          if (monthRev >= ms && (monthRev - incomingDealValue) < ms) {
+            winEvents.push({
+              kind: "milestone",
+              headline: `$${ms.toLocaleString()} attributable revenue this month`,
+              detail: `Client just crossed $${ms.toLocaleString()} in tracked closed deals for the month.`,
+            });
+            break;
+          }
+        }
       }
     }
 
