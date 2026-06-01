@@ -143,6 +143,13 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
         if (error) throw new Error(error.message)
         result = data
       }
+      // Guard: maybeSingle() returns null without an error when RLS or a
+      // grant silently blocks the row from coming back. Without this
+      // check the parent treats null as a retire signal and switches
+      // offer — the save looks successful but nothing changed.
+      if (!result) {
+        throw new Error('Save returned no row. Check RLS / grants on offers.')
+      }
       onSaved(result)
     } catch (e) {
       setErr(e.message)
@@ -294,18 +301,25 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
 
           <div style={{ marginTop: 16, padding: 14, background: 'white', border: '1px solid var(--rule)',
                         borderRadius: 2 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-              <input type="checkbox" checked={form.has_dual_guarantee}
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+              <input type="checkbox" checked={form.has_dual_guarantee} style={{ marginTop: 3 }}
                 onChange={e => setForm({ ...form, has_dual_guarantee: e.target.checked })} />
               <span>
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.12em',
                               textTransform: 'uppercase', color: 'var(--ink)', fontWeight: 600 }}>
                   Dual guarantee
                 </span>
-                <span style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
-                              color: 'var(--ink-3)', marginLeft: 8 }}>
-                  Use the "top 3 ranking + crews booked, money back if neither" close.
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
+                              textTransform: 'uppercase', color: 'var(--ink-4)', marginLeft: 8 }}>
+                  Optional
                 </span>
+                <div style={{ marginTop: 4, fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
+                              color: 'var(--ink-3)', lineHeight: 1.45 }}>
+                  Enables the "top 3 ranking + crews booked, money back if neither" close on every script.
+                  Leave unchecked if you'd rather phrase the guarantee yourself inside the mechanism name
+                  (e.g. "The Direct Call Engine — money back if no calls in 90 days") — the scripts will
+                  pick that up.
+                </div>
               </span>
             </label>
           </div>

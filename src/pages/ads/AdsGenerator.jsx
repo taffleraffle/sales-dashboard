@@ -49,6 +49,15 @@ export default function AdsGenerator() {
   // Default = 10 Direct, 0 Hybrid, 0 Educational (matches prior behavior).
   // Total = sum of all three; if a mode is 0 it gets skipped entirely.
   const [modeQuotas, setModeQuotas] = useState({ direct: 10, hybrid: 0, educational: 0 })
+  // "Use mechanism" toggle (Ben 2026-06-01 PM — "some scripts are
+  // generating with the offer's mechanism name and some aren't. I want
+  // to be able to select whether we are using the mechanism or not.")
+  // Default ON to preserve existing behavior. When OFF, the edge fn
+  // strips mechanism_short / mechanism_long / brand mechanism name
+  // from the angle context so the script generates without the
+  // brand-name mechanism reveal — useful when running Educational
+  // mode or A/B-testing whether the brand-name lift is worth it.
+  const [useMechanism, setUseMechanism] = useState(true)
   const nConcepts = (modeQuotas.direct || 0) + (modeQuotas.hybrid || 0) + (modeQuotas.educational || 0)
   // Convenience: when only one mode is set, this is "the" mode (used in
   // history filtering, button labels, etc.). When 2+ modes are set,
@@ -644,6 +653,7 @@ export default function AdsGenerator() {
             ? selectedProofNames : undefined,
           n_concepts: c.n_concepts,
           script_mode: c.script_mode,
+          use_mechanism: useMechanism,
           save_as_drafts: true,
           extra_instructions: extras,
         })
@@ -1412,6 +1422,48 @@ export default function AdsGenerator() {
                 )}
               </div>
             )}
+          </Block>
+
+          {/* Use mechanism toggle (Ben 2026-06-01 PM — "some scripts are
+              generating the mechanism name and some aren't; I want to be
+              able to select whether we're using the mechanism or not").
+              Binary on/off. ON = include the offer's brand-named mechanism
+              in the prompt (default). OFF = strip it, scripts reveal
+              capabilities in plain language only. */}
+          <Block title="Mechanism reveal" dense
+            hint="Should the offer's brand-named mechanism appear in the script? Toggle off if you want plain-language scripts that describe what we do without the brand name.">
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[
+                { v: true,  label: 'Use mechanism',
+                  desc: "Scripts reference the offer's brand-named mechanism (e.g. \"The Direct Call Engine\"). Best when the prospect needs a memorable handle on the system." },
+                { v: false, label: 'No mechanism',
+                  desc: "Scripts describe what we do in plain language without naming a branded system. Useful for Educational mode and cold traffic where the brand-name reveal feels forced." },
+              ].map(opt => {
+                const on = useMechanism === opt.v
+                return (
+                  <button key={String(opt.v)} onClick={() => setUseMechanism(opt.v)}
+                    title={opt.desc}
+                    style={{
+                      flex: '1 1 280px', maxWidth: 420, textAlign: 'left',
+                      padding: '12px 14px',
+                      border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                      background: on ? 'var(--paper)' : 'white',
+                      color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
+                      display: 'flex', flexDirection: 'column', gap: 4,
+                    }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                                  letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                      {on && <Check size={11} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />}
+                      {opt.label}
+                    </span>
+                    <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
+                                   fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.45 }}>
+                      {opt.desc}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
           </Block>
 
           {/* Count + Generate row — no Section eyebrow, just an inline cluster. */}
@@ -2356,6 +2408,20 @@ function HistoryRunRow({ bucket, rows, angleLookup, currentOfferSlug }) {
 function HistoryDraftRow({ row, angle, angleName }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  // P1 fix from code review: Escape closes the modal + body scroll locks
+  // while the modal's open so the page beneath doesn't scroll behind the
+  // fixed overlay. Single effect, both behaviors, cleans up on unmount.
+  useEffect(() => {
+    if (!modalOpen) return
+    const onKey = (e) => { if (e.key === 'Escape') setModalOpen(false) }
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [modalOpen])
   const mode = row.target_attributes?.script_mode
   const modeMeta = scriptModeMeta(mode)
   const shape = row.target_attributes?.shape_code

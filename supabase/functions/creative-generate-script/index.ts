@@ -216,7 +216,7 @@ async function loadBodySkeletons(supabase: any, length_bucket?: string) {
 // take precedence over the angle's legacy mechanism fields. This lets the
 // same angle (problem/desire door) be paired with different mechanisms
 // across campaigns without editing the angle row.
-function buildAngleContext(angle: any, proofs: any[], mechanism: any = null): string {
+function buildAngleContext(angle: any, proofs: any[], mechanism: any = null, useMechanism: boolean = true): string {
   // Proof roster: group by proof_type so the rotation directive can ask
   // Claude to vary across kinds (Schwartz's hierarchy of proof — case
   // study, testimonial, statistic, authority, demonstration, social_volume,
@@ -246,13 +246,21 @@ function buildAngleContext(angle: any, proofs: any[], mechanism: any = null): st
     ? `\nPAIN POINTS (use these as the lived-reality of the prospect — Shape C "Pain anchor" hooks especially must lean on specific items from this list, NOT generic competitor language. Other shapes can reference one or two of these as supporting context):\n${pains.map((p: string) => `  - ${p}`).join('\n')}`
     : ''
   // Mechanism precedence: explicit mechanism > angle's legacy fields.
-  const mech_short = mechanism?.mechanism_short || angle.mechanism_short
-  const mech_long  = mechanism?.mechanism_long  || angle.mechanism_long
-  const mechBlock = mechanism
+  // When the operator toggled "No mechanism" off (useMechanism=false),
+  // all mech_* / mechBlock / howBlock collapse to empty so the prompt
+  // never names a branded mechanism. The angle's primary_promise +
+  // guarantee_close still carry through — the script just delivers the
+  // capability in plain language without the brand name.
+  const mech_short = useMechanism ? (mechanism?.mechanism_short || angle.mechanism_short) : ''
+  const mech_long  = useMechanism ? (mechanism?.mechanism_long  || angle.mechanism_long)  : ''
+  const mechBlock = (useMechanism && mechanism)
     ? `\nMECHANISM PICKED: ${mechanism.name}${mechanism.summary ? ' — ' + mechanism.summary : ''}`
     : ''
-  const howBlock = (mechanism?.beat_5a || mechanism?.beat_5b || mechanism?.beat_5c)
+  const howBlock = (useMechanism && (mechanism?.beat_5a || mechanism?.beat_5b || mechanism?.beat_5c))
     ? `\n3-PART HOW (use these as Beat 5a / 5b / 5c in the body skeleton — one sentence each, in order):\n  5a: ${mechanism.beat_5a || '(unset)'}\n  5b: ${mechanism.beat_5b || '(unset)'}\n  5c: ${mechanism.beat_5c || '(unset)'}`
+    : ''
+  const noMechanismDirective = !useMechanism
+    ? `\nMECHANISM OFF (operator toggle 2026-06-01 PM): Do NOT name a branded mechanism or system in any concept. Describe what we do in PLAIN LANGUAGE only ("we rebuild your Google profile and tune your service pages", NOT "we run the Direct Call Engine"). The capability is the same — the brand-naming layer is suppressed. This applies to hook, body, and joined scripts equally.`
     : ''
   // Schwartz awareness-stage diversity directive — applies to every angle
   // context regardless of proof state. Asks the generator to consider where
@@ -267,10 +275,11 @@ SCHWARTZ DIVERSITY (apply across the batch, NOT to every individual script):
     `ANGLE: ${angle.name}`,
     `QUALIFIER (the audience-filter opening line shape): ${angle.qualifier}`,
     `PRIMARY PROMISE (every script must deliver on exactly this): ${angle.primary_promise}`,
-    `MECHANISM (short, for hook use): ${mech_short}`,
+    mech_short ? `MECHANISM (short, for hook use): ${mech_short}` : '',
     mech_long ? `MECHANISM (long, for body reveal beat 4): ${mech_long}` : '',
     mechBlock,
     howBlock,
+    noMechanismDirective,
     `GUARANTEE CLOSE: ${angle.guarantee_close}`,
     angle.cta_teeup ? `CTA TEE-UP (body beat 1 opener template): ${angle.cta_teeup}` : '',
     angle.anchor_vocab?.length ? `ANCHOR VOCAB (rotate so anchors don't become a structural tic): ${angle.anchor_vocab.join(' · ')}` : '',
@@ -798,6 +807,10 @@ serve(async (req) => {
     body?.script_mode === 'educational' ? 'educational'
     : body?.script_mode === 'hybrid' ? 'hybrid'
     : 'direct'
+  // Mechanism toggle (Ben 2026-06-01 PM). Default TRUE so legacy callers
+  // (omitting the field) keep the existing branded-mechanism behavior.
+  // Only an explicit false strips the mechanism from the prompt context.
+  const use_mechanism: boolean = body?.use_mechanism === false ? false : true
   const extraBlock = extra_instructions
     ? `\n\nOPERATOR INSTRUCTIONS FOR THIS RUN (these take precedence over generic defaults; honor them literally):\n${extra_instructions}\n`
     : ''
@@ -1455,7 +1468,7 @@ serve(async (req) => {
     const shapeRotation = (script_type === 'hook' || script_type === 'joined')
       ? planShapeRotation(effectiveShapes, n_concepts) : []
 
-    const angleCtx = buildAngleContext(angle, proofs, mechanism)
+    const angleCtx = buildAngleContext(angle, proofs, mechanism, use_mechanism)
     const shapesBlock = (script_type === 'hook' || script_type === 'joined')
       ? `\n\nHOOK SHAPES AVAILABLE:\n${buildHookShapesBlock(effectiveShapes)}` : ''
     const skeletonsBlock = (script_type === 'body' || script_type === 'joined')
@@ -1670,9 +1683,10 @@ ANTI-TEMPLATE CHECK: if your body could be swapped to roofing or plumbing with 3
           length_bucket: target_length || null,
           script_mode,                          // Ben 2026-06-01 — surface in UI
           teach_focus: s.teach_focus || null,   // populated when n_concepts > 1
+          use_mechanism,                        // Ben 2026-06-01 PM — surface in UI
         },
         generated_by_model: ANTHROPIC_MODEL,
-        generation_params: { angle_slug, mechanism_slug, script_type, target_shapes, n_concepts, script_mode },
+        generation_params: { angle_slug, mechanism_slug, script_type, target_shapes, n_concepts, script_mode, use_mechanism },
       }))
       const { data, error } = await supabase.from('generated_scripts').insert(inserts).select('id')
       if (error) save_error_t = error.message
