@@ -443,9 +443,16 @@ function classifyRankAwareness(vertical: string | null | undefined): 'HIGH' | 'M
 function requiredRankExplicit(n_outcomes: number, tier: ReturnType<typeof classifyRankAwareness>): number {
   if (tier === 'SKIP') return 0
   if (tier === 'LOW') return 0
-  if (tier === 'MODERATE') return Math.min(n_outcomes, Math.max(1, Math.floor(n_outcomes * 0.2)))
-  // HIGH
-  return Math.min(n_outcomes, Math.max(2, Math.ceil(n_outcomes * 0.4)))
+  // MODERATE bumped 0.2 -> 0.3 (Ben 2026-06-01 — rank framing converts even for
+  // reputation-driven verticals once you anchor on local-pack visibility).
+  if (tier === 'MODERATE') return Math.min(n_outcomes, Math.max(1, Math.ceil(n_outcomes * 0.3)))
+  // HIGH bumped 0.4 -> 0.6 (Ben 2026-06-01 — "I want some that are a bit more
+  // like maps, really like being the number one company in your area, because
+  // that is ranking and working really well for us"). For HIGH-tier verticals
+  // (restoration, roofing, plumbing, HVAC, electrical, pest, locksmith,
+  // garage, painting, concrete, foundation), the BOFU rank-explicit
+  // outcomes carry the conversion load. 60% floor.
+  return Math.min(n_outcomes, Math.max(3, Math.ceil(n_outcomes * 0.6)))
 }
 
 // Build a tool schema for a SINGLE-BUCKET angle generation call
@@ -754,6 +761,12 @@ serve(async (req) => {
   const extra_instructions: string = typeof body?.extra_instructions === 'string'
     ? body.extra_instructions.trim().slice(0, 4000)
     : ''
+  // Script mode (Ben 2026-06-01) — 'direct' | 'hybrid' | 'educational'.
+  // Falls through to 'direct' (the legacy behavior) when caller omits.
+  const script_mode: 'direct' | 'hybrid' | 'educational' =
+    body?.script_mode === 'educational' ? 'educational'
+    : body?.script_mode === 'hybrid' ? 'hybrid'
+    : 'direct'
   const extraBlock = extra_instructions
     ? `\n\nOPERATOR INSTRUCTIONS FOR THIS RUN (these take precedence over generic defaults; honor them literally):\n${extra_instructions}\n`
     : ''
@@ -947,7 +960,15 @@ serve(async (req) => {
 
     async function runOneBucketCall(bucket: 'problem'|'circumstance'|'outcome', count: number, chunkIdx: number, chunksOfThisBucket: number): Promise<any[]> {
       const userMsg = buildBucketUserMsg(bucket, count, chunkIdx, chunksOfThisBucket)
-      const rankMinForThisCall = bucket === 'outcome' && chunkIdx === 0 ? Math.min(count, rankMin) : 0
+      // Distribute rank-explicit quota across all outcome chunks instead
+      // of dumping it on chunk 0 (Ben 2026-06-01). Previously chunk 0 had
+      // to be ALL rank-explicit and chunk 1+ was entirely free — meaning
+      // half the batch lost the rank requirement. Now each chunk gets a
+      // proportional share so the rank framing threads through the whole
+      // batch.
+      const rankMinForThisCall = bucket === 'outcome'
+        ? Math.min(count, Math.ceil((rankMin * count) / Math.max(n_outcomes, 1)))
+        : 0
       // Conservative payload (Ben 2026-06-01): keep Sonnet + string
       // system prompt (proven working v20). Haiku 4.5 + cache_control
       // was attempted but broke the background fetch silently — direct
@@ -1372,12 +1393,28 @@ serve(async (req) => {
       return json({ error: 'no body_skeletons match the requested length bucket' }, 400)
     }
 
+    // Mode-aware shape filtering (Ben 2026-06-01). Educational mode REQUIRES
+    // curiosity/reframe/trend openers (E/F/H) — never direct offer (A) or pain
+    // anchor (C). Hybrid excludes A so it leans question-first. Direct uses
+    // all shapes. This prevents single-concept hook generation from defaulting
+    // to Shape A and then contradicting the mode directive.
+    const MODE_SHAPE_ALLOWLIST: Record<string, string[]> = {
+      educational: ['E', 'F', 'H'],
+      hybrid:      ['B', 'D', 'E', 'F', 'G', 'H'],
+      direct:      [],   // empty = use all
+    }
+    const modeAllowed = MODE_SHAPE_ALLOWLIST[script_mode] || []
+    const shapesForMode = modeAllowed.length
+      ? shapes.filter((s: any) => modeAllowed.includes(s.code))
+      : shapes
+    const effectiveShapes = shapesForMode.length ? shapesForMode : shapes  // safety fallback
+
     const shapeRotation = (script_type === 'hook' || script_type === 'joined')
-      ? planShapeRotation(shapes, n_concepts) : []
+      ? planShapeRotation(effectiveShapes, n_concepts) : []
 
     const angleCtx = buildAngleContext(angle, proofs, mechanism)
     const shapesBlock = (script_type === 'hook' || script_type === 'joined')
-      ? `\n\nHOOK SHAPES AVAILABLE:\n${buildHookShapesBlock(shapes)}` : ''
+      ? `\n\nHOOK SHAPES AVAILABLE:\n${buildHookShapesBlock(effectiveShapes)}` : ''
     const skeletonsBlock = (script_type === 'body' || script_type === 'joined')
       ? `\n\nBODY SKELETON:\n${buildBodySkeletonsBlock(skeletons)}` : ''
     const rotationBlock = shapeRotation.length
@@ -1414,6 +1451,43 @@ CTA RULES (CRITICAL — apply to body + joined; hooks have their own ending):
           ? `Each body follows the 9-entry skeleton above (7 logical beats; beat 5 is split 5a/5b/5c). CRITICAL — Beat 1 is the STATE-OF-PLAY / SCENE OPENER, not a CTA. The CTA appears ONLY in Beat 7 (Final CTA). NEVER open the body with "So if that sounds [adjective], click the link" — that line belongs at the END, not the start. Beat 1 grounds the reader in a concrete moment or underlying truth of the angle. Beat 2 (pattern statement) zooms out to the systemic claim. Beats 3 (proof roster — NAME the proof characters), 4 (mechanism reveal), 5a/5b/5c (3-part HOW), 6 (guarantee), and 7 (final CTA — THIS is where "click the link below" lives) follow the skeleton tightly. Length: 250-380 words. Do NOT include a hook — bodies are standalone too.`
           : `Each joined script is HOOK + BODY chained. Write the hook FIRST using the rotation's assigned shape (60-75 words), then write a body that explicitly continues from THAT hook's proof character + opening posture (don't switch proof characters between hook and body). Body follows the skeleton above — Beat 1 is the state-of-play opener, NOT a CTA. CTA appears ONLY in Beat 7. Return them as separate strings (hook_text + body_text) and also as the combined body field. Length: 350-470 words total.`
 
+    // Script mode directive (Ben 2026-06-01, sharpened after he flagged
+    // hybrid as "just teaching stuff in general"). The three modes are
+    // distinct postures, not gradients. Per-script-type so hook generation
+    // doesn't get body-style "Beat N" language that triggers it to write
+    // a 300-word body instead of a 70-word hook.
+    //
+    // NOTE: `offer` is NOT in scope in the template branch (only angle,
+    // proofs, mechanism, shapes, skeletons). DO NOT reach for offer.* here.
+    const scriptModeBlock = (() => {
+      if (script_mode === 'direct') {
+        return script_type === 'hook'
+          ? `\n\nSCRIPT MODE: DIRECT — hook leads with offer shape (qualifier + promise + mechanism + guarantee). NO teaching beats. Keep to 60-75 words.`
+          : `\n\nSCRIPT MODE: DIRECT (default).\nBody opens with state-of-play (Beat 1) and drives straight to claim → proof → mechanism → 3-part HOW → guarantee → CTA. Beat 2 (pattern statement) makes a CLAIM, it does NOT explain WHY. No teaching beats up-front. Fastest path to CTA, converts on warm traffic.`
+      }
+      if (script_mode === 'hybrid') {
+        return script_type === 'hook'
+          ? `\n\nSCRIPT MODE: HYBRID — hook is a curiosity/reframe (Shape B/D/E/F/G/H — NOT Shape A) that surfaces ONE specific market-truth question, then ends with a soft promise. Example: "Quick question for restoration owners doing $50k+/mo: did you know Google weighs your LSA response time 3.2x more than your bid amount? If you want to use that to outrank ServPro in your zip, here's what we'll do for you..." Keep to 60-75 words. ONE teach-beat + soft promise + guarantee. NO full body, NO proof roster, NO 3-part HOW — those belong in the body.`
+          : `\n\nSCRIPT MODE: HYBRID.\nBody is a DIRECT body with ONE teaching beat woven into Beat 2 (pattern statement). The teach is ONE specific market-truth — an algorithm signal, an industry move, a hidden constraint — delivered as 1-2 sentences that justify why your mechanism works. After Beat 2, return to the standard direct flow: proof → mechanism → 3-part HOW → guarantee → CTA. If the body reads identical to Educational mode (teach-throughout) or to Direct mode (no teach at all), it's wrong. The teach must be RECOGNIZABLE as a discrete "here's why" insert.`
+      }
+      // educational
+      return script_type === 'hook'
+        ? `\n\nSCRIPT MODE: EDUCATIONAL — hook MUST be a curiosity question (Shape E), reframe (Shape F), or trend statement (Shape H). NEVER Shape A (direct offer). The hook surfaces a SPECIFIC market truth the prospect doesn't know — name the actual algorithm signal, industry move, or technical mechanism. Examples:
+- "How is it possible that the restoration companies winning every Google Guaranteed call in their market aren't even bidding the highest? Here's what Google's LSA algorithm actually weighs..."
+- "The reason most restoration owners think 'I just need to rank #1' is wrong — here's what the data actually says about where the calls come from..."
+- "Why does ChatGPT name the same 3 restoration companies when homeowners ask 'best water damage in [city]'?"
+Keep to 60-75 words. The hook is a CURIOSITY OPEN — it sets up a lesson, it does NOT make the offer. NO "here's what we'll do for you" cadence. The body delivers the lesson; the hook just opens the door.`
+        : `\n\nSCRIPT MODE: EDUCATIONAL — the WHOLE body teaches, not just the opener. The prospect should finish watching and feel they LEARNED SOMETHING SPECIFIC about how their market works, and only at the end notice there's an offer. Rules per beat:
+- Beat 1 (state-of-play): paint the CONCRETE moment the lesson applies (a search that just happened, an algorithm change, a measurable shift).
+- Beat 2 (pattern statement): the underlying market truth — name the specific signal/mechanism ("Google weighs response time 3.2x more than bid amount", "Insurance carriers are rolling out their own vendor apps").
+- Beat 3 (proof roster): proof characters become CASE STUDIES OF THE LESSON — "Marcus didn't outbid ServPro; he hit the 3 signals." Each proof teaches a different facet.
+- Beat 4 (mechanism reveal): name the mechanism as the SYSTEMATIC APPLICATION of the lesson ("the Maps Pin-1 Foundation Rebuild — the engineering process for hitting every signal Google weighs").
+- Beats 5a/b/c (3-part HOW): explicit teaching of three sub-mechanisms. Each is a teachable concept, not a feature.
+- Beat 6 (guarantee): tie guarantee to the teach — "because this is engineering not luck, we can guarantee X".
+- Beat 7 (CTA — SOFT): NOT "click to book a call". Frame learning continuation: "If you want the full breakdown of which ranking factors Google weighs most for your market, click below and we'll walk you through your numbers." Book-a-call is SECONDARY.
+BANNED in Educational: "qualifier + here's what we'll do for you" openers. Hard sells. The word "guarantee" before Beat 6. Build authority through SPECIFICITY — real signal names ("review velocity", "service radius weighting", "response time benchmark", "AI citation graph", "topical authority"), not "the market is changing." For COLD/TOFU traffic; you earn the right to offer by showing you know the technical game.`
+    })()
+
     const userMsg = [
       angleCtx,
       shapesBlock,
@@ -1423,11 +1497,14 @@ CTA RULES (CRITICAL — apply to body + joined; hooks have their own ending):
       `\n${typeSpecificInstructions}`,
       sharedVarianceBlock,
       sharedNumberRules,
+      scriptModeBlock,
       `\nReturn via the ${TEMPLATE_TOOL_NAMES[script_type]} tool.`,
       extraBlock,
     ].join('')
 
-    const shapeCodes = shapes.map(s => s.code)
+    // Tool schema enum must match the mode-filtered shape set or the
+    // model can pick a shape outside the rotation plan.
+    const shapeCodes = effectiveShapes.map((s: any) => s.code)
     const tool = buildTemplateToolSchema(script_type, n_concepts, shapeCodes.length ? shapeCodes : ['_'], hasProofs ? proofNames : [])
 
     const upstreamT = await fetch('https://api.anthropic.com/v1/messages', {

@@ -39,6 +39,15 @@ export default function AdsGenerator() {
   const [vocab, setVocab] = useState(null)
   const [offerSlug, setOfferSlug] = useState('')
   const [nConcepts, setNConcepts] = useState(10)
+  // Script mode (Ben 2026-06-01) — how the script frames its argument.
+  //   direct      = "here's what we do, here's the proof, click to book"
+  //                 the classic OPT shape, fastest path to CTA.
+  //   educational = open by teaching one specific mechanism / market truth
+  //                 the prospect doesn't know, THEN offer. Longer build,
+  //                 higher trust, better for cold/Top-of-Funnel.
+  //   hybrid      = teach for the first 30% (hook + opening beats), then
+  //                 pivot into direct offer. The default A/B candidate.
+  const [scriptMode, setScriptMode] = useState('direct')
   const [mode, setMode] = useState('diverse')
   const [targets, setTargets] = useState({})
   const [saveAsDrafts, setSaveAsDrafts] = useState(true)
@@ -222,10 +231,14 @@ export default function AdsGenerator() {
   // Refresh mechanism + proof lists whenever the single-selected angle changes.
   // Multi-angle mode hides those pickers — each angle uses its own defaults
   // server-side — so we only load them when exactly one is selected.
+  // Filter by offer_slug too (Ben 2026-06-01) — otherwise an accounting-scoped
+  // mechanism like "Banker + Attorney Referral Chain" leaks into the
+  // restoration picker, which is irrelevant noise.
   useEffect(() => {
     if (!primaryAngleSlug) return
-    listMechanisms({ angle_slug: primaryAngleSlug }).then(setMechanisms).catch(() => {})
-  }, [primaryAngleSlug])
+    listMechanisms({ offer_slug: offerSlug, angle_slug: primaryAngleSlug })
+      .then(setMechanisms).catch(() => {})
+  }, [primaryAngleSlug, offerSlug])
 
   useEffect(() => {
     if (!primaryAngleSlug) { setProofCharacters([]); setSelectedProofNames([]); return }
@@ -297,7 +310,7 @@ export default function AdsGenerator() {
     // mechanism compat; in multi-select mode skip the refresh (mechanism
     // picker isn't visible anyway).
     if (primaryAngleSlug) {
-      const fresh = await listMechanisms({ angle_slug: primaryAngleSlug }).catch(() => [])
+      const fresh = await listMechanisms({ offer_slug: offerSlug, angle_slug: primaryAngleSlug }).catch(() => [])
       setMechanisms(fresh)
     }
     if (saved?.slug) setMechanismSlug(saved.slug)
@@ -611,6 +624,7 @@ export default function AdsGenerator() {
           target_proof_characters: angleSlugs.length === 1 && selectedProofNames.length
             ? selectedProofNames : undefined,
           n_concepts: nConcepts,
+          script_mode: scriptMode,
           save_as_drafts: true,
           extra_instructions: extras,
         })
@@ -1337,6 +1351,39 @@ export default function AdsGenerator() {
                           border: '1px solid var(--rule)', background: 'white',
                           borderRadius: 2,
                         }} />
+                    </div>
+                  </div>
+                  {/* Script-mode toggle (Ben 2026-06-01) — Direct vs Hybrid vs
+                      Educational. Direct = current default (offer-led, fastest
+                      to CTA). Educational = open by teaching one specific
+                      market truth before offering, better for cold traffic.
+                      Hybrid = teach for the opening, then pivot direct. */}
+                  <div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10,
+                                  letterSpacing: '0.14em', textTransform: 'uppercase',
+                                  color: 'var(--ink-4)', marginBottom: 6 }}>
+                      Mode
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {[
+                        { v: 'direct',      label: 'Direct',      desc: "Offer-led. Open with qualifier + promise + guarantee. Fastest to CTA. OPT's classic shape — converts on warm traffic." },
+                        { v: 'hybrid',      label: 'Hybrid',      desc: 'Teach one specific market truth in the hook (e.g. "Google ranks LSAs on response time, not bid"), THEN pivot to the offer. Best A/B candidate against Direct.' },
+                        { v: 'educational', label: 'Educational', desc: 'Open by teaching the prospect something they did NOT know (algorithm signal, industry move, hidden constraint). Build trust through specificity, soft-offer at the end. Best for cold/TOFU.' },
+                      ].map(opt => {
+                        const on = scriptMode === opt.v
+                        return (
+                          <button key={opt.v} onClick={() => setScriptMode(opt.v)}
+                            title={opt.desc}
+                            style={{
+                              padding: '8px 14px',
+                              border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+                              background: on ? 'var(--accent)' : 'white',
+                              color: 'var(--ink)',
+                              fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
+                              cursor: 'pointer', borderRadius: 2,
+                            }}>{opt.label}</button>
+                        )
+                      })}
                     </div>
                   </div>
                   <button onClick={handleGenerate} disabled={disabled}

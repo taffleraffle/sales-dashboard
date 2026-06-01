@@ -44,6 +44,7 @@ export async function generateScripts({
   target_attributes = {},
   save_as_drafts = false,
   extra_instructions,    // optional free-text appended to the Claude prompt
+  script_mode,           // 'direct' | 'hybrid' | 'educational' (Ben 2026-06-01)
 } = {}) {
   if (!offer_slug && !(script_type && angle_slug)) {
     throw new Error('generateScripts: pass either offer_slug, or script_type + angle_slug')
@@ -62,6 +63,9 @@ export async function generateScripts({
   }
   if (extra_instructions && extra_instructions.trim()) {
     body.extra_instructions = extra_instructions.trim()
+  }
+  if (script_mode && ['direct', 'hybrid', 'educational'].includes(script_mode)) {
+    body.script_mode = script_mode
   }
   const { data, error } = await supabase.functions.invoke('creative-generate-script', { body })
   if (error) throw new Error(error.message || 'creative-generate-script failed')
