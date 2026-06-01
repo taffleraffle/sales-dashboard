@@ -2001,7 +2001,19 @@ const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
 // useCallback-stable; markers is useMemo-stable. Together they let the
 // player stay completely idle during normal playback.
 const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
-  { src, markers = [], onSeek, onState, hoveredMarkerId, onMarkerHoverChange },
+  { src, markers = [], onSeek, onState, hoveredMarkerId, onMarkerHoverChange,
+    // `compact` switches the player into inline-card mode: no min-height
+    // floor, no autoplay (so expanding multiple version cards doesn't
+    // dogpile audio), smaller play overlay + tighter controls. Used by
+    // SubmissionsPanel so the inline player has the exact same OPT
+    // chrome as the Review modal (Ben 2026-06-01: "needs to be pretty
+    // congruent across the board").
+    compact = false,
+    // Outer wrapper styles — lets the caller cap maxHeight in compact
+    // mode so the player doesn't push the surrounding card off-screen.
+    wrapperStyle,
+    autoPlay,
+  },
   parentRef,
 ) {
   const videoRef = useRef(null)
@@ -2027,6 +2039,10 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
   const bufferedRef = useRef(0)
   const [playing, setPlaying] = useState(false)
   const [muted, setMuted] = useState(false)
+  // Volume 0..1. Stored separately from `muted` so the user can mute
+  // (drop audio to 0) and then unmute back to the same level without
+  // the slider snapping to 100%. Mirrors the YouTube/Vimeo pattern.
+  const [volume, setVolume] = useState(1)
   const [duration, setDuration] = useState(0)
   const [hoverPct, setHoverPct] = useState(null)  // 0..1
   const [playbackRate, setPlaybackRate] = useState(1)
@@ -2118,10 +2134,14 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
     }
   }, [src])
 
-  // Keyboard shortcuts. Only fire when the player is focused or the
-  // event happened outside an input — typing in the comment composer
-  // shouldn't accidentally pause the video.
+  // Keyboard shortcuts. Modal-only — when multiple compact inline
+  // players are mounted in a SubmissionsPanel (one per expanded
+  // version card), a single window-level keydown would dispatch to
+  // all of them, e.g. spacebar would play/pause every video at once.
+  // The modal is the only context where there's a single, focused
+  // player that owns the keyboard.
   useEffect(() => {
+    if (compact) return
     const onKey = (e) => {
       const t = e.target
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
@@ -2148,7 +2168,7 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [compact])
 
   // Fullscreen state sync — the browser can leave fullscreen on Esc
   // without us telling it to, so we need to listen for the change event.
@@ -2222,6 +2242,7 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
         background: '#000', color: 'white',
         display: 'flex', flexDirection: 'column',
         userSelect: 'none',
+        ...wrapperStyle,
       }}>
       {/* Video element with native controls killed. Click toggles
           play/pause; double-click toggles fullscreen. The video FILLS
@@ -2233,15 +2254,18 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
           consistent regardless of source aspect ratio (Ben 2026-06-01:
           "make sure that if I'm doing it in a short form, like 9:16,
           it is still going to keep the current size that it has and
-          the bars will just be black"). */}
+          the bars will just be black"). In compact mode (inline card)
+          we drop the 400px floor so the player can be ~240px tall
+          inside an EditTaskModal submission card. */}
       <div style={{
-        flex: '1 1 auto', minHeight: 400, position: 'relative',
+        flex: '1 1 auto', minHeight: compact ? 0 : 400, position: 'relative',
         background: '#000', display: 'flex',
         justifyContent: 'center', alignItems: 'center',
         overflow: 'hidden',
       }}>
         {src ? (
-          <video ref={videoRef} src={src} preload="metadata" autoPlay
+          <video ref={videoRef} src={src} preload="metadata"
+            autoPlay={autoPlay !== undefined ? autoPlay : !compact}
             onClick={togglePlay}
             onDoubleClick={toggleFullscreen}
             onPlay={() => setPlaying(true)}
@@ -2249,10 +2273,18 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
             onLoadedMetadata={() => {
               const v = videoRef.current
               if (v && isFinite(v.duration)) setDuration(v.duration)
-              if (v) setMuted(v.muted)
+              if (v) {
+                setMuted(v.muted)
+                setVolume(v.volume)
+              }
             }}
             onTimeUpdate={onVideoTimeUpdate}
-            onVolumeChange={() => setMuted(videoRef.current?.muted ?? false)}
+            onVolumeChange={() => {
+              const v = videoRef.current
+              if (!v) return
+              setMuted(v.muted)
+              setVolume(v.volume)
+            }}
             onRateChange={() => setPlaybackRate(videoRef.current?.playbackRate ?? 1)}
             style={{
               width: '100%', height: '100%',
@@ -2272,10 +2304,10 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
           <button onClick={togglePlay} aria-label="Play"
             style={{
               position: 'absolute', inset: 0, margin: 'auto',
-              width: 76, height: 76, borderRadius: '50%',
+              width: compact ? 52 : 76, height: compact ? 52 : 76, borderRadius: '50%',
               background: 'rgba(244,225,74,0.92)',
               border: 'none', cursor: 'pointer',
-              color: '#0a0a0a', fontSize: 28,
+              color: '#0a0a0a', fontSize: compact ? 20 : 28,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
             }}>▶</button>
@@ -2422,16 +2454,47 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
               color: 'white', fontSize: 16, padding: '0 2px',
               minWidth: 18,
             }}>{playing ? '⏸' : '▶'}</button>
-          <button onClick={() => {
-              const v = videoRef.current
-              if (v) { v.muted = !v.muted; setMuted(v.muted) }
-            }}
-            aria-label={muted ? 'Unmute' : 'Mute'}
-            style={{
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              color: 'white', fontSize: 14, padding: '0 2px',
-              minWidth: 18,
-            }}>{muted ? '🔇' : '🔊'}</button>
+          {/* Mute + volume slider — clicking the speaker toggles mute
+              while preserving the slider's last value (YouTube-style).
+              Dragging the slider sets volume, auto-unmutes when the
+              user nudges it above 0, auto-mutes at exactly 0. Speaker
+              icon reflects level so the visual matches the audio. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button onClick={() => {
+                const v = videoRef.current
+                if (v) { v.muted = !v.muted; setMuted(v.muted) }
+              }}
+              aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}
+              title={muted ? 'Unmute (M)' : 'Mute (M)'}
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: 'white', fontSize: 14, padding: '0 2px',
+                minWidth: 18,
+              }}>{muted || volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊'}</button>
+            <input
+              type="range" min="0" max="1" step="0.01"
+              value={muted ? 0 : volume}
+              onChange={(e) => {
+                const v = videoRef.current
+                if (!v) return
+                const newVol = parseFloat(e.target.value)
+                v.volume = newVol
+                v.muted = newVol === 0
+                // onVolumeChange handler syncs state, but set explicitly
+                // here too so the slider stays in sync even if the
+                // browser doesn't fire the event (some Safari versions).
+                setVolume(newVol)
+                setMuted(newVol === 0)
+              }}
+              aria-label="Volume"
+              style={{
+                width: compact ? 56 : 72,
+                accentColor: '#f4e14a',
+                cursor: 'pointer',
+                verticalAlign: 'middle',
+              }}
+            />
+          </div>
           {/* Read currentTime from ref so re-renders (play/pause/hover)
               don't clobber the live textContent written by
               onVideoTimeUpdate. Ref read at render time → React writes
@@ -3312,44 +3375,10 @@ function normaliseTranscript(text) {
   return out
 }
 
-const PreviewVideo = forwardRef(function PreviewVideo({ src, poster, style, onDuration }, parentRef) {
-  const ref = useRef(null)
-  // Expose seekTo so the SubmissionsPanel marker strip can jump the
-  // inline player to a comment's timestamp without forcing the operator
-  // to bounce into the Review modal first.
-  useImperativeHandle(parentRef, () => ({
-    seekTo: (seconds) => {
-      const v = ref.current
-      if (!v) return
-      try { v.currentTime = Math.max(0, Math.min(seconds, v.duration || seconds)) } catch {}
-      try { v.play() } catch {}
-    },
-  }), [])
-  useEffect(() => {
-    const v = ref.current
-    return () => {
-      if (v) {
-        try { v.pause() } catch {}
-        v.removeAttribute('src')
-        try { v.load() } catch {}
-      }
-    }
-  }, [src])
-  return (
-    <video
-      ref={ref}
-      src={src}
-      controls
-      preload="metadata"
-      poster={poster || undefined}
-      onLoadedMetadata={() => {
-        const v = ref.current
-        if (v && isFinite(v.duration) && onDuration) onDuration(v.duration)
-      }}
-      style={style || { width: '100%', height: '100%', display: 'block' }}
-    />
-  )
-})
+// PreviewVideo removed 2026-06-01 — every video surface now uses
+// OptVideoPlayer (compact mode) so chrome stays consistent across
+// Library detail, EditTaskModal source preview, SubmissionsPanel
+// version cards, and the SubmissionPreviewModal review surface.
 
 // Soft full-row background tint for library / queue rows so Ben can
 // scan status at a glance:
@@ -8132,12 +8161,14 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
           </div>
         )}
 
-        {/* Video preview — explicit pause + src clear on unmount so the
-            browser doesn't stall when the modal closes mid-stream (Ben
-            flagged "click out of pop-up is super slow"). */}
+        {/* Video preview — uses the compact OPT player so the chrome
+            matches the Review modal + the inline SubmissionsPanel
+            player (Ben 2026-06-01: "needs to be pretty congruent
+            across the board"). */}
         {playbackKind === 'video' && (
           <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
-            <PreviewVideo src={row.preview_url} poster={row.thumbnail_url} />
+            <OptVideoPlayer src={row.preview_url} compact
+              wrapperStyle={{ height: '100%' }} />
           </div>
         )}
         {playbackKind === 'iframe' && (
@@ -11419,19 +11450,22 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       if (!c.parent_id && !c.resolved_at) bucket.open += 1
       // Markers = top-level timestamped comments only. Replies stay
       // attached to their parent thread in the Review modal; surfacing
-      // them here would visually clutter the inline strip without
-      // helping the user navigate.
+      // them on the player would visually clutter without helping
+      // navigation. Shape matches OptVideoPlayer's `markers` prop
+      // contract so the same data drives both the Review modal and the
+      // inline compact player (single source of truth — no transforms
+      // at render time).
       if (!c.parent_id && c.timestamp_seconds != null) {
         bucket.markers.push({
           id: c.id,
           ts: c.timestamp_seconds,
-          body: c.body,
-          author_name: c.author_name,
-          resolved: !!c.resolved_at,
+          color: c.resolved_at ? 'rgba(255,255,255,0.4)' : '#3e7eba',
+          title: c.body,
+          authorName: c.author_name,
         })
       }
     }
-    // Sort each bucket's markers by timestamp so the strip reads
+    // Sort each bucket's markers by timestamp so the scrubber reads
     // left-to-right in playback order.
     for (const id of ids) map[id].markers.sort((a, b) => a.ts - b.ts)
     setCommentsBySubId(map)
@@ -11776,8 +11810,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             old rows), then preview_url (only full-quality for new rows). */}
         {task.preview_url ? (
           <div style={{ background: '#000', border: '1px solid var(--rule)' }}>
-            <PreviewVideo src={task.preview_url} poster={task.thumbnail_url}
-              style={{ display: 'block', width: '100%', maxHeight: 360, objectFit: 'contain', background: '#000' }} />
+            <OptVideoPlayer src={task.preview_url} compact
+              wrapperStyle={{ height: 360 }} />
             <div style={{
               padding: '8px 12px', background: 'var(--paper-2)',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
@@ -12171,21 +12205,6 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
    the old single-slot SubmittedWorkPanel. */
 function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDelete, canFeedback = true, busy, onApprove, onDelete, onOpenReview, onFeedbackSaved, onRequestRevision, currentUserName, currentUserRole = 'admin', taskEditorId, taskName }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
-  // Per-submission video duration so the inline marker strip can
-  // position each comment dot at (ts / duration) * 100%. Populated by
-  // PreviewVideo's onDuration callback. Missing key = duration still
-  // loading, in which case the strip degrades to a flat row of pills.
-  const [videoDurations, setVideoDurations] = useState({})
-  // Refs to each PreviewVideo's imperative handle so marker click can
-  // seek the INLINE player (not just open the Review modal). One ref
-  // per submission id, lazily created.
-  const previewRefs = useRef({})
-  const getPreviewRef = (id) => {
-    if (!previewRefs.current[id]) {
-      previewRefs.current[id] = { current: null }
-    }
-    return previewRefs.current[id]
-  }
   // Per-card expand/collapse state. Default: only the LATEST (first
   // in the list) is expanded, older versions are collapsed so the
   // modal doesn't sprout three video players for a long revision
@@ -12513,79 +12532,20 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                   revision history. */}
               {isExpanded && sub.file_url && (
                 <>
-                  <PreviewVideo
-                    ref={getPreviewRef(sub.id)}
+                  {/* Compact OPT player — same controls + same custom
+                      marker tooltips as the Review modal, just sized for
+                      the inline card. Markers come straight from
+                      commentsBySubId.markers (already in OptVideoPlayer
+                      shape — no per-render transform). The video area
+                      is capped at 240px so the version stack doesn't
+                      push CTA buttons below the fold. Ben 2026-06-01:
+                      "the player still is not a custom one in this
+                      preview here and across the board". */}
+                  <OptVideoPlayer
                     src={sub.file_url}
-                    poster={sub.thumbnail_url}
-                    onDuration={(d) => setVideoDurations(prev => prev[sub.id] === d ? prev : { ...prev, [sub.id]: d })}
-                    style={{ display: 'block', width: '100%', maxHeight: 280, background: '#000', objectFit: 'contain' }} />
-                  {/* Inline comment-marker strip — gives the operator the
-                      same per-timestamp at-a-glance read that the Review
-                      modal's scrubber does. Dots positioned by
-                      (ts / duration) * 100%. Click a dot to seek the
-                      inline player; if the operator wants to read the
-                      thread or add a reply, the marker also doubles as
-                      a quick-jump into the Review modal via shift-click
-                      (or the "Open comments in Review" button below).
-                      Ben 2026-06-01: "this player still also doesn't
-                      have the comments in the preview where we left
-                      comments". */}
-                  {(() => {
-                    const cc = commentsBySubId[sub.id]
-                    if (!cc || !cc.markers || cc.markers.length === 0) return null
-                    const d = videoDurations[sub.id]
-                    return (
-                      <div style={{
-                        position: 'relative', height: 22, background: '#0a0a0a',
-                        borderTop: '1px solid rgba(255,255,255,0.08)',
-                      }}>
-                        {/* Track */}
-                        <div style={{
-                          position: 'absolute', left: 8, right: 8, top: '50%',
-                          height: 2, background: 'rgba(255,255,255,0.12)',
-                          transform: 'translateY(-50%)',
-                        }} />
-                        {/* Markers — positioned by duration when known,
-                            else flat-spaced as a fallback so the operator
-                            still sees them even before metadata loads.
-                            Clamped between 8px and (100% - 8px) so end
-                            markers don't hang off the strip edges. */}
-                        {cc.markers.map((m, idx) => {
-                          const pct = d && d > 0
-                            ? (m.ts / d) * 100
-                            : ((idx + 1) / (cc.markers.length + 1)) * 100
-                          return (
-                            <div
-                              key={m.id}
-                              title={`${m.author_name || 'Comment'} · ${fmtTime(m.ts)}\n${(m.body || '').slice(0, 160)}\n\nClick to seek inline · Shift-click to open Review`}
-                              onClick={(e) => {
-                                if (e.shiftKey && onOpenReview && sub.file_url) {
-                                  onOpenReview(sub)
-                                  return
-                                }
-                                previewRefs.current[sub.id]?.current?.seekTo(m.ts)
-                              }}
-                              style={{
-                                position: 'absolute',
-                                left: `clamp(8px, ${pct}%, calc(100% - 8px))`,
-                                top: '50%', transform: 'translate(-50%, -50%)',
-                                width: 10, height: 10, borderRadius: '50%',
-                                background: m.resolved ? 'rgba(255,255,255,0.45)' : '#3e7eba',
-                                border: '2px solid #0a0a0a',
-                                cursor: 'pointer',
-                                boxShadow: m.resolved
-                                  ? 'none'
-                                  : '0 0 0 1px rgba(62,126,186,0.5)',
-                                transition: 'transform 100ms ease',
-                              }}
-                              onMouseEnter={e => { e.currentTarget.style.transform = 'translate(-50%, -50%) scale(1.3)' }}
-                              onMouseLeave={e => { e.currentTarget.style.transform = 'translate(-50%, -50%) scale(1)' }}
-                            />
-                          )
-                        })}
-                      </div>
-                    )
-                  })()}
+                    markers={commentsBySubId[sub.id]?.markers || []}
+                    compact
+                    wrapperStyle={{ height: 320 }} />
                   <div style={{
                     padding: '6px 12px', background: 'var(--paper-2)',
                     borderTop: '1px solid var(--rule)',
