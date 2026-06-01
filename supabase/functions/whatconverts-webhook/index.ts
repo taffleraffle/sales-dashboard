@@ -76,7 +76,18 @@ serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, matched: false }), { status: 200 });
     }
 
-    // Insert into client_leads
+    // Read existing row state first so we can detect change kind
+    const { data: prior } = await supa
+      .from("client_leads")
+      .select("id, quotable, sales_value, converted")
+      .eq("source_system", "whatconverts")
+      .eq("source_id", String(lead.lead_id))
+      .maybeSingle();
+
+    const isQuotable = typeof lead.quotable === "boolean" ? lead.quotable : lead.quotable === "true";
+    const incomingSalesValue = lead.sales_value ? Number(lead.sales_value) : null;
+
+    // Upsert
     const { data: leadRow, error } = await supa
       .from("client_leads")
       .upsert(
@@ -95,8 +106,8 @@ serve(async (req) => {
           landing_url: lead.landing_url,
           call_duration_seconds: lead.duration,
           call_status: lead.call_status,
-          quotable: typeof lead.quotable === "boolean" ? lead.quotable : lead.quotable === "true",
-          sales_value: lead.sales_value,
+          quotable: isQuotable,
+          sales_value: incomingSalesValue,
           received_at: lead.date_created || new Date().toISOString(),
           raw: lead,
         },
@@ -109,9 +120,15 @@ serve(async (req) => {
       console.error("lead insert error:", error);
     }
 
-    // Win: only for fresh leads, not updates. Only for quotable or unknown-quotability.
-    if (leadRow) {
-      const isQuotable = typeof lead.quotable === "boolean" ? lead.quotable : lead.quotable === "true";
+    if (!leadRow) {
+      return new Response(JSON.stringify({ ok: false, error: "upsert returned no row" }), { status: 500 });
+    }
+
+    // Decide what wins (if any) to emit based on state transition
+    const winEvents: Array<{ kind: "new_lead" | "milestone"; headline: string; detail: string }> = [];
+
+    if (!prior) {
+      // BRAND NEW LEAD
       const headline = isQuotable
         ? `New quotable lead: ${lead.contact_name || lead.phone || "unknown"}`
         : `New lead: ${lead.contact_name || lead.phone || "unknown"}`;
@@ -119,20 +136,47 @@ serve(async (req) => {
         lead.lead_type ? `*Type:* ${lead.lead_type}` : null,
         lead.source ? `*Source:* ${lead.source}` : null,
         lead.keyword ? `*Keyword:* ${lead.keyword}` : null,
-        lead.sales_value ? `*Value:* $${lead.sales_value}` : null,
+        incomingSalesValue ? `*Value:* $${incomingSalesValue.toLocaleString()}` : null,
       ].filter(Boolean).join(" · ");
+      winEvents.push({ kind: "new_lead", headline, detail });
+    } else {
+      // EXISTING LEAD UPDATE — emit only on meaningful state transitions
+      // 1. Became quotable (prior was false/null, now true)
+      if (isQuotable && !prior.quotable) {
+        winEvents.push({
+          kind: "new_lead",
+          headline: `Lead qualified: ${lead.contact_name || lead.phone || "unknown"}`,
+          detail: `Marked quotable. ${lead.keyword ? `*Keyword:* ${lead.keyword}` : ""}`,
+        });
+      }
+      // 2. Sales value attached or upgraded (only fire on increase from null or significant uplift)
+      if (incomingSalesValue && (!prior.sales_value || incomingSalesValue > Number(prior.sales_value))) {
+        winEvents.push({
+          kind: "milestone",
+          headline: `Deal closed: $${incomingSalesValue.toLocaleString()} from ${lead.contact_name || lead.phone || "lead"}`,
+          detail: `${lead.keyword ? `*Keyword:* ${lead.keyword} · ` : ""}${lead.source ? `*Source:* ${lead.source}` : ""}`,
+        });
+      }
+      // 3. Other updates → silently update the row, no wins emission
+    }
 
+    if (winEvents.length === 0) {
+      return new Response(JSON.stringify({ ok: true, matched: true, lead_row_id: leadRow.id, win_emitted: false, reason: prior ? "no_meaningful_transition" : "?" }), { status: 200 });
+    }
+
+    // Fire each win event
+    for (const evt of winEvents) {
       await emitWin({
         client_id: clientId,
-        kind: "new_lead",
-        headline,
-        detail,
-        payload: { lead_id: lead.lead_id, profile_id: lead.profile_id, sales_value: lead.sales_value },
+        kind: evt.kind,
+        headline: evt.headline,
+        detail: evt.detail,
+        payload: { lead_id: lead.lead_id, profile_id: lead.profile_id, sales_value: incomingSalesValue },
         source: "whatconverts",
       });
     }
 
-    return new Response(JSON.stringify({ ok: true, matched: true, lead_row_id: leadRow?.id }), { status: 200 });
+    return new Response(JSON.stringify({ ok: true, matched: true, lead_row_id: leadRow.id, win_emitted: true, win_kinds: winEvents.map((e) => e.kind) }), { status: 200 });
   } catch (e) {
     console.error("wc webhook exception:", e);
     return new Response(JSON.stringify({ ok: false, error: (e as Error).message }), { status: 500 });

@@ -15,9 +15,19 @@ export async function slackPost(
   channel: string,
   blocks: unknown[],
   fallbackText: string,
+  threadTs?: string,
 ): Promise<SlackPostResult> {
   const token = Deno.env.get("SLACK_BOT_TOKEN");
   if (!token) throw new Error("SLACK_BOT_TOKEN not set");
+
+  const body: Record<string, unknown> = {
+    channel,
+    text: fallbackText,
+    blocks,
+    unfurl_links: false,
+    unfurl_media: false,
+  };
+  if (threadTs) body.thread_ts = threadTs;
 
   const res = await fetch(`${SLACK_API}/chat.postMessage`, {
     method: "POST",
@@ -25,13 +35,7 @@ export async function slackPost(
       "Authorization": `Bearer ${token}`,
       "Content-Type": "application/json; charset=utf-8",
     },
-    body: JSON.stringify({
-      channel,
-      text: fallbackText,
-      blocks,
-      unfurl_links: false,
-      unfurl_media: false,
-    }),
+    body: JSON.stringify(body),
   });
 
   const data = await res.json();

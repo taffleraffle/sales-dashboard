@@ -65,6 +65,8 @@ export async function emitWin(input: EmitWinInput): Promise<{ id?: string; slack
 
   const fallbackText = `${icon} ${input.headline} — ${clientLabel}`;
 
+  // Main message: presentation-grade for closers to screenshot in sales conversations.
+  // No internal tags (RANK_JUMP, via dataforseo) — those go to a thread reply.
   const blocks: unknown[] = [
     {
       type: "section",
@@ -82,20 +84,6 @@ export async function emitWin(input: EmitWinInput): Promise<{ id?: string; slack
     });
   }
 
-  const contextElements: unknown[] = [
-    { type: "mrkdwn", text: `\`${input.kind.toUpperCase()}\`` },
-  ];
-  if (input.source) {
-    contextElements.push({ type: "mrkdwn", text: `via ${input.source}` });
-  }
-  contextElements.push({
-    type: "mrkdwn",
-    text: `<!date^${Math.floor(Date.now() / 1000)}^{time_secs}|just now>`,
-  });
-
-  blocks.push({ type: "context", elements: contextElements });
-  blocks.push({ type: "divider" });
-
   let slack_ts: string | undefined;
   let slack_channel_id: string | undefined;
   if (input.postToSlack !== false) {
@@ -104,6 +92,23 @@ export async function emitWin(input: EmitWinInput): Promise<{ id?: string; slack
       if (result.ok) {
         slack_ts = result.ts;
         slack_channel_id = result.channel;
+
+        // Threaded reply: internal metadata, hidden from the main channel feed
+        // unless someone explicitly opens the thread.
+        const threadElements: unknown[] = [
+          { type: "mrkdwn", text: `\`${input.kind.toUpperCase()}\`` },
+        ];
+        if (input.source) {
+          threadElements.push({ type: "mrkdwn", text: `via ${input.source}` });
+        }
+        threadElements.push({
+          type: "mrkdwn",
+          text: `<!date^${Math.floor(Date.now() / 1000)}^{time_secs}|just now>`,
+        });
+        // Fire-and-forget thread reply, don't await — main message is the durable bit
+        slackPost(channel, [
+          { type: "context", elements: threadElements },
+        ], `internal · ${input.kind}`, slack_ts).catch((e) => console.error("thread reply failed:", e));
       } else {
         console.error("slack post failed:", result.error);
       }
