@@ -6,6 +6,17 @@ import {
   fmtMoneyFull, fmtNum, fmtPct, PALETTE, WinnerBadge, PodiumRank,
 } from '../components/editorial/atoms'
 
+// ad_daily_stats.spend is NZD (Meta bills the OPT account in NZD; the
+// sync-meta-ads-full Edge Function writes raw spend without conversion).
+// Every Ads page (AdsList, AdDetail, ComponentDetail) multiplies by this
+// rate at display time. Do the same here so spend / CPL / coverage
+// numbers are USD-consistent with the Marketing page and the Ads pages.
+//
+// The coverage / gap / attribution stage values (counts, percentages)
+// are currency-agnostic so they don't need conversion.
+const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+const toUsd = (n) => (Number(n) || 0) * NZD_TO_USD
+
 /*
   Attribution Coverage Report (rewritten Ben 2026-06-01, full-screen edit).
 
@@ -54,6 +65,7 @@ const KANBAN_COLUMNS = [
   { slug: 'restoration',  label: 'Restoration',   color: PALETTE.red,     hint: '' },
   { slug: 'electrician',  label: 'Electricians',  color: PALETTE.teal,    hint: '' },
   { slug: 'accounting',   label: 'Accounting',    color: PALETTE.orange,  hint: '' },
+  { slug: 'australia',    label: 'Australia',     color: PALETTE.purple,  hint: 'AU market — TRADIES campaigns.' },
   { slug: 'other',        label: 'Other verticals', color: PALETTE.ink3,  hint: '' },
 ]
 
@@ -163,6 +175,7 @@ function bucketAdToColumn(ad, pending) {
   if (vertical === 'restoration')        return 'restoration'
   if (vertical === 'electrician')        return 'electrician'
   if (vertical === 'accounting')         return 'accounting'
+  if (vertical === 'australia')          return 'australia'
   return 'other'
 }
 
@@ -365,9 +378,12 @@ export default function AttributionCoverage() {
     if (!stage) return null
     return {
       pct: Number(stage.coverage_pct),
-      traced: Number(stage.traced),
-      total: Number(stage.total),
-      gap: Number(stage.gap),
+      // attribution_coverage RPC sums ad_daily_stats.spend (NZD). Coverage
+      // percentage is ratio so unaffected. Dollar values get converted to
+      // USD so the headline reconciles with the Marketing page.
+      traced: toUsd(stage.traced),
+      total:  toUsd(stage.total),
+      gap:    toUsd(stage.gap),
     }
   }, [stages])
 
@@ -643,7 +659,10 @@ function TopPerformersSection({ ads, onPick, pendingVertical, windowLabel, busy 
 
 function PerformerCard({ ad, rank, pending, onPick }) {
   const { vertical, source } = effectiveVertical(ad, { [ad.ad_id]: pending })
-  const cpl = ad.cpl_30d != null ? Number(ad.cpl_30d) : null
+  // spend_30d / cpl_30d come from lib_attribution_ad_kanban which sums
+  // ad_daily_stats.spend (NZD) — convert to USD for display.
+  const spendUsd = toUsd(ad.spend_30d)
+  const cpl = ad.cpl_30d != null ? toUsd(ad.cpl_30d) : null
   const audTone = source === 'override' ? 'green' : source === 'parsed' ? 'amber' : 'red'
   const [hover, setHover] = useState(false)
 
@@ -715,7 +734,7 @@ function PerformerCard({ ad, rank, pending, onPick }) {
           padding: '10px 0', borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)',
         }}>
           <StatCell label="Leads" value={ad.leads_30d} />
-          <StatCell label="Spend" value={fmtMoneyFull(Number(ad.spend_30d))} />
+          <StatCell label="Spend" value={fmtMoneyFull(spendUsd)} />
           <StatCell
             label="CPL"
             value={cpl != null ? fmtMoneyFull(cpl) : '∞'}
@@ -823,7 +842,8 @@ function KanbanByAudience({
 }
 
 function KanbanColumn({ column, ads, pendingVertical, onPick }) {
-  const totalSpend = ads.reduce((a, b) => a + Number(b.spend_30d || 0), 0)
+  // Convert NZD → USD on the spend rollup (ad_daily_stats.spend is NZD).
+  const totalSpend = ads.reduce((a, b) => a + toUsd(b.spend_30d), 0)
   const totalLeads = ads.reduce((a, b) => a + Number(b.leads_30d || 0), 0)
   return (
     <div style={{
@@ -894,7 +914,8 @@ function KanbanColumn({ column, ads, pendingVertical, onPick }) {
 }
 
 function KanbanCard({ ad, pending, onPick }) {
-  const cpl = ad.cpl_30d != null ? Number(ad.cpl_30d) : null
+  const spendUsd = toUsd(ad.spend_30d)
+  const cpl = ad.cpl_30d != null ? toUsd(ad.cpl_30d) : null
   return (
     <button
       type="button"
@@ -939,7 +960,7 @@ function KanbanCard({ ad, pending, onPick }) {
           <span style={{
             fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
             fontSize: 13, color: 'var(--ink)',
-          }}>{fmtMoneyFull(Number(ad.spend_30d))}</span>
+          }}>{fmtMoneyFull(spendUsd)}</span>
           <span style={{ color: 'var(--ink-4)' }}>·</span>
           <span>{ad.leads_30d || 0} leads</span>
           {cpl != null && (
@@ -995,7 +1016,8 @@ function AdDrawer({ ad, pendingVertical, audiences, onClose, onAssign }) {
   if (!ad) return null
   const pending = pendingVertical[ad.ad_id]
   const { vertical, source } = effectiveVertical(ad, pendingVertical)
-  const cpl = ad.cpl_30d != null ? Number(ad.cpl_30d) : null
+  const spendUsd = toUsd(ad.spend_30d)
+  const cpl = ad.cpl_30d != null ? toUsd(ad.cpl_30d) : null
 
   return (
     <div
@@ -1077,7 +1099,7 @@ function AdDrawer({ ad, pendingVertical, audiences, onClose, onAssign }) {
             padding: '14px 0', borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)',
             marginBottom: 20,
           }}>
-            <StatCell label="Spend 30d" value={fmtMoneyFull(Number(ad.spend_30d))} />
+            <StatCell label="Spend 30d" value={fmtMoneyFull(spendUsd)} />
             <StatCell label="Traced leads" value={ad.leads_30d} />
             <StatCell
               label="Cost / lead"
@@ -1203,6 +1225,8 @@ function FunnelSection({ stages }) {
             {stages.map(s => {
               const isUsd = s.unit === 'usd'
               const fmt = isUsd ? fmtMoneyFull : fmtNum
+              // For USD stages, the RPC returned NZD-summed values; convert.
+              const conv = (v) => isUsd ? toUsd(v) : Number(v)
               const tone = covTone(Number(s.coverage_pct))
               const help = STAGE_HELP[s.stage_key]
               return (
@@ -1223,10 +1247,10 @@ function FunnelSection({ stages }) {
                       </div>
                     </div>
                   </td>
-                  <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(Number(s.total))}</td>
-                  <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(Number(s.traced))}</td>
+                  <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(conv(s.total))}</td>
+                  <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmt(conv(s.traced))}</td>
                   <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: Number(s.gap) > 0 ? PALETTE.red : 'var(--ink-3)' }}>
-                    {Number(s.gap) === 0 ? '—' : fmt(Number(s.gap))}
+                    {Number(s.gap) === 0 ? '—' : fmt(conv(s.gap))}
                   </td>
                   <td style={{ ...td, textAlign: 'right' }}>
                     <Pill tone={tone} uppercase>{fmtPct(Number(s.coverage_pct))}</Pill>
@@ -1263,7 +1287,8 @@ function GapAdsSection({ ads, busy }) {
           </thead>
           <tbody>
             {ads.slice(0, 20).map(ad => {
-              const spend = Number(ad.spend_30d) || 0
+              // spend_30d is NZD from ad_daily_stats — convert.
+              const spend = toUsd(ad.spend_30d)
               const leads = Number(ad.traced_leads_30d) || 0
               const cpl = leads > 0 ? spend / leads : null
               const tone = leads === 0 ? 'red' : (cpl && cpl > 100 ? 'amber' : 'green')

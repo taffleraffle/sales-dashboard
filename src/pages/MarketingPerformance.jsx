@@ -21,6 +21,18 @@ const toLocalDateStr = (d) => {
   return `${y}-${m}-${day}`
 }
 
+// Meta bills the OPT ad account in NZD. The sync-meta-ads-full edge function
+// (supabase/functions/sync-meta-ads-full/index.ts:112) writes Meta's raw
+// `spend` straight into ad_daily_stats.spend with NO conversion — so the
+// numbers in lib_marketing_by_audience_daily.adspend are NZD. The Ads pages
+// (AdsList, AdDetail, ComponentDetail) convert at display time using this
+// rate; do the same here so the Marketing page shows USD consistently.
+//
+// closer_calls.revenue / cash_collected are entered by the closer in USD
+// (deals are with US customers, Stripe/Fanbasis denominate USD), so
+// trial_revenue / trial_cash in the audience view do NOT need conversion.
+const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+
 // ── Audience parsing + filter (Ben 2026-05-31) ──────────────────────
 // Campaign names follow a "BRAND - VERTICAL - description" convention
 // (e.g. "SCIO - Electricians - VSL - #1 Electrician 5/24 - Relaunch",
@@ -2952,7 +2964,9 @@ export default function MarketingPerformance() {
       const d = row.date
       if (!byDate[d]) byDate[d] = emptyRow(d)
       const r = byDate[d]
-      r.adspend            += Number(row.adspend) || 0
+      // adspend is NZD from ad_daily_stats — convert to USD for display.
+      // trial_revenue / trial_cash are already USD (closer EOD entry).
+      r.adspend            += (Number(row.adspend) || 0) * NZD_TO_USD
       r.leads              += Number(row.leads) || 0
       r.qualified_bookings += Number(row.qualified_bookings) || 0
       r.live_calls         += Number(row.live_calls) || 0
