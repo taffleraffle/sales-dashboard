@@ -2712,13 +2712,15 @@ export default function MarketingPerformance() {
       // If the mirror is empty (migration 055 not yet applied), leadDate
       // map below is empty and the bucketing falls back to booked_at —
       // i.e. behaves identically to before.
+      // Source bookings from lib_strategy_booking_resolved so each row carries
+      // its audience tag. Without that, the Bookings KPI tile (bk.all) was
+      // global — same 68 number on every audience tab. The view already filters
+      // to non-cancelled strategy-calendar bookings, deduped by contact.
       const [{ data, error }, { data: oppRows, error: oppErr }] = await Promise.all([
         supabase
-          .from('ghl_appointments')
-          .select('booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name')
-          .or(`booked_at.gte.${sinceStr},appointment_date.gte.${sinceStr}`)
-          .neq('appointment_status', 'cancelled')
-          .in('calendar_name', STRATEGY_CALL_CALENDARS),
+          .from('lib_strategy_booking_resolved')
+          .select('booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name, is_dq, audience')
+          .gte('booked_at', sinceStr),
         supabase
           .from('ghl_opportunities')
           .select('ghl_contact_id, created_at')
@@ -2743,14 +2745,13 @@ export default function MarketingPerformance() {
       const cohortMap = {}
       const leadCohortMap = {}
       for (const a of data || []) {
+        // is_dq comes from the view (calendar-based); also honor revenue-tier
+        // overrides so manual revenue_tier flags still work.
         const dqByTier = a.revenue_tier ? isDQRevenueTier(a.revenue_tier) : null
-        const dqByCalendar = DQ_BOOKING_CALENDARS.includes(a.calendar_name)
-        const isDq = dqByTier !== null ? dqByTier : dqByCalendar
+        const isDq = dqByTier !== null ? dqByTier : !!a.is_dq
         const contactKey = a.ghl_contact_id || `name:${a.contact_name || 'unknown'}`
-        // Keep the human-readable name for cross-contact-id duplicate
-        // detection (e.g. "Mike White" and "Michael" booked as separate
-        // GHL contacts — same person, two contact_ids).
         const contactName = a.contact_name || ''
+        const audience = a.audience || 'Unknown'
 
         // booked_at-bucketed
         const rawBooked = a.booked_at || a.appointment_date
@@ -2758,7 +2759,7 @@ export default function MarketingPerformance() {
           const d = String(rawBooked).split(' ')[0].split('T')[0]
           if (d >= sinceStr && d <= todayStr) {
             if (!map[d]) map[d] = []
-            map[d].push({ contactKey, isDq, contactName })
+            map[d].push({ contactKey, isDq, contactName, audience })
           }
         }
 
@@ -2768,18 +2769,17 @@ export default function MarketingPerformance() {
           const d = String(rawApt).split(' ')[0].split('T')[0]
           if (d >= sinceStr && d <= todayStr) {
             if (!cohortMap[d]) cohortMap[d] = []
-            cohortMap[d].push({ contactKey, isDq, contactName })
+            cohortMap[d].push({ contactKey, isDq, contactName, audience })
           }
         }
 
         // Lead-cohort-bucketed (booking attributed to its LEAD's createdAt).
-        // Falls back to booked_at when no opportunity is known for the
-        // contact (orphan booking — e.g. Calendly direct, no pipeline op).
+        // Falls back to booked_at when no opportunity is known for the contact.
         const leadDate = leadDateByContact[a.ghl_contact_id]
         const cohortDate = leadDate || (rawBooked ? String(rawBooked).split(' ')[0].split('T')[0] : null)
         if (cohortDate && cohortDate >= sinceStr && cohortDate <= todayStr) {
           if (!leadCohortMap[cohortDate]) leadCohortMap[cohortDate] = []
-          leadCohortMap[cohortDate].push({ contactKey, isDq, contactName })
+          leadCohortMap[cohortDate].push({ contactKey, isDq, contactName, audience })
         }
       }
       setBookingsByDate(map)
@@ -2939,12 +2939,12 @@ export default function MarketingPerformance() {
       const sinceStr = etDateOffset(-Math.max(0, days - 1))
       return d => d >= sinceStr
     })()
-    const seen = new Map() // contactKey -> { isDq } (qualified wins over DQ)
+    const wantedAud = (selectedAudiences && selectedAudiences.size > 0) ? selectedAudiences : null
+    const seen = new Map()
     for (const [d, list] of Object.entries(bookingsByDate)) {
       if (!filterDate(d)) continue
       for (const b of list) {
-        // Collapse merged secondaries into their canonical primary so
-        // resolved-duplicate pairs count as one prospect.
+        if (wantedAud && !wantedAud.has(b.audience)) continue
         const key = canonicalKey(b.contactKey)
         const existing = seen.get(key)
         if (!existing) seen.set(key, { isDq: b.isDq })
@@ -2958,7 +2958,7 @@ export default function MarketingPerformance() {
       else qualified++
     }
     return { all, qualified, dq }
-  }, [bookingsByDate, canonicalKey])
+  }, [bookingsByDate, canonicalKey, selectedAudiences])
 
   // Same dedupe rule but on appointment_date (call-held) buckets. Used for
   // cohort show rate so numerator (lives) and denominator (scheduled calls)
@@ -2974,12 +2974,12 @@ export default function MarketingPerformance() {
       const sinceStr = etDateOffset(-Math.max(0, days - 1))
       return d => d >= sinceStr
     })()
+    const wantedAud = (selectedAudiences && selectedAudiences.size > 0) ? selectedAudiences : null
     const seen = new Map()
     for (const [d, list] of Object.entries(cohortBookingsByDate)) {
       if (!filterDate(d)) continue
       for (const b of list) {
-        // Collapse merged secondaries into their canonical primary so
-        // resolved-duplicate pairs count as one prospect.
+        if (wantedAud && !wantedAud.has(b.audience)) continue
         const key = canonicalKey(b.contactKey)
         const existing = seen.get(key)
         if (!existing) seen.set(key, { isDq: b.isDq })
@@ -2993,7 +2993,7 @@ export default function MarketingPerformance() {
       else qualified++
     }
     return { all, qualified, dq }
-  }, [cohortBookingsByDate, canonicalKey])
+  }, [cohortBookingsByDate, canonicalKey, selectedAudiences])
 
   // Lead-cohort booking sum: count unique prospects whose LEAD's createdAt
   // fell in the window, regardless of when they booked. Pairs with stats.leads
@@ -3015,12 +3015,12 @@ export default function MarketingPerformance() {
       const sinceStr = etDateOffset(-Math.max(0, days - 1))
       return d => d >= sinceStr
     })()
+    const wantedAud = (selectedAudiences && selectedAudiences.size > 0) ? selectedAudiences : null
     const seen = new Map()
     for (const [d, list] of Object.entries(leadCohortBookingsByDate)) {
       if (!filterDate(d)) continue
       for (const b of list) {
-        // Collapse merged secondaries into their canonical primary so
-        // resolved-duplicate pairs count as one prospect.
+        if (wantedAud && !wantedAud.has(b.audience)) continue
         const key = canonicalKey(b.contactKey)
         const existing = seen.get(key)
         if (!existing) seen.set(key, { isDq: b.isDq })
@@ -3034,7 +3034,7 @@ export default function MarketingPerformance() {
       else qualified++
     }
     return { all, qualified, dq }
-  }, [leadCohortBookingsByDate, canonicalKey])
+  }, [leadCohortBookingsByDate, canonicalKey, selectedAudiences])
 
   // Audience filter (Ben 2026-05-31). Multiselect via chips next to the
   // date range. Empty Set = show all. Overrides loaded from
