@@ -3196,17 +3196,23 @@ export default function MarketingPerformance() {
       r.adspend            += (Number(row.adspend) || 0) * NZD_TO_USD
       r.leads              += Number(row.leads) || 0
       r.qualified_bookings += Number(row.qualified_bookings) || 0
-      // `live_calls` = lib_ghl_lives_detail row count (all held strategy
-      // calls including FU + ascensions + closes). Useful for "did the
-      // call happen" but NOT for "Net NEW Live calls" which is the
-      // NC-only count the closer logs in their EOD. We populate
-      // `new_live_calls` from marketing_tracker.new_live_calls below
-      // (in the EOD-layer loop) so the tile labeled "Net New Live"
-      // matches the closer_calls NC drilldown.
+      // live_calls is now sourced from lib_closer_call_audience NC count
+      // (matches the fetchLiveCalls drilldown one-for-one). When a filter
+      // is active this gives Electrician-only NC count = 2 instead of
+      // global EOD 4. When no filter, it gives the total across audiences.
       r.live_calls         += Number(row.live_calls) || 0
+      r.new_live_calls     += Number(row.live_calls) || 0
+      // closes from the view (sourced via lib_close_audience with booking
+      // fallback so closes inherit their booking's audience when the
+      // typeform attribution missed).
       r.closes             += Number(row.closes) || 0
       r.trial_revenue      += Number(row.trial_revenue) || 0
       r.trial_cash         += Number(row.trial_cash) || 0
+      // Ascensions now from lib_closer_call_audience too (was global
+      // marketing_tracker.ascensions = 1 even when filtered to Electricians;
+      // John & Hector are Electricians but the lone ascension belonged to
+      // an Unknown-audience prospect, so Electricians filter shows 0).
+      r.ascensions         += Number(row.ascensions) || 0
     }
     // Layer in EOD-only KPIs from marketing_tracker — offers, ascensions,
     // refunds, no_shows, reschedules, etc. These are closer-self-reported
@@ -3224,8 +3230,12 @@ export default function MarketingPerformance() {
     for (const e of entries) mtByDate[e.date] = e
     for (const d in byDate) {
       const mt = mtByDate[d]; if (!mt) continue
+      // When an audience filter is active, prefer the audience-bucketed
+      // ascensions count we already computed from lib_closer_call_audience.
+      // marketing_tracker.ascensions is a global daily counter that doesn't
+      // know which audience the ascending prospect belonged to.
+      if (!wanted) byDate[d].ascensions = Number(mt.ascensions) || 0
       byDate[d].offers              = Number(mt.offers) || 0
-      byDate[d].ascensions          = Number(mt.ascensions) || 0
       byDate[d].ascend_cash         = Number(mt.ascend_cash) || 0
       byDate[d].ascend_revenue      = Number(mt.ascend_revenue) || 0
       byDate[d].ar_collected        = Number(mt.ar_collected) || 0
@@ -3243,12 +3253,11 @@ export default function MarketingPerformance() {
       byDate[d].net_new_calls       = Number(mt.net_new_calls) || 0
       byDate[d].net_fu_calls        = Number(mt.net_fu_calls) || 0
       byDate[d].net_live_calls      = Number(mt.net_live_calls) || 0
-      // new_live_calls (used by the "Net New Live" tile) = closer-EOD's
-      // NC-only live count, matching the fetchLiveCalls drilldown source
-      // (closer_calls call_type='new_call'). Without this the tile read
-      // lib_ghl_lives_detail (38, includes FU+ascensions+closes) while
-      // drilldown read closer_calls NC (25) — same label, two universes.
-      byDate[d].new_live_calls      = Number(mt.new_live_calls) || 0
+      // new_live_calls when there's NO audience filter — use closer-EOD's
+      // NC count (= 25 for 30d). When filter IS active, keep the audience-
+      // bucketed count from lib_marketing_by_audience_daily.live_calls
+      // (which now sources lib_closer_call_audience).
+      if (!wanted) byDate[d].new_live_calls = Number(mt.new_live_calls) || 0
       byDate[d].auto_bookings       = Number(mt.auto_bookings) || 0
       byDate[d].calls_on_calendar   = Number(mt.calls_on_calendar) || 0
     }
