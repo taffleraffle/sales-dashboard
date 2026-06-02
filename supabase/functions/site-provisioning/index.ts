@@ -310,6 +310,46 @@ async function generateRepoFromTemplate(repoName: string): Promise<{ repo_name: 
   return { repo_name: data.name, repo_url: data.html_url };
 }
 
+// RankOnMaps is a USER not an org, so org-level secrets aren't available.
+// Each newly generated repo needs Cloudflare secrets copied from env so its
+// existing GitHub Actions deploy workflow can authenticate.
+async function copySecretsToNewRepo(repoName: string): Promise<{ ok: boolean; detail?: string }> {
+  const cfToken = Deno.env.get("CLOUDFLARE_API_TOKEN");
+  const cfAccount = Deno.env.get("CLOUDFLARE_ACCOUNT_ID");
+  if (!cfToken || !cfAccount) {
+    return { ok: false, detail: "CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID missing in env" };
+  }
+
+  // Fetch repo public key for secret encryption
+  const keyRes = await ghFetch(`/repos/${GH_OWNER}/${repoName}/actions/secrets/public-key`);
+  if (!keyRes.ok) {
+    return { ok: false, detail: `public-key fetch failed: ${keyRes.status}` };
+  }
+  const { key, key_id } = await keyRes.json();
+
+  // Encrypt + PUT each secret
+  // Uses libsodium-wrappers via esm.sh — required for GitHub's sealed_box encryption
+  // deno-lint-ignore no-explicit-any
+  const sodium = (await import("https://esm.sh/libsodium-wrappers@0.7.13")) as any;
+  await sodium.ready;
+
+  async function putSecret(name: string, value: string): Promise<boolean> {
+    const keyBytes = sodium.from_base64(key, sodium.base64_variants.ORIGINAL);
+    const valueBytes = sodium.from_string(value);
+    const encrypted = sodium.crypto_box_seal(valueBytes, keyBytes);
+    const encryptedValue = sodium.to_base64(encrypted, sodium.base64_variants.ORIGINAL);
+    const r = await ghFetch(`/repos/${GH_OWNER}/${repoName}/actions/secrets/${name}`, {
+      method: "PUT",
+      body: JSON.stringify({ encrypted_value: encryptedValue, key_id }),
+    });
+    return r.ok;
+  }
+
+  const tokenOk = await putSecret("CLOUDFLARE_API_TOKEN", cfToken);
+  const accountOk = await putSecret("CLOUDFLARE_ACCOUNT_ID", cfAccount);
+  return { ok: tokenOk && accountOk, detail: `token=${tokenOk} account=${accountOk}` };
+}
+
 function b64encode(s: string): string {
   // deno has btoa, but needs proper utf8 handling
   const bytes = new TextEncoder().encode(s);
@@ -560,6 +600,14 @@ ${extra_context || "(none)"}`;
         repo_url,
       })
       .eq("id", runId);
+
+    // step 7b: copy Cloudflare secrets to the new repo (RankOnMaps is a USER not org —
+    // no org-level secret inheritance). Required so the template's existing
+    // GitHub Actions deploy workflow can authenticate against Cloudflare Pages.
+    const secretCopy = await copySecretsToNewRepo(repo_name).catch((e) => ({ ok: false, detail: (e as Error).message }));
+    if (!secretCopy.ok) {
+      console.warn(`secret copy partial: ${secretCopy.detail}`);
+    }
 
     // step 8: commit the 3 json files
     await commitFile(
