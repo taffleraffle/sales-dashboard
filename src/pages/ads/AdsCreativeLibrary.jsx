@@ -11375,6 +11375,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   const [priority, setPriority] = useState(task.priority || 'P2 - Medium')
   const [taskType, setTaskType] = useState(task.task_type || 'edit')
   const [due, setDue] = useState(task.due_date || '')
+  const [startDate, setStartDate] = useState(
+    task.assigned_at ? task.assigned_at.slice(0, 10) : ''
+  )
   const [notes, setNotes] = useState(task.notes || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
@@ -11527,7 +11530,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   useEffect(() => {
     if (dirtyInitRef.current) { dirtyInitRef.current = false; return }
     dirtyRef.current = true
-  }, [editorId, status, priority, taskType, due, notes])
+  }, [editorId, status, priority, taskType, due, startDate, notes])
 
   const save = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setBusy(true)
@@ -11535,6 +11538,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     const patch = {
       editor_id: editorId || null,
       status, priority, task_type: taskType, due_date: due || null,
+      assigned_at: startDate || null,
       notes: notes || null,
     }
     // Auto-set started_at when moving into in_progress
@@ -11551,7 +11555,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       dirtyRef.current = false
       if (!silent) onSaved?.()
     }
-  }, [editorId, status, priority, taskType, due, notes, task.task_id, task.started_at, task.completed_at, onSaved])
+  }, [editorId, status, priority, taskType, due, startDate, notes, task.task_id, task.started_at, task.completed_at, onSaved])
   const remove = async () => {
     setBusy(true); setErr(null)
     const { error } = await supabase.from('lib_editing_tasks').delete().eq('id', task.task_id)
@@ -11961,6 +11965,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           <Field label="Task type">
             <OptionPicker value={taskType} options={TASK_TYPE_OPTIONS}
               onChange={setTaskType} />
+          </Field>
+          <Field label="Start date">
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
           </Field>
           <Field label="Due date">
             <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
@@ -14399,17 +14406,13 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
               <option>P3 - Low</option>
             </select>
           </Field>
+          <Field label="Start date">
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
+          </Field>
           <Field label="Due date">
             <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
           </Field>
         </div>
-        {/* Optional start date — appears auto-filled when user dragged
-            across days in Timeline. Lets them tweak before saving. */}
-        {(startDate || prefillStart) && (
-          <Field label="Start date (drag-created task)">
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
-          </Field>
-        )}
       </div>
     </Modal>
   )
