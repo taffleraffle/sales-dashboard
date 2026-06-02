@@ -14420,6 +14420,56 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
 
 /* ─────────────────────── TIMELINE (Gantt-style) ─────────────────────── */
 
+function DateEditPopover({ popover, onClose, onSave, onFullEdit }) {
+  const [start, setStart] = useState(popover.startDate)
+  const [due, setDue] = useState(popover.dueDate)
+  const ref = useRef(null)
+  useEffect(() => {
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
+    const onKey  = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [onClose])
+  const left = Math.min(popover.x, window.innerWidth - 256)
+  const top  = Math.min(popover.y, window.innerHeight - 180)
+  const inp  = { display: 'block', width: '100%', marginTop: 3, padding: '5px 8px',
+                 background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3,
+                 fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)', boxSizing: 'border-box' }
+  return (
+    <div ref={ref} style={{
+      position: 'fixed', left, top, zIndex: 1200, width: 236,
+      background: 'var(--paper)', border: '1px solid var(--rule)',
+      borderRadius: 4, padding: 14, boxShadow: '0 4px 16px rgba(0,0,0,0.28)',
+    }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                    color: 'var(--ink-3)', marginBottom: 10,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {popover.task.creative_name || 'Set dates'}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <label style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+          Start date<input type="date" value={start} onChange={e => setStart(e.target.value)} style={inp} />
+        </label>
+        <label style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+          Due date<input type="date" value={due} onChange={e => setDue(e.target.value)} style={inp} />
+        </label>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button onClick={() => onSave(start, due)}
+          style={{ flex: 1, padding: '6px 0', background: 'var(--ink)', color: 'var(--paper)',
+                   border: 'none', borderRadius: 3, fontFamily: 'var(--mono)', fontSize: 11,
+                   fontWeight: 600, cursor: 'pointer', letterSpacing: '0.06em' }}>Save</button>
+        <button onClick={onFullEdit}
+          style={{ padding: '6px 10px', background: 'transparent', color: 'var(--ink-3)',
+                   border: '1px solid var(--rule)', borderRadius: 3, fontFamily: 'var(--mono)',
+                   fontSize: 10, cursor: 'pointer' }}>Full edit</button>
+      </div>
+    </div>
+  )
+}
+
 function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment, onAddTask }) {
   const [range, setRange] = useState(() => {
     try { return localStorage.getItem('queue.timelineRange') || 'month' } catch { return 'month' }
@@ -14442,6 +14492,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
   // checked in the bar's onClick to suppress the post-mouseup "click"
   // event that would otherwise open the EditTaskModal.
   const justResizedRef = useRef(false)
+  const [datePopover, setDatePopover] = useState(null)
   const tasksById = useMemo(() => Object.fromEntries(tasks.map(t => [t.task_id, t])), [tasks])
   const draggingTask = draggingTaskId ? tasksById[draggingTaskId] : null
 
@@ -14450,6 +14501,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
     e.dataTransfer.setData('text/plain', task.task_id)
     e.dataTransfer.effectAllowed = 'move'
     setDraggingTaskId(task.task_id)
+    setDatePopover(null)
   }
   const handleTaskDragEnd = () => {
     setDraggingTaskId(null)
@@ -14902,12 +14954,16 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                   return (
                     <div key={t.task_id}
                       data-task-bar="true"
-                      onClick={() => {
-                        // Suppress the click that fires right after a resize
-                        // mouseup — otherwise releasing the resize handle
-                        // opens the modal every time.
+                      onClick={(e) => {
                         if (isResizing || justResizedRef.current) return
-                        onEdit?.(t)
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setDatePopover({
+                          task: t,
+                          x: rect.left,
+                          y: rect.bottom + 6,
+                          startDate: t.assigned_at ? t.assigned_at.slice(0, 10) : '',
+                          dueDate: t.due_date || '',
+                        })
                       }}
                       draggable={!!(onMoveEditor || onUpdateAssignment) && !isResizing}
                       onDragStart={(e) => handleTaskDragStart(e, t)}
@@ -14996,6 +15052,21 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
         })}
       </div>
       </div>
+      {datePopover && (
+        <DateEditPopover
+          popover={datePopover}
+          onClose={() => setDatePopover(null)}
+          onSave={(newStart, newDue) => {
+            const patch = {}
+            const oldStart = datePopover.task.assigned_at ? datePopover.task.assigned_at.slice(0, 10) : ''
+            if (newStart !== oldStart) patch.assignedAt = newStart
+            if (newDue !== (datePopover.task.due_date || '')) patch.dueDate = newDue
+            if (Object.keys(patch).length) onUpdateAssignment?.(datePopover.task, patch)
+            setDatePopover(null)
+          }}
+          onFullEdit={() => { onEdit?.(datePopover.task); setDatePopover(null) }}
+        />
+      )}
     </div>
   )
 }

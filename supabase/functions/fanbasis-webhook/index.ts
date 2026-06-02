@@ -16,27 +16,38 @@ serve(async (req) => {
 
     const payload = await req.json()
 
-    // Parse Fanbasis payload structure: buyer, item, subscription nested objects
-    const buyer = payload.buyer || {}
-    const item = payload.item || {}
-    const sub = payload.subscription || {}
+    // Fanbasis wraps the real payload in `data` for current webhook events
+    // (payment.succeeded, subscription.renewed, product.purchased). Older
+    // events posted fields at the root, so we fall back to the root.
+    // Without this, every field below resolves to undefined and we'd write
+    // a row with amount=0 / email=null / matched=false.
+    const core = (payload && typeof payload.data === 'object' && payload.data) ? payload.data : payload
+    const buyer = core.buyer || {}
+    const item = core.item || {}
+    const sub = core.subscription || {}
 
-    const amount = parseFloat(payload.total_price || payload.unit_price || payload.amount || 0)
-    const fee = parseFloat(payload.application_fee_amount || 0) || Number((amount * 0.035).toFixed(2))
+    const amount = parseFloat(core.total_price || core.unit_price || core.amount || 0)
+    const fee = parseFloat(core.application_fee_amount || 0) || Number((amount * 0.035).toFixed(2))
     const netAmount = Number((amount - fee).toFixed(2))
-    const email = buyer.email || payload.email || payload.customer_email || null
-    const name = buyer.name || payload.name || payload.customer_name || null
-    const phone = buyer.phone || payload.phone || null
-    const eventId = payload.payment_id || payload.id || `fanbasis_${Date.now()}`
-    const paymentDate = payload.created_at || payload.payment_date || new Date().toISOString()
+    const email = buyer.email || core.email || core.customer_email || null
+    const name = buyer.name || core.name || core.customer_name || null
+    const phone = buyer.phone || core.phone || null
+    // Dedupe across the multiple events Fanbasis fires per payment (e.g.
+    // payment.succeeded + subscription.renewed both carry the same payment_id):
+    // use payment_id as source_event_id so the upsert collapses them to one row.
+    const eventId = core.payment_id || payload.payment_id || payload.id || `fanbasis_${Date.now()}`
+    const paymentDate = core.created_at || core.payment_date || payload.created_at || new Date().toISOString()
+    const eventType = payload.type || payload.event_type || core.event_type || null
+    const currency = String(core.currency || payload.currency || 'USD').toUpperCase()
+    const description = core.description || payload.description || item.title || payload.product_name || null
 
     // Match to client
     const { clientId, matched } = await matchPaymentToClient(
       supabase, email, phone, name, ghlApiKey, ghlLocationId
     )
 
-    const itemTitle = (item.title || payload.description || '').toLowerCase()
-    const isSubscription = item.type === 'subscription' || !!sub.id
+    const itemTitle = String(item.title || core.description || description || '').toLowerCase()
+    const isSubscription = item.type === 'subscription' || !!sub.id || core.payment_type === 'subscription'
     const paymentType = itemTitle.includes('trial') ? 'trial'
       : itemTitle.includes('pif') || itemTitle.includes('pay in full') ? 'pif'
       : isSubscription ? 'monthly'
@@ -46,12 +57,12 @@ serve(async (req) => {
       source: 'fanbasis',
       source_event_id: eventId,
       amount, fee, net_amount: netAmount,
-      currency: (payload.currency || 'USD').toUpperCase(),
+      currency,
       customer_email: email, customer_name: name,
       payment_date: paymentDate,
       payment_type: paymentType,
-      description: payload.description || payload.product_name || null,
-      metadata: payload,
+      description,
+      metadata: { ...payload, _event_type: eventType },
       client_id: clientId, matched,
     }, { onConflict: 'source_event_id' }).select('id').single()
 

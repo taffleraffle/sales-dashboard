@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { Loader, LogIn, Eye, EyeOff, BarChart3, ArrowLeft, Mail } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 export default function LoginPage() {
   const { isAuthenticated, isLoading, signIn } = useAuth()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -22,7 +23,17 @@ export default function LoginPage() {
     )
   }
 
-  if (isAuthenticated) return <Navigate to="/sales" replace />
+  // ProtectedRoute stashes the URL the user originally tried to hit
+  // (incl. ?creative=<id>) on location.state.from. After successful auth
+  // we bounce them back there so shared deep-links survive the login wall.
+  // Only honor in-app paths — guard against open-redirect via /\\ checks.
+  if (isAuthenticated) {
+    const from = location.state?.from
+    const target = from?.pathname?.startsWith('/') && !from.pathname.startsWith('//')
+      ? `${from.pathname}${from.search || ''}${from.hash || ''}`
+      : '/sales'
+    return <Navigate to={target} replace />
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()

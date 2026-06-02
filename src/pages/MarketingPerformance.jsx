@@ -1603,17 +1603,23 @@ async function fetchAdspend({ from, to, audiences } = {}) {
 // kind is in this map get a historical trend chart at the top of their
 // drilldown modal with week/month + range filtering.
 const TREND_METRIC_BY_KIND = {
-  live:      'live',
-  closes:    'closes',
-  closerate: 'closerate',
-  bookings:  'bookings',
-  qbookings: 'qbookings',
-  leads:     'leads',
-  cpl:       'cpl',
-  cpb:       'cpb',
-  cpqb:      'cpqb',
-  cpnew:     'cpnew',
-  cpatrial:  'cpatrial',
+  live:       'live',
+  closes:     'closes',
+  closerate:  'closerate',
+  bookings:   'bookings',
+  qbookings:  'qbookings',
+  leads:      'leads',
+  cpl:        'cpl',
+  cpb:        'cpb',
+  cpqb:       'cpqb',
+  cpnew:      'cpnew',
+  // NOTE: the drilldown kind is `cpaTrial` (camelCase) on the page.
+  // Without this exact-case key the trend chart silently never rendered.
+  cpaTrial:   'cpatrial',
+  adspend:    'adspend',
+  showrate:   'showrate',    // panel renders Gross | Net variants
+  noshows:    'noshow_rate',
+  ascensions: 'ascensions',
 }
 
 const DRILLDOWN_CONFIG = {

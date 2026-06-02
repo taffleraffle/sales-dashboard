@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Component, Suspense, lazy, useState, useCallback } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Layout from './components/Layout'
@@ -154,6 +154,7 @@ function PageSkeleton() {
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, isLoading, needsPasswordSetup, isEditor } = useAuth()
+  const location = useLocation()
 
   if (isLoading) {
     return (
@@ -163,8 +164,15 @@ function ProtectedRoute({ children }) {
     )
   }
 
-  if (!isAuthenticated) return <Navigate to="/login" replace />
+  // Pass the original path + query as state so LoginPage can land the user
+  // back on the deep-link (e.g. ?creative=<id> opens the detail modal) after
+  // they sign in. Without this, shared links from the failed-uploads sheet
+  // and Sentinel just dump people on /sales.
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace state={{ from: location }} />
+  }
   if (needsPasswordSetup) return <SetPasswordPage />
+
   // Creative-team editors are scoped to /editor-view only. If they land
   // on a /sales/* route (typed directly, bookmarked, or accidentally
   // clicked) we boot them back to the editor portal so they don't see

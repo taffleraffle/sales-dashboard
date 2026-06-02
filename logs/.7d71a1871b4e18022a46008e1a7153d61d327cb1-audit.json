@@ -1,0 +1,55 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "C:\\Users\\Ben\\sales-dashboard\\logs\\.7d71a1871b4e18022a46008e1a7153d61d327cb1-audit.json",
+    "files": [
+        {
+            "date": 1779436769901,
+            "name": "C:\\Users\\Ben\\sales-dashboard\\logs\\mcp-puppeteer-2026-05-22.log",
+            "hash": "d1cb8988dd24c270fef26942583b1b94195cef28d158e290f77571e4a0b25b8c"
+        },
+        {
+            "date": 1779485729214,
+            "name": "C:\\Users\\Ben\\sales-dashboard\\logs\\mcp-puppeteer-2026-05-23.log",
+            "hash": "c420cad7c8ab4fda9b92cab9dfa2049438933c1f543017420e08877a4eb108f9"
+        },
+        {
+            "date": 1779595109388,
+            "name": "C:\\Users\\Ben\\sales-dashboard\\logs\\mcp-puppeteer-2026-05-24.log",
+            "hash": "cdd8d85a25ba050ed08a79078149d3ed935286ae8ce83c1bdaf38e9b12762b06"
+        },
+        {
+            "date": 1779785173769,
+            "name": "C:\\Users\\Ben\\sales-dashboard\\logs\\mcp-puppeteer-2026-05-26.log",
+            "hash": "560f5f32cc440d258ca34e2456dfdb2ebede0d42413a6abf6e5735025cf35c92"
+        },
+        {
+            "date": 1779800772432,
+            "name": "C:\\Users\\Ben\\sales-dashboard\\logs\\mcp-puppeteer-2026-05-27.log",
+            "hash": "231d431c1e386fc7ee94d92930c50343757884937ea9e0ce9b2636da5a91a475"
+        },
+        {
+            "date": 1779971047959,
+            "name": "C:\\Users\\Ben\\sales-dashboard\\logs\\mcp-puppeteer-2026-05-29.log",
+            "hash": "b4b172de6e8d67d33036dd6952bc0c6ab2f0eac751a05642546aa84c89eb8cfa"
+        },
+        {
+            "date": 1780199485292,
+            "name": "C:\\Users\\Ben\\sales-dashboard\\logs\\mcp-puppeteer-2026-05-31.log",
+            "hash": "18cb1db73aac905434c93940b3844ecc8dec37931f2cd7c2a50868bf175a7cc5"
+        },
+        {
+            "date": 1780310735497,
+            "name": "C:\\Users\\Ben\\sales-dashboard\\logs\\mcp-puppeteer-2026-06-01.log",
+            "hash": "93f2c559c53d6dceffc503297a7a27d797d037b420c15e7cb251add90f8f4c46"
+        },
+        {
+            "date": 1780388663909,
+            "name": "C:\\Users\\Ben\\sales-dashboard\\logs\\mcp-puppeteer-2026-06-02.log",
+            "hash": "0be6f1af06e172c7f742d80d18b8b268924b7c4a8652a9b926f53bd9a31f7e6c"
+        }
+    ],
+    "hashType": "sha256"
+}
