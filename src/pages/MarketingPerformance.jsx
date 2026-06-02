@@ -4,6 +4,7 @@ import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketin
 import { useCloserCallProspectMetrics } from '../hooks/useCloserCallProspectMetrics'
 import { useAudiences } from '../hooks/useAudiences'
 import EditorialDate from '../components/EditorialDate'
+import MetricTrendPanel from '../components/marketing/MetricTrendPanel'
 import DateRangeSelector from '../components/DateRangeSelector'
 import SyncStatusIndicator from '../components/SyncStatusIndicator'
 import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check } from 'lucide-react'
@@ -1598,6 +1599,23 @@ async function fetchAdspend({ from, to, audiences } = {}) {
     }))
 }
 
+// Drilldown `kind` → metric key in MetricTrendPanel. Tiles whose drilldown
+// kind is in this map get a historical trend chart at the top of their
+// drilldown modal with week/month + range filtering.
+const TREND_METRIC_BY_KIND = {
+  live:      'live',
+  closes:    'closes',
+  closerate: 'closerate',
+  bookings:  'bookings',
+  qbookings: 'qbookings',
+  leads:     'leads',
+  cpl:       'cpl',
+  cpb:       'cpb',
+  cpqb:      'cpqb',
+  cpnew:     'cpnew',
+  cpatrial:  'cpatrial',
+}
+
 const DRILLDOWN_CONFIG = {
   live: {
     title: 'Net New Calls',
@@ -1688,6 +1706,23 @@ const DRILLDOWN_CONFIG = {
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
     ],
     emptyMsg: 'No qualified bookings in this window.',
+  },
+  // Close Rate, Show Rate etc. don't have a meaningful row list — the
+  // chart IS the drilldown. fetcher returns the close drilldown rows so
+  // the operator can scan which closes drove the rate.
+  closerate: {
+    title: 'Close Rate',
+    subtitle: 'NC closes ÷ NC lives · click bars to inspect the underlying calls',
+    fetcher: fetchCloses,
+    chart: null,
+    columns: [
+      { key: 'date', label: 'Date', cls: 'tabular-nums' },
+      { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
+      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
+      { key: 'cash', label: 'Cash', align: 'right', render: r => r.cash ? `$${parseFloat(r.cash).toLocaleString()}` : '—' },
+    ],
+    emptyMsg: 'No closes in this window.',
   },
   rc: {
     title: 'Reschedules + Cancellations',
@@ -2419,6 +2454,16 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
           <button onClick={onClose} className="text-text-400 hover:text-text-primary"><X size={18} /></button>
         </div>
         <div className="flex-1 overflow-y-auto">
+          {/* Historical trend (week/month + range presets + hover). Shows for
+              every kind that maps to a metric in MetricTrendPanel. Pulls
+              lib_marketing_by_audience_daily once, aggregates client-side. */}
+          {TREND_METRIC_BY_KIND[kind] && (
+            <MetricTrendPanel
+              metric={TREND_METRIC_BY_KIND[kind]}
+              selectedAudiences={selectedAudiences}
+              height={320}
+            />
+          )}
           {rows == null && <div className="p-6 text-center text-text-400 text-xs">{config.slowFirstLoad ? 'Fetching from GHL — may take a few seconds…' : 'Loading…'}</div>}
           {rows != null && rows.length === 0 && <div className="p-6 text-center text-text-400 text-xs">{config.emptyMsg}</div>}
           {rows != null && rows.length > 0 && config.chart && (
@@ -4122,7 +4167,7 @@ export default function MarketingPerformance() {
         <KPI label="Offer Rate" value={stats.offer_rate} format="%" benchmark={bm.offer_rate} trailing={stats30.offer_rate} prev={sp.offer_rate} whatIf={gated(upstream.offers, wf?.offer_rate)} tip="Offers / Net Live (NC + FU)" />
         <KPI label="Cost Per Offer" value={stats.cost_per_offer} format="$" prev={sp.cost_per_offer} whatIf={gated(upstream.offers, wf?.cost_per_offer)} tip="Adspend / Offers" />
         <KPI label="Total Closes" value={stats.closes} format="n" prev={sp.closes} whatIf={gated(upstream.closes, wf?.closes)} tip="Deals closed (trial sign-ups). Click to view." onClick={() => setDrilldown('closes')} />
-        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={gated(upstream.closes, wf?.close_rate)} tip="Closes ÷ Live New Calls. Follow-ups and ascensions excluded from denominator." />
+        <KPI label="Close Rate" value={stats.close_rate} format="%" benchmark={bm.close_rate} trailing={stats30.close_rate} prev={sp.close_rate} whatIf={gated(upstream.closes, wf?.close_rate)} tip="Closes ÷ Live New Calls. Follow-ups and ascensions excluded from denominator. Click for historical trend." onClick={() => setDrilldown('closerate')} />
         <KPI label="CPA (Trial)" value={stats.cpa_trial} format="$" benchmark={bm.cpa_trial} trailing={stats30.cpa_trial} prev={sp.cpa_trial} whatIf={gated(upstream.closes, wf?.cpa_trial)} tip="Cost Per Acquisition = Adspend / Closes. Click for daily CPA trend." onClick={() => setDrilldown('cpaTrial')} />
       </Section>
 
