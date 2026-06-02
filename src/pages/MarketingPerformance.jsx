@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransitio
 import { Link } from 'react-router-dom'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { useCloserCallProspectMetrics } from '../hooks/useCloserCallProspectMetrics'
+import { useAudiences } from '../hooks/useAudiences'
 import EditorialDate from '../components/EditorialDate'
 import DateRangeSelector from '../components/DateRangeSelector'
 import SyncStatusIndicator from '../components/SyncStatusIndicator'
@@ -2649,6 +2650,13 @@ function ResolveDupeModal({ group, onClose, onResolved }) {
 // ── Main Page ──────────────────────────────────────────────────────
 export default function MarketingPerformance() {
   const { entries, benchmarks, loading, upsertEntry, upsertMany, updateBenchmark, deleteEntry, reload } = useMarketingTracker()
+  // Self-service audiences (audience_definitions table). Adding "Dentists"
+  // in Settings → Audiences makes a Dentists tab appear here automatically;
+  // the whole resolution chain (lib_ad_audience, lib_strategy_booking_resolved,
+  // lib_closer_call_audience, lib_close_audience, lib_marketing_by_audience_daily)
+  // already buckets by audience name, so tiles + drilldowns light up with
+  // zero code changes per audience.
+  const { audiences: audienceDefs } = useAudiences()
   const [range, setRange] = useState(30)
   const [showAddEntry, setShowAddEntry] = useState(false)
   const [showBenchmarks, setShowBenchmarks] = useState(false)
@@ -3136,20 +3144,20 @@ export default function MarketingPerformance() {
   // when zero entries match in the current window — Ben wants them always
   // visible/clickable as filters, not popping in and out by date range
   // (request 2026-05-31).
-  const CANONICAL_AUDIENCES = ['Restoration', 'Electricians', 'Accounting']
+  // Audience list = every active row in audience_definitions, sorted by
+  // spend desc within the current window. Any audience added via Settings
+  // → Audiences appears here on next render — no hardcoded list to maintain.
   const audienceList = useMemo(() => {
+    const fromTable = (audienceDefs || []).filter(a => a.is_active !== false).map(a => a.display_name)
     const totals = {}
+    for (const name of fromTable) totals[name] = 0
     for (const e of entries || []) {
       const a = audienceForEntry(e, audienceOverrides)
-      totals[a] = (totals[a] || 0) + Number(e.adspend || 0)
-    }
-    // Pin canonical audiences with 0 spend so they appear at the end if
-    // currently empty, but immediately re-sort to the top when data lands.
-    for (const a of CANONICAL_AUDIENCES) {
-      if (!(a in totals)) totals[a] = 0
+      if (a in totals) totals[a] += Number(e.adspend || 0)
+      else totals[a] = Number(e.adspend || 0)  // catch any audience that exists in data but not in table
     }
     return Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([a]) => a)
-  }, [entries, audienceOverrides])
+  }, [entries, audienceOverrides, audienceDefs])
 
   // Single source of truth: audienceDaily (= lib_marketing_by_audience_daily
   // aggregating ad_daily_stats truth + typeform attribution chain). Used
