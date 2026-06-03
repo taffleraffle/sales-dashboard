@@ -1096,13 +1096,15 @@ async function fetchLiveCalls({ from, to, audiences } = {}) {
   if (reportIds.length === 0) return []
   const { data: callRows } = await supabase
     .from('closer_calls')
-    .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected')
+    .select('id, eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected')
     .in('eod_report_id', reportIds)
     .in('outcome', ['not_closed', 'closed'])
     .eq('call_type', 'new_call') // "Net New" = NEW CALLS only (no follow-ups, no ascensions)
   const rows = (callRows || [])
     .filter(c => prospectMatches(c.prospect_name, allowed))
     .map(c => ({
+      _id: c.id,
+      _kind: 'call',
       date: reportMap[c.eod_report_id]?.report_date,
       closer: reportMap[c.eod_report_id]?.closer?.name || '—',
       type: c.call_type,
@@ -1233,12 +1235,14 @@ async function fetchBookings({ from, to, audiences } = {}) {
   // window includes the full day (#6/#22 in code-review 2026-06-01).
   let q = supabase
     .from('lib_strategy_booking_resolved')
-    .select('contact_name, contact_email, calendar_name, booked_at, appointment_date, revenue_tier, is_dq, is_spam, audience, audience_source')
+    .select('id, contact_name, contact_email, calendar_name, booked_at, appointment_date, revenue_tier, is_dq, is_spam, audience, audience_source')
     .eq('is_spam', false)
     .gte('booked_at', from).lte('booked_at', `${to} 23:59:59`)
   if (wanted) q = q.in('audience', [...wanted])
   const { data } = await q
   return (data || []).map(r => ({
+    _id: r.id,
+    _kind: 'booking',
     booked: String(r.booked_at).split('T')[0],
     prospect: r.contact_name,
     revenue_tier: r.revenue_tier,
@@ -1429,7 +1433,7 @@ async function fetchLeads({ from, to, audiences } = {}) {
     // via ad_id (so we know each lead's audience). Then filter by the picked set.
     const { data } = await supabase
       .from('typeform_responses')
-      .select('submitted_at, first_name, last_name, email, phone, form_name, utm_campaign, ad_id')
+      .select('response_id, submitted_at, first_name, last_name, email, phone, form_name, utm_campaign, ad_id')
       .gte('submitted_at', sinceTs).lte('submitted_at', untilTs)
       .order('submitted_at', { ascending: false })
     if (!data?.length) return []
@@ -1443,15 +1447,24 @@ async function fetchLeads({ from, to, audiences } = {}) {
         .in('ad_id', adIds)
       for (const r of (aaRows || [])) audMap[r.ad_id] = r.audience
     }
+    // Hygiene flags (spam / duplicate detection — migration 137).
+    const { data: flagRows } = await supabase
+      .from('lib_lead_hygiene_flags')
+      .select('response_id, any_flag')
+      .gte('submitted_at', sinceTs).lte('submitted_at', untilTs)
+    const flagMap = Object.fromEntries((flagRows || []).map(f => [f.response_id, f.any_flag]))
     const wanted = audiences
     return data
       .map(r => ({
+        _id: r.response_id,
+        _kind: 'lead',
         created: (r.submitted_at || '').split('T')[0],
         name: [r.first_name, r.last_name].filter(Boolean).join(' ') || '—',
         email: r.email || '—',
         phone: r.phone || '—',
         source: r.form_name || r.utm_campaign || 'Typeform',
         audience: audMap[r.ad_id] || 'Unknown',
+        flag: flagMap[r.response_id] || null,
       }))
       .filter(r => wanted.has(r.audience))
       .sort((a, b) => (b.created || '').localeCompare(a.created || ''))
@@ -1599,6 +1612,85 @@ async function fetchAdspend({ from, to, audiences } = {}) {
     }))
 }
 
+// ── Row Actions ───────────────────────────────────────────────────────
+// DQ / Mark spam / Remove for a single drilldown row. Writes go to the
+// exclusion tables (migration 137): lead_excluded, booking_excluded,
+// closer_call_excluded. The underlying audience view (lib_marketing_by
+// _audience_daily) honours all three on its next read so KPI tiles + the
+// trend panel drop the row from the next aggregation.
+//
+// Reasons we expose:
+//   spam       — the prospect is junk (proton.me / test@ / null email)
+//   duplicate  — same person already counted via another row
+//   dq         — disqualify (manual operator judgement)
+//   remove     — silent delete (test entry, wrong audience, junk EOD line)
+function RowActions({ row, onActioned }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  if (!row?._id || !row?._kind) return null
+
+  const apply = async (reason) => {
+    if (busy) return
+    setBusy(true); setErr(null)
+    try {
+      const table = row._kind === 'lead'    ? 'lead_excluded'
+                  : row._kind === 'booking' ? 'booking_excluded'
+                  : 'closer_call_excluded'
+      const idCol = row._kind === 'lead'    ? 'response_id'
+                  : row._kind === 'booking' ? 'booking_id'
+                  : 'closer_call_id'
+      const payload = { [idCol]: row._id, reason }
+      // booking_excluded has an `action` column too (dq vs remove vs spam)
+      if (row._kind === 'booking') payload.action = reason === 'spam' ? 'spam' : reason === 'dq' ? 'dq' : 'remove'
+      const { error } = await supabase.from(table).upsert(payload, { onConflict: idCol })
+      if (error) throw error
+      onActioned?.(row._id, reason)
+    } catch (e) {
+      setErr(e.message || 'failed')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
+      <button title="Mark as spam"
+              onClick={() => apply('spam')}
+              disabled={busy}
+              className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-border-default hover:border-orange-400 hover:text-orange-400 transition-colors">
+        spam
+      </button>
+      <button title="Mark as duplicate"
+              onClick={() => apply('duplicate')}
+              disabled={busy}
+              className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-border-default hover:border-yellow-400 hover:text-yellow-400 transition-colors">
+        dup
+      </button>
+      {row._kind === 'booking' && (
+        <button title="Disqualify booking"
+                onClick={() => apply('dq')}
+                disabled={busy}
+                className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-border-default hover:border-text-primary hover:text-text-primary transition-colors">
+          DQ
+        </button>
+      )}
+      <button title="Remove entirely (won't count)"
+              onClick={() => apply(row._kind === 'booking' ? 'remove' : 'manual')}
+              disabled={busy}
+              className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-border-default hover:border-red-400 hover:text-red-400 transition-colors">
+        remove
+      </button>
+      {err && <span className="text-[9px] text-red-400 ml-1">{err}</span>}
+    </div>
+  )
+}
+
+const ROW_ACTIONS_COL = {
+  key: '_actions',
+  label: 'Actions',
+  align: 'right',
+  render: (row, ctx) => <RowActions row={row} onActioned={ctx?.onActioned} />,
+}
+
 // Drilldown `kind` → metric key in MetricTrendPanel. Tiles whose drilldown
 // kind is in this map get a historical trend chart at the top of their
 // drilldown modal with week/month + range filtering.
@@ -1639,6 +1731,7 @@ const DRILLDOWN_CONFIG = {
       { key: 'outcome', label: 'Outcome', render: r => <span className={r.outcome === 'closed' ? 'text-success' : 'text-text-secondary'}>{r.outcome}</span> },
       { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
       { key: 'cash', label: 'Cash', align: 'right', render: r => r.cash ? `$${parseFloat(r.cash).toLocaleString()}` : '—' },
+      ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No live calls logged in this window. Closers may have filed aggregate-only EODs without per-row data.',
   },
@@ -1655,6 +1748,7 @@ const DRILLDOWN_CONFIG = {
       { key: 'is_dq', label: 'Type', render: r => r.is_dq
         ? <span className="text-orange-400 text-[10px] uppercase">DQ</span>
         : <span className="text-success text-[10px] uppercase">Qual</span> },
+      ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No strategy bookings in this window.',
   },
@@ -1668,6 +1762,7 @@ const DRILLDOWN_CONFIG = {
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
       { key: 'revenue_tier', label: 'Revenue', render: r => r.revenue_tier || '—' },
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
+      ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No qualified bookings in this window.',
   },
@@ -1807,15 +1902,20 @@ const DRILLDOWN_CONFIG = {
   },
   leads: {
     title: 'Leads',
-    subtitle: 'New opportunities in SCIO USA pipeline (created in this window)',
+    subtitle: 'New opportunities in SCIO USA pipeline (created in this window). Yellow ⚑ = spam-pattern or duplicate flagged by lib_lead_hygiene_flags.',
     fetcher: fetchLeads,
     chart: { dateKey: 'created', label: 'Leads per day' },
     columns: [
       { key: 'created', label: 'Date', cls: 'tabular-nums' },
-      { key: 'name', label: 'Name', cls: 'text-text-primary' },
+      { key: 'name', label: 'Name', cls: 'text-text-primary',
+        render: r => <span className="flex items-center gap-1.5">
+          {r.flag && <span title={`Flagged: ${r.flag.replace(/_/g,' ')}`} className="text-yellow-400 text-[10px]">⚑</span>}
+          <span>{r.name}</span>
+        </span> },
       { key: 'email', label: 'Email', cls: 'text-text-400 text-[10px]' },
       { key: 'phone', label: 'Phone', cls: 'text-text-400 text-[10px]' },
       { key: 'source', label: 'Source', cls: 'text-text-400 text-[10px]' },
+      ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No leads in this window.',
   },
@@ -2428,7 +2528,10 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
 function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }) {
   const config = DRILLDOWN_CONFIG[kind]
   const [rows, setRows] = useState(null)
-  // Stable key for the audience set so the effect re-runs when filter changes.
+  // True once the operator has performed at least one RowActions write.
+  // Passed up to onClose so the parent can bump its hygieneRefetchKey and
+  // re-read the audience view with the exclusion-honouring numbers.
+  const mutatedRef = useRef(false)
   const audKey = selectedAudiences ? [...selectedAudiences].sort().join('|') : ''
   useEffect(() => {
     if (!config) return
@@ -2441,6 +2544,8 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
     return () => { cancelled = true }
   }, [kind, range, audKey, config])
 
+  const handleClose = () => onClose(mutatedRef.current)
+
   if (!config) return null
 
   const rangeLabel = range === 'mtd'
@@ -2450,14 +2555,14 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
       : `Last ${range}d`
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={handleClose}>
       <div className="bg-bg-card border border-border-default rounded-sm max-w-4xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border-default">
           <div>
             <h2 className="text-sm font-semibold">{config.title}</h2>
             <p className="text-[10px] text-text-400">{rangeLabel} &middot; {config.subtitle}</p>
           </div>
-          <button onClick={onClose} className="text-text-400 hover:text-text-primary"><X size={18} /></button>
+          <button onClick={handleClose} className="text-text-400 hover:text-text-primary"><X size={18} /></button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {/* Historical trend (week/month + range presets + hover). Shows for
@@ -2497,10 +2602,10 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
               </thead>
               <tbody>
                 {rows.map((row, i) => (
-                  <tr key={i} className="border-b border-border-default/30">
+                  <tr key={row._id || i} className="border-b border-border-default/30 hover:bg-white/[0.02]">
                     {config.columns.map(c => (
                       <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.cls || ''}`}>
-                        {c.render ? c.render(row) : (row[c.key] ?? '—')}
+                        {c.render ? c.render(row, { onActioned: (id) => { mutatedRef.current = true; setRows(prev => (prev || []).filter(r => r._id !== id)) } }) : (row[c.key] ?? '—')}
                       </td>
                     ))}
                   </tr>
@@ -3177,6 +3282,9 @@ export default function MarketingPerformance() {
   // (Ben 2026-06-01: "When I click Restoration it says I have zero ad spend
   // for restoration. That just factually is not correct.")
   const [audienceDaily, setAudienceDaily] = useState([])
+  // Bumped after any RowActions mutation (DQ/Spam/Remove) so the audience
+  // view refetches + KPI tiles drop the excluded row's contribution.
+  const [hygieneRefetchKey, setHygieneRefetchKey] = useState(0)
   useEffect(() => {
     let alive = true
     supabase.from('lib_marketing_by_audience_daily').select('*').limit(2000)
@@ -3185,7 +3293,7 @@ export default function MarketingPerformance() {
         setAudienceDaily(data)
       })
     return () => { alive = false }
-  }, [])
+  }, [hygieneRefetchKey])
 
   // All distinct audiences present in the dataset, sorted by total spend
   // so the chip strip shows the heaviest audiences first. Includes
@@ -3250,28 +3358,26 @@ export default function MarketingPerformance() {
       const d = row.date
       if (!byDate[d]) byDate[d] = emptyRow(d)
       const r = byDate[d]
-      // adspend is NZD from ad_daily_stats — convert to USD for display.
-      // trial_revenue / trial_cash are already USD (closer EOD entry).
       r.adspend            += (Number(row.adspend) || 0) * NZD_TO_USD
       r.leads              += Number(row.leads) || 0
       r.qualified_bookings += Number(row.qualified_bookings) || 0
-      // live_calls is now sourced from lib_closer_call_audience NC count
-      // (matches the fetchLiveCalls drilldown one-for-one). When a filter
-      // is active this gives Electrician-only NC count = 2 instead of
-      // global EOD 4. When no filter, it gives the total across audiences.
       r.live_calls         += Number(row.live_calls) || 0
       r.new_live_calls     += Number(row.live_calls) || 0
-      // closes from the view (sourced via lib_close_audience with booking
-      // fallback so closes inherit their booking's audience when the
-      // typeform attribution missed).
       r.closes             += Number(row.closes) || 0
       r.trial_revenue      += Number(row.trial_revenue) || 0
       r.trial_cash         += Number(row.trial_cash) || 0
-      // Ascensions now from lib_closer_call_audience too (was global
-      // marketing_tracker.ascensions = 1 even when filtered to Electricians;
-      // John & Hector are Electricians but the lone ascension belonged to
-      // an Unknown-audience prospect, so Electricians filter shows 0).
       r.ascensions         += Number(row.ascensions) || 0
+      // Audience-aware show-rate components (migration 137). These columns
+      // now come out of lib_closer_call_audience filtered by audience, so
+      // an audience filter no longer leaves no_shows/reschedules/cancels
+      // pulling from the global marketing_tracker fall-through below.
+      r.no_shows           += Number(row.no_shows) || 0
+      r.reschedules        += Number(row.reschedules) || 0
+      // Split aggregate cancels into the two MT-style columns the
+      // downstream computeMarketingStats expects (cancelled_dtf +
+      // cancelled_by_prospect). Audience-truth doesn't distinguish, so
+      // park everything in cancelled_by_prospect.
+      r.cancelled_by_prospect += Number(row.cancels) || 0
     }
     // Layer in EOD-only KPIs from marketing_tracker — offers, ascensions,
     // refunds, no_shows, reschedules, etc. These are closer-self-reported
@@ -3305,10 +3411,17 @@ export default function MarketingPerformance() {
       byDate[d].finance_accepted    = Number(mt.finance_accepted) || 0
       byDate[d].monthly_offers      = Number(mt.monthly_offers) || 0
       byDate[d].monthly_accepted    = Number(mt.monthly_accepted) || 0
-      byDate[d].reschedules         = Number(mt.reschedules) || 0
-      byDate[d].no_shows            = Number(mt.no_shows) || 0
-      byDate[d].cancelled_dtf       = Number(mt.cancelled_dtf) || 0
-      byDate[d].cancelled_by_prospect = Number(mt.cancelled_by_prospect) || 0
+      // Show-rate components: when an audience filter is active, keep the
+      // values we folded from lib_marketing_by_audience_daily (audience-
+      // aware via lib_closer_call_audience, migration 137). Without a
+      // filter, fall through to marketing_tracker totals so the All view
+      // continues to match closer EOD numbers.
+      if (!wanted) {
+        byDate[d].reschedules         = Number(mt.reschedules) || 0
+        byDate[d].no_shows            = Number(mt.no_shows) || 0
+        byDate[d].cancelled_dtf       = Number(mt.cancelled_dtf) || 0
+        byDate[d].cancelled_by_prospect = Number(mt.cancelled_by_prospect) || 0
+      }
       byDate[d].net_new_calls       = Number(mt.net_new_calls) || 0
       byDate[d].net_fu_calls        = Number(mt.net_fu_calls) || 0
       byDate[d].net_live_calls      = Number(mt.net_live_calls) || 0
@@ -4282,7 +4395,7 @@ export default function MarketingPerformance() {
         for (const e of (entries || [])) {
           if (e.date) spendByDate[e.date] = parseFloat(e.adspend || 0)
         }
-        return <DrilldownModal kind={drilldown} range={range} onClose={() => setDrilldown(null)} spendByDate={spendByDate} selectedAudiences={selectedAudiences} />
+        return <DrilldownModal kind={drilldown} range={range} onClose={(mutated) => { setDrilldown(null); if (mutated) setHygieneRefetchKey(k => k + 1) }} spendByDate={spendByDate} selectedAudiences={selectedAudiences} />
       })()}
     </div>
   )

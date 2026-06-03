@@ -35,9 +35,12 @@ const METRIC_DEFS = {
   adspend:      { title: 'Ad Spend',                 fmt: '$', numKey: 'adspend' },
   ascensions:   { title: 'Ascensions',               fmt: 'n', numKey: 'ascensions' },
   // Show rate variants — denominator depends on variant.
-  showrate_gross: { title: 'Gross Show Rate', fmt: '%', numKey: 'live_calls', denKey: 'qualified_bookings', numLabel: 'lives', denLabel: 'booked', variantOf: 'showrate' },
-  showrate_net:   { title: 'Net Show Rate',   fmt: '%', numKey: 'live_calls', denKey: 'confirmed',          numLabel: 'lives', denLabel: 'confirmed', variantOf: 'showrate', needsConfirmed: true },
-  noshow_rate:    { title: 'No-Show Rate',    fmt: '%', numKey: 'no_shows',   denKey: 'qualified_bookings', numLabel: 'no-shows', denLabel: 'booked', needsAggregateOnly: true },
+  // Gross: live / qualified_bookings  (both audience-aware via view)
+  // Net:   live / (qualified_bookings - cancels - reschedules) — all three
+  //        now audience-aware via migration 137, no scaling hack.
+  showrate_gross: { title: 'Gross Show Rate', fmt: '%', numKey: 'live_calls', denKey: 'qualified_bookings',  numLabel: 'lives', denLabel: 'booked',    variantOf: 'showrate' },
+  showrate_net:   { title: 'Net Show Rate',   fmt: '%', numKey: 'live_calls', denKey: 'confirmed_audience', numLabel: 'lives', denLabel: 'confirmed', variantOf: 'showrate', needsAudienceConfirmed: true },
+  noshow_rate:    { title: 'No-Show Rate',    fmt: '%', numKey: 'no_shows',   denKey: 'qualified_bookings',  numLabel: 'no-shows', denLabel: 'booked' },
 }
 
 const VARIANT_GROUPS = {
@@ -106,7 +109,6 @@ export default function MetricTrendPanel({ metric, selectedAudiences, height = 3
   const def = METRIC_DEFS[activeMetric]
 
   const [daily, setDaily] = useState([])           // lib_marketing_by_audience_daily rows
-  const [confirmed, setConfirmed] = useState([])   // marketing_tracker date-level rows (for net show rate)
   const [busy, setBusy] = useState(true)
   const [err, setErr] = useState(null)
   const [granularity, setGranularity] = useState('week')
@@ -120,25 +122,20 @@ export default function MetricTrendPanel({ metric, selectedAudiences, height = 3
   useEffect(() => {
     let alive = true
     setBusy(true); setErr(null)
-    Promise.all([
-      supabase
-        .from('lib_marketing_by_audience_daily')
-        .select('date, audience, adspend, leads, qualified_bookings, live_calls, closes, trial_revenue, trial_cash, ascensions')
-        .order('date', { ascending: true })
-        .limit(20000),
-      // marketing_tracker is date-level (not audience). Pull cancels/reschedules so we can
-      // compute "confirmed bookings" (qualified_bookings - cancels - reschedules) for Net Show.
-      supabase
-        .from('marketing_tracker')
-        .select('date, qualified_bookings, cancelled_dtf, cancelled_by_prospect, reschedules, no_shows, adspend, new_live_calls')
-        .order('date', { ascending: true })
-        .limit(5000),
-    ]).then(([daily_r, mt_r]) => {
-      if (!alive) return
-      if (daily_r.error) { setErr(daily_r.error.message); return }
-      setDaily(daily_r.data || [])
-      setConfirmed(mt_r.data || [])
-    }).finally(() => { if (alive) setBusy(false) })
+    // All audience-aware columns (incl. no_shows, reschedules, cancels
+    // from migration 137). No marketing_tracker fallback needed any more
+    // — every metric variant computes from the audience view alone.
+    supabase
+      .from('lib_marketing_by_audience_daily')
+      .select('date, audience, adspend, leads, qualified_bookings, live_calls, closes, trial_revenue, trial_cash, ascensions, no_shows, reschedules, cancels')
+      .order('date', { ascending: true })
+      .limit(20000)
+      .then(({ data, error }) => {
+        if (!alive) return
+        if (error) { setErr(error.message); return }
+        setDaily(data || [])
+      })
+      .finally(() => { if (alive) setBusy(false) })
     return () => { alive = false }
   }, [])
 
@@ -177,61 +174,22 @@ export default function MetricTrendPanel({ metric, selectedAudiences, height = 3
       else                          cursor.setUTCDate(cursor.getUTCDate() + 7)
     }
     // Fold audience-daily rows into buckets
-    if (def.needsAggregateOnly) {
-      // no_shows lives ONLY in marketing_tracker, audience-blind
-      for (const r of confirmed) {
-        const d = parse(r.date)
-        if (d < fromDT || d > toDT) continue
-        const k = bucketKey(r.date, granularity)
-        if (!map.has(k)) map.set(k, { period: k, num: 0, den: 0 })
-        const b = map.get(k)
-        b.num += Number(r[def.numKey]) || 0
-        if (def.denKey) b.den += Number(r[def.denKey]) || 0
-      }
-    } else if (def.needsConfirmed) {
-      // Net show rate: numerator (live_calls) from audience-daily filtered, denom (confirmed)
-      // = qualified_bookings - cancels - reschedules from marketing_tracker (date-level).
-      // If an audience filter is active we PROPORTIONALLY scale the marketing_tracker confirmed
-      // count by the audience's share of total qualified_bookings on that day.
+    if (def.needsAudienceConfirmed) {
+      // Net show rate from the audience view directly: every column we need
+      // (live_calls, qualified_bookings, cancels, reschedules) is now
+      // audience-aware via migration 137. No date-level fallback / scaling.
       for (const r of daily) {
         if (wanted && !wanted.has(r.audience)) continue
         const d = parse(r.date)
         if (d < fromDT || d > toDT) continue
         const k = bucketKey(r.date, granularity)
         if (!map.has(k)) map.set(k, { period: k, num: 0, den: 0 })
-        map.get(k).num += Number(r.live_calls) || 0
-      }
-      // Sum total qualified_bookings per date for proportional scaling
-      const totalQBPerDate = new Map()
-      if (wanted) {
-        for (const r of daily) {
-          totalQBPerDate.set(r.date, (totalQBPerDate.get(r.date) || 0) + (Number(r.qualified_bookings) || 0))
-        }
-      }
-      const audQBPerDate = new Map()
-      if (wanted) {
-        for (const r of daily) {
-          if (!wanted.has(r.audience)) continue
-          audQBPerDate.set(r.date, (audQBPerDate.get(r.date) || 0) + (Number(r.qualified_bookings) || 0))
-        }
-      }
-      for (const r of confirmed) {
-        const d = parse(r.date)
-        if (d < fromDT || d > toDT) continue
-        const k = bucketKey(r.date, granularity)
-        if (!map.has(k)) continue
-        const qb     = Number(r.qualified_bookings) || 0
-        const cancels = (Number(r.cancelled_dtf) || 0) + (Number(r.cancelled_by_prospect) || 0)
+        const b = map.get(k)
+        b.num += Number(r.live_calls) || 0
+        const qb      = Number(r.qualified_bookings) || 0
+        const cancels = Number(r.cancels) || 0
         const resched = Number(r.reschedules) || 0
-        const conf    = Math.max(0, qb - cancels - resched)
-        if (wanted) {
-          const total = totalQBPerDate.get(r.date) || 0
-          const aud   = audQBPerDate.get(r.date) || 0
-          const share = total > 0 ? aud / total : 0
-          map.get(k).den += conf * share
-        } else {
-          map.get(k).den += conf
-        }
+        b.den += Math.max(0, qb - cancels - resched)
       }
     } else {
       // Standard path — sum numerator/denom from audience-daily
@@ -257,7 +215,7 @@ export default function MetricTrendPanel({ metric, selectedAudiences, height = 3
       }
       return { ...b, value }
     })
-  }, [daily, confirmed, def, granularity, rangeKey, customFrom, customTo, selectedAudiences])
+  }, [daily, def, granularity, rangeKey, customFrom, customTo, selectedAudiences])
 
   // 4-period trailing average
   const trailing = useMemo(() => buckets.map((row, i) => {
