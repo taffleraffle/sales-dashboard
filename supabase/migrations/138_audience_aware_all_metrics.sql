@@ -90,11 +90,35 @@ closer_d AS (
     AND NOT EXISTS (SELECT 1 FROM closer_call_excluded e WHERE e.closer_call_id = cca.closer_call_id)
   GROUP BY cca.report_date, cca.audience
 ),
-close_d AS (
+resolver_floor AS (
+  -- The earliest date the close resolver (lib_close_audience) has covered.
+  -- Pre-this date we backfill from marketing_tracker EOD aggregate so
+  -- historical context isn't silently lost in trend charts.
+  SELECT COALESCE(MIN(created_at::date), '2099-01-01'::date) AS d FROM lib_close_audience
+),
+close_d_src AS (
   SELECT ca.created_at::date AS date, ca.audience,
     count(*) AS closes, sum(ca.revenue) AS revenue, sum(ca.cash_collected) AS cash
   FROM lib_close_audience ca WHERE ca.audience <> 'Referral'::text
   GROUP BY (ca.created_at::date), ca.audience
+  UNION ALL
+  -- Pre-resolver: closer EOD aggregate as Unknown audience. No per-call
+  -- audience attribution available -- the closes happened, we just can't
+  -- split them by audience. Better to surface than to silently drop.
+  SELECT mt.date,
+         'Unknown'::text AS audience,
+         mt.closes::bigint,
+         mt.trial_revenue::numeric AS revenue,
+         mt.trial_cash::numeric AS cash
+  FROM marketing_tracker mt, resolver_floor f
+  WHERE mt.date < f.d AND (COALESCE(mt.closes, 0) > 0 OR COALESCE(mt.trial_cash, 0) > 0)
+),
+close_d AS (
+  SELECT date, audience,
+    SUM(closes)::bigint AS closes,
+    SUM(revenue)::numeric AS revenue,
+    SUM(cash)::numeric AS cash
+  FROM close_d_src GROUP BY date, audience
 ),
 all_keys AS (
   SELECT date, audience FROM spend_d UNION

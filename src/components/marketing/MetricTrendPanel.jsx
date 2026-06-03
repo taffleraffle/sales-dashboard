@@ -118,7 +118,11 @@ export default function MetricTrendPanel({ metric, selectedAudiences, height = 3
   const [busy, setBusy] = useState(true)
   const [err, setErr] = useState(null)
   const [granularity, setGranularity] = useState('week')
-  const [rangeKey, setRangeKey] = useState('90d')
+  // Default to 1yr so the chart surfaces full historical context (ad spend
+  // history goes back to May 2025). Operators were defaulting to "the
+  // dashboard only has March data" -- it doesn't, the 90d default just
+  // happened to start in March 2026.
+  const [rangeKey, setRangeKey] = useState('365d')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const svgRef = useRef(null)
