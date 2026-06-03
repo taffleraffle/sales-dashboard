@@ -32,8 +32,14 @@ const METRIC_DEFS = {
   revenue:      { title: 'Trial Contracted Revenue', fmt: '$', numKey: 'trial_revenue' },
   cash:         { title: 'Trial Cash Collected',     fmt: '$', numKey: 'trial_cash' },
   roas:         { title: 'Trial FE Cash ROAS',       fmt: 'x', numKey: 'trial_cash',        denKey: 'adspend',            numLabel: 'cash',  denLabel: 'spend' },
-  adspend:      { title: 'Ad Spend',                 fmt: '$', numKey: 'adspend' },
-  ascensions:   { title: 'Ascensions',               fmt: 'n', numKey: 'ascensions' },
+  adspend:        { title: 'Ad Spend',               fmt: '$', numKey: 'adspend' },
+  ascensions:     { title: 'Ascensions',             fmt: 'n', numKey: 'ascensions' },
+  ascensions_closed: { title: 'Ascensions Closed',   fmt: 'n', numKey: 'ascensions_closed' },
+  ascend_cash:    { title: 'Ascension Cash',         fmt: '$', numKey: 'ascend_cash' },
+  ascend_revenue: { title: 'Ascension Revenue',      fmt: '$', numKey: 'ascend_revenue' },
+  finance_offers: { title: 'Finance Offers',         fmt: 'n', numKey: 'finance_offers' },
+  net_live_calls: { title: 'Net Live (NC+FU)',       fmt: 'n', numKey: 'net_live_calls' },
+  fu_lives:       { title: 'Follow-up Lives',        fmt: 'n', numKey: 'fu_lives' },
   // Show rate variants — denominator depends on variant.
   // Gross: live / qualified_bookings  (both audience-aware via view)
   // Net:   live / (qualified_bookings - cancels - reschedules) — all three
@@ -127,7 +133,7 @@ export default function MetricTrendPanel({ metric, selectedAudiences, height = 3
     // — every metric variant computes from the audience view alone.
     supabase
       .from('lib_marketing_by_audience_daily')
-      .select('date, audience, adspend, leads, qualified_bookings, live_calls, closes, trial_revenue, trial_cash, ascensions, no_shows, reschedules, cancels')
+      .select('date, audience, adspend, leads, qualified_bookings, live_calls, closes, trial_revenue, trial_cash, ascensions, ascensions_closed, ascend_cash, ascend_revenue, no_shows, reschedules, cancels, net_live_calls, fu_lives, finance_offers')
       .order('date', { ascending: true })
       .limit(20000)
       .then(({ data, error }) => {

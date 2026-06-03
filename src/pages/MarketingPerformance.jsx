@@ -1712,6 +1712,14 @@ const TREND_METRIC_BY_KIND = {
   showrate:   'showrate',    // panel renders Gross | Net variants
   noshows:    'noshow_rate',
   ascensions: 'ascensions',
+  // Migration 138 metrics — every tile that previously bled global EOD
+  // numbers under an audience filter now resolves via the audience view.
+  ascCash:    'ascend_cash',
+  ascRev:     'ascend_revenue',
+  ascendCash: 'ascend_cash',
+  ascendRevenue: 'ascend_revenue',
+  financeOffers: 'finance_offers',
+  netLive:    'net_live_calls',
 }
 
 const DRILLDOWN_CONFIG = {
@@ -3394,17 +3402,30 @@ export default function MarketingPerformance() {
       r.trial_revenue      += Number(row.trial_revenue) || 0
       r.trial_cash         += Number(row.trial_cash) || 0
       r.ascensions         += Number(row.ascensions) || 0
-      // Audience-aware show-rate components (migration 137). These columns
-      // now come out of lib_closer_call_audience filtered by audience, so
-      // an audience filter no longer leaves no_shows/reschedules/cancels
-      // pulling from the global marketing_tracker fall-through below.
+      // Audience-aware show-rate components (migration 137).
       r.no_shows           += Number(row.no_shows) || 0
       r.reschedules        += Number(row.reschedules) || 0
-      // Split aggregate cancels into the two MT-style columns the
-      // downstream computeMarketingStats expects (cancelled_dtf +
-      // cancelled_by_prospect). Audience-truth doesn't distinguish, so
-      // park everything in cancelled_by_prospect.
       r.cancelled_by_prospect += Number(row.cancels) || 0
+      // Audience-aware extended metrics (migration 138). Previously these
+      // leaked global marketing_tracker totals when an audience filter was
+      // on — Electricians showed Restoration's $15k ascend cash, etc.
+      r.ascend_cash        += Number(row.ascend_cash) || 0
+      r.ascend_revenue     += Number(row.ascend_revenue) || 0
+      // net_live_calls in the view = NC + FU lived (matches MT's combined
+      // counter). Without a filter, MT fall-through below still owns it.
+      r.net_live_calls     += Number(row.net_live_calls) || 0
+      // Finance: per-row reliable for offers, sparse for accepted —
+      // accepted stays on MT fall-through.
+      r.finance_offers     += Number(row.finance_offers) || 0
+      // NC bookings (called net_new_calls in MT) = qualified_bookings in
+      // the view. The view counts confirmed strategy-calendar bookings;
+      // MT's net_new_calls is closer EOD self-report. Usually agree within
+      // a few units. Re-source from the view when filtering.
+      r.net_new_calls      += Number(row.qualified_bookings) || 0
+      // FU bookings — no audience-aware source (FU calendar isn't tagged).
+      // Set fu_lives at least so net_live_calls reconciles with NC + FU
+      // lived per audience.
+      r.net_fu_calls       += Number(row.fu_lives) || 0
     }
     // Layer in EOD-only KPIs from marketing_tracker — offers, ascensions,
     // refunds, no_shows, reschedules, etc. These are closer-self-reported
@@ -3426,39 +3447,44 @@ export default function MarketingPerformance() {
       // ascensions count we already computed from lib_closer_call_audience.
       // marketing_tracker.ascensions is a global daily counter that doesn't
       // know which audience the ascending prospect belonged to.
-      if (!wanted) byDate[d].ascensions = Number(mt.ascensions) || 0
-      byDate[d].offers              = Number(mt.offers) || 0
-      byDate[d].ascend_cash         = Number(mt.ascend_cash) || 0
-      byDate[d].ascend_revenue      = Number(mt.ascend_revenue) || 0
+      // ── Aggregate-only fields (no audience-aware source) ────────────
+      // These come from closer EOD daily aggregates with no per-call row,
+      // so we can't split them by audience even when a filter is on.
+      // Layered in for every view but they reflect "everyone in the
+      // window" not "this audience" — the relevant tiles surface this in
+      // their tooltip.
       byDate[d].ar_collected        = Number(mt.ar_collected) || 0
       byDate[d].ar_defaulted        = Number(mt.ar_defaulted) || 0
       byDate[d].refund_count        = Number(mt.refund_count) || 0
       byDate[d].refund_amount       = Number(mt.refund_amount) || 0
-      byDate[d].finance_offers      = Number(mt.finance_offers) || 0
-      byDate[d].finance_accepted    = Number(mt.finance_accepted) || 0
       byDate[d].monthly_offers      = Number(mt.monthly_offers) || 0
       byDate[d].monthly_accepted    = Number(mt.monthly_accepted) || 0
-      // Show-rate components: when an audience filter is active, keep the
-      // values we folded from lib_marketing_by_audience_daily (audience-
-      // aware via lib_closer_call_audience, migration 137). Without a
-      // filter, fall through to marketing_tracker totals so the All view
-      // continues to match closer EOD numbers.
+      byDate[d].auto_bookings       = Number(mt.auto_bookings) || 0
+      byDate[d].calls_on_calendar   = Number(mt.calls_on_calendar) || 0
+      // offers + finance_accepted: closer_calls per-row flags are sparse
+      // (closer rarely ticks per-call offered/finance-accepted; aggregate
+      // EOD is the truth). Keep MT global for now — under a filter the
+      // tooltip on those tiles notes "aggregate, not audience-split".
+      byDate[d].offers              = Number(mt.offers) || 0
+      byDate[d].finance_accepted    = Number(mt.finance_accepted) || 0
+      // ── Audience-aware fields (gated by `!wanted`) ──────────────────
+      // When a filter is on, the audience-fold above is the source of
+      // truth. When no filter is on, fall through to MT so the All view
+      // still matches closer EOD.
       if (!wanted) {
+        byDate[d].ascensions          = Number(mt.ascensions) || 0
+        byDate[d].ascend_cash         = Number(mt.ascend_cash) || 0
+        byDate[d].ascend_revenue      = Number(mt.ascend_revenue) || 0
+        byDate[d].finance_offers      = Number(mt.finance_offers) || 0
         byDate[d].reschedules         = Number(mt.reschedules) || 0
         byDate[d].no_shows            = Number(mt.no_shows) || 0
         byDate[d].cancelled_dtf       = Number(mt.cancelled_dtf) || 0
         byDate[d].cancelled_by_prospect = Number(mt.cancelled_by_prospect) || 0
+        byDate[d].net_new_calls       = Number(mt.net_new_calls) || 0
+        byDate[d].net_fu_calls        = Number(mt.net_fu_calls) || 0
+        byDate[d].net_live_calls      = Number(mt.net_live_calls) || 0
+        byDate[d].new_live_calls      = Number(mt.new_live_calls) || 0
       }
-      byDate[d].net_new_calls       = Number(mt.net_new_calls) || 0
-      byDate[d].net_fu_calls        = Number(mt.net_fu_calls) || 0
-      byDate[d].net_live_calls      = Number(mt.net_live_calls) || 0
-      // new_live_calls when there's NO audience filter — use closer-EOD's
-      // NC count (= 25 for 30d). When filter IS active, keep the audience-
-      // bucketed count from lib_marketing_by_audience_daily.live_calls
-      // (which now sources lib_closer_call_audience).
-      if (!wanted) byDate[d].new_live_calls = Number(mt.new_live_calls) || 0
-      byDate[d].auto_bookings       = Number(mt.auto_bookings) || 0
-      byDate[d].calls_on_calendar   = Number(mt.calls_on_calendar) || 0
     }
     return Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date))
   }, [entries, audienceDaily, selectedAudiences])
