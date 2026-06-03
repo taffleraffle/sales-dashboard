@@ -3282,16 +3282,30 @@ export default function MarketingPerformance() {
   // (Ben 2026-06-01: "When I click Restoration it says I have zero ad spend
   // for restoration. That just factually is not correct.")
   const [audienceDaily, setAudienceDaily] = useState([])
+  const [audienceDailyBusy, setAudienceDailyBusy] = useState(true)
+  const [audienceDailyError, setAudienceDailyError] = useState(null)
   // Bumped after any RowActions mutation (DQ/Spam/Remove) so the audience
   // view refetches + KPI tiles drop the excluded row's contribution.
   const [hygieneRefetchKey, setHygieneRefetchKey] = useState(0)
   useEffect(() => {
     let alive = true
+    setAudienceDailyBusy(true)
+    setAudienceDailyError(null)
     supabase.from('lib_marketing_by_audience_daily').select('*').limit(2000)
       .then(({ data, error }) => {
-        if (!alive || error || !data) return
-        setAudienceDaily(data)
+        if (!alive) return
+        if (error) {
+          // Statement timeout / network failure — log it and surface so the
+          // page can render "audience data unavailable" instead of silently
+          // dropping back to global totals (the 2026-06-03 Electricians = 28
+          // bug). Codes: 57014 = statement_timeout, PGRST: PostgREST errors.
+          console.warn('lib_marketing_by_audience_daily fetch failed:', error)
+          setAudienceDailyError(error.message || 'failed to load audience data')
+          return
+        }
+        if (data) setAudienceDaily(data)
       })
+      .finally(() => { if (alive) setAudienceDailyBusy(false) })
     return () => { alive = false }
   }, [hygieneRefetchKey])
 
@@ -3334,8 +3348,21 @@ export default function MarketingPerformance() {
   // per-audience level because closers don't tag their EOD report by
   // audience.
   const audienceFilteredEntries = useMemo(() => {
-    if (!audienceDaily.length) return entries  // wait for the view to load
+    // The audience view (lib_marketing_by_audience_daily) is the only source
+    // that splits leads / live_calls / no_shows etc. by audience. If it's
+    // still loading or the query failed, we used to fall back to the global
+    // marketing_tracker entries — which silently showed GLOBAL numbers on
+    // KPI tiles while a specific audience chip was selected (Ben 2026-06-03:
+    // Electricians tile showed 28 lives — the global EOD count — while the
+    // Electricians drilldown listed 3 actual prospects).
+    //
+    // Fix: when an audience filter IS active and the view hasn't loaded,
+    // return [] so tiles render 0 instead of misleading globals.
     const wanted = (selectedAudiences && selectedAudiences.size > 0) ? selectedAudiences : null
+    if (!audienceDaily.length) {
+      if (wanted) return []           // audience filter on, no data yet → empty
+      return entries                  // no filter → global is correct
+    }
     const byDate = {}
     const emptyRow = (d) => ({
       date: d,
@@ -3971,6 +3998,16 @@ export default function MarketingPerformance() {
           {selectedAudiences.size > 0 && (
             <span style={{ fontFamily: 'var(--serif)', fontSize: 12, fontStyle: 'italic', color: 'var(--ink-4)', marginRight: 8 }}>
               Showing {selectedAudiences.size} of {audienceList.length} audiences
+            </span>
+          )}
+          {audienceDailyBusy && selectedAudiences.size > 0 && (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)', marginRight: 8 }}>
+              ◌ loading audience data…
+            </span>
+          )}
+          {audienceDailyError && (
+            <span title={audienceDailyError} style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#b53e3e', marginRight: 8 }}>
+              ⚠ audience query failed — KPIs may be incomplete
             </span>
           )}
           <button onClick={() => setOverrideModal({ audience: null, campaign_id: null })}
