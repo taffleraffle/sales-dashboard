@@ -10,11 +10,18 @@ export function AuthProvider({ children }) {
   const [needsPasswordSetup, setNeedsPasswordSetup] = useState(false)
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session) loadProfile(session.user.id)
-    })
+    // Get initial session. Always resolve the loading state — if getSession()
+    // rejects (network blip, expired token, Supabase hiccup) we fall through
+    // to the login page rather than hanging on the spinner forever.
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setSession(session)
+        if (session) loadProfile(session.user.id)
+      })
+      .catch((err) => {
+        console.error('getSession failed:', err)
+        setSession(null)
+      })
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
