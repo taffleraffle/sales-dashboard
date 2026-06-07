@@ -3124,6 +3124,12 @@ export default function MarketingPerformance() {
   // Per-date booking records (NOT pre-counted). Each entry is the list of
   // appointments on that date with the contact_id attached, so window-level
   // sums can dedupe by prospect (Khaled booking 3 times = 1 prospect).
+  // Hoisted above loadBookings so loadBookings can reference it in deps —
+  // bumped after any RowActions mutation (DQ/spam/dup/remove) via
+  // handleClose → onClose(mutated). The audienceDaily fetch (further down)
+  // and loadBookings (just below) both watch this so the matview tiles AND
+  // the bk-derived tiles refetch together after a mark.
+  const [hygieneRefetchKey, setHygieneRefetchKey] = useState(0)
   const [bookingsByDate, setBookingsByDate] = useState({}) // { 'YYYY-MM-DD': [{contactKey, isDq, contactName}] }
   // Same dataset, bucketed by appointment_date (call held date). Used for
   // cohort show rate so numerator and denominator clock the same event.
@@ -3198,27 +3204,40 @@ export default function MarketingPerformance() {
       const sinceStr = since.toISOString().split('T')[0]
       const todayStr = new Date().toISOString().split('T')[0]
 
-      // Parallel pull: appointments + opportunity mirror (for lead-cohort).
-      // Opportunities are populated by syncMetaToTracker → fetchGHLLeadsByDate.
-      // If the mirror is empty (migration 055 not yet applied), leadDate
-      // map below is empty and the bucketing falls back to booked_at —
-      // i.e. behaves identically to before.
-      // Source bookings from lib_strategy_booking_resolved so each row carries
-      // its audience tag. The view already filters to non-cancelled strategy-
-      // calendar bookings, deduped by contact, and flags is_spam (123, J,
-      // Tj, dsd etc.) which we exclude here so spam never enters any
-      // booking-derived count.
-      const [{ data, error }, { data: oppRows, error: oppErr }] = await Promise.all([
+      // Parallel pull: appointments + opportunity mirror + manual
+      // exclusions. Opportunities are populated by syncMetaToTracker →
+      // fetchGHLLeadsByDate. If the mirror is empty (migration 055 not yet
+      // applied), leadDate map below is empty and the bucketing falls back
+      // to booked_at — i.e. behaves identically to before.
+      //
+      // Source bookings from lib_strategy_booking_resolved so each row
+      // carries its audience tag. The view already filters to non-cancelled
+      // strategy-calendar bookings, deduped by contact, and flags is_spam
+      // (123, J, Tj, dsd etc.) which we exclude here so spam never enters
+      // any booking-derived count.
+      //
+      // booking_excluded is the operator's manual mark layer (spam / dup /
+      // dq / remove via the drilldown RowActions). The matview qual_bookings_d
+      // already honours it; the bk.qualified tile counter previously didn't,
+      // so a manual spam mark made the drilldown row vanish but left the
+      // headline tile counting the same row — Ben: "tile says 9, drilldown
+      // shows 8 qualified". Fold the excluded ids in here and drop them
+      // before bucketing.
+      const [{ data, error }, { data: oppRows, error: oppErr }, { data: exclRows }] = await Promise.all([
         supabase
           .from('lib_strategy_booking_resolved')
-          .select('booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name, is_dq, is_spam, audience')
+          .select('id, booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name, is_dq, is_spam, audience')
           .eq('is_spam', false)
           .gte('booked_at', sinceStr),
         supabase
           .from('ghl_opportunities')
           .select('ghl_contact_id, created_at')
           .gte('created_at', sinceStr),
+        supabase
+          .from('booking_excluded')
+          .select('booking_id'),
       ])
+      const excludedBookingIds = new Set((exclRows || []).map(r => r.booking_id))
       if (cancelled) return
       if (error) { console.warn('Bookings load failed:', error.message); return }
       if (oppErr) console.warn('ghl_opportunities load failed (falling back to booked_at):', oppErr.message)
@@ -3238,6 +3257,11 @@ export default function MarketingPerformance() {
       const cohortMap = {}
       const leadCohortMap = {}
       for (const a of data || []) {
+        // Manual operator marks (spam / dup / dq / remove via the drilldown)
+        // drop the booking out of every bk-derived count. The matview already
+        // does this via NOT EXISTS booking_excluded; without this check the
+        // tile counted excluded rows while the drilldown filtered them out.
+        if (excludedBookingIds.has(a.id)) continue
         // is_dq comes from the view (calendar-based); also honor revenue-tier
         // overrides so manual revenue_tier flags still work.
         const dqByTier = a.revenue_tier ? isDQRevenueTier(a.revenue_tier) : null
@@ -3281,7 +3305,7 @@ export default function MarketingPerformance() {
     }
     loadBookings()
     return () => { cancelled = true }
-  }, [])
+  }, [hygieneRefetchKey])
 
   // Cross-contact-id duplicate detector. The bk.qualified count dedupes
   // by ghl_contact_id — but the same person can appear in GHL as two
@@ -3559,9 +3583,9 @@ export default function MarketingPerformance() {
   const [audienceDaily, setAudienceDaily] = useState([])
   const [audienceDailyBusy, setAudienceDailyBusy] = useState(true)
   const [audienceDailyError, setAudienceDailyError] = useState(null)
-  // Bumped after any RowActions mutation (DQ/Spam/Remove) so the audience
-  // view refetches + KPI tiles drop the excluded row's contribution.
-  const [hygieneRefetchKey, setHygieneRefetchKey] = useState(0)
+  // hygieneRefetchKey is also a dep of loadBookings above so bk.qualified
+  // refetches with the new booking_excluded set after a mark — without it
+  // the tile count stayed stale until a hard reload.
   useEffect(() => {
     let alive = true
     setAudienceDailyBusy(true)
