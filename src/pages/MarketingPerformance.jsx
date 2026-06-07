@@ -1715,6 +1715,7 @@ function ProspectCell({ row }) {
     row.email && `Email: ${row.email}`,
     row.phone && `Phone: ${row.phone}`,
     row.audience && `Funnel: ${row.audience}`,
+    row.revenue_tier && `Revenue: ${row.revenue_tier}`,
     row.calendar && `Calendar: ${row.calendar}`,
     row.appt_date && `Call date: ${String(row.appt_date).slice(0, 10)}`,
     row.audience_source && `Attribution: ${row.audience_source}`,
@@ -1746,6 +1747,14 @@ const BOOKING_PROSPECT_COL = { key: 'prospect', label: 'Prospect', render: r => 
 const BOOKING_FUNNEL_COL = {
   key: 'funnel', label: 'Funnel', cls: 'text-[10px] uppercase text-text-400',
   render: r => r.audience || '—',
+}
+// Revenue tier — the Typeform-collected revenue bracket the prospect picked
+// when they filled the funnel. The strongest single qualification signal in
+// the drilldown for a spam/DQ decision (a "$0-1k/m" lead next to a no-email
+// prospect is a near-certain spam mark; a "$250k+/m" is usually a real one).
+const BOOKING_REVENUE_COL = {
+  key: 'revenue_tier', label: 'Revenue', cls: 'text-[10px] uppercase text-text-secondary whitespace-nowrap',
+  render: r => r.revenue_tier || '—',
 }
 const STATUS_STYLE = { qual: 'text-success', dq: 'text-orange-400', spam: 'text-red-400', removed: 'text-text-400/60' }
 const BOOKING_TYPE_COL = {
@@ -1814,6 +1823,7 @@ const DRILLDOWN_CONFIG = {
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
       BOOKING_PROSPECT_COL,
       BOOKING_FUNNEL_COL,
+      BOOKING_REVENUE_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
       BOOKING_TYPE_COL,
       ROW_ACTIONS_COL,
@@ -1829,6 +1839,7 @@ const DRILLDOWN_CONFIG = {
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
       BOOKING_PROSPECT_COL,
       BOOKING_FUNNEL_COL,
+      BOOKING_REVENUE_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
       ROW_ACTIONS_COL,
     ],
@@ -1859,6 +1870,7 @@ const DRILLDOWN_CONFIG = {
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
       BOOKING_PROSPECT_COL,
       BOOKING_FUNNEL_COL,
+      BOOKING_REVENUE_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
       BOOKING_TYPE_COL,
       ROW_ACTIONS_COL,
@@ -1874,6 +1886,7 @@ const DRILLDOWN_CONFIG = {
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
       BOOKING_PROSPECT_COL,
       BOOKING_FUNNEL_COL,
+      BOOKING_REVENUE_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
       ROW_ACTIONS_COL,
     ],
