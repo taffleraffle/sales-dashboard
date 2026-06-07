@@ -1086,10 +1086,21 @@ function prospectMatches(prospectName, allowedSet) {
 }
 
 async function fetchLiveCalls({ from, to, audiences } = {}) {
+  // The Net New Live TILE reads aggregate closer_eod_reports.new_live_calls.
+  // This drilldown used to read ONLY per-row closer_calls — so when a closer
+  // filed an aggregate-only EOD (just typed the count, no per-row detail),
+  // the tile said 4 and the drilldown said 0. Operators saw a contradiction.
+  //
+  // Fix: pull both. Per-row rows render with full detail (prospect, outcome,
+  // revenue). Any EOD whose aggregate exceeds its per-row count gets
+  // (aggregate - perRow) synthesized "(aggregate-only)" filler rows so the
+  // drilldown total === tile total. The same pattern fetchCloses uses via
+  // lib_close_audience, adapted for a table without a resolved view.
   const allowed = await prospectNamesInAudience(audiences, { from, to })
+  const audienceFilterActive = audiences && audiences.size > 0
   const { data: reports } = await supabase
     .from('closer_eod_reports')
-    .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
+    .select('id, report_date, new_live_calls, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
     .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
   const reportIds = (reports || []).map(r => r.id)
   const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
@@ -1100,23 +1111,56 @@ async function fetchLiveCalls({ from, to, audiences } = {}) {
     .in('eod_report_id', reportIds)
     .in('outcome', ['not_closed', 'closed'])
     .eq('call_type', 'new_call') // "Net New" = NEW CALLS only (no follow-ups, no ascensions)
-  const rows = (callRows || [])
-    .filter(c => prospectMatches(c.prospect_name, allowed))
-    .map(c => ({
-      _id: c.id,
-      _kind: 'call',
-      date: reportMap[c.eod_report_id]?.report_date,
-      closer: reportMap[c.eod_report_id]?.closer?.name || '—',
-      type: c.call_type,
-      prospect: c.prospect_name || '—',
-      email: null,
-      outcome: c.outcome,
-      revenue: c.revenue,
-      cash: c.cash_collected,
-    })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 
-  await enrichRowsWithProspectEmails(rows)
-  return rows
+  // Per-row rows + per-EOD count for the aggregate reconciliation below.
+  const perRowCountByEod = {}
+  const perRow = (callRows || [])
+    .filter(c => prospectMatches(c.prospect_name, allowed))
+    .map(c => {
+      perRowCountByEod[c.eod_report_id] = (perRowCountByEod[c.eod_report_id] || 0) + 1
+      return {
+        _id: c.id,
+        _kind: 'call',
+        date: reportMap[c.eod_report_id]?.report_date,
+        closer: reportMap[c.eod_report_id]?.closer?.name || '—',
+        type: c.call_type,
+        prospect: c.prospect_name || '—',
+        email: null,
+        outcome: c.outcome,
+        revenue: c.revenue,
+        cash: c.cash_collected,
+      }
+    })
+
+  // Aggregate-only fallback. Skipped when a specific audience is selected —
+  // the aggregate count isn't funnel-attributed, so it'd over-count if we
+  // surfaced it under a single audience.
+  const aggregateRows = []
+  if (!audienceFilterActive) {
+    for (const report of (reports || [])) {
+      const aggregate = Number(report.new_live_calls) || 0
+      const perRowCount = perRowCountByEod[report.id] || 0
+      const missing = aggregate - perRowCount
+      for (let i = 0; i < missing; i++) {
+        aggregateRows.push({
+          _id: `agg-${report.id}-${i}`,
+          _kind: 'call',
+          date: report.report_date,
+          closer: report.closer?.name || '—',
+          type: 'new_call',
+          prospect: '(aggregate-only — no per-row detail filed)',
+          email: null,
+          outcome: '—',
+          revenue: null,
+          cash: null,
+          aggregate_only: true,
+        })
+      }
+    }
+  }
+
+  await enrichRowsWithProspectEmails(perRow)
+  return [...perRow, ...aggregateRows].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
 async function fetchCloses({ from, to, audiences } = {}) {
