@@ -1696,6 +1696,12 @@ const ROW_ACTIONS_COL = {
   key: '_actions',
   label: 'Actions',
   align: 'right',
+  // Pin to the right of the scroll container so spam/dup/DQ/remove
+  // stay reachable even when the modal is narrow (split-screen, half-
+  // width browser) and the table scrolls horizontally. z-20 keeps it
+  // above the sticky-top header at the corner intersection; the inset
+  // shadow on the left hints there's hidden content behind it.
+  cls: 'sticky right-0 bg-bg-card z-20 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.4)]',
   render: (row, ctx) => <RowActions row={row} onActioned={ctx?.onActioned} onReload={ctx?.onReload} />,
 }
 
@@ -1722,11 +1728,12 @@ function ProspectCell({ row }) {
         {row.prospect || '—'}
       </span>
       {/* Email under the name — the prospect string is only the calendar event
-          title, so the email is what actually IDs the person. */}
-      <div className="text-[10px] text-text-400">
+          title, so the email is what actually IDs the person. Sized so an
+          operator scanning the list can read it without hovering. */}
+      <div className="text-[11px] text-text-secondary leading-tight">
         {row.email
-          ? <a href={`mailto:${row.email}`} className="hover:underline" onClick={e => e.stopPropagation()}>{row.email}</a>
-          : <span className="text-text-400/60">no email</span>}
+          ? <a href={`mailto:${row.email}`} className="hover:underline hover:text-text-primary" onClick={e => e.stopPropagation()}>{row.email}</a>
+          : <span className="text-text-400/60 italic">no email on file</span>}
       </div>
     </div>
   )
@@ -2660,7 +2667,11 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
           </div>
           <button onClick={handleClose} className="text-text-400 hover:text-text-primary"><X size={18} /></button>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        {/* overflow-auto (both axes) so narrow modals scroll horizontally
+            when the column count exceeds available width — combined with
+            the sticky-right Actions column above, this keeps the spam/DQ
+            buttons reachable in split-screen / half-width windows. */}
+        <div className="flex-1 overflow-auto">
           {/* Historical trend (week/month + range presets + hover). Shows for
               every kind that maps to a metric in MetricTrendPanel. Pulls
               lib_marketing_by_audience_daily once, aggregates client-side. */}
@@ -2692,7 +2703,7 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
               <thead className="sticky top-0 bg-bg-card border-b border-border-default text-[9px] uppercase tracking-wider text-text-400">
                 <tr>
                   {config.columns.map(c => (
-                    <th key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                    <th key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.cls || ''}`}>{c.label}</th>
                   ))}
                 </tr>
               </thead>
