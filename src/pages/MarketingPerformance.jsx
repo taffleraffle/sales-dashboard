@@ -5,6 +5,7 @@ import { useCloserCallProspectMetrics } from '../hooks/useCloserCallProspectMetr
 import { useAudiences } from '../hooks/useAudiences'
 import EditorialDate from '../components/EditorialDate'
 import MetricTrendPanel from '../components/marketing/MetricTrendPanel'
+import DataHealthBanner from '../components/marketing/DataHealthBanner'
 import DateRangeSelector from '../components/DateRangeSelector'
 import SyncStatusIndicator from '../components/SyncStatusIndicator'
 import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check } from 'lucide-react'
@@ -4240,6 +4241,11 @@ export default function MarketingPerformance() {
 
   return (
     <div className="max-w-[1600px] mx-auto">
+      {/* Data Health — first thing on the page so accuracy regressions
+          surface before the operator counts rows by hand. Polls every 60s. */}
+      <div className="mb-4">
+        <DataHealthBanner />
+      </div>
       {/* Header — editorial */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
