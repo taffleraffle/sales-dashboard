@@ -1512,29 +1512,46 @@ async function fetchLeads({ from, to, audiences } = {}) {
     .gte('submitted_at', sinceTs).lte('submitted_at', untilTs)
   const flagMap = Object.fromEntries((flagRows || []).map(f => [f.response_id, f.any_flag]))
 
-  // Manual exclusions — so a marked-spam lead drops out and the drilldown
-  // matches the tile (leads_d filters NOT EXISTS lead_excluded).
+  // Manual exclusions — pulled with action/reason so the drilldown can
+  // SHOW marked-spam leads (with a status pill + restore button) rather
+  // than hide them. The Leads TILE still filters them out via the
+  // leads_d view, so the row count > tile count by the # of marks;
+  // the modal footer surfaces "X total · Y counted" for transparency.
   const ids = data.map(r => r.response_id)
-  let excluded = new Set()
+  const exclById = {}
   if (ids.length) {
     const { data: ex } = await supabase
-      .from('lead_excluded').select('response_id').in('response_id', ids)
-    excluded = new Set((ex || []).map(e => e.response_id))
+      .from('lead_excluded').select('response_id, reason').in('response_id', ids)
+    for (const e of (ex || [])) exclById[e.response_id] = e.reason
   }
 
   let rows = data
-    .filter(r => audMap[r.ad_id] && !excluded.has(r.response_id))
-    .map(r => ({
-      _id: r.response_id,
-      _kind: 'lead',
-      created: (r.submitted_at || '').split('T')[0],
-      name: [r.first_name, r.last_name].filter(Boolean).join(' ') || '—',
-      email: r.email || '—',
-      phone: r.phone || '—',
-      source: r.form_name || r.utm_campaign || 'Typeform',
-      audience: audMap[r.ad_id],
-      flag: flagMap[r.response_id] || null,
-    }))
+    // Keep ad-attribution alignment with the tile (drop typeforms that
+    // never mapped to a tracked ad — those aren't "leads" in the
+    // marketing sense). But DO keep manually-marked rows so the operator
+    // can verify decisions and restore false-positive spam marks.
+    .filter(r => audMap[r.ad_id])
+    .map(r => {
+      const mark = exclById[r.response_id] || null    // spam | duplicate | manual | null
+      const status = mark === 'spam' ? 'spam'
+        : mark === 'duplicate' ? 'dup'
+        : mark === 'manual' ? 'removed'
+        : mark ? 'removed'
+        : 'qual'
+      return {
+        _id: r.response_id,
+        _kind: 'lead',
+        created: (r.submitted_at || '').split('T')[0],
+        name: [r.first_name, r.last_name].filter(Boolean).join(' ') || '—',
+        email: r.email || '—',
+        phone: r.phone || '—',
+        source: r.form_name || r.utm_campaign || 'Typeform',
+        audience: audMap[r.ad_id],
+        flag: flagMap[r.response_id] || null,
+        mark,
+        status,        // 'qual' | 'spam' | 'dup' | 'removed'
+      }
+    })
   if (wanted) rows = rows.filter(r => wanted.has(r.audience))
   return rows.sort((a, b) => (b.created || '').localeCompare(a.created || ''))
 }
@@ -1618,22 +1635,24 @@ function RowActions({ row, onActioned, onReload }) {
       if (row._kind === 'booking') payload.action = reason === 'spam' ? 'spam' : reason === 'dq' ? 'dq' : 'remove'
       const { error } = await supabase.from(TABLE).upsert(payload, { onConflict: ID_COL })
       if (error) throw error
-      // Bookings refresh in place so the operator sees the status flip (and can
-      // undo). Other kinds just drop out of the list.
-      if (row._kind === 'booking' && onReload) onReload()
+      // Bookings + leads refresh in place so the operator sees the status
+      // flip and can hit restore on a false-positive mark. Live calls and
+      // other kinds without a restore path just drop out of the list.
+      if ((row._kind === 'booking' || row._kind === 'lead') && onReload) onReload()
       else onActioned?.(row._id, reason)
     } catch (e) {
       setErr(e.message || 'failed'); setBusy(false)
     }
   }
 
-  // Undo a manual booking mark — delete the booking_excluded row so the
-  // booking returns to qualified (unless the calendar itself is a DQ calendar).
+  // Undo a manual mark — delete the *_excluded row so the row returns to
+  // qualified. Booking restores via booking_excluded.booking_id, lead
+  // restores via lead_excluded.response_id; both use TABLE/ID_COL above.
   const restore = async () => {
     if (busy) return
     setBusy(true); setErr(null)
     try {
-      const { error } = await supabase.from('booking_excluded').delete().eq('booking_id', row._id)
+      const { error } = await supabase.from(TABLE).delete().eq(ID_COL, row._id)
       if (error) throw error
       onReload?.()
     } catch (e) {
@@ -1641,10 +1660,11 @@ function RowActions({ row, onActioned, onReload }) {
     }
   }
 
-  // A booking that's already been manually marked → offer Restore instead of
-  // re-marking. (Calendar-DQ bookings have no manual mark, so they keep the
-  // normal buttons.)
-  if (row._kind === 'booking' && row.mark) {
+  // A row that's already been manually marked → offer Restore instead of
+  // re-marking. Works for both bookings (booking_excluded) and leads
+  // (lead_excluded). Calendar-DQ bookings have no manual mark and keep
+  // the normal buttons.
+  if (row.mark) {
     return (
       <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
         <span className="text-[9px] uppercase tracking-wider text-text-400 mr-1">{row.mark}</span>
@@ -1857,6 +1877,11 @@ const DRILLDOWN_CONFIG = {
       { key: 'phone', label: 'Phone', cls: 'text-text-400 text-[10px]' },
       { key: 'audience', label: 'Funnel', cls: 'text-[10px] uppercase text-text-400', render: r => r.audience || '—' },
       { key: 'source', label: 'Source', cls: 'text-text-400 text-[10px]' },
+      // Reuses the booking-status renderer — STATUS_STYLE handles
+      // qual / spam / dup / removed identically. Surfaces manual marks
+      // so the operator can confirm spam decisions, and pairs with the
+      // restore button in ROW_ACTIONS_COL.
+      BOOKING_TYPE_COL,
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No leads in this window.',
