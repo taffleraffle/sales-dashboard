@@ -172,6 +172,13 @@ async function syncMarketingTracker(force = false) {
     const { syncEODToTracker } = await import('../hooks/useMarketingTracker')
     await syncEODToTracker()
     console.log('[auto-sync] Marketing tracker (EOD) done')
+    // Refresh the historical-trend matview (migration 139) now that marketing
+    // data changed. Throttled server-side + best-effort: ignore if the RPC
+    // isn't deployed yet.
+    try {
+      const { supabase } = await import('../lib/supabase')
+      await supabase.rpc('refresh_marketing_trend_mv')
+    } catch (e) { console.warn('[auto-sync] trend matview refresh skipped:', e.message) }
     clearError('marketingTracker')
   } catch (e) {
     console.warn('[auto-sync] Marketing tracker failed:', e.message)

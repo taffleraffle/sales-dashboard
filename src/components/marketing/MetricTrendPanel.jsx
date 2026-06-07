@@ -135,17 +135,24 @@ export default function MetricTrendPanel({ metric, selectedAudiences, height = 3
     // All audience-aware columns (incl. no_shows, reschedules, cancels
     // from migration 137). No marketing_tracker fallback needed any more
     // — every metric variant computes from the audience view alone.
-    supabase
-      .from('lib_marketing_by_audience_daily')
-      .select('date, audience, adspend, leads, qualified_bookings, live_calls, closes, trial_revenue, trial_cash, ascensions, ascensions_closed, ascend_cash, ascend_revenue, no_shows, reschedules, cancels, net_live_calls, fu_lives, finance_offers')
-      .order('date', { ascending: true })
-      .limit(20000)
-      .then(({ data, error }) => {
-        if (!alive) return
-        if (error) { setErr(error.message); return }
-        setDaily(data || [])
-      })
-      .finally(() => { if (alive) setBusy(false) })
+    const COLS = 'date, audience, adspend, leads, qualified_bookings, live_calls, closes, trial_revenue, trial_cash, ascensions, ascensions_closed, ascend_cash, ascend_revenue, no_shows, reschedules, cancels, net_live_calls, fu_lives, finance_offers'
+    // Read the materialized copy (migration 139). The live view recomputes the
+    // whole close-resolver chain on every read and times out over all-time.
+    // Fall back to the live view when the matview isn't deployed yet.
+    const load = async () => {
+      let res = await supabase
+        .from('lib_marketing_by_audience_daily_mv')
+        .select(COLS).order('date', { ascending: true }).limit(20000)
+      if (res.error) {
+        res = await supabase
+          .from('lib_marketing_by_audience_daily')
+          .select(COLS).order('date', { ascending: true }).limit(20000)
+      }
+      if (!alive) return
+      if (res.error) { setErr(res.error.message); return }
+      setDaily(res.data || [])
+    }
+    load().finally(() => { if (alive) setBusy(false) })
     return () => { alive = false }
   }, [])
 
