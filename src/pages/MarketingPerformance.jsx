@@ -1458,7 +1458,7 @@ async function fetchCpNew({ from, to, audiences } = {}) {
   // Daily Cost/New Live Call — spend / new_live_calls per day.
   if (audiences && audiences.size > 0) {
     const { data } = await supabase
-      .from('lib_marketing_by_audience_daily')
+      .from('lib_marketing_by_audience_daily_mv')
       .select('date, audience, adspend, live_calls')
       .in('audience', [...audiences])
       .gte('date', from).lte('date', to)
@@ -1500,7 +1500,7 @@ async function fetchCpaTrial({ from, to, audiences } = {}) {
   // Daily CPA (Trial) — spend / closes per day.
   if (audiences && audiences.size > 0) {
     const { data } = await supabase
-      .from('lib_marketing_by_audience_daily')
+      .from('lib_marketing_by_audience_daily_mv')
       .select('date, audience, adspend, closes')
       .in('audience', [...audiences])
       .gte('date', from).lte('date', to)
@@ -1656,7 +1656,7 @@ async function fetchAdspend({ from, to, audiences } = {}) {
   // marketing_tracker (closer EOD self-report — USD).
   if (audiences && audiences.size > 0) {
     const { data } = await supabase
-      .from('lib_marketing_by_audience_daily')
+      .from('lib_marketing_by_audience_daily_mv')
       .select('date, audience, adspend, leads, qualified_bookings')
       .in('audience', [...audiences])
       .gte('date', from).lte('date', to)
@@ -1737,6 +1737,12 @@ function RowActions({ row, onActioned, onReload }) {
         : 'remove'
       const { error } = await supabase.from(TABLE).upsert(payload, { onConflict: ID_COL })
       if (error) throw error
+      // Fire-and-forget matview refresh so the marketing tiles recount
+      // within the throttle window (~60s, RPC is throttled in migration 139).
+      // Without this the tile reads stale data and Ben sees "marking does
+      // nothing to CPL" — the drilldown row flips but the tile number above
+      // it doesn't. Don't await — adds noticeable latency to the row click.
+      supabase.rpc('refresh_marketing_trend_mv').then(() => {}, () => {})
       // Bookings + leads refresh in place so the operator sees the status
       // flip and can hit restore on a false-positive mark. Live calls and
       // other kinds without a restore path just drop out of the list.
@@ -1756,6 +1762,7 @@ function RowActions({ row, onActioned, onReload }) {
     try {
       const { error } = await supabase.from(TABLE).delete().eq(ID_COL, row._id)
       if (error) throw error
+      supabase.rpc('refresh_marketing_trend_mv').then(() => {}, () => {})
       onReload?.()
     } catch (e) {
       setErr(e.message || 'failed'); setBusy(false)
@@ -3542,7 +3549,14 @@ export default function MarketingPerformance() {
     let alive = true
     setAudienceDailyBusy(true)
     setAudienceDailyError(null)
-    supabase.from('lib_marketing_by_audience_daily').select('*').limit(2000)
+    // Switched from the live view to the matview (migration 139) — the live
+    // view recomputes the entire close-resolver chain on every read and
+    // returns 57014 statement-timeout for select('*').limit(2000). That made
+    // the audienceDaily fetch fail silently for the marketing tiles, which
+    // is why marking spam/DQ in the drilldowns appeared to do nothing to the
+    // tile counts. RowActions now also triggers refresh_marketing_trend_mv()
+    // after each mark so the matview catches up within ~60s.
+    supabase.from('lib_marketing_by_audience_daily_mv').select('*').limit(2000)
       .then(({ data, error }) => {
         if (!alive) return
         if (error) {
