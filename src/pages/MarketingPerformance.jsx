@@ -1525,18 +1525,27 @@ async function fetchLeads({ from, to, audiences } = {}) {
     for (const e of (ex || [])) exclById[e.response_id] = e.reason
   }
 
+  // No more ad-attribution drop. The previous filter (.filter(audMap[r.ad_id]))
+  // hid every typeform whose ad_id didn't resolve via lib_ad_audience — so a
+  // booking from an organic/direct/un-mapped form appeared in the Bookings
+  // drilldown but vanished from the Leads drilldown. Operators couldn't
+  // verify "where did this booking come from?" for ~any non-paid lead.
+  //
+  // Now: show every typeform in window. Unmapped rows surface with
+  // audience='Untracked' so they're scannable but visually distinct, and
+  // the audience filter chip still excludes them when a specific funnel
+  // is selected. Tile-vs-drilldown count divergence is intentional — same
+  // pattern as the Bookings drilldown (which is a superset of the
+  // Q.Bookings tile).
   let rows = data
-    // Keep ad-attribution alignment with the tile (drop typeforms that
-    // never mapped to a tracked ad — those aren't "leads" in the
-    // marketing sense). But DO keep manually-marked rows so the operator
-    // can verify decisions and restore false-positive spam marks.
-    .filter(r => audMap[r.ad_id])
     .map(r => {
       const mark = exclById[r.response_id] || null    // spam | duplicate | manual | null
+      const audience = audMap[r.ad_id] || 'Untracked'
       const status = mark === 'spam' ? 'spam'
         : mark === 'duplicate' ? 'dup'
         : mark === 'manual' ? 'removed'
         : mark ? 'removed'
+        : audience === 'Untracked' ? 'untracked'
         : 'qual'
       return {
         _id: r.response_id,
@@ -1546,10 +1555,10 @@ async function fetchLeads({ from, to, audiences } = {}) {
         email: r.email || '—',
         phone: r.phone || '—',
         source: r.form_name || r.utm_campaign || 'Typeform',
-        audience: audMap[r.ad_id],
+        audience,
         flag: flagMap[r.response_id] || null,
         mark,
-        status,        // 'qual' | 'spam' | 'dup' | 'removed'
+        status,        // 'qual' | 'spam' | 'dup' | 'removed' | 'untracked'
       }
     })
   if (wanted) rows = rows.filter(r => wanted.has(r.audience))
@@ -1776,7 +1785,7 @@ const BOOKING_REVENUE_COL = {
   key: 'revenue_tier', label: 'Revenue', cls: 'text-[10px] uppercase text-text-secondary whitespace-nowrap',
   render: r => r.revenue_tier || '—',
 }
-const STATUS_STYLE = { qual: 'text-success', dq: 'text-orange-400', spam: 'text-red-400', removed: 'text-text-400/60' }
+const STATUS_STYLE = { qual: 'text-success', dq: 'text-orange-400', spam: 'text-red-400', removed: 'text-text-400/60', untracked: 'text-yellow-400' }
 const BOOKING_TYPE_COL = {
   key: 'status', label: 'Status',
   render: r => <span className={`text-[10px] uppercase ${STATUS_STYLE[r.status] || 'text-text-secondary'}`}>{r.status || 'qual'}</span>,
