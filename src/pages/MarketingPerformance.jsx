@@ -1235,22 +1235,79 @@ async function fetchBookings({ from, to, audiences } = {}) {
   // window includes the full day (#6/#22 in code-review 2026-06-01).
   let q = supabase
     .from('lib_strategy_booking_resolved')
-    .select('id, contact_name, contact_email, calendar_name, booked_at, appointment_date, revenue_tier, is_dq, is_spam, audience, audience_source')
+    .select('id, ghl_contact_id, contact_name, contact_email, calendar_name, booked_at, appointment_date, revenue_tier, is_dq, is_spam, audience, audience_source')
     .eq('is_spam', false)
     .gte('booked_at', from).lte('booked_at', `${to} 23:59:59`)
   if (wanted) q = q.in('audience', [...wanted])
   const { data } = await q
-  return (data || []).map(r => ({
-    _id: r.id,
-    _kind: 'booking',
-    booked: String(r.booked_at).split('T')[0],
-    prospect: r.contact_name,
-    revenue_tier: r.revenue_tier,
-    appt_date: r.appointment_date,
-    is_dq: r.is_dq || (r.revenue_tier ? isDQRevenueTier(r.revenue_tier) : false),
-    audience: r.audience,
-    audience_source: r.audience_source,
-  })).sort((a, b) => (b.booked || '').localeCompare(a.booked || ''))
+  const raw = data || []
+
+  // Apply manual exclusions. The Q.Books TILE (migration 138) drops any
+  // booking with a booking_excluded row from the qualified count, but this
+  // drilldown read the raw resolver view and ignored that table — so marking
+  // a booking spam/DQ vanished on reopen and never reached the Qualified
+  // Bookings modal. Fold the table in here so a mark sticks and propagates.
+  const ids = raw.map(r => r.id).filter(Boolean)
+  let exclById = {}
+  if (ids.length) {
+    const { data: excl } = await supabase
+      .from('booking_excluded')
+      .select('booking_id, action, reason')
+      .in('booking_id', ids)
+    exclById = Object.fromEntries((excl || []).map(e => [e.booking_id, e.action || e.reason]))
+  }
+
+  // Enrich from ghl_contacts so the operator can see the REAL person behind the
+  // calendar event title ("Anthony and Daniel…") — first/last name, email and
+  // phone. contact_email on the resolver view is sparse, and the calendar title
+  // alone can't tell a real prospect from a fake/test booking.
+  const contactIds = [...new Set(raw.map(r => r.ghl_contact_id).filter(Boolean))]
+  const contactById = {}
+  for (let i = 0; i < contactIds.length; i += 500) {
+    const slice = contactIds.slice(i, i + 500)
+    const { data: cs } = await supabase
+      .from('ghl_contacts')
+      .select('ghl_contact_id, full_name, first_name, last_name, email, phone')
+      .in('ghl_contact_id', slice)
+    for (const c of (cs || [])) contactById[c.ghl_contact_id] = c
+  }
+
+  return raw.map(r => {
+    const mark = exclById[r.id] || null               // spam | dq | duplicate | remove | null
+    const autoDq = r.is_dq || (r.revenue_tier ? isDQRevenueTier(r.revenue_tier) : false)
+    const is_dq = autoDq || mark === 'dq'
+    const is_spam = mark === 'spam'
+    // 'remove'/'duplicate' = won't count at all; tile drops them and so do we.
+    const removed = mark === 'remove' || mark === 'duplicate'
+    const status = removed ? 'removed' : is_spam ? 'spam' : is_dq ? 'dq' : 'qual'
+    const c = contactById[r.ghl_contact_id] || {}
+    // First name: prefer the real GHL contact, fall back to the leading token of
+    // the calendar title ("Anthony and Daniel…" → "Anthony").
+    const firstName = c.first_name
+      || (r.contact_name || '').split(/\s+and\s+|\s+-\s+/)[0].trim()
+      || null
+    return {
+      _id: r.id,
+      _kind: 'booking',
+      booked: String(r.booked_at).split('T')[0],
+      prospect: r.contact_name,
+      firstName,
+      email: r.contact_email || c.email || null,
+      phone: c.phone || null,
+      calendar: r.calendar_name || null,
+      revenue_tier: r.revenue_tier,
+      appt_date: r.appointment_date,
+      is_dq,
+      is_spam,
+      status,        // 'qual' | 'dq' | 'spam' | 'removed'
+      mark,          // active booking_excluded action, or null
+      autoDq,        // true = DQ'd by the calendar itself (can't be re-qualified here)
+      audience: r.audience,
+      audience_source: r.audience_source,
+    }
+  })
+    .filter(r => r.status !== 'removed')
+    .sort((a, b) => (b.booked || '').localeCompare(a.booked || ''))
 }
 
 async function fetchNoShows({ from, to, audiences } = {}) {
@@ -1421,145 +1478,65 @@ async function fetchReschCancel({ from, to, audiences } = {}) {
 }
 
 async function fetchLeads({ from, to, audiences } = {}) {
-  // When an audience filter is active, source leads from typeform_responses
-  // (which carries the ad_id → audience chain) instead of the GHL
-  // opportunities mirror. This is the only path that lets us attribute a
-  // lead to Restoration / Electricians / Australia correctly. Without
-  // this branch the drilldown showed ALL leads regardless of tab.
-  if (audiences && audiences.size > 0) {
-    const sinceTs = `${from}T00:00:00Z`
-    const untilTs = `${to}T23:59:59Z`
-    // Pull every typeform_responses row in the window joined to lib_ad_audience
-    // via ad_id (so we know each lead's audience). Then filter by the picked set.
-    const { data } = await supabase
-      .from('typeform_responses')
-      .select('response_id, submitted_at, first_name, last_name, email, phone, form_name, utm_campaign, ad_id')
-      .gte('submitted_at', sinceTs).lte('submitted_at', untilTs)
-      .order('submitted_at', { ascending: false })
-    if (!data?.length) return []
-    // Resolve each ad_id → audience by fetching lib_ad_audience for the unique set.
-    const adIds = [...new Set(data.map(r => r.ad_id).filter(Boolean))]
-    const audMap = {}
-    if (adIds.length) {
-      const { data: aaRows } = await supabase
-        .from('lib_ad_audience')
-        .select('ad_id, audience')
-        .in('ad_id', adIds)
-      for (const r of (aaRows || [])) audMap[r.ad_id] = r.audience
-    }
-    // Hygiene flags (spam / duplicate detection — migration 137).
-    const { data: flagRows } = await supabase
-      .from('lib_lead_hygiene_flags')
-      .select('response_id, any_flag')
-      .gte('submitted_at', sinceTs).lte('submitted_at', untilTs)
-    const flagMap = Object.fromEntries((flagRows || []).map(f => [f.response_id, f.any_flag]))
-    const wanted = audiences
-    return data
-      .map(r => ({
-        _id: r.response_id,
-        _kind: 'lead',
-        created: (r.submitted_at || '').split('T')[0],
-        name: [r.first_name, r.last_name].filter(Boolean).join(' ') || '—',
-        email: r.email || '—',
-        phone: r.phone || '—',
-        source: r.form_name || r.utm_campaign || 'Typeform',
-        audience: audMap[r.ad_id] || 'Unknown',
-        flag: flagMap[r.response_id] || null,
-      }))
-      .filter(r => wanted.has(r.audience))
-      .sort((a, b) => (b.created || '').localeCompare(a.created || ''))
+  // Leads source of truth = typeform_responses (carries the ad_id → audience
+  // chain) for ALL views — the same source the Leads tile reads via
+  // lib_marketing_by_audience_daily.leads_d, so the tile and this drilldown
+  // agree. The no-filter path previously read the ghl_opportunities mirror,
+  // whose partial coverage made the list span only ~05-17 while the tile read
+  // a full 30d (and the two sources never matched).
+  const sinceTs = `${from}T00:00:00Z`
+  const untilTs = `${to}T23:59:59Z`
+  const wanted = (audiences && audiences.size > 0) ? audiences : null
+
+  const { data } = await supabase
+    .from('typeform_responses')
+    .select('response_id, submitted_at, first_name, last_name, email, phone, form_name, utm_campaign, ad_id')
+    .gte('submitted_at', sinceTs).lte('submitted_at', untilTs)
+    .order('submitted_at', { ascending: false })
+  if (!data?.length) return []
+
+  // ad_id → audience. leads_d INNER JOINs lib_ad_audience, so the tile counts
+  // only ad-attributed leads — mirror that here (drop rows with no mapped ad)
+  // so the row count matches the tile.
+  const adIds = [...new Set(data.map(r => r.ad_id).filter(Boolean))]
+  const audMap = {}
+  if (adIds.length) {
+    const { data: aaRows } = await supabase
+      .from('lib_ad_audience').select('ad_id, audience').in('ad_id', adIds)
+    for (const r of (aaRows || [])) audMap[r.ad_id] = r.audience
   }
 
-  // Query the local ghl_opportunities mirror — instant (~100ms) vs the
-  // 10-15s live GHL fetch. The mirror is populated by
-  // fetchGHLLeadsByDate (auto-sync) so this stays current. The opportunity
-  // table doesn't carry contact name/email/phone — we join to ghl_contacts.
-  //
-  // Fallback: if the mirror is empty (e.g. first deploy before sync),
-  // fall through to the live GHL fetch so the drilldown still works.
-  const sinceTs = `${from}T00:00:00`
-  const untilTs = `${to}T23:59:59`
-  const opps = []
-  const PAGE = 1000
-  let offset = 0
-  while (true) {
-    const { data, error } = await supabase
-      .from('ghl_opportunities')
-      .select('id, ghl_contact_id, created_at, source, stage_id, name')
-      .gte('created_at', sinceTs).lte('created_at', untilTs)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + PAGE - 1)
-    if (error) { console.warn('local opps query failed, falling back to GHL:', error.message); break }
-    if (!data?.length) break
-    opps.push(...data)
-    if (data.length < PAGE) break
-    offset += PAGE
+  // Hygiene flags (spam / duplicate detection — migration 137).
+  const { data: flagRows } = await supabase
+    .from('lib_lead_hygiene_flags').select('response_id, any_flag')
+    .gte('submitted_at', sinceTs).lte('submitted_at', untilTs)
+  const flagMap = Object.fromEntries((flagRows || []).map(f => [f.response_id, f.any_flag]))
+
+  // Manual exclusions — so a marked-spam lead drops out and the drilldown
+  // matches the tile (leads_d filters NOT EXISTS lead_excluded).
+  const ids = data.map(r => r.response_id)
+  let excluded = new Set()
+  if (ids.length) {
+    const { data: ex } = await supabase
+      .from('lead_excluded').select('response_id').in('response_id', ids)
+    excluded = new Set((ex || []).map(e => e.response_id))
   }
 
-  if (opps.length) {
-    // Join contacts in one query for speed
-    const contactIds = [...new Set(opps.map(o => o.ghl_contact_id).filter(Boolean))]
-    const byId = {}
-    const C_PAGE = 500
-    for (let i = 0; i < contactIds.length; i += C_PAGE) {
-      const slice = contactIds.slice(i, i + C_PAGE)
-      const { data } = await supabase
-        .from('ghl_contacts')
-        .select('ghl_contact_id, full_name, first_name, last_name, email, phone')
-        .in('ghl_contact_id', slice)
-      for (const c of (data || [])) byId[c.ghl_contact_id] = c
-    }
-    return opps.map(o => {
-      const c = byId[o.ghl_contact_id] || {}
-      const name = c.full_name
-        || [c.first_name, c.last_name].filter(Boolean).join(' ')
-        || o.name
-        || '—'
-      return {
-        created: (o.created_at || '').split('T')[0],
-        name,
-        email: c.email || '—',
-        phone: c.phone || '—',
-        source: o.source || '—',
-        stage: o.stage_id || '—',
-      }
-    }).sort((a, b) => (b.created || '').localeCompare(a.created || ''))
-  }
-
-  // Fallback: live GHL fetch — slow but correct when local mirror is empty.
-  const SCIO_USA = 'ZN1DW9S9qS540PNAXSxa'
-  const headers = {
-    Authorization: `Bearer ${import.meta.env.VITE_GHL_API_KEY}`,
-    Version: '2021-07-28',
-  }
-  const BASE = 'https://services.leadconnectorhq.com'
-  const LOC = import.meta.env.VITE_GHL_LOCATION_ID
-  let all = []
-  let startAfterId = null, startAfter = null
-  for (let p = 0; p < 50; p++) {
-    const params = new URLSearchParams({ location_id: LOC, pipeline_id: SCIO_USA, limit: '100' })
-    if (startAfterId) { params.set('startAfterId', startAfterId); params.set('startAfter', String(startAfter)) }
-    const r = await fetch(`${BASE}/opportunities/search?${params}`, { headers })
-    if (!r.ok) break
-    const j = await r.json()
-    all = all.concat(j.opportunities || [])
-    if (!j.meta?.startAfterId || (j.opportunities || []).length === 0) break
-    startAfterId = j.meta.startAfterId; startAfter = j.meta.startAfter
-  }
-  return all
-    .filter(o => {
-      const d = (o.createdAt || '').split('T')[0]
-      return d >= from && d <= to
-    })
-    .map(o => ({
-      created: (o.createdAt || '').split('T')[0],
-      name: o.contact?.name || o.name || '—',
-      email: o.contact?.email || '—',
-      phone: o.contact?.phone || '—',
-      source: o.source || '—',
-      stage: o.pipelineStageId || '—',
+  let rows = data
+    .filter(r => audMap[r.ad_id] && !excluded.has(r.response_id))
+    .map(r => ({
+      _id: r.response_id,
+      _kind: 'lead',
+      created: (r.submitted_at || '').split('T')[0],
+      name: [r.first_name, r.last_name].filter(Boolean).join(' ') || '—',
+      email: r.email || '—',
+      phone: r.phone || '—',
+      source: r.form_name || r.utm_campaign || 'Typeform',
+      audience: audMap[r.ad_id],
+      flag: flagMap[r.response_id] || null,
     }))
-    .sort((a, b) => (b.created || '').localeCompare(a.created || ''))
+  if (wanted) rows = rows.filter(r => wanted.has(r.audience))
+  return rows.sort((a, b) => (b.created || '').localeCompare(a.created || ''))
 }
 
 async function fetchAdspend({ from, to, audiences } = {}) {
@@ -1624,31 +1601,62 @@ async function fetchAdspend({ from, to, audiences } = {}) {
 //   duplicate  — same person already counted via another row
 //   dq         — disqualify (manual operator judgement)
 //   remove     — silent delete (test entry, wrong audience, junk EOD line)
-function RowActions({ row, onActioned }) {
+function RowActions({ row, onActioned, onReload }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   if (!row?._id || !row?._kind) return null
+
+  const TABLE = { lead: 'lead_excluded', booking: 'booking_excluded' }[row._kind] || 'closer_call_excluded'
+  const ID_COL = { lead: 'response_id', booking: 'booking_id' }[row._kind] || 'closer_call_id'
 
   const apply = async (reason) => {
     if (busy) return
     setBusy(true); setErr(null)
     try {
-      const table = row._kind === 'lead'    ? 'lead_excluded'
-                  : row._kind === 'booking' ? 'booking_excluded'
-                  : 'closer_call_excluded'
-      const idCol = row._kind === 'lead'    ? 'response_id'
-                  : row._kind === 'booking' ? 'booking_id'
-                  : 'closer_call_id'
-      const payload = { [idCol]: row._id, reason }
+      const payload = { [ID_COL]: row._id, reason }
       // booking_excluded has an `action` column too (dq vs remove vs spam)
       if (row._kind === 'booking') payload.action = reason === 'spam' ? 'spam' : reason === 'dq' ? 'dq' : 'remove'
-      const { error } = await supabase.from(table).upsert(payload, { onConflict: idCol })
+      const { error } = await supabase.from(TABLE).upsert(payload, { onConflict: ID_COL })
       if (error) throw error
-      onActioned?.(row._id, reason)
+      // Bookings refresh in place so the operator sees the status flip (and can
+      // undo). Other kinds just drop out of the list.
+      if (row._kind === 'booking' && onReload) onReload()
+      else onActioned?.(row._id, reason)
     } catch (e) {
-      setErr(e.message || 'failed')
-      setBusy(false)
+      setErr(e.message || 'failed'); setBusy(false)
     }
+  }
+
+  // Undo a manual booking mark — delete the booking_excluded row so the
+  // booking returns to qualified (unless the calendar itself is a DQ calendar).
+  const restore = async () => {
+    if (busy) return
+    setBusy(true); setErr(null)
+    try {
+      const { error } = await supabase.from('booking_excluded').delete().eq('booking_id', row._id)
+      if (error) throw error
+      onReload?.()
+    } catch (e) {
+      setErr(e.message || 'failed'); setBusy(false)
+    }
+  }
+
+  // A booking that's already been manually marked → offer Restore instead of
+  // re-marking. (Calendar-DQ bookings have no manual mark, so they keep the
+  // normal buttons.)
+  if (row._kind === 'booking' && row.mark) {
+    return (
+      <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
+        <span className="text-[9px] uppercase tracking-wider text-text-400 mr-1">{row.mark}</span>
+        <button title="Undo — mark qualified again"
+                onClick={restore}
+                disabled={busy}
+                className="px-1.5 py-0.5 text-[9px] uppercase tracking-wider border border-border-default hover:border-success hover:text-success transition-colors">
+          restore
+        </button>
+        {err && <span className="text-[9px] text-red-400 ml-1">{err}</span>}
+      </div>
+    )
   }
 
   return (
@@ -1688,7 +1696,54 @@ const ROW_ACTIONS_COL = {
   key: '_actions',
   label: 'Actions',
   align: 'right',
-  render: (row, ctx) => <RowActions row={row} onActioned={ctx?.onActioned} />,
+  render: (row, ctx) => <RowActions row={row} onActioned={ctx?.onActioned} onReload={ctx?.onReload} />,
+}
+
+// Booking rows carry the prospect's email, resolved funnel, source calendar
+// and attribution method. The prospect name itself is only the calendar event
+// title ("Eric and Daniel Gomez De Le Vega"), so the operator needs the rest
+// on hover to tell two same-first-name bookings apart and decide DQ/spam.
+function ProspectCell({ row }) {
+  const detail = [
+    row.firstName && `First name: ${row.firstName}`,
+    row.email && `Email: ${row.email}`,
+    row.phone && `Phone: ${row.phone}`,
+    row.audience && `Funnel: ${row.audience}`,
+    row.calendar && `Calendar: ${row.calendar}`,
+    row.appt_date && `Call date: ${String(row.appt_date).slice(0, 10)}`,
+    row.audience_source && `Attribution: ${row.audience_source}`,
+  ].filter(Boolean).join('\n')
+  return (
+    <div className="leading-tight">
+      <span
+        className={`text-text-primary ${detail ? 'border-b border-dotted border-border-default/60 cursor-help' : ''}`}
+        title={detail || undefined}
+      >
+        {row.prospect || '—'}
+      </span>
+      {/* Email under the name — the prospect string is only the calendar event
+          title, so the email is what actually IDs the person. */}
+      <div className="text-[10px] text-text-400">
+        {row.email
+          ? <a href={`mailto:${row.email}`} className="hover:underline" onClick={e => e.stopPropagation()}>{row.email}</a>
+          : <span className="text-text-400/60">no email</span>}
+      </div>
+    </div>
+  )
+}
+
+// Shared columns for the booking drilldowns (Bookings / Qualified Bookings /
+// Cost Per Booking / Cost Per Qualified Booking) so every one of them exposes
+// the same identifying detail the operator filters on.
+const BOOKING_PROSPECT_COL = { key: 'prospect', label: 'Prospect', render: r => <ProspectCell row={r} /> }
+const BOOKING_FUNNEL_COL = {
+  key: 'funnel', label: 'Funnel', cls: 'text-[10px] uppercase text-text-400',
+  render: r => r.audience || '—',
+}
+const STATUS_STYLE = { qual: 'text-success', dq: 'text-orange-400', spam: 'text-red-400', removed: 'text-text-400/60' }
+const BOOKING_TYPE_COL = {
+  key: 'status', label: 'Status',
+  render: r => <span className={`text-[10px] uppercase ${STATUS_STYLE[r.status] || 'text-text-secondary'}`}>{r.status || 'qual'}</span>,
 }
 
 // Drilldown `kind` → metric key in MetricTrendPanel. Tiles whose drilldown
@@ -1750,12 +1805,10 @@ const DRILLDOWN_CONFIG = {
     chart: { dateKey: 'booked', label: 'Bookings per day' },
     columns: [
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
-      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
-      { key: 'revenue_tier', label: 'Revenue', render: r => r.revenue_tier || '—' },
+      BOOKING_PROSPECT_COL,
+      BOOKING_FUNNEL_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
-      { key: 'is_dq', label: 'Type', render: r => r.is_dq
-        ? <span className="text-orange-400 text-[10px] uppercase">DQ</span>
-        : <span className="text-success text-[10px] uppercase">Qual</span> },
+      BOOKING_TYPE_COL,
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No strategy bookings in this window.',
@@ -1763,12 +1816,12 @@ const DRILLDOWN_CONFIG = {
   qbookings: {
     title: 'Qualified Bookings',
     subtitle: 'Strategy bookings excluding the DQ Calendly calendar',
-    fetcher: async (range) => (await fetchBookings(range)).filter(r => !r.is_dq),
+    fetcher: async (range) => (await fetchBookings(range)).filter(r => r.status === 'qual'),
     chart: { dateKey: 'booked', label: 'Qualified bookings per day' },
     columns: [
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
-      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
-      { key: 'revenue_tier', label: 'Revenue', render: r => r.revenue_tier || '—' },
+      BOOKING_PROSPECT_COL,
+      BOOKING_FUNNEL_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
       ROW_ACTIONS_COL,
     ],
@@ -1784,10 +1837,11 @@ const DRILLDOWN_CONFIG = {
       { key: 'name', label: 'Name', cls: 'text-text-primary' },
       { key: 'email', label: 'Email', cls: 'text-text-400 text-[10px]' },
       { key: 'phone', label: 'Phone', cls: 'text-text-400 text-[10px]' },
+      { key: 'audience', label: 'Funnel', cls: 'text-[10px] uppercase text-text-400', render: r => r.audience || '—' },
       { key: 'source', label: 'Source', cls: 'text-text-400 text-[10px]' },
+      ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No leads in this window.',
-    slowFirstLoad: true,
   },
   cpb: {
     title: 'Cost Per Booking',
@@ -1796,23 +1850,25 @@ const DRILLDOWN_CONFIG = {
     chart: { dateKey: 'booked', mode: 'cost', label: 'Cost per booking per day', fmtValue: v => `$${Math.round(v)}` },
     columns: [
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
-      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      BOOKING_PROSPECT_COL,
+      BOOKING_FUNNEL_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
-      { key: 'is_dq', label: 'Type', render: r => r.is_dq
-        ? <span className="text-orange-400 text-[10px] uppercase">DQ</span>
-        : <span className="text-success text-[10px] uppercase">Qual</span> },
+      BOOKING_TYPE_COL,
+      ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No bookings in this window.',
   },
   cpqb: {
     title: 'Cost Per Qualified Booking',
     subtitle: 'Daily Meta adspend ÷ qualified bookings made that day',
-    fetcher: async (range) => (await fetchBookings(range)).filter(r => !r.is_dq),
+    fetcher: async (range) => (await fetchBookings(range)).filter(r => r.status === 'qual'),
     chart: { dateKey: 'booked', mode: 'cost', label: 'Cost per Q.Book per day', fmtValue: v => `$${Math.round(v)}` },
     columns: [
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
-      { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      BOOKING_PROSPECT_COL,
+      BOOKING_FUNNEL_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
+      ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No qualified bookings in this window.',
   },
@@ -1922,6 +1978,7 @@ const DRILLDOWN_CONFIG = {
         </span> },
       { key: 'email', label: 'Email', cls: 'text-text-400 text-[10px]' },
       { key: 'phone', label: 'Phone', cls: 'text-text-400 text-[10px]' },
+      { key: 'audience', label: 'Funnel', cls: 'text-[10px] uppercase text-text-400', render: r => r.audience || '—' },
       { key: 'source', label: 'Source', cls: 'text-text-400 text-[10px]' },
       ROW_ACTIONS_COL,
     ],
@@ -2024,13 +2081,17 @@ async function enrichRowsWithProspectEmails(rows) {
     .lte('appointment_date', fmt(maxDate))
     .limit(5000)
 
-  const matchScore = (norm, candidate) => {
-    if (!norm || !candidate) return false
-    if (candidate === norm || candidate.includes(norm) || norm.includes(candidate)) return true
+  // Graded match so an exact name beats a loose substring hit. A bare first
+  // name like "john" used to substring-match every "John *" appointment and
+  // the closest-by-date one won — surfacing a different John's email. Exact
+  // (3) and first+last (2) now rank above substring (1).
+  const matchQuality = (norm, candidate) => {
+    if (!norm || !candidate) return 0
+    if (candidate === norm) return 3
     const np = norm.split(/\s+/), cp = candidate.split(/\s+/)
-    return np.length > 1 && cp.length > 1
-      && np[0] === cp[0]
-      && np[np.length - 1] === cp[cp.length - 1]
+    if (np.length > 1 && cp.length > 1 && np[0] === cp[0] && np[np.length - 1] === cp[cp.length - 1]) return 2
+    if (candidate.includes(norm) || norm.includes(candidate)) return 1
+    return 0
   }
 
   const unresolvedContactIds = new Set()
@@ -2042,18 +2103,32 @@ async function enrichRowsWithProspectEmails(rows) {
     const candidates = []
     for (const a of (appts || [])) {
       const an = normalizeProspectName(a.contact_name)
-      if (!matchScore(norm, an)) continue
+      const q = matchQuality(norm, an)
+      if (!q) continue
       const dDiff = Math.abs((new Date(a.appointment_date) - new Date(row.date)) / 86400000)
-      candidates.push({ appt: a, dDiff })
+      candidates.push({ appt: a, q, dDiff })
     }
     if (candidates.length === 0) continue
-    candidates.sort((a, b) => a.dDiff - b.dDiff)
+    candidates.sort((a, b) => b.q - a.q || a.dDiff - b.dDiff)
+
+    // Within the best match tier, if two appointments carry DIFFERENT emails
+    // the prospect name alone can't disambiguate them (two distinct "John"s
+    // on the same calendar). Leave the email blank rather than show a
+    // confidently-wrong address — "—" is safer than the wrong person.
+    const bestQ = candidates[0].q
+    const tierEmails = new Map() // lower → original-case
+    for (const c of candidates) {
+      if (c.q !== bestQ) continue
+      const e = c.appt.contact_email
+      if (e && e.includes('@')) tierEmails.set(e.toLowerCase(), e)
+    }
+    if (tierEmails.size > 1) continue
+    if (tierEmails.size === 1) { row.email = [...tierEmails.values()][0]; continue }
+
+    // No email on the matched appointment(s) — fall back to the closest match's
+    // contact_id and resolve via ghl_contacts_cache below.
     const best = candidates[0].appt
-    if (best.contact_email && best.contact_email.includes('@')) {
-      row.email = best.contact_email
-    } else if (best.ghl_contact_id) {
-      // Appointment row has no email but we know the contact_id — queue for
-      // ghl_contacts_cache fallback below.
+    if (best.ghl_contact_id) {
       rowToContactId.set(row, best.ghl_contact_id)
       unresolvedContactIds.add(best.ghl_contact_id)
     }
@@ -2541,16 +2616,29 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
   // re-read the audience view with the exclusion-honouring numbers.
   const mutatedRef = useRef(false)
   const audKey = selectedAudiences ? [...selectedAudiences].sort().join('|') : ''
-  useEffect(() => {
+  // Re-run the fetcher in place — used after a booking mark/restore so the
+  // status flip (and the row dropping out of the qualified views) is reflected
+  // immediately without closing the modal. Marks any reload as a mutation so
+  // the parent re-reads the tiles on close.
+  const reload = useCallback(({ silent = false } = {}) => {
     if (!config) return
+    mutatedRef.current = true
+    if (!silent) setRows(null)
+    const args = { ...resolveRange(range), audiences: selectedAudiences }
+    config.fetcher(args)
+      .then(r => setRows(r))
+      .catch(e => { console.warn(`${kind} drilldown failed:`, e); setRows([]) })
+  }, [config, kind, range, audKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
     let cancelled = false
     setRows(null)
+    if (!config) return
     const args = { ...resolveRange(range), audiences: selectedAudiences }
     config.fetcher(args)
       .then(r => { if (!cancelled) setRows(r) })
       .catch(e => { if (!cancelled) { console.warn(`${kind} drilldown failed:`, e); setRows([]) } })
     return () => { cancelled = true }
-  }, [kind, range, audKey, config])
+  }, [kind, range, audKey, config]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleClose = () => onClose(mutatedRef.current)
 
@@ -2613,7 +2701,7 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
                   <tr key={row._id || i} className="border-b border-border-default/30 hover:bg-white/[0.02]">
                     {config.columns.map(c => (
                       <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.cls || ''}`}>
-                        {c.render ? c.render(row, { onActioned: (id) => { mutatedRef.current = true; setRows(prev => (prev || []).filter(r => r._id !== id)) } }) : (row[c.key] ?? '—')}
+                        {c.render ? c.render(row, { onActioned: (id) => { mutatedRef.current = true; setRows(prev => (prev || []).filter(r => r._id !== id)) }, onReload: () => reload({ silent: true }) }) : (row[c.key] ?? '—')}
                       </td>
                     ))}
                   </tr>
