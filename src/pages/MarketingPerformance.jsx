@@ -1316,15 +1316,47 @@ async function fetchBookings({ from, to, audiences } = {}) {
     for (const c of (cs || [])) contactById[c.ghl_contact_id] = c
   }
 
+  // Backfill revenue_tier from typeform_responses for any booking whose
+  // resolver chain couldn't surface it (lib_strategy_booking_resolved is
+  // sparse here: it only carries revenue_tier when the booking was
+  // attributed through the typeform→ghl_appointments join, which misses
+  // direct calendar bookings, manual entries, and pre-resolver rows).
+  // Strategy: collect the emails that still need a tier, batch-lookup the
+  // typeform answer for each (lowercased), pick the most recent one when
+  // multiple typeforms share an email (a prospect filling the funnel twice).
+  const needTierEmails = [...new Set(
+    raw.filter(r => !r.revenue_tier)
+       .map(r => (r.contact_email || contactById[r.ghl_contact_id]?.email || '').toLowerCase().trim())
+       .filter(Boolean)
+  )]
+  const tierByEmail = {}
+  for (let i = 0; i < needTierEmails.length; i += 200) {
+    const slice = needTierEmails.slice(i, i + 200)
+    const { data: tfs } = await supabase
+      .from('typeform_responses')
+      .select('email, revenue_tier, submitted_at')
+      .in('email', slice)
+      .not('revenue_tier', 'is', null)
+      .order('submitted_at', { ascending: false })
+    for (const t of (tfs || [])) {
+      const k = (t.email || '').toLowerCase().trim()
+      if (k && !tierByEmail[k]) tierByEmail[k] = t.revenue_tier   // newest wins (sorted desc)
+    }
+  }
+
   return raw.map(r => {
     const mark = exclById[r.id] || null               // spam | dq | duplicate | remove | null
-    const autoDq = r.is_dq || (r.revenue_tier ? isDQRevenueTier(r.revenue_tier) : false)
+    const c = contactById[r.ghl_contact_id] || {}
+    const email = r.contact_email || c.email || null
+    const revenueTier = r.revenue_tier
+      || (email && tierByEmail[email.toLowerCase().trim()])
+      || null
+    const autoDq = r.is_dq || (revenueTier ? isDQRevenueTier(revenueTier) : false)
     const is_dq = autoDq || mark === 'dq'
     const is_spam = mark === 'spam'
     // 'remove'/'duplicate' = won't count at all; tile drops them and so do we.
     const removed = mark === 'remove' || mark === 'duplicate'
     const status = removed ? 'removed' : is_spam ? 'spam' : is_dq ? 'dq' : 'qual'
-    const c = contactById[r.ghl_contact_id] || {}
     // First name: prefer the real GHL contact, fall back to the leading token of
     // the calendar title ("Anthony and Daniel…" → "Anthony").
     const firstName = c.first_name
@@ -1336,10 +1368,10 @@ async function fetchBookings({ from, to, audiences } = {}) {
       booked: String(r.booked_at).split('T')[0],
       prospect: r.contact_name,
       firstName,
-      email: r.contact_email || c.email || null,
+      email,
       phone: c.phone || null,
       calendar: r.calendar_name || null,
-      revenue_tier: r.revenue_tier,
+      revenue_tier: revenueTier,
       appt_date: r.appointment_date,
       is_dq,
       is_spam,
@@ -1534,7 +1566,7 @@ async function fetchLeads({ from, to, audiences } = {}) {
 
   const { data } = await supabase
     .from('typeform_responses')
-    .select('response_id, submitted_at, first_name, last_name, email, phone, form_name, utm_campaign, ad_id')
+    .select('response_id, submitted_at, first_name, last_name, email, phone, form_name, utm_campaign, ad_id, revenue_tier')
     .gte('submitted_at', sinceTs).lte('submitted_at', untilTs)
     .order('submitted_at', { ascending: false })
   if (!data?.length) return []
@@ -1600,6 +1632,7 @@ async function fetchLeads({ from, to, audiences } = {}) {
         phone: r.phone || '—',
         source: r.form_name || r.utm_campaign || 'Typeform',
         audience,
+        revenue_tier: r.revenue_tier || null,
         flag: flagMap[r.response_id] || null,
         mark,
         status,        // 'qual' | 'spam' | 'dup' | 'removed' | 'untracked'
@@ -1929,9 +1962,13 @@ const DRILLDOWN_CONFIG = {
       { key: 'email', label: 'Email', cls: 'text-text-400 text-[10px]' },
       { key: 'phone', label: 'Phone', cls: 'text-text-400 text-[10px]' },
       { key: 'audience', label: 'Funnel', cls: 'text-[10px] uppercase text-text-400', render: r => r.audience || '—' },
+      // Revenue tier the prospect picked on the typeform — strongest single
+      // qualification signal for spam/DQ decisions, same as on the booking
+      // drilldowns. Reuses BOOKING_REVENUE_COL so styling stays consistent.
+      BOOKING_REVENUE_COL,
       { key: 'source', label: 'Source', cls: 'text-text-400 text-[10px]' },
       // Reuses the booking-status renderer — STATUS_STYLE handles
-      // qual / spam / dup / removed identically. Surfaces manual marks
+      // qual / spam / dup / removed / untracked identically. Surfaces marks
       // so the operator can confirm spam decisions, and pairs with the
       // restore button in ROW_ACTIONS_COL.
       BOOKING_TYPE_COL,
