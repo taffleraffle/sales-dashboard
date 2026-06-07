@@ -1354,9 +1354,17 @@ async function fetchBookings({ from, to, audiences } = {}) {
     const autoDq = r.is_dq || (revenueTier ? isDQRevenueTier(revenueTier) : false)
     const is_dq = autoDq || mark === 'dq'
     const is_spam = mark === 'spam'
-    // 'remove'/'duplicate' = won't count at all; tile drops them and so do we.
-    const removed = mark === 'remove' || mark === 'duplicate'
-    const status = removed ? 'removed' : is_spam ? 'spam' : is_dq ? 'dq' : 'qual'
+    const is_dup = mark === 'duplicate'
+    // 'remove' = won't count at all; tile drops it and so do we below.
+    // 'duplicate' = visible with a 'dup' status pill + restore button so the
+    // operator can verify or undo the mark (used to silently disappear like
+    // 'remove' — bad UX, no way to recover a false-positive dup mark).
+    const removed = mark === 'remove'
+    const status = removed ? 'removed'
+      : is_dup ? 'dup'
+      : is_spam ? 'spam'
+      : is_dq ? 'dq'
+      : 'qual'
     // First name: prefer the real GHL contact, fall back to the leading token of
     // the calendar title ("Anthony and Daniel…" → "Anthony").
     const firstName = c.first_name
@@ -1717,8 +1725,16 @@ function RowActions({ row, onActioned, onReload }) {
     setBusy(true); setErr(null)
     try {
       const payload = { [ID_COL]: row._id, reason }
-      // booking_excluded has an `action` column too (dq vs remove vs spam)
-      if (row._kind === 'booking') payload.action = reason === 'spam' ? 'spam' : reason === 'dq' ? 'dq' : 'remove'
+      // booking_excluded has an `action` column. Persist 'duplicate' as its
+      // own action so the drilldown can render a 'dup' status pill + restore
+      // button instead of silently dropping the row (which is what 'remove'
+      // does, and what 'duplicate' used to collapse to — clicking dup made
+      // the booking vanish with no visible status change).
+      if (row._kind === 'booking') payload.action =
+        reason === 'spam' ? 'spam'
+        : reason === 'dq' ? 'dq'
+        : reason === 'duplicate' ? 'duplicate'
+        : 'remove'
       const { error } = await supabase.from(TABLE).upsert(payload, { onConflict: ID_COL })
       if (error) throw error
       // Bookings + leads refresh in place so the operator sees the status
@@ -1862,7 +1878,7 @@ const BOOKING_REVENUE_COL = {
   key: 'revenue_tier', label: 'Revenue', cls: 'text-[10px] uppercase text-text-secondary whitespace-nowrap',
   render: r => r.revenue_tier || '—',
 }
-const STATUS_STYLE = { qual: 'text-success', dq: 'text-orange-400', spam: 'text-red-400', removed: 'text-text-400/60', untracked: 'text-yellow-400' }
+const STATUS_STYLE = { qual: 'text-success', dq: 'text-orange-400', spam: 'text-red-400', dup: 'text-yellow-400', removed: 'text-text-400/60', untracked: 'text-yellow-400' }
 const BOOKING_TYPE_COL = {
   key: 'status', label: 'Status',
   render: r => <span className={`text-[10px] uppercase ${STATUS_STYLE[r.status] || 'text-text-secondary'}`}>{r.status || 'qual'}</span>,
