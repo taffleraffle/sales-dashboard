@@ -1716,9 +1716,24 @@ function RowActions({ row, onActioned, onReload }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   if (!row?._id || !row?._kind) return null
+  // Aggregate-only filler rows from fetchLiveCalls have synthetic _id
+  // ('agg-<eod_report_id>-<i>') that isn't a real closer_calls.id, so an
+  // upsert into closer_call_excluded would FK-violate. Hide the action bar
+  // entirely — these rows exist to make the drilldown total match the tile
+  // (one per outstanding aggregate count), not as per-call markable entries.
+  if (row.aggregate_only) return null
 
   const TABLE = { lead: 'lead_excluded', booking: 'booking_excluded' }[row._kind] || 'closer_call_excluded'
   const ID_COL = { lead: 'response_id', booking: 'booking_id' }[row._kind] || 'closer_call_id'
+
+  // Fire-and-forget matview refresh after a mark/restore so the marketing
+  // tiles recount within the throttle window (~60s — RPC is throttled in
+  // migration 139). console.warn on failure so a broken refresh is visible
+  // in the browser console instead of silently leaving the tile stale.
+  const refreshMatview = () =>
+    supabase.rpc('refresh_marketing_trend_mv').then(() => {}, err => {
+      console.warn('refresh_marketing_trend_mv failed:', err?.message || err)
+    })
 
   const apply = async (reason) => {
     if (busy) return
@@ -1737,19 +1752,19 @@ function RowActions({ row, onActioned, onReload }) {
         : 'remove'
       const { error } = await supabase.from(TABLE).upsert(payload, { onConflict: ID_COL })
       if (error) throw error
-      // Fire-and-forget matview refresh so the marketing tiles recount
-      // within the throttle window (~60s, RPC is throttled in migration 139).
-      // Without this the tile reads stale data and Ben sees "marking does
-      // nothing to CPL" — the drilldown row flips but the tile number above
-      // it doesn't. Don't await — adds noticeable latency to the row click.
-      supabase.rpc('refresh_marketing_trend_mv').then(() => {}, () => {})
+      refreshMatview()
       // Bookings + leads refresh in place so the operator sees the status
       // flip and can hit restore on a false-positive mark. Live calls and
       // other kinds without a restore path just drop out of the list.
       if ((row._kind === 'booking' || row._kind === 'lead') && onReload) onReload()
       else onActioned?.(row._id, reason)
     } catch (e) {
-      setErr(e.message || 'failed'); setBusy(false)
+      setErr(e.message || 'failed')
+    } finally {
+      // Always clear busy — without finally, a successful mark left the
+      // button disabled forever (RowActions doesn't unmount when the row
+      // reloads in place, only when it drops out of the visible list).
+      setBusy(false)
     }
   }
 
@@ -1762,10 +1777,12 @@ function RowActions({ row, onActioned, onReload }) {
     try {
       const { error } = await supabase.from(TABLE).delete().eq(ID_COL, row._id)
       if (error) throw error
-      supabase.rpc('refresh_marketing_trend_mv').then(() => {}, () => {})
+      refreshMatview()
       onReload?.()
     } catch (e) {
-      setErr(e.message || 'failed'); setBusy(false)
+      setErr(e.message || 'failed')
+    } finally {
+      setBusy(false)
     }
   }
 
