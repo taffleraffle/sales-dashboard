@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Trash2, X } from 'lucide-react'
+import { Sparkles, Copy, AlertCircle, FileText, ChevronDown, ChevronUp, Check, Zap, Layers, Plus, Settings, Trash2, X, Edit3 } from 'lucide-react'
 import { generateScripts, generateAngles, generateProofsForAngle,
          listAngles, listHookShapes, listMechanisms,
          listProofCharactersForAngle,
@@ -10,6 +10,7 @@ import { listTestBatches, addScriptsToBatch } from '../../services/testBatches'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
 import MechanismConfigModal from '../../components/ads/MechanismConfigModal'
 import ProofCharacterEditor from '../../components/ads/ProofCharacterEditor'
+import AngleEditorModal from '../../components/ads/AngleEditorModal'
 import ConfirmModal from '../../components/ConfirmModal'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Eyebrow } from '../../components/editorial/atoms'
@@ -114,6 +115,11 @@ export default function AdsGenerator() {
   // for ANY angle regardless of selection state (Ben 2026-06-01).
   // null = closed.
   const [proofEditorAngle, setProofEditorAngle] = useState(null)
+  // Angle editor — { mode: 'edit'|'create', angle: rowOrNull }. Opens the
+  // modal that lets the operator fix wording (qualifier / name / mechanism)
+  // on existing rows OR seed a brand-new custom angle when no generated
+  // angle fits the scenario they want to test.
+  const [angleEditorTarget, setAngleEditorTarget] = useState(null)
   // Per-angle proof lists — full rows, not just counts. Lets the angle
   // chip indicator show "no proofs yet", the angle library tile show a
   // breakdown by proof_type, and the Scripts "pulling proofs from"
@@ -977,6 +983,14 @@ export default function AdsGenerator() {
                       border: '1px solid var(--rule)', background: 'transparent',
                       color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
                     }}>Refresh</button>
+                  <button onClick={() => setAngleEditorTarget({ mode: 'create', angle: null })}
+                    title="Add a custom angle to the library (skip Claude generation)"
+                    style={{
+                      padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
+                      letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
+                      border: '1px solid #1a242c', background: '#1a242c',
+                      color: 'var(--paper)', cursor: 'pointer', borderRadius: 2,
+                    }}>+ Custom angle</button>
                 </div>
               </div>
               {/* Bulk action bar — appears when any tile is selected. Sticky at
@@ -1043,6 +1057,7 @@ export default function AdsGenerator() {
                   })}
                   onRetire={(a) => setRetireAngleTarget({ slug: a.slug, name: a.name })}
                   onOpenProofs={(a) => setProofEditorAngle(a)}
+                  onEdit={(a) => setAngleEditorTarget({ mode: 'edit', angle: a })}
                 />
               ) : (
                 <div style={{
@@ -1057,6 +1072,7 @@ export default function AdsGenerator() {
                       onToggleSelect={() => toggleSelectAngle(a.slug)}
                       onRetire={() => setRetireAngleTarget({ slug: a.slug, name: a.name })}
                       onOpenProofs={() => setProofEditorAngle(a)}
+                      onEdit={() => setAngleEditorTarget({ mode: 'edit', angle: a })}
                     />
                   ))}
                 </div>
@@ -1735,6 +1751,23 @@ export default function AdsGenerator() {
             angles={angles}
             onClose={() => setMechanismModalOpen(false)}
             onSaved={handleMechanismSaved}
+          />
+          <AngleEditorModal
+            open={!!angleEditorTarget}
+            angle={angleEditorTarget?.angle}
+            mode={angleEditorTarget?.mode || 'edit'}
+            offerSlug={offerSlug}
+            angleType={angleEditorTarget?.angle?.angle_type || 'outcome'}
+            onClose={() => setAngleEditorTarget(null)}
+            onSaved={(savedSlug) => {
+              // Refresh the library so the new/edited angle shows up. If we
+              // just CREATED an angle, also pre-select it so the next script
+              // run uses it immediately.
+              refreshMessagingLibrary(offerSlug)
+              if (angleEditorTarget?.mode === 'create' && savedSlug) {
+                setAngleSlugs(prev => prev.includes(savedSlug) ? prev : [...prev, savedSlug])
+              }
+            }}
           />
           <ProofCharacterEditor
             open={!!proofEditorAngle}
@@ -3318,7 +3351,7 @@ async function upsertProofCharacterCall(payload) {
 // Crossed $100K Monthly Revenue" end up in the same group with a single
 // "select all 2 in cluster" button. Clusters of 1 are listed below in a
 // "uniques" section so nothing hides. Same tile component, just grouped.
-function LibraryClusterView({ angles, proofs, selected, onToggleSelect, onSelectCluster, onRetire, onOpenProofs }) {
+function LibraryClusterView({ angles, proofs, selected, onToggleSelect, onSelectCluster, onRetire, onOpenProofs, onEdit }) {
   // Group by angle_type first, then by normalized name fingerprint.
   // Normalize strips noise words (the, a, my, just, restoration, water, etc.)
   // and punctuation, keeping the first 3 meaningful tokens as the cluster
@@ -3410,6 +3443,7 @@ function LibraryClusterView({ angles, proofs, selected, onToggleSelect, onSelect
                             onToggleSelect={() => onToggleSelect(a.slug)}
                             onRetire={() => onRetire(a)}
                             onOpenProofs={() => onOpenProofs(a)}
+                            onEdit={onEdit ? () => onEdit(a) : undefined}
                           />
                         ))}
                       </div>
@@ -3435,6 +3469,7 @@ function LibraryClusterView({ angles, proofs, selected, onToggleSelect, onSelect
                       onToggleSelect={() => onToggleSelect(a.slug)}
                       onRetire={() => onRetire(a)}
                       onOpenProofs={() => onOpenProofs(a)}
+                      onEdit={onEdit ? () => onEdit(a) : undefined}
                     />
                   ))}
                 </div>
@@ -3452,7 +3487,7 @@ function LibraryClusterView({ angles, proofs, selected, onToggleSelect, onSelect
 // Ben hated). Big serif title, type tag, prospect voice, proof type
 // breakdown chips, and an expander for evidence_examples / why-it-matters.
 // Retire = soft-delete (active=false).
-function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, onOpenProofs }) {
+function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, onOpenProofs, onEdit }) {
   const [open, setOpen] = useState(false)
   const meta = angleTypeMeta(angle.angle_type)
   const typeColor = meta.color
@@ -3519,6 +3554,15 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
             }}>
             <Settings size={13} />
           </button>
+          {onEdit && (
+            <button onClick={onEdit} title="Edit angle (qualifier, name, mechanism)"
+              style={{
+                padding: 6, background: 'transparent', border: '1px solid var(--rule)',
+                color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+              }}>
+              <Edit3 size={13} />
+            </button>
+          )}
           <button onClick={onRetire} title="Retire angle"
             style={{
               padding: 6, background: 'transparent', border: '1px solid var(--rule)',
