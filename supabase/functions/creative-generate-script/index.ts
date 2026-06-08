@@ -897,11 +897,13 @@ serve(async (req) => {
   const extra_instructions: string = typeof body?.extra_instructions === 'string'
     ? body.extra_instructions.trim().slice(0, 4000)
     : ''
-  // Script mode (Ben 2026-06-01) — 'direct' | 'hybrid' | 'educational'.
+  // Script mode (Ben 2026-06-01, ROM added 2026-06-09) —
+  // 'direct' | 'hybrid' | 'educational' | 'rom'.
   // Falls through to 'direct' (the legacy behavior) when caller omits.
-  const script_mode: 'direct' | 'hybrid' | 'educational' =
+  const script_mode: 'direct' | 'hybrid' | 'educational' | 'rom' =
     body?.script_mode === 'educational' ? 'educational'
     : body?.script_mode === 'hybrid' ? 'hybrid'
+    : body?.script_mode === 'rom' ? 'rom'
     : 'direct'
   // Mechanism toggle (Ben 2026-06-01 PM). Default TRUE so legacy callers
   // (omitting the field) keep the existing branded-mechanism behavior.
@@ -1570,6 +1572,7 @@ serve(async (req) => {
       educational: ['A', 'D', 'E', 'F', 'H'],
       hybrid:      ['A', 'D', 'E', 'F', 'G', 'H'],
       direct:      [],   // empty = use all
+      rom:         [],   // ROM uses all 8 shapes — diversity is the whole point
     }
     const modeAllowed = MODE_SHAPE_ALLOWLIST[script_mode] || []
     const shapesForMode = modeAllowed.length
@@ -1646,6 +1649,62 @@ CTA RULES (CRITICAL — apply to body + joined; hooks have their own ending):
     // NOTE: `offer` is NOT in scope in the template branch (only angle,
     // proofs, mechanism, shapes, skeletons). DO NOT reach for offer.* here.
     const scriptModeBlock = (() => {
+      if (script_mode === 'rom') {
+        // ROM mode (Ben 2026-06-09) — validated across 40 scripts
+        // (20 electrician + 20 restoration). Locked body skeleton with
+        // a diverse hook on every concept. The "#1 in 90 days or money
+        // back" line is the OFFER at the close — NEVER the hook.
+        // Ben killed a previous batch where every hook was that line.
+        return script_type === 'hook'
+          ? `\n\nSCRIPT MODE: ROM (diverse-hook, offer-at-close).
+Open with one of these shapes — vary across the batch, no repeats:
+- Insight reveal: "Most ${'{vertical}'} don't know this yet. Google's AI now ranks Maps by..."
+- AI shift / trend: "Google's AI rewrote how it ranks ${'{vertical}'} on Maps in 2025..."
+- Mechanism reveal: "Three signals on your Google Business Profile decide who ranks #1..."
+- Pattern interrupt: "Your website isn't what ranks you anymore..."
+- Story-led: "[Proof name] was getting zero direct calls from Google. Not low. Zero..."
+- Mistake framing: "The reason most $50K+/month ${'{vertical}'} are stuck isn't bad work. It's the wrong product..."
+- Identity / full pipeline: "The #1 ${'{vertical}'} in your city wakes up to a full pipeline every morning..."
+- Direct qualifier-led: "${'{vertical}'} doing $50K+/month. This is for you."
+- Trend / future: "The ${'{vertical}'} dominating Google Maps in 2026 won't be the ones with the biggest ad budgets..."
+- Outcome-led: "5 new customers a week. From Google. Without spending a dollar on ads."
+- Fire-your-agency variants: "You're allowed to fire your SEO agency..." / "Your SEO agency has had 12 months..." / "We don't sell SEO. We install signals."
+
+Length: 40-65 words. Friend-talk voice. Identity / vertical callout in the hook itself.
+
+BANNED in ROM hooks:
+- Questions at the start ("Have you ever wondered...")
+- The "#1 in 90 days or money back" line — that's the OFFER, it goes in the body close
+- Competitor framing ("your competitors", naming franchises)
+- Filler ("quietly", "something most don't know")
+- "Get Found engine" / "Maps Mastery" branded names
+- Problem-aware stats ("78% of emergency calls go to Google first")
+- "shops" — use "company / companies"
+
+VARIETY CHECK: across the batch, every hook MUST use a different shape. Repeating a shape across two concepts is a fail.`
+          : `\n\nSCRIPT MODE: ROM (locked body skeleton — only the hook varies).
+The body is FIXED across every script in a batch. Only the hook varies. The body is:
+
+1. SETUP — one short paragraph. "$50K+/month [vertical]" qualifier + ONE named real proof character + their concrete result number. Example: "If you do $50K+/month and you're not in the top 3 for '[vertical] near me,' you're missing at least one. Hamish from HM Electrical went from zero direct calls to 90+ in 100 days after we installed his."
+
+2. REVEAL — verbatim line, swap vertical only:
+   "Here's the truth Google won't say out loud. Their AI doesn't rank you by your website anymore. It ranks you by proof — proof you serve the area, proof people pick you, proof you're still open. Most [vertical] profiles miss all three."
+
+3. OFFER — verbatim:
+   "We'll make you the #1 company in your area in 90 days or your money back. No ads. No retainer."
+
+4. CTA — variant action that ties back to the hook's angle:
+   "If you're a $50K+/month [vertical] ready to [be #1 / fire the retainer and rank / stop renting your ranking / etc.], click below."
+
+Length: 180-230 words total (hook + body combined). Short. Tight. No filler.
+
+BANNED in ROM bodies:
+- Complex math (e.g. "$3K × 18 months = $54K") — say "tens of thousands"
+- Inventing proof character names — use ONLY the real ones from the angle's proof roster
+- Restating the reveal in different words — copy it verbatim
+- Mid-body CTA — CTA is the final line only
+- Branded mechanism names — say "three specific signals on your Google Business Profile"`
+      }
       if (script_mode === 'direct') {
         return script_type === 'hook'
           ? `\n\nSCRIPT MODE: DIRECT (Schwartz Stage 1-2 — claim-led, FRIEND-TALK).

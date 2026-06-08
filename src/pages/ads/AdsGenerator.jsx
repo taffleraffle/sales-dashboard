@@ -59,11 +59,11 @@ export default function AdsGenerator() {
   // brand-name mechanism reveal — useful when running Educational
   // mode or A/B-testing whether the brand-name lift is worth it.
   const [useMechanism, setUseMechanism] = useState(true)
-  const nConcepts = (modeQuotas.direct || 0) + (modeQuotas.hybrid || 0) + (modeQuotas.educational || 0)
+  const nConcepts = (modeQuotas.direct || 0) + (modeQuotas.hybrid || 0) + (modeQuotas.educational || 0) + (modeQuotas.rom || 0)
   // Convenience: when only one mode is set, this is "the" mode (used in
   // history filtering, button labels, etc.). When 2+ modes are set,
   // scriptMode = 'mixed'.
-  const activeModes = ['direct', 'hybrid', 'educational'].filter(m => (modeQuotas[m] || 0) > 0)
+  const activeModes = ['direct', 'hybrid', 'educational', 'rom'].filter(m => (modeQuotas[m] || 0) > 0)
   // eslint-disable-next-line no-unused-vars
   const scriptMode = activeModes.length === 1 ? activeModes[0] : 'mixed'
   // Noop shim — the legacy `generatorMode === 'attributes'` UI (dead since
@@ -1363,6 +1363,8 @@ export default function AdsGenerator() {
                   desc: 'Direct flow with ONE mechanism-reveal beat (e.g. "Google weighs response time 3x more than bid") woven into the pattern statement. Best A/B candidate against pure Direct on slightly-cold traffic.' },
                 { v: 'educational', label: 'Educational', stage: 'Stage 3-4 · mechanism-led',
                   desc: 'Mechanism IS the headline; claim follows. Body teaches throughout — each beat advances the lesson. Hook uses curiosity / reframe / trend shape. Soft "learn more" CTA. For saturated markets where every claim has been heard.' },
+                { v: 'rom',         label: 'ROM',         stage: 'Diverse hook · locked body · offer at close',
+                  desc: 'Validated 2026-06-09. Diverse hook shape on every script (insight reveal, AI shift, mechanism, pattern interrupt, story, mistake, identity, qualifier-led, trend, outcome, fire-agency). Locked body skeleton — setup + named proof + "Here\'s the truth Google won\'t say out loud" reveal + "#1 in 90 days or money back" offer at the close. Never the hook. For $50K+/mo solution-aware operators.' },
               ].map(opt => {
                 const n = modeQuotas[opt.v] || 0
                 const on = n > 0

@@ -44,7 +44,7 @@ export async function generateScripts({
   target_attributes = {},
   save_as_drafts = false,
   extra_instructions,    // optional free-text appended to the Claude prompt
-  script_mode,           // 'direct' | 'hybrid' | 'educational' (Ben 2026-06-01)
+  script_mode,           // 'direct' | 'hybrid' | 'educational' | 'rom' (Ben 2026-06-01, ROM added 06-09)
   use_mechanism,         // boolean (Ben 2026-06-01 PM) — true (default) reveals
                          // the offer's brand-named mechanism, false strips it
 } = {}) {
@@ -66,7 +66,7 @@ export async function generateScripts({
   if (extra_instructions && extra_instructions.trim()) {
     body.extra_instructions = extra_instructions.trim()
   }
-  if (script_mode && ['direct', 'hybrid', 'educational'].includes(script_mode)) {
+  if (script_mode && ['direct', 'hybrid', 'educational', 'rom'].includes(script_mode)) {
     body.script_mode = script_mode
   }
   if (typeof use_mechanism === 'boolean') {
