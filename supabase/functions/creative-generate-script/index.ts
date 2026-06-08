@@ -211,6 +211,102 @@ async function loadBodySkeletons(supabase: any, length_bucket?: string) {
   return data || []
 }
 
+// Load winning-ad reference scripts (migration 143). The prompt assembly
+// injects up to 3 active examples matching the run's script_mode +
+// script_type so the model sees what good copy LOOKS LIKE without us
+// having to hand-code restoration-flavoured examples into the prompt.
+//
+// Selection priority:
+//   1. Examples scoped to this offer_slug exactly
+//   2. Examples scoped to no offer (offer_slug IS NULL = applies across offers)
+//   3. Most recent first within each tier
+//
+// Capped at 3 to keep prompt-size sane; Ben can prune/edit the table
+// any time without redeploying this function.
+async function loadScriptExamples(supabase: any, mode: string, script_type: string, offer_slug: string | null) {
+  // Inputs are validated upstream but be defensive — bad mode shouldn't 502.
+  if (!mode || !script_type) return []
+  // script_type='joined' counts as 'hook_body' for the purpose of pulling
+  // full-script references; an isolated hook or body still pulls hook_body
+  // examples since most winners are full scripts and the model can extract
+  // the relevant portion.
+  const typeAlias = script_type === 'joined' ? ['hook_body'] : ['hook_body', script_type]
+  let q = supabase
+    .from('script_examples')
+    .select('slug, title, body, mode, script_type, offer_slug, audience_label, notes')
+    .eq('active', true)
+    .eq('mode', mode)
+    .in('script_type', typeAlias)
+    .order('created_at', { ascending: false })
+    .limit(20)   // pull a generous bucket, narrow down client-side
+  const { data, error } = await q
+  if (error) return []   // example fetch is best-effort — never block generation
+  const rows = data || []
+  // Sort: offer-specific first, then global. Stable within each tier.
+  rows.sort((a: any, b: any) => {
+    const aMatch = a.offer_slug === offer_slug ? 0 : (a.offer_slug ? 2 : 1)
+    const bMatch = b.offer_slug === offer_slug ? 0 : (b.offer_slug ? 2 : 1)
+    return aMatch - bMatch
+  })
+  return rows.slice(0, 3)
+}
+
+// Format the examples block for the prompt. Critical framing: these are
+// PATTERNS to extract, NOT templates to copy. Without that the model
+// borrows concrete details (mechanism names, client stories, specific
+// numbers) that belong to the originals.
+function formatScriptExamplesBlock(examples: any[], script_mode: string): string {
+  if (!examples.length) return ''
+  const sections = examples.map((ex, i) => {
+    const audienceLine = ex.audience_label ? `Audience: ${ex.audience_label}\n` : ''
+    const notesLine = ex.notes ? `\nWhat makes this work (operator notes):\n${ex.notes}\n` : ''
+    return `═══ EXAMPLE ${i + 1} — ${ex.title} ═══\n${audienceLine}\nSCRIPT BODY:\n${ex.body}\n${notesLine}`
+  }).join('\n\n')
+  return `\n\n═══════════════════════════════════════════════════════════════
+EDUCATIONAL EXAMPLES TO STUDY (${script_mode.toUpperCase()} MODE)
+═══════════════════════════════════════════════════════════════
+
+The scripts below are winning ads in the same MODE you're writing in.
+They share a structural spine you should EXTRACT and APPLY to THIS
+angle. They do NOT share the same offer, mechanism, audience, or
+proof characters — those came from the original advertisers' worlds,
+not from yours.
+
+EXTRACT these patterns:
+  - Opening shape (pattern-interrupt CLAIM vs qualifier-call-out vs
+    trend-statement vs mistake-framing vs curiosity tease) — pick the
+    shape that fits THIS angle, don't default to the same one every time
+  - Where the QUALIFIER drops (beat 1 or beat 2) — early enough that
+    out-of-band prospects self-deselect
+  - PLAIN-WORDS mechanism reveal in the middle (NOT jargon — these
+    examples explicitly avoid "algorithm" / "weighting" / "optimize")
+  - ONE proof story with concrete numbers in 2-3 sentences max
+    (NOT a roster of 4+ clients — one is enough)
+  - The reframe that punctures the prospect's existing belief
+    ("Google's algorithm doesn't think — it guesses" is the educational
+    flip that makes the body convert)
+  - Close shape: soft urgency + qualifier reinforcement + CTA
+
+DO NOT borrow these specifics (they belong to the originals):
+  - Mechanism names: "Get Found engine", "Maps Mastery system"
+    → use THIS offer's actual mechanism (in the angle context above)
+  - Revenue bands: "$25k+/mo", "$50k+/mo restoration"
+    → use THIS angle's qualifier (verbatim, it's in the angle context)
+  - Proof stories: "Phoenix dentist", "16 days to #1", "3 calls → 27"
+    → use THE PROOF CHARACTERS listed for THIS angle (with their
+    actual revenue / outcome / story from the proof rows)
+  - Industry verticals named in the examples — write to THIS angle's
+    vertical, full stop.
+
+If your draft uses any of the example mechanism names, client stories,
+or specific numbers verbatim, you've copied instead of studied —
+rewrite with this offer's facts.
+${sections}
+
+═══ END EXAMPLES ═══
+`
+}
+
 // Build the angle-context block that prefixes every template-based prompt.
 // When mechanism is provided (migration 108), its short/long/3-part-HOW
 // take precedence over the angle's legacy mechanism fields. This lets the
@@ -1377,20 +1473,36 @@ serve(async (req) => {
       ? target_shapes_raw.filter((s: any) => typeof s === 'string')
       : (typeof target_shapes_raw === 'string' && target_shapes_raw ? [target_shapes_raw] : [])
 
-    let angle: any, mechanism: any = null, proofs: any[], shapes: any[], skeletons: any[]
+    let angle: any, mechanism: any = null, proofs: any[], shapes: any[], skeletons: any[], scriptExamples: any[]
     try {
       const needsShapes = script_type === 'hook' || script_type === 'joined'
       const needsSkeletons = script_type === 'body' || script_type === 'joined'
-      ;[angle, mechanism, proofs, shapes, skeletons] = await Promise.all([
+      ;[angle, mechanism, proofs, shapes, skeletons, scriptExamples] = await Promise.all([
         loadAngle(supabase, angle_slug),
         mechanism_slug ? loadMechanism(supabase, mechanism_slug) : Promise.resolve(null),
         loadProofCharacters(supabase, angle_slug),
         needsShapes ? loadHookShapes(supabase, target_shapes.length ? target_shapes : undefined) : Promise.resolve([]),
         needsSkeletons ? loadBodySkeletons(supabase, target_length) : Promise.resolve([]),
+        // script_mode-matched example fetch (migration 143). Best-effort —
+        // returns [] on any error so generation never blocks on this.
+        loadScriptExamples(supabase, script_mode, script_type, null /* angle.offer_slugs picked up below */),
       ])
     } catch (e: any) {
       return json({ error: e.message }, 500)
     }
+    // Re-narrow the examples to this offer if we have one — we passed null
+    // to the loader above so it'd return both global + offer-specific rows;
+    // resort with the actual offer_slug we now have from the angle.
+    try {
+      const offerSlugForExamples = angle?.offer_slugs?.[0] || null
+      if (offerSlugForExamples && scriptExamples.length) {
+        scriptExamples = [...scriptExamples].sort((a, b) => {
+          const am = a.offer_slug === offerSlugForExamples ? 0 : (a.offer_slug ? 2 : 1)
+          const bm = b.offer_slug === offerSlugForExamples ? 0 : (b.offer_slug ? 2 : 1)
+          return am - bm
+        }).slice(0, 3)
+      }
+    } catch { /* defensive — never block on example sorting */ }
     // Merge in per-OFFER proofs (migration 120) — these apply across
     // every script for the offer, on top of the angle-specific proofs.
     // Dedup by lowercased name to avoid the same proof appearing twice
@@ -1617,6 +1729,13 @@ Length: 200-300 words HARD CAP at 300 (Ben 2026-06-01 PM: shorter wins). If you'
 ANTI-TEMPLATE CHECK: if your body could be swapped to roofing or plumbing with 3-word find-replace, it's too generic — anchor on this angle's specific scene, specific named proof, specific in-the-trenches detail.`
     })()
 
+    // Winning-ad reference examples (migration 143). Placed AFTER the
+    // mode-specific block so the model has internalised the mode rules
+    // before seeing what good copy looks like — the examples then
+    // ground the abstract rules in concrete style. Empty string when
+    // there are no examples for this mode/script_type.
+    const examplesBlock = formatScriptExamplesBlock(scriptExamples, script_mode)
+
     const userMsg = [
       angleCtx,
       shapesBlock,
@@ -1627,6 +1746,7 @@ ANTI-TEMPLATE CHECK: if your body could be swapped to roofing or plumbing with 3
       sharedVarianceBlock,
       sharedNumberRules,
       scriptModeBlock,
+      examplesBlock,
       `\nReturn via the ${TEMPLATE_TOOL_NAMES[script_type]} tool.`,
       extraBlock,
     ].join('')
