@@ -1101,7 +1101,10 @@ async function fetchLiveCalls({ from, to, audiences } = {}) {
   const audienceFilterActive = audiences && audiences.size > 0
   const { data: reports } = await supabase
     .from('closer_eod_reports')
-    .select('id, report_date, new_live_calls, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
+    // NB: the EOD column is live_nc_calls (NEW-call lives). Selecting the
+    // non-existent new_live_calls 400s the whole query and the drilldown
+    // rendered 0 rows while the tile showed 3 (bug found 2026-06-10).
+    .select('id, report_date, live_nc_calls, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
     .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
   const reportIds = (reports || []).map(r => r.id)
   const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
@@ -1139,7 +1142,7 @@ async function fetchLiveCalls({ from, to, audiences } = {}) {
   const aggregateRows = []
   if (!audienceFilterActive) {
     for (const report of (reports || [])) {
-      const aggregate = Number(report.new_live_calls) || 0
+      const aggregate = Number(report.live_nc_calls) || 0
       const perRowCount = perRowCountByEod[report.id] || 0
       const missing = aggregate - perRowCount
       for (let i = 0; i < missing; i++) {
