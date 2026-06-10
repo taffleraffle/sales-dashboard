@@ -286,7 +286,14 @@ async function uploadWithResume(file, { bucket, path, contentType, onProgress, u
         bucketName: bucket,
         objectName: path,
         contentType: contentType || file.type || 'application/octet-stream',
-        cacheControl: '3600',
+        // 30 days + immutable. Edited cuts never change after upload, so
+        // browsers + Cloudflare can serve repeat downloads from cache with
+        // zero revalidation round-trips. Previous 1-hour cache forced a
+        // revalidation every browser session — every reviewer paid the
+        // round-trip on every visit (Ben 2026-06-10: "downloading from the
+        // platform is super super slow"). The matching existing-file
+        // backfill ran via SQL on storage.objects.metadata at the same time.
+        cacheControl: 'public, max-age=2592000, immutable',
       },
       // Fingerprint MUST include the target objectName. tus-js-client's
       // default fingerprint keys only on file identity (name+size+mtime+
@@ -2000,9 +2007,14 @@ const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
 // every parent render and silently defeat the memo() wrap on
 // OptVideoPlayer (caught in code-review 2026-06-01). Hoisting these
 // here gives each call site a stable identity.
-const OPT_PLAYER_WRAP_FILL = { height: '100%' }
-const OPT_PLAYER_WRAP_360 = { height: 360 }
-const OPT_PLAYER_WRAP_320 = { height: 320 }
+// Wrapper styles for OptVideoPlayer call sites. Always pair a fixed height
+// with a maxHeight cap so 9:16 vertical submissions can't run away when
+// the modal is wide (Ben 2026-06-10: "when I click review on a thing
+// that is a mobile video, it is very, very, very tall"). The maxHeight
+// is viewport-relative so the player shrinks on shorter screens too.
+const OPT_PLAYER_WRAP_FILL = { height: '100%', maxHeight: 'min(56vh, 460px)' }
+const OPT_PLAYER_WRAP_360 = { height: 360, maxHeight: 'min(56vh, 360px)' }
+const OPT_PLAYER_WRAP_320 = { height: 300, maxHeight: 'min(48vh, 320px)' }
 
 // memo-wrapped so SubmissionPreviewModal's 1Hz state ticks don't cascade
 // into a player re-render unless an actual prop changes (markers,
@@ -2261,6 +2273,11 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
     <div ref={wrapRef} className="opt-player"
       style={{
         position: 'relative', width: '100%',
+        // Hard ceiling so vertical (9:16) submissions can never blow
+        // past the viewport even if a caller forgets to pass a
+        // height-capped wrapperStyle. Individual call sites can
+        // override via wrapperStyle.maxHeight if they want larger.
+        maxHeight: 'min(60vh, 520px)',
         background: '#000', color: 'white',
         display: 'flex', flexDirection: 'column',
         userSelect: 'none',
@@ -2288,10 +2305,13 @@ const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
         {src ? (
           <video ref={videoRef} src={src} preload="metadata"
             autoPlay={autoPlay !== undefined ? autoPlay : !compact}
+            playsInline
             onClick={togglePlay}
             onDoubleClick={toggleFullscreen}
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
+            onWaiting={() => { try { if (videoRef.current) videoRef.current.dataset.buffering = '1' } catch {} }}
+            onCanPlay={() => { try { if (videoRef.current) videoRef.current.dataset.buffering = '0' } catch {} }}
             onLoadedMetadata={() => {
               const v = videoRef.current
               if (v && isFinite(v.duration)) setDuration(v.duration)
@@ -4620,10 +4640,15 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
 
   // Filter helper for clicking the unassigned banner — narrows the view
   // to raw + unassigned non-Testimony rows by setting the existing
-  // filter chips.
+  // filter chips. Also turns OFF hide-low-quality and hide-bad-takes so
+  // raw rows flagged for either don't get silently excluded — the banner
+  // count ignores both flags, so the filtered view has to as well or the
+  // operator sees "Nothing matches" while the banner still says N raw.
   const focusUnassignedRaw = useCallback(() => {
     setStageFilter(new Set(['raw_unused']))
     setTypeFilter(new Set(['Hook', 'Body', 'Joined', 'Full Video', 'Retargeting']))
+    setHideLowQuality(false)
+    setHideBadTakes(false)
   }, [])
 
   // Bulk download — for each selected row, kicks off a browser download
