@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { SectionHead, Icon, PALETTE } from '../../components/editorial/atoms'
 import Modal from '../../components/editorial/Modal'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
+import { FolderBar, FolderPickerModal, subtreeIds } from '../../components/ads/CreativeFolders'
 
 const SUPABASE_URL = 'https://kjfaqhmllagbxjdxlopm.supabase.co'
 
@@ -702,7 +703,7 @@ async function runUploadPipeline(item, update) {
   const { file, config, perFileConfig } = item
   const {
     batchType, batchStatus, batchEditorId, batchOfferSlug, stamp,
-    batchCreator, uploadBatchId,
+    batchCreator, uploadBatchId, batchFolderId,
   } = config
   // Per-file config from the rename allocator. Falls back to safe
   // defaults if the modal didn't supply it (very old enqueue path).
@@ -751,6 +752,10 @@ async function runUploadPipeline(item, update) {
     assigned_editor_id: batchEditorId || null,
     offer_slug: batchOfferSlug || null,
     creator: batchCreator || null,
+    // Uploads started while inside a folder file straight into it —
+    // Drive behaviour. The 42703 strip-loop below keeps this safe if
+    // migration 146 isn't applied yet.
+    folder_id: batchFolderId || null,
     upload_batch_id: uploadBatchId || null,
     is_bad_take: markedBad,
     bad_take_reason: markedBad ? badReason : null,
@@ -761,7 +766,10 @@ async function runUploadPipeline(item, update) {
   let working = { ...fullInsert }
   let insertRes = await supabase.from('lib_creative_library').insert(working).select('id').single()
   let guard = 0
-  while (insertRes.error?.code === '42703' && guard < Object.keys(fullInsert).length) {
+  // PGRST204 = PostgREST's "column not in schema cache" for INSERT bodies;
+  // 42703 is what SELECTs return. The loop must accept both or it never
+  // fires for inserts and the self-heal promise is dead code.
+  while ((insertRes.error?.code === '42703' || insertRes.error?.code === 'PGRST204') && guard < Object.keys(fullInsert).length) {
     guard++
     const missing = Object.keys(working).find(k => (insertRes.error.message || '').includes(k))
     if (!missing) break
@@ -3483,6 +3491,7 @@ const PAGE_CACHE = {
   editorsTime: 0,
   offers: null,
   offersTime: 0,
+  folders: null,       // lib_creative_folders (migration 146)
 }
 
 // Default scope = full admin permissions (when used inside the regular dashboard).
@@ -4033,6 +4042,16 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // alongside the main rows fetch — not chained, so we don't add latency.
   const [editors, setEditors] = useState(() => cached?.editors || [])
   const [offers, setOffers] = useState(() => cached?.offers || [])
+  // Drive-style folders (migration 146). folderId = the folder currently
+  // open; null = library root. Search ignores folder scoping (global),
+  // matching how Drive search behaves.
+  const [folders, setFolders] = useState(() => cached?.folders || [])
+  const [folderId, setFolderId] = useState(null)
+  const [moveFolderOpen, setMoveFolderOpen] = useState(false)
+  // Boolean (not the array) is what the hot filter memo keys on — a
+  // rename/re-parent producing a fresh folders array must not re-run the
+  // whole filter/sort pipeline.
+  const hasFolders = folders.length > 0
   // Admins are tracked in lib_creative_editors but should NOT appear in
   // the "EDITORS" filter chip, the assignment dropdown, or the per-editor
   // stats breakdown — they don't take queue work, they manage it.
@@ -4169,7 +4188,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // of transcript = 600KB+ wasted on the first paint. Pulling without it
   // cuts the initial payload roughly in half. Transcripts get lazy-loaded
   // in a follow-up query after first paint so library search still works.
-  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason'
+  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id'
 
   const load = useCallback(async (background = false, attempt = 0) => {
     if (!background) setLoading(true)
@@ -4184,9 +4203,9 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       setTimeout(() => reject(new Error(
         'Supabase timed out — try again or restart the project from the Supabase dashboard.'
       )), TIMEOUT_MS))
-    let rowsRes, edRes, ofRes
+    let rowsRes, edRes, ofRes, fdRes
     try {
-      ;[rowsRes, edRes, ofRes] = await Promise.race([
+      ;[rowsRes, edRes, ofRes, fdRes] = await Promise.race([
         Promise.all([
           supabase.from('lib_creative_library')
             .select(`${LIB_LEAN_COLS},assigned_editor:assigned_editor_id (id, name)`)
@@ -4194,6 +4213,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             .order('added_at', { ascending: false }),
           supabase.from('lib_creative_editors').select('*').eq('active', true).order('name'),
           supabase.from('offers').select('slug,name').eq('retired', false).order('slug'),
+          supabase.from('lib_creative_folders').select('id,name,parent_id').order('name'),
         ]),
         timeoutErr,
       ])
@@ -4216,13 +4236,31 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     // so the library still loads. Rows will show is_bad_take=undefined (falsy),
     // which the filter treats as "not a bad take" — safe default. Self-heals
     // the moment the migration is applied.
+    // The fallbacks CHAIN: each strips its column from the previous
+    // attempt's list (not the original constant), so a DB missing both
+    // migration 099 AND 146 still converges instead of re-introducing
+    // the first missing column on the second retry.
+    let effectiveCols = LIB_LEAN_COLS
     if (rowsRes.error?.code === '42703' && rowsRes.error.message?.includes('is_bad_take')) {
-      const fallbackCols = LIB_LEAN_COLS
+      effectiveCols = effectiveCols
         .replace(',is_bad_take,bad_take_reason', '')
         .replace('is_bad_take,bad_take_reason,', '')
         .replace('is_bad_take,bad_take_reason', '')
       const { data: fd, error: fe } = await supabase.from('lib_creative_library')
-        .select(`${fallbackCols},assigned_editor:assigned_editor_id (id, name)`)
+        .select(`${effectiveCols},assigned_editor:assigned_editor_id (id, name)`)
+        .eq('exclude_from_library', false)
+        .order('added_at', { ascending: false })
+      rowsRes = { data: fd, error: fe }
+    }
+    // Migration 146 adds folder_id. Same code-ahead-of-migration fallback
+    // as is_bad_take above: retry the row fetch without the column so the
+    // library still loads; rows show folder_id=undefined (root). The
+    // folders table fetch failing (42P01, table missing) is handled below
+    // by treating folders as empty — the folder UI simply doesn't appear.
+    if (rowsRes.error?.code === '42703' && rowsRes.error.message?.includes('folder_id')) {
+      effectiveCols = effectiveCols.replace(',folder_id', '')
+      const { data: fd, error: fe } = await supabase.from('lib_creative_library')
+        .select(`${effectiveCols},assigned_editor:assigned_editor_id (id, name)`)
         .eq('exclude_from_library', false)
         .order('added_at', { ascending: false })
       rowsRes = { data: fd, error: fe }
@@ -4247,10 +4285,19 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     }
     setEditors(edRes.data || [])
     setOffers(ofRes.data || [])
+    // Folders: an error here (e.g. 42P01 — migration 146 not applied yet)
+    // just means no folder UI. Don't surface it; the library is unaffected.
+    const folderRows = fdRes?.error ? [] : (fdRes?.data || [])
+    setFolders(folderRows)
+    // If the folder we're standing in was deleted elsewhere (another tab/
+    // client) this refresh would otherwise leave us scoped to a ghost id —
+    // an empty list under a breadcrumb that looks like the root.
+    setFolderId(curr => (curr && !folderRows.some(f => f.id === curr)) ? null : curr)
     PAGE_CACHE.editors = edRes.data || []
     PAGE_CACHE.editorsTime = Date.now()
     PAGE_CACHE.offers = ofRes.data || []
     PAGE_CACHE.offersTime = Date.now()
+    PAGE_CACHE.folders = folderRows
     setLoading(false)
 
     // Background-load transcripts after first paint so library search
@@ -4404,6 +4451,25 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     if (hideLowQuality) list = list.filter(r => !r.is_low_quality)
     if (hideBadTakes) list = list.filter(r => !r.is_bad_take)
     const search = deferredQ.trim().toLowerCase()
+    // Folder scoping (Drive-style): inside a folder show only its direct
+    // clips; at the root show un-filed clips. Skipped while searching so
+    // search stays global — same as Drive. Until the first folder exists
+    // every row has folder_id null and the root view is identical to the
+    // pre-folders library.
+    //
+    // raw_unused carve-out: the RAW / needs-editing view is a WORK QUEUE,
+    // not a browse view — the unassigned banner counts the FULL row set
+    // and its "Filter to these →" click lands at the root with EXACTLY
+    // this filter set. Hiding filed raws there would show fewer rows than
+    // the banner promised (and let filed raws dodge assignment forever).
+    // Only the exact single-selection bypasses scoping — a multi-select
+    // that merely includes raw_unused keeps the root un-filed-only, so
+    // filed edited cuts can't leak into a browse view.
+    const rawQueueView = stageFilter.size === 1 && stageFilter.has('raw_unused')
+    if (!search) {
+      if (folderId) list = list.filter(r => r.folder_id === folderId)
+      else if (hasFolders && !rawQueueView) list = list.filter(r => !r.folder_id)
+    }
     if (search) list = list.filter(r => {
       // Search blob includes the new display_name + messaging_angle so a
       // coordinator searching for "STOP-PAYING-FOR-LEADS" or "ACCOUNTANT"
@@ -4490,7 +4556,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       })
     }
     return list
-  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, dateFilter, latestOnly, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds])
+  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, dateFilter, latestOnly, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -4649,6 +4715,10 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     setTypeFilter(new Set(['Hook', 'Body', 'Joined', 'Full Video', 'Retargeting']))
     setHideLowQuality(false)
     setHideBadTakes(false)
+    // The banner counts the FULL row set; jump back to the library root
+    // (where the raw_unused view ignores folder scoping) so folders can't
+    // hide rows the banner just promised.
+    setFolderId(null)
   }, [])
 
   // Bulk download — for each selected row, kicks off a browser download
@@ -4689,6 +4759,109 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       }, i * 180)
     })
   }, [selected, rows])
+
+  // ── Folder CRUD (migration 146) ────────────────────────────────────
+  // Clip counts per folder, for the folder cards. Respects the default-on
+  // hide flags so a card never advertises clips that render as "Nothing
+  // matches" when the folder is opened (a folder of hidden bad takes
+  // saying "2 clips" but opening empty reads as data loss).
+  const folderClipCounts = useMemo(() => {
+    const m = new Map()
+    for (const r of rows) {
+      if (!r.folder_id) continue
+      if (hideLowQuality && r.is_low_quality) continue
+      if (hideBadTakes && r.is_bad_take) continue
+      m.set(r.folder_id, (m.get(r.folder_id) || 0) + 1)
+    }
+    return m
+  }, [rows, hideLowQuality, hideBadTakes])
+
+  const syncFolders = useCallback((updater) => {
+    setFolders(curr => {
+      const next = updater(curr)
+      PAGE_CACHE.folders = next
+      return next
+    })
+  }, [])
+  const syncRows = useCallback((updater) => {
+    setRows(curr => {
+      const next = updater(curr)
+      PAGE_CACHE.rows = next
+      return next
+    })
+  }, [])
+
+  // New folders are created inside the folder currently open — same as
+  // Drive's "New folder" button.
+  const createFolder = useCallback(async (name) => {
+    const { data, error } = await supabase.from('lib_creative_folders')
+      .insert({ name, parent_id: folderId })
+      .select('id,name,parent_id').single()
+    if (error) throw error
+    syncFolders(curr => [...curr, data])
+  }, [folderId, syncFolders])
+
+  // Rename + re-parent share one write path; both are a single-column
+  // patch on the folder row.
+  const patchFolder = useCallback(async (folder, patch) => {
+    const { error } = await supabase.from('lib_creative_folders')
+      .update(patch).eq('id', folder.id)
+    if (error) throw error
+    syncFolders(curr => curr.map(f => f.id === folder.id ? { ...f, ...patch } : f))
+  }, [syncFolders])
+  // Stable wrappers — FolderBar is memoized; inline lambdas in its JSX
+  // would defeat the memo on every parent render.
+  const renameFolder = useCallback((folder, name) => patchFolder(folder, { name }), [patchFolder])
+  const reparentFolder = useCallback((folder, parentId) => patchFolder(folder, { parent_id: parentId }), [patchFolder])
+
+  // Delete = subtree gone, clips released to the deleted folder's parent
+  // (never deleted). The release + delete run atomically server-side
+  // (lib_delete_creative_folder RPC) so a failure can't leave clips moved
+  // but the folder alive. If the operator is standing inside the deleted
+  // subtree, hop them up to the surviving parent.
+  const deleteFolder = useCallback(async (folder) => {
+    const { error } = await supabase.rpc('lib_delete_creative_folder', { p_folder_id: folder.id })
+    if (error) throw error
+    const removed = subtreeIds(folders, folder.id)
+    syncFolders(curr => curr.filter(f => !removed.has(f.id)))
+    syncRows(curr => curr.map(r => removed.has(r.folder_id) ? { ...r, folder_id: folder.parent_id || null } : r))
+    if (folderId && removed.has(folderId)) setFolderId(folder.parent_id || null)
+  }, [folders, folderId, syncFolders, syncRows])
+
+  // Moving a clip moves its WHOLE version family (parent_id chain).
+  // Filing v1 while v2 stays behind would split the family across
+  // folders — and with "latest only" on, hide it from both views.
+  const moveClipsToFolder = useCallback(async (ids, destId) => {
+    const roots = new Set()
+    for (const id of ids) {
+      const r = rows.find(x => x.id === id)
+      roots.add(r?.parent_id || id)
+    }
+    const family = rows.filter(r => roots.has(r.parent_id || r.id)).map(r => r.id)
+    const { error } = await supabase.from('lib_creative_library')
+      .update({ folder_id: destId }).in('id', family)
+    if (error) throw error
+    const idSet = new Set(family)
+    syncRows(curr => curr.map(r => idSet.has(r.id) ? { ...r, folder_id: destId } : r))
+  }, [rows, syncRows])
+
+  // Stable navigate handler — FolderBar is memoized, an inline lambda
+  // would re-render the whole card grid on every keystroke. Selection is
+  // cleared so a bulk action can't target rows that are no longer shown.
+  const navigateFolder = useCallback((id) => {
+    setFolderId(id)
+    clearSelection()
+  }, [clearSelection])
+
+  // Where the current selection lives, for the move picker's "current"
+  // tag + no-op guard: a folder id (or null = root) only when EVERY
+  // selected clip agrees; undefined (no guard) for mixed selections,
+  // which global search makes possible.
+  const selectionFolderId = useMemo(() => {
+    if (!moveFolderOpen) return undefined
+    const fids = new Set(Array.from(selected).map(id => rows.find(r => r.id === id)?.folder_id || null))
+    return fids.size === 1 ? fids.values().next().value : undefined
+  }, [moveFolderOpen, selected, rows])
 
   return (
     <>
@@ -4999,6 +5172,25 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
 
       {err && <ErrorBanner msg={err} onRetry={() => load(false)} />}
 
+      {/* Drive-style folder navigation — breadcrumb + folder cards for
+          the folder currently open. Hidden entirely until the first
+          folder exists. While a search is active the cards hide and a
+          "search covers all folders" tag shows instead, because results
+          are global. */}
+      <FolderBar
+        folders={folders}
+        currentFolderId={folderId}
+        onNavigate={navigateFolder}
+        clipCounts={folderClipCounts}
+        searching={Boolean(deferredQ.trim())}
+        canManage={scope.canEditCreative}
+        onCreate={createFolder}
+        onRename={renameFolder}
+        onDelete={deleteFolder}
+        onMoveFolder={reparentFolder}
+        onError={setErr}
+      />
+
       {/* Bulk selection bar — sticky, appears when ≥1 tile is selected */}
       {selected.size > 0 && scope.canEditCreative && (
         <div style={{
@@ -5037,6 +5229,14 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               background: 'transparent', color: 'white',
               border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer',
             }}>↓ Download {selected.size}</button>
+          <button onClick={() => setMoveFolderOpen(true)} disabled={bulkBusy}
+            title="Move the selected clips (and their other versions) into a folder"
+            style={{
+              padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 10.5,
+              fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: 'transparent', color: 'white',
+              border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer',
+            }}>Move to folder</button>
           <button onClick={() => setBulkEditOpen(true)} disabled={bulkBusy}
             style={{
               padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 10.5,
@@ -5161,6 +5361,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
           editors={editors}
           offers={offers}
           knownCreators={knownCreators}
+          folderId={folderId}
           onClose={() => setUploadOpen(false)}
           onSaved={() => { setUploadOpen(false); load() }}
           onOfferAdded={(newOffer) => {
@@ -5221,6 +5422,21 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             setBulkEditOpen(false)
             clearSelection()
           }} />
+      )}
+
+      {moveFolderOpen && (
+        <FolderPickerModal
+          title={`Move ${selected.size} clip${selected.size === 1 ? '' : 's'}`}
+          subtitle="Pick a destination. A clip's other versions move with it; each clip lives in exactly one folder."
+          folders={folders}
+          currentId={selectionFolderId}
+          onClose={() => setMoveFolderOpen(false)}
+          onPick={async (destId) => {
+            await moveClipsToFolder(Array.from(selected), destId)
+            setMoveFolderOpen(false)
+            clearSelection()
+          }}
+        />
       )}
     </>
   )
@@ -6497,6 +6713,11 @@ function VersionsPanel({ row, onReload }) {
           status: row.status || 'raw',
           offer_slug: row.offer_slug,
           assigned_editor_id: row.assigned_editor_id,
+          // Stay in the source clip's folder — a v2 landing at the library
+          // root would split the version family across folders. Key only
+          // included when set so this insert keeps working if migration
+          // 146 isn't applied yet (no 42703 self-heal loop on this path).
+          ...(row.folder_id ? { folder_id: row.folder_id } : {}),
           parent_id: rootId,
           version_number: nextVersion,
           size_mb: Math.round(file.size / 1024 / 1024 * 10) / 10,
@@ -8599,7 +8820,7 @@ function driveEmbedUrl(url) {
 
 /* ─────────────────────────── UPLOAD MODAL ─────────────────────────── */
 
-function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded, knownCreators = [] }) {
+function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded, knownCreators = [], folderId = null }) {
   // The modal is now a thin shell: it collects files + batch config,
   // hands them off to the module-level upload queue, and closes. The
   // queue owns all upload state, runs in the background regardless of
@@ -8786,6 +9007,7 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
       batchEditorId,
       batchOfferSlug,
       batchCreator: batch.actor_creator,
+      batchFolderId: folderId,   // file uploads into the folder that was open
       uploadBatchId: batch.id,
       uploadBatchSeq: batch.batch_seq,
       uploadBatchDate: batch.date_local,
