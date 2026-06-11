@@ -2187,6 +2187,12 @@ const DRILLDOWN_CONFIG = {
       { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
       { key: 'type', label: 'Type', cls: 'text-[10px] uppercase text-text-400' },
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      // Unknown audience = the close resolver found no ad, typeform, or
+      // booking attribution. These closes silently drop out of every
+      // audience-filtered view, so flag them loudly for manual follow-up.
+      { key: 'audience', label: 'Audience', render: r => r.audience === 'Unknown' || !r.audience
+        ? <span className="text-[10px] uppercase text-red-400 font-semibold" title="No ad, typeform, or booking attribution — this close is invisible under audience filters. Check the prospect's UTM/typeform trail.">Unattributed</span>
+        : <span className="text-[10px] uppercase text-text-400">{r.audience}</span> },
       { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
       { key: 'cash', label: 'Cash', align: 'right', render: r => r.cash ? `$${parseFloat(r.cash).toLocaleString()}` : '—' },
       { key: 'finance', label: 'Finance', cls: 'text-[10px] uppercase text-text-400' },
@@ -2819,6 +2825,15 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
     return () => { cancelled = true }
   }, [kind, range, audKey, config]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Lock the page behind while the modal is open — without this, wheel
+  // events over the modal (and any overscroll past the end of its inner
+  // scroll area) scrolled the dashboard underneath instead of the modal.
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
   const handleClose = () => onClose(mutatedRef.current)
 
   if (!config) return null
@@ -2843,7 +2858,7 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
             when the column count exceeds available width — combined with
             the sticky-right Actions column above, this keeps the spam/DQ
             buttons reachable in split-screen / half-width windows. */}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto overscroll-contain">
           {/* Historical trend (week/month + range presets + hover). Shows for
               every kind that maps to a metric in MetricTrendPanel. Pulls
               lib_marketing_by_audience_daily once, aggregates client-side. */}
