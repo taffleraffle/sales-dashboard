@@ -1430,13 +1430,16 @@ async function fetchShowRate({ from, to }) {
   // bookings, lives, no_shows, gross + net show% pre-computed.
   const { data } = await supabase
     .from('marketing_tracker')
-    .select('date, nc_booked, new_live_calls, no_shows, cancelled_dtf, cancelled_by_prospect, reschedules, qualified_bookings')
+    // marketing_tracker has no nc_booked column (selecting it 400'd the
+    // whole query → the show-rate drilldown was always empty). The show-rate
+    // denominator is Qualified Bookings, matching the tile tooltip.
+    .select('date, new_live_calls, no_shows, cancelled_dtf, cancelled_by_prospect, reschedules, qualified_bookings')
     .gte('date', from).lte('date', to)
     .order('date', { ascending: false })
   return (data || [])
-    .filter(r => (r.nc_booked || 0) > 0)
+    .filter(r => (r.qualified_bookings || 0) > 0)
     .map(r => {
-      const nc = r.nc_booked || 0
+      const nc = r.qualified_bookings || 0
       const lives = r.new_live_calls || 0
       const cancels = (r.cancelled_dtf || 0) + (r.cancelled_by_prospect || 0)
       const reschedules = r.reschedules || 0

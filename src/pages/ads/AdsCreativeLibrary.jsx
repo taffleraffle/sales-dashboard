@@ -1328,12 +1328,12 @@ function useAdminIdentity() {
       const fallback = (user.email || '').split('@')[0] || 'Admin'
       setIdentity({ kind: 'admin', id: user.id, name: fallback })
       supabase.from('team_members')
-        .select('display_name')
+        .select('name')
         .eq('auth_user_id', user.id)
         .maybeSingle()
         .then(({ data: tm }) => {
-          if (mounted && tm?.display_name) {
-            setIdentity({ kind: 'admin', id: user.id, name: tm.display_name })
+          if (mounted && tm?.name) {
+            setIdentity({ kind: 'admin', id: user.id, name: tm.name })
           }
         })
     })

@@ -51,6 +51,9 @@ export function useEODSubmit() {
           offered_finance: c.offered_finance || false,
           notes: c.notes || '',
           setter_lead_id: c.setter_lead_id && validIds.has(c.setter_lead_id) ? c.setter_lead_id : null,
+          // Lets review/calendar pages dedupe saved calls against GHL
+          // appointments instead of re-counting every appointment as new.
+          ghl_event_id: c.ghl_event_id || null,
         }))
         const { error: callError } = await supabase.from('closer_calls').insert(callRows)
         if (callError) throw callError
