@@ -4739,32 +4739,58 @@ export default function MarketingPerformance() {
         // bk + bk30 are hoisted at component scope. Locally bound for
         // brevity inside this IIFE.
         const denom    = bk.qualified || 0
-        const denom30  = bk30.qualified || 0
         const denomPrev = sp.qualified_bookings || 0  // prev period stays on EOD until we have bk for it
         const rate = (num, d) => d > 0 ? Math.min(100, (num / d) * 100) : 0
-        const reschedRate    = rate(stats.reschedules || 0, denom)
-        const reschedRate30  = rate(stats30.reschedules || 0, denom30)
+
+        // Every component of the show-rate family (lives, bookings, cancels,
+        // reschedules) is summed from audienceDaily — the SAME mv the
+        // drilldown charts. Previously the numerator/cancel counts came from
+        // EOD event aggregates while the denominator was the deduped
+        // calendar map: a prospect rescheduling 3× produced 3 subtraction
+        // events against 1 deduped booking, collapsing the net denominator
+        // (the "30d: 100.0%" net show). One source → 7d, 30d, and the
+        // drilldown are congruent by construction.
+        const { from: winFrom, to: winTo } = resolveRange(range)
+        const sumWin = (fromD, toD) => {
+          const w = { qb: 0, lives: 0, noShows: 0, cancels: 0, resch: 0 }
+          for (const r of audienceDaily) {
+            if (r.date < fromD || r.date > toD) continue
+            if (selectedAudiences.size > 0 && !selectedAudiences.has(r.audience)) continue
+            w.qb      += Number(r.qualified_bookings) || 0
+            w.lives   += Number(r.live_calls) || 0
+            w.noShows += Number(r.no_shows) || 0
+            w.cancels += Number(r.cancels) || 0
+            w.resch   += Number(r.reschedules) || 0
+          }
+          return w
+        }
+        const W   = sumWin(winFrom, winTo)
+        const W30 = sumWin(etDateOffset(-29), todayET())
+        const reschedRate    = rate(W.resch, W.qb)
+        const reschedRate30  = rate(W30.resch, W30.qb)
         const reschedRatePrev= rate(sp.reschedules || 0, denomPrev)
-        const cancelRate     = rate(stats.cancels || 0, denom)
-        const cancelRate30   = rate(stats30.cancels || 0, denom30)
+        const cancelRate     = rate(W.cancels, W.qb)
+        const cancelRate30   = rate(W30.cancels, W30.qb)
         const cancelRatePrev = rate(sp.cancels || 0, denomPrev)
-        // Show rates recomputed with calendar denominator. Net Show% subtracts
-        // closer-reported cancels + reschedules from the calendar count — best
-        // available approximation of "confirmed bookings."
-        const grossShowRate = rate(stats.new_live_calls || 0, denom)
-        const grossShowRate30 = rate(stats30.new_live_calls || 0, denom30)
-        const netDenom    = Math.max(0, denom    - (stats.cancels || 0)   - (stats.reschedules || 0))
-        const netDenom30  = Math.max(0, denom30  - (stats30.cancels || 0) - (stats30.reschedules || 0))
-        const netShowRate   = rate(stats.new_live_calls || 0, netDenom)
-        const netShowRate30 = rate(stats30.new_live_calls || 0, netDenom30)
+        const grossShowRate   = rate(W.lives, W.qb)
+        const grossShowRate30 = rate(W30.lives, W30.qb)
+        // Net Show = lives ÷ (lives + no-shows): of bookings that reached
+        // their slot, how many showed. The old "qb − cancels − reschedules"
+        // subtracted CALL-level events from BOOKING counts — one prospect
+        // rescheduling repeatedly collapsed the denominator to ≤ lives and
+        // pinned the 30d net at a meaningless 100%.
+        const netDenom    = W.lives + W.noShows
+        const netDenom30  = W30.lives + W30.noShows
+        const netShowRate   = rate(W.lives, netDenom)
+        const netShowRate30 = rate(W30.lives, netDenom30)
         return (
           <Section title="Calls & Show Rates" cols={7}>
             <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={gated(upstream.live, wf?.new_live_calls)} tip={`NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Denominator for show rates uses Qualified Bookings (${denom}) from the calendar, not the closer's EOD count. Click to view.`} onClick={() => setDrilldown('live')} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={gated(upstream.live, wf?.no_shows)} tip="NC no-shows from closer EOD. Click for daily trend + prospects." onClick={() => setDrilldown('noshows')} />
-            <KPI label="Reschedule%" value={reschedRate} format="%" trailing={reschedRate30} prev={reschedRatePrev} tip={`Reschedules ÷ Qualified Bookings. ${stats.reschedules || 0} reschedules out of ${denom} qualified bookings (calendar). Click to view.`} onClick={() => setDrilldown('rc')} />
-            <KPI label="Cancel%" value={cancelRate} format="%" trailing={cancelRate30} prev={cancelRatePrev} tip={`Cancellations ÷ Qualified Bookings. ${stats.cancels || 0} cancels out of ${denom} qualified bookings (calendar). Click to view.`} onClick={() => setDrilldown('rc')} />
-            <KPI label="Gross Show%" value={grossShowRate} format="%" trailing={grossShowRate30} tip={`Live shows ÷ ALL qualified bookings (includes calls that later cancelled or rescheduled). ${stats.new_live_calls || 0} live ÷ ${denom} booked. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
-            <KPI label="Net Show%" value={netShowRate} format="%" benchmark={bm.show_rate_new} trailing={netShowRate30} tip={`Live shows ÷ CONFIRMED bookings (Qualified Bookings minus cancels and reschedules). ${stats.new_live_calls || 0} live ÷ ${netDenom} confirmed = ${netShowRate.toFixed(1)}%. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
+            <KPI label="Reschedule%" value={reschedRate} format="%" trailing={reschedRate30} prev={reschedRatePrev} tip={`Reschedules ÷ Qualified Bookings (same audience rollup as the drilldown). ${W.resch} reschedules out of ${W.qb} qualified bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
+            <KPI label="Cancel%" value={cancelRate} format="%" trailing={cancelRate30} prev={cancelRatePrev} tip={`Cancellations ÷ Qualified Bookings (same audience rollup as the drilldown). ${W.cancels} cancels out of ${W.qb} qualified bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
+            <KPI label="Gross Show%" value={grossShowRate} format="%" trailing={grossShowRate30} tip={`Live shows ÷ ALL qualified bookings (includes calls that later cancelled or rescheduled). ${W.lives} live ÷ ${W.qb} booked — same audience rollup as the drilldown. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
+            <KPI label="Net Show%" value={netShowRate} format="%" benchmark={bm.show_rate_new} trailing={netShowRate30} tip={`Live shows ÷ bookings that reached their slot (lives + no-shows, same audience rollup as the drilldown). ${W.lives} live ÷ ${netDenom} reached = ${netShowRate.toFixed(1)}%. Cancels/reschedules are excluded — they have their own tiles. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
             <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={gated(upstream.live, wf?.cost_per_new_live_call)} tip="Adspend ÷ Net New Live calls. Click for daily trend." onClick={() => setDrilldown('cpnew')} />
           </Section>
         )
