@@ -57,6 +57,13 @@ export function subtreeIds(folders, rootId) {
   return ids
 }
 
+// ── Drag & drop (Drive behaviour) ────────────────────────────────────────
+// Clips drag from the tile/list views (payload set by the library page);
+// folder cards drag to re-parent. Custom MIME types so a stray file drag
+// from the OS can't trigger a move.
+export const CLIP_DRAG_MIME = 'application/x-lib-clips'
+export const FOLDER_DRAG_MIME = 'application/x-lib-folder'
+
 // ── Folder bar (breadcrumb + cards) ──────────────────────────────────────
 
 const crumbBtn = {
@@ -78,6 +85,7 @@ export const FolderBar = memo(function FolderBar({
   onRename,              // (folder, name) => Promise
   onDelete,              // (folder) => Promise
   onMoveFolder,          // (folder, newParentId) => Promise
+  onDropClips,           // (ids, folderId|null) => Promise — clips dragged in
   onError,               // (message) — surface a failed write on the page
 }) {
   const [nameModal, setNameModal] = useState(null)   // { folder } | { create: true }
@@ -85,6 +93,54 @@ export const FolderBar = memo(function FolderBar({
   const [delBusy, setDelBusy] = useState(false)
   const [moveTarget, setMoveTarget] = useState(null) // folder being re-parented
   const [menuFor, setMenuFor] = useState(null)       // folder id with open ⋯ menu
+  const [dropHover, setDropHover] = useState(null)   // 'root' | folder id under a drag
+  // Which of OUR folder cards is being dragged. dataTransfer payloads are
+  // unreadable during dragover (spec), so this local mirror is the only
+  // way to stop the dragged card highlighting itself as its own target.
+  const [dragFolderId, setDragFolderId] = useState(null)
+
+  // Shared drop wiring for crumbs + cards. destId null = library root.
+  // The hover gate keys on MIME types alone; the drop handler re-validates.
+  const isOurs = (e) =>
+    e.dataTransfer.types.includes(CLIP_DRAG_MIME) || e.dataTransfer.types.includes(FOLDER_DRAG_MIME)
+  const dragOver = (key) => (e) => {
+    if (!isOurs(e)) return
+    if (dragFolderId && key === dragFolderId) return   // a card is not its own destination
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDropHover(key)
+  }
+  const dragLeave = (key) => () => setDropHover(h => (h === key ? null : h))
+  const handleDrop = (destId) => async (e) => {
+    if (!isOurs(e)) return
+    e.preventDefault()
+    e.stopPropagation()
+    setDropHover(null)
+    const clipJson = e.dataTransfer.getData(CLIP_DRAG_MIME)
+    if (clipJson) {
+      let ids = []
+      try { ids = JSON.parse(clipJson) } catch { /* foreign payload — ignore */ }
+      if (Array.isArray(ids) && ids.length) await onDropClips?.(ids, destId)
+      return
+    }
+    const draggedId = e.dataTransfer.getData(FOLDER_DRAG_MIME)
+    if (!draggedId) return
+    // Accidental self-drop (press, twitch a few px, release) is by far the
+    // most common gesture — Drive treats it as a silent no-op, not an error.
+    if (draggedId === destId) return
+    const folder = folders.find(f => f.id === draggedId)
+    if (!folder) return
+    if ((folder.parent_id || null) === (destId || null)) return        // already there
+    if (destId && subtreeIds(folders, draggedId).has(destId)) {
+      onError?.('Can’t move a folder into itself or its own subfolder')
+      return
+    }
+    try { await onMoveFolder(folder, destId) }
+    catch (err) { onError?.(err.message || 'Folder move failed') }
+  }
+  const dropTargetStyle = (key) => dropHover === key
+    ? { background: 'rgba(244,225,74,0.25)', outline: '2px solid var(--accent)', outlineOffset: -2 }
+    : null
 
   const path = useMemo(
     () => (currentFolderId ? folderPath(folders, currentFolderId) : []),
@@ -116,14 +172,16 @@ export const FolderBar = memo(function FolderBar({
           knows whether they're looking at the root or inside a folder. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', marginBottom: children.length > 0 && !searching ? 10 : 0 }}>
         <button type="button" onClick={() => onNavigate(null)}
-          style={{ ...crumbBtn, color: currentFolderId ? 'var(--ink-3)' : 'var(--ink)', paddingLeft: 0 }}>
+          onDragOver={dragOver('root')} onDragLeave={dragLeave('root')} onDrop={handleDrop(null)}
+          style={{ ...crumbBtn, color: currentFolderId ? 'var(--ink-3)' : 'var(--ink)', paddingLeft: 0, ...dropTargetStyle('root') }}>
           Library
         </button>
         {path.map((f, i) => (
           <span key={f.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
             <ChevronRight size={12} style={{ color: 'var(--ink-4)' }} />
             <button type="button" onClick={() => onNavigate(f.id)}
-              style={{ ...crumbBtn, color: i === path.length - 1 ? 'var(--ink)' : 'var(--ink-3)' }}>
+              onDragOver={dragOver(f.id)} onDragLeave={dragLeave(f.id)} onDrop={handleDrop(f.id)}
+              style={{ ...crumbBtn, color: i === path.length - 1 ? 'var(--ink)' : 'var(--ink-3)', ...dropTargetStyle(f.id) }}>
               {f.name}
             </button>
           </span>
@@ -174,12 +232,21 @@ export const FolderBar = memo(function FolderBar({
             return (
               <div key={f.id}
                 onClick={() => { setMenuFor(null); onNavigate(f.id) }}
+                draggable={canManage}
+                onDragStart={canManage ? (e) => {
+                  e.dataTransfer.setData(FOLDER_DRAG_MIME, f.id)
+                  e.dataTransfer.effectAllowed = 'move'
+                  setDragFolderId(f.id)
+                } : undefined}
+                onDragEnd={() => setDragFolderId(null)}
+                onDragOver={dragOver(f.id)} onDragLeave={dragLeave(f.id)} onDrop={handleDrop(f.id)}
                 style={{
                   position: 'relative',
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '10px 12px',
                   background: 'var(--paper-2)', border: '1px solid var(--rule)',
                   cursor: 'pointer',
+                  ...dropTargetStyle(f.id),
                 }}>
                 <Folder size={18} style={{ color: 'var(--ink-3)', flexShrink: 0 }} />
                 <div style={{ minWidth: 0, flex: 1 }}>

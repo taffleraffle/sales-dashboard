@@ -1225,6 +1225,7 @@ async function fetchCloses({ from, to, audiences } = {}) {
   return closeRows.map(r => {
     const ci = closerById[r.closer_call_id] || {}
     return {
+      closer_call_id: r.closer_call_id,
       date: String(r.created_at || '').split('T')[0],
       closer: ci.closer || '—',
       type: ci.call_type || '—',
@@ -1897,9 +1898,96 @@ function ProspectCell({ row }) {
 // Cost Per Booking / Cost Per Qualified Booking) so every one of them exposes
 // the same identifying detail the operator filters on.
 const BOOKING_PROSPECT_COL = { key: 'prospect', label: 'Prospect', render: r => <ProspectCell row={r} /> }
+
+// Audience names for the editable funnel dropdown — fetched once per page
+// load from audience_definitions (same source as the filter chips).
+let _audienceNamesPromise = null
+function loadAudienceNames() {
+  if (!_audienceNamesPromise) {
+    _audienceNamesPromise = supabase
+      .from('audience_definitions')
+      .select('display_name')
+      .neq('is_active', false)
+      .order('sort_order')
+      .then(({ data }) => (data || []).map(r => r.display_name).filter(Boolean))
+      .catch(() => [])
+  }
+  return _audienceNamesPromise
+}
+
+// Editable audience/funnel cell. Writes a manual override (the top rung of
+// the resolver chain, survives every re-sync) then refreshes the trend MV
+// so the tiles agree without waiting for the 10-min cron:
+//   kind='close'   → close_attribution_overrides.audience (PK closer_call_id)
+//   kind='booking' → booking_audience_overrides           (PK booking_id)
+function EditableAudienceCell({ id, value, kind, onSaved }) {
+  const [names, setNames] = useState(null)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [current, setCurrent] = useState(value)
+  useEffect(() => { setCurrent(value) }, [value])
+
+  const startEdit = async (e) => {
+    e.stopPropagation()
+    if (!id) return
+    setNames(await loadAudienceNames())
+    setEditing(true)
+  }
+
+  const save = async (audience) => {
+    setEditing(false)
+    if (!audience || audience === current) return
+    setSaving(true)
+    const note = 'Set via dashboard funnel editor'
+    const { error } = kind === 'close'
+      ? await supabase.from('close_attribution_overrides')
+          .upsert({ closer_call_id: id, audience, note, updated_at: new Date().toISOString() }, { onConflict: 'closer_call_id' })
+      : await supabase.from('booking_audience_overrides')
+          .upsert({ booking_id: id, audience, note, updated_at: new Date().toISOString() }, { onConflict: 'booking_id' })
+    if (error) {
+      console.error('audience override failed:', error.message)
+      alert(`Couldn't save funnel: ${error.message}`)
+    } else {
+      setCurrent(audience)
+      // Fire-and-forget — the function self-throttles to 60s, so rapid
+      // consecutive edits coalesce into one refresh.
+      supabase.rpc('refresh_marketing_trend_mv').then(() => {}, () => {})
+      onSaved?.(audience)
+    }
+    setSaving(false)
+  }
+
+  if (editing && names) {
+    return (
+      <select
+        autoFocus
+        defaultValue={current && current !== 'Unknown' ? current : ''}
+        onChange={e => save(e.target.value)}
+        onBlur={() => setEditing(false)}
+        onClick={e => e.stopPropagation()}
+        className="text-[10px] uppercase bg-bg-card border border-border-default rounded-sm px-1 py-0.5 text-text-primary"
+      >
+        <option value="" disabled>Pick funnel…</option>
+        {names.map(n => <option key={n} value={n}>{n}</option>)}
+      </select>
+    )
+  }
+  const unattributed = !current || current === 'Unknown'
+  return (
+    <button
+      onClick={startEdit}
+      disabled={saving || !id}
+      title={id ? 'Click to set this prospect’s funnel (manual override)' : 'No row id — cannot override'}
+      className={`text-[10px] uppercase ${unattributed ? 'text-red-400 font-semibold' : 'text-text-400'} ${id ? 'border-b border-dotted border-border-default/60 hover:text-text-primary cursor-pointer' : ''} disabled:opacity-50`}
+    >
+      {saving ? 'Saving…' : (unattributed ? 'Unattributed' : current)}
+    </button>
+  )
+}
+
 const BOOKING_FUNNEL_COL = {
   key: 'funnel', label: 'Funnel', cls: 'text-[10px] uppercase text-text-400',
-  render: r => r.audience || '—',
+  render: (r, ctx) => <EditableAudienceCell id={r._id} value={r.audience} kind="booking" onSaved={() => ctx?.onReload?.()} />,
 }
 // Revenue tier — the Typeform-collected revenue bracket the prospect picked
 // when they filled the funnel. The strongest single qualification signal in
@@ -2192,10 +2280,10 @@ const DRILLDOWN_CONFIG = {
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
       // Unknown audience = the close resolver found no ad, typeform, or
       // booking attribution. These closes silently drop out of every
-      // audience-filtered view, so flag them loudly for manual follow-up.
-      { key: 'audience', label: 'Audience', render: r => r.audience === 'Unknown' || !r.audience
-        ? <span className="text-[10px] uppercase text-red-400 font-semibold" title="No ad, typeform, or booking attribution — this close is invisible under audience filters. Check the prospect's UTM/typeform trail.">Unattributed</span>
-        : <span className="text-[10px] uppercase text-text-400">{r.audience}</span> },
+      // audience-filtered view — flagged red, and click-to-fix: the cell
+      // writes close_attribution_overrides (top of the resolver chain).
+      { key: 'audience', label: 'Audience', render: (r, ctx) =>
+        <EditableAudienceCell id={r.closer_call_id} value={r.audience} kind="close" onSaved={() => ctx?.onReload?.()} /> },
       { key: 'revenue', label: 'Revenue', align: 'right', render: r => r.revenue ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' },
       { key: 'cash', label: 'Cash', align: 'right', render: r => r.cash ? `$${parseFloat(r.cash).toLocaleString()}` : '—' },
       { key: 'finance', label: 'Finance', cls: 'text-[10px] uppercase text-text-400' },

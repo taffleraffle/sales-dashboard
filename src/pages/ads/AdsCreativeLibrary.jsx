@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef, memo, useDeferredValue, startTransition, forwardRef, useImperativeHandle } from 'react'
 import { createPortal } from 'react-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import * as tus from 'tus-js-client'
 import { supabase } from '../../lib/supabase'
 import { SectionHead, Icon, PALETTE } from '../../components/editorial/atoms'
@@ -4042,11 +4043,43 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // alongside the main rows fetch — not chained, so we don't add latency.
   const [editors, setEditors] = useState(() => cached?.editors || [])
   const [offers, setOffers] = useState(() => cached?.offers || [])
-  // Drive-style folders (migration 146). folderId = the folder currently
-  // open; null = library root. Search ignores folder scoping (global),
-  // matching how Drive search behaves.
+  // Drive-style folders (migration 146). The open folder lives in the URL
+  // (?folder=<id>; absent = library root) so every folder is its own
+  // history entry — browser back walks UP the folder trail instead of
+  // leaving the page, deep links work, and refresh keeps your place.
+  // Search ignores folder scoping (global), matching how Drive behaves.
   const [folders, setFolders] = useState(() => cached?.folders || [])
-  const [folderId, setFolderId] = useState(null)
+  const [searchParams] = useSearchParams()
+  const folderId = searchParams.get('folder') || null
+  // Writes go through the LIVE window.location, not the router's
+  // searchParams snapshot. Two reasons: (1) setSearchParams closes over
+  // the render-time URL, and several long-lived [] -dep callbacks (load,
+  // focusUnassignedRaw) would navigate to a mount-time query, silently
+  // yanking the user out of whatever folder they're in; (2) this page
+  // strips one-shot deep-link params (?creative, ?task) with raw
+  // history.replaceState, which the router never sees — rebuilding from
+  // the router snapshot would resurrect them on the next folder click.
+  // Reading the live URL makes setFolderId genuinely stable AND respects
+  // those strips. No-op writes bail out so re-clicking the current crumb
+  // can't stack dead history entries under the Back button.
+  // replace:true is for corrections (deleted/unknown folder): they fix
+  // the URL without burning the history entry the user came from.
+  const navigate = useNavigate()
+  const navRef = useRef(navigate)
+  navRef.current = navigate
+  const setFolderId = useCallback((next, { replace = false } = {}) => {
+    const sp = new URLSearchParams(window.location.search)
+    const curr = sp.get('folder') || null
+    const value = (typeof next === 'function' ? next(curr) : next) || null
+    if (value === curr) return
+    if (value) sp.set('folder', value)
+    else sp.delete('folder')
+    const qs = sp.toString()
+    navRef.current(
+      { pathname: window.location.pathname, search: qs ? `?${qs}` : '' },
+      { replace },
+    )
+  }, [])
   const [moveFolderOpen, setMoveFolderOpen] = useState(false)
   // Boolean (not the array) is what the hot filter memo keys on — a
   // rename/re-parent producing a fresh folders array must not re-run the
@@ -4285,19 +4318,23 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     }
     setEditors(edRes.data || [])
     setOffers(ofRes.data || [])
-    // Folders: an error here (e.g. 42P01 — migration 146 not applied yet)
-    // just means no folder UI. Don't surface it; the library is unaffected.
-    const folderRows = fdRes?.error ? [] : (fdRes?.data || [])
-    setFolders(folderRows)
-    // If the folder we're standing in was deleted elsewhere (another tab/
-    // client) this refresh would otherwise leave us scoped to a ghost id —
-    // an empty list under a breadcrumb that looks like the root.
-    setFolderId(curr => (curr && !folderRows.some(f => f.id === curr)) ? null : curr)
+    // Folders: an error here (e.g. 42P01 — migration 146 not applied yet,
+    // or a transient network blip on just this query) means we keep
+    // whatever folder list we already have and DON'T touch the URL — a
+    // failed fetch must never strip a valid ?folder deep link. Only a
+    // successful fetch is authoritative enough to declare the folder in
+    // the URL a ghost (deleted in another tab / foreign id) and correct
+    // the location back to the root.
+    if (!fdRes?.error) {
+      const folderRows = fdRes?.data || []
+      setFolders(folderRows)
+      PAGE_CACHE.folders = folderRows
+      setFolderId(curr => (curr && !folderRows.some(f => f.id === curr)) ? null : curr, { replace: true })
+    }
     PAGE_CACHE.editors = edRes.data || []
     PAGE_CACHE.editorsTime = Date.now()
     PAGE_CACHE.offers = ofRes.data || []
     PAGE_CACHE.offersTime = Date.now()
-    PAGE_CACHE.folders = folderRows
     setLoading(false)
 
     // Background-load transcripts after first paint so library search
@@ -4825,8 +4862,8 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     const removed = subtreeIds(folders, folder.id)
     syncFolders(curr => curr.filter(f => !removed.has(f.id)))
     syncRows(curr => curr.map(r => removed.has(r.folder_id) ? { ...r, folder_id: folder.parent_id || null } : r))
-    if (folderId && removed.has(folderId)) setFolderId(folder.parent_id || null)
-  }, [folders, folderId, syncFolders, syncRows])
+    if (folderId && removed.has(folderId)) setFolderId(folder.parent_id || null, { replace: true })
+  }, [folders, folderId, setFolderId, syncFolders, syncRows])
 
   // Moving a clip moves its WHOLE version family (parent_id chain).
   // Filing v1 while v2 stays behind would split the family across
@@ -4846,12 +4883,35 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   }, [rows, syncRows])
 
   // Stable navigate handler — FolderBar is memoized, an inline lambda
-  // would re-render the whole card grid on every keystroke. Selection is
-  // cleared so a bulk action can't target rows that are no longer shown.
+  // would re-render the whole card grid on every keystroke. Scroll to top
+  // because entering a folder is a page navigation, not a filter tweak.
   const navigateFolder = useCallback((id) => {
     setFolderId(id)
-    clearSelection()
-  }, [clearSelection])
+    window.scrollTo({ top: 0 })
+  }, [setFolderId])
+  // Selection clears on ANY folder change — including browser back/
+  // forward, which never goes through navigateFolder — so a bulk action
+  // can't target rows that are no longer on screen.
+  useEffect(() => { clearSelection() }, [folderId, clearSelection])
+
+  // Drag a clip onto a folder card / breadcrumb (Drive behaviour). If the
+  // dragged tile is part of the current selection the whole selection
+  // travels; otherwise just that clip. Payload is ids only — the drop side
+  // re-resolves rows, so a stale drag can't move ghosts.
+  const onClipDragStart = useCallback((row, e) => {
+    const ids = selected.has(row.id) ? Array.from(selected) : [row.id]
+    e.dataTransfer.setData('application/x-lib-clips', JSON.stringify(ids))
+    e.dataTransfer.effectAllowed = 'move'
+  }, [selected])
+
+  const dropClipsToFolder = useCallback(async (ids, destId) => {
+    try {
+      await moveClipsToFolder(ids, destId)
+      clearSelection()
+    } catch (e) {
+      setErr(e.message || 'Move failed')
+    }
+  }, [moveClipsToFolder, clearSelection])
 
   // Where the current selection lives, for the move picker's "current"
   // tag + no-op guard: a folder id (or null = root) only when EVERY
@@ -5188,6 +5248,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
         onRename={renameFolder}
         onDelete={deleteFolder}
         onMoveFolder={reparentFolder}
+        onDropClips={dropClipsToFolder}
         onError={setErr}
       />
 
@@ -5278,7 +5339,8 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
                       onClick={() => setDrawerRow(r)}
                       selected={selected.has(r.id)}
                       selectionMode={selected.size > 0}
-                      onToggleSelect={scope.canEditCreative ? toggleSelect : null} />
+                      onToggleSelect={scope.canEditCreative ? toggleSelect : null}
+                      onDragStartClip={scope.canEditCreative ? onClipDragStart : null} />
                   ))}
                 </div>
               ) : view === 'list' ? (
@@ -5290,6 +5352,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
                   selected={selected}
                   selectionMode={selected.size > 0}
                   onToggleSelect={scope.canEditCreative ? toggleSelect : null}
+                  onDragStartClip={scope.canEditCreative ? onClipDragStart : null}
                 />
               ) : (
                 <CreativeMatrixView
@@ -5556,7 +5619,7 @@ function StatusBadge({ status }) {
 // memo'd for the same reason as CreativeMatrixView — modal open/close
 // shouldn't force the entire list to re-render when no list-relevant
 // props changed.
-const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onClick, onDelete, selected, selectionMode, onToggleSelect }) {
+const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onClick, onDelete, selected, selectionMode, onToggleSelect, onDragStartClip = null }) {
   // Selectable adds a 26px checkbox column at the very left. Mirrors the
   // matrix view so bulk-edit works identically across both view modes.
   const selectable = !!onToggleSelect
@@ -5625,13 +5688,14 @@ const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onCl
           selected={selected?.has(r.id)}
           selectionMode={selectionMode}
           onToggleSelect={onToggleSelect}
+          onDragStartClip={onDragStartClip}
           onClick={() => onClick(r)} onDelete={() => onDelete(r)} />
       ))}
     </div>
   )
 })
 
-function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectable, selected, selectionMode, onToggleSelect }) {
+function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectable, selected, selectionMode, onToggleSelect, onDragStartClip = null }) {
   // `onDelete` may be null when the viewer doesn't have delete permission
   const [hover, setHover] = useState(false)
   // In selection mode, body-clicks toggle selection instead of opening
@@ -5679,6 +5743,8 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
           }}
           onMouseEnter={() => setHover(true)}
           onMouseLeave={() => setHover(false)}
+          draggable={!!onDragStartClip}
+          onDragStart={onDragStartClip ? (e) => onDragStartClip(r, e) : undefined}
           onClick={handleRowClick}>
           {selectable && (
             <div onClick={(e) => { e.stopPropagation(); onToggleSelect?.(r.id) }}
@@ -7817,7 +7883,7 @@ function FilterStrip({ label, active, options, onPick, onClear, totalCount }) {
   )
 }
 
-function CreativeCard({ row, isUsed = false, onClick, selected = false, selectionMode = false, onToggleSelect = null }) {
+function CreativeCard({ row, isUsed = false, onClick, selected = false, selectionMode = false, onToggleSelect = null, onDragStartClip = null }) {
   const [hover, setHover] = useState(false)
   // 320ms hover delay before swapping to the preview video — avoids
   // spawning a network request + video decoder for every tile the
@@ -7848,6 +7914,8 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
     <div onClick={handleCardClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      draggable={!!onDragStartClip}
+      onDragStart={onDragStartClip ? (e) => onDragStartClip(row, e) : undefined}
       style={{
         cursor: 'pointer',
         background: tint ? (hover ? tint.hover : tint.base) : 'var(--paper)',
