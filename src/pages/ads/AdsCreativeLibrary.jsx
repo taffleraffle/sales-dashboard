@@ -3917,14 +3917,13 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // pretending to be 60-100 MB videos — they look pixelated when played
   // because the original ingest only stored partial bytes. Operator can
   // toggle these back on via the filter chip to see/triage them.
-  const [hideLowQuality, setHideLowQuality] = useState(() => {
-    try { return localStorage.getItem('lib.hideLowQuality') !== 'false' } catch { return true }
-  })
-  useEffect(() => { try { localStorage.setItem('lib.hideLowQuality', String(hideLowQuality)) } catch {} }, [hideLowQuality])
-  const [hideBadTakes, setHideBadTakes] = useState(() => {
-    try { return localStorage.getItem('lib.hideBadTakes') !== 'false' } catch { return true }
-  })
-  useEffect(() => { try { localStorage.setItem('lib.hideBadTakes', String(hideBadTakes)) } catch {} }, [hideBadTakes])
+  // ALWAYS true since 2026-06-11 — the show/hide toggles were removed, so
+  // flagged clips are permanently hidden. Deliberately NOT initialised
+  // from localStorage: the old banner click persisted `false`, and anyone
+  // who ever clicked it would otherwise boot with flagged clips stuck
+  // visible and no UI left to hide them.
+  const [hideLowQuality] = useState(true)
+  const [hideBadTakes] = useState(true)
   // Column sort for the Matrix view. sortKey = '' means default order
   // (insertion / added_at desc). Clicking a header sets the key; clicking
   // the same key again toggles direction.
@@ -3989,6 +3988,34 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // Filter panel collapsed by default — the FILTERS button's count badge
   // carries the "something is active" signal while it's closed.
   const [filtersOpen, setFiltersOpen] = useState(false)
+  // True while a clip drag is in flight — folder cards light up as drop
+  // targets the moment the drag starts (Drive behaviour) instead of only
+  // when the cursor happens to cross one.
+  const [dragActive, setDragActive] = useState(false)
+  // Transient confirmation pill ("Moved 3 clips to Electricians") — the
+  // moved clips vanish from the current view, which otherwise reads as
+  // data loss.
+  const [toast, setToast] = useState(null)
+  const toastTimer = useRef(null)
+  const showToast = useCallback((msg) => {
+    setToast(msg)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 3500)
+  }, [])
+  useEffect(() => () => clearTimeout(toastTimer.current), [])
+  // dragend fires on the drag SOURCE and bubbles — one window listener
+  // beats wiring onDragEnd through every card and row, and also catches
+  // drags cancelled with Esc.
+  useEffect(() => {
+    if (!dragActive) return
+    const end = () => setDragActive(false)
+    window.addEventListener('dragend', end)
+    window.addEventListener('drop', end)
+    return () => {
+      window.removeEventListener('dragend', end)
+      window.removeEventListener('drop', end)
+    }
+  }, [dragActive])
   // Boolean (not the array) is what the hot filter memo keys on — a
   // rename/re-parent producing a fresh folders array must not re-run the
   // whole filter/sort pipeline.
@@ -4514,24 +4541,33 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     }
   }, [sortKey, sortDir])
 
-  // Per-type counts for the chip badges (over ALL rows, ignoring current type filter)
+  // Flagged (low-quality / bad-take) clips are permanently hidden since
+  // 2026-06-11, so every count the operator sees is computed over the
+  // rows that can actually appear — a chip advertising clips the view
+  // can never show reads as a bug.
+  const visibleRows = useMemo(
+    () => rows.filter(r => !r.is_low_quality && !r.is_bad_take),
+    [rows],
+  )
+
+  // Per-type counts for the chip badges (over all VISIBLE rows, ignoring current type filter)
   const typeCounts = useMemo(() => {
     const m = {}
-    for (const r of rows) m[r.type] = (m[r.type] || 0) + 1
+    for (const r of visibleRows) m[r.type] = (m[r.type] || 0) + 1
     return m
-  }, [rows])
+  }, [visibleRows])
 
   const offerCounts = useMemo(() => {
     const m = { __none__: 0 }
-    for (const r of rows) {
+    for (const r of visibleRows) {
       if (r.offer_slug) m[r.offer_slug] = (m[r.offer_slug] || 0) + 1
       else m.__none__ += 1
     }
     return m
-  }, [rows])
+  }, [visibleRows])
 
-  const runCount    = useMemo(() => rows.filter(r => r.has_been_run).length, [rows])
-  const notRunCount = useMemo(() => rows.filter(r => !r.has_been_run).length, [rows])
+  const runCount    = useMemo(() => visibleRows.filter(r => r.has_been_run).length, [visibleRows])
+  const notRunCount = useMemo(() => visibleRows.filter(r => !r.has_been_run).length, [visibleRows])
   // Counts for the Uploaded filter dropdown. Recomputed when rows change;
   // shown beside each preset so the operator can see how many clips fall
   // inside each window before picking.
@@ -4564,21 +4600,37 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // Status counts. 'Edited' includes Joined (since Joined is a sub-state of
   // edited). 'Merged' is a narrower filter showing only Joined.
   const stageCounts = useMemo(() => ({
-    raw_used:   rows.filter(r => r.status === 'raw' && usedRawIds.has(r.id)).length,
-    raw_unused: rows.filter(r => r.status === 'raw' && !usedRawIds.has(r.id) && !r.assigned_editor_id && r.type !== 'Testimony').length,
-    edited_seg: rows.filter(r => r.status === 'edited').length,
-  }), [rows, usedRawIds])
+    raw_used:   visibleRows.filter(r => r.status === 'raw' && usedRawIds.has(r.id)).length,
+    raw_unused: visibleRows.filter(r => r.status === 'raw' && !usedRawIds.has(r.id) && !r.assigned_editor_id && r.type !== 'Testimony').length,
+    edited_seg: visibleRows.filter(r => r.status === 'edited').length,
+  }), [visibleRows, usedRawIds])
 
   // Section groups for the list view — used when no type filter, shows
   // Hooks/Bodies/Joined/Testimony as separate sections. With multi-select
   // type filter, still group by type so each selected type gets its own
   // section.
   const grouped = useMemo(() => {
+    // Inside a folder the operator is managing a BATCH (one angle/offer),
+    // so the useful split is workflow state, not clip type: finished cuts
+    // on top, raw source underneath. Type stays visible via the tile
+    // pills. At the root (and during global search) keep the type
+    // sections — that's a browse surface, not a batch.
+    if (folderId && !deferredQ.trim()) {
+      // 'review' = a finished cut awaiting approval — it belongs with the
+      // edited work, not under "Raw footage".
+      const isCut = (r) => r.status === 'edited' || r.status === 'review'
+      const edited = filtered.filter(isCut)
+      const raw = filtered.filter(r => !isCut(r))
+      return [
+        { type: 'Edited cuts', rows: edited },
+        { type: 'Raw footage', rows: raw },
+      ].filter(g => g.rows.length > 0)
+    }
     const order = ['Hook', 'Body', 'Full Video', 'Joined', 'Testimony', 'Retargeting']
     return order
       .map(t => ({ type: t, rows: filtered.filter(r => r.type === t) }))
       .filter(g => g.rows.length > 0)
-  }, [filtered])
+  }, [filtered, folderId, deferredQ])
 
   // Unassigned raw clips that need an editor. Excludes Testimony per
   // Ben's rule ("testimony footage can just sit in there raw"), and
@@ -4593,6 +4645,10 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       if (r.type === 'Testimony') continue
       if (r.assigned_editor_id) continue
       if (usedRawIds.has(r.id)) continue
+      // Flagged clips aren't assignment candidates — and since the
+      // show/hide toggles were removed (2026-06-11) they're permanently
+      // hidden, so counting them would promise rows the view can't show.
+      if (r.is_low_quality || r.is_bad_take) continue
       n += 1
     }
     return n
@@ -4658,11 +4714,11 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   const focusUnassignedRaw = useCallback(() => {
     setStageFilter(new Set(['raw_unused']))
     setTypeFilter(new Set(['Hook', 'Body', 'Joined', 'Full Video', 'Retargeting']))
-    setHideLowQuality(false)
-    setHideBadTakes(false)
-    // The banner counts the FULL row set; jump back to the library root
-    // (where the raw_unused view ignores folder scoping) so folders can't
-    // hide rows the banner just promised.
+    // NOTE: hide flags are left alone — the count now excludes flagged
+    // clips, and the show/hide toggles are gone (2026-06-11), so unhiding
+    // here would strand low-quality rows on screen with no way back.
+    // Jump back to the library root (where the raw_unused view ignores
+    // folder scoping) so folders can't hide rows the count promised.
     setFolderId(null)
   }, [])
 
@@ -4810,23 +4866,25 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     const ids = selected.has(row.id) ? Array.from(selected) : [row.id]
     e.dataTransfer.setData('application/x-lib-clips', JSON.stringify(ids))
     e.dataTransfer.effectAllowed = 'move'
+    setDragActive(true)
   }, [selected])
 
   const dropClipsToFolder = useCallback(async (ids, destId) => {
+    const destName = destId ? (folders.find(f => f.id === destId)?.name || 'folder') : 'the library root'
+    showToast(`Moving ${ids.length} clip${ids.length === 1 ? '' : 's'}…`)
     try {
       await moveClipsToFolder(ids, destId)
       clearSelection()
+      showToast(`✓ Moved ${ids.length} clip${ids.length === 1 ? '' : 's'} to ${destName}`)
     } catch (e) {
+      setToast(null)
       setErr(e.message || 'Move failed')
     }
-  }, [moveClipsToFolder, clearSelection])
+  }, [moveClipsToFolder, clearSelection, folders, showToast])
 
   // Badge for the FILTERS button: how many filter groups are active.
-  // Latest-only counts; the default-on hide flags don't (default state
-  // shouldn't read as "filters applied").
   const activeFilterCount =
-    stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size +
-    dateFilter.size + (latestOnly ? 1 : 0)
+    stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size
 
   // Where the current selection lives, for the move picker's "current"
   // tag + no-op guard: a folder id (or null = root) only when EVERY
@@ -4972,7 +5030,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
           )}
           <span style={{ flex: 1 }} />
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
-            {filtered.length} / {rows.length}
+            {filtered.length} / {visibleRows.length}
           </span>
           <button type="button"
             onClick={() => setFiltersOpen(v => !v)}
@@ -5020,12 +5078,12 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               { value: 'raw_used',   label: 'EDITED RAW', sublabel: 'already used in a cut',   count: stageCounts.raw_used,   dot: '#999' },
               { value: 'edited_seg', label: 'EDITED',     sublabel: 'finished cut',            count: stageCounts.edited_seg, dot: '#3e8a5e' },
             ]}
-            allCount={rows.length}
+            allCount={visibleRows.length}
             onChange={setStageFilter} />
           <FilterDropdown label="TYPE"
             selected={typeFilter}
             options={TYPES.map(t => ({ value: t, label: t.toUpperCase(), count: typeCounts[t] || 0, dot: typeColor(t).ink }))}
-            allCount={rows.length}
+            allCount={visibleRows.length}
             onChange={setTypeFilter} />
           <FilterDropdown label="OFFER"
             selected={offerFilter}
@@ -5038,7 +5096,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               })),
               ...(offerCounts.__none__ > 0 ? [{ value: '__none__', label: 'NO OFFER', count: offerCounts.__none__, dot: 'var(--ink-4)' }] : []),
             ]}
-            allCount={rows.length}
+            allCount={visibleRows.length}
             onChange={setOfferFilter} />
           <FilterDropdown label="RUN"
             selected={runFilter}
@@ -5046,73 +5104,17 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               { value: 'yes', label: 'RUN BEFORE', count: runCount,    dot: '#3e8a5e' },
               { value: 'no',  label: 'NOT YET',    count: notRunCount, dot: 'var(--ink-4)' },
             ]}
-            allCount={rows.length}
+            allCount={visibleRows.length}
             onChange={setRunFilter} />
-          <FilterDropdown label="UPLOADED"
-            selected={dateFilter}
-            options={[
-              { value: 'today',  label: 'TODAY',         count: dateCounts.today,  dot: '#3e8a5e' },
-              { value: 'last7',  label: 'LAST 7 DAYS',   count: dateCounts.last7,  dot: '#3e7eba' },
-              { value: 'last30', label: 'LAST 30 DAYS',  count: dateCounts.last30, dot: '#b8920c' },
-              { value: 'last90', label: 'LAST 90 DAYS',  count: dateCounts.last90, dot: 'var(--ink-3)' },
-            ]}
-            allCount={rows.length}
-            onChange={setDateFilter} />
-          <button type="button"
-            onClick={() => setLatestOnly(v => !v)}
-            title="Show only the latest version of each clip (hide v1 when a v2 exists)"
-            style={{
-              padding: '5px 9px',
-              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-              letterSpacing: '0.06em', textTransform: 'uppercase',
-              background: latestOnly ? 'var(--accent)' : 'white',
-              color: 'var(--ink)',
-              border: '1px solid ' + (latestOnly ? 'var(--ink)' : 'var(--rule)'),
-              borderRadius: 2, cursor: 'pointer',
-            }}>{latestOnly ? '☑ Latest only' : 'Latest only'}</button>
-          {lowQualityCount > 0 && (
-            <button type="button"
-              onClick={() => setHideLowQuality(v => !v)}
-              title={hideLowQuality
-                ? `${lowQualityCount} clips have damaged source files (1-3 MB placeholders, sub-par bitrate). Click to show them.`
-                : `Currently SHOWING ${lowQualityCount} damaged-source clips. Click to hide.`}
-              style={{
-                padding: '5px 9px',
-                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-                letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: hideLowQuality ? '#fff3e0' : '#b53e3e',
-                color: hideLowQuality ? '#a86a08' : 'white',
-                border: '1px solid ' + (hideLowQuality ? '#e8b408' : '#b53e3e'),
-                borderRadius: 2, cursor: 'pointer',
-              }}>
-              {hideLowQuality ? `Hiding ${lowQualityCount} low-quality` : `⚠ Showing ${lowQualityCount} low-quality`}
-            </button>
-          )}
-          {badTakeCount > 0 && (
-            <button type="button"
-              onClick={() => setHideBadTakes(v => !v)}
-              title={hideBadTakes
-                ? `${badTakeCount} clips are flagged as bad takes. Click to show them.`
-                : `Currently SHOWING ${badTakeCount} bad takes. Click to hide.`}
-              style={{
-                padding: '5px 9px',
-                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-                letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: hideBadTakes ? '#fef3f3' : '#b53e3e',
-                color: hideBadTakes ? '#b53e3e' : 'white',
-                border: '1px solid #b53e3e',
-                borderRadius: 2, cursor: 'pointer',
-              }}>
-              {hideBadTakes ? `Hiding ${badTakeCount} bad takes` : `Showing ${badTakeCount} bad takes`}
-            </button>
-          )}
-          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size + dateFilter.size > 0 || latestOnly) && (
+          {/* Uploaded-date filter, latest-only and the low-quality / bad-take
+              show/hide toggles removed 2026-06-11 (Ben: too much noise).
+              Flagged clips are now simply always hidden; their state vars
+              keep their defaults so the filter pipeline is unchanged. */}
+          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size > 0) && (
             <button type="button"
               onClick={() => {
                 setStageFilter(new Set()); setTypeFilter(new Set())
                 setOfferFilter(new Set()); setRunFilter(new Set())
-                setDateFilter(new Set())
-                setLatestOnly(false)
               }}
               style={{
                 marginLeft: 4, padding: '4px 9px',
@@ -5167,8 +5169,22 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
         onDelete={deleteFolder}
         onMoveFolder={reparentFolder}
         onDropClips={dropClipsToFolder}
+        dropReady={dragActive}
         onError={setErr}
       />
+
+      {/* Move-confirmation pill — fixed bottom-center, Drive-style */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 120, padding: '10px 18px',
+          background: 'var(--ink)', color: 'var(--paper)',
+          fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 600,
+          letterSpacing: '0.05em', borderRadius: 3,
+          boxShadow: '0 6px 24px rgba(10,10,10,0.35)',
+          pointerEvents: 'none',
+        }}>{toast}</div>
+      )}
 
       {/* Bulk selection bar — sticky, appears when ≥1 tile is selected */}
       {selected.size > 0 && scope.canEditCreative && (
@@ -5413,9 +5429,8 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
           currentId={selectionFolderId}
           onClose={() => setMoveFolderOpen(false)}
           onPick={async (destId) => {
-            await moveClipsToFolder(Array.from(selected), destId)
+            await dropClipsToFolder(Array.from(selected), destId)
             setMoveFolderOpen(false)
-            clearSelection()
           }}
         />
       )}
@@ -12201,10 +12216,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             <OptionPicker value={priority} options={PRIORITY_OPTIONS}
               onChange={setPriority} />
           </Field>
-          <Field label="Task type">
-            <OptionPicker value={taskType} options={TASK_TYPE_OPTIONS}
-              onChange={setTaskType} />
-          </Field>
+          {/* Task-type picker removed 2026-06-11 (Ben) — taskType state
+              stays so existing values round-trip through save untouched. */}
           <Field label="Start date">
             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
           </Field>
@@ -14152,8 +14165,11 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
   // Selected creative(s) — Set of ids. UI toggles between single and multi:
   // checkbox per row + a "Select all visible" affordance.
   const [creativeIds, setCreativeIds] = useState(() => new Set())
-  // Upload-mode state
-  const [uploadFile, setUploadFile] = useState(null)
+  // Upload-mode state. Multi-file: dropping N files creates N library
+  // rows + N tasks in one go (Ben 2026-06-11 — "bulk upload isn't
+  // available here"). With one file the name stays editable; with
+  // several, names derive from the filenames.
+  const [uploadFiles, setUploadFiles] = useState([])
   const [uploadName, setUploadName] = useState('')
   const [uploadType, setUploadType] = useState('Joined')
   const [uploadProgress, setUploadProgress] = useState(null)
@@ -14216,84 +14232,88 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
   const rawCount     = useMemo(() => creatives.filter(c => c.status === 'raw' && c.manually_marked_used !== true).length, [creatives])
   const editedCount  = useMemo(() => creatives.length - rawCount, [creatives, rawCount])
 
-  const onFilePick = (file) => {
-    if (!file) return
-    setUploadFile(file)
-    // Auto-fill name from filename (strip extension)
-    if (!uploadName) setUploadName(file.name.replace(/\.[^.]+$/, ''))
+  const onFilePick = (fileList) => {
+    const files = Array.from(fileList || []).filter(f => f && f.size > 0)
+    if (!files.length) return
+    setUploadFiles(files)
+    // Single file: auto-fill the editable name from the filename.
+    if (files.length === 1 && !uploadName) setUploadName(files[0].name.replace(/\.[^.]+$/, ''))
   }
 
   const submit = async () => {
     setBusy(true); setErr(null)
     try {
       let cids = []
-      // Upload mode: upload file → insert library row → single creative id
+      // Upload mode: upload each file → insert a library row each → one
+      // task per row. Sequential per file (TUS chunks parallelise within
+      // a file already); overall progress maps file i of N onto 10-85%.
       if (mode === 'upload') {
-        if (!uploadFile || !uploadName.trim()) {
-          setErr('Pick a file and give it a name'); setBusy(false); return
+        if (!uploadFiles.length || (uploadFiles.length === 1 && !uploadName.trim())) {
+          setErr('Pick at least one file (and a name for a single file)'); setBusy(false); return
         }
-        setUploadProgress(10)
-        const sanitized = uploadFile.name.replace(/[^A-Za-z0-9._-]+/g, '_')
-        const storagePath = `edited/${Date.now()}_${sanitized}`
-        // Resumable upload (TUS) — single-POST .upload() silently failed
-        // on multi-hundred-MB files routed through "+ Add task" and left
-        // the operator with no progress past a static 50%. Now goes through
-        // uploadWithResume which: chunks at 6MB, retries on transient
-        // failures, fingerprints by (bucket,path) so re-drops don't cross-
-        // wire, and refuses to resolve unless verifyUploaded confirms the
-        // object is fetchable (no broken-link rows).
-        let lastUploadPct = -1
-        await uploadWithResume(uploadFile, {
-          bucket: 'creative-uploads',
-          path: storagePath,
-          contentType: uploadFile.type || 'video/mp4',
-          onProgress: (frac) => {
-            // 0-1 fraction -> 10-50% slot (rest of the work claims 50-100%)
-            const pct = 10 + Math.floor(frac * 40)
-            if (pct !== lastUploadPct) { lastUploadPct = pct; setUploadProgress(pct) }
-          },
-        })
-        setUploadProgress(50)
-        const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
-
-        // Extract thumbnail. Pre-upload File path first (fast path,
-        // < 500 MB) then post-upload URL path (HTTP-range, any size).
-        // Without this the brand-new library row would land with no
-        // thumbnail and the task card on the kanban would show a
-        // black square until a backfill ran. (Ben caught this on a
-        // Sky-assigned Sony XAVC clip 2026-05-23.)
-        let thumbnailUrl = null
-        let thumbBlob = await captureVideoThumbnail(uploadFile)
-        if (!thumbBlob) {
-          thumbBlob = await captureVideoThumbnailFromUrl(publicUrl)
-        }
-        if (thumbBlob) {
-          const thumbPath = `edited/${Date.now()}_${sanitized}_thumb.jpg`
-          const { error: thumbErr } = await supabase.storage
-            .from('creative-uploads')
-            .upload(thumbPath, thumbBlob, { upsert: true, contentType: 'image/jpeg' })
-          if (!thumbErr) {
-            thumbnailUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${thumbPath}`
-          }
-        }
-        setUploadProgress(70)
-
-        const { data: newRow, error: insErr } = await supabase.from('lib_creative_library')
-          .insert({
-            name: uploadName.trim() + (uploadFile.name.match(/\.[^.]+$/) || [''])[0],
-            type: uploadType,
-            size_mb: Math.round(uploadFile.size / 1024 / 1024 * 10) / 10,
-            status: 'review',
-            source_bucket: 'Editor upload (via Add task)',
-            preview_url: publicUrl,
-            drive_url: publicUrl,
-            thumbnail_url: thumbnailUrl,
-            notes: `Uploaded ${new Date().toISOString().slice(0,10)} alongside a new task. Pending review + assignment.`,
+        const n = uploadFiles.length
+        const span = 75 / n   // each file's slice of the 10-85% window
+        for (let i = 0; i < n; i++) {
+          const file = uploadFiles[i]
+          const base = 10 + i * span
+          setUploadProgress(Math.floor(base))
+          const sanitized = file.name.replace(/[^A-Za-z0-9._-]+/g, '_')
+          const storagePath = `edited/${Date.now()}_${sanitized}`
+          // Resumable upload (TUS) — single-POST .upload() silently failed
+          // on multi-hundred-MB files routed through "+ Add task". 6MB
+          // chunks, retries, fingerprinted by (bucket,path), and refuses
+          // to resolve unless verifyUploaded confirms the object exists.
+          let lastUploadPct = -1
+          await uploadWithResume(file, {
+            bucket: 'creative-uploads',
+            path: storagePath,
+            contentType: file.type || 'video/mp4',
+            onProgress: (frac) => {
+              const pct = Math.floor(base + frac * span * 0.7)
+              if (pct !== lastUploadPct) { lastUploadPct = pct; setUploadProgress(pct) }
+            },
           })
-          .select()
-          .single()
-        if (insErr) throw insErr
-        cids = [newRow.id]
+          const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
+
+          // Thumbnail: pre-upload File path first (fast, < 500 MB) then
+          // post-upload URL path (HTTP-range, any size) — without it the
+          // new row lands as a black square on the kanban.
+          let thumbnailUrl = null
+          let thumbBlob = await captureVideoThumbnail(file)
+          if (!thumbBlob) {
+            thumbBlob = await captureVideoThumbnailFromUrl(publicUrl)
+          }
+          if (thumbBlob) {
+            const thumbPath = `edited/${Date.now()}_${sanitized}_thumb.jpg`
+            const { error: thumbErr } = await supabase.storage
+              .from('creative-uploads')
+              .upload(thumbPath, thumbBlob, { upsert: true, contentType: 'image/jpeg' })
+            if (!thumbErr) {
+              thumbnailUrl = `https://kjfaqhmllagbxjdxlopm.supabase.co/storage/v1/object/public/creative-uploads/${thumbPath}`
+            }
+          }
+
+          const ext = (file.name.match(/\.[^.]+$/) || [''])[0]
+          const rowName = n === 1
+            ? uploadName.trim() + ext
+            : file.name   // bulk: filenames are the names
+          const { data: newRow, error: insErr } = await supabase.from('lib_creative_library')
+            .insert({
+              name: rowName,
+              type: uploadType,
+              size_mb: Math.round(file.size / 1024 / 1024 * 10) / 10,
+              status: 'review',
+              source_bucket: 'Editor upload (via Add task)',
+              preview_url: publicUrl,
+              drive_url: publicUrl,
+              thumbnail_url: thumbnailUrl,
+              notes: `Uploaded ${new Date().toISOString().slice(0,10)} alongside a new task. Pending review + assignment.`,
+            })
+            .select()
+            .single()
+          if (insErr) throw insErr
+          cids.push(newRow.id)
+        }
         setUploadProgress(85)
       } else {
         cids = Array.from(creativeIds)
@@ -14372,7 +14392,7 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
 
   const canSubmit = mode === 'pick'
     ? creativeIds.size > 0
-    : !!uploadFile && !!uploadName.trim()
+    : uploadFiles.length > 0 && (uploadFiles.length > 1 || !!uploadName.trim())
   const toggleCreative = (id) => {
     setCreativeIds(prev => {
       const next = new Set(prev)
@@ -14393,7 +14413,9 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
           <button onClick={submit} disabled={!canSubmit || busy} style={primaryBtn}>
             {busy
               ? (mode === 'upload' ? `Uploading… ${uploadProgress || 0}%` : 'Adding…')
-              : (mode === 'upload' ? 'Upload + add task' : 'Add task')}
+              : (mode === 'upload'
+                  ? (uploadFiles.length > 1 ? `Upload ${uploadFiles.length} + add tasks` : 'Upload + add task')
+                  : 'Add task')}
           </button>
         </>
       }>
@@ -14568,33 +14590,45 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
           </>
         ) : (
           <>
-            <Field label="Upload your finished file">
+            <Field label="Upload your finished files">
               <div
                 onClick={() => !busy && uploadInputRef.current?.click()}
-                onDrop={e => { e.preventDefault(); onFilePick(e.dataTransfer.files?.[0]) }}
+                onDrop={e => { e.preventDefault(); onFilePick(e.dataTransfer.files) }}
                 onDragOver={e => e.preventDefault()}
                 style={{
                   padding: 24, textAlign: 'center', cursor: busy ? 'not-allowed' : 'pointer',
                   border: '2px dashed var(--rule)',
-                  background: uploadFile ? 'white' : 'var(--paper-2)',
+                  background: uploadFiles.length ? 'white' : 'var(--paper-2)',
                 }}>
-                <input ref={uploadInputRef} type="file" accept="video/*"
+                <input ref={uploadInputRef} type="file" accept="video/*" multiple
                   style={{ display: 'none' }}
-                  onChange={e => onFilePick(e.target.files?.[0])} />
-                {uploadFile ? (
+                  onChange={e => onFilePick(e.target.files)} />
+                {uploadFiles.length > 0 ? (
                   <>
-                    <div style={{ fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 500 }}>{uploadFile.name}</div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
-                      {(uploadFile.size / 1024 / 1024).toFixed(1)} MB · click to change
+                    <div style={{ fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 500 }}>
+                      {uploadFiles.length === 1
+                        ? uploadFiles[0].name
+                        : `${uploadFiles.length} files — one task each`}
                     </div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
+                      {(uploadFiles.reduce((s, f) => s + f.size, 0) / 1024 / 1024).toFixed(1)} MB total · click to change
+                    </div>
+                    {uploadFiles.length > 1 && (
+                      <div style={{
+                        marginTop: 8, textAlign: 'left', maxHeight: 110, overflowY: 'auto',
+                        fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', lineHeight: 1.7,
+                      }}>
+                        {uploadFiles.map(f => <div key={f.name}>· {f.name}</div>)}
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
                     <div style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)' }}>
-                      Drop your finished file here
+                      Drop your finished file(s) here
                     </div>
                     <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 4 }}>
-                      or click to select
+                      or click to select · multiple files = one task each
                     </div>
                   </>
                 )}
@@ -14610,11 +14644,19 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
               )}
             </Field>
             <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '2fr 1fr' }}>
-              <Field label="Name this creative">
-                <input type="text" value={uploadName} onChange={e => setUploadName(e.target.value)}
-                  placeholder="e.g. 'Eric direct call breakthrough — final cut'"
-                  style={inputStyle} />
-              </Field>
+              {uploadFiles.length <= 1 ? (
+                <Field label="Name this creative">
+                  <input type="text" value={uploadName} onChange={e => setUploadName(e.target.value)}
+                    placeholder="e.g. 'Eric direct call breakthrough — final cut'"
+                    style={inputStyle} />
+                </Field>
+              ) : (
+                <Field label="Names">
+                  <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', color: 'var(--ink-3)', fontFamily: 'var(--mono)', fontSize: 11 }}>
+                    Taken from each filename
+                  </div>
+                </Field>
+              )}
               <Field label="Type">
                 <select value={uploadType} onChange={e => setUploadType(e.target.value)} style={selectStyle}>
                   {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -14624,20 +14666,15 @@ function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefill
           </>
         )}
 
-        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr 1fr 1fr' }}>
           <Field label="Editor (optional)">
             <select value={editorId} onChange={e => setEditorId(e.target.value)} style={selectStyle}>
               <option value="">— Unassigned</option>
               {editors.filter(e => e.tier !== 'admin').map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
           </Field>
-          <Field label="Task type">
-            <select value={taskType} onChange={e => setTaskType(e.target.value)} style={selectStyle}>
-              <option value="edit">Edit</option>
-              <option value="patch">Patch</option>
-              <option value="revision">Revision</option>
-            </select>
-          </Field>
+          {/* Task-type select removed 2026-06-11 (Ben) — new tasks default
+              to 'edit'; the column and existing values are untouched. */}
           <Field label="Priority">
             <select value={priority} onChange={e => setPriority(e.target.value)} style={selectStyle}>
               <option>P1 - High</option>
@@ -15320,6 +15357,75 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
    prominent status badge. Clicking opens the EditTaskModal where Ben
    can watch the submission, leave notes, advance status. */
 function InboxView({ tasks, onEdit }) {
+  // Bulk actions (Ben 2026-06-11): select cards → move the underlying
+  // creatives into a library folder, or download their best-quality
+  // files — without round-tripping through the Library tab.
+  const [sel, setSel] = useState(() => new Set())
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [folders, setFolders] = useState(null)   // null = not fetched yet
+  const [note, setNote] = useState(null)         // transient feedback
+  const noteTimer = useRef(null)
+  const flash = (msg) => {
+    setNote(msg)
+    clearTimeout(noteTimer.current)
+    noteTimer.current = setTimeout(() => setNote(null), 3500)
+  }
+  useEffect(() => () => clearTimeout(noteTimer.current), [])
+
+  const toggleSel = useCallback((taskId) => {
+    setSel(prev => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId); else next.add(taskId)
+      return next
+    })
+  }, [])
+
+  const selTasks = tasks.filter(t => sel.has(t.task_id))
+
+  const openPicker = async () => {
+    if (folders === null) {
+      const { data } = await supabase.from('lib_creative_folders')
+        .select('id,name,parent_id').order('name')
+      setFolders(data || [])
+    }
+    setPickerOpen(true)
+  }
+
+  // Same family semantics as the Library's move: a clip travels with its
+  // other versions, so "latest only" can't strand half a family.
+  const moveSelectedToFolder = async (destId) => {
+    const cids = [...new Set(selTasks.map(t => t.creative_id).filter(Boolean))]
+    if (!cids.length) return
+    const { data: fam, error: famErr } = await supabase.from('lib_creative_library')
+      .select('id,parent_id').in('id', cids)
+    if (famErr) throw famErr
+    const roots = [...new Set((fam || []).map(r => r.parent_id || r.id))]
+    const list = roots.join(',')
+    const { error } = await supabase.from('lib_creative_library')
+      .update({ folder_id: destId })
+      .or(`id.in.(${list}),parent_id.in.(${list})`)
+    if (error) throw error
+    setPickerOpen(false)
+    setSel(new Set())
+    flash(`✓ Moved ${cids.length} video${cids.length === 1 ? '' : 's'} to ${destId ? (folders?.find(f => f.id === destId)?.name || 'folder') : 'the library root'}`)
+  }
+
+  // Best-quality URL first — same priority chain as the Library's bulk
+  // download (final cut > original Drive ingest > preview/original TUS).
+  const downloadSelected = () => {
+    const urls = selTasks
+      .map(t => t.final_cut_url || t.drive_url || t.preview_url)
+      .filter(Boolean)
+    urls.forEach((url, i) => {
+      setTimeout(() => {
+        const a = document.createElement('a')
+        a.href = url; a.download = ''
+        document.body.appendChild(a); a.click(); a.remove()
+      }, i * 180)
+    })
+    flash(`Downloading ${urls.length} file${urls.length === 1 ? '' : 's'}…`)
+  }
+
   const sections = useMemo(() => {
     const review  = tasks.filter(t => t.status === 'review')
     const overdue = tasks.filter(t => t.is_overdue && t.status !== 'review')
@@ -15353,6 +15459,46 @@ function InboxView({ tasks, onEdit }) {
 
   return (
     <div style={{ display: 'grid', gap: 24 }}>
+      {/* Bulk bar — appears when ≥1 card is ticked */}
+      {sel.size > 0 && (
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 50,
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 14px', background: 'var(--ink)', color: 'white',
+        }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em' }}>
+            {sel.size} selected
+          </span>
+          <span style={{ flex: 1 }} />
+          <button onClick={downloadSelected} style={{
+            padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            background: 'transparent', color: 'white',
+            border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer',
+          }}>↓ Download {sel.size}</button>
+          <button onClick={openPicker} style={{
+            padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            background: 'var(--accent)', color: 'var(--ink)',
+            border: 'none', cursor: 'pointer',
+          }}>Move to folder</button>
+          <button onClick={() => setSel(new Set())} style={{
+            padding: '7px 10px', fontFamily: 'var(--mono)', fontSize: 10.5,
+            background: 'transparent', color: 'rgba(255,255,255,0.7)',
+            border: 'none', cursor: 'pointer',
+          }}>✕</button>
+        </div>
+      )}
+      {note && (
+        <div style={{
+          position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 120, padding: '10px 18px',
+          background: 'var(--ink)', color: 'var(--paper)',
+          fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 600,
+          letterSpacing: '0.05em', borderRadius: 3,
+          boxShadow: '0 6px 24px rgba(10,10,10,0.35)', pointerEvents: 'none',
+        }}>{note}</div>
+      )}
       {sections.map(section => (
         <div key={section.key}>
           <div style={{
@@ -15371,15 +15517,27 @@ function InboxView({ tasks, onEdit }) {
             </div>
           </div>
           <div style={{ display: 'grid', gap: 8 }}>
-            {section.items.map(t => <InboxCard key={t.task_id} task={t} onEdit={onEdit} sectionColor={section.color} />)}
+            {section.items.map(t => (
+              <InboxCard key={t.task_id} task={t} onEdit={onEdit} sectionColor={section.color}
+                selected={sel.has(t.task_id)} onToggle={toggleSel} />
+            ))}
           </div>
         </div>
       ))}
+      {pickerOpen && folders !== null && (
+        <FolderPickerModal
+          title={`Move ${sel.size} video${sel.size === 1 ? '' : 's'} to a folder`}
+          subtitle="Files the underlying library clips (and their other versions). Tasks stay where they are."
+          folders={folders}
+          onClose={() => setPickerOpen(false)}
+          onPick={moveSelectedToFolder}
+        />
+      )}
     </div>
   )
 }
 
-function InboxCard({ task: t, onEdit, sectionColor }) {
+function InboxCard({ task: t, onEdit, sectionColor, selected = false, onToggle = null }) {
   const [hover, setHover] = useState(false)
   const [hoverPlay, setHoverPlay] = useState(false)
   useEffect(() => {
@@ -15412,12 +15570,33 @@ function InboxCard({ task: t, onEdit, sectionColor }) {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 14,
+        display: 'grid',
+        gridTemplateColumns: onToggle ? '22px 64px 1fr auto' : '64px 1fr auto',
+        gap: 14,
         padding: '12px 16px', alignItems: 'center',
-        background: hover ? 'var(--paper-2)' : 'var(--paper)',
-        border: '1px solid var(--rule)', borderLeft: `4px solid ${sectionColor}`,
+        background: selected ? 'rgba(244,225,74,0.12)' : (hover ? 'var(--paper-2)' : 'var(--paper)'),
+        border: selected ? '1px solid var(--accent)' : '1px solid var(--rule)',
+        borderLeft: `4px solid ${sectionColor}`,
         cursor: 'pointer', transition: 'background 0.12s',
       }}>
+      {onToggle && (
+        <div onClick={e => { e.stopPropagation(); onToggle(t.task_id) }}
+          title={selected ? 'Deselect' : 'Select for bulk actions (move to folder / download)'}
+          style={{
+            width: 20, height: 20, borderRadius: 3,
+            background: selected ? 'var(--accent)' : 'white',
+            border: '1.5px solid var(--ink)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            opacity: selected || hover ? 1 : 0.45, transition: 'opacity 0.12s',
+          }}>
+          {selected && (
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+              <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
+                strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </div>
+      )}
       <div style={{
         width: 64, height: 40, background: '#000',
         border: '1px solid var(--rule)', overflow: 'hidden', position: 'relative',
