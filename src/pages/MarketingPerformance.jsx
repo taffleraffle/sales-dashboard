@@ -1049,42 +1049,8 @@ function resolveRange(range) {
   return { from: etDateOffset(-Math.max(0, days - 1)), to: today }
 }
 
-// Helper: build a Set<string> of LOWER(prospect_name) that belong to the
-// requested audiences. Used by fetchLiveCalls / fetchCloses / fetchAscensions
-// to filter their closer_calls rows by audience (closer_calls has no
-// native audience column — the only way to attribute is via the resolved
-// booking chain).
-async function prospectNamesInAudience(audiences, { from, to }) {
-  if (!audiences || audiences.size === 0) return null  // no filter active
-  // Window the booking lookup to ±90d around the call window so a call
-  // attributed via an earlier booking still matches.
-  const start = new Date(from); start.setUTCDate(start.getUTCDate() - 90)
-  const end = new Date(to); end.setUTCDate(end.getUTCDate() + 30)
-  const { data } = await supabase
-    .from('lib_booking_resolved_mv')
-    .select('contact_name, audience')
-    .in('audience', [...audiences])
-    .gte('booked_at', start.toISOString().slice(0, 10))
-    .lte('booked_at', end.toISOString().slice(0, 10))
-  const set = new Set()
-  for (const r of (data || [])) {
-    if (!r.contact_name) continue
-    // Strip the closer suffix "X and Daniel Gomez De Le Vega" → "X"
-    const prospect = r.contact_name.split(' and ')[0].trim().toLowerCase()
-    if (prospect) set.add(prospect)
-  }
-  return set
-}
-
-function prospectMatches(prospectName, allowedSet) {
-  if (!allowedSet) return true
-  if (!prospectName) return false
-  // closer_calls.prospect_name may be "Hector  - RestorationConnect Strategy
-  // Call" — extract the part before any ' - ' or ' and '.
-  const cleaned = prospectName.split(/ - | and /)[0].trim().toLowerCase()
-  if (!cleaned) return false
-  return allowedSet.has(cleaned)
-}
+// (booking-name audience matching removed 2026-06-12 — every call drilldown
+// now filters via lib_closer_call_audience, the same view the tiles read.)
 
 async function fetchLiveCalls({ from, to, audiences } = {}) {
   // The Net New Live TILE reads aggregate closer_eod_reports.new_live_calls.
@@ -1249,26 +1215,32 @@ async function fetchCloses({ from, to, audiences } = {}) {
 async function fetchAscensions({ from, to, audiences } = {}) {
   // Every ascension in window — call_type = 'ascension'. Includes both ascended
   // and not-ascended outcomes so the user can see the full ascension funnel.
-  const allowed = await prospectNamesInAudience(audiences, { from, to })
+  // Rows from lib_closer_call_audience — the SAME view the tiles aggregate,
+  // so audience chips filter via the funnel-first resolver instead of the
+  // old booking-name matching that diverged from the tiles (same bug class
+  // as the net-live "tile 6 / drilldown 0", patched across the board
+  // 2026-06-12).
   const { data: reports } = await supabase
     .from('closer_eod_reports')
     .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
     .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
-  const reportIds = (reports || []).map(r => r.id)
   const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
-  if (reportIds.length === 0) return []
-  const { data: callRows } = await supabase
-    .from('closer_calls')
-    .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected, offered_finance')
-    .in('eod_report_id', reportIds)
+  if ((reports || []).length === 0) return []
+  let q = supabase
+    .from('lib_closer_call_audience')
+    .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected, offered_finance, audience')
+    .gte('report_date', from).lte('report_date', to)
+    .eq('is_confirmed', true)
     .eq('call_type', 'ascension')
+  if (audiences && audiences.size > 0) q = q.in('audience', [...audiences])
+  const { data: callRows } = await q
   return (callRows || [])
-    .filter(c => prospectMatches(c.prospect_name, allowed))
     .map(c => ({
       date: reportMap[c.eod_report_id]?.report_date,
       closer: reportMap[c.eod_report_id]?.closer?.name || '—',
       prospect: c.prospect_name || '—',
       outcome: c.outcome,
+      audience: c.audience,
       revenue: c.revenue,
       cash: c.cash_collected,
       finance: c.offered_finance ? 'yes' : 'no',
@@ -1408,49 +1380,67 @@ async function fetchBookings({ from, to, audiences } = {}) {
 }
 
 async function fetchNoShows({ from, to, audiences } = {}) {
-  const allowed = await prospectNamesInAudience(audiences, { from, to })
   // NC no-shows only — follow-up no-shows happen on different funnel
   // events and shouldn't pollute the "did this booking happen" metric.
   // Matches the no_show_rate calculation in useMarketingTracker.js.
+  // Rows from lib_closer_call_audience — the SAME view the tiles aggregate,
+  // so audience chips filter via the funnel-first resolver instead of the
+  // old booking-name matching that diverged from the tiles (same bug class
+  // as the net-live "tile 6 / drilldown 0", patched across the board
+  // 2026-06-12).
   const { data: reports } = await supabase
     .from('closer_eod_reports')
     .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
     .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
-  const reportIds = (reports || []).map(r => r.id)
   const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
-  if (reportIds.length === 0) return []
-  const { data: callRows } = await supabase
-    .from('closer_calls')
-    .select('eod_report_id, prospect_name, call_type, outcome')
-    .in('eod_report_id', reportIds)
+  if ((reports || []).length === 0) return []
+  let q = supabase
+    .from('lib_closer_call_audience')
+    .select('eod_report_id, prospect_name, call_type, outcome, audience')
+    .gte('report_date', from).lte('report_date', to)
+    .eq('is_confirmed', true)
     .eq('outcome', 'no_show')
     .eq('call_type', 'new_call')
+  if (audiences && audiences.size > 0) q = q.in('audience', [...audiences])
+  const { data: callRows } = await q
   return (callRows || [])
-    .filter(c => prospectMatches(c.prospect_name, allowed))
     .map(c => ({
       date: reportMap[c.eod_report_id]?.report_date,
       closer: reportMap[c.eod_report_id]?.closer?.name || '—',
       prospect: c.prospect_name || '—',
+      audience: c.audience,
     })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
-async function fetchShowRate({ from, to }) {
-  // Per-day show rate from marketing_tracker. One row per day with
-  // bookings, lives, no_shows, gross + net show% pre-computed.
-  const { data } = await supabase
-    .from('marketing_tracker')
-    // marketing_tracker has no nc_booked column (selecting it 400'd the
-    // whole query → the show-rate drilldown was always empty). The show-rate
-    // denominator is Qualified Bookings, matching the tile tooltip.
-    .select('date, new_live_calls, no_shows, cancelled_dtf, cancelled_by_prospect, reschedules, qualified_bookings')
+async function fetchShowRate({ from, to, audiences } = {}) {
+  // Per-day show rate from the SAME audience rollup the tiles read
+  // (lib_marketing_by_audience_daily_mv) — the old marketing_tracker source
+  // had no audience column, so under any audience chip this drilldown
+  // silently showed GLOBAL show rates next to an audience-filtered tile.
+  let q = supabase
+    .from('lib_marketing_by_audience_daily_mv')
+    .select('date, audience, live_calls, no_shows, cancels, reschedules, qualified_bookings')
     .gte('date', from).lte('date', to)
     .order('date', { ascending: false })
-  return (data || [])
+  if (audiences && audiences.size > 0) q = q.in('audience', [...audiences])
+  const { data } = await q
+  // Sum audience rows per day (the mv is one row per date×audience).
+  const byDate = {}
+  for (const r of (data || [])) {
+    const d = byDate[r.date] || (byDate[r.date] = { date: r.date, qualified_bookings: 0, live_calls: 0, no_shows: 0, cancels: 0, reschedules: 0 })
+    d.qualified_bookings += Number(r.qualified_bookings) || 0
+    d.live_calls += Number(r.live_calls) || 0
+    d.no_shows += Number(r.no_shows) || 0
+    d.cancels += Number(r.cancels) || 0
+    d.reschedules += Number(r.reschedules) || 0
+  }
+  return Object.values(byDate)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
     .filter(r => (r.qualified_bookings || 0) > 0)
     .map(r => {
       const nc = r.qualified_bookings || 0
-      const lives = r.new_live_calls || 0
-      const cancels = (r.cancelled_dtf || 0) + (r.cancelled_by_prospect || 0)
+      const lives = r.live_calls || 0
+      const cancels = r.cancels || 0
       const reschedules = r.reschedules || 0
       const noShows = r.no_shows || 0
       const grossDenom = nc
@@ -1553,30 +1543,36 @@ async function fetchCpaTrial({ from, to, audiences } = {}) {
 }
 
 async function fetchReschCancel({ from, to, audiences } = {}) {
-  const allowed = await prospectNamesInAudience(audiences, { from, to })
+  // Rows from lib_closer_call_audience — the SAME view the tiles aggregate,
+  // so audience chips filter via the funnel-first resolver instead of the
+  // old booking-name matching that diverged from the tiles (same bug class
+  // as the net-live "tile 6 / drilldown 0", patched across the board
+  // 2026-06-12).
   const { data: reports } = await supabase
     .from('closer_eod_reports')
     .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
     .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
-  const reportIds = (reports || []).map(r => r.id)
   const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
-  if (reportIds.length === 0) return []
-  const { data: callRows } = await supabase
-    .from('closer_calls')
-    .select('eod_report_id, prospect_name, call_type, outcome')
-    .in('eod_report_id', reportIds)
+  if ((reports || []).length === 0) return []
+  let q = supabase
+    .from('lib_closer_call_audience')
+    .select('eod_report_id, prospect_name, call_type, outcome, audience')
+    .gte('report_date', from).lte('report_date', to)
+    .eq('is_confirmed', true)
     .in('outcome', ['rescheduled', 'canceled'])
     // Tile numerators never include ascension-call resch/cancels (NC-only when
     // audience-filtered, NC+FU on the All view) — keep the drilldown aligned.
     .neq('call_type', 'ascension')
+  if (audiences && audiences.size > 0) q = q.in('audience', [...audiences])
+  const { data: callRows } = await q
   return (callRows || [])
-    .filter(c => prospectMatches(c.prospect_name, allowed))
     .map(c => ({
       date: reportMap[c.eod_report_id]?.report_date,
       closer: reportMap[c.eod_report_id]?.closer?.name || '—',
       type: c.call_type,
       prospect: c.prospect_name || '—',
       outcome: c.outcome,
+      audience: c.audience,
     })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
