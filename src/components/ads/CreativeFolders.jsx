@@ -86,6 +86,7 @@ export const FolderBar = memo(function FolderBar({
   onDelete,              // (folder) => Promise
   onMoveFolder,          // (folder, newParentId) => Promise
   onDropClips,           // (ids, folderId|null) => Promise — clips dragged in
+  dropReady = false,     // a clip drag is in flight — light up all targets
   onError,               // (message) — surface a failed write on the page
 }) {
   const [nameModal, setNameModal] = useState(null)   // { folder } | { create: true }
@@ -138,9 +139,16 @@ export const FolderBar = memo(function FolderBar({
     try { await onMoveFolder(folder, destId) }
     catch (err) { onError?.(err.message || 'Folder move failed') }
   }
-  const dropTargetStyle = (key) => dropHover === key
-    ? { background: 'rgba(244,225,74,0.25)', outline: '2px solid var(--accent)', outlineOffset: -2 }
-    : null
+  // Three visual states, Drive-style: drag in flight anywhere = every
+  // target shows a dashed "drop here" outline; cursor over a target =
+  // solid outline + fill; otherwise nothing.
+  const dropTargetStyle = (key) => {
+    if (dropHover === key)
+      return { background: 'rgba(244,225,74,0.3)', outline: '2px solid var(--accent)', outlineOffset: -2 }
+    if (dropReady)
+      return { outline: '2px dashed rgba(216,201,58,0.8)', outlineOffset: -2 }
+    return null
+  }
 
   const path = useMemo(
     () => (currentFolderId ? folderPath(folders, currentFolderId) : []),

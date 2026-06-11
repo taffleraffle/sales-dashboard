@@ -23,9 +23,10 @@ import { Icon } from '../../components/editorial/atoms'
 // the sub-nav 2026-05-18 — the routes still resolve (e.g. detail-page
 // links), but they don't show up here so the nav stays focused on
 // what Ben actually uses day-to-day.
+// Tests hidden from the sub-nav 2026-06-11 (Ben de-clutter) — the route
+// still resolves at /sales/ads/creative/tests for direct links.
 const SUBNAV = [
   { to: '/sales/ads/creative/insights',     label: 'Insights' },
-  { to: '/sales/ads/creative/tests',        label: 'Tests' },
   { to: '/sales/ads/creative/creatives',    label: 'Creatives' },
   { to: '/sales/ads/creative/library',      label: 'Library' },
   { to: '/sales/ads/creative/attributes',   label: 'Attributes' },

@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { TrendingUp, Type, FlaskConical, AlertCircle, Archive, MoreHorizontal } from 'lucide-react'
+import { TrendingUp, FlaskConical, AlertCircle, Archive, MoreHorizontal } from 'lucide-react'
 
+// Messaging hidden 2026-06-11 — Ben wants it rebuilt before it's shown
+// again (route still resolves at /sales/ads/messaging for direct access).
 const PRIMARY = [
   { to: '/sales/ads/performance', label: 'Performance',      icon: TrendingUp },
-  { to: '/sales/ads/messaging',   label: 'Messaging',        icon: Type },
   { to: '/sales/ads/creative',    label: 'Creative testing', icon: FlaskConical },
 ]
 
