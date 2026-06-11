@@ -17,6 +17,8 @@ import { supabase } from '../../lib/supabase'
   switch the metric in-panel (e.g. Show Rate → Gross | Net).
 */
 
+const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+
 const METRIC_DEFS = {
   leads:        { title: 'Leads',                    fmt: 'n', numKey: 'leads' },
   cpl:          { title: 'Cost per Lead',            fmt: '$', numKey: 'adspend',           denKey: 'leads',              numLabel: 'spend', denLabel: 'leads' },
@@ -148,6 +150,10 @@ export default function MetricTrendPanel({ metric, selectedAudiences, height = 3
           .from('lib_marketing_by_audience_daily')
           .select(COLS).order('date', { ascending: true }).limit(20000)
       }
+      // mv adspend is raw NZD (ad_daily_stats passthrough); every $ tile on
+      // the page is USD (× NZD_TO_USD). Without this conversion the trend
+      // charts read ~1.79× higher than the tiles they sit beside.
+      if (res.data) for (const r of res.data) r.adspend = (Number(r.adspend) || 0) * NZD_TO_USD
       if (!alive) return
       if (res.error) { setErr(res.error.message); return }
       setDaily(res.data || [])
