@@ -1,5 +1,6 @@
-import { NavLink, Outlet } from 'react-router-dom'
-import { TrendingUp, Type, FlaskConical, AlertCircle, Archive } from 'lucide-react'
+import { useState } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { TrendingUp, Type, FlaskConical, AlertCircle, Archive, MoreHorizontal } from 'lucide-react'
 
 const PRIMARY = [
   { to: '/sales/ads/performance', label: 'Performance',      icon: TrendingUp },
@@ -7,6 +8,8 @@ const PRIMARY = [
   { to: '/sales/ads/creative',    label: 'Creative testing', icon: FlaskConical },
 ]
 
+// Maintenance surfaces, not daily destinations — tucked behind the ⋯
+// menu so the tab bar stays three items (Ben 2026-06-10 de-clutter).
 const SECONDARY = [
   { to: '/sales/ads/orphans',  label: 'Orphans',  icon: AlertCircle },
   { to: '/sales/ads/legacy',   label: 'Legacy',   icon: Archive },
@@ -46,6 +49,12 @@ const secondaryTab = (isActive) => ({
 })
 
 export default function AdsLayout() {
+  const [moreOpen, setMoreOpen] = useState(false)
+  const location = useLocation()
+  // Keep the ⋯ trigger visibly active while ON a tucked-away page so the
+  // operator can tell where they are even though the tab itself is hidden.
+  const onSecondary = SECONDARY.some(s => location.pathname.startsWith(s.to))
+
   return (
     <div className="max-w-[1600px] mx-auto">
       {/* Tab bar — the only chrome the user needs at this layer.
@@ -66,12 +75,40 @@ export default function AdsLayout() {
               </NavLink>
             ))}
           </div>
-          <div className="flex gap-1 pb-2">
-            {SECONDARY.map(({ to, label, icon: Icon }) => (
-              <NavLink key={to} to={to} style={({ isActive }) => secondaryTab(isActive)}>
-                <Icon size={10} /> {label}
-              </NavLink>
-            ))}
+          <div className="pb-2" style={{ position: 'relative' }}>
+            <button type="button" aria-label="More ads pages"
+              onClick={() => setMoreOpen(v => !v)}
+              style={{ ...secondaryTab(onSecondary), cursor: 'pointer', background: onSecondary ? 'var(--accent-soft)' : 'transparent' }}>
+              <MoreHorizontal size={12} />
+            </button>
+            {moreOpen && (
+              <>
+                {/* click-outside catcher */}
+                <div onClick={() => setMoreOpen(false)}
+                  style={{ position: 'fixed', inset: 0, zIndex: 55 }} />
+                <div style={{
+                  position: 'absolute', top: '100%', right: 0, zIndex: 60,
+                  background: 'white', border: '1px solid var(--rule)',
+                  boxShadow: '0 8px 24px rgba(10,10,10,0.12)',
+                  display: 'grid', minWidth: 140,
+                }}>
+                  {SECONDARY.map(({ to, label, icon: Icon }) => (
+                    <NavLink key={to} to={to} onClick={() => setMoreOpen(false)}
+                      style={({ isActive }) => ({
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '9px 12px',
+                        fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        color: isActive ? 'var(--ink)' : 'var(--ink-2)',
+                        background: isActive ? 'var(--accent-soft)' : 'transparent',
+                        textDecoration: 'none',
+                      })}>
+                      <Icon size={11} /> {label}
+                    </NavLink>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

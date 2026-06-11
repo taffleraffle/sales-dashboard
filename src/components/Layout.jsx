@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, Headphones, DollarSign, Bot, Mail, ChevronDown, Workflow, Megaphone, FileText, TrendingDown } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -10,10 +10,12 @@ import { UploadProvider } from '../hooks/useUploads'
 import { startAutoSync, stopAutoSync } from '../services/autoSync'
 import { ICON } from '../utils/constants'
 
-// Archived nav: Pipeline + Call Data are routes that still work via direct
-// URL but are hidden from the sidebar. Pipeline overlaps with Setters /
-// Marketing data; Call Data hasn't been used as a primary surface in months.
-// Keeping the routes registered in App.jsx so any deep links survive.
+// Archived nav: routes that still work via direct URL but are hidden from
+// the sidebar. Pipeline overlaps with Setters / Marketing data; Call Data
+// hasn't been used as a primary surface in months. Ben (2026-06-10) also
+// cut Commissions, Setter Bot and Email Flows to de-clutter, and moved
+// Settings to the avatar/profile dropdown only (it was already linked
+// there). Keeping the routes registered in App.jsx so deep links survive.
 const navItems = [
   { to: '/sales', icon: BarChart3, label: 'Overview', end: true },
   { to: '/sales/closers', icon: UserCheck, label: 'Closers' },
@@ -23,10 +25,6 @@ const navItems = [
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
   { to: '/sales/contracts', icon: FileText, label: 'Contracts' },
   { to: '/sales/downsells', icon: TrendingDown, label: 'Downsells' },
-  { to: '/sales/commissions', icon: DollarSign, label: 'Commissions' },
-  { to: '/sales/setter-bot', icon: Bot, label: 'Setter Bot' },
-  { to: '/sales/email-flows', icon: Mail, label: 'Email Flows' },
-  { to: '/sales/settings', icon: Settings, label: 'Settings' },
 ]
 
 function initialsOf(name) {
