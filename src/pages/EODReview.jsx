@@ -1682,10 +1682,20 @@ export default function EODReview() {
   useEffect(() => {
     if (tab !== 'closer' || !selectedMember) { setCalls([]); setCalendarSource(null); return }
 
+    // Date/member changes can fire while a previous (slow — GHL calendar
+    // sync) load is still in flight. Without cancellation the stale response
+    // landed AFTER the fresh one and overwrote the screen with the wrong
+    // day's data; and because `confirmed` wasn't reset, the old day's
+    // summary card sat frozen with no loading hint ("cycling dates doesn't
+    // change the info", 2026-06-11).
+    let cancelled = false
+
     async function loadCalls() {
       setLoadingCalls(true)
       setExpandedCall(null)
       setNewCallsSinceSubmit([])
+      setCalls([])
+      setConfirmed(false) // re-derived for THIS date below; drops the stale summary card
 
       // Check if an EOD already exists for this member+date
       const { data: existingEOD } = await supabase
@@ -1694,6 +1704,7 @@ export default function EODReview() {
         .eq('closer_id', selectedMember)
         .eq('report_date', selectedDate)
         .limit(1)
+      if (cancelled) return
 
       if (existingEOD?.[0]?.is_confirmed) {
         setConfirmed(true)
@@ -1703,6 +1714,7 @@ export default function EODReview() {
           .select('*')
           .eq('eod_report_id', existingEOD[0].id)
           .order('id', { ascending: true })
+        if (cancelled) return
         if (savedCalls?.length) {
           // Also load the EOD notes
           const { data: eodData } = await supabase
@@ -1710,6 +1722,7 @@ export default function EODReview() {
             .select('notes')
             .eq('id', existingEOD[0].id)
             .single()
+          if (cancelled) return
           setCloserNotes(eodData?.notes || '')
           setCalls(savedCalls.map(c => ({
             lead_id: c.setter_lead_id || null,
@@ -1740,6 +1753,7 @@ export default function EODReview() {
           // them as a banner so the closer can re-open and add them.
           fetchCloserCalendar(selectedMember, selectedDate)
             .then(({ events }) => {
+              if (cancelled) return
               const savedEventIds = new Set(savedCalls.map(c => c.ghl_event_id).filter(Boolean))
               const fresh = (events || []).filter(e => e.ghl_event_id && !savedEventIds.has(e.ghl_event_id))
               setNewCallsSinceSubmit(fresh)
@@ -1769,6 +1783,7 @@ export default function EODReview() {
           .then(res => res, () => ({ data: [] })),
       ])
 
+      if (cancelled) return
       const { source, events } = calendarResult
       const setterLeads = leadsRes.data || []
       const transcripts = transcriptsRes.data || []
@@ -1881,10 +1896,11 @@ export default function EODReview() {
       } catch (err) {
         console.error('Failed to load calls:', err)
       }
-      setLoadingCalls(false)
+      if (!cancelled) setLoadingCalls(false)
     }
 
     loadCalls()
+    return () => { cancelled = true }
   }, [tab, selectedMember, selectedDate])
 
   const updateCall = (index, field, value) => {
