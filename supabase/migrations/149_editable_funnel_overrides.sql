@@ -15,8 +15,12 @@
 -- drilldowns (Funnel column) become editable dropdowns that upsert these
 -- tables and refresh the trend MV.
 
-create table if not exists public.booking_audience_overrides (
-  booking_id text primary key,
+-- booking_id is ghl_appointments.id (uuid). A first cut typed it text and
+-- the view join failed with "operator does not exist: text = uuid" — drop
+-- the empty mistyped table if that run left it behind.
+drop table if exists public.booking_audience_overrides;
+create table public.booking_audience_overrides (
+  booking_id uuid primary key,
   audience text not null,
   note text,
   created_at timestamptz not null default now(),
