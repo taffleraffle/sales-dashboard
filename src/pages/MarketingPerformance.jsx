@@ -1097,7 +1097,6 @@ async function fetchLiveCalls({ from, to, audiences } = {}) {
   // (aggregate - perRow) synthesized "(aggregate-only)" filler rows so the
   // drilldown total === tile total. The same pattern fetchCloses uses via
   // lib_close_audience, adapted for a table without a resolved view.
-  const allowed = await prospectNamesInAudience(audiences, { from, to })
   const audienceFilterActive = audiences && audiences.size > 0
   const { data: reports } = await supabase
     .from('closer_eod_reports')
@@ -1109,21 +1108,29 @@ async function fetchLiveCalls({ from, to, audiences } = {}) {
   const reportIds = (reports || []).map(r => r.id)
   const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
   if (reportIds.length === 0) return []
-  const { data: callRows } = await supabase
-    .from('closer_calls')
-    .select('id, eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected')
-    .in('eod_report_id', reportIds)
+
+  // Rows come from lib_closer_call_audience — the SAME view the tiles
+  // aggregate — so the audience filter is the resolver chain itself
+  // (funnel-first, migrations 152/153), not the old booking-name matching
+  // that disagreed with the tiles (tile said 6, drilldown showed 0 under
+  // the Electricians chip, 2026-06-11).
+  let q = supabase
+    .from('lib_closer_call_audience')
+    .select('closer_call_id, eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected, audience')
+    .gte('report_date', from).lte('report_date', to)
+    .eq('is_confirmed', true)
     .in('outcome', ['not_closed', 'closed'])
     .eq('call_type', 'new_call') // "Net New" = NEW CALLS only (no follow-ups, no ascensions)
+  if (audienceFilterActive) q = q.in('audience', [...audiences])
+  const { data: callRows } = await q
 
   // Per-row rows + per-EOD count for the aggregate reconciliation below.
   const perRowCountByEod = {}
   const perRow = (callRows || [])
-    .filter(c => prospectMatches(c.prospect_name, allowed))
     .map(c => {
       perRowCountByEod[c.eod_report_id] = (perRowCountByEod[c.eod_report_id] || 0) + 1
       return {
-        _id: c.id,
+        _id: c.closer_call_id,
         _kind: 'call',
         date: reportMap[c.eod_report_id]?.report_date,
         closer: reportMap[c.eod_report_id]?.closer?.name || '—',
@@ -1131,6 +1138,7 @@ async function fetchLiveCalls({ from, to, audiences } = {}) {
         prospect: c.prospect_name || '—',
         email: null,
         outcome: c.outcome,
+        audience: c.audience,
         revenue: c.revenue,
         cash: c.cash_collected,
       }
@@ -2048,6 +2056,8 @@ const DRILLDOWN_CONFIG = {
       { key: 'closer', label: 'Closer', cls: 'text-text-primary' },
       { key: 'type', label: 'Type', cls: 'text-[10px] uppercase text-text-400' },
       { key: 'prospect', label: 'Prospect', cls: 'text-text-primary' },
+      { key: 'audience', label: 'Audience', render: r => r.aggregate_only ? <span className="text-text-400/60">—</span>
+        : <span className={`text-[10px] uppercase ${(!r.audience || r.audience === 'Unknown') ? 'text-red-400 font-semibold' : 'text-text-400'}`}>{r.audience || 'Unattributed'}</span> },
       { key: 'email', label: 'Email', render: r => r.email
         ? <a href={`mailto:${r.email}`} className="text-text-primary hover:underline" onClick={e => e.stopPropagation()}>{r.email}</a>
         : <span className="text-text-400/60">—</span> },
