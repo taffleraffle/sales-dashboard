@@ -224,7 +224,7 @@ export default function AdsCreativeTestingLayout() {
         borderBottom: '1px solid var(--rule)',
         alignItems: 'center',
       }}>
-        {SUBNAV.map((t, i) => (
+        {SUBNAV.map((t) => (
           <NavLink
             key={t.to}
             to={t.to}
@@ -242,10 +242,6 @@ export default function AdsCreativeTestingLayout() {
               transition: 'color 160ms ease, border-color 160ms ease',
             })}
           >
-            <span style={{
-              fontFamily: 'var(--mono)', opacity: 0.5,
-              fontSize: 10, fontWeight: 400,
-            }}>{String(i + 1).padStart(2, '0')}</span>
             <span>{t.label}</span>
           </NavLink>
         ))}
