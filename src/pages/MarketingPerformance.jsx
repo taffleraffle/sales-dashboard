@@ -2888,6 +2888,7 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
 }
 
 function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }) {
+  const [fetchErr, setFetchErr] = useState(null)
   const config = DRILLDOWN_CONFIG[kind]
   const [rows, setRows] = useState(null)
   // True once the operator has performed at least one RowActions write.
@@ -2904,18 +2905,20 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
     mutatedRef.current = true
     if (!silent) setRows(null)
     const args = { ...resolveRange(range), audiences: selectedAudiences }
+    setFetchErr(null)
     config.fetcher(args)
       .then(r => setRows(r))
-      .catch(e => { console.warn(`${kind} drilldown failed:`, e); setRows([]) })
+      .catch(e => { console.warn(`${kind} drilldown failed:`, e); setFetchErr(e?.message || String(e)); setRows([]) })
   }, [config, kind, range, audKey]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     let cancelled = false
     setRows(null)
     if (!config) return
     const args = { ...resolveRange(range), audiences: selectedAudiences }
+    setFetchErr(null)
     config.fetcher(args)
       .then(r => { if (!cancelled) setRows(r) })
-      .catch(e => { if (!cancelled) { console.warn(`${kind} drilldown failed:`, e); setRows([]) } })
+      .catch(e => { if (!cancelled) { console.warn(`${kind} drilldown failed:`, e); setFetchErr(e?.message || String(e)); setRows([]) } })
     return () => { cancelled = true }
   }, [kind, range, audKey, config]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2964,7 +2967,9 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
             />
           )}
           {rows == null && <div className="p-6 text-center text-text-400 text-xs">{config.slowFirstLoad ? 'Fetching from GHL — may take a few seconds…' : 'Loading…'}</div>}
-          {rows != null && rows.length === 0 && <div className="p-6 text-center text-text-400 text-xs">{config.emptyMsg}</div>}
+          {rows != null && rows.length === 0 && (fetchErr
+            ? <div className="p-6 text-center text-xs text-red-400">Failed to load this drilldown: {fetchErr}<div className="mt-1 text-text-400">This is an error, not an empty result — screenshot this message.</div></div>
+            : <div className="p-6 text-center text-text-400 text-xs">{config.emptyMsg}</div>)}
           {rows != null && rows.length > 0 && config.chart && (
             <DailyTrendChart
               rows={rows}

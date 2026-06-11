@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Component, Suspense, lazy, useState, useCallback } from 'react'
+import { Component, Suspense, lazy, useState, useCallback, useEffect } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
@@ -190,6 +190,41 @@ function AdminRoute({ children }) {
   return children
 }
 
+// Polls /version.json (emitted per build) and prompts a reload when the
+// running bundle is older than the deployed one. Checks every 3 minutes and
+// whenever the tab regains focus — long-lived tabs were silently running
+// days-old code.
+function UpdatePrompt() {
+  const [stale, setStale] = useState(false)
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' })
+        if (!res.ok) return
+        const { build } = await res.json()
+        if (build && typeof __BUILD_ID__ !== 'undefined' && build !== __BUILD_ID__) setStale(true)
+      } catch { /* offline — try again next tick */ }
+    }
+    const id = setInterval(check, 180000)
+    const onVis = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', onVis)
+    check()
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis) }
+  }, [])
+  if (!stale) return null
+  return (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-4 py-2.5 rounded-sm bg-[#1a1a1a] border border-opt-yellow/50 shadow-2xl">
+      <span className="text-xs text-text-primary">A new version of the dashboard is available.</span>
+      <button
+        onClick={() => window.location.reload()}
+        className="text-xs font-semibold px-3 py-1 rounded-sm bg-opt-yellow text-black hover:opacity-90"
+      >
+        Reload now
+      </button>
+    </div>
+  )
+}
+
 export default function App() {
   const [splashDone, setSplashDone] = useState(() => sessionStorage.getItem('splash_shown') === '1')
 
@@ -201,6 +236,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
+        <UpdatePrompt />
         {!splashDone && <SplashScreen onComplete={handleSplashComplete} />}
         <BrowserRouter>
           <Routes>
