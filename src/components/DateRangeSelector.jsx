@@ -51,6 +51,11 @@ export default function DateRangeSelector({ selected, onChange }) {
     const handleDown = (e) => {
       if (triggerRef.current?.contains(e.target)) return
       if (popoverRef.current?.contains(e.target)) return
+      // The From/To pickers are EditorialDate components whose calendars
+      // portal to document.body — NOT inside popoverRef. Without this guard
+      // every click on a calendar day counted as "outside" and closed the
+      // whole custom-range popover before a range could be applied.
+      if (e.target.closest?.('[data-editorial-date-popover]')) return
       setOpen(false)
     }
     const reposition = () => {

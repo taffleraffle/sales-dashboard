@@ -216,6 +216,7 @@ export default function EditorialDate({ value, onChange, min, max, placeholder =
           ref={popoverRef}
           role="dialog"
           aria-label="Choose date"
+          data-editorial-date-popover=""
           // Defensive: stop mousedown inside the popover from ever bubbling
           // up to the document-level click-outside handler. Even if
           // popoverRef.current is briefly null during a React re-render
