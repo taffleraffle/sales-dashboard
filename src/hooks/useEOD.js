@@ -59,6 +59,11 @@ export function useEODSubmit() {
         if (callError) throw callError
       }
 
+      // The marketing tiles read a snapshot on a 10-min cron; refresh it now
+      // so an EOD edit shows up immediately (self-throttled to 60s, so rapid
+      // resubmits coalesce). Fire-and-forget — the EOD itself is saved.
+      supabase.rpc('refresh_marketing_trend_mv').then(() => {}, () => {})
+
       return { success: true, report }
     } catch (err) {
       console.error('Closer EOD submit failed:', err)
