@@ -1533,8 +1533,8 @@ export default function AdsPerformance() {
             if (attributedVal > 0)  parts.push(`${fmtN(attributedVal)} attributed`)
             return parts.length ? parts.join(' · ') + extra : null
           }
-          const tipProspect = 'Unique prospects in this window — deduped by email + name across typeform, GHL, and lib_close_resolved. Matches the drilldown count exactly. The "attributed" subtitle is the sum of per-row attribution across visible campaigns (a prospect attributed to multiple ads counts once here but multiple times in the per-row sum).'
-          const tipLive   = 'Unique prospects who had a live call. Source: typeform is_live ∪ ghl_lives ∪ closes (close ⇒ live). Drilldown panel shows the same list one-for-one.'
+          const tipProspect = 'Sum of per-ad attributed counts across the campaigns currently visible. A prospect attributed to multiple ads counts once per ad here, so this can read ~5-10% higher than the drilldown, which lists the globally deduped prospects.'
+          const tipLive   = 'Per-ad attributed live calls summed across visible campaigns (typeform is_live ∪ ghl_lives ∪ closes). The drilldown lists globally deduped prospects, so multi-ad prospects can make this tile read slightly higher.'
           const tipCloses = 'Unique prospects who closed. Source: lib_close_resolved ∪ typeform is_closed. Excludes ascensions.'
           return (
             <>

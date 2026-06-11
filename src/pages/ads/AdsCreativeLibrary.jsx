@@ -3515,89 +3515,17 @@ export default function AdsCreativeLibrary({ editorScope }) {
   const scope = editorScope || ADMIN_SCOPE
   // In editor-view mode, default to the Editing Queue tab since that's why
   // they came (to see their assignments). Admins land on Library.
+  // Ben (2026-06-10) cut the Triage and Launch queue views to de-clutter —
+  // two sub-views only, so a saved 'triage'/'launch' from before the cut
+  // falls back to the default.
   const [tab, setTab] = useState(() => {
+    const fallback = scope.isEditorView ? 'queue' : 'library'
     try {
       const saved = localStorage.getItem('lib.tab')
-      return saved || (scope.isEditorView ? 'queue' : 'library')
-    } catch { return scope.isEditorView ? 'queue' : 'library' }
+      return (saved === 'library' || saved === 'queue') ? saved : fallback
+    } catch { return fallback }
   })
   useEffect(() => { try { localStorage.setItem('lib.tab', tab) } catch {} }, [tab])
-
-  // Triage count — pulled here so the count badge on the Triage tab button
-  // refreshes whether the user is on Library, Queue, or Triage. Re-runs
-  // every 30s; refresh hook also allows immediate refresh after the
-  // TriageTab approves/flags a row.
-  const [triageCount, setTriageCount] = useState(0)
-  const refreshTriageCount = useCallback(async () => {
-    if (scope.isEditorView) return  // editors don't triage
-    try {
-      const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
-      const { count, error } = await supabase
-        .from('lib_creative_library')
-        .select('id', { count: 'exact', head: true })
-        .is('triaged_at', null)
-        .eq('exclude_from_library', false)
-        .gte('added_at', since)
-      if (!error && typeof count === 'number') setTriageCount(count)
-    } catch { /* triaged_at column may not exist pre-104 — silently skip */ }
-  }, [scope.isEditorView])
-  useEffect(() => {
-    refreshTriageCount()
-    const t = setInterval(refreshTriageCount, 30_000)
-    return () => clearInterval(t)
-  }, [refreshTriageCount])
-
-  // Launch queue count — approved cuts that haven't been run yet, i.e. the
-  // "ship me next" backlog. Surfaces on the Launch queue tab button so the
-  // operator can see at a glance how many ads are waiting on a launch.
-  // Yellow badge (positive/ready state) vs Triage's red (action required).
-  //
-  // Filter: only EDITED rows that haven't been run. The earlier OR-on-
-  // stage_final_cut allowed approved-but-status-raw rows through (the
-  // approveSubmission flow at line ~9867 sets stage_final_cut='done'
-  // without touching status, so an approved submission against a raw
-  // source landed in the launch queue and looked launch-ready when it
-  // wasn't). Ben: "raw footage would never be actually run" (2026-06-01).
-  // Use only status='edited' — every legitimate ship-ready path either
-  // sets status='edited' directly (Library matrix dropdown, batchStatus
-  // ='edited' upload) or should set it as part of approval. If a row is
-  // approved (stage_final_cut='done') but still status='raw', that's a
-  // data-hygiene gap we surface by NOT including it.
-  // Also exclude low-quality flagged rows by default — they shouldn't
-  // be considered launch-ready until cleaned up. Operator can toggle
-  // them back in via the hide-low-quality chip.
-  const [launchCount, setLaunchCount] = useState(0)
-  const refreshLaunchCount = useCallback(async () => {
-    if (scope.isEditorView) return  // editors don't ship ads
-    try {
-      const { count, error } = await supabase
-        .from('lib_creative_library')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'edited')
-        .eq('has_been_run', false)
-        .eq('exclude_from_library', false)
-        .or('is_low_quality.is.null,is_low_quality.eq.false')
-      if (!error && typeof count === 'number') setLaunchCount(count)
-    } catch { /* defensive — same pattern as refreshTriageCount */ }
-  }, [scope.isEditorView])
-  useEffect(() => {
-    refreshLaunchCount()
-    const t = setInterval(refreshLaunchCount, 30_000)
-    return () => clearInterval(t)
-  }, [refreshLaunchCount])
-
-  // Deep-link from Launch queue → Library detail drawer. Clicking "Open"
-  // on a launch-queue row switches to Library tab and pushes a request
-  // that LibraryTab picks up via prop + useEffect, calling its existing
-  // openRowById helper. We use a bumped timestamp instead of just the id
-  // so re-clicking the same row (after closing the drawer) re-opens it —
-  // a bare id-equality check would no-op the second click.
-  const [pendingLibraryOpen, setPendingLibraryOpen] = useState(null)
-  const openInLibrary = useCallback((creativeId) => {
-    if (!creativeId) return
-    setTab('library')
-    setPendingLibraryOpen({ id: creativeId, ts: Date.now() })
-  }, [])
 
   return (
     <div style={{ padding: '12px 0 60px' }}>
@@ -3609,22 +3537,11 @@ export default function AdsCreativeLibrary({ editorScope }) {
           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
           letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
         }}>
-          {scope.isEditorView ? 'Editor portal · ' : ''}{
-            tab === 'library' ? 'Library'
-            : tab === 'triage' ? 'Triage'
-            : tab === 'launch' ? 'Launch queue'
-            : 'Editing queue'
-          }
+          {scope.isEditorView ? 'Editor portal · ' : ''}{tab === 'library' ? 'Library' : 'Editing queue'}
         </div>
         <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper)' }}>
           <TabBtn active={tab === 'library'} onClick={() => setTab('library')}>Library</TabBtn>
-          {!scope.isEditorView && (
-            <TabBtn active={tab === 'triage'} onClick={() => setTab('triage')} badge={triageCount}>Triage</TabBtn>
-          )}
           <TabBtn active={tab === 'queue'}   onClick={() => setTab('queue')}>Editing queue</TabBtn>
-          {!scope.isEditorView && (
-            <TabBtn active={tab === 'launch'} onClick={() => setTab('launch')} badge={launchCount} badgeTone="ready">Launch queue</TabBtn>
-          )}
         </div>
       </div>
 
@@ -3636,23 +3553,11 @@ export default function AdsCreativeLibrary({ editorScope }) {
           of paint time. Keeping both mounted means switching is a
           near-instant visibility flip and the user's filters survive. */}
       <div style={{ display: tab === 'library' ? 'block' : 'none' }}>
-        <LibraryTab scope={scope} pendingOpen={pendingLibraryOpen} />
+        <LibraryTab scope={scope} />
       </div>
-      {!scope.isEditorView && (
-        <div style={{ display: tab === 'triage' ? 'block' : 'none' }}>
-          <TriageTab scope={scope} onTriaged={refreshTriageCount} />
-        </div>
-      )}
       <div style={{ display: tab === 'queue' ? 'block' : 'none' }}>
         <EditingQueueTab scope={scope} />
       </div>
-      {!scope.isEditorView && (
-        <div style={{ display: tab === 'launch' ? 'block' : 'none' }}>
-          <LaunchQueueTab
-            scope={scope}
-            onLaunched={refreshLaunchCount} />
-        </div>
-      )}
     </div>
   )
 }
@@ -4081,6 +3986,9 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     )
   }, [])
   const [moveFolderOpen, setMoveFolderOpen] = useState(false)
+  // Filter panel collapsed by default — the FILTERS button's count badge
+  // carries the "something is active" signal while it's closed.
+  const [filtersOpen, setFiltersOpen] = useState(false)
   // Boolean (not the array) is what the hot filter memo keys on — a
   // rename/re-parent producing a fresh folders array must not re-run the
   // whole filter/sort pipeline.
@@ -4913,6 +4821,13 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     }
   }, [moveClipsToFolder, clearSelection])
 
+  // Badge for the FILTERS button: how many filter groups are active.
+  // Latest-only counts; the default-on hide flags don't (default state
+  // shouldn't read as "filters applied").
+  const activeFilterCount =
+    stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size +
+    dateFilter.size + (latestOnly ? 1 : 0)
+
   // Where the current selection lives, for the move picker's "current"
   // tag + no-op guard: a folder id (or null = root) only when EVERY
   // selected clip agrees; undefined (no guard) for mixed selections,
@@ -4925,40 +4840,6 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
 
   return (
     <>
-      {/* Unassigned-raw banner — yellow alert at the very top so it's
-          the first thing the operator sees on landing. Hidden when
-          count is zero so the page is clean during normal operation. */}
-      {unassignedRawCount > 0 && (
-        <div onClick={focusUnassignedRaw}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 14,
-            padding: '16px 18px', marginBottom: 14,
-            background: '#fff3d1', border: '2px solid #d68f00',
-            borderLeft: '6px solid #d68f00',
-            cursor: 'pointer',
-            fontFamily: 'var(--mono)', fontSize: 13,
-            letterSpacing: '0.04em', color: '#4d3000',
-            boxShadow: '0 1px 0 rgba(214,143,0,0.18)',
-          }}
-          title="Click to filter the library to just these rows">
-          <span style={{ fontSize: 20, lineHeight: 1 }}>⚠</span>
-          <span style={{
-            fontWeight: 800, fontSize: 18, color: '#9a4d00',
-            padding: '2px 8px', background: '#fff', border: '1.5px solid #d68f00',
-            borderRadius: 3, minWidth: 32, textAlign: 'center',
-          }}>{unassignedRawCount}</span>
-          <span style={{ fontWeight: 700, textTransform: 'uppercase' }}>
-            raw creative{unassignedRawCount === 1 ? '' : 's'} need editor assignment
-          </span>
-          <span style={{ flex: 1 }} />
-          <span style={{
-            textDecoration: 'underline', fontWeight: 700,
-            padding: '4px 10px', background: '#9a4d00', color: '#fff',
-            borderRadius: 2, textDecorationColor: 'rgba(255,255,255,0.4)',
-          }}>Filter to these →</span>
-        </div>
-      )}
-
       {/* Notification surface — editors get the editor-side bell
           (personal feed of feedback / assignments / source updates /
           approvals), admins get the recent-submissions bell. Two
@@ -5056,13 +4937,15 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       <UploadDock onRefresh={() => load(true)} />
       <TopUploadProgressBar />
 
-      {/* Toolbar — compact, single block. No more 5-row chip stack. */}
+      {/* Toolbar — ONE visible row. The five filter dropdowns + toggles
+          live behind a single FILTERS button (count badge = active
+          filters) so the resting state is calm; the old full-width yellow
+          banner is now the compact ⚠ icon next to the search box. */}
       <div style={{
         padding: '10px 14px', background: 'var(--paper-2)',
         border: '1px solid var(--rule)', marginBottom: 14,
       }}>
-        {/* Top row: search + view toggle + upload */}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <input type="text" value={q} onChange={e => setQ(e.target.value)}
             placeholder="Search name, description, transcript, notes…"
             style={{
@@ -5070,10 +4953,40 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 12.5,
               background: 'white', border: '1px solid var(--rule)', outline: 'none',
             }} />
+          {/* Needs-attention icon — replaces the old full-width banner.
+              Click applies the same "unassigned raw" filter set. */}
+          {unassignedRawCount > 0 && (
+            <button type="button"
+              onClick={() => { focusUnassignedRaw(); setFiltersOpen(true) }}
+              title={`${unassignedRawCount} raw creative${unassignedRawCount === 1 ? '' : 's'} need editor assignment — click to filter to them`}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '5px 9px',
+                fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                background: '#fff3d1', color: '#9a4d00',
+                border: '1.5px solid #d68f00', borderRadius: 2, cursor: 'pointer',
+              }}>
+              <span style={{ fontSize: 13, lineHeight: 1 }}>⚠</span>
+              {unassignedRawCount}
+            </button>
+          )}
           <span style={{ flex: 1 }} />
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
             {filtered.length} / {rows.length}
           </span>
+          <button type="button"
+            onClick={() => setFiltersOpen(v => !v)}
+            style={{
+              padding: '6px 12px',
+              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              background: filtersOpen || activeFilterCount > 0 ? 'var(--ink)' : 'white',
+              color: filtersOpen || activeFilterCount > 0 ? 'var(--paper)' : 'var(--ink)',
+              border: '1px solid ' + (filtersOpen || activeFilterCount > 0 ? 'var(--ink)' : 'var(--rule)'),
+              cursor: 'pointer',
+            }}>
+            Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''} {filtersOpen ? '▴' : '▾'}
+          </button>
           <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'white' }}>
             <ViewBtn active={view === 'tile'}   onClick={() => setView('tile')}>Tiles</ViewBtn>
             <ViewBtn active={view === 'list'}   onClick={() => setView('list')}>List</ViewBtn>
@@ -5084,16 +4997,15 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               + Upload creative
             </button>
           )}
-          {scope.canUpload && (
-            <RenameUnnamedButton rows={rows} onComplete={() => load(true)} />
-          )}
         </div>
 
-        {/* Editorial inline filter strip — 4 groups, each on its own line,
-            text-style instead of buttoned chips. Click the label/"All" to
-            click the small button to open a popover with options. */}
+        {/* Expanded filter panel — everything that used to be a permanent
+            second row of chips. Collapsed by default; the FILTERS button
+            badge keeps active filters discoverable while hidden. */}
+        {filtersOpen && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+          marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--rule)',
         }}>
           <FilterDropdown label="STATUS"
             selected={stageFilter}
@@ -5227,7 +5139,13 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
                 borderRadius: 2,
               }}>☐ Bulk edit · select all {filtered.length}</button>
           )}
+          {/* Occasional utility, not a daily control — lives in the panel
+              so the resting toolbar stays one row. */}
+          {scope.canUpload && (
+            <RenameUnnamedButton rows={rows} onComplete={() => load(true)} />
+          )}
         </div>
+        )}
       </div>
 
       {err && <ErrorBanner msg={err} onRetry={() => load(false)} />}
@@ -5787,11 +5705,11 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
               return (
                 <>
                   {tileSrc && !showVideoHover && (
-                    <img src={tileSrc} alt="" loading="lazy"
+                    <img src={tileSrc} alt="" loading="lazy" draggable={false}
                       style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                   )}
                   {showVideoHover && (
-                    <video src={r.preview_url} autoPlay muted loop playsInline preload="metadata"
+                    <video src={r.preview_url} autoPlay muted loop playsInline preload="metadata" draggable={false}
                       style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                   )}
                 </>
@@ -7962,9 +7880,14 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
         position: 'relative', overflow: 'hidden',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
+        {/* draggable={false} on the media: browsers start a NATIVE image
+            drag when the grab lands on an <img> (which covers most of the
+            tile), hijacking the card's drag and dropping our clip payload
+            on the floor. The card div must own every drag. */}
         {row.thumbnail_url && !(hoverPlay && row.preview_url) && (
           <img src={row.thumbnail_url} alt=""
             loading="lazy"
+            draggable={false}
             style={{
               width: '100%', height: '100%', objectFit: 'cover',
               display: 'block',
@@ -7973,6 +7896,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
         {hoverPlay && row.preview_url && (
           <video src={row.preview_url}
             autoPlay muted loop playsInline preload="metadata"
+            draggable={false}
             style={{
               width: '100%', height: '100%', objectFit: 'cover',
               display: 'block',

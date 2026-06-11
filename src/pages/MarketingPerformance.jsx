@@ -1061,7 +1061,7 @@ async function prospectNamesInAudience(audiences, { from, to }) {
   const start = new Date(from); start.setUTCDate(start.getUTCDate() - 90)
   const end = new Date(to); end.setUTCDate(end.getUTCDate() + 30)
   const { data } = await supabase
-    .from('lib_strategy_booking_resolved')
+    .from('lib_booking_resolved_mv')
     .select('contact_name, audience')
     .in('audience', [...audiences])
     .gte('booked_at', start.toISOString().slice(0, 10))
@@ -1283,7 +1283,7 @@ async function fetchBookings({ from, to, audiences } = {}) {
   // booking made on the `to` day after 00:00. Append ' 23:59:59' so the
   // window includes the full day (#6/#22 in code-review 2026-06-01).
   let q = supabase
-    .from('lib_strategy_booking_resolved')
+    .from('lib_booking_resolved_mv')
     .select('id, ghl_contact_id, contact_name, contact_email, calendar_name, booked_at, appointment_date, revenue_tier, is_dq, is_spam, audience, audience_source')
     .eq('is_spam', false)
     .gte('booked_at', from).lte('booked_at', `${to} 23:59:59`)
@@ -1558,6 +1558,9 @@ async function fetchReschCancel({ from, to, audiences } = {}) {
     .select('eod_report_id, prospect_name, call_type, outcome')
     .in('eod_report_id', reportIds)
     .in('outcome', ['rescheduled', 'canceled'])
+    // Tile numerators never include ascension-call resch/cancels (NC-only when
+    // audience-filtered, NC+FU on the All view) — keep the drilldown aligned.
+    .neq('call_type', 'ascension')
   return (callRows || [])
     .filter(c => prospectMatches(c.prospect_name, allowed))
     .map(c => ({
@@ -3335,7 +3338,7 @@ export default function MarketingPerformance() {
       // before bucketing.
       const [{ data, error }, { data: oppRows, error: oppErr }, { data: exclRows }] = await Promise.all([
         supabase
-          .from('lib_strategy_booking_resolved')
+          .from('lib_booking_resolved_mv')
           .select('id, booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name, is_dq, is_spam, audience')
           .eq('is_spam', false)
           .gte('booked_at', sinceStr),
@@ -4697,7 +4700,7 @@ export default function MarketingPerformance() {
             <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={gated(upstream.bookings, wf?.cpb_all)} tip="Adspend ÷ Bookings (all). Click to see daily cost-per-booking trend." onClick={() => setDrilldown('cpb')} />
             <KPI label="Q.Books" value={cohortAvailable ? bkLeadCohort.qualified : bk.qualified} format="n" trailing={bkLeadCohort30.qualified > 0 ? bkLeadCohort30.qualified : bk30.qualified} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip={cohortAvailable
               ? `Of the ${stats.leads} leads created in this window, ${bkLeadCohort.qualified} have booked a qualified strategy call (cohort-true conversion). Click to view bookings activity (booked_at-bucketed: ${bk.qualified} unique prospects).`
-              : `Unique prospects who BOOKED a strategy call (excl. DQ Calendly) in this window, bucketed by booked_at. Cohort-true math will activate after ghl_opportunities mirror first syncs (migration 055). ${bk.dq ? `${bk.dq} routed to DQ in this window. ` : ''}Click to view.`} onClick={() => setDrilldown('bookings')} />
+              : `Unique prospects who BOOKED a strategy call (excl. DQ Calendly) in this window, bucketed by booked_at. Cohort-true math will activate after ghl_opportunities mirror first syncs (migration 055). ${bk.dq ? `${bk.dq} routed to DQ in this window. ` : ''}Click to view.`} onClick={() => setDrilldown('qbookings')} />
             <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} whatIf={gated(upstream.bookings, wf?.lead_to_booking_pct)} tip={cohortAvailable
               ? `True conversion rate: of the ${stats.leads} leads created in window, ${bkLeadCohort.qualified} booked a qualified strategy call. Cohort-aligned — denominator and numerator share the same lead-create window.`
               : leadToQDrift
