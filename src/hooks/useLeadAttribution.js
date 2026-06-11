@@ -11,7 +11,10 @@ export function useLeadAttribution(range = 30) {
     setLoading(true)
     const { data, error } = await supabase
       .from('setter_leads')
-      .select('*, contacted, setter:team_members!setter_leads_setter_id_fkey(name), closer:team_members!setter_leads_closer_id_fkey(name)')
+      // NB: do not add bare column names alongside * — a non-existent column
+      // (the old ", contacted") 400s the whole query via PostgREST and this
+      // page silently rendered zero leads.
+      .select('*, setter:team_members!setter_leads_setter_id_fkey(name), closer:team_members!setter_leads_closer_id_fkey(name)')
       .gte('date_set', sinceDate(range))
       .order('date_set', { ascending: false })
 
