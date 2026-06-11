@@ -4913,8 +4913,12 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
           row means multiple bells stack horizontally with a small gap
           instead of piling on top of each other. */}
       <div style={{
-        position: 'fixed', top: 76, right: 16, zIndex: 90,
+        position: 'fixed', top: 76, right: 12, zIndex: 90,
         display: 'flex', gap: 8, alignItems: 'center',
+        // Narrow windows: the tray must never push past the viewport edge
+        // (Ben 2026-06-11 — Inbox/Activity buttons were clipping). Wrap
+        // right-aligned instead of overflowing.
+        maxWidth: 'calc(100vw - 24px)', flexWrap: 'wrap', justifyContent: 'flex-end',
       }}>
         {!scope.isEditorView && coordinatorEditorId && (
           <EditorNotificationBell
@@ -12012,6 +12016,47 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     onClose?.()
   }, [onClose, save])
 
+  // ── File to folder (Ben 2026-06-11) ──────────────────────────────────
+  // Files the raw source into a library folder AND turns the latest
+  // submitted edit into its OWN library row in that folder — two separate
+  // clips, not one version family, so the batch view shows both.
+  const [fileFolderOpen, setFileFolderOpen] = useState(false)
+  const [taskFolders, setTaskFolders] = useState(null)
+  const [filedNote, setFiledNote] = useState(null)
+  const openFileToFolder = useCallback(async () => {
+    if (taskFolders === null) {
+      const { data } = await supabase.from('lib_creative_folders')
+        .select('id,name,parent_id').order('name')
+      setTaskFolders(data || [])
+    }
+    setFileFolderOpen(true)
+  }, [taskFolders])
+  const fileToFolder = useCallback(async (destId) => {
+    const { error: rErr } = await supabase.from('lib_creative_library')
+      .update({ folder_id: destId }).eq('id', task.creative_id)
+    if (rErr) throw rErr
+    // Latest uploaded submission (list is version-desc; external links
+    // have no file to surface in the library, so skip those).
+    const latest = (submissions || []).find(s => s.file_url)
+    if (latest) {
+      const { error: iErr } = await supabase.from('lib_creative_library').insert({
+        name: `${task.creative_name || 'Edit'} — edit v${latest.version_number}`,
+        type: task.creative_type || 'Joined',
+        status: 'edited',
+        source_bucket: 'Filed from editing task',
+        preview_url: latest.file_url,
+        drive_url: latest.file_url,
+        thumbnail_url: task.thumbnail_url || null,
+        folder_id: destId,
+        notes: `Filed from editing task (submission v${latest.version_number}).`,
+      })
+      if (iErr) throw iErr
+    }
+    setFileFolderOpen(false)
+    setFiledNote(latest ? '✓ Filed raw + edit' : '✓ Filed raw (no uploaded edit yet)')
+    setTimeout(() => setFiledNote(null), 4000)
+  }, [task.creative_id, task.creative_name, task.creative_type, task.thumbnail_url, submissions])
+
   return (
     <Modal open={true} onClose={handleCloseModal} size="lg"
       eyebrow="Edit task"
@@ -12032,9 +12077,14 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             <>
               {scope.canDeleteTask && (
                 <button onClick={() => setConfirmDel(true)} disabled={busy} style={{
-                  ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
+                  ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)',
                 }}>Delete</button>
               )}
+              <button onClick={openFileToFolder} disabled={busy}
+                title="File the raw source and the latest submitted edit into a library folder as two separate clips"
+                style={{ ...ghostBtn, marginRight: 'auto' }}>
+                {filedNote || 'File to folder…'}
+              </button>
               <button onClick={handleCloseModal} style={ghostBtn}>
                 {busy && uploadXhrRef.current ? 'Cancel upload' : 'Cancel'}
               </button>
@@ -12044,6 +12094,15 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         </>
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
+        {fileFolderOpen && taskFolders !== null && (
+          <FolderPickerModal
+            title="File raw + edit to a folder"
+            subtitle="The raw source moves into the folder; the latest submitted edit becomes its own clip there."
+            folders={taskFolders}
+            onClose={() => setFileFolderOpen(false)}
+            onPick={fileToFolder}
+          />
+        )}
         {/* Prominent status banner — shown when the task is in a state
             that's NOT the default "in progress" flow, so the operator
             sees at a glance that something changed (especially after
