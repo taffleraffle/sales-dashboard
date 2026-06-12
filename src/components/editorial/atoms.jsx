@@ -70,7 +70,10 @@ export function SectionHead({ eyebrow, title, italicWord, tagline, right, gap = 
           }}>{tagline}</p>
         )}
       </div>
-      {right && <div style={{ flexShrink: 0 }}>{right}</div>}
+      {/* marginLeft:auto keeps the action cluster right-aligned even when
+          flexWrap pushes it onto its own line (space-between only spreads
+          items sharing a line). */}
+      {right && <div style={{ flexShrink: 0, marginLeft: 'auto' }}>{right}</div>}
     </div>
   )
 }

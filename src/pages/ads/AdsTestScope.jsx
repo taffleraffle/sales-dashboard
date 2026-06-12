@@ -278,7 +278,9 @@ export default function AdsTestScope() {
           ~1046px; below that the spend/booked/winning columns were
           hard-clipped (≤768px CSS hides main overflow). */}
       <div style={{ background: 'white', border: '1px solid var(--rule)', borderTop: 'none', overflowX: 'auto' }}>
-      <div style={{ minWidth: 1046 }}>
+      {/* minWidth only when rows exist — a centered loading/empty message
+          inside a 1046px canvas sits off-viewport on phones. */}
+      <div style={{ minWidth: campaigns.length > 0 ? 1046 : undefined }}>
         <div style={{
           display: 'grid',
           gridTemplateColumns: '40px minmax(280px, 2fr) 110px 80px 80px 80px 80px minmax(180px, 1fr)',

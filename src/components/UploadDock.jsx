@@ -18,14 +18,18 @@ export default function UploadDock() {
     <div
       style={{
         position: 'fixed',
-        // 124 = below the notification bell tray (top:76, ~40px tall) —
-        // both lived at top:76/z:90 and the dock sat ON the bells during
-        // uploads, exactly when the library page needs them clickable.
-        top: 124,
+        // Bottom-right, not top-right: the notification bell tray owns
+        // the top-right corner (top:76) and WRAPS to two rows on narrow
+        // windows, so any fixed top offset eventually collides with it
+        // (a 76→124 bump shipped 2026-06-12 still overlapped wrapped
+        // trays). The bottom corner has no fixed neighbours — library
+        // toasts are bottom-CENTER — and matches the LibraryTab comment
+        // that always described this as a bottom-right dock.
+        bottom: 16,
         right: 16,
         zIndex: 90,
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: 'column-reverse',
         gap: 8,
         width: 300,
         maxWidth: '90vw',
