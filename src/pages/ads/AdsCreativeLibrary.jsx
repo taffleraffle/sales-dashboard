@@ -4012,7 +4012,27 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // New approach: build a Set of all 10-word phrases (sliding by 5) from
   // edited transcripts ONCE, then for each raw row test its phrases via
   // Set.has — O(R + E×W) with hash lookups.
+  //
+  // Cheap fingerprint of the inputs the scan actually reads (transcript
+  // corpus + manual overrides + row count). This is the most expensive
+  // computation on the page (1-3s at volume) and used to re-run on EVERY
+  // rows identity change — a status dropdown click, a folder move — and
+  // always ran at least twice per load (once with empty transcripts,
+  // again when the background transcript merge landed). The ref-gate
+  // below re-scans only when the fingerprint moves.
+  const usedRawScanKey = useMemo(() => {
+    let n = 0
+    for (const r of rows) {
+      n += (r.transcript ? r.transcript.length : 0)
+      if (r.manually_marked_used === true) n += 7
+      else if (r.manually_marked_used === false) n += 13
+    }
+    return `${rows.length}|${n}`
+  }, [rows])
+  const usedRawCache = useRef({ key: null, value: new Set() })
+
   const usedRawIds = useMemo(() => {
+    if (usedRawCache.current.key === usedRawScanKey) return usedRawCache.current.value
     const used = new Set()
     // Tri-state manual override:
     //   manually_marked_used = TRUE  → force into "used" set
@@ -4066,8 +4086,9 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
         }
       }
     }
+    usedRawCache.current = { key: usedRawScanKey, value: used }
     return used
-  }, [rows])
+  }, [rows, usedRawScanKey])
 
 
   const filtered = useMemo(() => {
