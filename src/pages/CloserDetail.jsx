@@ -278,7 +278,7 @@ export default function CloserDetail() {
         <div className="flex items-center gap-2 mb-4">
           <AlertTriangle size={16} className="text-warning" />
           <h2 className="text-sm font-medium">Most Common Objections</h2>
-          <span className="text-xs text-text-400 ml-auto">Last {days} days &middot; Auto-analyzed from Fathom</span>
+          <span className="text-xs text-text-400 ml-auto">{range === 'mtd' ? 'Month to date' : `Last ${days} days`} &middot; Auto-analyzed from Fathom</span>
         </div>
         {loadingObjections ? (
           <p className="text-text-400 text-sm py-4 text-center">Loading...</p>
