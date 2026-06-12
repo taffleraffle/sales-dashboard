@@ -524,7 +524,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
                     return <td key={i} className={`px-2 py-1 text-right ${clr || 'text-text-400'}`}>{val}</td>
                   })}
                   <td className="px-2 py-1.5">
-                    <div className="flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="row-actions-touch flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={() => startEdit(e)} className="w-6 h-6 rounded-md text-text-400 hover:text-text-primary hover:bg-opt-yellow/10 flex items-center justify-center transition-colors"><Edit3 size={11} /></button>
                       <button onClick={() => onDelete(e.date)} className="w-6 h-6 rounded-md text-text-400 hover:text-danger hover:bg-danger/10 flex items-center justify-center transition-colors"><Trash2 size={11} /></button>
                     </div>

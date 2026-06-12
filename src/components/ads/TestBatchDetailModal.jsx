@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ExternalLink, Trash2, Send, FileText, Plus, Upload, FilePlus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import Modal from '../editorial/Modal'
+import ConfirmModal from '../ConfirmModal'
 import UploadScriptsModal from './UploadScriptsModal'
 import AddExistingScriptsModal from './AddExistingScriptsModal'
 import {
@@ -35,6 +36,7 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState(null)
   const [working, setWorking] = useState(false)
+  const [confirmAction, setConfirmAction] = useState(null)  // 'launch'|'close'|'delete'
   const [uploadOpen, setUploadOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
 
@@ -57,9 +59,11 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
     } catch (e) { setErr(e.message) }
   }
 
+  // window.confirm → one styled ConfirmModal driven by confirmAction
+  // ('launch'|'close'|'delete'); native dialogs freeze the thread and
+  // clash with the editorial system (2026-06-12).
   async function handleLaunch() {
     if (!batch) return
-    if (!window.confirm(`Launch "${batch.name}"? This marks it as launched and exits the draft state.`)) return
     setWorking(true)
     try { await launchTestBatch(batch.id); await refresh(); onChanged?.() }
     catch (e) { setErr(e.message) }
@@ -68,7 +72,6 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
 
   async function handleClose() {
     if (!batch) return
-    if (!window.confirm(`Mark "${batch.name}" as closed (test complete)?`)) return
     setWorking(true)
     try { await closeTestBatch(batch.id); await refresh(); onChanged?.() }
     catch (e) { setErr(e.message) }
@@ -77,7 +80,6 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
 
   async function handleDelete() {
     if (!batch) return
-    if (!window.confirm(`Delete "${batch.name}"? Scripts are kept; they just lose their batch link.`)) return
     setWorking(true)
     try {
       await deleteTestBatch(batch.id)
@@ -127,19 +129,19 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
       footer={batch && (
         <>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={handleDelete} disabled={working} style={btnDanger}>
+            <button onClick={() => setConfirmAction('delete')} disabled={working} style={btnDanger}>
               <Trash2 size={12} /> Delete
             </button>
           </div>
           <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
             {isDraft && (
-              <button onClick={handleLaunch} disabled={working || batch.script_count === 0}
+              <button onClick={() => setConfirmAction('launch')} disabled={working || batch.script_count === 0}
                 style={btnPrimary} title={batch.script_count === 0 ? 'Add scripts before launching' : 'Mark this test as launched'}>
                 <Send size={12} /> Launch test
               </button>
             )}
             {!isDraft && !isClosed && (
-              <button onClick={handleClose} disabled={working} style={btnGhost}>
+              <button onClick={() => setConfirmAction('close')} disabled={working} style={btnGhost}>
                 Mark closed
               </button>
             )}
@@ -286,6 +288,34 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
         batch={batch}
         onSaved={() => { refresh(); onChanged?.() }}
       />
+      {confirmAction && batch && (
+        <ConfirmModal
+          open
+          onClose={() => { if (!working) setConfirmAction(null) }}
+          title={
+            confirmAction === 'launch' ? `Launch “${batch.name}”?`
+            : confirmAction === 'close' ? `Mark “${batch.name}” as closed?`
+            : `Delete “${batch.name}”?`
+          }
+          message={
+            confirmAction === 'launch' ? 'This marks it as launched and exits the draft state.'
+            : confirmAction === 'close' ? 'Closing means the test is complete.'
+            : 'Scripts are kept; they just lose their batch link.'
+          }
+          confirmLabel={
+            confirmAction === 'launch' ? 'Launch' : confirmAction === 'close' ? 'Close test' : 'Delete batch'
+          }
+          variant={confirmAction === 'delete' ? 'danger' : 'default'}
+          loading={working}
+          onConfirm={async () => {
+            const act = confirmAction
+            if (act === 'launch') await handleLaunch()
+            else if (act === 'close') await handleClose()
+            else await handleDelete()
+            setConfirmAction(null)
+          }}
+        />
+      )}
     </Modal>
   )
 }

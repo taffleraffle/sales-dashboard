@@ -5,6 +5,7 @@ import {
   LayoutGrid, Table2, X, Link2, TrendingUp, Trophy, Sparkles, Type, MessageSquare
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import ConfirmModal from '../../components/ConfirmModal'
 import { pagedFetch } from '../../lib/pagedFetch'
 import { useToast } from '../../hooks/useToast'
 import { SectionHead } from '../../components/editorial/atoms'
@@ -265,12 +266,18 @@ export default function AdsVariants() {
     } catch (e) { toast.error(`Create failed: ${e.message}`) }
   }
 
+  // window.confirm → styled ConfirmModal (2026-06-12): native dialogs
+  // block the JS thread and look broken next to the editorial system.
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const deleteVariant = async (variant_id) => {
-    if (!confirm(`Delete variant ${variant_id}?`)) return
+    setDeleteBusy(true)
     try {
       await supabase.rpc('lib_variant_delete', { p_variant_id: variant_id })
       await load()
+      setConfirmDeleteId(null)
     } catch (e) { toast.error(`Delete failed: ${e.message}`) }
+    finally { setDeleteBusy(false) }
   }
 
   const seedSampleData = async () => {
@@ -426,7 +433,7 @@ export default function AdsVariants() {
           onClose={() => setSelectedVariant(null)}
           onSaveField={saveField}
           onToggleStage={toggleStage}
-          onDelete={(id) => { deleteVariant(id); setSelectedVariant(null) }}
+          onDelete={(id) => { setConfirmDeleteId(id); setSelectedVariant(null) }}
         />
       )}
 
@@ -447,6 +454,17 @@ export default function AdsVariants() {
           onCreated={() => { setShowAddClip(null); load() }}
         />
       )}
+
+      <ConfirmModal
+        open={confirmDeleteId !== null}
+        onClose={() => { if (!deleteBusy) setConfirmDeleteId(null) }}
+        title={`Delete variant ${confirmDeleteId || ''}?`}
+        message="The variant row is removed; its hook/body clips are untouched."
+        confirmLabel="Delete variant"
+        variant="danger"
+        loading={deleteBusy}
+        onConfirm={() => deleteVariant(confirmDeleteId)}
+      />
     </div>
   )
 }

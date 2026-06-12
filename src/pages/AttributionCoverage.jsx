@@ -533,7 +533,7 @@ export default function AttributionCoverage() {
       )}
 
       {/* ── KPI hero ───────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginTop: 28 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20, marginTop: 28 }}>
         <Card padding={28}>
           <Eyebrow>Spend traced end-to-end</Eyebrow>
           <div style={{ marginTop: 12 }}>
@@ -761,7 +761,7 @@ function PerformerCard({ ad, rank, pending, onPick }) {
         </div>
 
         <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8,
           padding: '10px 0', borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)',
         }}>
           <StatCell label="Leads" value={ad.leads_30d} />
@@ -1126,7 +1126,7 @@ function AdDrawer({ ad, pendingVertical, audiences, onClose, onAssign }) {
 
           {/* Metrics */}
           <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12,
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12,
             padding: '14px 0', borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)',
             marginBottom: 20,
           }}>

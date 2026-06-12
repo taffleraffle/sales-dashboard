@@ -919,6 +919,31 @@ table.data.data-dense thead th { padding: 7px 10px; }
   flex-shrink: 0;
 }
 
+/* ── Ads gallery shell — card grid + docked analyst panel ──
+   The desktop two-column template (cards | 380px analyst) is set inline in
+   AdsGallery.jsx. Below 900px that fixed 380px column starves the card grid
+   (it collapses to 0 width), so stack to a single column instead. !important
+   is required to beat the inline gridTemplateColumns. */
+.ads-gallery-grid {
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .ads-gallery-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* ── Touch affordance for hover-revealed row actions ──
+   Row action buttons hidden behind opacity-0 + group-hover:opacity-100 (or
+   faded with opacity-50) never become visible on touch devices — iPads have
+   no hover state. Force them fully visible when the primary input can't
+   hover; pointer devices keep the hover reveal. */
+@media (hover: none) {
+  .row-actions-touch {
+    opacity: 1 !important;
+  }
+}
+
 /* ── Reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
