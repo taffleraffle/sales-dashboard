@@ -12016,9 +12016,21 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     onClose?.()
   }, [onClose, save])
 
+  // ── File to folder (Ben 2026-06-11) ──────────────────────────────────
+  // Files the raw source into a library folder AND turns the latest
+  // submitted edit into its OWN library row in that folder — two separate
+  // clips, not one version family, so the batch view shows both.
+  const [fileFolderOpen, setFileFolderOpen] = useState(false)
+  const [taskFolders, setTaskFolders] = useState(null)
+  const [filedNote, setFiledNote] = useState(null)
+
   // ── Folder rail field (Ben 2026-06-11 redesign) ──────────────────────
   // Shows where the source clip lives; "change" opens the picker and
   // moves the clip (with its version family) — no Library round-trip.
+  // NOTE: must stay BELOW the taskFolders declaration above — the
+  // useCallback deps read it at render time, and a const in TDZ crashes
+  // the whole modal (shipped + reverted 2026-06-11, "Cannot access 'ke'
+  // before initialization").
   const [creativeFolder, setCreativeFolder] = useState(undefined)  // undefined = loading, null = root
   const [folderAssignOpen, setFolderAssignOpen] = useState(false)
   useEffect(() => {
@@ -12052,14 +12064,6 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     setCreativeFolder(destId ? { id: destId, name: taskFolders?.find(f => f.id === destId)?.name || 'folder' } : null)
     setFolderAssignOpen(false)
   }, [task.creative_id, taskFolders])
-
-  // ── File to folder (Ben 2026-06-11) ──────────────────────────────────
-  // Files the raw source into a library folder AND turns the latest
-  // submitted edit into its OWN library row in that folder — two separate
-  // clips, not one version family, so the batch view shows both.
-  const [fileFolderOpen, setFileFolderOpen] = useState(false)
-  const [taskFolders, setTaskFolders] = useState(null)
-  const [filedNote, setFiledNote] = useState(null)
   const openFileToFolder = useCallback(async () => {
     if (taskFolders === null) {
       const { data } = await supabase.from('lib_creative_folders')
