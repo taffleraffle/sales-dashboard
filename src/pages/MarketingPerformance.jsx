@@ -3144,7 +3144,9 @@ function ResolveDupeModal({ group, onClose, onResolved }) {
             <div style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 14 }}>
               If yes, pick which contact is the canonical record (the others merge into it). The bookings / lives / closes counts collapse to one prospect on the next page load.
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${members.length}, 1fr)`, gap: 12, marginBottom: 18 }}>
+            {/* auto-fit: N equal columns crushed to ~100px unreadable
+                strips on phones when 3+ duplicates matched. */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 18 }}>
               {members.map((m, idx) => (
                 <div
                   key={m.contactKey}

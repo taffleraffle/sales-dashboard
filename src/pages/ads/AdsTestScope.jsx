@@ -274,8 +274,11 @@ export default function AdsTestScope() {
         }}>Deselect visible</button>
       </div>
 
-      {/* Campaign table */}
-      <div style={{ background: 'white', border: '1px solid var(--rule)', borderTop: 'none' }}>
+      {/* Campaign table — overflow-x because the column template needs
+          ~1046px; below that the spend/booked/winning columns were
+          hard-clipped (≤768px CSS hides main overflow). */}
+      <div style={{ background: 'white', border: '1px solid var(--rule)', borderTop: 'none', overflowX: 'auto' }}>
+      <div style={{ minWidth: 1046 }}>
         <div style={{
           display: 'grid',
           gridTemplateColumns: '40px minmax(280px, 2fr) 110px 80px 80px 80px 80px minmax(180px, 1fr)',
@@ -405,6 +408,7 @@ export default function AdsTestScope() {
             </div>
           )
         })}
+      </div>
       </div>
 
       {/* Help text */}

@@ -324,7 +324,11 @@ function TopPerformersTable({ rows, loading, onClickRow, limit = 10 }) {
   const cols = '52px 80px minmax(280px, 2fr) minmax(260px, 2.2fr) 96px 96px 108px'
 
   return (
-    <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+    // overflow-x: the column template needs ~1030px; below that (split-
+    // screen laptop, iPad) the right columns were hard-clipped because
+    // the ≤768px CSS hides main overflow. Scroll beats clip.
+    <div style={{ background: 'white', border: '1px solid var(--rule)', overflowX: 'auto' }}>
+    <div style={{ minWidth: 1030 }}>
       {/* Header */}
       <div style={{
         display: 'grid',
@@ -348,6 +352,7 @@ function TopPerformersTable({ rows, loading, onClickRow, limit = 10 }) {
           onClick={() => onClickRow?.(c)}
           isLast={i === sorted.length - 1} />
       ))}
+    </div>
     </div>
   )
 }

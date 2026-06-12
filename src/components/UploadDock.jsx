@@ -18,7 +18,10 @@ export default function UploadDock() {
     <div
       style={{
         position: 'fixed',
-        top: 76,
+        // 124 = below the notification bell tray (top:76, ~40px tall) —
+        // both lived at top:76/z:90 and the dock sat ON the bells during
+        // uploads, exactly when the library page needs them clickable.
+        top: 124,
         right: 16,
         zIndex: 90,
         display: 'flex',

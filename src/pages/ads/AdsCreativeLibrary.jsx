@@ -4446,8 +4446,15 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       // Search blob includes the new display_name + messaging_angle so a
       // coordinator searching for "STOP-PAYING-FOR-LEADS" or "ACCOUNTANT"
       // hits both legacy canonical and post-overhaul rows.
-      const blob = `${r.name} ${r.canonical_name || ''} ${r.display_name || ''} ${r.messaging_angle || ''} ${r.messaging_angle_override || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
-      return blob.includes(search)
+      // _searchBlob is memoized on the row object itself — rebuilding a
+      // ~16KB lowercased string (transcripts!) per row per keystroke made
+      // search visibly laggy despite useDeferredValue. Cache invalidates
+      // whenever the row object identity changes (every patch path
+      // replaces the row), so staleness isn't possible.
+      if (r._searchBlob === undefined) {
+        r._searchBlob = `${r.name} ${r.canonical_name || ''} ${r.display_name || ''} ${r.messaging_angle || ''} ${r.messaging_angle_override || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
+      }
+      return r._searchBlob.includes(search)
     })
     // Multi-select filters: empty Set = no filter; otherwise OR within
     // a group (any-match) and AND across groups (intersection).
@@ -5578,7 +5585,10 @@ const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onCl
   }
 
   return (
-    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
+    // overflow-x: the row template needs ~1064px; on tablets the action
+    // columns were hard-clipped (≤768px CSS hides main overflow).
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)', overflowX: 'auto' }}>
+    <div style={{ minWidth: 1064 }}>
       <div style={{
         display: 'grid', gridTemplateColumns: gridCols,
         padding: '10px 14px', gap: 12,
@@ -5628,6 +5638,7 @@ const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onCl
           onDragStartClip={onDragStartClip}
           onClick={() => onClick(r)} onDelete={() => onDelete(r)} />
       ))}
+    </div>
     </div>
   )
 })

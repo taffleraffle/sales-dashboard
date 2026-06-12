@@ -39,7 +39,9 @@ export function SectionHead({ eyebrow, title, italicWord, tagline, right, gap = 
   return (
     <div style={{
       display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
-      gap: 24, marginBottom: gap,
+      // flexWrap: callers stack 200-300px button clusters in the right
+      // slot; without wrap the title column collapses to ~70px on phones.
+      gap: 24, marginBottom: gap, flexWrap: 'wrap',
     }}>
       <div style={{ minWidth: 0 }}>
         {eyebrow && <Eyebrow style={{ marginBottom: isPage ? 8 : 6 }}>{eyebrow}</Eyebrow>}
