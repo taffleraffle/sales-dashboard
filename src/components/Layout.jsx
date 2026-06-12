@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
 import UploadDock from './UploadDock'
+import RouteErrorBoundary from './RouteErrorBoundary'
 import { ToastProvider } from '../hooks/useToast'
 import { UploadProvider } from '../hooks/useUploads'
 import { startAutoSync, stopAutoSync } from '../services/autoSync'
@@ -349,7 +350,11 @@ export default function Layout() {
 
           {/* Page content */}
           <main className="w-full px-3 sm:px-4 md:px-8 py-4 md:py-6 pb-10">
-            <Outlet />
+            {/* Route-scoped boundary: a page crash keeps the shell + nav
+                alive (resets automatically on navigation). */}
+            <RouteErrorBoundary>
+              <Outlet />
+            </RouteErrorBoundary>
           </main>
         </div>
 
