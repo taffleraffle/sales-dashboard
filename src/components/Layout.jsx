@@ -73,42 +73,23 @@ export default function Layout() {
     }
   }, [])
 
-  // Pre-warm caches for slow pages (preserved verbatim)
+  // Pre-warm caches for slow pages. Trimmed 2026-06-12 (perf audit):
+  // - Email Flows prewarm DELETED — the page is hidden from nav, and its
+  //   loadEmailStats() pulled every inbound email ever recorded (no date
+  //   bound) on every session, for every user. If the page returns to
+  //   nav, prewarm on first visit instead.
+  // - Closer/Setter EOD prewarm DELETED — SalesOverview's own
+  //   useCloserEODs/useSetterEODs fill the same module cache at T+0,
+  //   so the T+12s timer re-fetched data the landing page already had.
+  // Kept: pipeline summaries + WAVV aggregates (no other warm path).
   useEffect(() => {
     const timers = []
-    timers.push(setTimeout(async () => {
-      try {
-        const { prewarmRecipientNameCache, loadEmailStats, loadFlowGroups, loadSubjectMeta } =
-          await import('../services/ghlEmailFlows')
-        const since = new Date(); since.setDate(since.getDate() - 30)
-        const fromDate = since.toISOString().split('T')[0]
-        const toDate = new Date().toISOString().split('T')[0]
-        Promise.all([
-          loadEmailStats(fromDate, toDate),
-          loadFlowGroups(),
-          loadSubjectMeta(),
-        ]).catch(() => {})
-        prewarmRecipientNameCache(30).catch(() => {})
-      } catch (_e) { void _e }
-    }, 5000))
     timers.push(setTimeout(async () => {
       try {
         const { fetchAllPipelineSummaries } = await import('../services/ghlPipeline')
         fetchAllPipelineSummaries().catch(() => {})
       } catch (_e) { void _e }
     }, 7000))
-    timers.push(setTimeout(async () => {
-      try {
-        const [{ prewarmCloserEODs }, { prewarmSetterEODs }] = await Promise.all([
-          import('../hooks/useCloserData'),
-          import('../hooks/useSetterData'),
-        ])
-        Promise.all([
-          prewarmCloserEODs(null, 30),
-          prewarmSetterEODs(null, 30),
-        ]).catch(() => {})
-      } catch (_e) { void _e }
-    }, 12000))
     timers.push(setTimeout(async () => {
       try {
         const { fetchWavvAggregates } = await import('../services/wavvService')
