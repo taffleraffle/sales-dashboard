@@ -2022,6 +2022,10 @@ const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
 // that is a mobile video, it is very, very, very tall"). The maxHeight
 // is viewport-relative so the player shrinks on shorter screens too.
 const OPT_PLAYER_WRAP_FILL = { height: '100%', maxHeight: 'min(56vh, 460px)' }
+// Per-row lowercased search text, keyed by row object identity (see the
+// filter pipeline for why this must NOT live as a property on the row).
+const SEARCH_BLOBS = new WeakMap()
+
 const OPT_PLAYER_WRAP_360 = { height: 360, maxHeight: 'min(56vh, 360px)' }
 const OPT_PLAYER_WRAP_320 = { height: 300, maxHeight: 'min(48vh, 320px)' }
 
@@ -4446,15 +4450,21 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       // Search blob includes the new display_name + messaging_angle so a
       // coordinator searching for "STOP-PAYING-FOR-LEADS" or "ACCOUNTANT"
       // hits both legacy canonical and post-overhaul rows.
-      // _searchBlob is memoized on the row object itself — rebuilding a
-      // ~16KB lowercased string (transcripts!) per row per keystroke made
-      // search visibly laggy despite useDeferredValue. Cache invalidates
-      // whenever the row object identity changes (every patch path
-      // replaces the row), so staleness isn't possible.
-      if (r._searchBlob === undefined) {
-        r._searchBlob = `${r.name} ${r.canonical_name || ''} ${r.display_name || ''} ${r.messaging_angle || ''} ${r.messaging_angle_override || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
+      // Search blob cached in a WeakMap keyed by row OBJECT IDENTITY —
+      // rebuilding a ~16KB lowercased string (transcripts!) per row per
+      // keystroke made search visibly laggy despite useDeferredValue.
+      // WeakMap, not a property on the row: every patch path builds the
+      // replacement via { ...r, ...patch }, and a spread would COPY a
+      // cached own-property onto the new object (stale blob indexing the
+      // pre-edit fields — shipped and caught in review 2026-06-12). A
+      // WeakMap entry stays behind on the old object instead, so a fresh
+      // row identity always recomputes, and dropped rows get GC'd.
+      let blob = SEARCH_BLOBS.get(r)
+      if (blob === undefined) {
+        blob = `${r.name} ${r.canonical_name || ''} ${r.display_name || ''} ${r.messaging_angle || ''} ${r.messaging_angle_override || ''} ${r.description || ''} ${r.creator || ''} ${r.v21_script_id || ''} ${r.notes || ''} ${r.transcript || ''}`.toLowerCase()
+        SEARCH_BLOBS.set(r, blob)
       }
-      return r._searchBlob.includes(search)
+      return blob.includes(search)
     })
     // Multi-select filters: empty Set = no filter; otherwise OR within
     // a group (any-match) and AND across groups (intersection).
@@ -12223,6 +12233,10 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           display: 'grid', gap: 20, alignItems: 'start',
           gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
         }}>
+        {/* Left column only when there's media — an empty div would still
+            claim an auto-fit track and render a blank half-modal for rows
+            with no preview/source URL. */}
+        {(task.preview_url || task.drive_url) && (
         <div style={{ display: 'grid', gap: 14, minWidth: 0 }}>
         {/* Inline video preview — playable in the modal so the editor
             can watch the source without bouncing elsewhere. preview_url
@@ -12293,7 +12307,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           </div>
         ) : null}
 
-        </div>{/* end LEFT column (player) */}
+        </div>
+        )}{/* end LEFT column (player) */}
         {/* ── RIGHT details rail ── */}
         <div style={{ display: 'grid', gap: 14, minWidth: 0, alignContent: 'start' }}>
         {/* Quick-action status row — colored pill per status when selected. */}
