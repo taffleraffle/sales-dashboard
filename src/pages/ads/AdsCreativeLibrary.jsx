@@ -7,6 +7,7 @@ import { SectionHead, Icon, PALETTE } from '../../components/editorial/atoms'
 import Modal from '../../components/editorial/Modal'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
 import { FolderBar, FolderPickerModal, subtreeIds } from '../../components/ads/CreativeFolders'
+import ClipEditorModal from '../../components/ads/ClipEditorModal'
 
 const SUPABASE_URL = 'https://kjfaqhmllagbxjdxlopm.supabase.co'
 
@@ -762,8 +763,13 @@ async function runUploadPipeline(item, update) {
     bad_take_reason: markedBad ? badReason : null,
     bad_take_source: markedBad ? (badSource || 'upload') : null,
     source_bucket: 'Manual upload',
-    notes: `Uploaded via /sales/ads/creative/library on ${stamp}.${markedBad ? ` Flagged as bad take at upload (${badSource || 'operator'}): ${badReason || ''}` : ''}`,
+    // perFileConfig.note carries Clip Editor lineage ("Merged from part 1:
+    // …" / "Uncut multi-take source of …") so merges/splits stay traceable.
+    notes: `Uploaded via /sales/ads/creative/library on ${stamp}.${markedBad ? ` Flagged as bad take at upload (${badSource || 'operator'}): ${badReason || ''}` : ''}${perFileConfig?.note ? ` ${perFileConfig.note}` : ''}`,
   }
+  // Clip Editor outputs carry meaningful names (-HOOK01 / -MERGED) and a
+  // type of their own; both override the batch defaults.
+  if (perFileConfig?.typeOverride) fullInsert.type = perFileConfig.typeOverride
   let working = { ...fullInsert }
   let insertRes = await supabase.from('lib_creative_library').insert(working).select('id').single()
   let guard = 0
@@ -8508,6 +8514,19 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
   // — Ben's "surface errors, never swallow" rule.
   const [rejected, setRejected] = useState([])
   const [probing, setProbing] = useState(false)
+  // Clip Editor (cut/trim/merge before upload). editorTarget = { mode:
+  // 'split'|'merge', indices: [file idx] }; editSel = indices ticked for
+  // a multi-file merge session.
+  const [editorTarget, setEditorTarget] = useState(null)
+  const [editSel, setEditSel] = useState(() => new Set())
+  // Stable items array for the editor — a fresh array each render would
+  // make ClipEditorModal revoke + recreate its blob URLs mid-playback
+  // whenever anything else re-renders the page (e.g. a finishing upload
+  // batch refreshing the library).
+  const editorItems = useMemo(
+    () => (editorTarget ? editorTarget.indices.map(i => files[i]).filter(Boolean) : null),
+    [editorTarget, files],
+  )
   const inputRef = useRef(null)
   // No `busy` state — the modal is never blocked once Upload is clicked
   // because the queue takes over. The button just dispatches + closes.
@@ -8640,13 +8659,17 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
       file: item.file,
       perFileConfig: {
         fileSeq: idx + 1,
-        renamedName: renameForUpload({
+        // Clip Editor outputs keep their meaningful names (-HOOK01 /
+        // -MERGED) instead of the RAW-… rename scheme.
+        renamedName: item.keepName ? item.file.name : renameForUpload({
           originalName: item.file.name,
           actor: batch.actor_creator,
           dateLocal: batch.date_local,
           batchSeq: batch.batch_seq,
           fileSeq: idx + 1,
         }),
+        note: item.note || null,
+        typeOverride: item.typeOverride || null,
         markedBad: !!item.markedBad,
         badReason: item.badReason || null,
         badSource: item.badSource || (item.markedBad ? 'upload' : null),
@@ -8930,18 +8953,54 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
           <div style={{
             marginTop: 14, border: '1px solid var(--rule)', maxHeight: 320, overflowY: 'auto',
           }}>
+            {/* Edit & merge bar — appears when 2+ videos are ticked */}
+            {editSel.size >= 2 && (
+              <div style={{
+                position: 'sticky', top: 0, zIndex: 5,
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '7px 12px', background: 'var(--ink)', color: 'white',
+              }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600 }}>
+                  {editSel.size} selected
+                </span>
+                <span style={{ flex: 1 }} />
+                <button type="button"
+                  onClick={() => setEditorTarget({ mode: 'merge', indices: Array.from(editSel).sort((a, b) => a - b) })}
+                  style={{
+                    padding: '5px 12px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                    background: 'var(--accent)', color: 'var(--ink)', border: 'none', cursor: 'pointer',
+                  }}>⧉ Edit &amp; merge into one</button>
+                <button type="button" onClick={() => setEditSel(new Set())} style={{
+                  background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)',
+                  cursor: 'pointer', fontSize: 13, padding: 0,
+                }}>✕</button>
+              </div>
+            )}
             {files.map((item, i) => {
               const f = item.file
               const dur = item.dims?.duration_s
+              const isVideo = f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name)
               return (
                 <div key={i} style={{
-                  display: 'grid', gridTemplateColumns: '1fr auto 80px 100px 30px',
+                  display: 'grid', gridTemplateColumns: '18px 1fr auto 80px auto 100px 30px',
                   gap: 10, alignItems: 'center',
                   padding: '8px 12px',
                   borderBottom: i === files.length - 1 ? 'none' : '1px solid var(--rule)',
                   background: item.markedBad ? 'rgba(181,62,62,0.05)' : (i % 2 === 0 ? 'transparent' : 'var(--paper-2)'),
                   borderLeft: item.markedBad ? '3px solid #b53e3e' : '3px solid transparent',
                 }}>
+                  {/* merge-select checkbox (videos only) */}
+                  {isVideo ? (
+                    <input type="checkbox" checked={editSel.has(i)}
+                      title="Select for Edit & merge"
+                      onChange={() => setEditSel(prev => {
+                        const next = new Set(prev)
+                        if (next.has(i)) next.delete(i); else next.add(i)
+                        return next
+                      })}
+                      style={{ accentColor: 'var(--ink)', cursor: 'pointer' }} />
+                  ) : <span />}
                   <div style={{ minWidth: 0 }}>
                     <div style={{
                       fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
@@ -8949,6 +9008,15 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
                       textDecoration: item.markedBad ? 'line-through' : 'none',
                       opacity: item.markedBad ? 0.6 : 1,
                     }} title={f.name}>{f.name}</div>
+                    {item.note && (
+                      <div style={{
+                        fontFamily: 'var(--mono)', fontSize: 9.5, color: '#b86a0c',
+                        marginTop: 2, letterSpacing: '0.04em',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }} title={item.note}>
+                        {item.keepName ? 'CLIP EDITOR OUTPUT' : 'SOURCE'} · {item.note}
+                      </div>
+                    )}
                     {item.markedBad && item.badReason && (
                       <div style={{
                         fontFamily: 'var(--mono)', fontSize: 9.5, color: '#b53e3e',
@@ -8968,6 +9036,19 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
                       takes the operator KNOWS are flubbed before upload
                       — restart, missed cue, audio fail, etc. Auto-flagged
                       items can be un-flagged with the same toggle. */}
+                  {isVideo ? (
+                    <button type="button"
+                      onClick={() => setEditorTarget({ mode: 'split', indices: [i] })}
+                      title="Open in the Clip Editor — cut into takes, trim stutters, preview"
+                      style={{
+                        padding: '3px 9px', borderRadius: 2,
+                        background: 'var(--paper)', color: 'var(--ink-2)',
+                        border: '1px solid var(--rule)',
+                        fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+                        letterSpacing: '0.08em', textTransform: 'uppercase',
+                        cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}>✂ Edit</button>
+                  ) : <span />}
                   <button onClick={() => toggleMarkedBad(i)} type="button"
                     title={item.markedBad ? 'Currently flagged as bad take — click to keep' : 'Mark as bad take (will be hidden from editor library)'}
                     style={{
@@ -8979,7 +9060,16 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
                       letterSpacing: '0.08em', textTransform: 'uppercase',
                       cursor: 'pointer', whiteSpace: 'nowrap',
                     }}>{item.markedBad ? 'Bad take' : 'Keep'}</button>
-                  <button onClick={() => setFiles(files.filter((_, j) => j !== i))} style={{
+                  <button onClick={() => {
+                    setFiles(files.filter((_, j) => j !== i))
+                    // editSel holds positional indices — remap so the
+                    // ticks stay on the same FILES, not the same rows
+                    // (stale indices merged the wrong videos / crashed
+                    // when they ran past the shortened list).
+                    setEditSel(prev => new Set(
+                      [...prev].filter(j => j !== i).map(j => (j > i ? j - 1 : j))
+                    ))
+                  }} style={{
                     background: 'transparent', border: 'none', cursor: 'pointer',
                     color: 'var(--ink-4)', fontSize: 16, padding: 0,
                   }}>×</button>
@@ -9003,6 +9093,34 @@ function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded
               )
             })()}
           </div>
+        )}
+        {/* Clip Editor — cut / trim / merge before the queue ever sees
+            the files. Outputs come back as new list items (keepName +
+            typeOverride + lineage note); sources stay, annotated. */}
+        {editorTarget && (
+          <ClipEditorModal
+            items={editorItems}
+            mode={editorTarget.mode}
+            onClose={() => setEditorTarget(null)}
+            onDone={async ({ results, sourceNotes }) => {
+              const newItems = await Promise.all(results.map(async (r) => {
+                let dims = null
+                try { dims = await probeMediaDimensions(r.file) } catch { /* probe is cosmetic here */ }
+                return {
+                  file: r.file, dims,
+                  markedBad: false, badReason: null,
+                  keepName: !!r.keepName, note: r.note || null,
+                  typeOverride: r.typeOverride || null,
+                }
+              }))
+              setFiles(curr => [
+                ...curr.map(it => sourceNotes.has(it.file) ? { ...it, note: sourceNotes.get(it.file) } : it),
+                ...newItems,
+              ])
+              setEditSel(new Set())
+              setEditorTarget(null)
+            }}
+          />
         )}
         {rejected.length > 0 && (
           <div style={{
