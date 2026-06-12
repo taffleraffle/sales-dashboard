@@ -224,12 +224,17 @@ export default function AdsPerformance() {
   const [ghlBookedAd, setGhlBookedAd] = useState({})
   const [ghlBookedAdset, setGhlBookedAdset] = useState({})
   const [ghlBookedCampaign, setGhlBookedCampaign] = useState({})
-  // Resolver-view bookings tallied per ad / adset / campaign so the per-row
-  // overlay can credit bookings whose typeform record lost ad_id at submit
-  // time (resolved via email/phone/first_name fallback chain in migration 131).
-  const [resolvedBookedAd, setResolvedBookedAd] = useState({})
-  const [resolvedBookedAdset, setResolvedBookedAdset] = useState({})
-  const [resolvedBookedCampaign, setResolvedBookedCampaign] = useState({})
+  // Resolver-view bookings tallied per ad / adset / campaign (email/phone/
+  // first_name fallback chain in migration 131). Still computed and stored
+  // on every load — state shape unchanged — but nothing reads the getters:
+  // the visible tree pass intentionally OMITS the resolvedBooked* overlays
+  // (they were only ever applied to the discarded pre-filter rollups). The
+  // resolver counts that DO surface in rows flow through the tfAd/tfAdset/
+  // tfCampaign booked_calls MAX-fold inside load(). Getters destructured
+  // as holes so the unused bindings don't trip lint.
+  const [, setResolvedBookedAd] = useState({})
+  const [, setResolvedBookedAdset] = useState({})
+  const [, setResolvedBookedCampaign] = useState({})
   const [ghlLivesAd, setGhlLivesAd] = useState({})
   const [ghlLivesAdset, setGhlLivesAdset] = useState({})
   const [ghlLivesCampaign, setGhlLivesCampaign] = useState({})
@@ -514,75 +519,194 @@ export default function AdsPerformance() {
         eod.cash    += parseFloat(r.trial_cash || 0)
       }
 
-      // Attributed counts (rows we can credit to a Meta creative).
-      // Dedup-by-prospect so a single person who books twice or has both
-      // a typeform AND a GHL row only counts once. Without this dedup
-      // the "attributed" number ROW-counts and routinely exceeds the
-      // headline union count (e.g. 93 attrBooked vs 80 union-prospects)
-      // which is mathematically impossible and makes the cost-per tiles
-      // disagree with the per-row math.
-      const closeRev = closeRows.reduce((s, r) => s + parseFloat(r.revenue || 0), 0)
-      const closeCash = closeRows.reduce((s, r) => s + parseFloat(r.cash_collected || 0), 0)
-      // Unique-prospect counts — mirror the union+dedupe logic in
-      // ProspectDrillModal so the headline tile count equals what the
-      // drilldown panel renders when clicked. Without this, top tiles
-      // showed EOD self-reports (e.g. "5 closes") while clicking opened
-      // a panel with deduped prospect rows (e.g. 3) — the same drift
-      // class fixed at the per-campaign cells. Email dedupe primary,
-      // name-token fallback for sources without email (lib_close_resolved,
-      // lib_ghl_lives_detail).
+      // ── One normalization pass per source ───────────────────────────
+      // Everything below (headline tiles, attributed counts, per-scope
+      // row buckets) needs the same per-row derived values: lowercased
+      // email key, name-token key, and the resolved adset/campaign scope
+      // keys. These used to be recomputed per row PER METRIC (~16 sweeps
+      // of tfRows between the union helpers, the six per-metric .map()
+      // normalizations and bucketUnion's resolve calls). Now each source
+      // array is swept exactly once and every downstream pass works off
+      // the precomputed keys.
       const lc = (s) => (s || '').toString().toLowerCase().trim()
       const nameTok = (r) => {
         const raw = lc(r.clean_name || r.prospect_name || r.display_name || r.email)
         if (!raw) return ''
         return raw.split(/\s+/).filter(Boolean).slice(0, 2).join(' ')
       }
+
+      // Campaign / adset resolution for prospect rows.
+      //
+      // Priority (drilldown must match exactly or counts drift):
+      //   1. utm_campaign / adset_id (lead-time truth, captured at form
+      //      submission) — but ONLY if the value matches a known
+      //      campaign/adset in adsLoaded. This handles the "Meta moved
+      //      the ad after the lead came in" case: e.g. Wendell + Vlad
+      //      submitted via the 5/2 campaign; Meta later moved their
+      //      ad_ids to the 4/30 campaign. Ad-parent says 4/30; utm
+      //      says 5/2; utm wins because that's where the conversion
+      //      came from.
+      //   2. ad-parent → adset-parent (current Meta state) — fallback
+      //      when utm is missing or points to a campaign that no
+      //      longer exists in adsLoaded (handles Meta rename: old utm
+      //      value isn't in adsLoaded anymore, so we use the current
+      //      campaign name).
+      //   3. Raw campaign / adset value — fallback for completely
+      //      orphaned rows (campaign was deleted; will bucket under a
+      //      ghost name that doesn't match any visible campaign row).
+      //
+      // Without this, the campaign row showed 8 leads but the drilldown
+      // showed 10 because Wendell + Vlad's ad_id-parent moved them off
+      // 5/2 while the drilldown's utm_campaign.eq.X OR caught them.
+      const adParent = {}
+      const adsetParent = {}
+      const validCampaigns = new Set()
+      const validAdsets    = new Set()
+      for (const a of adsLoaded) {
+        adParent[a.ad_id] = { adset: a.adset_id, campaign: a.campaign_name }
+        if (a.adset_id) adsetParent[a.adset_id] = { campaign: a.campaign_name }
+        if (a.campaign_name) validCampaigns.add(a.campaign_name)
+        if (a.adset_id)      validAdsets.add(a.adset_id)
+      }
+      const adsById = Object.fromEntries(adsLoaded.map(a => [a.ad_id, a]))
+      const resolveCampaign = (rawCampaign, rawAd, rawAdset) =>
+        (rawCampaign && validCampaigns.has(rawCampaign) ? rawCampaign : null) ||
+        (rawAd    && adParent[rawAd]       ? adParent[rawAd].campaign       : null) ||
+        (rawAdset && adsetParent[rawAdset] ? adsetParent[rawAdset].campaign : null) ||
+        rawCampaign
+      const resolveAdset = (rawAd, rawAdset) =>
+        (rawAdset && validAdsets.has(rawAdset) ? rawAdset : null) ||
+        (rawAd && adParent[rawAd] ? adParent[rawAd].adset : null) ||
+        rawAdset
+
+      // Normalized row shape:
+      //   ek / nk — raw email key + name-token key (the tile unions need
+      //             them separately).
+      //   ekey    — email-first dedupe key (ek || nk). For metrics where
+      //             BOTH sources expose email (leads, booked).
+      //   nkey    — name-first dedupe key (nk || ek). For metrics where
+      //             EITHER source lacks email (live = lib_ghl_lives_detail,
+      //             closes = lib_close_resolved). Mixing key flavours
+      //             double-counts: George Sidhom matched as "george@..."
+      //             in typeform and "george sidhom" in lib_close_resolved
+      //             → row said 3 closes, drilldown said 2.
+      //   ad / adset / campaign — resolved scope keys (the resolve chain
+      //             runs once per row here, not once per row per metric).
+      const normRow = (r, rawAd, rawAdset, rawCampaign) => {
+        const ek = lc(r.email), nk = nameTok(r)
+        return {
+          ek, nk,
+          ekey: ek || nk || '',
+          nkey: nk || ek || '',
+          ad: rawAd,
+          adset: resolveAdset(rawAd, rawAdset),
+          campaign: resolveCampaign(rawCampaign, rawAd, rawAdset),
+        }
+      }
+
+      // Typeform — one pass; carry the per-metric flags + close $.
+      const tfN = tfRows.map(r => {
+        const n = normRow(r, r.ad_id, r.adset_id, r.utm_campaign)
+        n.qualified = !!r.qualified
+        n.isBooked  = !!r.is_booked
+        n.isLive    = !!r.is_live
+        n.isClosed  = !!r.is_closed
+        if (n.isClosed) {
+          n.rev  = parseFloat(r.revenue || 0)
+          n.cash = parseFloat(r.cash_collected || 0)
+        }
+        return n
+      })
+
+      // lib_close_resolved — one pass; the closeRev/closeCash totals and
+      // the orphan list (closes the resolver couldn't attribute to any
+      // ad/adset/campaign — real revenue, surfaced in the banner) ride
+      // along instead of being separate sweeps.
+      let closeRev = 0, closeCash = 0
+      const orphans = []
+      let orphanRev = 0, orphanCash = 0
+      const closeN = closeRows.map(r => {
+        const rev  = parseFloat(r.revenue || 0)
+        const cash = parseFloat(r.cash_collected || 0)
+        closeRev  += rev
+        closeCash += cash
+        if (r.attribution_source === 'orphan') {
+          orphans.push(r)
+          orphanRev  += rev
+          orphanCash += cash
+        }
+        const n = normRow(r, r.resolved_ad_id, r.resolved_adset_id, r.resolved_campaign)
+        n.rev = rev
+        n.cash = cash
+        n.hasAdAttr = !!(r.resolved_ad_id || r.resolved_campaign)
+        return n
+      })
+
+      // GHL sources — one pass each. The raw per-source tallies (NOT
+      // deduped, NOT resolved) ride along; they no longer drive any
+      // row-level cell math — they survive for callers that need to know
+      // "how many rows did GHL contribute at this scope" (attribution
+      // gap displays).
+      const normGhl = (rows, tAd, tAdset, tCamp) => rows.map(r => {
+        if (r.ad_id)        tAd[r.ad_id]          = (tAd[r.ad_id]          || 0) + 1
+        if (r.adset_id)     tAdset[r.adset_id]    = (tAdset[r.adset_id]    || 0) + 1
+        if (r.utm_campaign) tCamp[r.utm_campaign] = (tCamp[r.utm_campaign] || 0) + 1
+        return normRow(r, r.ad_id, r.adset_id, r.utm_campaign)
+      })
+      const gLeadAd = {}, gLeadAdset = {}, gLeadCamp = {}
+      const gBookAd = {}, gBookAdset = {}, gBookCamp = {}
+      const gLiveAd = {}, gLiveAdset = {}, gLiveCamp = {}
+      const ghlLeadN   = normGhl(ghlLeadRows,   gLeadAd, gLeadAdset, gLeadCamp)
+      const ghlBookedN = normGhl(ghlBookedRows, gBookAd, gBookAdset, gBookCamp)
+      const ghlLiveN   = normGhl(ghlLiveRows,   gLiveAd, gLiveAdset, gLiveCamp)
+
+      // lib_strategy_booking_resolved — one pass. Carries the dedupe keys
+      // for the tile unions AND the per-scope resolver tallies:
+      //   rBookAd / rBookAdset / rBookCamp — qualified (non-DQ) bookings
+      //     per resolved ad / adset / campaign_name (campaign via the
+      //     resolved ad's parent so the key matches tfCampaign /
+      //     ghlBookedCampaign — both keyed by name, not id).
+      //   rFoldAdset — adset tally GATED on resolved_ad_id: the MAX-fold
+      //     into tfAdsetMap only ever counted rows that resolved to an
+      //     ad, while rBookAdset counts any row with a resolved adset.
+      const rBookAd = {}, rBookAdset = {}, rBookCamp = {}, rFoldAdset = {}
+      const resolvedN = (resolvedBookingRows || []).map(r => {
+        const isDq = !!r.is_dq
+        if (!isDq) {
+          if (r.resolved_ad_id)    rBookAd[r.resolved_ad_id]       = (rBookAd[r.resolved_ad_id]       || 0) + 1
+          if (r.resolved_adset_id) rBookAdset[r.resolved_adset_id] = (rBookAdset[r.resolved_adset_id] || 0) + 1
+          if (r.resolved_ad_id && r.resolved_adset_id) rFoldAdset[r.resolved_adset_id] = (rFoldAdset[r.resolved_adset_id] || 0) + 1
+          const camp = adsById[r.resolved_ad_id]?.campaign_name
+          if (camp) rBookCamp[camp] = (rBookCamp[camp] || 0) + 1
+        }
+        const ek = lc(r.contact_email)
+        const nk = nameTok({ display_name: r.contact_name, email: r.contact_email })
+        return { ek, nk, ekey: ek || nk || '', nkey: nk || ek || '', isDq, hasAd: !!r.resolved_ad_id }
+      })
+      const resolvedQualN = resolvedN.filter(r => !r.isDq)
       // Two union flavours — must match the drilldown's dedupe strategy
       // for each metric or the headline tile reads a different number
-      // than what the panel will list.
+      // than what the panel will list. Variadic over the normalized rows
+      // (precomputed ek/nk — no key recompute per union).
       //
-      // unionCountEmail: both sources have an email column (leads, booked).
+      // unionByEmail: both sources have an email column (leads, booked).
       //   Email primary, name fallback when an individual row lacks email.
-      // unionCountName:  ONE source lacks email (live = ghl_lives_detail,
+      // unionByName:  ONE source lacks email (live = ghl_lives_detail,
       //   closes = lib_close_resolved). Using email on the side that has
       //   it while the other side falls through to name produces two
       //   different keys for the same person — that's the bug that made
-      //   the Ads tile show 3 closes when the drilldown showed 2 (George
-      //   Sidhom matched as "george@..." in typeform and "george sidhom"
-      //   in lib_close_resolved → counted twice).
+      //   the Ads tile show 3 closes when the drilldown showed 2.
       // Both helpers skip rows with NO key — they can't be distinguished
       // from other key-less rows, so counting them inflates the universe.
-      const unionCountEmail = (tfList, otherList) => {
+      // List order matters for unionByEmail (a later email-bearing row can
+      // still count after a name-only row claimed its name token), so the
+      // call sites preserve the original source ordering exactly.
+      const unionByEmail = (...lists) => {
         const emails = new Set(), names = new Set()
         let n = 0
-        for (const r of tfList) {
-          const e = lc(r.email), k = nameTok(r)
-          if (!e && !k) continue
-          if (e && emails.has(e)) continue
-          if (!e && k && names.has(k)) continue
-          if (e) emails.add(e)
-          if (k) names.add(k)
-          n++
-        }
-        for (const r of otherList) {
-          const e = lc(r.email), k = nameTok(r)
-          if (!e && !k) continue
-          if (e && emails.has(e)) continue
-          if (!e && k && names.has(k)) continue
-          if (e) emails.add(e)
-          if (k) names.add(k)
-          n++
-        }
-        return n
-      }
-      // Same dedup rules as unionCountEmail, three-way (resolver view added
-      // so bookings without typeform ad_id at submit time still count).
-      const unionCountEmail3 = (a, b, c) => {
-        const emails = new Set(), names = new Set()
-        let n = 0
-        const consume = (list) => {
+        for (const list of lists) {
           for (const r of list) {
-            const e = lc(r.email), k = nameTok(r)
+            const e = r.ek, k = r.nk
             if (!e && !k) continue
             if (e && emails.has(e)) continue
             if (!e && k && names.has(k)) continue
@@ -591,31 +715,21 @@ export default function AdsPerformance() {
             n++
           }
         }
-        consume(a); consume(b); consume(c)
         return n
       }
-      const unionCountName = (tfList, otherList) => {
+      const unionByName = (...lists) => {
         const names = new Set()
         let n = 0
-        for (const r of tfList) {
-          const k = nameTok(r)
-          if (!k) continue
-          if (names.has(k)) continue
-          names.add(k)
-          n++
-        }
-        for (const r of otherList) {
-          const k = nameTok(r)
-          if (!k) continue
-          if (names.has(k)) continue
-          names.add(k)
-          n++
+        for (const list of lists) {
+          for (const r of list) {
+            const k = r.nk
+            if (!k || names.has(k)) continue
+            names.add(k)
+            n++
+          }
         }
         return n
       }
-      // Filter resolver-view bookings down to qualified (not DQ) for the
-      // booked totals. The view's `id` is unique per contact already.
-      const resolvedQualBookings = (resolvedBookingRows || []).filter(r => !r.is_dq)
       // Source alignment with Marketing dashboard (Ben 2026-06-01):
       // Marketing reads strict views (lib_strategy_booking_resolved for
       // strategy-call bookings, lib_ghl_lives_detail for held lives,
@@ -628,56 +742,48 @@ export default function AdsPerformance() {
       //
       // Fix: each source narrows to the same population Marketing uses.
       //   booked = lib_strategy_booking_resolved unique contacts (incl. DQ)
-      //   live   = lib_ghl_lives_detail unique prospects
+      //   live   = lib_ghl_lives_detail row count (NOT deduped — multiple
+      //            calls for the same prospect each count, matching
+      //            Marketing's audience view live_calls = COUNT(*))
       //   leads  = typeform_response_detail unique (still the broadest
       //            sensible "lead universe" — Marketing's view-sourced 100
       //            and Ads' 106 differ by ~6 GHL-only contacts, within
       //            tolerance because both pull typeform as primary)
       //   closes = lib_close_resolved-ish (closeRows union typeform.is_closed)
-      const allResolvedBookings = (resolvedBookingRows || [])  // qualified + DQ
       const prospects = {
-        leads:  unionCountEmail(tfRows, ghlLeadRows),
+        leads:  unionByEmail(tfN, ghlLeadN),
         // Booked: strategy-call universe only (matches Marketing's bk.all).
-        booked: unionCountEmail(
-          allResolvedBookings.map(r => ({ email: r.contact_email, display_name: r.contact_name })),
-          [],
-        ),
-        // Lives: GHL strategy lives only. Use row count (NOT deduped) so
-        // multiple calls for the same prospect each count — matches
-        // Marketing's audience view live_calls = COUNT(*) from
-        // lib_ghl_lives_detail.
+        booked: unionByEmail(resolvedN),
         live:   (ghlLiveRows || []).length,
-        closes: unionCountName(tfRows.filter(r => r.is_closed), closeRows),
+        closes: unionByName(tfN.filter(r => r.isClosed), closeN),
       }
       // Attributed = union (typeform with ad_id) ∪ (GHL row with ad_id),
       // prospect-deduped via the same email-first + name-token fallback
-      // that the headline tiles use. Same shape as unionCountEmail /
-      // unionCountName above so attributed never exceeds the headline.
-      const attrLeads = unionCountEmail(
-        tfRows.filter(r => r.ad_id),
-        ghlLeadRows.filter(r => r.ad_id)
+      // that the headline tiles use, so attributed never exceeds the
+      // headline. Filters run over precomputed flags — no key recompute.
+      const attrLeads = unionByEmail(
+        tfN.filter(r => r.ad),
+        ghlLeadN.filter(r => r.ad)
       )
       // Attributed booked = three-way union including resolver-view rows
       // that have resolved_ad_id set (typeform email/phone/name chain).
       // Without this, bookings where the typeform record lost ad_id (the
       // bulk of last-30d Electrician bookings) never got attributed.
-      const attrBooked = unionCountEmail3(
-        tfRows.filter(r => r.is_booked && r.ad_id),
-        ghlBookedRows.filter(r => r.ad_id),
-        resolvedQualBookings
-          .filter(r => r.resolved_ad_id)
-          .map(r => ({ email: r.contact_email, display_name: r.contact_name }))
+      const attrBooked = unionByEmail(
+        tfN.filter(r => r.isBooked && r.ad),
+        ghlBookedN.filter(r => r.ad),
+        resolvedQualN.filter(r => r.hasAd)
       )
       // Live/closes use name-token (lib_ghl_lives_detail + lib_close_resolved
       // expose no email column, so an email-first dedup silently double-
       // counts every prospect who appears in both sources).
-      const attrLive = unionCountName(
-        tfRows.filter(r => r.is_live && r.ad_id),
-        ghlLiveRows.filter(r => r.ad_id)
+      const attrLive = unionByName(
+        tfN.filter(r => r.isLive && r.ad),
+        ghlLiveN.filter(r => r.ad)
       )
-      const attrCloses = unionCountName(
-        tfRows.filter(r => r.is_closed && r.ad_id),
-        closeRows.filter(r => r.resolved_ad_id || r.resolved_campaign)
+      const attrCloses = unionByName(
+        tfN.filter(r => r.isClosed && r.ad),
+        closeN.filter(r => r.hasAdAttr)
       )
       setRowTotals({
         eod,
@@ -704,7 +810,7 @@ export default function AdsPerformance() {
       }
       setStats(perAd)
 
-      // Per-scope prospect-deduped aggregation.
+      // ── Per-scope prospect-deduped aggregation (single pass) ────────
       //
       // Every count + revenue/cash sum below is computed the SAME way the
       // drilldown panel computes them: union the relevant sources, dedupe
@@ -713,333 +819,150 @@ export default function AdsPerformance() {
       // the number shown in the table row equals the number of rows the
       // drilldown lists when that cell is clicked.
       //
-      // Previously each metric had its own ad-hoc rule (closes used
-      // `c.closes || t.closes`, leads/booked/live used Math.max(typeform,
-      // ghl), qual_booked was typeform-only) which systematically
-      // disagreed with the deduped drilldown. Most painful was the
-      // closes case: a typeform `is_closed=true` row not yet resolved
-      // by HYROS counted toward the drilldown but the `||` fallback
-      // hid it from the row whenever ANY resolved close existed for
-      // the same ad — so a $9k unresolved typeform close stayed
-      // invisible behind the $10k resolved close.
-
-      // Bucket builder. Sources are normalized to { key, ad, adset, campaign,
-      // rev, cash } before union, so the same accumulator handles every
-      // metric. (lc + nameTok already declared above by the top-tile
-      // prospects block; reusing them here keeps both code paths in sync.)
+      // Buckets are born in the exact field shape consumers (adRollupFrom,
+      // overlayTypeformIfHigher, overlayClose) read; the per-metric _seen
+      // Sets are stripped before setState so the state payload is
+      // byte-identical to the old merge() output. One loop per normalized
+      // source replaces the old pipeline (six per-metric .map()s → six
+      // bucketUnion sweeps → ~15 merge() re-walks → a 3-level close fold
+      // → 3 cAd/cAdset/cCamp loops).
       //
-      // Two dedupe strategies — pick the one that matches the source pair:
-      //
-      // • dedupeByEmail: email primary, name-token fallback. Use when BOTH
-      //   sources have an email column (leads = typeform + lib_ghl_leads,
-      //   booked = typeform + lib_ghl_booked).
-      //
-      // • dedupeByName: name-token ONLY. Use when EITHER source lacks an
-      //   email column (closes = typeform + lib_close_resolved [no email],
-      //   live = typeform + lib_ghl_lives_detail [no email]). If we let
-      //   typeform key by email and resolved-side key by name, the same
-      //   person collides on neither key → double-counted. This is the
-      //   bug that made closes count 3 when the drilldown showed 2: George
-      //   Sidhom appeared in both sources with email "george@..." in
-      //   typeform and only `clean_name` in lib_close_resolved.
-      const dedupeByEmail = (r) => lc(r.email) || nameTok(r) || ''
-      const dedupeByName  = (r) => nameTok(r) || lc(r.email) || ''
-
-      const accumulate = (target, scopeKey, row) => {
-        if (!scopeKey) return
-        const k = row._dedupe
-        // Skip rows with NO dedupe key (no email AND no name). They can't
-        // be distinguished from each other, so counting them all inflates
-        // the universe. Prior version counted them as separate prospects,
-        // adding silent slop to every metric.
-        if (!k) return
-        let bucket = target[scopeKey]
-        if (!bucket) bucket = target[scopeKey] = { count: 0, revenue: 0, cash: 0, _seen: new Set() }
-        if (bucket._seen.has(k)) return
-        bucket._seen.add(k)
-        bucket.count++
-        bucket.revenue += row._rev || 0
-        bucket.cash    += row._cash || 0
-      }
-      // Campaign / adset resolution for prospect rows.
-      //
-      // Priority (drilldown must match exactly or counts drift):
-      //   1. utm_campaign / adset_id (lead-time truth, captured at form
-      //      submission) — but ONLY if the value matches a known
-      //      campaign/adset in adsLoaded. This handles the "Meta moved
-      //      the ad after the lead came in" case: e.g. Wendell + Vlad
-      //      submitted via the 5/2 campaign; Meta later moved their
-      //      ad_ids to the 4/30 campaign. Ad-parent says 4/30; utm
-      //      says 5/2; utm wins because that's where the conversion
-      //      came from.
-      //   2. ad-parent → adset-parent (current Meta state) — fallback
-      //      when utm is missing or points to a campaign that no
-      //      longer exists in adsLoaded (handles Meta rename: old utm
-      //      value isn't in adsLoaded anymore, so we use the current
-      //      campaign name).
-      //   3. Raw row._campaign / row._adset — fallback for completely
-      //      orphaned rows (campaign was deleted; will bucket under a
-      //      ghost name that doesn't match any visible campaign row).
-      //
-      // Without this, the campaign row showed 8 leads but the drilldown
-      // showed 10 because Wendell + Vlad's ad_id-parent moved them off
-      // 5/2 while the drilldown's utm_campaign.eq.X OR caught them.
-      const adParent = {}
-      const adsetParent = {}
-      const validCampaigns = new Set()
-      const validAdsets    = new Set()
-      for (const a of adsLoaded) {
-        adParent[a.ad_id] = { adset: a.adset_id, campaign: a.campaign_name }
-        if (a.adset_id) adsetParent[a.adset_id] = { campaign: a.campaign_name }
-        if (a.campaign_name) validCampaigns.add(a.campaign_name)
-        if (a.adset_id)      validAdsets.add(a.adset_id)
-      }
-      const resolveCampaign = (row) =>
-        (row._campaign && validCampaigns.has(row._campaign) ? row._campaign : null) ||
-        (row._ad    && adParent[row._ad]    ? adParent[row._ad].campaign       : null) ||
-        (row._adset && adsetParent[row._adset] ? adsetParent[row._adset].campaign : null) ||
-        row._campaign
-      const resolveAdset = (row) =>
-        (row._adset && validAdsets.has(row._adset) ? row._adset : null) ||
-        (row._ad && adParent[row._ad] ? adParent[row._ad].adset : null) ||
-        row._adset
-
-      const bucketUnion = (...sourceLists) => {
-        const ad = {}, adset = {}, campaign = {}
-        for (const list of sourceLists) {
-          for (const row of list) {
-            accumulate(ad,       row._ad,            row)
-            accumulate(adset,    resolveAdset(row),  row)
-            accumulate(campaign, resolveCampaign(row), row)
-          }
-        }
-        return { ad, adset, campaign }
-      }
-
-      // Normalize each row source to a uniform shape. Order matters in
-      // sourceLists: the FIRST source seen for a given dedupe key wins
-      // (its revenue/cash counts; later sources are skipped). For closes
-      // we put lib_close_resolved first so HYROS-validated $/cash wins
-      // over typeform self-report.
-      //
-      // Dedupe-key choice per metric (must match the drilldown for the
-      // tile count to equal the panel count):
-      //   leads / qual_leads / booked / qual_booked → email-first
-      //     (both sources have an email column).
-      //   live / closes                             → name-only
-      //     (lib_close_resolved + lib_ghl_lives_detail expose no email).
-      const tfAsLead = tfRows.map(r => ({
-        _dedupe: dedupeByEmail(r),
-        _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
-      }))
-      const tfQualLead = tfRows.filter(r => r.qualified).map(r => ({
-        _dedupe: dedupeByEmail(r),
-        _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
-      }))
-      const tfAsBooked = tfRows.filter(r => r.is_booked).map(r => ({
-        _dedupe: dedupeByEmail(r),
-        _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
-      }))
-      const tfAsQualBooked = tfRows.filter(r => r.is_booked && r.qualified).map(r => ({
-        _dedupe: dedupeByEmail(r),
-        _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
-      }))
-      const tfAsLive = tfRows.filter(r => r.is_live).map(r => ({
-        _dedupe: dedupeByName(r),
-        _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
-      }))
-      const tfAsClose = tfRows.filter(r => r.is_closed).map(r => ({
-        _dedupe: dedupeByName(r),
-        _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
-        _rev: parseFloat(r.revenue || 0),
-        _cash: parseFloat(r.cash_collected || 0),
-      }))
-      const gAsLead = ghlLeadRows.map(r => ({
-        _dedupe: dedupeByEmail(r),
-        _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
-      }))
-      const gAsBooked = ghlBookedRows.map(r => ({
-        _dedupe: dedupeByEmail(r),
-        _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
-      }))
-      const gAsLive = ghlLiveRows.map(r => ({
-        _dedupe: dedupeByName(r),
-        _ad: r.ad_id, _adset: r.adset_id, _campaign: r.utm_campaign,
-      }))
-      const closeAsClose = closeRows.map(r => ({
-        _dedupe: dedupeByName(r),
-        _ad: r.resolved_ad_id, _adset: r.resolved_adset_id, _campaign: r.resolved_campaign,
-        _rev: parseFloat(r.revenue || 0),
-        _cash: parseFloat(r.cash_collected || 0),
-      }))
-
-      // Replace the old tfAdMap shape with the deduped per-metric maps.
-      // Each level (ad/adset/campaign) gets its own dedupe scope so a
-      // prospect that attributes across multiple ads in the same adset
-      // counts once at the adset level — same as the drilldown does.
-      const mapsLead       = bucketUnion(tfAsLead,       gAsLead)
-      const mapsQualLead   = bucketUnion(tfQualLead)
-      const mapsBooked     = bucketUnion(tfAsBooked,     gAsBooked)
-      const mapsQualBooked = bucketUnion(tfAsQualBooked)
-      // Lives universe = typeform is_live ∪ ghl_lives_detail ∪ closes
-      // (closed implies live by definition). Without the closes union, a
-      // closed prospect with no recorded live event (e.g. George Sidhom)
-      // shows in Closes=1 but Lives=0 on the same row — the kind of
-      // impossible math that makes Ben yell at the dashboard.
-      const mapsLive       = bucketUnion(tfAsLive,       gAsLive,    closeAsClose, tfAsClose)
-      // Closes: lib_close_resolved FIRST so its revenue wins on prospects
-      // that appear in both sources. Typeform is_closed adds prospects
-      // that haven't been HYROS-resolved yet.
-      const mapsClose      = bucketUnion(closeAsClose,   tfAsClose)
-
-      const adMap = (m, fields) => {
-        const out = {}
-        for (const [k, v] of Object.entries(m)) {
-          const o = {}
-          for (const [src, dst] of fields) o[dst] = v[src] || 0
-          out[k] = o
-        }
-        return out
-      }
-      // Backwards-compat shape: existing consumers (extract, addRollup,
-      // overlayTypeformIfHigher, overlayClose) read .leads / .booked_calls
-      // / .closes / etc. Emit the same field names — but the underlying
-      // counts are now drilldown-matched prospect totals, not raw row
-      // counts or MAX heuristics.
+      // Metric semantics preserved exactly:
+      //   leads / qual_leads / booked / qual_booked → email-first dedupe
+      //     (both sources expose email).
+      //   live / closes → name-token dedupe (lib_ghl_lives_detail +
+      //     lib_close_resolved expose no email column).
+      //   lives universe = typeform is_live ∪ ghl_lives ∪ closes — closed
+      //     implies live by definition. Without the closes union, a closed
+      //     prospect with no recorded live event (e.g. George Sidhom)
+      //     shows Closes=1 but Lives=0 on the same row — the kind of
+      //     impossible math that makes Ben yell at the dashboard.
+      //   closes: lib_close_resolved is processed FIRST so its HYROS-
+      //     validated revenue/cash win (first source seen for a dedupe
+      //     key wins; typeform is_closed adds prospects that haven't
+      //     been HYROS-resolved yet).
+      const newBucket = () => ({
+        leads: 0, qualified_leads: 0, booked_calls: 0, qualified_booked_calls: 0,
+        live_calls: 0, closes: 0, revenue_attributed: 0, cash_attributed: 0,
+        _seen: {
+          leads: new Set(), qualified_leads: new Set(),
+          booked_calls: new Set(), qualified_booked_calls: new Set(),
+          live_calls: new Set(), closes: new Set(),
+        },
+      })
       const tfAdMap = {}, tfAdsetMap = {}, tfCampMap = {}
-      const cAd = {}, cAdset = {}, cCamp = {}
-      const merge = (target, source, key, field) => {
-        for (const [k, v] of Object.entries(source[key])) {
-          if (!target[k]) target[k] = { leads: 0, qualified_leads: 0, booked_calls: 0, qualified_booked_calls: 0, live_calls: 0, closes: 0, revenue_attributed: 0, cash_attributed: 0 }
-          target[k][field] = v.count || 0
-        }
+      // Count once per (scope, metric, dedupe-key). Skips rows with no
+      // scope key or NO dedupe key (key-less rows can't be distinguished
+      // from each other; counting them inflates the universe). Returns
+      // the bucket when the row was counted so the close pass can add $.
+      const bump = (map, scopeKey, metric, dkey) => {
+        if (!scopeKey || !dkey) return null
+        const b = map[scopeKey] || (map[scopeKey] = newBucket())
+        const seen = b._seen[metric]
+        if (seen.has(dkey)) return null
+        seen.add(dkey)
+        b[metric]++
+        return b
       }
-      merge(tfAdMap,    mapsLead,       'ad',       'leads')
-      merge(tfAdsetMap, mapsLead,       'adset',    'leads')
-      merge(tfCampMap,  mapsLead,       'campaign', 'leads')
-      merge(tfAdMap,    mapsQualLead,   'ad',       'qualified_leads')
-      merge(tfAdsetMap, mapsQualLead,   'adset',    'qualified_leads')
-      merge(tfCampMap,  mapsQualLead,   'campaign', 'qualified_leads')
-      merge(tfAdMap,    mapsBooked,     'ad',       'booked_calls')
-      merge(tfAdsetMap, mapsBooked,     'adset',    'booked_calls')
-      merge(tfCampMap,  mapsBooked,     'campaign', 'booked_calls')
-      merge(tfAdMap,    mapsQualBooked, 'ad',       'qualified_booked_calls')
-      merge(tfAdsetMap, mapsQualBooked, 'adset',    'qualified_booked_calls')
-      merge(tfCampMap,  mapsQualBooked, 'campaign', 'qualified_booked_calls')
-      merge(tfAdMap,    mapsLive,       'ad',       'live_calls')
-      merge(tfAdsetMap, mapsLive,       'adset',    'live_calls')
-      merge(tfCampMap,  mapsLive,       'campaign', 'live_calls')
-      // Close rev/cash also fold into the tf* maps' revenue_attributed /
-      // cash_attributed so overlayTypeformIfHigher carries them up the tree.
-      for (const level of ['ad', 'adset', 'campaign']) {
-        const target = level === 'ad' ? tfAdMap : level === 'adset' ? tfAdsetMap : tfCampMap
-        for (const [k, v] of Object.entries(mapsClose[level])) {
-          if (!target[k]) target[k] = { leads: 0, qualified_leads: 0, booked_calls: 0, qualified_booked_calls: 0, live_calls: 0, closes: 0, revenue_attributed: 0, cash_attributed: 0 }
-          target[k].closes              = v.count   || 0
-          target[k].revenue_attributed  = v.revenue || 0
-          target[k].cash_attributed     = v.cash    || 0
-        }
+      const bump3 = (metric, dkey, row) => {
+        bump(tfAdMap,    row.ad,       metric, dkey)
+        bump(tfAdsetMap, row.adset,    metric, dkey)
+        bump(tfCampMap,  row.campaign, metric, dkey)
       }
-      // cAd / cAdset / cCamp expose the close-only view (for extract's
+      const bumpClose3 = (row) => {
+        const a = bump(tfAdMap,    row.ad,       'closes', row.nkey)
+        if (a) { a.revenue_attributed += row.rev || 0; a.cash_attributed += row.cash || 0 }
+        const s = bump(tfAdsetMap, row.adset,    'closes', row.nkey)
+        if (s) { s.revenue_attributed += row.rev || 0; s.cash_attributed += row.cash || 0 }
+        const c = bump(tfCampMap,  row.campaign, 'closes', row.nkey)
+        if (c) { c.revenue_attributed += row.rev || 0; c.cash_attributed += row.cash || 0 }
+      }
+
+      // lib_close_resolved FIRST — revenue/cash first-wins per prospect.
+      for (const r of closeN) {
+        bumpClose3(r)
+        bump3('live_calls', r.nkey, r)   // closed ⇒ live
+      }
+      for (const r of tfN) {
+        bump3('leads', r.ekey, r)
+        if (r.qualified) bump3('qualified_leads', r.ekey, r)
+        if (r.isBooked) {
+          bump3('booked_calls', r.ekey, r)
+          if (r.qualified) bump3('qualified_booked_calls', r.ekey, r)
+        }
+        if (r.isLive || r.isClosed) bump3('live_calls', r.nkey, r)
+        if (r.isClosed) bumpClose3(r)
+      }
+      for (const r of ghlLeadN)   bump3('leads',        r.ekey, r)
+      for (const r of ghlBookedN) bump3('booked_calls', r.ekey, r)
+      for (const r of ghlLiveN)   bump3('live_calls',   r.nkey, r)
+
+      // cAd / cAdset / cCamp expose the close-only view (adRollupFrom's
       // tfRevenue / tfCash fallback chain and overlayClose at the parent
-      // level). Keep the same shape consumers expect.
-      for (const [k, v] of Object.entries(mapsClose.ad))       cAd[k]    = { closes: v.count, revenue: v.revenue, cash: v.cash }
-      for (const [k, v] of Object.entries(mapsClose.adset))    cAdset[k] = { closes: v.count, revenue: v.revenue, cash: v.cash }
-      for (const [k, v] of Object.entries(mapsClose.campaign)) cCamp[k]  = { closes: v.count, revenue: v.revenue, cash: v.cash }
+      // level) — same { closes, revenue, cash } shape consumers expect.
+      // Then strip the working _seen Sets so the state payload is the
+      // exact plain-count shape the old merge() used to emit.
+      const cAd = {}, cAdset = {}, cCamp = {}
+      const finalizeLevel = (map, closeView) => {
+        for (const k of Object.keys(map)) {
+          const b = map[k]
+          if (b._seen.closes.size > 0) {
+            closeView[k] = { closes: b.closes, revenue: b.revenue_attributed, cash: b.cash_attributed }
+          }
+          delete b._seen
+        }
+      }
+      finalizeLevel(tfAdMap,    cAd)
+      finalizeLevel(tfAdsetMap, cAdset)
+      finalizeLevel(tfCampMap,  cCamp)
 
       // Fold resolver-view qualified bookings into tf*Map.booked_calls /
       // qualified_booked_calls so per-row Booked counts pick up the email/
       // phone/first_name fallback chain. MAX over typeform count (the
       // resolver should be ≥ typeform-direct because it's a superset).
-      const adsByIdLocal = Object.fromEntries((adsCacheRef.data || []).map(a => [a.ad_id, a]))
-      const folded = { ad: {}, adset: {}, campaign: {} }
-      for (const r of resolvedQualBookings) {
-        if (!r.resolved_ad_id) continue
-        folded.ad[r.resolved_ad_id] = (folded.ad[r.resolved_ad_id] || 0) + 1
-        if (r.resolved_adset_id) folded.adset[r.resolved_adset_id] = (folded.adset[r.resolved_adset_id] || 0) + 1
-        const camp = adsByIdLocal[r.resolved_ad_id]?.campaign_name
-        if (camp) folded.campaign[camp] = (folded.campaign[camp] || 0) + 1
-      }
+      // rBookAd / rFoldAdset / rBookCamp come from the resolved-bookings
+      // normalization pass above (ad + campaign tallies gate on
+      // resolved_ad_id; rFoldAdset additionally gates the adset tally on
+      // resolved_ad_id, exactly like the old `folded` loop did).
       const ensure = (target, k) => {
         if (!target[k]) target[k] = { leads: 0, qualified_leads: 0, booked_calls: 0, qualified_booked_calls: 0, live_calls: 0, closes: 0, revenue_attributed: 0, cash_attributed: 0 }
         return target[k]
       }
-      for (const [k, n] of Object.entries(folded.ad)) {
-        const t = ensure(tfAdMap, k)
-        if (n > (t.booked_calls || 0)) t.booked_calls = n
-        if (n > (t.qualified_booked_calls || 0)) t.qualified_booked_calls = n
+      const foldResolvedBooked = (target, counts) => {
+        for (const [k, n] of Object.entries(counts)) {
+          const t = ensure(target, k)
+          if (n > (t.booked_calls || 0)) t.booked_calls = n
+          if (n > (t.qualified_booked_calls || 0)) t.qualified_booked_calls = n
+        }
       }
-      for (const [k, n] of Object.entries(folded.adset)) {
-        const t = ensure(tfAdsetMap, k)
-        if (n > (t.booked_calls || 0)) t.booked_calls = n
-        if (n > (t.qualified_booked_calls || 0)) t.qualified_booked_calls = n
-      }
-      for (const [k, n] of Object.entries(folded.campaign)) {
-        const t = ensure(tfCampMap, k)
-        if (n > (t.booked_calls || 0)) t.booked_calls = n
-        if (n > (t.qualified_booked_calls || 0)) t.qualified_booked_calls = n
-      }
+      foldResolvedBooked(tfAdMap,    rBookAd)
+      foldResolvedBooked(tfAdsetMap, rFoldAdset)
+      foldResolvedBooked(tfCampMap,  rBookCamp)
 
       setTfAd(tfAdMap); setTfAdset(tfAdsetMap); setTfCampaign(tfCampMap)
       setCloseAd(cAd); setCloseAdset(cAdset); setCloseCampaign(cCamp)
 
-      // Orphan tracking — unchanged from the prior aggregation, runs on
-      // the raw lib_close_resolved rows. Orphan = close that couldn't be
-      // attributed to any ad/adset/campaign by the resolver.
-      const orphans = []
-      let orphanRev = 0, orphanCash = 0
-      for (const r of closeRows) {
-        if (r.attribution_source === 'orphan') {
-          orphans.push(r)
-          orphanRev  += parseFloat(r.revenue || 0)
-          orphanCash += parseFloat(r.cash_collected || 0)
-        }
-      }
+      // Orphan tracking — orphans/orphanRev/orphanCash were folded into
+      // the lib_close_resolved normalization pass above. Orphan = close
+      // that couldn't be attributed to any ad/adset/campaign.
       setOrphanCloses({ count: orphans.length, revenue: orphanRev, cash: orphanCash, rows: orphans })
 
-      // GHL-side standalone maps still feed extract's Math.max() / orphan
-      // detection paths. Counts are NOT deduped here because the union
-      // dedupe already happened in mapsLead/mapsBooked/mapsLive above —
-      // these per-source maps survive only for callers that need to know
-      // "how many rows did GHL contribute at this scope" (the dataIssues
-      // banner + attribution gap displays). They no longer drive any
-      // row-level cell math.
-      const tally = (rows, idKey = 'ad_id', asKey = 'adset_id', cKey = 'utm_campaign') => {
-        const a = {}, ads = {}, c = {}
-        for (const r of rows) {
-          if (r[idKey])  a[r[idKey]]   = (a[r[idKey]]   || 0) + 1
-          if (r[asKey])  ads[r[asKey]] = (ads[r[asKey]] || 0) + 1
-          if (r[cKey])   c[r[cKey]]    = (c[r[cKey]]    || 0) + 1
-        }
-        return [a, ads, c]
-      }
-      const [gLeadAd, gLeadAdset, gLeadCamp]     = tally(ghlLeadRows)
-      const [gBookAd, gBookAdset, gBookCamp]     = tally(ghlBookedRows)
-      const [gLiveAd, gLiveAdset, gLiveCamp]     = tally(ghlLiveRows)
+      // GHL-side standalone maps (tallied during the normalization
+      // passes). Counts are NOT deduped because the union dedupe already
+      // happened in the bucket accumulation above — these per-source maps
+      // survive only for callers that need to know "how many rows did GHL
+      // contribute at this scope" (the dataIssues banner + attribution
+      // gap displays). They no longer drive any row-level cell math.
       setGhlBookedAd(gBookAd); setGhlBookedAdset(gBookAdset); setGhlBookedCampaign(gBookCamp)
       setGhlLivesAd(gLiveAd);  setGhlLivesAdset(gLiveAdset);  setGhlLivesCampaign(gLiveCamp)
       setGhlLeadsAd(gLeadAd)
       setGhlLeadsAdset(gLeadAdset)
       setGhlLeadsCampaign(gLeadCamp)
 
-      // Tally resolver-view qualified bookings per ad / adset / campaign_id.
-      // Map ad_id → campaign_name via the local ads list so the campaign-level
-      // overlay key matches the existing tfCampaign / ghlBookedCampaign maps
-      // (both keyed by campaign_name, not id).
-      const adsById = Object.fromEntries((adsCacheRef.data || []).map(a => [a.ad_id, a]))
-      const [rBookAd, rBookAdset] = tally(
-        resolvedQualBookings.map(r => ({
-          ad_id: r.resolved_ad_id,
-          adset_id: r.resolved_adset_id,
-        }))
-      )
-      const rBookCamp = {}
-      for (const r of resolvedQualBookings) {
-        const ad = adsById[r.resolved_ad_id]
-        const camp = ad?.campaign_name
-        if (!camp) continue
-        rBookCamp[camp] = (rBookCamp[camp] || 0) + 1
-      }
+      // Resolver-view qualified bookings per ad / adset / campaign_name
+      // (campaign keyed by name via the resolved ad's parent so the key
+      // matches tfCampaign / ghlBookedCampaign). Tallied in the resolved-
+      // bookings normalization pass above.
       setResolvedBookedAd(rBookAd)
       setResolvedBookedAdset(rBookAdset)
       setResolvedBookedCampaign(rBookCamp)
@@ -1076,16 +999,24 @@ export default function AdsPerformance() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Build the hierarchical tree: campaign → adset → ads, with rollups.
-  // Parent status is derived bottom-up: if ANY descendant ad is ACTIVE the
-  // parent counts as active. Used both for the status dot and for hiding
-  // all-paused branches when statusFilter === 'ACTIVE'.
-  const tree = useMemo(() => {
+  // Build the hierarchical data model: campaign → adset → ads, with
+  // per-ad rollups, per-campaign winning attributes (topAttrs) and the
+  // precomputed parent-overlay objects (visOverlay) the visible pass
+  // applies. Parent status is derived bottom-up: if ANY descendant ad is
+  // ACTIVE the parent counts as active.
+  //
+  // DATA-ONLY deps. This used to be one giant memo (26 deps including
+  // sortKey/sortDir/advFilter/statusFilter) that re-ran every per-ad
+  // rollup on every sort click and advanced-filter keystroke. Split:
+  // rollupTree rebuilds only when source data changes; the cheap `tree`
+  // memo below does status-filter / overlay-apply / numeric-filter /
+  // sort only.
+  const rollupTree = useMemo(() => {
     const q = search.trim().toLowerCase()
     const filteredAds = ads.filter(a => {
       // Per-ad status filter only applies AT the ad level for the
       // current filter mode. We still need ALL ads to compute parent
-      // rollups; we hide branches in a second pass.
+      // rollups; we hide branches in a second pass (the `tree` memo).
       if (q) {
         const blob = `${a.ad_name || ''} ${a.campaign_name || ''} ${a.adset_name || ''}`.toLowerCase()
         if (!blob.includes(q)) return false
@@ -1101,7 +1032,6 @@ export default function AdsPerformance() {
         campaigns.set(cid, {
           id: cid, name: cname,
           ad_sets: new Map(),
-          rollup: emptyRollup(),
           activeAdCount: 0, totalAdCount: 0,
           // attrBookedCounts[attr][value] = sum(booked) of ads in this campaign with that value.
           // Used to compute the leading value per attribute on the campaign row.
@@ -1113,7 +1043,7 @@ export default function AdsPerformance() {
       const asid = a.adset_id || 'no-adset'
       const asname = a.adset_name || 'Untitled ad set'
       if (!camp.ad_sets.has(asid)) {
-        camp.ad_sets.set(asid, { id: asid, name: asname, ads: [], rollup: emptyRollup(), activeAdCount: 0, totalAdCount: 0 })
+        camp.ad_sets.set(asid, { id: asid, name: asname, ads: [], activeAdCount: 0, totalAdCount: 0 })
       }
       const adset = camp.ad_sets.get(asid)
 
@@ -1125,12 +1055,11 @@ export default function AdsPerformance() {
       camp.totalAdCount++
       if (isActive) { adset.activeAdCount++; camp.activeAdCount++ }
 
-      // Spend always sums bottom-up (always exactly tied to ads.ad_id).
-      // Typeform/HYROS fields are SUMMED bottom-up too, but we then
-      // overlay the adset/campaign view rows so that leads with only
-      // utm_term or only utm_campaign also surface at the parent level.
-      addRollup(adset.rollup, adRollup)
-      addRollup(camp.rollup, adRollup)
+      // NOTE: parent rollups are NOT summed here. The visible pass (the
+      // `tree` memo) always rebuilds adset/campaign rollups from the
+      // status-filtered ads, so a pre-filter sum would be discarded
+      // anyway — the old code computed and overlaid it, then threw it
+      // away when it replaced `rollup` on every output node.
 
       // Attribute roll-up: for each tagged ad, attribute booked-count to
       // each of its attribute values. After the loop the campaign's
@@ -1168,37 +1097,46 @@ export default function AdsPerformance() {
       camp.topAttrs = top
     }
 
-    // Overlay ad-set + campaign-level Typeform numbers (catches leads
-    // where utm_content didn't match a specific ad name but utm_term
-    // or utm_campaign did). Also overlay unified close attribution at
-    // each parent level so HYROS-attributed closes (Shain Mann, Jeff
-    // Stovall, etc) flow up correctly even when the closer_call had no
-    // typeform behind it.
-    // Overlay all parent-level counts. MAX of bottom-up sum vs view value
-    // for each metric. Payment revenue is overlaid SUM-style because each
-    // payment maps to one ad already; the parent should sum its children.
-    const overlayMax = (target, val, field) => { if (val > (target[field] || 0)) target[field] = val }
+    // Precompute the parent-level overlay objects the visible pass
+    // applies on top of the filtered bottom-up sums: ad-set + campaign
+    // Typeform numbers (catches leads where utm_content didn't match a
+    // specific ad name but utm_term or utm_campaign did), unified close
+    // attribution (so HYROS-attributed closes flow up even when the
+    // closer_call had no typeform behind it) and the GHL maxes. Looking
+    // these maps up once here keeps the per-keystroke pass to plain
+    // property reads.
+    //
+    // NOTE: resolvedBooked* overlays are intentionally OMITTED — the
+    // visible pass never applied them (the old code only applied them to
+    // pre-filter rollups it then discarded). The resolver's booked counts
+    // that DO surface in rows arrive via the tf* maps' booked_calls
+    // MAX-fold inside load().
     for (const camp of campaigns.values()) {
       for (const set of camp.ad_sets.values()) {
-        const tf = tfAdset[set.id]
-        if (tf) overlayTypeformIfHigher(set.rollup, tf)
-        const cs = closeAdset[set.id]
-        if (cs) overlayClose(set.rollup, cs)
-        overlayMax(set.rollup, ghlLeadsAdset[set.id]  || 0, 'tfLeads')
-        overlayMax(set.rollup, ghlBookedAdset[set.id] || 0, 'tfBooked')
-        overlayMax(set.rollup, resolvedBookedAdset[set.id] || 0, 'tfBooked')
-        overlayMax(set.rollup, ghlLivesAdset[set.id]  || 0, 'tfLive')
+        set.visOverlay = {
+          tf:        tfAdset[set.id] || null,
+          close:     closeAdset[set.id] || null,
+          ghlLeads:  ghlLeadsAdset[set.id]  || 0,
+          ghlBooked: ghlBookedAdset[set.id] || 0,
+          ghlLives:  ghlLivesAdset[set.id]  || 0,
+        }
       }
-      const tfc = tfCampaign[camp.name]
-      if (tfc) overlayTypeformIfHigher(camp.rollup, tfc)
-      const cc = closeCampaign[camp.name]
-      if (cc) overlayClose(camp.rollup, cc)
-      overlayMax(camp.rollup, ghlLeadsCampaign[camp.name]  || 0, 'tfLeads')
-      overlayMax(camp.rollup, ghlBookedCampaign[camp.name] || 0, 'tfBooked')
-      overlayMax(camp.rollup, resolvedBookedCampaign[camp.name] || 0, 'tfBooked')
-      overlayMax(camp.rollup, ghlLivesCampaign[camp.name]  || 0, 'tfLive')
+      camp.visOverlay = {
+        tf:        tfCampaign[camp.name] || null,
+        close:     closeCampaign[camp.name] || null,
+        ghlLeads:  ghlLeadsCampaign[camp.name]  || 0,
+        ghlBooked: ghlBookedCampaign[camp.name] || 0,
+        ghlLives:  ghlLivesCampaign[camp.name]  || 0,
+      }
     }
+    return Array.from(campaigns.values())
+  }, [ads, stats, hyros, attrsByAd, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, ghlBookedAd, ghlBookedAdset, ghlBookedCampaign, ghlLivesAd, ghlLivesAdset, ghlLivesCampaign, search])
 
+  // Visible tree: status filter → rebuild rollups from the filtered ads →
+  // re-apply parent overlays → advanced numeric filter → sort. No per-ad
+  // rollup recompute happens here, so sort clicks and filter keystrokes
+  // stay cheap.
+  const tree = useMemo(() => {
     // Parse advanced numeric filters once.
     const num = (v) => (v === '' || v == null ? null : parseFloat(v))
     const f = {
@@ -1226,7 +1164,20 @@ export default function AdsPerformance() {
       return true
     }
 
-    // Now apply the status filter at each level. CRITICAL: rebuild the
+    // Re-apply parent overlays (typeform / close / GHL) so adset +
+    // campaign cells continue to show deduped union counts that include
+    // leads/bookings attributed via utm_term / utm_campaign (not directly
+    // to an ad). Overlays overwrite — same semantics as before the split.
+    const overlayMax = (target, val, field) => { if (val > (target[field] || 0)) target[field] = val }
+    const applyParentOverlays = (rollup, ov) => {
+      if (ov.tf) overlayTypeformIfHigher(rollup, ov.tf)
+      if (ov.close) overlayClose(rollup, ov.close)
+      overlayMax(rollup, ov.ghlLeads,  'tfLeads')
+      overlayMax(rollup, ov.ghlBooked, 'tfBooked')
+      overlayMax(rollup, ov.ghlLives,  'tfLive')
+    }
+
+    // Apply the status filter at each level. CRITICAL: rebuild the
     // adset + campaign rollups from the FILTERED ads so totals.spend
     // (and every other top-tile metric derived from `tree`) reflects
     // only the visible-status ads. Prior version kept the pre-filter
@@ -1235,49 +1186,34 @@ export default function AdsPerformance() {
     // was actually the totals double-counting the active ads' spend
     // while the table only showed paused ads.
     const visibleCampaigns = []
-    for (const camp of campaigns.values()) {
+    for (const camp of rollupTree) {
       const visibleSets = []
       const campVisibleRollup = emptyRollup()
       for (const set of camp.ad_sets.values()) {
-        let ads = set.ads
-        if (statusFilter === 'ACTIVE') ads = ads.filter(x => x.isActive)
-        else if (statusFilter === 'PAUSED') ads = ads.filter(x => !x.isActive)
+        // ALWAYS a fresh array — rollupTree is memoized across renders
+        // and the sort below mutates. Sorting set.ads in place (the old
+        // code did, harmlessly, because it rebuilt the hierarchy every
+        // run) would now corrupt the cached hierarchy.
+        let ads
+        if (statusFilter === 'ACTIVE')      ads = set.ads.filter(x => x.isActive)
+        else if (statusFilter === 'PAUSED') ads = set.ads.filter(x => !x.isActive)
+        else                                ads = set.ads.slice()
         if (!ads.length) continue
         // Rebuild set rollup from filtered ads.
         const setVisibleRollup = emptyRollup()
         for (const a of ads) addRollup(setVisibleRollup, a.rollup)
-        // Re-apply parent overlays (typeform / close / GHL) so adset +
-        // campaign cells continue to show deduped union counts that
-        // include leads/bookings attributed via utm_term / utm_campaign
-        // (not directly to an ad). Overlays overwrite — same semantics
-        // as the pre-filter build.
-        const tf = tfAdset[set.id]
-        if (tf) overlayTypeformIfHigher(setVisibleRollup, tf)
-        const cs = closeAdset[set.id]
-        if (cs) overlayClose(setVisibleRollup, cs)
-        const overlayMax = (target, val, field) => { if (val > (target[field] || 0)) target[field] = val }
-        overlayMax(setVisibleRollup, ghlLeadsAdset[set.id]  || 0, 'tfLeads')
-        overlayMax(setVisibleRollup, ghlBookedAdset[set.id] || 0, 'tfBooked')
-        overlayMax(setVisibleRollup, ghlLivesAdset[set.id]  || 0, 'tfLive')
+        applyParentOverlays(setVisibleRollup, set.visOverlay)
         addRollup(campVisibleRollup, setVisibleRollup)
         visibleSets.push({ ...set, rollup: setVisibleRollup, ads })
       }
       if (!visibleSets.length) continue
       // Re-apply campaign overlays on the filtered campaign rollup.
-      const tfc = tfCampaign[camp.name]
-      if (tfc) overlayTypeformIfHigher(campVisibleRollup, tfc)
-      const cc = closeCampaign[camp.name]
-      if (cc) overlayClose(campVisibleRollup, cc)
-      const overlayMax2 = (target, val, field) => { if (val > (target[field] || 0)) target[field] = val }
-      overlayMax2(campVisibleRollup, ghlLeadsCampaign[camp.name]  || 0, 'tfLeads')
-      overlayMax2(campVisibleRollup, ghlBookedCampaign[camp.name] || 0, 'tfBooked')
-      overlayMax2(campVisibleRollup, ghlLivesCampaign[camp.name]  || 0, 'tfLive')
+      applyParentOverlays(campVisibleRollup, camp.visOverlay)
       // Advanced filter runs at the filtered campaign rollup.
       if (!passesAdv(campVisibleRollup)) continue
-      const compareAds = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
-      for (const s of visibleSets) s.ads.sort(compareAds)
-      const compareSets = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
-      visibleSets.sort(compareSets)
+      const byRollup = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
+      for (const s of visibleSets) s.ads.sort(byRollup)
+      visibleSets.sort(byRollup)
       // Hide ONLY truly-empty campaigns (no spend, no leads, no
       // bookings, no lives, no closes). Previously this filter was
       // tighter (spend OR leads only) which hid campaigns whose old
@@ -1295,14 +1231,15 @@ export default function AdsPerformance() {
       if (!hasActivity && !search.trim()) continue
       visibleCampaigns.push({ ...camp, rollup: campVisibleRollup, ad_sets_sorted: visibleSets })
     }
-    const compareCamps = (a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir)
-    visibleCampaigns.sort(compareCamps)
+    visibleCampaigns.sort((a, b) => sortCompare(a.rollup, b.rollup, sortKey, sortDir))
     return visibleCampaigns
-  }, [ads, stats, hyros, attrsByAd, tfAd, tfAdset, tfCampaign, closeAd, closeAdset, closeCampaign, ghlLeadsAd, ghlLeadsAdset, ghlLeadsCampaign, ghlBookedAd, ghlBookedAdset, ghlBookedCampaign, ghlLivesAd, ghlLivesAdset, ghlLivesCampaign, resolvedBookedAd, resolvedBookedAdset, resolvedBookedCampaign, statusFilter, search, sortKey, sortDir, advFilter])
+  }, [rollupTree, statusFilter, advFilter, sortKey, sortDir, search])
 
-  // When filter or data changes and the user hasn't manually toggled
-  // anything, auto-expand the visible campaigns. This way Ben lands on a
-  // page with ALL his active campaigns already open — no extra clicks.
+  // When the DATA changes and the user hasn't manually toggled anything,
+  // auto-expand the visible campaigns. This way Ben lands on a page with
+  // ALL his active campaigns already open — no extra clicks. Keyed on
+  // rollupTree (data identity) so sort clicks and filter keystrokes
+  // can't re-trigger it.
   useEffect(() => {
     if (!tree.length) return
     setExpandedCampaigns(prev => {
@@ -1311,7 +1248,10 @@ export default function AdsPerformance() {
       if (prev.size > 0) return prev
       return new Set(tree.map(c => c.id))
     })
-  }, [tree.length])
+  // `tree` is read for the CURRENT visible ids but is deliberately not a
+  // dep — only fresh data should trigger the expand.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rollupTree])
 
   const totals = useMemo(() => {
     const t = emptyRollup()
