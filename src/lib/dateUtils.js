@@ -29,12 +29,14 @@ export function sinceDate(range) {
  */
 export function rangeToDays(range) {
   if (typeof range === 'number') return range
+  // ET-anchored: browser-local Date here made NZ users' windows drift ±1 day
+  // from the ET buckets everything else uses.
   if (range === 'mtd') {
-    const now = new Date()
-    return now.getDate()
+    return parseInt(todayET().slice(8, 10), 10)
   }
   if (range && typeof range === 'object' && range.from) {
-    const diff = Math.ceil((new Date() - new Date(range.from)) / 86400000)
+    const end = range.to || todayET()
+    const diff = Math.round((new Date(end + 'T12:00:00') - new Date(range.from + 'T12:00:00')) / 86400000) + 1
     return Math.max(diff, 1)
   }
   return 30

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { sinceDate } from '../lib/dateUtils'
+import {sinceDate, dateRangeBoundsET } from '../lib/dateUtils'
 
 // Module-level cache keyed by (closerId, days). 3-min TTL — closer_eod_reports
 // updates throughout the day as closers submit, so we keep it fresher than
@@ -10,6 +10,7 @@ const eodCache = new Map()
 const EOD_TTL_MS = 3 * 60 * 1000
 
 function eodKey(closerId, days) {
+  if (days && typeof days === 'object') days = `${days.from}_${days.to || ''}`
   return `${closerId || 'all'}:${days}`
 }
 
@@ -27,7 +28,8 @@ export function useCloserEODs(closerId, days = 30) {
       let query = supabase
         .from('closer_eod_reports')
         .select('*, closer:team_members(name)')
-        .gte('report_date', sinceDate(days))
+        .gte('report_date', dateRangeBoundsET(days).startStr)
+        .lte('report_date', dateRangeBoundsET(days).endStr)
         .order('report_date', { ascending: false })
 
       if (closerId) query = query.eq('closer_id', closerId)
@@ -73,7 +75,8 @@ export async function prewarmCloserEODs(closerId = null, days = 30) {
   let query = supabase
     .from('closer_eod_reports')
     .select('*, closer:team_members(name)')
-    .gte('report_date', sinceDate(days))
+    .gte('report_date', dateRangeBoundsET(days).startStr)
+    .lte('report_date', dateRangeBoundsET(days).endStr)
     .order('report_date', { ascending: false })
   if (closerId) query = query.eq('closer_id', closerId)
   const { data, error } = await query
@@ -115,7 +118,11 @@ export function useCloserCallBreakdown(closerId, days = 30) {
       let reportQ = supabase
         .from('closer_eod_reports')
         .select('id, closer_id')
-        .gte('report_date', sinceDate(days))
+        .gte('report_date', dateRangeBoundsET(days).startStr)
+        .lte('report_date', dateRangeBoundsET(days).endStr)
+        // Doctrine (matches useCloserCallProspectMetrics + the marketing mv):
+        // unconfirmed EODs don't count anywhere else, so not here either.
+        .eq('is_confirmed', true)
       if (closerId) reportQ = reportQ.eq('closer_id', closerId)
       const { data: reports } = await reportQ
 
@@ -129,10 +136,18 @@ export function useCloserCallBreakdown(closerId, days = 30) {
         return
       }
 
-      const { data: calls } = await supabase
-        .from('closer_calls')
-        .select('eod_report_id, call_type, outcome, prospect_name')
-        .in('eod_report_id', reportIds)
+      // Paged — a single select silently truncates at 1000 rows on long
+      // custom ranges (same fix useCloserCallProspectMetrics carries).
+      let calls = []
+      for (let off = 0; ; off += 1000) {
+        const { data: page } = await supabase
+          .from('closer_calls')
+          .select('eod_report_id, call_type, outcome, prospect_name')
+          .in('eod_report_id', reportIds)
+          .range(off, off + 999)
+        calls = calls.concat(page || [])
+        if (!page || page.length < 1000) break
+      }
 
       const norm = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ')
 
@@ -152,7 +167,7 @@ export function useCloserCallBreakdown(closerId, days = 30) {
         if (!cid) continue
         if (isHistoricalPlaceholder(c.prospect_name)) continue
         if (!sets[cid]) sets[cid] = { live: new Set(), closed: new Set() }
-        if (!counts[cid]) counts[cid] = { ncCloses: 0, fuCloses: 0, ncLive: 0, fuLive: 0, allCloses: 0 }
+        if (!counts[cid]) counts[cid] = { ncCloses: 0, fuCloses: 0, ncLive: 0, fuLive: 0, allCloses: 0, ncLiveRows: 0, ncNoShowRows: 0, ncReschedRows: 0 }
         const isNew = c.call_type === 'new_call'
         const isFu  = c.call_type === 'follow_up'
         const isCloseEligible = isNew || isFu
@@ -174,6 +189,11 @@ export function useCloserCallBreakdown(closerId, days = 30) {
         if (isNew && isLiveLegacy) k.ncLive++
         if (isFu  && isLiveLegacy) k.fuLive++
         if (c.outcome === 'closed') k.allCloses++
+        // Doctrine counters (mirror the marketing mv definitions): NC rows,
+        // not deduped — Net Show = ncLiveRows ÷ (ncLiveRows + ncNoShowRows).
+        if (isNew && ['closed', 'not_closed'].includes(c.outcome)) k.ncLiveRows++
+        if (isNew && c.outcome === 'no_show') k.ncNoShowRows++
+        if (isNew && c.outcome === 'rescheduled') k.ncReschedRows++
       }
 
       const byCloser = {}
@@ -252,7 +272,9 @@ export function useCloserStats(closerId, days = 30) {
     (acc, r) => ({
       ncBooked: acc.ncBooked + (r.nc_booked || 0),
       fuBooked: acc.fuBooked + (r.fu_booked || 0),
-      noShows: acc.noShows + (r.nc_no_shows || 0) + (r.fu_no_shows || 0),
+      // NC-only — marketing's no_shows are NEW-call no-shows; adding FU
+      // no-shows made this page read 27 where marketing reads 24 (30d).
+      noShows: acc.noShows + (r.nc_no_shows || 0),
       liveCalls: acc.liveCalls + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
       liveNC: acc.liveNC + (r.live_nc_calls || 0),
       offers: acc.offers + (r.offers || 0),

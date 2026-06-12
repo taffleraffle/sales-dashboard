@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { sinceDate } from '../lib/dateUtils'
+import {sinceDate, dateRangeBoundsET } from '../lib/dateUtils'
 import { INTRO_CALENDARS } from '../utils/constants'
 
 const isAutoLead = l => l.lead_source === 'auto' || INTRO_CALENDARS.includes(l.lead_source)
@@ -14,7 +14,8 @@ export function useFunnelData(days = 30) {
       const { data: leads } = await supabase
         .from('setter_leads')
         .select('id, status, lead_source, revenue_attributed')
-        .gte('date_set', sinceDate(days))
+        .gte('date_set', dateRangeBoundsET(days).startStr)
+        .lte('date_set', dateRangeBoundsET(days).endStr)
 
       const all = leads || []
       const auto = all.filter(isAutoLead)

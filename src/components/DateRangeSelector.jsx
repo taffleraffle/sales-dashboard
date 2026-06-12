@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Calendar, ChevronDown } from 'lucide-react'
 import EditorialDate from './EditorialDate'
+import { todayET, etDateOffset } from '../lib/dateUtils'
 
 const presets = [
   { label: 'Today', days: 1 },
@@ -210,16 +211,17 @@ export default function DateRangeSelector({ selected, onChange }) {
               { label: 'This Quarter', quarter: true },
             ].map(preset => {
               const handleClick = () => {
-                const now = new Date()
-                const toStr = now.toISOString().split('T')[0]
+                // ET-anchored like every other range in the app. The old
+                // toISOString() (UTC) put `to` a day ahead of ET each NZ
+                // evening, so these presets disagreed with the main ones.
+                const toStr = todayET()
                 let fromStr
                 if (preset.quarter) {
-                  const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)
-                  fromStr = qStart.toISOString().split('T')[0]
+                  const [y, m] = toStr.split('-').map(Number)
+                  const qMonth = Math.floor((m - 1) / 3) * 3 + 1
+                  fromStr = `${y}-${String(qMonth).padStart(2, '0')}-01`
                 } else {
-                  const d = new Date()
-                  d.setDate(d.getDate() - preset.from)
-                  fromStr = d.toISOString().split('T')[0]
+                  fromStr = etDateOffset(-(preset.from - 1))
                 }
                 setCustomFrom(fromStr)
                 setCustomTo(toStr)

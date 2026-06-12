@@ -12099,7 +12099,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   }, [task.creative_id, task.creative_name, task.creative_type, task.thumbnail_url, submissions])
 
   return (
-    <Modal open={true} onClose={handleCloseModal} size="lg"
+    <Modal open={true} onClose={handleCloseModal} size="xl"
       eyebrow="Edit task"
       title={task.creative_name}
       subtitle={`${task.creative_type || ''}${task.creative_creator ? ' · ' + task.creative_creator : ''}${task.v21_script_id ? ' · ' + task.v21_script_id : ''}`}
@@ -12281,6 +12281,100 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               }}>Open in Drive</a>
           </div>
         ) : null}
+
+        </div>{/* end LEFT column (player) */}
+        {/* ── RIGHT details rail ── */}
+        <div style={{ display: 'grid', gap: 14, minWidth: 0, alignContent: 'start' }}>
+        {/* Quick-action status row — colored pill per status when selected. */}
+        <div>
+          <div style={chipLabelStyle}>Status</div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            {['queued', 'in_progress', 'review', 'needs_revision', 'done', 'blocked'].map(s => {
+              const isOn = status === s
+              const c = TASK_STATUS_COLOR[s] || 'var(--ink)'
+              return (
+                <button key={s} onClick={() => setStatus(s)} style={{
+                  padding: '5px 10px',
+                  fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  background: isOn ? c : 'white',
+                  color: isOn ? 'white' : 'var(--ink-2)',
+                  border: '1px solid ' + (isOn ? c : 'var(--rule)'),
+                  borderRadius: 2, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                }}>
+                  {!isOn && <span style={{ width: 7, height: 7, borderRadius: '50%', background: c }} />}
+                  <span>{TASK_STATUS_LABEL[s] || s}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
+          <Field label="Editor">
+            <EditorPicker value={editorId || null} editors={editors}
+              onChange={(id) => setEditorId(id || '')}
+              placeholder="— Unassigned" />
+          </Field>
+          <Field label="Priority">
+            <OptionPicker value={priority} options={PRIORITY_OPTIONS}
+              onChange={setPriority} />
+          </Field>
+          {/* Task-type picker removed 2026-06-11 (Ben) — taskType state
+              stays so existing values round-trip through save untouched. */}
+          <Field label="Start date">
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
+          </Field>
+          <Field label="Due date">
+            <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
+          </Field>
+        </div>
+
+        {/* Folder — where the source clip lives in the library. Inline so
+            filing doesn't require a trip back to the Library tab. */}
+        <Field label="Folder">
+          <button type="button" onClick={openFolderAssign}
+            title="Move the source clip (and its versions) into a library folder"
+            style={{
+              ...inputStyle, textAlign: 'left', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+            }}>
+            <span style={{
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              color: creativeFolder?.name ? 'var(--ink)' : 'var(--ink-3)',
+            }}>
+              {creativeFolder === undefined ? '…' : (creativeFolder?.name || 'Library root')}
+            </span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0 }}>
+              change ▾
+            </span>
+          </button>
+        </Field>
+
+        <Field label="Notes">
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--sans)' }}
+            placeholder="Notes on this task — feedback, blockers, links to revisions…" />
+        </Field>
+
+        {/* Script the footage was shot from — read-only reference. */}
+        {scriptText && scriptText.trim() && (
+          <div>
+            <div style={chipLabelStyle}>Script</div>
+            <div style={{
+              marginTop: 6, padding: '12px 14px',
+              background: 'var(--paper-2)', border: '1px solid var(--rule)',
+              borderLeft: '3px solid var(--accent)', borderRadius: 2,
+              fontFamily: 'var(--sans)', fontSize: 13, lineHeight: 1.6,
+              color: 'var(--ink-2)', whiteSpace: 'pre-wrap',
+              maxHeight: 280, overflowY: 'auto',
+            }}>{scriptText}</div>
+          </div>
+        )}
+        </div>{/* end RIGHT rail */}
+        </div>{/* end 2-col grid */}
+
 
         {/* Submitted work — stacked list of every upload (v1, v2, v3, …)
             from lib_task_submissions. Newest first. Each card has its
@@ -12472,99 +12566,6 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             Source file: <a href={task.drive_url} target="_blank" rel="noreferrer" style={{ color: 'var(--ink)' }}>{task.drive_url.slice(0, 80)}…</a>
           </div>
         )}
-        </div>{/* end LEFT column */}
-
-        {/* ── RIGHT details rail ── */}
-        <div style={{ display: 'grid', gap: 14, minWidth: 0, alignContent: 'start' }}>
-        {/* Quick-action status row — colored pill per status when selected. */}
-        <div>
-          <div style={chipLabelStyle}>Status</div>
-          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-            {['queued', 'in_progress', 'review', 'needs_revision', 'done', 'blocked'].map(s => {
-              const isOn = status === s
-              const c = TASK_STATUS_COLOR[s] || 'var(--ink)'
-              return (
-                <button key={s} onClick={() => setStatus(s)} style={{
-                  padding: '5px 10px',
-                  fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
-                  letterSpacing: '0.06em', textTransform: 'uppercase',
-                  background: isOn ? c : 'white',
-                  color: isOn ? 'white' : 'var(--ink-2)',
-                  border: '1px solid ' + (isOn ? c : 'var(--rule)'),
-                  borderRadius: 2, cursor: 'pointer',
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                }}>
-                  {!isOn && <span style={{ width: 7, height: 7, borderRadius: '50%', background: c }} />}
-                  <span>{TASK_STATUS_LABEL[s] || s}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
-          <Field label="Editor">
-            <EditorPicker value={editorId || null} editors={editors}
-              onChange={(id) => setEditorId(id || '')}
-              placeholder="— Unassigned" />
-          </Field>
-          <Field label="Priority">
-            <OptionPicker value={priority} options={PRIORITY_OPTIONS}
-              onChange={setPriority} />
-          </Field>
-          {/* Task-type picker removed 2026-06-11 (Ben) — taskType state
-              stays so existing values round-trip through save untouched. */}
-          <Field label="Start date">
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
-          </Field>
-          <Field label="Due date">
-            <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
-          </Field>
-        </div>
-
-        {/* Folder — where the source clip lives in the library. Inline so
-            filing doesn't require a trip back to the Library tab. */}
-        <Field label="Folder">
-          <button type="button" onClick={openFolderAssign}
-            title="Move the source clip (and its versions) into a library folder"
-            style={{
-              ...inputStyle, textAlign: 'left', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-            }}>
-            <span style={{
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              color: creativeFolder?.name ? 'var(--ink)' : 'var(--ink-3)',
-            }}>
-              {creativeFolder === undefined ? '…' : (creativeFolder?.name || 'Library root')}
-            </span>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0 }}>
-              change ▾
-            </span>
-          </button>
-        </Field>
-
-        <Field label="Notes">
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
-            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--sans)' }}
-            placeholder="Notes on this task — feedback, blockers, links to revisions…" />
-        </Field>
-
-        {/* Script the footage was shot from — read-only reference. */}
-        {scriptText && scriptText.trim() && (
-          <div>
-            <div style={chipLabelStyle}>Script</div>
-            <div style={{
-              marginTop: 6, padding: '12px 14px',
-              background: 'var(--paper-2)', border: '1px solid var(--rule)',
-              borderLeft: '3px solid var(--accent)', borderRadius: 2,
-              fontFamily: 'var(--sans)', fontSize: 13, lineHeight: 1.6,
-              color: 'var(--ink-2)', whiteSpace: 'pre-wrap',
-              maxHeight: 280, overflowY: 'auto',
-            }}>{scriptText}</div>
-          </div>
-        )}
-        </div>{/* end RIGHT rail */}
-        </div>{/* end 2-col grid */}
       </div>
       {/* SubmissionPreviewModal stacks on top of this task modal when the
           operator clicks Review on a submission card. The Modal primitive's
