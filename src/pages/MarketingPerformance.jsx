@@ -2262,6 +2262,15 @@ const DRILLDOWN_CONFIG = {
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No leads in this window.',
+    // The tile counts ad-attributed, non-excluded leads only; this list
+    // deliberately shows everything (incl. untracked/marked) so operators
+    // can fix attribution. The footer reconciles the two counts.
+    footer: rows => {
+      const counted = rows.filter(r => r.status === 'qual').length
+      return counted === rows.length
+        ? `${rows.length} leads — all counted by the tile`
+        : `${rows.length} listed · ${counted} counted by the tile (${rows.length - counted} untracked/marked)`
+    },
   },
   adspend: {
     title: 'Adspend',
@@ -3014,7 +3023,7 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
           )}
         </div>
         <div className="px-5 py-2 text-[10px] text-text-400/80 border-t border-border-default">
-          <span>{rows != null && `${rows.length} row${rows.length === 1 ? '' : 's'} shown`}</span>
+          <span>{rows != null && (config.footer ? config.footer(rows) : `${rows.length} row${rows.length === 1 ? '' : 's'} shown`)}</span>
         </div>
       </div>
     </div>
@@ -4905,11 +4914,20 @@ export default function MarketingPerformance() {
       {showBenchmarks && <BenchmarksModal benchmarks={benchmarks} onSave={updateBenchmark} onClose={() => setShowBenchmarks(false)} />}
       {showImportModal && <CSVImportModal onImport={handleModalImport} onClose={() => setShowImportModal(false)} />}
       {drilldown && (() => {
-        // Build a date → adspend map from marketing_tracker so cost-per
-        // drilldown charts can compute CPL / Cost-per-Booking per day.
+        // Build a date → adspend (USD) map for the cost-per drilldown charts.
+        // Under an audience filter, sum the audience rollup's NZD spend ×fx —
+        // dividing audience row counts by GLOBAL tracker spend inflated every
+        // per-day cost metric whenever a chip was selected.
         const spendByDate = {}
-        for (const e of (entries || [])) {
-          if (e.date) spendByDate[e.date] = parseFloat(e.adspend || 0)
+        if (selectedAudiences.size > 0) {
+          for (const r of (audienceDaily || [])) {
+            if (!r.date || !selectedAudiences.has(r.audience)) continue
+            spendByDate[r.date] = (spendByDate[r.date] || 0) + (Number(r.adspend) || 0) * NZD_TO_USD
+          }
+        } else {
+          for (const e of (entries || [])) {
+            if (e.date) spendByDate[e.date] = parseFloat(e.adspend || 0)
+          }
         }
         return <DrilldownModal kind={drilldown} range={range} onClose={(mutated) => { setDrilldown(null); if (mutated) setHygieneRefetchKey(k => k + 1) }} spendByDate={spendByDate} selectedAudiences={selectedAudiences} />
       })()}
