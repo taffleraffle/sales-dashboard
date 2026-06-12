@@ -18,43 +18,11 @@
   Cost: ~5-15 seconds of browser CPU per 30s clip. Linear with duration.
 */
 
-let _ffmpeg = null
-let _loading = null
+// Loader extracted to ffmpegCore.js (2026-06-12) so the Clip Editor and
+// audio extraction share one ~25MB core instance.
+import { getFFmpeg } from './ffmpegCore'
 
-const FFMPEG_CORE_VERSION = '0.12.6'
-// Use CDN-hosted single-threaded core (no cross-origin isolation needed)
-const CORE_BASE_URL = `https://unpkg.com/@ffmpeg/core@${FFMPEG_CORE_VERSION}/dist/umd`
-
-async function getFfmpeg(onProgress) {
-  if (_ffmpeg) return _ffmpeg
-  if (_loading) return _loading
-
-  _loading = (async () => {
-    onProgress?.('Loading audio extractor (one-time, ~25MB)…')
-    const { FFmpeg } = await import('@ffmpeg/ffmpeg')
-    const { toBlobURL } = await import('@ffmpeg/util')
-
-    const ffmpeg = new FFmpeg()
-    ffmpeg.on('log', ({ message }) => {
-      if (import.meta.env.DEV) console.log('[ffmpeg]', message)
-    })
-
-    // Load core + wasm via Blob URLs to dodge CORS issues
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${CORE_BASE_URL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${CORE_BASE_URL}/ffmpeg-core.wasm`, 'application/wasm'),
-    })
-
-    _ffmpeg = ffmpeg
-    return ffmpeg
-  })()
-
-  try {
-    return await _loading
-  } finally {
-    _loading = null
-  }
-}
+const getFfmpeg = (onProgress) => getFFmpeg(onProgress)
 
 /**
  * Extract the audio track from a video File and return it as an
