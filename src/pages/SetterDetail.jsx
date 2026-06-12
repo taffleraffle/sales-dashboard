@@ -19,16 +19,12 @@ export default function SetterDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [range, setRange] = useState(30)
-  // Hooks take the RAW range (incl. custom {from,to}) and bound both ends via
-  // dateRangeBoundsET — collapsing to rangeToDays here discarded the custom
-  // `to` date, so "May 1 – May 15" silently rendered May 1 → today.
-  // `days` stays numeric for APIs/labels that genuinely need a count.
-  const days = rangeToDays(range)
+  const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const [member, setMember] = useState(null)
   const [leads, setLeads] = useState([])
-  const stats = useSetterStats(id, range)
-  const { reports: myEodReports } = useSetterEODs(id, range)
-  const { reports: allReports } = useSetterEODs(null, range)
+  const stats = useSetterStats(id, days)
+  const { reports: myEodReports } = useSetterEODs(id, days)
+  const { reports: allReports } = useSetterEODs(null, days)
   const [showEodHistory, setShowEodHistory] = useState(false)
   const [allLeads, setAllLeads] = useState([])
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })

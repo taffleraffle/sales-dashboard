@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import {sinceDate, dateRangeBoundsET } from '../lib/dateUtils'
+import { sinceDate } from '../lib/dateUtils'
 
 // Module-level cache keyed by (setterId, days). 3-min TTL mirrors the
 // closer EOD cache. Nav between Overview / Setter Overview / EOD dashboards
@@ -26,8 +26,7 @@ export function useSetterEODs(setterId, days = 30) {
       let query = supabase
         .from('setter_eod_reports')
         .select('*, setter:team_members(name)')
-        .gte('report_date', dateRangeBoundsET(days).startStr)
-        .lte('report_date', dateRangeBoundsET(days).endStr)
+        .gte('report_date', sinceDate(days))
         .order('report_date', { ascending: false })
 
       if (setterId) query = query.eq('setter_id', setterId)
@@ -71,8 +70,7 @@ export async function prewarmSetterEODs(setterId = null, days = 30) {
   let query = supabase
     .from('setter_eod_reports')
     .select('*, setter:team_members(name)')
-    .gte('report_date', dateRangeBoundsET(days).startStr)
-    .lte('report_date', dateRangeBoundsET(days).endStr)
+    .gte('report_date', sinceDate(days))
     .order('report_date', { ascending: false })
   if (setterId) query = query.eq('setter_id', setterId)
   const { data, error } = await query

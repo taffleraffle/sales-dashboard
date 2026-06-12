@@ -459,19 +459,15 @@ export default function SalesOverview() {
   const [stl, setStl] = useState(null)
   const [stlLoading, setStlLoading] = useState(true)
 
-  // Hooks take the RAW range (incl. custom {from,to}) and bound both ends via
-  // dateRangeBoundsET — collapsing to rangeToDays here discarded the custom
-  // `to` date, so "May 1 – May 15" silently rendered May 1 → today.
-  // `days` stays numeric for APIs/labels that genuinely need a count.
-  const days = rangeToDays(range)
-  const { data: funnelData, loading: loadingFunnel } = useFunnelData(range)
+  const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
+  const { data: funnelData, loading: loadingFunnel } = useFunnelData(days)
   const { members: closers } = useTeamMembers('closer')
   const { members: setters } = useTeamMembers('setter')
   const { reports: closerReports } = useCloserEODs(null, days)
-  const { breakdown: callBreakdown } = useCloserCallBreakdown(null, range)
+  const { breakdown: callBreakdown } = useCloserCallBreakdown(null, days)
   const { reports: setterReports } = useSetterEODs(null, days)
   const { entries: marketingEntries } = useMarketingTracker()
-  const { leads: recentLeads, refresh: refreshLeads } = useLeadAttribution(range)
+  const { leads: recentLeads, refresh: refreshLeads } = useLeadAttribution(days)
 
   const [showAllRecentLeads, setShowAllRecentLeads] = useState(false)
   const [endangeredLeads, setEndangeredLeads] = useState([])
