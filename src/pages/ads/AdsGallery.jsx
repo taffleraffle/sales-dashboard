@@ -450,6 +450,32 @@ export default function AdsGallery() {
           </div>
         )}
 
+        {/* Filtered-to-nothing state — without it the grid area renders
+            silent blank space and reads as "no ads exist" (the real
+            empty state only covers zero synced ads). */}
+        {!loading && !error && rows.length > 0 && filtered.length === 0 && (
+          <div style={{
+            border: '1px dashed var(--rule)', padding: 40, textAlign: 'center',
+            background: 'var(--paper-2)',
+          }}>
+            <div style={{ fontFamily: 'var(--serif)', fontSize: 16, color: 'var(--ink-2)', marginBottom: 6 }}>
+              No ads match these filters
+            </div>
+            <button type="button"
+              onClick={() => {
+                setStatusFilter('all'); setStateFilter('all')
+                setCampaignFilter('all'); setSpendTier('all'); setSearch('')
+              }}
+              style={{
+                marginTop: 6, padding: '7px 14px',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                background: 'var(--ink)', color: 'var(--paper)',
+                border: 'none', cursor: 'pointer',
+              }}>Clear filters</button>
+          </div>
+        )}
+
         {/* Card grid */}
         {!loading && filtered.length > 0 && (
           <div

@@ -333,12 +333,12 @@ export default function EmailFlows() {
                       <div className="text-right min-w-[50px]"><div className="text-[10px] text-text-400 uppercase">Reply</div><div className={`font-bold ${rateColor(fg.replyRate, 10, 3)}`}>{fg.replyRate}%</div></div>
                       <button
                         onClick={(e) => { e.preventDefault(); setEditingFlow(fg) }}
-                        className="p-1.5 text-text-400/50 hover:text-text-primary transition-colors"
+                        className="row-actions-touch p-1.5 text-text-400 opacity-50 hover:opacity-100 hover:text-text-primary transition-all"
                         title="Edit flow"
                       >
                         <Pencil size={14} />
                       </button>
-                      <button onClick={(e) => { e.preventDefault(); setDeleteTarget(fg.id) }} className="p-1.5 text-text-400/30 hover:text-danger transition-colors" title="Delete flow">
+                      <button onClick={(e) => { e.preventDefault(); setDeleteTarget(fg.id) }} className="row-actions-touch p-1.5 text-text-400 opacity-50 hover:opacity-100 hover:text-danger transition-all" title="Delete flow">
                         <Trash2 size={14} />
                       </button>
                       <Link to={`/sales/email-flows/${fg.id}`} className="p-1.5 text-text-400 group-hover:text-text-primary transition-colors">
