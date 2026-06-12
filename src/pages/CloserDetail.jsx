@@ -15,22 +15,18 @@ export default function CloserDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [range, setRange] = useState(30)
-  // Hooks take the RAW range (incl. custom {from,to}) and bound both ends via
-  // dateRangeBoundsET — collapsing to rangeToDays here discarded the custom
-  // `to` date, so "May 1 – May 15" silently rendered May 1 → today.
-  // `days` stays numeric for APIs/labels that genuinely need a count.
-  const days = rangeToDays(range)
+  const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const [member, setMember] = useState(null)
   const [freshObjections, setFreshObjections] = useState(null)
   const [allCalls, setAllCalls] = useState([])
   const [selectedDate, setSelectedDate] = useState(null)
   const [expandedCallId, setExpandedCallId] = useState(null)
   const syncedRef = useRef(false)
-  const stats = useCloserStats(id, range)
-  const { reports: myReports } = useCloserEODs(id, range)
-  const { reports: allReports } = useCloserEODs(null, range)
-  const { breakdown: myBreak } = useCloserCallBreakdown(id, range)
-  const { breakdown: allBreak } = useCloserCallBreakdown(null, range)
+  const stats = useCloserStats(id, days)
+  const { reports: myReports } = useCloserEODs(id, days)
+  const { reports: allReports } = useCloserEODs(null, days)
+  const { breakdown: myBreak } = useCloserCallBreakdown(id, days)
+  const { breakdown: allBreak } = useCloserCallBreakdown(null, days)
   const { transcripts, loading: loadingTranscripts } = useCloserTranscripts(id)
   const { objections: storedObjections, loading: loadingObjections } = useObjectionAnalysis(id, days)
 
@@ -177,14 +173,7 @@ export default function CloserDetail() {
     ? parseFloat(((companyProspects.closed / companyProspects.live) * 100).toFixed(1))
     : 0
 
-  const mb = myBreak?.[id] || { liveProspects: 0, closedProspects: 0, ncLiveRows: 0, ncNoShowRows: 0, ncReschedRows: 0 }
-  // Sum the per-call doctrine counters across every closer for company-wide
-  // rates (same rows the marketing mv aggregates).
-  const companyRows = Object.values(allBreak || {}).reduce((a, b) => ({
-    ncLiveRows: a.ncLiveRows + (b.ncLiveRows || 0),
-    ncNoShowRows: a.ncNoShowRows + (b.ncNoShowRows || 0),
-    ncReschedRows: a.ncReschedRows + (b.ncReschedRows || 0),
-  }), { ncLiveRows: 0, ncNoShowRows: 0, ncReschedRows: 0 })
+  const mb = myBreak?.[id] || { liveProspects: 0, closedProspects: 0 }
   const myCloseRate = mb.liveProspects > 0
     ? parseFloat(((mb.closedProspects / mb.liveProspects) * 100).toFixed(1))
     : 0
@@ -196,25 +185,18 @@ export default function CloserDetail() {
   const myLiveDeduped   = mb.liveProspects   || 0
 
   const companyRates = {
-    // Net Show — DOCTRINE formula (matches the Marketing page): NC live rows
-    // ÷ (NC live rows + NC no-show rows), from per-call data. The old
-    // live_nc ÷ nc_booked read 32% while marketing read 47-50% on 30d —
-    // nc_booked is a different universe from qualified bookings.
-    showRate: (companyRows.ncLiveRows + companyRows.ncNoShowRows) > 0
-      ? parseFloat(((companyRows.ncLiveRows / (companyRows.ncLiveRows + companyRows.ncNoShowRows)) * 100).toFixed(1)) : 0,
+    // Show rate: new-call only (denominator = nc_booked, numerator = live_nc_calls)
+    showRate: companyTotals.ncBooked > 0 ? parseFloat(((companyTotals.liveNC / companyTotals.ncBooked) * 100).toFixed(1)) : 0,
     closeRate: companyCloseRate,
     offerRate: companyTotals.liveCalls > 0 ? parseFloat(((companyTotals.offers / companyTotals.liveCalls) * 100).toFixed(1)) : 0,
     offerCloseRate: companyTotals.offers > 0 ? parseFloat(((companyTotals.closes / companyTotals.offers) * 100).toFixed(1)) : 0,
-    // Reschedule numerator from confirmed NC call rows (marketing counts
-    // rows, not the EOD counter, which over-reported 15 vs 9 on 30d).
-    rescheduleRate: companyTotals.booked > 0 ? parseFloat(((companyRows.ncReschedRows / companyTotals.booked) * 100).toFixed(1)) : 0,
+    rescheduleRate: companyTotals.booked > 0 ? parseFloat(((companyTotals.reschedules / companyTotals.booked) * 100).toFixed(1)) : 0,
   }
 
-  const myShowRate = (mb.ncLiveRows + mb.ncNoShowRows) > 0
-    ? parseFloat(((mb.ncLiveRows / (mb.ncLiveRows + mb.ncNoShowRows)) * 100).toFixed(1)) : 0
+  const myShowRate = parseFloat(stats.showRate) || 0
   const myOfferRate = parseFloat(stats.offerRate) || 0
   const myOfferCloseRate = stats.offers > 0 ? parseFloat(((myClosesDeduped / stats.offers) * 100).toFixed(1)) : 0
-  const myRescheduleRate = stats.totalBooked > 0 ? parseFloat(((mb.ncReschedRows / stats.totalBooked) * 100).toFixed(1)) : 0
+  const myRescheduleRate = parseFloat(stats.rescheduleRate) || 0
   const avgDealSize = myClosesDeduped > 0 ? parseFloat((stats.revenue / myClosesDeduped).toFixed(0)) : 0
   const totalCash = stats.cash + stats.ascendCash
   const totalRevenue = stats.revenue + stats.ascendRevenue
@@ -251,7 +233,7 @@ export default function CloserDetail() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
         <KPICard label="Booked" value={stats.totalBooked} subtitle={`${stats.ncBooked} NC / ${stats.fuBooked} FU`} />
-        <KPICard label="Net New" value={mb.ncLiveRows} subtitle={`${myLiveDeduped} unique · ${stats.liveNC} EOD-reported`} />
+        <KPICard label="Net New" value={myLiveDeduped} subtitle={`${stats.liveNC} EOD-reported · ${stats.liveCalls - stats.liveNC} FU separately`} />
         <KPICard label="No Shows" value={stats.noShows} />
         <KPICard label="Offers" value={stats.offers} />
         <KPICard label="Closes" value={myClosesDeduped} subtitle={myClosesDeduped !== stats.closes ? `${stats.closes} EOD-reported` : null} />
@@ -296,7 +278,7 @@ export default function CloserDetail() {
         <div className="flex items-center gap-2 mb-4">
           <AlertTriangle size={16} className="text-warning" />
           <h2 className="text-sm font-medium">Most Common Objections</h2>
-          <span className="text-xs text-text-400 ml-auto">{range === 'mtd' ? 'Month to date' : `Last ${days} days`} &middot; Auto-analyzed from Fathom</span>
+          <span className="text-xs text-text-400 ml-auto">Last {days} days &middot; Auto-analyzed from Fathom</span>
         </div>
         {loadingObjections ? (
           <p className="text-text-400 text-sm py-4 text-center">Loading...</p>

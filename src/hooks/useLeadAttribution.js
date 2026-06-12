@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import {sinceDate, dateRangeBoundsET } from '../lib/dateUtils'
+import { sinceDate } from '../lib/dateUtils'
 
 export function useLeadAttribution(range = 30) {
   const [leads, setLeads] = useState([])
@@ -15,8 +15,7 @@ export function useLeadAttribution(range = 30) {
       // (the old ", contacted") 400s the whole query via PostgREST and this
       // page silently rendered zero leads.
       .select('*, setter:team_members!setter_leads_setter_id_fkey(name), closer:team_members!setter_leads_closer_id_fkey(name)')
-      .gte('date_set', dateRangeBoundsET(range).startStr)
-      .lte('date_set', dateRangeBoundsET(range).endStr)
+      .gte('date_set', sinceDate(range))
       .order('date_set', { ascending: false })
 
     if (error) console.error('Failed to fetch leads:', error)

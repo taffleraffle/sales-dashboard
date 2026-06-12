@@ -11,14 +11,10 @@ import { rangeToDays } from '../lib/dateUtils'
 export default function CloserOverview() {
   const navigate = useNavigate()
   const [range, setRange] = useState(30)
-  // Hooks take the RAW range (incl. custom {from,to}) and bound both ends via
-  // dateRangeBoundsET — collapsing to rangeToDays here discarded the custom
-  // `to` date, so "May 1 – May 15" silently rendered May 1 → today.
-  // `days` stays numeric for APIs/labels that genuinely need a count.
-  const days = rangeToDays(range)
+  const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const { members: closers, loading: loadingMembers } = useTeamMembers('closer')
-  const { reports, loading: loadingReports } = useCloserEODs(null, range)
-  const { breakdown } = useCloserCallBreakdown(null, range)
+  const { reports, loading: loadingReports } = useCloserEODs(null, days)
+  const { breakdown } = useCloserCallBreakdown(null, days)
 
   // Wait for BOTH members and reports before rendering so KPI cards don't flash
   // empty values (0s) while reports are still loading in the background.
