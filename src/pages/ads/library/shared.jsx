@@ -372,3 +372,10 @@ export const selectStyle = {
   background: 'white', border: '1px solid var(--rule)', outline: 'none',
   cursor: 'pointer',
 }
+
+// Small uppercase eyebrow label used on chips/fields across the page.
+export const chipLabelStyle = {
+  fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
+  letterSpacing: '0.12em', textTransform: 'uppercase',
+  color: 'var(--ink-3)', marginRight: 6,
+}
