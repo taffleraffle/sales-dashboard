@@ -1,0 +1,15 @@
+{
+  "name": "clip-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ffmpeg microservice for the creative-library Clip Editor: cut / trim / merge / detect-takes with full codec support.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "express": "^4.21.0"
+  }
+}
