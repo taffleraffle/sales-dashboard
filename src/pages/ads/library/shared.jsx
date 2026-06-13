@@ -345,3 +345,30 @@ export function ErrorBanner({ msg, onRetry }) {
     </div>
   )
 }
+
+/* Shared button / input style tokens. Moved here from the page file in
+   step 2 of the split because UploadModal (library/upload.jsx) uses
+   primaryBtn / ghostBtn / selectStyle; the page imports them back. */
+export const primaryBtn = {
+  padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+  letterSpacing: '0.06em', textTransform: 'uppercase',
+  background: 'var(--ink)', color: 'var(--paper)',
+  border: '1px solid var(--ink)', cursor: 'pointer',
+}
+export const ghostBtn = {
+  padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+  letterSpacing: '0.06em', textTransform: 'uppercase',
+  background: 'transparent', color: 'var(--ink-3)',
+  border: '1px solid var(--rule)', cursor: 'pointer',
+}
+export const inputStyle = {
+  width: '100%', padding: '8px 11px',
+  fontFamily: 'var(--mono)', fontSize: 12,
+  background: 'white', border: '1px solid var(--rule)', outline: 'none',
+}
+export const selectStyle = {
+  width: '100%', padding: '8px 11px',
+  fontFamily: 'var(--sans)', fontSize: 12,
+  background: 'white', border: '1px solid var(--rule)', outline: 'none',
+  cursor: 'pointer',
+}
