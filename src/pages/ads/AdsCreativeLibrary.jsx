@@ -2691,6 +2691,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       .select('id,name,parent_id').single()
     if (error) throw error
     syncFolders(curr => [...curr, data])
+    return data   // upload modal uses the new id to file the batch
   }, [folderId, syncFolders])
 
   // Rename + re-parent share one write path; both are a single-column
@@ -3254,6 +3255,8 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
           offers={offers}
           knownCreators={knownCreators}
           folderId={folderId}
+          folders={folders}
+          onCreateFolder={createFolder}
           onClose={() => setUploadOpen(false)}
           onSaved={() => { setUploadOpen(false); load() }}
           onOfferAdded={(newOffer) => {
