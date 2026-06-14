@@ -150,9 +150,29 @@ function cutArgs(src, { in: tin, out, reencode }, outPath) {
   // (self-test caught an 8s output for a 4s request). -t is unambiguous.
   if (out != null) a.push('-t', String(out - (tin || 0)))
   if (reencode) a.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-c:a', 'aac', '-b:a', '160k')
-  else a.push('-c', 'copy', '-avoid_negative_ts', 'make_zero')
+  // -map 0:v:0 -map 0:a:0? — keep all default streams but drop data/
+  // subtitle streams that can't go into mp4 (a common copy-cut failure).
+  else a.push('-map', '0', '-map', '-0:d?', '-map', '-0:s?', '-c', 'copy', '-avoid_negative_ts', 'make_zero')
   a.push('-movflags', '+faststart', outPath)
   return a
+}
+
+// Render a cut, falling back to re-encode if a stream-copy fails (copy
+// is fragile: keyframe alignment, exotic stream combos). Re-encode is
+// slower but always produces a clean, playable file.
+async function renderCut(src, opts, outPath) {
+  let r = await run(cutArgs(src, opts, outPath))
+  if (r.code !== 0 && !opts.reencode) {
+    r = await run(cutArgs(src, { ...opts, reencode: true }, outPath))
+  }
+  return r
+}
+
+// Pull the most relevant line out of ffmpeg's stderr for an error msg.
+function ffErr(stderr) {
+  const lines = (stderr || '').split('\n').map(s => s.trim()).filter(Boolean)
+  const hit = [...lines].reverse().find(l => /error|invalid|could not|failed|no such|unable|not found|denied/i.test(l))
+  return hit || lines.slice(-2).join(' ') || 'ffmpeg failed'
 }
 
 // ── auth ─────────────────────────────────────────────────────────────────
@@ -193,8 +213,8 @@ app.post('/cut', guard, async (req, res) => {
     dir = await mkdtemp(join(tmpdir(), 'cw-'))
     const src = await fetchToFile(sourceUrl, join(dir, 'src'))
     const outPath = join(dir, 'out.mp4')
-    const { code, err } = await run(cutArgs(src, { in: tin, out, reencode }, outPath))
-    if (code !== 0) throw new Error(err.split('\n').slice(-3).join(' '))
+    const { code, err } = await renderCut(src, { in: tin, out, reencode }, outPath)
+    if (code !== 0) throw new Error(ffErr(err))
     res.set('Content-Type', 'video/mp4')
     res.send(await readFile(outPath))
   } catch (e) { res.status(500).json({ error: String(e.message || e) }) }
@@ -208,18 +228,20 @@ app.post('/merge', guard, async (req, res) => {
   try {
     dir = await mkdtemp(join(tmpdir(), 'cw-'))
     const inter = []
-    const anyTrim = reencode || parts.some(p => p.in != null || p.out != null)
+    // Always re-encode each part to identical params — body parts come
+    // from different generations/sources, and concat-copy only works on
+    // byte-identical stream formats. Re-encode guarantees a clean join.
     for (let i = 0; i < parts.length; i++) {
       const src = await fetchToFile(parts[i].sourceUrl, join(dir, `s${i}`))
       const ip = join(dir, `i${i}.mp4`)
-      const { code, err } = await run(cutArgs(src, { in: parts[i].in ?? null, out: parts[i].out ?? null, reencode: anyTrim }, ip))
-      if (code !== 0) throw new Error(`part ${i + 1}: ${err.split('\n').slice(-2).join(' ')}`)
+      const { code, err } = await run(cutArgs(src, { in: parts[i].in ?? null, out: parts[i].out ?? null, reencode: true }, ip))
+      if (code !== 0) throw new Error(`part ${i + 1}: ${ffErr(err)}`)
       inter.push(ip)
     }
     await writeFile(join(dir, 'list.txt'), inter.map(p => `file '${p}'`).join('\n'))
     const outPath = join(dir, 'merged.mp4')
     const { code, err } = await run(['-y', '-f', 'concat', '-safe', '0', '-i', join(dir, 'list.txt'), '-c', 'copy', '-movflags', '+faststart', outPath])
-    if (code !== 0) throw new Error(`concat: ${err.split('\n').slice(-2).join(' ')}`)
+    if (code !== 0) throw new Error(`concat: ${ffErr(err)}`)
     res.set('Content-Type', 'video/mp4')
     res.send(await readFile(outPath))
   } catch (e) { res.status(500).json({ error: String(e.message || e) }) }
