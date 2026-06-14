@@ -116,11 +116,11 @@ function parseBoundaries(stderr, duration) {
   return merged
 }
 
-async function detect(sourceUrl, dir) {
-  const src = await fetchToFile(sourceUrl, join(dir, 'src'))
-  // One pass: silencedetect on audio + scene-select+showinfo on video.
+// Detect on a LOCAL file (shared by the /detect route and /selftest).
+// One pass: silencedetect on audio + scene-select+showinfo on video.
+async function detectFile(localPath) {
   const { err } = await run([
-    '-i', src,
+    '-i', localPath,
     '-filter_complex',
     `[0:a]silencedetect=noise=${SILENCE_DB}:d=${SILENCE_MIN_S}[a];` +
     `[0:v]select='gt(scene,${SCENE_THRESHOLD})',showinfo[v]`,
@@ -128,12 +128,19 @@ async function detect(sourceUrl, dir) {
   ])
   return { cuts: parseBoundaries(err, parseDuration(err)), duration: parseDuration(err) }
 }
+async function detect(sourceUrl, dir) {
+  const src = await fetchToFile(sourceUrl, join(dir, 'src'))
+  return detectFile(src)
+}
 
 function cutArgs(src, { in: tin, out, reencode }, outPath) {
   const a = ['-y']
   if (tin != null && tin > 0) a.push('-ss', String(tin))
   a.push('-i', src)
-  if (out != null) a.push('-to', String(out - (tin || 0)))
+  // -t DURATION (not -to): with input-side -ss, -to is measured against
+  // the ORIGINAL timeline in some ffmpeg builds, which over-runs the cut
+  // (self-test caught an 8s output for a 4s request). -t is unambiguous.
+  if (out != null) a.push('-t', String(out - (tin || 0)))
   if (reencode) a.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-c:a', 'aac', '-b:a', '160k')
   else a.push('-c', 'copy', '-avoid_negative_ts', 'make_zero')
   a.push('-movflags', '+faststart', outPath)
@@ -223,62 +230,57 @@ app.post('/selftest', guard, async (_req, res) => {
     const info = await ffmpegInfo()
     ok('ffmpeg present', !!info.ffmpeg, info.ffmpeg)
 
-    // Build 3 takes: each 4s, distinct color (scene change between them)
-    // + a 1s tone then 1s silence (silence gap between takes). Concat to
-    // one 12s source.
-    const mk = async (color, freq, idx) => {
-      const p = join(dir, `take${idx}.mp4`)
-      const r = await run([
-        '-y',
-        '-f', 'lavfi', '-i', `color=c=${color}:s=320x240:d=4`,
-        '-f', 'lavfi', '-i', `sine=frequency=${freq}:d=1`,
-        '-filter_complex', '[1:a]apad=pad_dur=3[a]',
-        '-map', '0:v', '-map', '[a]',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-shortest', p,
-      ])
-      if (r.code !== 0) throw new Error(`gen take${idx}: ${r.err.split('\n').slice(-2).join(' ')}`)
-      return p
-    }
-    const takes = [await mk('red', 440, 1), await mk('green', 660, 2), await mk('blue', 880, 3)]
-    ok('generate 3 takes', takes.length === 3)
-
-    await writeFile(join(dir, 'l.txt'), takes.map(p => `file '${p}'`).join('\n'))
+    // Build ONE continuous 12s source: red→green→blue (scene cuts at 4s
+    // & 8s, like a cut-separated AI hook reel) with a tone that's gated
+    // to the first second of each 4s block (silence gaps too). One
+    // encode → continuous PTS, so detection is tested honestly (the old
+    // concat-copy reset timestamps and hid a scene cut).
     const source = join(dir, 'source.mp4')
-    const cat = await run(['-y', '-f', 'concat', '-safe', '0', '-i', join(dir, 'l.txt'), '-c', 'copy', source])
-    ok('concat source (12s)', cat.code === 0)
+    const gen = await run([
+      '-y',
+      '-f', 'lavfi', '-i', 'color=c=red:s=320x240:d=4:r=25',
+      '-f', 'lavfi', '-i', 'color=c=green:s=320x240:d=4:r=25',
+      '-f', 'lavfi', '-i', 'color=c=blue:s=320x240:d=4:r=25',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:d=12',
+      '-filter_complex',
+      "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v];" +
+      "[3:a]volume=enable='lt(mod(t,4),1)':volume=1:eval=frame[a]",
+      '-map', '[v]', '-map', '[a]',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest',
+      source,
+    ])
+    ok('generate continuous 12s source', gen.code === 0, gen.code !== 0 ? gen.err.split('\n').slice(-2).join(' ') : '')
 
-    // detect — run the same filter pass the /detect route uses, on the
-    // generated source directly.
-    const det = await (async () => {
-      const { err } = await run([
-        '-i', source,
-        '-filter_complex',
-        `[0:a]silencedetect=noise=${SILENCE_DB}:d=${SILENCE_MIN_S}[a];[0:v]select='gt(scene,${SCENE_THRESHOLD})',showinfo[v]`,
-        '-map', '[v]', '-map', '[a]', '-f', 'null', '-',
-      ])
-      return { cuts: parseBoundaries(err, parseDuration(err)), duration: parseDuration(err) }
-    })()
-    // Expect ~2 interior boundaries (between take1/2 and take2/3, near 4s & 8s).
+    const det = await detectFile(source)
+    // Scene cuts at 4s & 8s are the real-world signal (AI reels are cut-
+    // separated). Expect a boundary near each.
     const near = (t, target) => Math.abs(t - target) < 1.5
     const found4 = det.cuts.some(c => near(c, 4))
     const found8 = det.cuts.some(c => near(c, 8))
-    ok('detect finds the 2 take boundaries', found4 && found8, `cuts=[${det.cuts.map(c => c.toFixed(1)).join(', ')}] dur=${det.duration.toFixed(1)}`)
+    ok('detect finds the 2 scene cuts', found4 && found8, `cuts=[${det.cuts.map(c => c.toFixed(1)).join(', ')}] dur=${det.duration.toFixed(1)}`)
 
-    // cut take 2 (4..8) via copy
+    // cut the middle take (4..8) via copy → expect ~4s
     const seg = join(dir, 'seg.mp4')
     const c1 = await run(cutArgs(source, { in: 4, out: 8, reencode: false }, seg))
     let segDur = 0
     if (c1.code === 0) { const probe = await run(['-i', seg]); segDur = parseDuration(probe.err) }
-    ok('cut take 2 (≈4s)', c1.code === 0 && Math.abs(segDur - 4) < 1.5, `segDur=${segDur.toFixed(1)}`)
+    ok('cut middle take (≈4s)', c1.code === 0 && Math.abs(segDur - 4) < 1.5, `segDur=${segDur.toFixed(1)}`)
 
-    // merge take1 + take3 (skip take2) via re-encode trims
-    await writeFile(join(dir, 'm.txt'), [takes[0], takes[2]].map(p => `file '${p}'`).join('\n'))
+    // merge first take (0..4) + last take (8..12) via re-encode trims → ~8s
     const merged = join(dir, 'm.mp4')
-    const mg = await run(['-y', '-f', 'concat', '-safe', '0', '-i', join(dir, 'm.txt'), '-c', 'copy', merged])
+    const inter = []
+    for (const [i, span] of [[0, 4], [8, 12]].entries()) {
+      const ip = join(dir, `mi${i}.mp4`)
+      const r = await run(cutArgs(source, { in: span[0], out: span[1], reencode: true }, ip))
+      if (r.code === 0) inter.push(ip)
+    }
     let mDur = 0
-    if (mg.code === 0) { const probe = await run(['-i', merged]); mDur = parseDuration(probe.err) }
-    ok('merge 2 takes (≈8s)', mg.code === 0 && Math.abs(mDur - 8) < 2, `mergedDur=${mDur.toFixed(1)}`)
+    if (inter.length === 2) {
+      await writeFile(join(dir, 'm.txt'), inter.map(p => `file '${p}'`).join('\n'))
+      const mg = await run(['-y', '-f', 'concat', '-safe', '0', '-i', join(dir, 'm.txt'), '-c', 'copy', merged])
+      if (mg.code === 0) { const probe = await run(['-i', merged]); mDur = parseDuration(probe.err) }
+    }
+    ok('merge 2 trimmed takes (≈8s)', Math.abs(mDur - 8) < 2, `mergedDur=${mDur.toFixed(1)}`)
 
     const pass = steps.every(s => s.pass)
     res.status(pass ? 200 : 500).json({ pass, steps })
