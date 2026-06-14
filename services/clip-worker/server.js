@@ -37,7 +37,9 @@ const MAX_SOURCE_BYTES = Number(process.env.MAX_SOURCE_BYTES || 1024 * 1024 * 10
 
 const SILENCE_DB = '-35dB'
 const SILENCE_MIN_S = 0.9
-const SCENE_THRESHOLD = 0.4   // visual scene-change sensitivity (0..1)
+const SCENE_THRESHOLD = 0.25  // visual scene-change sensitivity (0..1); real
+                              // shot changes score well above this. 0.4 missed
+                              // lower-luma transitions (e.g. red→green).
 const EDGE_GUARD_S = 3
 
 const app = express()
@@ -238,15 +240,22 @@ app.post('/selftest', guard, async (_req, res) => {
     const source = join(dir, 'source.mp4')
     const gen = await run([
       '-y',
+      // High-contrast luma steps (black→white→red) so the scene cuts are
+      // unambiguous — solid colours score lower than real shot changes,
+      // so this is a deliberately hard but decisive test.
+      '-f', 'lavfi', '-i', 'color=c=black:s=320x240:d=4:r=25',
+      '-f', 'lavfi', '-i', 'color=c=white:s=320x240:d=4:r=25',
       '-f', 'lavfi', '-i', 'color=c=red:s=320x240:d=4:r=25',
-      '-f', 'lavfi', '-i', 'color=c=green:s=320x240:d=4:r=25',
-      '-f', 'lavfi', '-i', 'color=c=blue:s=320x240:d=4:r=25',
       '-f', 'lavfi', '-i', 'sine=frequency=440:d=12',
       '-filter_complex',
       "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v];" +
       "[3:a]volume=enable='lt(mod(t,4),1)':volume=1:eval=frame[a]",
       '-map', '[v]', '-map', '[a]',
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest',
+      // -g 25: keyframe every second so copy-cuts land precisely (real
+      // footage has frequent keyframes; a single-GOP synthetic source
+      // doesn't, which made the copy-cut over-run in QA).
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-g', '25', '-keyint_min', '25',
+      '-c:a', 'aac', '-shortest',
       source,
     ])
     ok('generate continuous 12s source', gen.code === 0, gen.code !== 0 ? gen.err.split('\n').slice(-2).join(' ') : '')
