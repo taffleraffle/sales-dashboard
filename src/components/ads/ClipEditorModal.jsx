@@ -162,6 +162,21 @@ export default function ClipEditorModal({
     }
   }, [activeIdx])
 
+  // Click anywhere on the timeline strip to move the playhead there
+  // (the native video bar is tiny; this is the real scrubber). Ignores
+  // clicks that land on a trim handle (those stopPropagation).
+  const seekStrip = (e) => {
+    const strip = stripRef.current
+    const v = videoRef.current
+    if (!strip || !v || !activeDur) return
+    const rect = strip.getBoundingClientRect()
+    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    const t = frac * activeDur
+    v.currentTime = t
+    setCurrentT(t)
+    previewStopRef.current = null   // a manual seek cancels any preview-stop
+  }
+
   // ── segment operations ───────────────────────────────────────────────
   const cutAtPlayhead = () => {
     const t = currentT
@@ -425,20 +440,22 @@ export default function ClipEditorModal({
             <Button size="sm" variant="secondary" onClick={autoDetect} disabled={busy || !activeDur}>✨ Auto-detect takes</Button>
             <Button size="sm" variant="secondary" onClick={cutAtPlayhead} disabled={busy || !activeDur}>✂ Cut at playhead</Button>
           </div>
-          <div ref={stripRef} style={{ position: 'relative', height: 54, background: 'var(--paper-2)', border: '1px solid var(--rule)', userSelect: 'none' }}>
+          <div ref={stripRef} onClick={seekStrip}
+            title="Click to move the playhead here, then ‘Cut at playhead’"
+            style={{ position: 'relative', height: 54, background: 'var(--paper-2)', border: '1px solid var(--rule)', userSelect: 'none', cursor: 'text' }}>
             {activeDur > 0 && activeSegs.map((s, i) => {
               const l = (s.in / activeDur) * 100
               const w = ((s.out - s.in) / activeDur) * 100
               return (
                 <div key={s.id}
-                  onClick={() => playSpan(s.fileIdx, s.in, s.out)}
-                  title={`Segment ${i + 1}: ${fmtT(s.in)}–${fmtT(s.out)} · click to preview`}
+                  onClick={seekStrip}
+                  title={`Segment ${i + 1}: ${fmtT(s.in)}–${fmtT(s.out)} · click to move the playhead here (▶ preview is in the list below)`}
                   style={{
                     position: 'absolute', top: 6, bottom: 6,
                     left: `${l}%`, width: `${w}%`,
                     background: s.bin === 'merge' ? 'rgba(184,106,12,0.25)' : 'rgba(62,126,186,0.22)',
                     border: `1.5px solid ${s.bin === 'merge' ? '#b86a0c' : '#3e7eba'}`,
-                    cursor: 'pointer', overflow: 'hidden',
+                    cursor: 'text', overflow: 'hidden',
                   }}>
                   <span style={{
                     position: 'absolute', top: 2, left: 12, right: 12,
@@ -447,10 +464,10 @@ export default function ClipEditorModal({
                   }}>
                     {i + 1}{s.precise ? ' ·trim' : ''}
                   </span>
-                  {/* trim handles */}
-                  <div onPointerDown={dragHandle(s.id, 'in')} title="Drag to trim the start"
+                  {/* trim handles — onClick stops the strip seek */}
+                  <div onPointerDown={dragHandle(s.id, 'in')} onClick={e => e.stopPropagation()} title="Drag to trim the start"
                     style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 10, cursor: 'ew-resize', background: 'rgba(10,10,10,0.35)' }} />
-                  <div onPointerDown={dragHandle(s.id, 'out')} title="Drag to trim the end"
+                  <div onPointerDown={dragHandle(s.id, 'out')} onClick={e => e.stopPropagation()} title="Drag to trim the end"
                     style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 10, cursor: 'ew-resize', background: 'rgba(10,10,10,0.35)' }} />
                 </div>
               )
