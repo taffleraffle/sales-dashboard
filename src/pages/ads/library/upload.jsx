@@ -924,10 +924,13 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
         const dims = await probeMediaDimensions(file)
         const shortest = Math.min(dims.width, dims.height)
         if (shortest < MIN_SHORTEST_SIDE) {
+          // Soft block, not a hard reject: AI-generated + portrait clips
+          // are legitimately 720p. Keep the file + dims so "Upload anyway"
+          // can recover it (lowres=true). A genuine probe failure below
+          // has no file and stays blocked.
           return {
-            ok: false,
-            file,
-            reason: `${dims.width}×${dims.height} — below 1080p floor (shortest side must be ≥${MIN_SHORTEST_SIDE}px)`,
+            ok: false, lowres: true, file, dims,
+            reason: `${dims.width}×${dims.height} — under 1080p (fine for AI/portrait clips; use “Upload anyway”)`,
           }
         }
         return { ok: true, file, dims }
@@ -958,9 +961,37 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
       name: p.file.name,
       size: p.file.size,
       reason: p.reason,
+      // Only sub-1080p rejects are recoverable — carry the file + dims so
+      // "Upload anyway" can move them into the accepted list.
+      lowres: !!p.lowres,
+      file: p.lowres ? p.file : null,
+      dims: p.lowres ? p.dims : null,
     }))
     if (accepted.length) setFiles(prev => [...prev, ...accepted])
     if (newlyRejected.length) setRejected(prev => [...prev, ...newlyRejected])
+  }
+
+  // "Upload anyway" — move a sub-1080p reject into the accepted file
+  // list (still runs the bad-take heuristic so a genuinely short/garbage
+  // clip can still flag). idx=null overrides ALL recoverable rejects.
+  const uploadAnyway = (idx) => {
+    setRejected(prev => {
+      const recover = (r) => {
+        if (!r?.lowres || !r.file) return null
+        const heuristic = badTakeHeuristic(r.file, r.dims)
+        return {
+          file: r.file, dims: r.dims,
+          markedBad: heuristic.flagged, badReason: heuristic.reason,
+          badSource: heuristic.flagged ? 'heuristic' : null,
+        }
+      }
+      const picked = idx == null ? prev : [prev[idx]]
+      const accepted = picked.map(recover).filter(Boolean)
+      if (accepted.length) setFiles(f => [...f, ...accepted])
+      return idx == null
+        ? prev.filter(r => !r.lowres)        // keep only the hard failures
+        : prev.filter((_, i) => i !== idx)
+    })
   }
 
   // Toggle the per-file Layer-1 flag. Operator-driven (vs heuristic which
@@ -1508,26 +1539,47 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                 fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
                 letterSpacing: '0.12em', textTransform: 'uppercase', color: '#b53e3e',
               }}>
-                {rejected.length} file{rejected.length === 1 ? '' : 's'} rejected · below 1080p
+                {rejected.length} file{rejected.length === 1 ? '' : 's'} held back · under 1080p
               </div>
-              <button onClick={() => setRejected([])} style={{
-                background: 'transparent', border: 'none', cursor: 'pointer',
-                color: 'var(--ink-4)', fontSize: 14, padding: 0,
-              }}>×</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {rejected.some(r => r.lowres) && (
+                  <button onClick={() => uploadAnyway(null)} style={{
+                    padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                    background: 'var(--ink)', color: 'var(--paper)', border: 'none', cursor: 'pointer',
+                  }}>Upload all anyway</button>
+                )}
+                <button onClick={() => setRejected([])} style={{
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  color: 'var(--ink-4)', fontSize: 14, padding: 0,
+                }}>×</button>
+              </div>
             </div>
             <div style={{ maxHeight: 180, overflowY: 'auto' }}>
               {rejected.map((r, i) => (
                 <div key={i} style={{
                   padding: '6px 12px',
                   borderBottom: i === rejected.length - 1 ? 'none' : '1px solid rgba(181,62,62,0.15)',
+                  display: 'flex', alignItems: 'center', gap: 10,
                 }}>
-                  <div style={{
-                    fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }} title={r.name}>{r.name}</div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#b53e3e', marginTop: 1 }}>
-                    {r.reason}
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{
+                      fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }} title={r.name}>{r.name}</div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: r.lowres ? '#a86a08' : '#b53e3e', marginTop: 1 }}>
+                      {r.reason}
+                    </div>
                   </div>
+                  {r.lowres && (
+                    <button onClick={() => uploadAnyway(i)} style={{
+                      flexShrink: 0, padding: '3px 9px',
+                      fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
+                      letterSpacing: '0.06em', textTransform: 'uppercase',
+                      background: 'white', color: 'var(--ink)',
+                      border: '1px solid var(--ink-3)', cursor: 'pointer',
+                    }}>Upload anyway</button>
+                  )}
                 </div>
               ))}
             </div>
