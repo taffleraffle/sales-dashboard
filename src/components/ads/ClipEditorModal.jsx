@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../editorial/Modal'
 import { Button } from '../editorial/atoms'
-import { detectTakeBoundaries, renderSegment, renderMerge, MAX_INPUT_BYTES } from '../../services/clipSurgery'
+// Server-side engine (clip-worker / real ffmpeg) — same signatures as the
+// old browser clipSurgery, so this is a drop-in swap. Handles iPhone HEVC,
+// no 32MB browser download, scene-cut detection. QA-verified 2026-06-14.
+import { detectTakeBoundaries, renderSegment, renderMerge, MAX_INPUT_BYTES } from '../../services/clipServer'
 
 /*
   Clip Editor — cut / trim / merge at upload time (Ben, 2026-06-12:
@@ -207,7 +210,7 @@ export default function ClipEditorModal({
     try {
       const cuts = await detectTakeBoundaries(files[activeIdx], { onStage: setBusyMsg })
       if (!cuts.length) {
-        setErr('No take boundaries found — the audio has no silence gaps ≥ 0.9s. Use "Cut at playhead" instead.')
+        setErr('No take boundaries detected — no scene cuts or silence gaps found. Use "Cut at playhead" to split manually.')
       } else {
         setSegments(curr => {
           const others = curr.filter(s => s.fileIdx !== activeIdx)
@@ -404,7 +407,7 @@ export default function ClipEditorModal({
             border: '1px solid rgba(181,62,62,0.35)', borderLeft: '3px solid #b53e3e',
             fontFamily: 'var(--mono)', fontSize: 11.5, color: '#b53e3e',
           }}>
-            {Math.round(totalBytes / 1024 / 1024)}MB selected — the in-browser editor holds at most {Math.round(MAX_INPUT_BYTES / 1024 / 1024)}MB. Remove some files.
+            {Math.round(totalBytes / 1024 / 1024)}MB selected — the editor handles up to {Math.round(MAX_INPUT_BYTES / 1024 / 1024)}MB at once. Remove some files.
           </div>
         )}
 
