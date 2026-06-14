@@ -25,6 +25,9 @@
 import express from 'express'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
+import { createWriteStream } from 'node:fs'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -79,9 +82,9 @@ async function fetchToFile(url, dest) {
   if (!res.ok) throw new Error(`source fetch ${res.status}`)
   const len = Number(res.headers.get('content-length') || 0)
   if (len && len > MAX_SOURCE_BYTES) throw new Error(`source too large (${len}B)`)
-  const buf = Buffer.from(await res.arrayBuffer())
-  if (buf.length > MAX_SOURCE_BYTES) throw new Error(`source too large (${buf.length}B)`)
-  await writeFile(dest, buf)
+  // STREAM to disk — buffering a 100MB+ video into the Node heap
+  // (arrayBuffer) OOM'd the 512MB instance (502s on real ad clips).
+  await pipeline(Readable.fromWeb(res.body), createWriteStream(dest))
   return dest
 }
 
@@ -125,7 +128,10 @@ async function detectFile(localPath) {
     '-i', localPath,
     '-filter_complex',
     `[0:a]silencedetect=noise=${SILENCE_DB}:d=${SILENCE_MIN_S}[a];` +
-    `[0:v]select='gt(scene,${SCENE_THRESHOLD})',showinfo[v]`,
+    // scale to 240px wide before scene detection — scene scores are
+    // resolution-independent but decoding at full 1080p was slow + heavy
+    // (OOM/timeout on long clips). 240px is ~20× cheaper.
+    `[0:v]scale=240:-2,select='gt(scene,${SCENE_THRESHOLD})',showinfo[v]`,
     '-map', '[v]', '-map', '[a]', '-f', 'null', '-',
   ])
   return { cuts: parseBoundaries(err, parseDuration(err)), duration: parseDuration(err) }
