@@ -850,7 +850,7 @@ export function RenameUnnamedButton({ rows, onComplete }) {
 
 /* ─────────────────────────── UPLOAD MODAL ─────────────────────────── */
 
-export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded, knownCreators = [], folderId = null }) {
+export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded, knownCreators = [], folderId = null, folders = [], onCreateFolder }) {
   // The modal is now a thin shell: it collects files + batch config,
   // hands them off to the module-level upload queue, and closes. The
   // queue owns all upload state, runs in the background regardless of
@@ -872,6 +872,12 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
   // (RAW-YYMMDD-ACTOR-S03-001.mp4) and the per-actor-per-day batch_seq
   // allocation. Empty -> UNK actor + the batch goes into the UNK bucket.
   const [batchCreator, setBatchCreator] = useState('')
+  // Destination folder for the whole batch (Ben: "record 10 scripts for
+  // an angle → upload all 10 → label with the angle → find them later").
+  // Defaults to whatever folder was open. '__new__' reveals a name field
+  // that creates a folder (the angle) at queue time.
+  const [batchFolderId, setBatchFolderId] = useState(folderId)
+  const [newFolderName, setNewFolderName] = useState('')
   // Inline "+ Add new niche" form state. Any team member can add a niche
   // — public.offers has allow-all RLS (migration 059). Slug auto-derives
   // from the display name (lowercase, dashed, opt- prefix) but is
@@ -1079,13 +1085,26 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
       },
     }))
 
+    // Resolve the batch's destination folder. '__new__' + a name creates
+    // the folder (the angle label) now so the whole batch lands in it.
+    let resolvedFolderId = batchFolderId === '__new__' ? null : batchFolderId
+    if (batchFolderId === '__new__' && newFolderName.trim() && onCreateFolder) {
+      try {
+        const created = await onCreateFolder(newFolderName.trim())
+        if (created?.id) resolvedFolderId = created.id
+      } catch (e) {
+        setErr(`Couldn't create the folder "${newFolderName.trim()}": ${e.message}`)
+        return
+      }
+    }
+
     uploadQueue.enqueue(perFile.map(p => p.file), {
       batchType,
       batchStatus,
       batchEditorId,
       batchOfferSlug,
       batchCreator: batch.actor_creator,
-      batchFolderId: folderId,   // file uploads into the folder that was open
+      batchFolderId: resolvedFolderId,   // whole batch files into this folder
       uploadBatchId: batch.id,
       uploadBatchSeq: batch.batch_seq,
       uploadBatchDate: batch.date_local,
@@ -1318,6 +1337,31 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                 </select>
               )}
             </div>
+          </div>
+          {/* Destination folder for the whole batch — Ben's "10 scripts for
+              an angle → one upload → label with the angle → find them
+              later". Pick an existing folder or create one (the angle). */}
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              Save batch to folder (angle)
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select value={batchFolderId ?? ''} onChange={e => setBatchFolderId(e.target.value || null)} style={{ ...selectStyle, flex: '1 1 240px', maxWidth: 360 }} disabled={busy}>
+                <option value="">— No folder (library root) —</option>
+                {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                <option value="__new__">+ New folder…</option>
+              </select>
+              {batchFolderId === '__new__' && (
+                <input type="text" value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
+                  placeholder="Angle name — e.g. ‘Fire your agency’"
+                  style={{ ...selectStyle, flex: '1 1 240px', maxWidth: 360 }} disabled={busy} autoFocus />
+              )}
+            </div>
+            {files.length > 1 && (
+              <div style={{ marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.04em' }}>
+                All {files.length} files in this batch file into{batchFolderId === '__new__' ? ` the new folder “${newFolderName.trim() || '…'}”` : batchFolderId ? ` “${folders.find(f => f.id === batchFolderId)?.name || 'folder'}”` : ' the library root'}.
+              </div>
+            )}
           </div>
         </div>
         <div
