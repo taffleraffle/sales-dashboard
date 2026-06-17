@@ -64,14 +64,53 @@ export function rowDisplayName(r) {
   // bulk replace_all of `r.canonical_name || r.name` -> `rowDisplayName(r)`
   // also rewrote this function body and produced infinite recursion. Keep
   // the chain literal here.
+  // An operator nickname (custom_name) wins over the structured auto-name so
+  // a hand-labelled clip reads "Restoration meme batch #2" instead of a
+  // 5-token machine string. Falls back to display_name → canonical → raw.
+  return r.custom_name || r.display_name || r.canonical_name || r.name || ''
+}
+// The structured machine-name, IGNORING any nickname. Shown as subtext under
+// the nickname so the offer/style/angle/actor encoding is never lost even
+// when a clip has been hand-labelled. Returns '' when there's nothing extra
+// to show beyond what rowDisplayName already returns.
+export function rowStructuredName(r) {
+  if (!r) return ''
   return r.display_name || r.canonical_name || r.name || ''
 }
 export function taskDisplayName(t) {
+  if (!t) return ''
+  return t.creative_custom_name || t.creative_display_name || t.creative_canonical_name || t.creative_name || ''
+}
+export function taskStructuredName(t) {
   if (!t) return ''
   return t.creative_display_name || t.creative_canonical_name || t.creative_name || ''
 }
 
 export const TYPES = ['Hook', 'Body', 'Full Video', 'Joined', 'Testimony', 'Retargeting']
+
+// Format / vibe axis — a SEPARATE dimension from the editorial `type`
+// (Hook/Body/Joined…). Stored free-text in lib_creative_library.style_format,
+// but the UI suggests this curated set so filtering stays consistent.
+export const STYLE_FORMATS = [
+  'Talking head', 'B-roll', 'Meme', 'Testimonial', 'Skit',
+  'Voiceover', 'Screen recording', 'UGC', 'Street interview', 'Other',
+]
+// Distinct, stable pill color per format so a busy grid scans fast. Keyed by
+// position in STYLE_FORMATS; unknown/free-text values fall back to neutral.
+const STYLE_FORMAT_COLOR = {
+  'Talking head':     { ink: '#1f4e8f', soft: 'rgba(31,78,143,0.10)',  border: 'rgba(31,78,143,0.35)' },
+  'B-roll':           { ink: '#2e6e3f', soft: 'rgba(46,110,63,0.10)',  border: 'rgba(46,110,63,0.35)' },
+  'Meme':             { ink: '#b86a0c', soft: 'rgba(184,106,12,0.10)', border: 'rgba(184,106,12,0.35)' },
+  'Testimonial':      { ink: '#7a3aa8', soft: 'rgba(122,58,168,0.10)', border: 'rgba(122,58,168,0.35)' },
+  'Skit':             { ink: '#c44b6e', soft: 'rgba(196,75,110,0.10)', border: 'rgba(196,75,110,0.35)' },
+  'Voiceover':        { ink: '#3eb2a8', soft: 'rgba(62,178,168,0.10)', border: 'rgba(62,178,168,0.35)' },
+  'Screen recording': { ink: '#5b6b8a', soft: 'rgba(91,107,138,0.10)', border: 'rgba(91,107,138,0.35)' },
+  'UGC':              { ink: '#a05810', soft: 'rgba(160,88,16,0.10)',  border: 'rgba(160,88,16,0.35)' },
+  'Street interview': { ink: '#5b8a3e', soft: 'rgba(91,138,62,0.10)',  border: 'rgba(91,138,62,0.35)' },
+}
+export function styleFormatColor(v) {
+  return STYLE_FORMAT_COLOR[v] || { ink: 'var(--ink-3)', soft: 'var(--paper-2)', border: 'var(--rule)' }
+}
 
 // Task-status (lib_editing_tasks.status) is separate from creative-status.
 // Friendly labels — no underscores in display — paired with colors used
