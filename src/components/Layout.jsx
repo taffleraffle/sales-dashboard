@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown, Calculator } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -20,6 +20,7 @@ import { ICON } from '../utils/constants'
 const navItems = [
   { to: '/sales', icon: BarChart3, label: 'Overview', end: true },
   { to: '/sales/closers', icon: UserCheck, label: 'Closers' },
+  { to: '/sales/forecasting', icon: Calculator, label: 'Forecasting' },
   { to: '/sales/setters', icon: Users, label: 'Setters' },
   { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
   { to: '/sales/ads', icon: Megaphone, label: 'Ads' },
