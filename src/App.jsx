@@ -54,6 +54,7 @@ import CallData from './pages/CallData'
 // download when the user actually navigates to them. Biggest wins:
 // EODReview (3.3k lines) and MarketingPerformance (1.3k lines).
 const CloserDetail = lazyWithReload(() => import('./pages/CloserDetail'))
+const CloserForecasting = lazyWithReload(() => import('./pages/CloserForecasting'))
 const SetterDetail = lazyWithReload(() => import('./pages/SetterDetail'))
 const SetterKPIHistory = lazyWithReload(() => import('./pages/SetterKPIHistory'))
 const PipelinePerformance = lazyWithReload(() => import('./pages/PipelinePerformance'))
@@ -254,6 +255,7 @@ export default function App() {
               <Route path="/sales" element={<SalesOverview />} />
               <Route path="/sales/closers" element={<CloserOverview />} />
               <Route path="/sales/closers/:id" element={<Suspense fallback={<PageSkeleton />}><CloserDetail /></Suspense>} />
+              <Route path="/sales/forecasting" element={<Suspense fallback={<PageSkeleton />}><CloserForecasting /></Suspense>} />
               <Route path="/sales/setters" element={<SetterOverview />} />
               <Route path="/sales/setters/:id" element={<Suspense fallback={<PageSkeleton />}><SetterDetail /></Suspense>} />
               <Route path="/sales/setters/:id/kpi-history" element={<Suspense fallback={<PageSkeleton />}><SetterKPIHistory /></Suspense>} />
