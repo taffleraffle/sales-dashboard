@@ -7,8 +7,8 @@ import Modal from '../../components/editorial/Modal'
 import OfferConfigModal from '../../components/ads/OfferConfigModal'
 import { FolderBar, FolderPickerModal, subtreeIds } from '../../components/ads/CreativeFolders'
 import {
-  SUPABASE_URL, notifyEditor, rowDisplayName, taskDisplayName,
-  TYPES, TASK_STATUS_LABEL, TASK_STATUS_COLOR, offerColor, typeColor,
+  SUPABASE_URL, notifyEditor, rowDisplayName, rowStructuredName, taskDisplayName,
+  TYPES, STYLE_FORMATS, styleFormatColor, TASK_STATUS_LABEL, TASK_STATUS_COLOR, offerColor, typeColor,
   EDITOR_COLORS, editorColor, rowStatusTint, rowStatusTintForTask,
   PAGE_CACHE, ADMIN_SCOPE, TabBtn, KpiTile, Field, LoadingState,
   EmptyState, ErrorBanner, primaryBtn, ghostBtn, inputStyle, selectStyle,
@@ -1815,6 +1815,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // All filters are Sets to support multi-select. Empty set = no filter applied.
   const [typeFilter, setTypeFilter]   = useState(() => new Set())
   const [offerFilter, setOfferFilter] = useState(() => new Set())  // values: offer_slug | '__none__'
+  const [formatFilter, setFormatFilter] = useState(() => new Set())  // values: style_format | '__none__'
   const [runFilter, setRunFilter]     = useState(() => new Set())  // values: 'yes' | 'no'
   const [stageFilter, setStageFilter] = useState(() => new Set())  // values: 'raw_unused' | 'raw_used' | 'edited_seg' | 'merged'
   // Upload-date filter. Preset windows only — operator picks a quick range
@@ -2066,7 +2067,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // of transcript = 600KB+ wasted on the first paint. Pulling without it
   // cuts the initial payload roughly in half. Transcripts get lazy-loaded
   // in a follow-up query after first paint so library search still works.
-  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id'
+  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id,custom_name,style_format'
 
   const load = useCallback(async (background = false, attempt = 0) => {
     if (!background) setLoading(true)
@@ -2398,6 +2399,10 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       if (offerFilter.has('__none__') && !r.offer_slug) return true
       return r.offer_slug && offerFilter.has(r.offer_slug)
     })
+    if (formatFilter.size > 0) list = list.filter(r => {
+      if (formatFilter.has('__none__') && !r.style_format) return true
+      return r.style_format && formatFilter.has(r.style_format)
+    })
     if (runFilter.size > 0) list = list.filter(r => {
       if (runFilter.has('yes') && r.has_been_run) return true
       if (runFilter.has('no') && !r.has_been_run) return true
@@ -2441,7 +2446,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       })
     }
     return list
-  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
+  }, [rows, deferredQ, typeFilter, offerFilter, formatFilter, runFilter, stageFilter, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -2776,7 +2781,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
 
   // Badge for the FILTERS button: how many filter groups are active.
   const activeFilterCount =
-    stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size
+    stageFilter.size + typeFilter.size + offerFilter.size + formatFilter.size + runFilter.size
 
   // Where the current selection lives, for the move picker's "current"
   // tag + no-op guard: a folder id (or null = root) only when EVERY
@@ -2994,6 +2999,29 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             ]}
             allCount={visibleRows.length}
             onChange={setOfferFilter} />
+          <FilterDropdown label="FORMAT"
+            selected={formatFilter}
+            options={(() => {
+              // Distinct style_format values present in the library, ordered
+              // with the known/curated set first, then any free-text extras,
+              // then a NO FORMAT bucket. Counts are live row counts.
+              const counts = {}
+              let noneCount = 0
+              for (const r of rows) {
+                if (r.style_format) counts[r.style_format] = (counts[r.style_format] || 0) + 1
+                else noneCount++
+              }
+              const known = STYLE_FORMATS.filter(f => counts[f])
+              const extra = Object.keys(counts).filter(f => !STYLE_FORMATS.includes(f)).sort()
+              return [
+                ...[...known, ...extra].map(f => ({
+                  value: f, label: f.toUpperCase(), count: counts[f], dot: styleFormatColor(f).ink,
+                })),
+                ...(noneCount > 0 ? [{ value: '__none__', label: 'NO FORMAT', count: noneCount, dot: 'var(--ink-4)' }] : []),
+              ]
+            })()}
+            allCount={visibleRows.length}
+            onChange={setFormatFilter} />
           <FilterDropdown label="RUN"
             selected={runFilter}
             options={[
@@ -3010,7 +3038,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             <button type="button"
               onClick={() => {
                 setStageFilter(new Set()); setTypeFilter(new Set())
-                setOfferFilter(new Set()); setRunFilter(new Set())
+                setOfferFilter(new Set()); setFormatFilter(new Set()); setRunFilter(new Set())
               }}
               style={{
                 marginLeft: 4, padding: '4px 9px',
@@ -3652,6 +3680,29 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
               )}
               {rowDisplayName(r)}
             </div>
+            {/* Subtext: when a nickname is set, keep the structured auto-name
+                visible (dimmed) so the offer/style/angle/actor encoding isn't
+                lost; plus the format pill. */}
+            {(r.custom_name || r.style_format) && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2, minWidth: 0 }}>
+                {r.custom_name && rowStructuredName(r) && (
+                  <span title={rowStructuredName(r)} style={{
+                    fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
+                  }}>{rowStructuredName(r)}</span>
+                )}
+                {r.style_format && (
+                  <span style={{
+                    flexShrink: 0, display: 'inline-block', padding: '1px 5px',
+                    fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
+                    letterSpacing: '0.05em', textTransform: 'uppercase',
+                    background: styleFormatColor(r.style_format).soft,
+                    color: styleFormatColor(r.style_format).ink,
+                    border: '1px solid ' + styleFormatColor(r.style_format).border, borderRadius: 2,
+                  }}>{r.style_format}</span>
+                )}
+              </div>
+            )}
           </div>
           {/* Type pill */}
           <div>
@@ -3945,7 +3996,7 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
         display: 'flex', alignItems: 'center', gap: 4,
         textDecoration: (r.status === 'raw' && isUsed) ? 'line-through' : 'none',
         opacity: (r.status === 'raw' && isUsed) ? 0.65 : 1,
-      }} title={rowDisplayName(r)}>
+      }} title={r.custom_name ? `${rowDisplayName(r)}  ·  ${rowStructuredName(r)}` : rowDisplayName(r)}>
         {(r.status === 'raw' && isUsed) && (
           <span title="Already edited"
             style={{ color: '#3e8a5e', fontWeight: 600, flexShrink: 0 }}>✓</span>
@@ -3953,6 +4004,15 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {rowDisplayName(r)}
         </span>
+        {r.style_format && (
+          <span title={`Format: ${r.style_format}`} style={{
+            flexShrink: 0, padding: '0 4px', fontFamily: 'var(--mono)', fontSize: 8.5,
+            fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase',
+            background: styleFormatColor(r.style_format).soft,
+            color: styleFormatColor(r.style_format).ink,
+            border: '1px solid ' + styleFormatColor(r.style_format).border, borderRadius: 2,
+          }}>{r.style_format}</span>
+        )}
       </div>
       {/* Description — read-only at this scope. Editing happens in the
           detail modal (click the row) so the matrix stays a clean
@@ -5191,12 +5251,14 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
   const [assignedEditorId, setAssignedEditorId] = useState(null)
   const [offerSlug, setOfferSlug] = useState(null)
   const [hasBeenRun, setHasBeenRun] = useState(null)   // null | true | false
+  const [format, setFormat] = useState(null)           // null = keep existing; '' = clear; else a STYLE_FORMATS value
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
   const patch = useMemo(() => {
     const p = {}
     if (type !== null)             p.type = type
+    if (format !== null)           p.style_format = format || null
     if (statusChoice === 'raw_unused') { p.status = 'raw';    p.manually_marked_used = false }
     if (statusChoice === 'raw_used')   { p.status = 'raw';    p.manually_marked_used = true  }
     if (statusChoice === 'edited')     { p.status = 'edited' }
@@ -5205,7 +5267,7 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
     if (offerSlug !== null)        p.offer_slug = offerSlug || null
     if (hasBeenRun !== null)       p.has_been_run = hasBeenRun
     return p
-  }, [type, statusChoice, creator, assignedEditorId, offerSlug, hasBeenRun])
+  }, [type, statusChoice, creator, assignedEditorId, offerSlug, hasBeenRun, format])
   const hasChanges = Object.keys(patch).length > 0
 
   const apply = async () => {
@@ -5267,6 +5329,36 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
                     border: '1px solid ' + (isOn ? tc.ink : tc.border),
                     borderRadius: 2, cursor: 'pointer',
                   }}>{t}</button>
+              )
+            })}
+          </div>
+        </Field>
+
+        {/* FORMAT — the new vibe axis. Tag a whole selection at once
+            (e.g. mark 8 clips as TALKING HEAD). Keep existing / clear / set. */}
+        <Field label="Format">
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            <button onClick={() => setFormat(null)} type="button"
+              style={format === null ? { ...keepPill, color: 'var(--ink)', borderColor: 'var(--ink)', borderStyle: 'solid', background: 'var(--accent)' } : keepPill}>
+              Keep existing
+            </button>
+            <button onClick={() => setFormat('')} type="button"
+              style={format === '' ? { ...keepPill, color: 'var(--ink)', borderColor: 'var(--ink)', borderStyle: 'solid', background: 'var(--accent)' } : keepPill}>
+              Clear
+            </button>
+            {STYLE_FORMATS.map(f => {
+              const isOn = format === f
+              const sc = styleFormatColor(f)
+              return (
+                <button key={f} type="button" onClick={() => setFormat(f)}
+                  style={{
+                    padding: '5px 9px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                    background: isOn ? sc.ink : sc.soft,
+                    color: isOn ? 'white' : sc.ink,
+                    border: '1px solid ' + (isOn ? sc.ink : sc.border),
+                    borderRadius: 2, cursor: 'pointer',
+                  }}>{f}</button>
               )
             })}
           </div>
@@ -5858,12 +5950,27 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
           )}
           {rowDisplayName(row)}
         </div>
+        {/* Structured auto-name as subtext when a nickname overrides it. */}
+        {row.custom_name && rowStructuredName(row) && (
+          <div title={rowStructuredName(row)} style={{
+            marginTop: 3, fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{rowStructuredName(row)}</div>
+        )}
         <div style={{
           marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center',
           fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
           letterSpacing: '0.06em', textTransform: 'uppercase',
         }}>
           {row.creator && <span>{row.creator}</span>}
+          {row.style_format && (
+            <span title={`Format: ${row.style_format}`} style={{
+              padding: '1px 5px', fontWeight: 600,
+              background: styleFormatColor(row.style_format).soft,
+              color: styleFormatColor(row.style_format).ink,
+              border: '1px solid ' + styleFormatColor(row.style_format).border, borderRadius: 2,
+            }}>{row.style_format}</span>
+          )}
           {row.offer_slug && (() => {
             const oc = offerColor(row.offer_slug)
             const short = row.offer_slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '')
@@ -6136,6 +6243,12 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
       type: edit.type, creator: edit.creator, status: edit.status,
       v21_script_id: edit.v21_script_id, notes: edit.notes,
       canonical_name: edit.canonical_name,
+      // Operator nickname + format axis (migration 154). Nickname becomes the
+      // PRIMARY label everywhere when set; empty string -> NULL so the auto
+      // display_name takes back over. If migration 154 hasn't run yet, the
+      // 42703 self-heal loop below strips these and the rest still saves.
+      custom_name: edit.custom_name ? (edit.custom_name.trim() || null) : null,
+      style_format: edit.style_format || null,
       assigned_editor_id: edit.assigned_editor_id || null,
       offer_slug: edit.offer_slug || null,
       has_been_run: !!edit.has_been_run,
@@ -6412,6 +6525,54 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         {/* Slim form — only the fields Ben actually uses to organise creatives.
             Notes, v21 script, and original filename are tucked into the
             'Advanced' disclosure below. */}
+        {/* Nickname — the operator's own label. When set it becomes the
+            PRIMARY name shown in every list/card/grid; the structured auto
+            name below drops to subtext. This is the "name them so I can see
+            them easily" field (migration 154). */}
+        <Field label="Nickname">
+          <input type="text"
+            value={edit.custom_name || ''}
+            placeholder="e.g. Restoration meme batch #2 — leave blank to use the auto name"
+            onChange={e => setEdit({ ...edit, custom_name: e.target.value })}
+            style={inputStyle} />
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', marginTop: 4 }}>
+            Your own label. Shows everywhere as the headline name; the auto name
+            stays visible underneath. Clear it to fall back to the auto name.
+          </div>
+        </Field>
+
+        {/* Format — a SEPARATE axis from Type (Hook/Body). Talking-head vs
+            B-roll vs meme vs testimonial vs skit … so you can filter/group by
+            the *vibe* of the edit (migration 154). */}
+        <Field label="Format">
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            <button type="button"
+              onClick={() => setEdit({ ...edit, style_format: null })}
+              style={{
+                padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.05em', textTransform: 'uppercase', borderRadius: 2, cursor: 'pointer',
+                background: !edit.style_format ? 'var(--accent)' : 'transparent',
+                color: 'var(--ink)',
+                border: '1px solid ' + (!edit.style_format ? 'var(--ink)' : 'var(--rule)'),
+              }}>None</button>
+            {STYLE_FORMATS.map(f => {
+              const isOn = edit.style_format === f
+              const sc = styleFormatColor(f)
+              return (
+                <button key={f} type="button"
+                  onClick={() => setEdit({ ...edit, style_format: f })}
+                  style={{
+                    padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                    letterSpacing: '0.05em', textTransform: 'uppercase', borderRadius: 2, cursor: 'pointer',
+                    background: isOn ? sc.ink : sc.soft,
+                    color: isOn ? 'white' : sc.ink,
+                    border: '1px solid ' + (isOn ? sc.ink : sc.border),
+                  }}>{f}</button>
+              )
+            })}
+          </div>
+        </Field>
+
         <Field label="Display name (auto)">
           {/* Read-only. The display_name is built by creative-library-describe
               from offer + messaging_angle + creator + take_number. Editing it
