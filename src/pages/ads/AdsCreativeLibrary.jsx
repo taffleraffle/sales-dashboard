@@ -5940,10 +5940,14 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
         <div style={{
           fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
           color: 'var(--ink)', lineHeight: 1.35,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          // Wrap to two lines instead of cutting the name off at one — long
+          // structured names ("RAW-OSO-LIFESTYLECONTENT-T01") were getting
+          // chopped. Clamp at 2 so cards stay even, with the full name on hover.
+          overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical', wordBreak: 'break-word',
           textDecoration: (row.status === 'raw' && isUsed) ? 'line-through' : 'none',
           opacity: (row.status === 'raw' && isUsed) ? 0.7 : 1,
-        }} title={row.name}>
+        }} title={rowDisplayName(row)}>
           {(row.status === 'raw' && isUsed) && (
             <span title="Already edited"
               style={{ color: '#3e8a5e', marginRight: 4 }}>✓</span>
@@ -6494,13 +6498,15 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
           </div>
         )}
 
-        {/* Download bar — points at the highest-quality URL available.
-            final_cut_url > drive_url > preview_url. Important: drive_url
-            comes BEFORE preview_url because for old Drive-imported rows
-            preview_url is a 720p transcode (looks dog shit on download). */}
+        {/* Download bar — "Download original" is ALWAYS the source clip
+            (drive_url before preview_url, because old Drive-imported rows have
+            a 720p preview that looks dog shit on download). The edited cut,
+            when one exists, downloads separately so "original" never silently
+            hands back the edit — consistent with the task modal. */}
         {(() => {
-          const dl = row.final_cut_url || row.drive_url || row.preview_url
-          if (!dl) return null
+          const src = row.drive_url || row.preview_url
+          const cut = row.final_cut_url
+          if (!src && !cut) return null
           return (
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
@@ -6508,16 +6514,33 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
             }}>
               <span>Original file</span>
-              <a href={toDownloadUrl(dl, rowDisplayName(row))}
-                download={rowDisplayName(row) || 'creative.mp4'}
-                rel="noreferrer"
-                title="Download the highest-quality version of this creative"
-                style={{
-                  padding: '4px 10px', fontWeight: 600,
-                  letterSpacing: '0.06em', textTransform: 'uppercase',
-                  background: 'var(--ink)', color: 'var(--paper)',
-                  textDecoration: 'none', borderRadius: 2,
-                }}>↓ Download original</a>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {src && (
+                  <a href={toDownloadUrl(src, rowDisplayName(row))}
+                    download={rowDisplayName(row) || 'creative.mp4'}
+                    rel="noreferrer"
+                    title="Download the original source clip (not the edited cut)"
+                    style={{
+                      padding: '4px 10px', fontWeight: 600,
+                      letterSpacing: '0.06em', textTransform: 'uppercase',
+                      background: 'var(--ink)', color: 'var(--paper)',
+                      textDecoration: 'none', borderRadius: 2,
+                    }}>↓ Download original</a>
+                )}
+                {cut && (
+                  <a href={toDownloadUrl(cut, (rowDisplayName(row) || 'creative') + '-cut')}
+                    download={(rowDisplayName(row) || 'creative') + '-cut.mp4'}
+                    rel="noreferrer"
+                    title="Download the latest edited cut"
+                    style={{
+                      padding: '4px 10px', fontWeight: 600,
+                      letterSpacing: '0.06em', textTransform: 'uppercase',
+                      background: 'transparent', color: 'var(--ink-2)',
+                      border: '1px solid var(--rule)',
+                      textDecoration: 'none', borderRadius: 2,
+                    }}>↓ Cut</a>
+                )}
+              </div>
             </div>
           )
         })()}
@@ -8180,6 +8203,12 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     task.assigned_at ? task.assigned_at.slice(0, 10) : ''
   )
   const [notes, setNotes] = useState(task.notes || '')
+  // Creative-level fields edited from the queue. The queue is a read-only
+  // VIEW, so these are written straight to lib_creative_library on save
+  // (by task.creative_id). Lets you rename / set format without leaving the
+  // task modal — parity with the Library detail modal (migration 154/155).
+  const [creativeNickname, setCreativeNickname] = useState(task.creative_custom_name || '')
+  const [creativeFormat, setCreativeFormat] = useState(task.creative_style_format || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [confirmDel, setConfirmDel] = useState(false)
@@ -8331,7 +8360,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   useEffect(() => {
     if (dirtyInitRef.current) { dirtyInitRef.current = false; return }
     dirtyRef.current = true
-  }, [editorId, status, priority, taskType, due, startDate, notes])
+  }, [editorId, status, priority, taskType, due, startDate, notes, creativeNickname, creativeFormat])
 
   const save = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setBusy(true)
@@ -8347,16 +8376,28 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     // Auto-set completed_at when moving to done
     if (status === 'done' && !task.completed_at) patch.completed_at = new Date().toISOString()
     const { error } = await supabase.from('lib_editing_tasks').update(patch).eq('id', task.task_id)
+    // Persist creative-level nickname/format straight to the source clip —
+    // the queue is a read-only view so we can't patch it through. Only writes
+    // when actually changed so we never clobber an unrelated edit.
+    let creativeErr = null
+    const nickChanged = (creativeNickname || '') !== (task.creative_custom_name || '')
+    const fmtChanged  = (creativeFormat || '')  !== (task.creative_style_format || '')
+    if (!error && task.creative_id && (nickChanged || fmtChanged)) {
+      const cpatch = {}
+      if (nickChanged) cpatch.custom_name = creativeNickname ? (creativeNickname.trim() || null) : null
+      if (fmtChanged)  cpatch.style_format = creativeFormat || null
+      creativeErr = (await supabase.from('lib_creative_library').update(cpatch).eq('id', task.creative_id)).error
+    }
     if (!silent) setBusy(false)
-    if (error) {
-      if (!silent) setErr(error.message)
+    if (error || creativeErr) {
+      if (!silent) setErr((error || creativeErr).message)
     } else {
       // Reset dirty so closing the modal twice doesn't fire a redundant
       // silent write. Manual Save also wins this flag back for the user.
       dirtyRef.current = false
       if (!silent) onSaved?.()
     }
-  }, [editorId, status, priority, taskType, due, startDate, notes, task.task_id, task.started_at, task.completed_at, onSaved])
+  }, [editorId, status, priority, taskType, due, startDate, notes, creativeNickname, creativeFormat, task.task_id, task.creative_id, task.creative_custom_name, task.creative_style_format, task.started_at, task.completed_at, onSaved])
   const remove = async () => {
     setBusy(true); setErr(null)
     const { error } = await supabase.from('lib_editing_tasks').delete().eq('id', task.task_id)
@@ -8644,7 +8685,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   return (
     <Modal open={true} onClose={handleCloseModal} size="xl"
       eyebrow="Edit task"
-      title={task.creative_name}
+      title={creativeNickname || taskDisplayName(task)}
       subtitle={`${task.creative_type || ''}${task.creative_creator ? ' · ' + task.creative_creator : ''}${task.v21_script_id ? ' · ' + task.v21_script_id : ''}`}
       footer={
         <>
@@ -8784,18 +8825,39 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                     Open in Drive ↗
                   </a>
                 )}
-                {(task.final_cut_url || task.drive_url || task.preview_url) && (
+                {/* ORIGINAL SOURCE — drive_url/preview_url only. NEVER
+                    final_cut_url: that gets overwritten with the editor's
+                    submitted cut on upload/approval, which used to make
+                    "Download original" hand back the edit instead of the
+                    source the editor needs to re-cut. The latest cut is
+                    downloadable separately below + per-version in Submitted
+                    work. */}
+                {(task.drive_url || task.preview_url) && (
                   <a
-                    href={toDownloadUrl(task.final_cut_url || task.drive_url || task.preview_url, task.creative_name)}
+                    href={toDownloadUrl(task.drive_url || task.preview_url, task.creative_name)}
                     download={task.creative_name || 'creative.mp4'}
                     rel="noreferrer"
-                    title="Download the original full-quality file"
+                    title="Download the original source clip (not the edited cut)"
                     style={{
                       padding: '4px 10px',
                       fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
                       background: 'var(--ink)', color: 'var(--paper)',
                       textDecoration: 'none', borderRadius: 2,
                     }}>↓ Download original</a>
+                )}
+                {task.final_cut_url && (
+                  <a
+                    href={toDownloadUrl(task.final_cut_url, (task.creative_name || 'creative') + '-cut')}
+                    download={(task.creative_name || 'creative') + '-cut.mp4'}
+                    rel="noreferrer"
+                    title="Download the latest edited cut"
+                    style={{
+                      padding: '4px 10px',
+                      fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                      background: 'transparent', color: 'var(--ink-2)',
+                      border: '1px solid var(--rule)',
+                      textDecoration: 'none', borderRadius: 2,
+                    }}>↓ Cut</a>
                 )}
               </div>
             </div>
@@ -8878,6 +8940,44 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
           </Field>
         </div>
+
+        {/* Nickname + Format — creative-level fields, written straight to the
+            source clip on save. Parity with the Library detail modal so you
+            can rename / tag a clip wherever you open it (migration 154/155). */}
+        <Field label="Nickname">
+          <input type="text"
+            value={creativeNickname}
+            placeholder="Name this clip so it's easy to find — blank uses the auto name"
+            onChange={e => setCreativeNickname(e.target.value)}
+            style={inputStyle} />
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', marginTop: 4 }}>
+            Becomes this task's title + the headline name across the library.
+          </div>
+        </Field>
+        <Field label="Format">
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => setCreativeFormat('')}
+              style={{
+                padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.05em', textTransform: 'uppercase', borderRadius: 2, cursor: 'pointer',
+                background: !creativeFormat ? 'var(--accent)' : 'transparent', color: 'var(--ink)',
+                border: '1px solid ' + (!creativeFormat ? 'var(--ink)' : 'var(--rule)'),
+              }}>None</button>
+            {STYLE_FORMATS.map(f => {
+              const isOn = creativeFormat === f
+              const sc = styleFormatColor(f)
+              return (
+                <button key={f} type="button" onClick={() => setCreativeFormat(f)}
+                  style={{
+                    padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                    letterSpacing: '0.05em', textTransform: 'uppercase', borderRadius: 2, cursor: 'pointer',
+                    background: isOn ? sc.ink : sc.soft, color: isOn ? 'white' : sc.ink,
+                    border: '1px solid ' + (isOn ? sc.ink : sc.border),
+                  }}>{f}</button>
+              )
+            })}
+          </div>
+        </Field>
 
         {/* Folder — where the source clip lives in the library. Inline so
             filing doesn't require a trip back to the Library tab. */}
