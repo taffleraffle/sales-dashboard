@@ -1833,13 +1833,10 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // pretending to be 60-100 MB videos — they look pixelated when played
   // because the original ingest only stored partial bytes. Operator can
   // toggle these back on via the filter chip to see/triage them.
-  // ALWAYS true since 2026-06-11 — the show/hide toggles were removed, so
-  // flagged clips are permanently hidden. Deliberately NOT initialised
-  // from localStorage: the old banner click persisted `false`, and anyone
-  // who ever clicked it would otherwise boot with flagged clips stuck
-  // visible and no UI left to hide them.
-  // Flagged clips are hidden by default; selecting the FLAGGED filter flips
-  // these off so they surface (see flaggedFilter above).
+  // Hidden by default to keep the library clean; the FLAGGED filter (above)
+  // flips both off so flagged clips surface and can be triaged. Derived from
+  // flaggedFilter rather than their own state, so there's a single source of
+  // truth and no stale localStorage value can strand a clip invisible.
   const showingFlagged = flaggedFilter.size > 0
   const hideLowQuality = !showingFlagged
   const hideBadTakes = !showingFlagged
@@ -2468,13 +2465,15 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     }
   }, [sortKey, sortDir])
 
-  // Flagged (low-quality / bad-take) clips are permanently hidden since
-  // 2026-06-11, so every count the operator sees is computed over the
-  // rows that can actually appear — a chip advertising clips the view
-  // can never show reads as a bug.
+  // Counts + denominators are computed over the rows that can actually appear
+  // in the CURRENT mode, so chip badges and the "X / Y" readout stay honest:
+  // the non-flagged set by default, or — when the FLAGGED filter is on — the
+  // flagged clips of the selected types (which is exactly what the list shows).
   const visibleRows = useMemo(
-    () => showingFlagged ? rows : rows.filter(r => !r.is_low_quality && !r.is_bad_take),
-    [rows, showingFlagged],
+    () => showingFlagged
+      ? rows.filter(r => (flaggedFilter.has('bad_take') && r.is_bad_take) || (flaggedFilter.has('low_quality') && r.is_low_quality))
+      : rows.filter(r => !r.is_low_quality && !r.is_bad_take),
+    [rows, showingFlagged, flaggedFilter],
   )
 
   // Per-type counts for the chip badges (over all VISIBLE rows, ignoring current type filter)
@@ -2550,9 +2549,9 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       if (r.type === 'Testimony') continue
       if (r.assigned_editor_id) continue
       if (usedRawIds.has(r.id)) continue
-      // Flagged clips aren't assignment candidates — and since the
-      // show/hide toggles were removed (2026-06-11) they're permanently
-      // hidden, so counting them would promise rows the view can't show.
+      // Flagged clips aren't assignment candidates, so they never count toward
+      // the unassigned-raw banner — regardless of whether the FLAGGED filter
+      // is currently revealing them in the list.
       if (r.is_low_quality || r.is_bad_take) continue
       n += 1
     }
@@ -2667,20 +2666,22 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   }, [selected, rows])
 
   // ── Folder CRUD (migration 146) ────────────────────────────────────
-  // Clip counts per folder, for the folder cards. Respects the default-on
-  // hide flags so a card never advertises clips that render as "Nothing
-  // matches" when the folder is opened (a folder of hidden bad takes
-  // saying "2 clips" but opening empty reads as data loss).
+  // Clip counts per folder, for the folder cards. Counts the same universe the
+  // list draws from in the current mode (non-flagged by default; the selected
+  // flagged types when the FLAGGED filter is on) so a card never advertises a
+  // count the opened folder can't match.
   const folderClipCounts = useMemo(() => {
     const m = new Map()
     for (const r of rows) {
       if (!r.folder_id) continue
-      if (hideLowQuality && r.is_low_quality) continue
-      if (hideBadTakes && r.is_bad_take) continue
+      const inScope = showingFlagged
+        ? ((flaggedFilter.has('bad_take') && r.is_bad_take) || (flaggedFilter.has('low_quality') && r.is_low_quality))
+        : (!r.is_low_quality && !r.is_bad_take)
+      if (!inScope) continue
       m.set(r.folder_id, (m.get(r.folder_id) || 0) + 1)
     }
     return m
-  }, [rows, hideLowQuality, hideBadTakes])
+  }, [rows, showingFlagged, flaggedFilter])
 
   const syncFolders = useCallback((updater) => {
     setFolders(curr => {
