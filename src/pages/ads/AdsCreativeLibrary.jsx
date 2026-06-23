@@ -1817,6 +1817,12 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   const [offerFilter, setOfferFilter] = useState(() => new Set())  // values: offer_slug | '__none__'
   const [runFilter, setRunFilter]     = useState(() => new Set())  // values: 'yes' | 'no'
   const [stageFilter, setStageFilter] = useState(() => new Set())  // values: 'raw_unused' | 'raw_used' | 'edited_seg' | 'merged'
+  // FLAGGED filter — reveals + narrows to AI/heuristic bad-takes and
+  // low-quality clips, which are otherwise hidden. Empty = hide them (the
+  // clean default). 2026-06-18 fix: a clip the AI flagged on upload was
+  // permanently invisible with no filter to reach it, so it couldn't be
+  // un-flagged or assigned even though it was on the platform.
+  const [flaggedFilter, setFlaggedFilter] = useState(() => new Set())  // values: 'bad_take' | 'low_quality'
   // Upload-date filter. Preset windows only — operator picks a quick range
   // and the list narrows to clips whose added_at falls inside it. Set so
   // the same FilterDropdown component as the other chips works; in practice
@@ -1827,13 +1833,13 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // pretending to be 60-100 MB videos — they look pixelated when played
   // because the original ingest only stored partial bytes. Operator can
   // toggle these back on via the filter chip to see/triage them.
-  // ALWAYS true since 2026-06-11 — the show/hide toggles were removed, so
-  // flagged clips are permanently hidden. Deliberately NOT initialised
-  // from localStorage: the old banner click persisted `false`, and anyone
-  // who ever clicked it would otherwise boot with flagged clips stuck
-  // visible and no UI left to hide them.
-  const [hideLowQuality] = useState(true)
-  const [hideBadTakes] = useState(true)
+  // Hidden by default to keep the library clean; the FLAGGED filter (above)
+  // flips both off so flagged clips surface and can be triaged. Derived from
+  // flaggedFilter rather than their own state, so there's a single source of
+  // truth and no stale localStorage value can strand a clip invisible.
+  const showingFlagged = flaggedFilter.size > 0
+  const hideLowQuality = !showingFlagged
+  const hideBadTakes = !showingFlagged
   // Column sort for the Matrix view. sortKey = '' means default order
   // (insertion / added_at desc). Clicking a header sets the key; clicking
   // the same key again toggles direction.
@@ -2351,6 +2357,11 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     // toggles via the chip in the toolbar when they want to see/triage them.
     if (hideLowQuality) list = list.filter(r => !r.is_low_quality)
     if (hideBadTakes) list = list.filter(r => !r.is_bad_take)
+    // FLAGGED filter active → the hides above are off; narrow to exactly the
+    // selected flag types so you can pull up the flagged clips to triage.
+    if (flaggedFilter.size > 0) list = list.filter(r =>
+      (flaggedFilter.has('bad_take') && r.is_bad_take) ||
+      (flaggedFilter.has('low_quality') && r.is_low_quality))
     const search = deferredQ.trim().toLowerCase()
     // Folder scoping (Drive-style): inside a folder show only its direct
     // clips; at the root show un-filed clips. Skipped while searching so
@@ -2441,7 +2452,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       })
     }
     return list
-  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
+  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, flaggedFilter, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -2454,13 +2465,15 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     }
   }, [sortKey, sortDir])
 
-  // Flagged (low-quality / bad-take) clips are permanently hidden since
-  // 2026-06-11, so every count the operator sees is computed over the
-  // rows that can actually appear — a chip advertising clips the view
-  // can never show reads as a bug.
+  // Counts + denominators are computed over the rows that can actually appear
+  // in the CURRENT mode, so chip badges and the "X / Y" readout stay honest:
+  // the non-flagged set by default, or — when the FLAGGED filter is on — the
+  // flagged clips of the selected types (which is exactly what the list shows).
   const visibleRows = useMemo(
-    () => rows.filter(r => !r.is_low_quality && !r.is_bad_take),
-    [rows],
+    () => showingFlagged
+      ? rows.filter(r => (flaggedFilter.has('bad_take') && r.is_bad_take) || (flaggedFilter.has('low_quality') && r.is_low_quality))
+      : rows.filter(r => !r.is_low_quality && !r.is_bad_take),
+    [rows, showingFlagged, flaggedFilter],
   )
 
   // Per-type counts for the chip badges (over all VISIBLE rows, ignoring current type filter)
@@ -2536,9 +2549,9 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       if (r.type === 'Testimony') continue
       if (r.assigned_editor_id) continue
       if (usedRawIds.has(r.id)) continue
-      // Flagged clips aren't assignment candidates — and since the
-      // show/hide toggles were removed (2026-06-11) they're permanently
-      // hidden, so counting them would promise rows the view can't show.
+      // Flagged clips aren't assignment candidates, so they never count toward
+      // the unassigned-raw banner — regardless of whether the FLAGGED filter
+      // is currently revealing them in the list.
       if (r.is_low_quality || r.is_bad_take) continue
       n += 1
     }
@@ -2653,20 +2666,22 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   }, [selected, rows])
 
   // ── Folder CRUD (migration 146) ────────────────────────────────────
-  // Clip counts per folder, for the folder cards. Respects the default-on
-  // hide flags so a card never advertises clips that render as "Nothing
-  // matches" when the folder is opened (a folder of hidden bad takes
-  // saying "2 clips" but opening empty reads as data loss).
+  // Clip counts per folder, for the folder cards. Counts the same universe the
+  // list draws from in the current mode (non-flagged by default; the selected
+  // flagged types when the FLAGGED filter is on) so a card never advertises a
+  // count the opened folder can't match.
   const folderClipCounts = useMemo(() => {
     const m = new Map()
     for (const r of rows) {
       if (!r.folder_id) continue
-      if (hideLowQuality && r.is_low_quality) continue
-      if (hideBadTakes && r.is_bad_take) continue
+      const inScope = showingFlagged
+        ? ((flaggedFilter.has('bad_take') && r.is_bad_take) || (flaggedFilter.has('low_quality') && r.is_low_quality))
+        : (!r.is_low_quality && !r.is_bad_take)
+      if (!inScope) continue
       m.set(r.folder_id, (m.get(r.folder_id) || 0) + 1)
     }
     return m
-  }, [rows, hideLowQuality, hideBadTakes])
+  }, [rows, showingFlagged, flaggedFilter])
 
   const syncFolders = useCallback((updater) => {
     setFolders(curr => {
@@ -2776,7 +2791,19 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
 
   // Badge for the FILTERS button: how many filter groups are active.
   const activeFilterCount =
-    stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size
+    stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size + flaggedFilter.size
+
+  // How many loaded clips are AI/heuristic flagged or low-quality — drives the
+  // "N flagged hidden" toolbar shortcut so hidden clips stay discoverable.
+  const flaggedCounts = useMemo(() => {
+    let bad = 0, low = 0, any = 0
+    for (const r of rows) {
+      if (r.is_bad_take) bad++
+      if (r.is_low_quality) low++
+      if (r.is_bad_take || r.is_low_quality) any++
+    }
+    return { bad, low, any }
+  }, [rows])
 
   // Where the current selection lives, for the move picker's "current"
   // tag + no-op guard: a folder id (or null = root) only when EVERY
@@ -2925,6 +2952,24 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             </button>
           )}
           <span style={{ flex: 1 }} />
+          {/* Discoverability shortcut: flagged clips are hidden, so surface a
+              one-click "show them" when any exist — otherwise an operator has
+              no idea a clip the AI flagged is even on the platform. */}
+          {flaggedFilter.size === 0 && flaggedCounts.any > 0 && (
+            <button type="button"
+              onClick={() => { setFlaggedFilter(new Set(['bad_take', 'low_quality'])); setFiltersOpen(true) }}
+              title="These clips were flagged by the AI / quality check and are hidden from the library. Click to show them so you can review, un-flag, or assign them."
+              style={{
+                padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+                letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: '#fff3d1', color: '#9a4d00',
+                border: '1px solid #d68f00', borderRadius: 2, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+              }}>
+              <span style={{ fontSize: 12, lineHeight: 1 }}>⚑</span>
+              {flaggedCounts.any} flagged hidden
+            </button>
+          )}
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
             {filtered.length} / {visibleRows.length}
           </span>
@@ -3002,15 +3047,24 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             ]}
             allCount={visibleRows.length}
             onChange={setRunFilter} />
-          {/* Uploaded-date filter, latest-only and the low-quality / bad-take
-              show/hide toggles removed 2026-06-11 (Ben: too much noise).
-              Flagged clips are now simply always hidden; their state vars
-              keep their defaults so the filter pipeline is unchanged. */}
-          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size > 0) && (
+          {/* FLAGGED — reveals AI/heuristic bad-takes + low-quality clips,
+              which are hidden by default. Without this a clip the AI flagged
+              on upload was permanently invisible (couldn't be un-flagged or
+              assigned). Selecting an option narrows the list to those clips so
+              you can pull them up and triage them. 2026-06-18 bug fix. */}
+          <FilterDropdown label="FLAGGED"
+            selected={flaggedFilter}
+            options={[
+              { value: 'bad_take',     label: 'BAD TAKES',   count: flaggedCounts.bad, dot: '#b53e3e' },
+              { value: 'low_quality',  label: 'LOW QUALITY', count: flaggedCounts.low, dot: '#d68f00' },
+            ]}
+            allCount={visibleRows.length}
+            onChange={setFlaggedFilter} />
+          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size + flaggedFilter.size > 0) && (
             <button type="button"
               onClick={() => {
                 setStageFilter(new Set()); setTypeFilter(new Set())
-                setOfferFilter(new Set()); setRunFilter(new Set())
+                setOfferFilter(new Set()); setRunFilter(new Set()); setFlaggedFilter(new Set())
               }}
               style={{
                 marginLeft: 4, padding: '4px 9px',
