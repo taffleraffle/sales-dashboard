@@ -53,6 +53,59 @@ function toDownloadUrl(url, filename) {
   return `${url}${sep}download=${encodeURIComponent(fname)}`
 }
 
+// Copy text to the clipboard with a legacy fallback (the async Clipboard API
+// throws when the document isn't focused / context isn't secure / webview
+// lacks it). Returns true on success.
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch { /* fall through */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'; ta.style.top = '-9999px'
+    document.body.appendChild(ta)
+    ta.focus(); ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch { return false }
+}
+
+/* Copy a direct, shareable URL to a video to the clipboard — the link an
+   editor pastes into their invoice or sends to review. Copies the plain
+   public URL (plays in the browser when opened); falls back to a selectable
+   prompt if the clipboard is blocked. */
+function CopyLinkButton({ url, label = 'Copy link', title, style }) {
+  const [copied, setCopied] = useState(false)
+  if (!url) return null
+  const onClick = async (e) => {
+    e.preventDefault(); e.stopPropagation()
+    const ok = await copyToClipboard(url)
+    if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1600) }
+    else { try { window.prompt('Copy this link:', url) } catch { /* no-op */ } }
+  }
+  return (
+    <button type="button" onClick={onClick}
+      title={title || 'Copy a shareable link to this video'}
+      style={{
+        padding: '4px 10px',
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+        letterSpacing: '0.06em', textTransform: 'uppercase',
+        background: copied ? '#3e8a5e' : 'transparent',
+        color: copied ? 'white' : 'var(--ink-2)',
+        border: '1px solid ' + (copied ? '#3e8a5e' : 'var(--rule)'),
+        borderRadius: 2, cursor: 'pointer', textDecoration: 'none',
+        whiteSpace: 'nowrap',
+        ...(style || {}),
+      }}>{copied ? '✓ Copied' : `🔗 ${label}`}</button>
+  )
+}
+
 /*
   /sales/ads/creative/library — two-tab surface for the creative library:
 
@@ -4151,6 +4204,10 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
           </div>
           {/* Actions */}
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <CopyLinkButton
+              url={r.final_cut_url || r.drive_url || r.preview_url}
+              label="Link"
+              title="Copy a shareable link to this video" />
             {onDelete && (
               <button onClick={e => { e.stopPropagation(); onDelete() }} style={{
                 padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
@@ -9090,6 +9147,10 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                       textDecoration: 'none', borderRadius: 2,
                     }}>↓ Download original</a>
                 )}
+                <CopyLinkButton
+                  url={task.final_cut_url || task.drive_url || task.preview_url}
+                  label="Copy link"
+                  title="Copy a shareable link to this video" />
               </div>
             </div>
           </div>
@@ -9791,6 +9852,11 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                       with the custom player, scrubber-pinned comment
                       markers, and Approve / Request revision in the
                       modal footer. */}
+                  <CopyLinkButton
+                    url={sub.file_url || sub.external_url}
+                    label="Copy link"
+                    title="Copy a shareable link to this version"
+                    style={{ marginLeft: 6 }} />
                   {onOpenReview && sub.file_url && (
                     <button type="button"
                       onClick={() => onOpenReview(sub)}
