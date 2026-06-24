@@ -18,6 +18,7 @@ import {
   uploadQueue, useUploadQueue, uploadWithResume,
   captureVideoThumbnail, captureVideoThumbnailFromUrl,
   TopUploadProgressBar, RenameUnnamedButton, UploadModal,
+  probeMediaDimensions,
 } from './library/upload'
 import {
   OptVideoPlayer, fmtTime, OPT_PLAYER_WRAP_360, OPT_PLAYER_WRAP_320,
@@ -1699,6 +1700,7 @@ export default function AdsCreativeLibrary({ editorScope }) {
     const fallback = scope.isEditorView ? 'queue' : 'library'
     try {
       const saved = localStorage.getItem('lib.tab')
+      if (saved === 'invoice') return scope.isEditorView ? 'invoice' : fallback
       return (saved === 'library' || saved === 'queue') ? saved : fallback
     } catch { return fallback }
   })
@@ -1714,11 +1716,14 @@ export default function AdsCreativeLibrary({ editorScope }) {
           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
           letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
         }}>
-          {scope.isEditorView ? 'Editor portal · ' : ''}{tab === 'library' ? 'Library' : 'Editing queue'}
+          {scope.isEditorView ? 'Editor portal · ' : ''}{tab === 'library' ? 'Library' : tab === 'invoice' ? 'Invoice' : 'Editing queue'}
         </div>
         <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper)' }}>
           <TabBtn active={tab === 'library'} onClick={() => setTab('library')}>Library</TabBtn>
           <TabBtn active={tab === 'queue'}   onClick={() => setTab('queue')}>Editing queue</TabBtn>
+          {scope.isEditorView && (
+            <TabBtn active={tab === 'invoice'} onClick={() => setTab('invoice')}>Invoice</TabBtn>
+          )}
         </div>
       </div>
 
@@ -1735,6 +1740,385 @@ export default function AdsCreativeLibrary({ editorScope }) {
       <div style={{ display: tab === 'queue' ? 'block' : 'none' }}>
         <EditingQueueTab scope={scope} />
       </div>
+      {scope.isEditorView && (
+        <div style={{ display: tab === 'invoice' ? 'block' : 'none' }}>
+          <InvoiceTab scope={scope} active={tab === 'invoice'} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Parse an editor-typed video length into seconds. Accepts "m:ss" / "h:mm:ss"
+// (colon form) or a bare number treated as minutes ("2" = 120s, "1.5" = 90s).
+// Returns null on anything unparseable so callers can keep the manual input open.
+function parseDurationInput(str) {
+  const t = (str || '').trim()
+  if (!t) return null
+  if (t.includes(':')) {
+    const parts = t.split(':').map(p => parseInt(p, 10))
+    if (parts.some(n => Number.isNaN(n) || n < 0)) return null
+    let s = 0
+    for (const p of parts) s = s * 60 + p
+    return s
+  }
+  const n = parseFloat(t)
+  if (!Number.isFinite(n) || n < 0) return null
+  return Math.round(n * 60)
+}
+
+/* InvoiceTab — the editor's pay surface inside the portal.
+   For one editor, lists each task's MOST-RECENT APPROVED submission, the link
+   to that cut, and its length. Tallies the total approved video time and, when
+   the editor has a flat per-minute rate set, the pay. Lengths captured at
+   upload show as "auto"; external review links (or anything we couldn't read)
+   get a manual length the editor types here. */
+function InvoiceTab({ scope, active }) {
+  const [editors, setEditors] = useState([])
+  const [selectedEditorId, setSelectedEditorId] = useState(scope.editorId || '')
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState(null)
+  const [editingId, setEditingId] = useState(null)
+  const [draftLen, setDraftLen] = useState('')
+  const [savingId, setSavingId] = useState(null)
+  const [copiedKey, setCopiedKey] = useState(null)
+
+  // Editors can only ever see their own invoice; the team-wide / admin
+  // portal can switch between editors via the picker.
+  const lockedToSelf = !!scope.editorId && !scope.isTeamWide
+  const canPick = !lockedToSelf
+
+  useEffect(() => {
+    let mounted = true
+    supabase.from('lib_creative_editors')
+      .select('id, name, rate_per_minute, active')
+      .order('name')
+      .then(({ data }) => {
+        if (!mounted) return
+        const list = data || []
+        setEditors(list)
+        // Default the picker to the logged-in editor, else first active editor.
+        if (!selectedEditorId) {
+          const first = list.find(e => e.active !== false) || list[0]
+          if (first) setSelectedEditorId(first.id)
+        }
+      })
+    return () => { mounted = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const selectedEditor = editors.find(e => e.id === selectedEditorId) || null
+  const rate = selectedEditor?.rate_per_minute != null ? Number(selectedEditor.rate_per_minute) : null
+
+  const load = useCallback(async () => {
+    if (!selectedEditorId) { setRows([]); setLoading(false); return }
+    setLoading(true); setErr(null)
+    try {
+      // Every approved, non-deleted submission this editor made.
+      const { data: subs, error: sErr } = await supabase
+        .from('lib_task_submissions')
+        .select('id, task_id, version_number, approved_at, file_url, external_url, duration_seconds, duration_source, thumbnail_url')
+        .eq('submitted_by_editor_id', selectedEditorId)
+        .not('approved_at', 'is', null)
+        .is('deleted_at', null)
+      if (sErr) throw sErr
+
+      // Keep only the most-recent approved version per task.
+      const latestByTask = new Map()
+      for (const s of (subs || [])) {
+        const cur = latestByTask.get(s.task_id)
+        if (!cur || (s.version_number || 0) > (cur.version_number || 0)) latestByTask.set(s.task_id, s)
+      }
+      const kept = [...latestByTask.values()]
+      if (kept.length === 0) { setRows([]); setLoading(false); return }
+
+      // Resolve task → creative for the name + a fallback link.
+      const taskIds = [...new Set(kept.map(s => s.task_id).filter(Boolean))]
+      const { data: tasks } = await supabase
+        .from('lib_editing_tasks')
+        .select('id, creative_id')
+        .in('id', taskIds)
+      const taskMap = new Map((tasks || []).map(t => [t.id, t]))
+      const creativeIds = [...new Set((tasks || []).map(t => t.creative_id).filter(Boolean))]
+      let creativeMap = new Map()
+      if (creativeIds.length) {
+        const { data: creatives } = await supabase
+          .from('lib_creative_library')
+          .select('id, name, canonical_name, display_name, type, final_cut_url, drive_url, preview_url')
+          .in('id', creativeIds)
+        creativeMap = new Map((creatives || []).map(c => [c.id, c]))
+      }
+
+      const built = kept.map(s => {
+        const task = taskMap.get(s.task_id)
+        const creative = task ? creativeMap.get(task.creative_id) : null
+        const name = creative ? rowDisplayName(creative) : 'Untitled edit'
+        const fname = `${name}-v${s.version_number || 1}.mp4`
+        // Link priority: the editor's own submitted file, then an external
+        // review link they pasted, then the creative's resolved final cut.
+        let link = null
+        if (s.file_url) link = toDownloadUrl(s.file_url, fname)
+        else if (s.external_url) link = s.external_url
+        else if (creative) link = toDownloadUrl(creative.final_cut_url || creative.drive_url || creative.preview_url, fname)
+        return {
+          id: s.id,
+          name,
+          type: creative?.type || null,
+          version: s.version_number || 1,
+          approvedAt: s.approved_at,
+          link,
+          isExternal: !s.file_url && !!s.external_url,
+          durationSeconds: s.duration_seconds != null ? Number(s.duration_seconds) : null,
+          durationSource: s.duration_source || null,
+          thumb: s.thumbnail_url || null,
+        }
+      }).sort((a, b) => new Date(b.approvedAt) - new Date(a.approvedAt))
+
+      setRows(built)
+    } catch (e) {
+      setErr(e.message || 'Failed to load invoice')
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedEditorId])
+
+  useEffect(() => { if (active) load() }, [active, load])
+
+  const totalSeconds = rows.reduce((acc, r) => acc + (r.durationSeconds || 0), 0)
+  const missing = rows.filter(r => r.durationSeconds == null).length
+  const totalMinutes = totalSeconds / 60
+  const pay = rate != null ? totalMinutes * rate : null
+
+  const saveDuration = async (row) => {
+    const seconds = parseDurationInput(draftLen)
+    if (seconds == null) { setErr('Enter a length like 1:30 or 2 (minutes).'); return }
+    setSavingId(row.id); setErr(null)
+    try {
+      const { error } = await supabase.from('lib_task_submissions')
+        .update({ duration_seconds: seconds, duration_source: 'manual' })
+        .eq('id', row.id)
+      if (error) throw error
+      setRows(rs => rs.map(r => r.id === row.id ? { ...r, durationSeconds: seconds, durationSource: 'manual' } : r))
+      setEditingId(null); setDraftLen('')
+    } catch (e) {
+      setErr(e.message || 'Could not save length')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  const copy = async (text, key) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedKey(key); setTimeout(() => setCopiedKey(null), 1600)
+    } catch { /* clipboard blocked — no-op */ }
+  }
+  const copyAll = () => {
+    const lines = rows
+      .filter(r => r.link)
+      .map(r => `${r.name}\t${r.durationSeconds != null ? formatTs(r.durationSeconds) : '—'}\t${r.link}`)
+    copy(lines.join('\n'), '__all__')
+  }
+
+  const labelMono = {
+    fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
+    textTransform: 'uppercase', color: 'var(--ink-3)',
+  }
+
+  return (
+    <div style={{ padding: '4px 0 40px' }}>
+      {/* Header: editor + summary tiles */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+        gap: 16, flexWrap: 'wrap', marginBottom: 16,
+      }}>
+        <div>
+          <div style={labelMono}>Invoice · approved video time</div>
+          {canPick ? (
+            <select value={selectedEditorId} onChange={e => setSelectedEditorId(e.target.value)}
+              style={{ ...inputStyle, marginTop: 6, maxWidth: 280, fontFamily: 'var(--serif)', fontSize: 18 }}>
+              <option value="">Select an editor…</option>
+              {editors.map(e => (
+                <option key={e.id} value={e.id}>{e.name}{e.active === false ? ' (inactive)' : ''}</option>
+              ))}
+            </select>
+          ) : (
+            <h2 style={{ margin: '4px 0 0', fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, color: 'var(--ink)' }}>
+              {selectedEditor?.name || scope.editorName || 'You'}
+            </h2>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <SummaryTile label="Approved edits" value={String(rows.length)} />
+          <SummaryTile label="Total video time" value={formatTs(totalSeconds)} accent />
+          {rate != null
+            ? <SummaryTile label={`Pay @ $${rate.toFixed(2)}/min`} value={`$${(pay || 0).toFixed(2)}`} accent />
+            : <SummaryTile label="Pay" value="rate not set" muted />}
+        </div>
+      </div>
+
+      {err && (
+        <div style={{
+          marginBottom: 12, padding: '10px 12px', background: 'rgba(181,62,62,0.06)',
+          border: '1px solid rgba(181,62,62,0.3)', borderLeft: '3px solid #b53e3e',
+          fontFamily: 'var(--sans)', fontSize: 12.5, color: '#b53e3e',
+        }}>{err}</div>
+      )}
+
+      {missing > 0 && !loading && (
+        <div style={{
+          marginBottom: 12, padding: '8px 12px', background: '#fffaea',
+          border: '1px solid #e8b408', fontFamily: 'var(--mono)', fontSize: 11, color: '#7a4e08',
+        }}>
+          {missing} edit{missing === 1 ? '' : 's'} {missing === 1 ? 'has' : 'have'} no length yet — these are
+          usually pasted review links. Set the length on each to include it in the total.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <button onClick={copyAll} disabled={rows.length === 0}
+          style={{
+            padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            background: copiedKey === '__all__' ? '#3e8a5e' : 'white',
+            color: copiedKey === '__all__' ? 'white' : 'var(--ink-2)',
+            border: '1px solid ' + (copiedKey === '__all__' ? '#3e8a5e' : 'var(--rule)'),
+            cursor: rows.length === 0 ? 'not-allowed' : 'pointer', opacity: rows.length === 0 ? 0.5 : 1,
+          }}>{copiedKey === '__all__' ? 'Copied' : 'Copy all (name · length · link)'}</button>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
+          Loading approved edits…
+        </div>
+      ) : rows.length === 0 ? (
+        <div style={{
+          padding: 40, textAlign: 'center', border: '1px dashed var(--rule)',
+          fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+        }}>
+          No approved edits yet. Once an admin approves a submission, it shows up here with its length.
+        </div>
+      ) : (
+        <div style={{ border: '1px solid var(--rule)', background: 'var(--paper)' }}>
+          {/* Column header */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 110px 96px 150px', gap: 12,
+            padding: '8px 14px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)',
+            ...labelMono,
+          }}>
+            <span>Edit</span><span>Approved</span><span>Length</span><span style={{ textAlign: 'right' }}>Link</span>
+          </div>
+          {rows.map(r => (
+            <div key={r.id} style={{
+              display: 'grid', gridTemplateColumns: '1fr 110px 96px 150px', gap: 12,
+              padding: '10px 14px', borderBottom: '1px solid var(--rule)', alignItems: 'center',
+            }}>
+              {/* Name + type */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{r.name}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', marginTop: 2 }}>
+                  v{r.version}{r.type ? ` · ${r.type}` : ''}{r.isExternal ? ' · link' : ''}
+                </div>
+              </div>
+              {/* Approved date */}
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
+                {r.approvedAt ? new Date(r.approvedAt).toLocaleDateString() : '—'}
+              </div>
+              {/* Length (display or manual input) */}
+              <div>
+                {editingId === r.id ? (
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <input autoFocus value={draftLen} onChange={e => setDraftLen(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') saveDuration(r); if (e.key === 'Escape') { setEditingId(null); setDraftLen('') } }}
+                      placeholder="1:30" style={{ ...inputStyle, width: 56, padding: '3px 6px', fontSize: 12 }} />
+                    <button onClick={() => saveDuration(r)} disabled={savingId === r.id}
+                      style={{ padding: '3px 7px', fontFamily: 'var(--mono)', fontSize: 10, background: 'var(--ink)', color: 'white', border: 'none', cursor: 'pointer' }}>
+                      {savingId === r.id ? '…' : '✓'}
+                    </button>
+                  </div>
+                ) : r.durationSeconds != null ? (
+                  <button onClick={() => { setEditingId(r.id); setDraftLen(formatTs(r.durationSeconds)) }}
+                    title={`Edit length (${r.durationSource || 'auto'})`}
+                    style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--ink)' }}>{formatTs(r.durationSeconds)}</span>
+                    {r.durationSource === 'manual' && (
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-4)', marginLeft: 4 }}>m</span>
+                    )}
+                  </button>
+                ) : (
+                  <button onClick={() => { setEditingId(r.id); setDraftLen('') }}
+                    style={{
+                      padding: '3px 8px', fontFamily: 'var(--mono)', fontSize: 10,
+                      letterSpacing: '0.04em', textTransform: 'uppercase',
+                      background: '#fffaea', color: '#7a4e08', border: '1px solid #e8b408', cursor: 'pointer',
+                    }}>Set length</button>
+                )}
+              </div>
+              {/* Link */}
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                {r.link ? (
+                  <>
+                    <a href={r.link} target="_blank" rel="noreferrer"
+                      style={{
+                        padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'white', color: 'var(--ink-2)', border: '1px solid var(--rule)',
+                        textDecoration: 'none',
+                      }}>Open</a>
+                    <button onClick={() => copy(r.link, r.id)}
+                      style={{
+                        padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
+                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: copiedKey === r.id ? '#3e8a5e' : 'white',
+                        color: copiedKey === r.id ? 'white' : 'var(--ink-2)',
+                        border: '1px solid ' + (copiedKey === r.id ? '#3e8a5e' : 'var(--rule)'), cursor: 'pointer',
+                      }}>{copiedKey === r.id ? 'Copied' : 'Copy'}</button>
+                  </>
+                ) : (
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>no link</span>
+                )}
+              </div>
+            </div>
+          ))}
+          {/* Totals footer */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 110px 96px 150px', gap: 12,
+            padding: '12px 14px', background: 'var(--paper-2)', alignItems: 'center',
+          }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+              {rows.length} edit{rows.length === 1 ? '' : 's'} · total
+            </span>
+            <span />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{formatTs(totalSeconds)}</span>
+            <span style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: rate != null ? '#3e8a5e' : 'var(--ink-4)' }}>
+              {rate != null ? `$${(pay || 0).toFixed(2)}` : '—'}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SummaryTile({ label, value, accent, muted }) {
+  return (
+    <div style={{
+      minWidth: 120, padding: '8px 14px',
+      border: '1px solid ' + (accent ? 'var(--ink)' : 'var(--rule)'),
+      background: accent ? 'var(--ink)' : 'var(--paper)',
+    }}>
+      <div style={{
+        fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase',
+        color: accent ? 'rgba(255,255,255,0.7)' : 'var(--ink-3)',
+      }}>{label}</div>
+      <div style={{
+        marginTop: 3, fontFamily: 'var(--serif)', fontSize: 20, fontWeight: 500,
+        color: accent ? 'white' : muted ? 'var(--ink-4)' : 'var(--ink)',
+      }}>{value}</div>
     </div>
   )
 }
@@ -8271,6 +8655,14 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       // computed as (count of existing non-deleted submissions) + 1 so
       // the editor's revisions stack instead of overwriting each other.
       const nextVersion = (submissions.length || 0) + 1
+      // Measure the cut's length so the Invoice tab can tally minutes
+      // (editors are paid per finished minute). Best-effort — a codec we
+      // can't decode leaves it null and the editor sets it manually.
+      let durationSeconds = null
+      try {
+        const dims = await probeMediaDimensions(file)
+        if (dims?.duration_s != null) durationSeconds = dims.duration_s
+      } catch { /* unreadable metadata — manual fallback in Invoice tab */ }
       const { error: sErr } = await supabase.from('lib_task_submissions').insert({
         task_id: task.task_id,
         submitted_by_editor_id: task.editor_id || null,
@@ -8279,6 +8671,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         file_storage_path: storagePath,
         thumbnail_url: submissionThumbUrl,
         version_number: nextVersion,
+        duration_seconds: durationSeconds,
+        duration_source: durationSeconds != null ? 'auto' : null,
       })
       if (sErr) throw sErr
       setUploadProgress(85)

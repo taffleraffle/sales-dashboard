@@ -633,6 +633,10 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
   const [color, setColor] = useState(editor.color || '')
   const [format, setFormat] = useState(editor.format || 'both')
   const [tier, setTier] = useState(editor.tier || 'editor')
+  // Flat pay rate in $/finished-minute. Drives the editor's Invoice tab.
+  const [ratePerMinute, setRatePerMinute] = useState(
+    editor.rate_per_minute != null ? String(editor.rate_per_minute) : ''
+  )
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [confirmDeactivate, setConfirmDeactivate] = useState(false)
@@ -708,6 +712,10 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
       email: email.trim() ? email.trim().toLowerCase() : null,
       active, notes: notes || null, color: color || null,
       format, tier,
+      // Empty input clears the rate (null). Anything else parses to a
+      // number; a non-numeric string falls back to null rather than NaN.
+      rate_per_minute: ratePerMinute.trim() === '' ? null
+        : (Number.isFinite(parseFloat(ratePerMinute)) ? parseFloat(ratePerMinute) : null),
     }
     const { error } = await supabase.from('lib_creative_editors')
       .update(patch).eq('id', editor.id)
@@ -826,6 +834,19 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
             </div>
           </Field>
         </div>
+        <Field label="Pay rate — dollars per finished minute">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--ink-3)' }}>$</span>
+            <input type="number" min="0" step="0.01" value={ratePerMinute}
+              placeholder="0.00"
+              onChange={e => setRatePerMinute(e.target.value)}
+              style={{ ...inputStyle, maxWidth: 140 }} />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>/ min</span>
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 6 }}>
+            Applied to the total approved video time in this editor's Invoice tab. Leave blank to show minutes only.
+          </div>
+        </Field>
         <Field label="Color">
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             {/* Reset to auto (hash-derived) */}
