@@ -2226,6 +2226,10 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   const [sortDir, setSortDir] = useState('asc')   // 'asc' | 'desc'
   const [drawerRow, setDrawerRow] = useState(null)
   const [uploadOpen, setUploadOpen] = useState(false)
+  // Share-with-editor lives in the Editing-queue toolbar too, but coordinators
+  // spend most of their time on the Library tab and couldn't find it there —
+  // surface the same modal from here.
+  const [shareLinksOpen, setShareLinksOpen] = useState(false)
   const [view, setView] = useState(() => {
     try { return localStorage.getItem('lib.view') || 'list' } catch { return 'list' }
   })
@@ -3366,6 +3370,12 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               + Upload creative
             </button>
           )}
+          {scope.canManageEditors && (
+            <button onClick={() => setShareLinksOpen(true)}
+              style={{ ...ghostBtn, color: '#a86a08', borderColor: '#a86a08' }}>
+              ↗ Share with editor
+            </button>
+          )}
         </div>
 
         {/* Expanded filter panel — everything that used to be a permanent
@@ -3677,6 +3687,12 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
         />
       )}
 
+      {shareLinksOpen && (
+        <ShareLinksModal
+          editors={editors}
+          onClose={() => setShareLinksOpen(false)}
+        />
+      )}
       {uploadOpen && (
         <UploadModal
           editors={editors}
