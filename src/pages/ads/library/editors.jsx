@@ -346,6 +346,36 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
    Two link types:
      1. TEAM-WIDE link (no editor_id binding) — anyone can see the whole queue
      2. Per-editor links (editor_id bound) — filtered to one editor's tasks */
+// Copy text to the clipboard with a legacy fallback. The async Clipboard API
+// throws (and we were swallowing it with an empty catch) when the document
+// isn't focused, the context isn't secure, or the browser/webview doesn't
+// expose navigator.clipboard — which made "Copy link" silently do nothing.
+// Falls back to a hidden-textarea + execCommand('copy'). Returns true on
+// success so callers can show real feedback instead of a fake "Copied".
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch { /* fall through to the legacy path below */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.top = '-9999px'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
 export function ShareLinksModal({ editors, onClose }) {
   const [links, setLinks] = useState({})   // editor_id -> link row
   const [teamLink, setTeamLink] = useState(null)
@@ -443,10 +473,9 @@ export function ShareLinksModal({ editors, onClose }) {
 
   const buildUrl = (token) => `${window.location.origin}/editor-view/${token}`
   const copyLink = async (token) => {
-    try {
-      await navigator.clipboard.writeText(buildUrl(token))
-      setCopyOk(token); setTimeout(() => setCopyOk(null), 1800)
-    } catch {}
+    const ok = await copyTextToClipboard(buildUrl(token))
+    if (ok) { setErr(null); setCopyOk(token); setTimeout(() => setCopyOk(null), 1800) }
+    else setErr('Couldn’t copy automatically — select the link text and copy it (Ctrl/Cmd+C).')
   }
 
   return (
@@ -493,6 +522,7 @@ export function ShareLinksModal({ editors, onClose }) {
                       padding: '8px 12px', background: 'white', border: '1px solid var(--rule)',
                       fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-2)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      userSelect: 'all', cursor: 'text',
                     }} title={buildUrl(teamLink.token)}>{buildUrl(teamLink.token)}</div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => copyLink(teamLink.token)} style={{
@@ -572,6 +602,7 @@ export function ShareLinksModal({ editors, onClose }) {
                         border: '1px solid var(--rule)',
                         fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        userSelect: 'all', cursor: 'text',
                       }} title={buildUrl(link.token)}>{buildUrl(link.token)}</div>
                     ) : (
                       <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)', fontSize: 12 }}>
@@ -697,10 +728,9 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
   const buildUrl = (token) =>
     `${window.location.origin}/editor-view/${token}`
   const copyLink = async (token) => {
-    try {
-      await navigator.clipboard.writeText(buildUrl(token))
-      setCopyOk(token); setTimeout(() => setCopyOk(null), 1800)
-    } catch {}
+    const ok = await copyTextToClipboard(buildUrl(token))
+    if (ok) { setErr(null); setCopyOk(token); setTimeout(() => setCopyOk(null), 1800) }
+    else setErr('Couldn’t copy automatically — select the link text and copy it (Ctrl/Cmd+C).')
   }
 
   const save = async () => {
@@ -912,6 +942,7 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
                     <div style={{
                       fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      userSelect: 'all', cursor: 'text',
                     }}>{buildUrl(l.token)}</div>
                     <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginTop: 2 }}>
                       Created {new Date(l.created_at).toLocaleDateString()}
