@@ -2200,6 +2200,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   const [typeFilter, setTypeFilter]   = useState(() => new Set())
   const [offerFilter, setOfferFilter] = useState(() => new Set())  // values: offer_slug | '__none__'
   const [runFilter, setRunFilter]     = useState(() => new Set())  // values: 'yes' | 'no'
+  const [creatorFilter, setCreatorFilter] = useState(() => new Set())  // values: creator name | '__none__'
   const [stageFilter, setStageFilter] = useState(() => new Set())  // values: 'raw_unused' | 'raw_used' | 'edited_seg' | 'merged'
   // Upload-date filter. Preset windows only — operator picks a quick range
   // and the list narrows to clips whose added_at falls inside it. Set so
@@ -2729,6 +2730,14 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   }, [rows, usedRawScanKey])
 
 
+  // The RAW work-queue view (raw_unused alone) deliberately keeps folder
+  // scoping so filed raws can't dodge assignment; every other active filter
+  // goes global like search (see the folder-scope block below + FolderBar).
+  const rawQueueView = stageFilter.size === 1 && stageFilter.has('raw_unused')
+  const filtersActive = typeFilter.size > 0 || offerFilter.size > 0
+    || runFilter.size > 0 || creatorFilter.size > 0
+    || (stageFilter.size > 0 && !rawQueueView)
+
   const filtered = useMemo(() => {
     let list = rows
     // Hide rows whose stored file is broken / sub-par. Default ON. Operator
@@ -2750,10 +2759,19 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     // Only the exact single-selection bypasses scoping — a multi-select
     // that merely includes raw_unused keeps the root un-filed-only, so
     // filed edited cuts can't leak into a browse view.
-    const rawQueueView = stageFilter.size === 1 && stageFilter.has('raw_unused')
-    if (!search) {
-      if (folderId) list = list.filter(r => r.folder_id === folderId)
-      else if (hasFolders && !rawQueueView) list = list.filter(r => !r.folder_id)
+    // An explicit filter is global, exactly like search: a coordinator who
+    // picks OFFER=electricians-maps expects EVERY matching clip, including
+    // ones already filed into a folder. Without this, the root view's
+    // "un-filed only" restriction hid filed clips from the filtered result —
+    // e.g. the Austin raws live in the Electricians folder, so filtering by
+    // their offer at the root surfaced nothing but the folder card.
+    // (rawQueueView + filtersActive are hoisted above the memo.)
+    if (folderId) {
+      // Inside a folder: always scope to that folder's direct clips.
+      list = list.filter(r => r.folder_id === folderId)
+    } else if (hasFolders && !rawQueueView && !search && !filtersActive) {
+      // Root browse with no search/filter: show only un-filed clips.
+      list = list.filter(r => !r.folder_id)
     }
     if (search) list = list.filter(r => {
       // Search blob includes the new display_name + messaging_angle so a
@@ -2786,6 +2804,10 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       if (runFilter.has('yes') && r.has_been_run) return true
       if (runFilter.has('no') && !r.has_been_run) return true
       return false
+    })
+    if (creatorFilter.size > 0) list = list.filter(r => {
+      if (creatorFilter.has('__none__') && !r.creator) return true
+      return r.creator && creatorFilter.has(r.creator)
     })
     if (stageFilter.size > 0) {
       list = list.filter(r => {
@@ -2825,7 +2847,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       })
     }
     return list
-  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, stageFilter, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
+  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, creatorFilter, stageFilter, rawQueueView, filtersActive, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -2858,6 +2880,15 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
     const m = { __none__: 0 }
     for (const r of visibleRows) {
       if (r.offer_slug) m[r.offer_slug] = (m[r.offer_slug] || 0) + 1
+      else m.__none__ += 1
+    }
+    return m
+  }, [visibleRows])
+
+  const creatorCounts = useMemo(() => {
+    const m = { __none__: 0 }
+    for (const r of visibleRows) {
+      if (r.creator) m[r.creator] = (m[r.creator] || 0) + 1
       else m.__none__ += 1
     }
     return m
@@ -3378,6 +3409,18 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             ]}
             allCount={visibleRows.length}
             onChange={setOfferFilter} />
+          <FilterDropdown label="CREATOR"
+            selected={creatorFilter}
+            options={[
+              ...knownCreators.map(c => ({
+                value: c,
+                label: c.toUpperCase(),
+                count: creatorCounts[c] || 0,
+              })),
+              ...(creatorCounts.__none__ > 0 ? [{ value: '__none__', label: 'NO CREATOR', count: creatorCounts.__none__, dot: 'var(--ink-4)' }] : []),
+            ]}
+            allCount={visibleRows.length}
+            onChange={setCreatorFilter} />
           <FilterDropdown label="RUN"
             selected={runFilter}
             options={[
@@ -3390,11 +3433,12 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               show/hide toggles removed 2026-06-11 (Ben: too much noise).
               Flagged clips are now simply always hidden; their state vars
               keep their defaults so the filter pipeline is unchanged. */}
-          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size > 0) && (
+          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size + creatorFilter.size > 0) && (
             <button type="button"
               onClick={() => {
                 setStageFilter(new Set()); setTypeFilter(new Set())
                 setOfferFilter(new Set()); setRunFilter(new Set())
+                setCreatorFilter(new Set())
               }}
               style={{
                 marginLeft: 4, padding: '4px 9px',
@@ -3442,7 +3486,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
         currentFolderId={folderId}
         onNavigate={navigateFolder}
         clipCounts={folderClipCounts}
-        searching={Boolean(deferredQ.trim())}
+        searching={Boolean(deferredQ.trim()) || filtersActive}
         canManage={scope.canEditCreative}
         onCreate={createFolder}
         onRename={renameFolder}
