@@ -2457,7 +2457,7 @@ async function enrichRowsWithProspectEmails(rows) {
       for (const row of stillUnresolved) {
         const norm = normalizeProspectName(row.prospect)
         if (!norm || norm.length < 2) continue
-        const hit = clients.find(c => matchScore(norm, normalizeProspectName(c.name)))
+        const hit = clients.find(c => matchQuality(norm, normalizeProspectName(c.name)))
         if (hit?.email) row.email = hit.email
       }
     }
