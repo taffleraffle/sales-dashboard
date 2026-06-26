@@ -3480,18 +3480,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             ]}
             allCount={visibleRows.length}
             onChange={setOfferFilter} />
-          <FilterDropdown label="CREATOR"
-            selected={creatorFilter}
-            options={[
-              ...knownCreators.map(c => ({
-                value: c,
-                label: c.toUpperCase(),
-                count: creatorCounts[c] || 0,
-              })),
-              ...(creatorCounts.__none__ > 0 ? [{ value: '__none__', label: 'NO CREATOR', count: creatorCounts.__none__, dot: 'var(--ink-4)' }] : []),
-            ]}
-            allCount={visibleRows.length}
-            onChange={setCreatorFilter} />
+          {/* Creator filter removed 2026-06-26 (Ben). */}
           <FilterDropdown label="RUN"
             selected={runFilter}
             options={[
@@ -5706,8 +5695,7 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
   const patch = useMemo(() => {
     const p = {}
     if (type !== null)             p.type = type
-    if (statusChoice === 'raw_unused') { p.status = 'raw';    p.manually_marked_used = false }
-    if (statusChoice === 'raw_used')   { p.status = 'raw';    p.manually_marked_used = true  }
+    if (statusChoice === 'raw')        { p.status = 'raw';    p.manually_marked_used = false }
     if (statusChoice === 'edited')     { p.status = 'edited' }
     if (creator !== null)          p.creator = creator
     if (assignedEditorId !== null) p.assigned_editor_id = assignedEditorId || null
@@ -5793,9 +5781,8 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
               Keep existing
             </button>
             {[
-              { v: 'raw_unused', label: 'RAW',        color: '#b53e3e' },
-              { v: 'raw_used',   label: 'EDITED RAW', color: 'var(--ink-4)'    },
-              { v: 'edited',     label: 'EDITED',     color: '#3e8a5e' },
+              { v: 'raw',    label: 'RAW',    color: 'var(--down)' },
+              { v: 'edited', label: 'EDITED', color: 'var(--up)' },
             ].map(opt => {
               const isOn = statusChoice === opt.v
               return (
@@ -6992,13 +6979,10 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                   EDITED      → status='edited' (flag left alone) */}
             <div style={{ display: 'flex', gap: 5 }}>
               {[
-                { v: 'raw_unused', label: 'RAW',        color: '#b53e3e',
-                  isOn: edit.status === 'raw' && !isUsed && edit.manually_marked_used !== true,
-                  apply: () => setEdit({ ...edit, status: 'raw',    manually_marked_used: false }) },
-                { v: 'raw_used',   label: 'EDITED RAW', color: 'var(--ink-4)',
-                  isOn: edit.status === 'raw' && (isUsed || edit.manually_marked_used === true),
-                  apply: () => setEdit({ ...edit, status: 'raw',    manually_marked_used: true  }) },
-                { v: 'edited',     label: 'EDITED',     color: '#3e8a5e',
+                { v: 'raw',    label: 'RAW',    color: 'var(--down)',
+                  isOn: edit.status === 'raw',
+                  apply: () => setEdit({ ...edit, status: 'raw', manually_marked_used: false }) },
+                { v: 'edited', label: 'EDITED', color: 'var(--up)',
                   isOn: edit.status === 'edited',
                   apply: () => setEdit({ ...edit, status: 'edited' }) },
               ].map(opt => (

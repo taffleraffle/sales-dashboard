@@ -71,7 +71,10 @@ export function taskDisplayName(t) {
   return t.creative_display_name || t.creative_canonical_name || t.creative_name || ''
 }
 
-export const TYPES = ['Hook', 'Body', 'Full Video', 'Joined', 'Testimony', 'Retargeting']
+// Testimony + Retargeting retired from the picker 2026-06-26 (Ben) — only
+// Hook / Body / Full Video / Joined remain. Colours kept below for any legacy
+// rows still carrying the old type.
+export const TYPES = ['Hook', 'Body', 'Full Video', 'Joined']
 
 // Task-status (lib_editing_tasks.status) is separate from creative-status.
 // Friendly labels — no underscores in display — paired with colors used
