@@ -6302,11 +6302,14 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
             drag when the grab lands on an <img> (which covers most of the
             tile), hijacking the card's drag and dropping our clip payload
             on the floor. The card div must own every drag. */}
-        {row.thumbnail_url && !(hoverPlay && row.preview_url) && (
+        {/* Thumbnail stays as the base layer so the hover video can fade in
+            on top of it — no black flash while the video buffers (Ben). */}
+        {row.thumbnail_url && (
           <img src={row.thumbnail_url} alt=""
             loading="lazy"
             draggable={false}
             style={{
+              position: 'absolute', inset: 0,
               width: '100%', height: '100%', objectFit: 'cover',
               display: 'block',
             }} />
@@ -6314,8 +6317,10 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
         {hoverPlay && row.preview_url && (
           <video src={row.preview_url}
             autoPlay muted loop playsInline preload="metadata"
+            poster={row.thumbnail_url || undefined}
             draggable={false}
             style={{
+              position: 'absolute', inset: 0,
               width: '100%', height: '100%', objectFit: 'cover',
               display: 'block',
             }} />
