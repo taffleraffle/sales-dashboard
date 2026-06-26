@@ -6908,7 +6908,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: rawSibling ? '1fr 96px' : '1fr', gap: 10, alignItems: 'start' }}>
               <div style={{ aspectRatio: '16 / 9', background: 'black', borderRadius: 12, overflow: 'hidden' }}>
-                <OptVideoPlayer key={playerRow.id} src={playerRow.preview_url} compact preload="auto"
+                <OptVideoPlayer key={playerRow.id} src={playerRow.preview_url} compact
                   poster={playerRow.thumbnail_url}
                   wrapperStyle={OPT_PLAYER_WRAP_FILL} />
               </div>
@@ -9194,7 +9194,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             old rows), then preview_url (only full-quality for new rows). */}
         {task.preview_url ? (
           <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
-            <OptVideoPlayer src={task.preview_url} compact preload="auto"
+            <OptVideoPlayer src={task.preview_url} compact
               poster={task.thumbnail_url}
               wrapperStyle={OPT_PLAYER_WRAP_360} />
             <div style={{
