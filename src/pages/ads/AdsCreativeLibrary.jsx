@@ -3646,10 +3646,10 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               {view === 'tile' ? (
                 <div style={{
                   display: 'grid', gap: 14,
-                  // Smaller base cells so raws stay compact; edited clips span
-                  // two columns to dominate (Ben: edit way more important).
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
-                  gridAutoFlow: 'dense',
+                  // Uniform cells — consistent column count regardless of the
+                  // filtered mix (Ben: must not jump 8→4 per row). Edited clips
+                  // are distinguished by the green EDITED pill, not by size.
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
                 }}>
                   {group.rows.map(r => (
                     <CreativeCard key={r.id} row={r}
@@ -6250,9 +6250,6 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
       onDragStart={onDragStartClip ? (e) => onDragStartClip(row, e) : undefined}
       style={{
         cursor: 'pointer',
-        // Edited clips span two grid columns so the finished cuts dominate the
-        // grid and raws stay compact (Ben 2026-06-26).
-        gridColumn: row.status === 'edited' ? 'span 2' : undefined,
         background: tint ? (hover ? tint.hover : tint.base) : 'var(--paper)',
         border: selected ? '2px solid var(--accent)'
               : hover ? '1px solid var(--ink)'
