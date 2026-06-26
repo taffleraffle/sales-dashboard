@@ -5830,23 +5830,8 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
           </div>
         </Field>
 
+        {/* Creator field removed 2026-06-26 (Ben). */}
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
-          <Field label="Creator">
-            <select value={creator === null ? '__KEEP__' : creator || ''}
-              onChange={e => {
-                const v = e.target.value
-                if (v === '__KEEP__') setCreator(null)
-                else if (v === '__ADD__') {
-                  const next = prompt('New creator name')
-                  if (next?.trim()) setCreator(next.trim().toUpperCase())
-                } else setCreator(v)
-              }}
-              style={selectStyle}>
-              <option value="__KEEP__">— KEEP EXISTING —</option>
-              {knownCreators.map(c => <option key={c} value={c}>{c}</option>)}
-              <option value="__ADD__">+ Add new…</option>
-            </select>
-          </Field>
           <Field label="Offer / niche">
             <select value={offerSlug === null ? '__KEEP__' : offerSlug || '__CLEAR__'}
               onChange={e => {
@@ -6271,12 +6256,14 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer',
             opacity: (selected || hover || selectionMode) ? 1 : 0.55,
-            transition: 'opacity 0.12s, background 0.12s',
+            transition: 'opacity 0.12s, background 0.12s, border-color 0.12s',
             boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+            ...(selected ? { animation: 'optBoxPop 0.22s cubic-bezier(0.2,1.5,0.4,1)' } : {}),
           }}
           title={selected ? 'Deselect' : 'Select for bulk edit'}>
           {selected && (
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"
+              style={{ animation: 'optCheckPop 0.24s cubic-bezier(0.2,1.5,0.4,1) both' }}>
               <path d="M3 8.5l3.5 3.5 6.5-8" stroke="var(--ink)" strokeWidth="2.5"
                 strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -6380,7 +6367,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
           fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
           letterSpacing: '0.06em', textTransform: 'uppercase',
         }}>
-          {row.creator && <span>{row.creator}</span>}
+          {/* Creator display removed 2026-06-26 (Ben). */}
           {row.offer_slug && (() => {
             const oc = offerColor(row.offer_slug)
             const short = row.offer_slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '')
@@ -7098,12 +7085,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
           </Field>
         </div>
 
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(3, 1fr)' }}>
-          <Field label="Creator">
-            <CreatorPicker value={edit.creator || ''}
-              known={knownCreators}
-              onChange={v => setEdit({ ...edit, creator: v || null })} />
-          </Field>
+        {/* Creator field removed 2026-06-26 (Ben) — offer + editor only. */}
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
           <Field label="Offer / niche">
             <select value={edit.offer_slug || ''}
               onChange={e => setEdit({ ...edit, offer_slug: e.target.value || null })}
@@ -9190,9 +9173,17 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             old rows), then preview_url (only full-quality for new rows). */}
         {task.preview_url ? (
           <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
-            <OptVideoPlayer src={task.preview_proxy_url || task.preview_url} compact
-              poster={task.thumbnail_url}
-              wrapperStyle={OPT_PLAYER_WRAP_360} />
+            {/* Lead with the most recent EDITED submission, not the raw source
+                (Ben 2026-06-26 — the edit is the priority; raw is below). */}
+            {(() => {
+              const leadSub = (submissions || []).find(s => s.file_url)
+              const leadSrc = leadSub?.file_url || task.preview_proxy_url || task.preview_url
+              return (
+                <OptVideoPlayer key={leadSrc} src={leadSrc} compact
+                  poster={leadSub?.thumbnail_url || task.thumbnail_url}
+                  wrapperStyle={OPT_PLAYER_WRAP_360} />
+              )
+            })()}
             <div style={{
               padding: '8px 12px', background: 'var(--paper-2)',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,

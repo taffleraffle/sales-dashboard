@@ -325,7 +325,7 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
           inside an EditTaskModal submission card. */}
       <div style={{
         flex: '1 1 auto', minHeight: compact ? 0 : 400, position: 'relative',
-        background: poster ? 'var(--ink)' : '#0c0d10', display: 'flex',
+        background: poster ? 'var(--ink)' : 'linear-gradient(135deg, #23252d 0%, #14151a 60%, #0e0f13 100%)', display: 'flex',
         justifyContent: 'center', alignItems: 'center',
         overflow: 'hidden',
       }}>
