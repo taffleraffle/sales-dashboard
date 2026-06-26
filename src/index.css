@@ -2,68 +2,77 @@
 
 /*
   ─────────────────────────────────────────────────────────────────
-  OPT Editorial Design System — Sales Dashboard
+  OPT Unified Design System — Sales Dashboard
   ─────────────────────────────────────────────────────────────────
-  Reference: C:\Users\Ben\.claude\OPT-DESIGN-SYSTEM.md
+  Matches the OPT Onboarding app (onboard.optdigital.io · onboarding.css):
+  Bethany Elingston display serif, Inter Tight body, warm ink (#15161a),
+  off-white paper (#fbfbf9 / #fff), #e9e6da hairlines, single yellow accent
+  (#f4e14a). Repointing the shared tokens + fonts here reskins every page
+  that uses var(--paper/--ink/--serif/...) or the Tailwind utilities in one
+  place — no per-file edits required.
 
-  Tokens use the existing legacy names (--color-bg-primary, --color-text-primary,
-  --color-opt-yellow, etc.) so every existing Tailwind utility class in the app
-  (`bg-bg-primary`, `text-text-primary`, `text-opt-yellow`, `border-border-default`)
-  automatically inherits the editorial palette without per-file edits.
-
-  Canonical editorial tokens (--paper, --ink, --accent, --rule, --serif) are
-  also exposed for new editorial primitives below.
+  Reference: C:\Users\Ben\.claude\OPT-DESIGN-SYSTEM.md (editorial origins)
+  + extracted onboarding tokens 2026-06-26.
 */
 
+/* ── Bethany Elingston — OPT heading font, self-hosted (matches onboarding) ── */
+@font-face {
+  font-family: 'Bethany Elingston';
+  src: url('/fonts/BethanyElingston.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
-  /* ── Editorial canonical tokens ── */
-  --color-paper:        #fbfaf6;
-  --color-paper-2:      #f4f1e8;
-  --color-paper-3:      #ece8da;
-  --color-ink:          #0a0a0a;
-  --color-ink-2:        #2a2a2a;
-  --color-ink-3:        #5d5d5a;
-  --color-ink-4:        #8a8882;
-  --color-rule:         #d9d4c4;
-  --color-rule-2:       #ece8da;
+  /* ── Canonical tokens — onboarding palette ── */
+  --color-paper:        #fbfbf9;   /* page bg — onboarding off-white */
+  --color-paper-2:      #f3f1ec;   /* tinted panel / toolbar */
+  --color-paper-3:      #ece9e0;
+  --color-ink:          #15161a;   /* onboarding --ink */
+  --color-ink-2:        #3b3d44;   /* onboarding --ink-soft */
+  --color-ink-3:        #6b6d75;
+  --color-ink-4:        #8a8d96;   /* onboarding --ink-mute */
+  --color-rule:         #e9e6da;   /* onboarding --line */
+  --color-rule-2:       #f0ede4;
   --color-accent:       #f4e14a;
-  --color-accent-dk:    #e4cc00;
+  --color-accent-dk:    #f5c518;   /* onboarding --opt-yellow-deep */
   --color-accent-soft:  #fef9cc;
-  --color-accent-ink:   #0a0a0a;
+  --color-accent-ink:   #1a1700;
   --color-up:           #1f7a3a;
   --color-up-soft:      #e3f2e6;
   --color-down:         #b42318;
   --color-down-soft:    #fbe7e3;
   --color-flat:         #6b7280;
 
-  /* ── Legacy token names (remapped to editorial values) ── */
-  --color-bg-primary:        #fbfaf6;   /* paper — page bg */
-  --color-bg-card:           #fbfaf6;   /* cards = paper with hairline */
-  --color-bg-card-hover:     #f4f1e8;   /* paper-2 */
-  --color-bg-sidebar:        #fbfaf6;   /* paper */
-  --color-border-default:    #d9d4c4;   /* rule hairline */
-  --color-border-subtle:     #ece8da;   /* rule-2 */
+  /* ── Legacy token names (remapped to onboarding values) ── */
+  --color-bg-primary:        #fbfbf9;   /* paper — page bg */
+  --color-bg-card:           #ffffff;   /* cards = white on off-white (onboarding) */
+  --color-bg-card-hover:     #f3f1ec;   /* paper-2 */
+  --color-bg-sidebar:        #fbfbf9;   /* paper */
+  --color-border-default:    #e9e6da;   /* line hairline */
+  --color-border-subtle:     #f0ede4;
 
-  /* Yellow accent — editorial yellow (#f4e14a), not neon */
+  /* Yellow accent */
   --color-opt-yellow:        #f4e14a;
   --color-opt-yellow-muted:  #fef9cc;     /* soft callout bg */
   --color-opt-yellow-subtle: rgba(244, 225, 74, 0.12);
   --color-opt-yellow-glow:   rgba(244, 225, 74, 0.35);
 
   /* Text hierarchy — ink scale */
-  --color-text-primary:      #0a0a0a;
-  --color-text-secondary:    #5d5d5a;
-  --color-text-400:          #8a8882;
+  --color-text-primary:      #15161a;
+  --color-text-secondary:    #6b6d75;
+  --color-text-400:          #8a8d96;
 
   /* Status — directional pills/deltas only */
   --color-success: #1f7a3a;
   --color-warning: #b88200;
   --color-danger:  #b42318;
 
-  /* Fonts */
-  --font-sans:  'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-mono:  'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-  --font-serif: 'Newsreader', ui-serif, 'Iowan Old Style', Georgia, serif;
+  /* Fonts — matches onboarding (Bethany display, Inter Tight body/labels) */
+  --font-sans:  'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono:  'Inter Tight', 'Inter', system-ui, sans-serif;
+  --font-serif: 'Bethany Elingston', 'Cormorant Garamond', Georgia, serif;
 }
 
 /*
@@ -72,23 +81,23 @@
   Mirror the @theme values above (Tailwind doesn't expose @theme vars to plain CSS).
 */
 :root {
-  --paper:        #fbfaf6;
-  --paper-2:      #f4f1e8;
-  --paper-3:      #ece8da;
-  --ink:          #0a0a0a;
-  --ink-2:        #2a2a2a;
-  --ink-3:        #5d5d5a;
-  --ink-4:        #8a8882;
-  --ink-5:        #b8b3a8;
-  --rule:         #d9d4c4;
-  --rule-2:       #ece8da;
-  --rule-strong:  #2a2825;
+  --paper:        #fbfbf9;
+  --paper-2:      #f3f1ec;
+  --paper-3:      #ece9e0;
+  --ink:          #15161a;
+  --ink-2:        #3b3d44;
+  --ink-3:        #6b6d75;
+  --ink-4:        #8a8d96;
+  --ink-5:        #b6b8be;
+  --rule:         #e9e6da;
+  --rule-2:       #f0ede4;
+  --rule-strong:  #3b3d44;
   --accent:       #f4e14a;
-  --accent-2:     #ead84a;
-  --accent-dk:    #e4cc00;
+  --accent-2:     #f1dd45;
+  --accent-dk:    #f5c518;
   --accent-soft:  #fef9cc;
   --accent-wash:  #fbf3a8;
-  --accent-ink:   #0a0a0a;
+  --accent-ink:   #1a1700;
   --frame-problem:      #b53e3e;
   --frame-circumstance: #e0a93e;
   --frame-outcome:      #3e8a5e;
@@ -98,11 +107,12 @@
   --down-soft:    #fbe7e3;
   --flat:         #6b7280;
 
-  --serif: 'Newsreader', ui-serif, 'Iowan Old Style', Georgia, serif;
-  --sans:  'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --mono:  'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* Matches onboarding: Bethany display, Inter Tight body + labels */
+  --serif: 'Bethany Elingston', 'Cormorant Garamond', Georgia, serif;
+  --sans:  'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
+  --mono:  'Inter Tight', 'Inter', system-ui, sans-serif;
 
-  --shadow-card: 0 1px 2px rgba(10,10,10,.03), 0 6px 18px rgba(10,10,10,.04);
+  --shadow-card: 0 1px 2px rgba(21,22,26,.04), 0 10px 30px -12px rgba(21,22,26,.10);
 }
 
 /* ── Base ── */

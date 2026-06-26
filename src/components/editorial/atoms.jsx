@@ -81,10 +81,10 @@ export function SectionHead({ eyebrow, title, italicWord, tagline, right, gap = 
 // ─── Buttons ───────────────────────────────────────────────────────────
 const btnBase = {
   fontFamily: 'var(--sans)',
-  fontSize: 13, fontWeight: 500, letterSpacing: '-0.005em',
-  padding: '9px 14px',
+  fontSize: 13, fontWeight: 600, letterSpacing: '-0.005em',
+  padding: '9px 16px',
   border: '1px solid transparent',
-  borderRadius: 2,
+  borderRadius: 999,   // pill — matches onboarding .cc-btn / .cta
   display: 'inline-flex', alignItems: 'center', gap: 8,
   transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1), border 0.12s cubic-bezier(0.2,0.7,0.2,1)',
   whiteSpace: 'nowrap',
