@@ -137,14 +137,13 @@
 /* ── Base ── */
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-/* The signature canvas: faint 66px graph paper over a warm radial cream
-   (from opt-kit.css). Fixed so it stays put while content scrolls. Cards
-   are pure white and float above this with soft shadows. */
+/* Warm cream canvas (from opt-kit.css). The faint graph-paper grid is
+   intentionally OFF for the dashboard — it reads as noise behind dense
+   data tables/tiles (kept it for marketing surfaces, not here). Cards are
+   pure white and float above this warm cream with soft shadows. */
 body {
   background:
-    repeating-linear-gradient(0deg, rgba(20,22,30,.035) 0 1px, transparent 1px 66px),
-    repeating-linear-gradient(90deg, rgba(20,22,30,.035) 0 1px, transparent 1px 66px),
-    radial-gradient(1200px 620px at 50% -8%, #fffdf2 0%, #fbfaf4 48%, #f6f4ec 100%) fixed;
+    radial-gradient(1200px 620px at 50% -8%, #fffdf3 0%, #fbfaf4 50%, #f7f5ee 100%) fixed;
   color: var(--ink);
   font-family: var(--sans);
   font-size: 14px;
