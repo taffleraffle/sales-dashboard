@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown, Library as LibraryIcon } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -23,6 +23,7 @@ const navItems = [
   { to: '/sales/setters', icon: Users, label: 'Setters' },
   { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
   { to: '/sales/ads', icon: Megaphone, label: 'Ads' },
+  { to: '/sales/ads/library', icon: LibraryIcon, label: 'Library' },
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
   { to: '/sales/contracts', icon: FileText, label: 'Contracts' },
   { to: '/sales/downsells', icon: TrendingDown, label: 'Downsells' },
