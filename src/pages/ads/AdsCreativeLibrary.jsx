@@ -394,7 +394,7 @@ function IngestStatusChip({ submission, onRetry, busy }) {
             padding: '1px 6px',
             fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
             letterSpacing: '0.08em', textTransform: 'uppercase',
-            background: '#b53e3e', color: 'white',
+            background: '#b53e3e', color: 'var(--paper)',
             border: 'none', borderRadius: 2,
             cursor: busy ? 'not-allowed' : 'pointer',
           }}>Retry</button>
@@ -668,7 +668,7 @@ const EditorNotificationBell = forwardRef(function EditorNotificationBell(
           <span style={{
             position: 'absolute', top: -2, right: -2,
             minWidth: 18, height: 18, borderRadius: 999,
-            background: '#b53e3e', color: 'white',
+            background: '#b53e3e', color: 'var(--paper)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
             padding: '0 5px',
@@ -875,7 +875,7 @@ const NotificationBell = forwardRef(function NotificationBell(
           <span style={{
             position: 'absolute', top: -2, right: -2,
             minWidth: 18, height: 18, borderRadius: 999,
-            background: '#b53e3e', color: 'white',
+            background: '#b53e3e', color: 'var(--paper)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
             padding: '0 5px',
@@ -990,7 +990,7 @@ const NotificationBell = forwardRef(function NotificationBell(
                         {/* Row 2: editor + version + time + NEW pill + ingest chip */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
                           <span style={{
-                            padding: '1px 5px', background: 'var(--ink-3)', color: 'white',
+                            padding: '1px 5px', background: 'var(--ink-3)', color: 'var(--paper)',
                             borderRadius: 2, fontSize: 9, fontWeight: 700,
                           }}>v{s.version_number}</span>
                           <span style={{ fontWeight: 600, fontSize: 10.5, color: 'var(--ink-2)' }}>{s.submitted_by_name || 'Unknown'}</span>
@@ -1000,7 +1000,7 @@ const NotificationBell = forwardRef(function NotificationBell(
                           )}
                           {isNew && (
                             <span style={{
-                              padding: '1px 5px', background: '#3e7eba', color: 'white',
+                              padding: '1px 5px', background: '#3e7eba', color: 'var(--paper)',
                               borderRadius: 2, fontSize: 9, fontWeight: 700,
                               letterSpacing: '0.08em',
                             }}>NEW</span>
@@ -1459,7 +1459,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
                       style={{
                         width: '100%', padding: '8px 10px',
                         fontFamily: 'var(--sans)', fontSize: 12.5,
-                        background: 'white', border: '1px solid var(--rule)',
+                        background: 'var(--paper)', border: '1px solid var(--rule)',
                         outline: 'none', resize: 'vertical',
                         boxSizing: 'border-box',
                       }} />
@@ -1557,7 +1557,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
             style={{
               width: '100%', padding: '8px 10px',
               fontFamily: 'var(--sans)', fontSize: 13,
-              background: 'white', border: '1px solid var(--rule)',
+              background: 'var(--paper)', border: '1px solid var(--rule)',
               outline: 'none', resize: 'vertical', boxSizing: 'border-box',
             }} />
           <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -2034,7 +2034,7 @@ function InvoiceTab({ scope, active }) {
           style={{
             padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
             letterSpacing: '0.08em', textTransform: 'uppercase',
-            background: copiedKey === '__all__' ? '#3e8a5e' : 'white',
+            background: copiedKey === '__all__' ? '#3e8a5e' : 'var(--paper)',
             color: copiedKey === '__all__' ? 'white' : 'var(--ink-2)',
             border: '1px solid ' + (copiedKey === '__all__' ? '#3e8a5e' : 'var(--rule)'),
             cursor: rows.length === 0 ? 'not-allowed' : 'pointer', opacity: rows.length === 0 ? 0.5 : 1,
@@ -2089,7 +2089,7 @@ function InvoiceTab({ scope, active }) {
                       onKeyDown={e => { if (e.key === 'Enter') saveDuration(r); if (e.key === 'Escape') { setEditingId(null); setDraftLen('') } }}
                       placeholder="1:30" style={{ ...inputStyle, width: 56, padding: '3px 6px', fontSize: 12 }} />
                     <button onClick={() => saveDuration(r)} disabled={savingId === r.id}
-                      style={{ padding: '3px 7px', fontFamily: 'var(--mono)', fontSize: 10, background: 'var(--ink)', color: 'white', border: 'none', cursor: 'pointer' }}>
+                      style={{ padding: '3px 7px', fontFamily: 'var(--mono)', fontSize: 10, background: 'var(--ink)', color: 'var(--paper)', border: 'none', cursor: 'pointer' }}>
                       {savingId === r.id ? '…' : '✓'}
                     </button>
                   </div>
@@ -2119,14 +2119,14 @@ function InvoiceTab({ scope, active }) {
                       style={{
                         padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
                         letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: 'white', color: 'var(--ink-2)', border: '1px solid var(--rule)',
+                        background: 'var(--paper)', color: 'var(--ink-2)', border: '1px solid var(--rule)',
                         textDecoration: 'none',
                       }}>Open</a>
                     <button onClick={() => copy(r.link, r.id)}
                       style={{
                         padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
                         letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: copiedKey === r.id ? '#3e8a5e' : 'white',
+                        background: copiedKey === r.id ? '#3e8a5e' : 'var(--paper)',
                         color: copiedKey === r.id ? 'white' : 'var(--ink-2)',
                         border: '1px solid ' + (copiedKey === r.id ? '#3e8a5e' : 'var(--rule)'), cursor: 'pointer',
                       }}>{copiedKey === r.id ? 'Copied' : 'Copy'}</button>
@@ -3377,7 +3377,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             style={{
               flex: '1 1 280px', maxWidth: 420,
               padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 12.5,
-              background: 'white', border: '1px solid var(--rule)', outline: 'none',
+              background: 'var(--paper)', border: '1px solid var(--rule)', outline: 'none',
             }} />
           {/* Needs-attention icon — replaces the old full-width banner.
               Click applies the same "unassigned raw" filter set. */}
@@ -3406,14 +3406,14 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               padding: '6px 12px',
               fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
               letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: filtersOpen || activeFilterCount > 0 ? 'var(--ink)' : 'white',
+              background: filtersOpen || activeFilterCount > 0 ? 'var(--ink)' : 'var(--paper)',
               color: filtersOpen || activeFilterCount > 0 ? 'var(--paper)' : 'var(--ink)',
               border: '1px solid ' + (filtersOpen || activeFilterCount > 0 ? 'var(--ink)' : 'var(--rule)'),
               cursor: 'pointer',
             }}>
             Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''} {filtersOpen ? '▴' : '▾'}
           </button>
-          <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'white' }}>
+          <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper)' }}>
             <ViewBtn active={view === 'tile'}   onClick={() => setView('tile')}>Tiles</ViewBtn>
             <ViewBtn active={view === 'list'}   onClick={() => setView('list')}>List</ViewBtn>
             <ViewBtn active={view === 'matrix'} onClick={() => setView('matrix')}>Matrix</ViewBtn>
@@ -3449,7 +3449,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               // The filter matcher below maps these to the existing
               // raw_unused / raw_used / edited_seg internal values.
               { value: 'raw_unused', label: 'RAW',        sublabel: 'needs editing',           count: stageCounts.raw_unused, dot: '#b53e3e' },
-              { value: 'raw_used',   label: 'EDITED RAW', sublabel: 'already used in a cut',   count: stageCounts.raw_used,   dot: '#999' },
+              { value: 'raw_used',   label: 'EDITED RAW', sublabel: 'already used in a cut',   count: stageCounts.raw_used,   dot: 'var(--ink-4)' },
               { value: 'edited_seg', label: 'EDITED',     sublabel: 'finished cut',            count: stageCounts.edited_seg, dot: '#3e8a5e' },
             ]}
             allCount={visibleRows.length}
@@ -3523,7 +3523,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
                 marginLeft: 'auto', padding: '5px 10px',
                 fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                 letterSpacing: '0.08em', textTransform: 'uppercase',
-                background: '#fff', color: 'var(--ink)',
+                background: 'var(--paper)', color: 'var(--ink)',
                 border: '1.5px dashed var(--ink-3)', cursor: 'pointer',
                 borderRadius: 2,
               }}>☐ Bulk edit · select all {filtered.length}</button>
@@ -3578,7 +3578,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
         <div style={{
           position: 'sticky', top: 0, zIndex: 50,
           marginBottom: 14, padding: '10px 14px',
-          background: 'var(--ink)', color: 'white',
+          background: 'var(--ink)', color: 'var(--paper)',
           display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
           boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
         }}>
@@ -3592,14 +3592,14 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             style={{
               padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
               fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: 'transparent', color: 'white',
+              background: 'transparent', color: 'var(--paper)',
               border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
             }}>Select all visible ({filtered.length})</button>
           <button onClick={clearSelection}
             style={{
               padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
               fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: 'transparent', color: 'white',
+              background: 'transparent', color: 'var(--paper)',
               border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
             }}>Clear</button>
           <span style={{ flex: 1 }} />
@@ -3608,7 +3608,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             style={{
               padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 10.5,
               fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: 'transparent', color: 'white',
+              background: 'transparent', color: 'var(--paper)',
               border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer',
             }}>↓ Download {selected.size}</button>
           <button onClick={() => setMoveFolderOpen(true)} disabled={bulkBusy}
@@ -3616,7 +3616,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
             style={{
               padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 10.5,
               fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: 'transparent', color: 'white',
+              background: 'transparent', color: 'var(--paper)',
               border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer',
             }}>Move to folder</button>
           <button onClick={() => setBulkEditOpen(true)} disabled={bulkBusy}
@@ -3852,7 +3852,7 @@ function BigToggle({ active, onClick, label, count, subtitle }) {
       flex: 1, padding: '14px 20px', textAlign: 'left',
       cursor: 'pointer', border: 'none',
       borderRight: '1px solid var(--rule)',
-      background: active ? 'var(--ink)' : 'white',
+      background: active ? 'var(--ink)' : 'var(--paper)',
       color: active ? 'var(--paper)' : 'var(--ink)',
       transition: 'background 0.12s',
     }}>
@@ -3882,7 +3882,7 @@ function FilterChip({ active, onClick, children, count, color }) {
       padding: '5px 11px',
       fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
       letterSpacing: '0.04em', textTransform: 'uppercase',
-      background: active ? 'var(--ink)' : 'white',
+      background: active ? 'var(--ink)' : 'var(--paper)',
       color: active ? 'var(--paper)' : 'var(--ink-2)',
       border: '1px solid ' + (active ? 'var(--ink)' : 'var(--rule)'),
       borderRadius: 2, cursor: 'pointer',
@@ -3986,7 +3986,7 @@ const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onCl
             style={{
               width: 18, height: 18, borderRadius: 3,
               border: '2px solid var(--ink)',
-              background: allVisible ? 'var(--accent)' : (someVisible ? 'var(--paper-2)' : 'white'),
+              background: allVisible ? 'var(--accent)' : (someVisible ? 'var(--paper-2)' : 'var(--paper)'),
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer',
             }}>
@@ -4053,7 +4053,7 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
   const stripeColor =
     (r.type === 'Joined' && r.status === 'edited') ? '#b86a0c'
     : (r.status === 'edited')                       ? '#3e8a5e'
-    : (r.status === 'raw' && isUsed)                ? '#999'
+    : (r.status === 'raw' && isUsed)                ? 'var(--ink-4)'
     :                                                 '#b53e3e'
   // Soft full-row tint that lets Ben see at a glance:
   //   green = edited / done
@@ -4084,7 +4084,7 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
               style={{
                 width: 16, height: 16, borderRadius: 2,
                 border: selected ? '2px solid var(--ink)' : (hover ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)'),
-                background: selected ? 'var(--accent)' : 'white',
+                background: selected ? 'var(--accent)' : 'var(--paper)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 cursor: 'pointer',
                 transition: 'border-color 0.08s',
@@ -4292,7 +4292,7 @@ const CreativeMatrixView = memo(function CreativeMatrixView({ rows, editors, off
             style={{
               width: 18, height: 18, borderRadius: 3,
               border: '2px solid var(--ink)',
-              background: allVisible ? 'var(--accent)' : (someVisible ? 'var(--paper-2)' : 'white'),
+              background: allVisible ? 'var(--accent)' : (someVisible ? 'var(--paper-2)' : 'var(--paper)'),
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer',
             }}>
@@ -4384,7 +4384,7 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
   const stripeColor =
     (r.type === 'Joined' && r.status === 'edited') ? '#b86a0c'     // merged (orange)
     : (r.status === 'edited')                       ? '#3e8a5e'     // edited (green)
-    : (r.status === 'raw' && isUsed)                ? '#999'        // raw + used (muted)
+    : (r.status === 'raw' && isUsed)                ? 'var(--ink-4)'        // raw + used (muted)
     :                                                 '#b53e3e'     // raw + unused (red — needs attention)
   // Soft full-row tint so Ben can scan status from across the matrix:
   //   green  = edited / done
@@ -4417,7 +4417,7 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
             // Selected: solid dark border. Hovered row: dark border so it
             // pops as discoverable. Otherwise: visible but muted.
             border: selected ? '2px solid var(--ink)' : (hover ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)'),
-            background: selected ? 'var(--accent)' : 'white',
+            background: selected ? 'var(--accent)' : 'var(--paper)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer',
             transition: 'border-color 0.08s',
@@ -4468,7 +4468,7 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
             style={{
               flexShrink: 0,
               padding: '1px 5px',
-              background: '#b53e3e', color: 'white',
+              background: '#b53e3e', color: 'var(--paper)',
               fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700,
               letterSpacing: '0.08em', textTransform: 'uppercase',
               borderRadius: 2,
@@ -4492,7 +4492,7 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
               style={{
                 flexShrink: 0,
                 padding: '1px 5px',
-                background: bg, color: 'white',
+                background: bg, color: 'var(--paper)',
                 fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700,
                 letterSpacing: '0.08em', textTransform: 'uppercase',
                 borderRadius: 2,
@@ -4793,7 +4793,7 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
           // High z-index so we sit above modal backdrops (z 100+) and
           // their dialogs (z 101+). Picker is the topmost UI when open.
           zIndex: 9999,
-          background: 'white', border: '1px solid var(--ink)',
+          background: 'var(--paper)', border: '1px solid var(--ink)',
           boxShadow: '0 8px 24px rgba(10,10,10,0.25)',
           padding: 4,
         }}>
@@ -4950,7 +4950,7 @@ function TranscriptBox({ text: rawText }) {
               flex: 1,
               padding: '4px 8px',
               border: '1px solid var(--rule)', borderRadius: 2,
-              background: 'white',
+              background: 'var(--paper)',
               fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)',
               outline: 'none',
             }} />
@@ -4966,14 +4966,14 @@ function TranscriptBox({ text: rawText }) {
                 disabled={matchCount === 0} title="Previous match"
                 style={{
                   padding: '2px 7px', fontFamily: 'var(--mono)', fontSize: 12,
-                  background: 'white', border: '1px solid var(--rule)', borderRadius: 2,
+                  background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 2,
                   cursor: matchCount === 0 ? 'default' : 'pointer', color: 'var(--ink-3)',
                 }}>‹</button>
               <button onClick={() => setCurrentMatch(m => matchCount === 0 ? 0 : (m + 1) % matchCount)}
                 disabled={matchCount === 0} title="Next match"
                 style={{
                   padding: '2px 7px', fontFamily: 'var(--mono)', fontSize: 12,
-                  background: 'white', border: '1px solid var(--rule)', borderRadius: 2,
+                  background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 2,
                   cursor: matchCount === 0 ? 'default' : 'pointer', color: 'var(--ink-3)',
                 }}>›</button>
             </>
@@ -5516,7 +5516,7 @@ function SourcePickerModal({ role, currentId, onClose, onPick }) {
             padding: '8px 12px',
             fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)',
             border: '1px solid var(--rule)', borderRadius: 2,
-            background: 'white', outline: 'none',
+            background: 'var(--paper)', outline: 'none',
           }} />
         {loading ? (
           <div style={{ padding: 20, textAlign: 'center', fontStyle: 'italic', color: 'var(--ink-3)' }}>
@@ -5537,7 +5537,7 @@ function SourcePickerModal({ role, currentId, onClose, onPick }) {
                     display: 'grid', gridTemplateColumns: '44px 1fr auto',
                     gap: 10, alignItems: 'center',
                     padding: '6px 10px', textAlign: 'left',
-                    background: isCurrent ? 'rgba(244,225,74,0.15)' : 'white',
+                    background: isCurrent ? 'rgba(244,225,74,0.15)' : 'var(--paper)',
                     border: '1px solid ' + (isCurrent ? 'var(--accent)' : 'var(--rule)'),
                     cursor: 'pointer', borderRadius: 2,
                   }}>
@@ -5640,8 +5640,8 @@ function StageEditor({ label, value, onChange }) {
         {STAGE_VALUES.map(s => {
           const active = (value || null) === s.v
           const styleProps = active
-            ? { background: s.bg === 'transparent' ? 'var(--ink)' : s.bg, color: s.color === '#ccc' ? 'white' : s.color }
-            : { background: 'white', color: 'var(--ink-3)' }
+            ? { background: s.bg === 'transparent' ? 'var(--ink)' : s.bg, color: s.color === '#ccc' ? 'var(--paper)' : s.color }
+            : { background: 'var(--paper)', color: 'var(--ink-3)' }
           return (
             <button key={String(s.v)} onClick={() => onChange(s.v)} style={{
               padding: '4px 8px',
@@ -5786,7 +5786,7 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
             </button>
             {[
               { v: 'raw_unused', label: 'RAW',        color: '#b53e3e' },
-              { v: 'raw_used',   label: 'EDITED RAW', color: '#999'    },
+              { v: 'raw_used',   label: 'EDITED RAW', color: 'var(--ink-4)'    },
               { v: 'edited',     label: 'EDITED',     color: '#3e8a5e' },
             ].map(opt => {
               const isOn = statusChoice === opt.v
@@ -5795,7 +5795,7 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
                   style={{
                     padding: '5px 14px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                     letterSpacing: '0.06em', textTransform: 'uppercase',
-                    background: isOn ? opt.color : 'white',
+                    background: isOn ? opt.color : 'var(--paper)',
                     color: isOn ? 'white' : opt.color,
                     border: '1px solid ' + opt.color,
                     borderRadius: 2, cursor: 'pointer',
@@ -5816,7 +5816,7 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
               style={{
                 padding: '5px 14px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                 letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: hasBeenRun === true ? '#3e8a5e' : 'white',
+                background: hasBeenRun === true ? '#3e8a5e' : 'var(--paper)',
                 color: hasBeenRun === true ? 'white' : '#3e8a5e',
                 border: '1px solid #3e8a5e',
                 borderRadius: 2, cursor: 'pointer',
@@ -5825,7 +5825,7 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
               style={{
                 padding: '5px 14px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                 letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: hasBeenRun === false ? 'var(--ink)' : 'white',
+                background: hasBeenRun === false ? 'var(--ink)' : 'var(--paper)',
                 color: hasBeenRun === false ? 'white' : 'var(--ink-3)',
                 border: '1px solid var(--rule)',
                 borderRadius: 2, cursor: 'pointer',
@@ -6045,7 +6045,7 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
           padding: '5px 9px',
           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
           letterSpacing: '0.06em', textTransform: 'uppercase',
-          background: isAll ? 'white' : 'var(--accent)',
+          background: isAll ? 'var(--paper)' : 'var(--accent)',
           color: 'var(--ink)',
           border: '1px solid ' + (isAll ? 'var(--rule)' : 'var(--ink)'),
           borderRadius: 2, cursor: 'pointer',
@@ -6070,7 +6070,7 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
           minWidth: popoverWidth,
           maxHeight: coords.maxHeight, overflowY: 'auto',
           zIndex: 9999,
-          background: 'white', border: '1px solid var(--ink)',
+          background: 'var(--paper)', border: '1px solid var(--ink)',
           boxShadow: '0 8px 24px rgba(10,10,10,0.25)',
           padding: 4,
         }}>
@@ -6088,7 +6088,7 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
             <span style={{
               width: 16, height: 16, borderRadius: 2,
               border: isAll ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
-              background: isAll ? 'var(--accent)' : 'white',
+              background: isAll ? 'var(--accent)' : 'var(--paper)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               flexShrink: 0,
             }}>
@@ -6120,7 +6120,7 @@ function FilterDropdown({ label, selected, options, allCount, onChange }) {
                 <span style={{
                   width: 16, height: 16, borderRadius: 2,
                   border: isOn ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
-                  background: isOn ? 'var(--accent)' : 'white',
+                  background: isOn ? 'var(--accent)' : 'var(--paper)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
                 }}>
@@ -6327,7 +6327,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
             <span style={{
               position: 'absolute', top: 6, left: 6,
               padding: '2px 7px',
-              background: tc.ink, color: 'white',
+              background: tc.ink, color: 'var(--paper)',
               fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
               letterSpacing: '0.06em', textTransform: 'uppercase',
             }}>{row.type}</span>
@@ -6825,7 +6825,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             </div>
             {replaceProgress ? (
               <div style={{
-                padding: '6px 10px', background: 'white', border: '1px solid var(--rule)',
+                padding: '6px 10px', background: 'var(--paper)', border: '1px solid var(--rule)',
                 fontFamily: 'var(--mono)', fontSize: 11, color: replaceProgress.startsWith('error') ? '#b53e3e' : 'var(--ink-2)',
               }}>{replaceProgress}</div>
             ) : (
@@ -6987,7 +6987,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                 { v: 'raw_unused', label: 'RAW',        color: '#b53e3e',
                   isOn: edit.status === 'raw' && !isUsed && edit.manually_marked_used !== true,
                   apply: () => setEdit({ ...edit, status: 'raw',    manually_marked_used: false }) },
-                { v: 'raw_used',   label: 'EDITED RAW', color: '#999',
+                { v: 'raw_used',   label: 'EDITED RAW', color: 'var(--ink-4)',
                   isOn: edit.status === 'raw' && (isUsed || edit.manually_marked_used === true),
                   apply: () => setEdit({ ...edit, status: 'raw',    manually_marked_used: true  }) },
                 { v: 'edited',     label: 'EDITED',     color: '#3e8a5e',
@@ -7000,7 +7000,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                     flex: 1, padding: '8px 14px',
                     fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
                     letterSpacing: '0.08em', textTransform: 'uppercase',
-                    background: opt.isOn ? opt.color : 'white',
+                    background: opt.isOn ? opt.color : 'var(--paper)',
                     color: opt.isOn ? 'white' : opt.color,
                     border: '1px solid ' + opt.color,
                     cursor: 'pointer', borderRadius: 2,
@@ -7016,7 +7016,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               style={{
                 padding: '8px 12px', fontFamily: 'var(--mono)', fontSize: 11,
                 fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: edit.has_been_run ? '#3e8a5e' : 'white',
+                background: edit.has_been_run ? '#3e8a5e' : 'var(--paper)',
                 color: edit.has_been_run ? 'white' : 'var(--ink-3)',
                 border: edit.has_been_run ? '1px solid #3e8a5e' : '1px solid var(--rule)',
                 cursor: 'pointer', textAlign: 'center', width: '100%',
@@ -7045,7 +7045,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                   style={{
                     flex: 1, padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10,
                     fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                    background: 'white', color: 'var(--ink-3)', border: '1px solid var(--rule)',
+                    background: 'var(--paper)', color: 'var(--ink-3)', border: '1px solid var(--rule)',
                     borderRadius: 2, cursor: 'pointer',
                   }}>+ New offer</button>
                 <button type="button" disabled={!edit.offer_slug}
@@ -7056,7 +7056,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                   style={{
                     flex: 1, padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10,
                     fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                    background: 'white', color: 'var(--ink-3)', border: '1px solid var(--rule)',
+                    background: 'var(--paper)', color: 'var(--ink-3)', border: '1px solid var(--rule)',
                     borderRadius: 2, opacity: edit.offer_slug ? 1 : 0.4,
                     cursor: edit.offer_slug ? 'pointer' : 'not-allowed',
                   }}>Edit offer</button>
@@ -7611,7 +7611,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
           {editors.filter(e => e.active && e.tier !== 'admin').length} editor{editors.filter(e => e.active && e.tier !== 'admin').length === 1 ? '' : 's'} · {filteredTasks.length} of {tasks.length} task{tasks.length === 1 ? '' : 's'}
         </span>
-        <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'white' }}>
+        <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper)' }}>
           <ViewBtn active={view === 'inbox'}    onClick={() => setView('inbox')}>Inbox</ViewBtn>
           <ViewBtn active={view === 'list'}     onClick={() => setView('list')}>List</ViewBtn>
           <ViewBtn active={view === 'timeline'} onClick={() => setView('timeline')}>Timeline</ViewBtn>
@@ -7636,7 +7636,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           <FilterDropdown
             label="Editors"
             options={[
-              { value: 'unassigned', label: 'Unassigned', dot: '#999',
+              { value: 'unassigned', label: 'Unassigned', dot: 'var(--ink-4)',
                 count: tasks.filter(t => t.editor_id == null).length },
               ...editors.filter(e => e.active && e.tier !== 'admin').map(e => ({
                 value: e.id, label: e.name, dot: editorColor(e),
@@ -7676,7 +7676,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         <div style={{
           position: 'sticky', top: 0, zIndex: 50,
           marginBottom: 14, padding: '10px 14px',
-          background: 'var(--ink)', color: 'white',
+          background: 'var(--ink)', color: 'var(--paper)',
           display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
           boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
         }}>
@@ -7688,14 +7688,14 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
             style={{
               padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
               fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: 'transparent', color: 'white',
+              background: 'transparent', color: 'var(--paper)',
               border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
             }}>Select all visible ({filteredTasks.length})</button>
           <button onClick={clearTaskSelection}
             style={{
               padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
               fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: 'transparent', color: 'white',
+              background: 'transparent', color: 'var(--paper)',
               border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
             }}>Clear</button>
           <span style={{ flex: 1 }} />
@@ -7718,7 +7718,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
                 e.target.value = ''
                 load(true)
               }}
-              style={{ padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10.5, background: 'white', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer' }}>
+              style={{ padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10.5, background: 'var(--paper)', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer' }}>
               <option value="" disabled>— Pick editor —</option>
               <option value="__UNASSIGN__">Unassign</option>
               {editors.filter(e => e.active !== false && e.tier !== 'admin').map(e => (
@@ -7746,7 +7746,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
                 e.target.value = ''
                 load(true)
               }}
-              style={{ padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10.5, background: 'white', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer' }}>
+              style={{ padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10.5, background: 'var(--paper)', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer' }}>
               <option value="" disabled>— Pick status —</option>
               <option value="queued">queued</option>
               <option value="in_progress">in_progress</option>
@@ -7774,7 +7774,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
                 e.target.value = ''
                 load(true)
               }}
-              style={{ padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10.5, background: 'white', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer' }}>
+              style={{ padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10.5, background: 'var(--paper)', color: 'var(--ink)', border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer' }}>
               <option value="" disabled>— Pick priority —</option>
               <option value="P0 - Critical">P0 — Critical</option>
               <option value="P1 - High">P1 — High</option>
@@ -7996,7 +7996,7 @@ function StatusFilterStrip({ tasks, selected, onToggle, onClearAll }) {
           padding: '5px 11px',
           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
           letterSpacing: '0.04em', textTransform: 'uppercase',
-          background: selected.size === 0 ? 'var(--ink)' : 'white',
+          background: selected.size === 0 ? 'var(--ink)' : 'var(--paper)',
           color: selected.size === 0 ? 'var(--paper)' : 'var(--ink-2)',
           border: '1px solid ' + (selected.size === 0 ? 'var(--ink)' : 'var(--rule)'),
           borderRadius: 2,
@@ -8011,7 +8011,7 @@ function StatusFilterStrip({ tasks, selected, onToggle, onClearAll }) {
               padding: '5px 11px',
               fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
               letterSpacing: '0.04em', textTransform: 'uppercase',
-              background: isOn ? s.color : 'white',
+              background: isOn ? s.color : 'var(--paper)',
               color: isOn ? 'white' : 'var(--ink-2)',
               border: '1px solid ' + (isOn ? s.color : 'var(--rule)'),
               borderRadius: 2, cursor: 'pointer',
@@ -8062,7 +8062,7 @@ function EditorSelector({ editors, selected, onToggle, onClearAll, onEditEditor,
           padding: '5px 11px',
           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 500,
           letterSpacing: '0.04em', textTransform: 'uppercase',
-          background: selected.size === 0 ? 'var(--ink)' : 'white',
+          background: selected.size === 0 ? 'var(--ink)' : 'var(--paper)',
           color: selected.size === 0 ? 'var(--paper)' : 'var(--ink-2)',
           border: '1px solid ' + (selected.size === 0 ? 'var(--ink)' : 'var(--rule)'),
           borderRadius: 2,
@@ -8076,7 +8076,7 @@ function EditorSelector({ editors, selected, onToggle, onClearAll, onEditEditor,
           <span key={e.id} style={{
             display: 'inline-flex', alignItems: 'stretch', borderRadius: 2,
             border: '1px solid ' + (isSelected ? color : 'var(--rule)'),
-            background: isSelected ? color : 'white',
+            background: isSelected ? color : 'var(--paper)',
             overflow: 'hidden',
           }}>
             <button onClick={() => onToggle(e.id)} style={{
@@ -8216,7 +8216,7 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds, sel
             style={{
               width: 18, height: 18, borderRadius: 3,
               border: '2px solid var(--ink)',
-              background: allVisible ? 'var(--accent)' : (someVisible ? 'var(--paper-2)' : 'white'),
+              background: allVisible ? 'var(--accent)' : (someVisible ? 'var(--paper-2)' : 'var(--paper)'),
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer',
             }}>
@@ -8292,7 +8292,7 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds, sel
                 style={{
                   width: 16, height: 16, borderRadius: 2,
                   border: selected?.has(t.task_id) ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
-                  background: selected?.has(t.task_id) ? 'var(--accent)' : 'white',
+                  background: selected?.has(t.task_id) ? 'var(--accent)' : 'var(--paper)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   cursor: 'pointer',
                 }}>
@@ -8476,7 +8476,7 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
         <div ref={popRef} style={{
           position: 'fixed', top: coords.top, left: coords.left, width: coords.width,
           maxHeight: coords.maxHeight, overflowY: 'auto', zIndex: 9999,
-          background: 'white', border: '1px solid var(--ink)',
+          background: 'var(--paper)', border: '1px solid var(--ink)',
           boxShadow: '0 8px 24px rgba(10,10,10,0.25)', padding: 4,
         }}>
           {options.map(o => {
@@ -9199,7 +9199,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                   padding: '5px 10px',
                   fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                   letterSpacing: '0.06em', textTransform: 'uppercase',
-                  background: isOn ? c : 'white',
+                  background: isOn ? c : 'var(--paper)',
                   color: isOn ? 'white' : 'var(--ink-2)',
                   border: '1px solid ' + (isOn ? c : 'var(--rule)'),
                   borderRadius: 2, cursor: 'pointer',
@@ -9380,7 +9380,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             style={{
               padding: 20, textAlign: 'center', cursor: busy ? 'not-allowed' : 'pointer',
               border: '2px dashed ' + (busy ? 'var(--accent)' : 'var(--rule)'),
-              background: uploadFile ? 'white' : 'transparent',
+              background: uploadFile ? 'var(--paper)' : 'transparent',
               transition: 'border-color 0.2s',
             }}>
             <input ref={uploadInputRef} type="file" accept="video/*"
@@ -9677,7 +9677,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
   return (
     <div style={{
       padding: '14px 16px', border: '1px solid var(--rule)',
-      background: 'white', borderLeft: '3px solid #3e8a5e',
+      background: 'var(--paper)', borderLeft: '3px solid #3e8a5e',
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -9721,7 +9721,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                   <span style={{
                     fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
                     padding: '3px 8px', borderRadius: 2,
-                    background: isApproved ? '#3e8a5e' : 'var(--ink-3)', color: 'white',
+                    background: isApproved ? '#3e8a5e' : 'var(--ink-3)', color: 'var(--paper)',
                     letterSpacing: '0.06em',
                   }}>v{sub.version_number}</span>
                   {isApproved && (
@@ -9843,7 +9843,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                           padding: '4px 8px',
                           fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
                           letterSpacing: '0.06em', textTransform: 'uppercase',
-                          background: '#b53e3e', color: 'white',
+                          background: '#b53e3e', color: 'var(--paper)',
                           border: 'none', borderRadius: 2, cursor: 'pointer',
                         }}>Confirm</button>
                     </>
@@ -9989,7 +9989,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                       <div style={{
                         fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink)',
                         lineHeight: 1.5, whiteSpace: 'pre-wrap', marginBottom: canFeedback ? 8 : 0,
-                        padding: '8px 10px', background: 'white', border: '1px solid var(--rule)',
+                        padding: '8px 10px', background: 'var(--paper)', border: '1px solid var(--rule)',
                         borderRadius: 2,
                       }}>{sub.feedback_text}</div>
                     )}
@@ -10007,7 +10007,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                           style={{
                             width: '100%', padding: '8px 10px',
                             fontFamily: 'var(--serif)', fontSize: 13,
-                            background: 'white', border: '1px solid var(--rule)',
+                            background: 'var(--paper)', border: '1px solid var(--rule)',
                             borderRadius: 2, resize: 'vertical',
                           }}
                         />
@@ -10143,7 +10143,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
               style={{
                 width: '100%', padding: '10px 12px',
                 fontFamily: 'var(--serif)', fontSize: 14,
-                background: 'white', border: '1px solid var(--rule)',
+                background: 'var(--paper)', border: '1px solid var(--rule)',
                 borderRadius: 2, resize: 'vertical', boxSizing: 'border-box',
               }}
             />
@@ -10374,7 +10374,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
 
   // Status stripe color (per task bar's left edge in the timeline)
   const STATUS_STRIPE = {
-    queued: '#999', in_progress: '#e0853e',
+    queued: 'var(--ink-4)', in_progress: '#e0853e',
     review: '#3e7eba', done: '#3e8a5e',
     blocked: '#b53e3e',
   }
@@ -10647,7 +10647,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                   // showing OVD when an editor had actually submitted, so it
                   // was impossible to tell who was blocking from the timeline.)
                   const editorIsBlocking = t.is_overdue && t.status !== 'review'
-                  const stripe = editorIsBlocking ? '#b53e3e' : (STATUS_STRIPE[t.status] || '#999')
+                  const stripe = editorIsBlocking ? '#b53e3e' : (STATUS_STRIPE[t.status] || 'var(--ink-4)')
                   const label = taskDisplayName(t)
                   const thumbVisible = !!t.thumbnail_url && w >= 80
                   // Status badge: show prominently for non-queued states.
@@ -10734,7 +10734,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                       {!isResizing && badge && w >= 60 && (
                         <span style={{
                           fontSize: 9, padding: '2px 5px',
-                          background: badge.bg, color: 'white',
+                          background: badge.bg, color: 'var(--paper)',
                           borderRadius: 2, fontWeight: 700,
                           letterSpacing: '0.08em', textTransform: 'uppercase',
                           textDecoration: 'none',
@@ -10905,7 +10905,7 @@ function InboxView({ tasks, onEdit }) {
         <div style={{
           position: 'sticky', top: 0, zIndex: 50,
           display: 'flex', alignItems: 'center', gap: 10,
-          padding: '10px 14px', background: 'var(--ink)', color: 'white',
+          padding: '10px 14px', background: 'var(--ink)', color: 'var(--paper)',
         }}>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em' }}>
             {sel.size} selected
@@ -10914,7 +10914,7 @@ function InboxView({ tasks, onEdit }) {
           <button onClick={downloadSelected} style={{
             padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
             letterSpacing: '0.08em', textTransform: 'uppercase',
-            background: 'transparent', color: 'white',
+            background: 'transparent', color: 'var(--paper)',
             border: '1px solid rgba(255,255,255,0.4)', cursor: 'pointer',
           }}>↓ Download {sel.size}</button>
           <button onClick={openPicker} style={{
@@ -11025,7 +11025,7 @@ function InboxCard({ task: t, onEdit, sectionColor, selected = false, onToggle =
           title={selected ? 'Deselect' : 'Select for bulk actions (move to folder / download)'}
           style={{
             width: 20, height: 20, borderRadius: 3,
-            background: selected ? 'var(--accent)' : 'white',
+            background: selected ? 'var(--accent)' : 'var(--paper)',
             border: '1.5px solid var(--ink)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             opacity: selected || hover ? 1 : 0.45, transition: 'opacity 0.12s',
@@ -11262,7 +11262,7 @@ function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDrag
       draggable={!!draggable}
       onDragStart={onDragStart}
       style={{
-        background: 'white', border: '1px solid var(--rule)',
+        background: 'var(--paper)', border: '1px solid var(--rule)',
         borderLeft: `3px solid ${statusColor}`,
         padding: '10px 12px',
         cursor: draggable ? 'grab' : (onClick ? 'pointer' : 'default'),
@@ -11310,7 +11310,7 @@ function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDrag
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,
             padding: '2px 7px', borderRadius: 999,
-            background: eColor ? 'white' : '#fffaea',
+            background: eColor ? 'var(--paper)' : '#fffaea',
             border: `1px solid ${eColor || '#e8b408'}`,
             fontFamily: 'var(--mono)', fontSize: 9.5,
             color: eColor ? 'var(--ink-2)' : '#7a4e08',
@@ -11341,7 +11341,7 @@ function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDrag
           position: 'fixed',
           top: coords.top, left: coords.left, width: Math.max(180, coords.width),
           maxHeight: coords.maxHeight, overflowY: 'auto', zIndex: 9999,
-          background: 'white', border: '1px solid var(--ink)',
+          background: 'var(--paper)', border: '1px solid var(--ink)',
           boxShadow: '0 8px 24px rgba(10,10,10,0.25)', padding: 4,
         }}>
           <button type="button"

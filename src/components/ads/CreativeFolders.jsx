@@ -209,7 +209,7 @@ export const FolderBar = memo(function FolderBar({
             style={{
               padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
               letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: 'white', color: 'var(--ink)',
+              background: 'var(--paper)', color: 'var(--ink)',
               border: '1px solid var(--rule)', borderRadius: 2, cursor: 'pointer',
             }}>+ New folder</button>
         )}
@@ -285,7 +285,7 @@ export const FolderBar = memo(function FolderBar({
                   <div onClick={e => e.stopPropagation()}
                     style={{
                       position: 'absolute', top: '100%', right: 8, zIndex: 60,
-                      background: 'white', border: '1px solid var(--rule)',
+                      background: 'var(--paper)', border: '1px solid var(--rule)',
                       boxShadow: '0 8px 24px rgba(10,10,10,0.12)',
                       display: 'grid', minWidth: 150,
                     }}>
@@ -412,7 +412,7 @@ function FolderNameModal({ folder, onClose, onSave }) {
           style={{
             width: '100%', padding: '8px 11px',
             fontFamily: 'var(--sans)', fontSize: 13,
-            background: 'white', border: '1px solid var(--rule)', outline: 'none',
+            background: 'var(--paper)', border: '1px solid var(--rule)', outline: 'none',
           }} />
       </div>
     </Modal>

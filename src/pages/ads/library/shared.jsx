@@ -146,7 +146,7 @@ export function editorColor(slugOrEditorOrTask) {
     return editorColor(slugOrEditorOrTask.slug || slugOrEditorOrTask.editor_slug || '')
   }
   const slug = slugOrEditorOrTask
-  if (!slug) return '#999'
+  if (!slug) return 'var(--ink-4)'
   let h = 0
   for (let i = 0; i < slug.length; i++) h = ((h << 5) - h + slug.charCodeAt(i)) | 0
   return EDITOR_COLORS[Math.abs(h) % EDITOR_COLORS.length]
@@ -338,7 +338,7 @@ export function ErrorBanner({ msg, onRetry }) {
           style={{
             padding: '4px 12px', fontFamily: 'var(--mono)', fontSize: 11,
             fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-            background: '#b53e3e', color: 'white',
+            background: '#b53e3e', color: 'var(--paper)',
             border: 'none', borderRadius: 2, cursor: 'pointer',
           }}>Retry</button>
       )}
@@ -364,12 +364,12 @@ export const ghostBtn = {
 export const inputStyle = {
   width: '100%', padding: '8px 11px',
   fontFamily: 'var(--mono)', fontSize: 12,
-  background: 'white', border: '1px solid var(--rule)', outline: 'none',
+  background: 'var(--paper)', border: '1px solid var(--rule)', outline: 'none',
 }
 export const selectStyle = {
   width: '100%', padding: '8px 11px',
   fontFamily: 'var(--sans)', fontSize: 12,
-  background: 'white', border: '1px solid var(--rule)', outline: 'none',
+  background: 'var(--paper)', border: '1px solid var(--rule)', outline: 'none',
   cursor: 'pointer',
 }
 

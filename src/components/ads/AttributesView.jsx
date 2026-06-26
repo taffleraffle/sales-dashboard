@@ -97,7 +97,7 @@ export default function AttributesView({ filteredPerf, baseline, loading, onClic
     return (
       <div style={{ padding: 64, textAlign: 'center', color: 'var(--ink-4)',
                     fontFamily: 'var(--serif)', fontStyle: 'italic',
-                    background: 'white', border: '1px solid var(--rule)' }}>
+                    background: 'var(--paper)', border: '1px solid var(--rule)' }}>
         Loading attribute data…
       </div>
     )
@@ -107,7 +107,7 @@ export default function AttributesView({ filteredPerf, baseline, loading, onClic
     return (
       <div style={{ padding: 64, textAlign: 'center', color: 'var(--ink-4)',
                     fontFamily: 'var(--serif)', fontStyle: 'italic',
-                    background: 'white', border: '1px dashed var(--rule)' }}>
+                    background: 'var(--paper)', border: '1px dashed var(--rule)' }}>
         No attribute has at least {MIN_SAMPLE} tagged ads in this window yet. Tag more ads to see the breakdown.
       </div>
     )
@@ -137,7 +137,7 @@ function AttributeRail({ summaries, active, setActive, baseline }) {
   const noData = summaries.filter(s => !s.leader)
   return (
     <div style={{
-      background: 'white', border: '1px solid var(--rule)',
+      background: 'var(--paper)', border: '1px solid var(--rule)',
       height: 'fit-content', position: 'sticky', top: 110,
     }}>
       <div style={{
@@ -240,7 +240,7 @@ function AttributeDetail({ summary, baseline, filteredPerf, attrSummaries, combo
       <div style={{
         padding: '32px 36px',
         paddingLeft: 32,
-        background: isLeading ? 'var(--accent-soft, #fdf6c5)' : 'white',
+        background: isLeading ? 'var(--accent-soft, #fdf6c5)' : 'var(--paper)',
         border: '1px solid var(--rule)',
         borderLeft: `4px solid ${color}`,
       }}>
@@ -345,7 +345,7 @@ function ValueBreakdown({ summary, baseline, selectedValue, onSelectValue }) {
   const GRID = '180px 1fr 90px 70px 80px'
 
   return (
-    <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       <div style={{
         padding: '14px 22px',
         borderBottom: '1px solid var(--rule)',
@@ -497,7 +497,7 @@ function CombinationMatrix({ summary, attrSummaries, comboAttr, setComboAttr, fi
   if (!effectiveCombo || colValues.length === 0) return null
 
   return (
-    <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       <div style={{
         padding: '14px 22px', borderBottom: '1px solid var(--rule)',
         display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
@@ -519,7 +519,7 @@ function CombinationMatrix({ summary, attrSummaries, comboAttr, setComboAttr, fi
             fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
             letterSpacing: '0.04em', textTransform: 'uppercase',
             padding: '5px 10px',
-            background: 'white', color: 'var(--ink)',
+            background: 'var(--paper)', color: 'var(--ink)',
             border: '1px solid var(--ink-3)', outline: 'none',
           }}>
             {availableCombos.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
@@ -656,7 +656,7 @@ function TopInValue({ summary, focusValue, focusRow, filteredPerf, onClickCreati
   const totalCount = allMatching.length
   const creativesLink = `/sales/ads/creative/creatives?${rowAttr}=${encodeURIComponent(value)}`
   return (
-    <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       <div style={{
         padding: '16px 22px', borderBottom: '1px solid var(--rule)',
         display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12,
@@ -681,7 +681,7 @@ function TopInValue({ summary, focusValue, focusRow, filteredPerf, onClickCreati
           display: 'inline-flex', alignItems: 'center', gap: 4,
           padding: '6px 12px',
           border: '1px solid var(--rule-2)',
-          background: 'white',
+          background: 'var(--paper)',
         }}>
           View all {totalCount} in Creatives →
         </a>
@@ -699,7 +699,7 @@ function TopInValue({ summary, focusValue, focusRow, filteredPerf, onClickCreati
               onMouseEnter={e => e.currentTarget.style.background = 'var(--paper-2)'}
               onMouseLeave={e => e.currentTarget.style.background = 'white'}
               style={{
-                background: 'white', padding: '16px 18px',
+                background: 'var(--paper)', padding: '16px 18px',
                 cursor: onClickCreative ? 'pointer' : 'default',
                 display: 'grid', gridTemplateColumns: '52px 1fr auto', gap: 14, alignItems: 'flex-start',
                 transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1)',

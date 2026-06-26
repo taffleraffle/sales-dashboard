@@ -198,7 +198,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
       {/* Toolbar: search + counters + sort */}
       <div style={{
         display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14,
-        padding: '12px 16px', background: 'white',
+        padding: '12px 16px', background: 'var(--paper)',
         border: '1px solid var(--rule)',
       }}>
         <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 240, maxWidth: 320 }}>
@@ -281,7 +281,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
           onToggle={toggleAttrFilter} onClear={clearAllAttrFilters} filterCount={attrFilterCount} />
 
       {/* Table — horizontally scrollable; min-width keeps columns from collapsing */}
-      <div style={{ background: 'white', border: '1px solid var(--rule)',
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)',
                     borderLeft: 'none', overflowX: 'auto' }}>
         <div style={{ minWidth: MIN_TABLE_WIDTH }}>
         {/* Header */}
@@ -392,7 +392,7 @@ function FilterRail({ rows, filters, onToggle, onClear, filterCount }) {
   return (
     <div>
       <div style={{
-        padding: '10px 14px', background: 'white',
+        padding: '10px 14px', background: 'var(--paper)',
         border: '1px solid var(--rule)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
@@ -407,7 +407,7 @@ function FilterRail({ rows, filters, onToggle, onClear, filterCount }) {
         )}
       </div>
       <div style={{
-        background: 'white',
+        background: 'var(--paper)',
         borderLeft: '1px solid var(--rule)',
         borderRight: '1px solid var(--rule)',
         borderBottom: '1px solid var(--rule)',

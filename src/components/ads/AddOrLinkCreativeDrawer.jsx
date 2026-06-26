@@ -339,7 +339,7 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
               <button key={t.key} onClick={() => setTab(t.key)} disabled={working}
                 style={{
                   flex: 1, padding: '12px 14px', textAlign: 'left',
-                  background: active ? 'white' : 'transparent',
+                  background: active ? 'var(--paper)' : 'transparent',
                   border: 'none', borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
                   cursor: working ? 'wait' : 'pointer',
                   display: 'flex', alignItems: 'center', gap: 8,
@@ -454,7 +454,7 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
 
                       {chosenAd && (
                         <div style={{
-                          marginTop: 12, padding: '10px 14px', background: 'white',
+                          marginTop: 12, padding: '10px 14px', background: 'var(--paper)',
                           border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
                           borderRadius: 2,
                           display: 'flex', alignItems: 'center', gap: 12,
@@ -567,7 +567,7 @@ function canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile, uploadQ
 
 const inputStyle = {
   width: '100%', padding: '10px 12px', fontFamily: 'var(--sans)', fontSize: 13,
-  border: '1px solid var(--rule)', background: 'white', borderRadius: 2,
+  border: '1px solid var(--rule)', background: 'var(--paper)', borderRadius: 2,
   color: 'var(--ink)',
 }
 
@@ -618,7 +618,7 @@ function Row({ selected, onClick, children }) {
   return (
     <button onClick={onClick} style={{
       textAlign: 'left', padding: '10px 12px',
-      background: selected ? 'var(--ink)' : 'white',
+      background: selected ? 'var(--ink)' : 'var(--paper)',
       color: selected ? 'var(--paper)' : 'var(--ink)',
       border: `1px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
       borderRadius: 2, cursor: 'pointer',
@@ -744,7 +744,7 @@ function DropZone({ file, setFile, onFiles, multiple = false }) {
     <label htmlFor="upload-mp4" style={{
       display: 'block', padding: 24,
       border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--rule)'}`,
-      background: dragOver ? 'var(--paper)' : 'white',
+      background: dragOver ? 'var(--paper)' : 'var(--paper)',
       borderRadius: 2, cursor: 'pointer', textAlign: 'center',
       transition: 'all 120ms ease',
     }}
@@ -807,7 +807,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
   return (
     <div style={{
       padding: '12px 14px',
-      background: item.status === 'done' ? 'var(--paper)' : 'white',
+      background: item.status === 'done' ? 'var(--paper)' : 'var(--paper)',
       border: '1px solid var(--rule)',
       borderLeft: `3px solid ${statusBadge.accent}`,
       borderRadius: 2,
@@ -899,7 +899,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
           <input type="text" value={adQuery} onChange={e => setAdQuery(e.target.value)}
             placeholder="Search ads…" autoFocus
             style={{ width: '100%', padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 12,
-                    border: '1px solid var(--rule)', background: 'white', borderRadius: 2,
+                    border: '1px solid var(--rule)', background: 'var(--paper)', borderRadius: 2,
                     marginBottom: 8 }} />
           <div style={{ maxHeight: 200, overflowY: 'auto', display: 'grid', gap: 3 }}>
             {adResults.map(a => (
@@ -907,7 +907,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
                 onClick={() => { onChangeAd(a); setPickerOpen(false); setAdQuery('') }}
                 style={{
                   textAlign: 'left', padding: '6px 8px',
-                  background: 'white', border: '1px solid var(--rule)',
+                  background: 'var(--paper)', border: '1px solid var(--rule)',
                   cursor: 'pointer', borderRadius: 2,
                   display: 'flex', alignItems: 'center', gap: 8,
                 }}>
@@ -993,7 +993,7 @@ function DocDropZone({ onText, onError }) {
       style={{
         display: 'block', padding: '14px 16px',
         border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--rule)'}`,
-        background: dragOver ? 'var(--paper)' : 'white',
+        background: dragOver ? 'var(--paper)' : 'var(--paper)',
         borderRadius: 2, cursor: extracting ? 'wait' : 'pointer',
         transition: 'all 120ms ease',
         display: 'flex', alignItems: 'center', gap: 12,

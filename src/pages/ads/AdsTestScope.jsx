@@ -201,7 +201,7 @@ export default function AdsTestScope() {
               padding: '6px 12px',
               fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
               letterSpacing: '0.04em', textTransform: 'uppercase',
-              border: '1px solid var(--ink-3)', background: 'white',
+              border: '1px solid var(--ink-3)', background: 'var(--paper)',
               color: 'var(--ink)', cursor: 'pointer',
             }}>Show all campaigns</button>
           )}
@@ -211,7 +211,7 @@ export default function AdsTestScope() {
       {/* Toolbar */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-        padding: '10px 14px', background: 'white',
+        padding: '10px 14px', background: 'var(--paper)',
         border: '1px solid var(--rule)',
       }}>
         <input type="text" value={search} onChange={e => setSearch(e.target.value)}
@@ -277,7 +277,7 @@ export default function AdsTestScope() {
       {/* Campaign table — overflow-x because the column template needs
           ~1046px; below that the spend/booked/winning columns were
           hard-clipped (≤768px CSS hides main overflow). */}
-      <div style={{ background: 'white', border: '1px solid var(--rule)', borderTop: 'none', overflowX: 'auto' }}>
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)', borderTop: 'none', overflowX: 'auto' }}>
       {/* minWidth only when rows exist — a centered loading/empty message
           inside a 1046px canvas sits off-viewport on phones. */}
       <div style={{ minWidth: campaigns.length > 0 ? 1046 : undefined }}>
@@ -485,7 +485,7 @@ function DraftCard({ batch, onClick }) {
   return (
     <button onClick={onClick}
       style={{
-        background: 'white', border: '1px solid var(--rule)',
+        background: 'var(--paper)', border: '1px solid var(--rule)',
         borderLeft: '3px solid var(--accent)',
         padding: 18, textAlign: 'left', cursor: 'pointer',
         fontFamily: 'inherit',
@@ -573,7 +573,7 @@ function LaunchedSection({ launched, onOpen }) {
           In market — {launched.length}
         </h2>
       </div>
-      <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
         {launched.map((b, i) => (
           <button key={b.id} onClick={() => onOpen(b.id)}
             style={{
@@ -667,7 +667,7 @@ function EmptyBox({ children }) {
   return (
     <div style={{
       padding: '24px 20px',
-      background: 'white', border: '1px dashed var(--rule-2)',
+      background: 'var(--paper)', border: '1px dashed var(--rule-2)',
       textAlign: 'center',
       fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-3)',
       lineHeight: 1.5,

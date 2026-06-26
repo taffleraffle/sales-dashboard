@@ -853,7 +853,7 @@ export default function AdsGenerator() {
           {/* Count + Generate row — primary action. */}
           <div style={{
             marginBottom: 6,
-            padding: '16px 18px', background: 'white',
+            padding: '16px 18px', background: 'var(--paper)',
             border: '1px solid var(--rule)', borderTop: '3px solid var(--ink)',
             borderRadius: 2,
           }}>
@@ -882,7 +882,7 @@ export default function AdsGenerator() {
                         style={{
                           padding: '8px 12px',
                           border: `1px solid ${b.value === n ? 'var(--ink)' : 'var(--rule)'}`,
-                          background: b.value === n ? 'var(--accent)' : 'white',
+                          background: b.value === n ? 'var(--accent)' : 'var(--paper)',
                           color: 'var(--ink)',
                           fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
                           cursor: 'pointer', borderRadius: 2, minWidth: 42,
@@ -936,7 +936,7 @@ export default function AdsGenerator() {
                     style={{
                       width: '100%', maxWidth: 720, padding: '10px 12px',
                       fontFamily: 'var(--sans)', fontSize: 14,
-                      border: '1px solid var(--rule)', background: 'white',
+                      border: '1px solid var(--rule)', background: 'var(--paper)',
                       color: 'var(--ink)', resize: 'vertical', borderRadius: 2, outline: 'none',
                     }} />
                 </Block>
@@ -1031,7 +1031,7 @@ export default function AdsGenerator() {
                     style={{
                       padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 11,
                       letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
-                      background: '#b53e3e', color: 'white',
+                      background: '#b53e3e', color: 'var(--paper)',
                       border: '1px solid #b53e3e', cursor: 'pointer', borderRadius: 2,
                     }}>Retire {selectedAngleSlugs.size}</button>
                 </div>
@@ -1268,7 +1268,7 @@ export default function AdsGenerator() {
                         <span key={t} style={{
                           fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
                           textTransform: 'uppercase', color: 'var(--ink)', fontWeight: 600,
-                          padding: '3px 8px', background: 'white',
+                          padding: '3px 8px', background: 'var(--paper)',
                           border: '1px solid var(--ink)', borderRadius: 2,
                         }}>
                           {t.replace('_', ' ')} <span style={{ opacity: 0.6, marginLeft: 2 }}>×{byType[t].length}</span>
@@ -1326,7 +1326,7 @@ export default function AdsGenerator() {
                       flex: '1 1 240px', maxWidth: 380,
                       padding: '14px 16px', textAlign: 'left',
                       border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                      background: on ? 'var(--ink)' : 'white',
+                      background: on ? 'var(--ink)' : 'var(--paper)',
                       color: on ? 'var(--paper)' : 'var(--ink)',
                       cursor: 'pointer', borderRadius: 2,
                       display: 'flex', flexDirection: 'column', gap: 4,
@@ -1374,7 +1374,7 @@ export default function AdsGenerator() {
                       flex: '1 1 280px', maxWidth: 420,
                       padding: '14px 16px',
                       border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                      background: on ? 'var(--paper)' : 'white',
+                      background: on ? 'var(--paper)' : 'var(--paper)',
                       borderRadius: 2,
                       display: 'flex', flexDirection: 'column', gap: 8,
                     }}>
@@ -1401,7 +1401,7 @@ export default function AdsGenerator() {
                           width: 56, padding: '6px 8px',
                           fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 700, textAlign: 'center',
                           border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                          background: 'white', borderRadius: 2,
+                          background: 'var(--paper)', borderRadius: 2,
                         }} />
                     </div>
                     <div style={{
@@ -1465,7 +1465,7 @@ export default function AdsGenerator() {
                       flex: '1 1 280px', maxWidth: 420, textAlign: 'left',
                       padding: '12px 14px',
                       border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                      background: on ? 'var(--paper)' : 'white',
+                      background: on ? 'var(--paper)' : 'var(--paper)',
                       color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
                       display: 'flex', flexDirection: 'column', gap: 4,
                     }}>
@@ -1501,7 +1501,7 @@ export default function AdsGenerator() {
             return (
               <div style={{
                 marginTop: 8, marginBottom: 6,
-                padding: '16px 18px', background: 'white',
+                padding: '16px 18px', background: 'var(--paper)',
                 border: '1px solid var(--rule)', borderTop: '3px solid var(--ink)',
                 borderRadius: 2,
               }}>
@@ -1609,7 +1609,7 @@ export default function AdsGenerator() {
                             letterSpacing: '0.1em', textTransform: 'uppercase',
                             fontWeight: selectedProofNames.length === 0 ? 700 : 500,
                             border: `1px solid ${selectedProofNames.length === 0 ? 'var(--ink)' : 'var(--rule)'}`,
-                            background: selectedProofNames.length === 0 ? 'var(--ink)' : 'white',
+                            background: selectedProofNames.length === 0 ? 'var(--ink)' : 'var(--paper)',
                             color: selectedProofNames.length === 0 ? 'var(--paper)' : 'var(--ink-3)',
                             cursor: 'pointer', borderRadius: 2,
                           }}>
@@ -1625,7 +1625,7 @@ export default function AdsGenerator() {
                               style={{
                                 padding: '8px 12px', fontFamily: 'var(--sans)', fontSize: 12.5,
                                 border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                                background: on ? 'var(--ink)' : 'white',
+                                background: on ? 'var(--ink)' : 'var(--paper)',
                                 color: on ? 'var(--paper)' : 'var(--ink-2)',
                                 cursor: 'pointer', borderRadius: 2,
                                 display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -1667,7 +1667,7 @@ export default function AdsGenerator() {
                                 padding: '10px 14px',
                                 border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
                                 borderRight: on ? '2px solid var(--ink)' : 'none',
-                                background: on ? 'var(--ink)' : 'white',
+                                background: on ? 'var(--ink)' : 'var(--paper)',
                                 color: on ? 'var(--paper)' : 'var(--ink)',
                                 fontFamily: 'var(--sans)', fontSize: 14, fontWeight: on ? 600 : 400,
                                 cursor: 'pointer', borderRadius: '2px 0 0 2px',
@@ -1682,7 +1682,7 @@ export default function AdsGenerator() {
                                 padding: '10px 8px',
                                 border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
                                 borderLeft: '1px solid var(--rule)',
-                                background: on ? 'var(--ink)' : 'white',
+                                background: on ? 'var(--ink)' : 'var(--paper)',
                                 color: on ? 'var(--paper)' : 'var(--ink-3)',
                                 cursor: 'pointer', borderRadius: '0 2px 2px 0',
                                 display: 'inline-flex', alignItems: 'center',
@@ -1732,7 +1732,7 @@ export default function AdsGenerator() {
                             style={{
                               padding: '10px 16px',
                               border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                              background: on ? 'var(--accent)' : 'white',
+                              background: on ? 'var(--accent)' : 'var(--paper)',
                               color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
                               cursor: 'pointer', borderRadius: 2,
                             }}>{opt.label}</button>
@@ -1800,7 +1800,7 @@ export default function AdsGenerator() {
                     padding: '10px 14px',
                     border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
                     borderRight: selected ? '2px solid var(--ink)' : 'none',
-                    background: selected ? 'var(--ink)' : 'white',
+                    background: selected ? 'var(--ink)' : 'var(--paper)',
                     color: selected ? 'var(--paper)' : isStub ? 'var(--ink-4)' : 'var(--ink)',
                     fontFamily: 'var(--sans)', fontSize: 14, fontWeight: selected ? 600 : 400,
                     cursor: 'pointer', borderRadius: '2px 0 0 2px',
@@ -1824,7 +1824,7 @@ export default function AdsGenerator() {
                     padding: '10px 8px',
                     border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
                     borderLeft: '1px solid var(--rule)',
-                    background: selected ? 'var(--ink)' : 'white',
+                    background: selected ? 'var(--ink)' : 'var(--paper)',
                     color: selected ? 'var(--paper)' : 'var(--ink-3)',
                     cursor: 'pointer', borderRadius: '0 2px 2px 0',
                     display: 'inline-flex', alignItems: 'center',
@@ -1890,7 +1890,7 @@ export default function AdsGenerator() {
                 style={{
                   padding: '10px 20px',
                   border: `1px solid ${nConcepts === n ? 'var(--ink)' : 'var(--rule)'}`,
-                  background: nConcepts === n ? 'var(--accent)' : 'white',
+                  background: nConcepts === n ? 'var(--accent)' : 'var(--paper)',
                   color: 'var(--ink)',
                   fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600,
                   cursor: 'pointer', borderRadius: 2,
@@ -1907,7 +1907,7 @@ export default function AdsGenerator() {
               style={{
                 width: 70, padding: '8px 10px',
                 fontFamily: 'var(--mono)', fontSize: 14, textAlign: 'center',
-                border: '1px solid var(--rule)', background: 'white',
+                border: '1px solid var(--rule)', background: 'var(--paper)',
                 borderRadius: 2,
               }} />
           </div>
@@ -1993,7 +1993,7 @@ export default function AdsGenerator() {
                                 padding: '6px 12px', fontSize: 12,
                                 fontFamily: 'var(--sans)',
                                 border: `1px solid ${isOn ? 'var(--ink)' : 'var(--rule)'}`,
-                                background: isOn ? 'var(--ink)' : 'white',
+                                background: isOn ? 'var(--ink)' : 'var(--paper)',
                                 color: isOn ? 'var(--paper)' : 'var(--ink-3)',
                                 cursor: 'pointer', borderRadius: 2,
                                 transition: 'all 120ms ease',
@@ -2305,7 +2305,7 @@ function HistoryRunRow({ bucket, rows, angleLookup, currentOfferSlug }) {
   })
   return (
     <div style={{
-      background: 'white', border: '1px solid var(--rule)',
+      background: 'var(--paper)', border: '1px solid var(--rule)',
       borderLeft: '3px solid var(--accent)', borderRadius: 2,
     }}>
       <button onClick={() => setOpen(o => !o)}
@@ -2481,7 +2481,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
         onClick={() => setModalOpen(true)}
         style={{
           position: 'relative',
-          background: 'white',
+          background: 'var(--paper)',
           border: '1px solid var(--rule)',
           borderTop: mode ? `3px solid ${modeMeta.color}` : '3px solid var(--rule)',
           borderRadius: 2,
@@ -2629,7 +2629,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: 'white', borderRadius: 4,
+              background: 'var(--paper)', borderRadius: 4,
               maxWidth: 720, width: '100%', maxHeight: '85vh',
               display: 'flex', flexDirection: 'column',
               borderTop: mode ? `4px solid ${modeMeta.color}` : '4px solid var(--ink)',
@@ -2760,7 +2760,7 @@ function AngleChip({ angle, selected, proofCount, onToggle, onOpenProofs }) {
         display: 'inline-flex', alignItems: 'stretch',
         border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
         borderLeft: `3px solid ${(hover || selected) ? typeColor : (selected ? 'var(--ink)' : 'var(--rule)')}`,
-        background: selected ? 'var(--ink)' : 'white',
+        background: selected ? 'var(--ink)' : 'var(--paper)',
         borderRadius: 2,
         transition: 'border-color 120ms ease',
       }}>
@@ -2805,7 +2805,7 @@ function AngleChip({ angle, selected, proofCount, onToggle, onOpenProofs }) {
           top: 'calc(100% + 6px)', left: 0,
           minWidth: 320, maxWidth: 420,
           padding: '12px 14px',
-          background: 'white',
+          background: 'var(--paper)',
           border: '1px solid var(--rule)',
           borderTop: `3px solid ${typeColor}`,
           borderRadius: 2,
@@ -2922,7 +2922,7 @@ function ModeCard({ selected, onClick, icon, title, desc }) {
         paddingTop: selected ? 17 : 20,
         border: '1px solid var(--rule)',
         borderTop: selected ? '4px solid var(--accent)' : '1px solid var(--rule)',
-        background: 'white',
+        background: 'var(--paper)',
         cursor: 'pointer', textAlign: 'left',
         transition: 'border-color 140ms ease, background 140ms ease',
         position: 'relative',
@@ -3330,13 +3330,13 @@ const PROOF_TYPES_LOCAL = [
 const inlineSelectStyle = {
   padding: '5px 8px', fontFamily: 'var(--mono)', fontSize: 10.5,
   letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600,
-  border: '1px solid var(--rule)', background: 'white',
+  border: '1px solid var(--rule)', background: 'var(--paper)',
   color: 'var(--ink)', borderRadius: 2, outline: 'none', cursor: 'pointer',
 }
 const inlineInputStyle = {
   width: '100%', padding: '8px 10px',
   fontFamily: 'var(--sans)', fontSize: 13,
-  border: '1px solid var(--rule)', background: 'white',
+  border: '1px solid var(--rule)', background: 'var(--paper)',
   color: 'var(--ink)', borderRadius: 2, outline: 'none',
 }
 
@@ -3425,7 +3425,7 @@ function LibraryClusterView({ angles, proofs, selected, onToggleSelect, onSelect
                           style={{
                             padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
                             letterSpacing: '0.12em', textTransform: 'uppercase',
-                            background: allSelected ? '#e8c98a' : 'white',
+                            background: allSelected ? '#e8c98a' : 'var(--paper)',
                             color: '#7a5810', border: '1px solid #7a5810',
                             cursor: allSelected ? 'default' : 'pointer', borderRadius: 2,
                             opacity: allSelected ? 0.7 : 1,
@@ -3504,7 +3504,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
   return (
     <div style={{
       position: 'relative',
-      background: 'white',
+      background: 'var(--paper)',
       border: `1px solid ${selected ? '#1a242c' : 'var(--rule)'}`,
       borderTop: `3px solid ${typeColor}`, borderRadius: 2,
       padding: 16, display: 'flex', flexDirection: 'column', gap: 10,
@@ -3520,7 +3520,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 22, height: 22, marginTop: 4, flexShrink: 0,
                 border: `1.5px solid ${selected ? '#1a242c' : 'var(--rule)'}`,
-                background: selected ? '#1a242c' : 'white',
+                background: selected ? '#1a242c' : 'var(--paper)',
                 borderRadius: 2, cursor: 'pointer',
                 transition: 'all 100ms ease',
               }}>
@@ -3668,7 +3668,7 @@ function SavedAngleRow({ angle, onRetire }) {
   const tagLabel = meta.label
   return (
     <div style={{
-      background: 'white', border: '1px solid var(--rule)',
+      background: 'var(--paper)', border: '1px solid var(--rule)',
       borderLeft: `3px solid ${tagColor}`, borderRadius: 2,
     }}>
       <div style={{
@@ -3811,7 +3811,7 @@ function ScriptCard({ script, index, angleLookup }) {
   const modeMeta = mode ? scriptModeMeta(mode) : null
 
   return (
-    <div style={{ padding: 20, background: 'white', border: '1px solid var(--rule)',
+    <div style={{ padding: 20, background: 'var(--paper)', border: '1px solid var(--rule)',
                   position: 'relative', borderRadius: 2 }}>
       {/* Top stripe — frame color */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3,
@@ -3872,7 +3872,7 @@ function ScriptCard({ script, index, angleLookup }) {
           style={{ padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
                   letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
                   border: `1px solid ${copied ? 'var(--accent)' : 'var(--rule)'}`,
-                  background: copied ? 'var(--accent)' : 'white',
+                  background: copied ? 'var(--accent)' : 'var(--paper)',
                   color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
                   flexShrink: 0,
                   display: 'inline-flex', alignItems: 'center', gap: 4 }}>

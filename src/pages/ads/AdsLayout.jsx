@@ -89,7 +89,7 @@ export default function AdsLayout() {
                   style={{ position: 'fixed', inset: 0, zIndex: 55 }} />
                 <div style={{
                   position: 'absolute', top: '100%', right: 0, zIndex: 60,
-                  background: 'white', border: '1px solid var(--rule)',
+                  background: 'var(--paper)', border: '1px solid var(--rule)',
                   boxShadow: '0 8px 24px rgba(10,10,10,0.12)',
                   display: 'grid', minWidth: 140,
                 }}>

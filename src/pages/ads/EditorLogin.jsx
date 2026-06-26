@@ -146,7 +146,7 @@ export default function EditorLogin() {
               style={{
                 width: '100%', padding: '10px 12px',
                 fontFamily: 'var(--sans)', fontSize: 15,
-                background: 'white', border: '1px solid var(--rule)',
+                background: 'var(--paper)', border: '1px solid var(--rule)',
                 borderRadius: 2, marginBottom: 16,
               }}
             />
@@ -175,7 +175,7 @@ export default function EditorLogin() {
                     style={{
                       padding: '10px 12px', cursor: sending ? 'not-allowed' : 'pointer',
                       textAlign: 'left',
-                      background: selected ? 'var(--paper-2)' : 'white',
+                      background: selected ? 'var(--paper-2)' : 'var(--paper)',
                       border: `1px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
                       borderLeft: `3px solid ${selected ? 'var(--accent)' : 'transparent'}`,
                       borderRadius: 2,

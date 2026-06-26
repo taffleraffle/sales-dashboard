@@ -192,7 +192,7 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
         {/* Bulk selection bar — sticky when any editor is selected */}
         {selectedIds.size > 0 && (
           <div style={{
-            padding: '10px 14px', background: 'var(--ink)', color: 'white',
+            padding: '10px 14px', background: 'var(--ink)', color: 'var(--paper)',
             display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
           }}>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em' }}>
@@ -201,13 +201,13 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
             <button onClick={selectAll} style={{
               padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
               letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: 'transparent', color: 'white',
+              background: 'transparent', color: 'var(--paper)',
               border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
             }}>Select all ({editors.length})</button>
             <button onClick={clearSel} style={{
               padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
               letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: 'transparent', color: 'white',
+              background: 'transparent', color: 'var(--paper)',
               border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
             }}>Clear</button>
             <span style={{ flex: 1 }} />
@@ -219,13 +219,13 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
                 <button onClick={() => setConfirmBulkDelete(false)} disabled={busy} style={{
                   padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                   letterSpacing: '0.08em', textTransform: 'uppercase',
-                  background: 'transparent', color: 'white',
+                  background: 'transparent', color: 'var(--paper)',
                   border: '1px solid rgba(255,255,255,0.5)', cursor: 'pointer',
                 }}>Cancel</button>
                 <button onClick={bulkDelete} disabled={busy} style={{
                   padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
                   letterSpacing: '0.08em', textTransform: 'uppercase',
-                  background: '#b53e3e', color: 'white', border: 'none', cursor: 'pointer',
+                  background: '#b53e3e', color: 'var(--paper)', border: 'none', cursor: 'pointer',
                 }}>{busy ? 'Deleting…' : 'Delete forever'}</button>
               </>
             ) : (
@@ -293,7 +293,7 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
                     style={{
                       width: 16, height: 16, borderRadius: 2,
                       border: isSel ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
-                      background: isSel ? 'var(--accent)' : 'white',
+                      background: isSel ? 'var(--accent)' : 'var(--paper)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       cursor: 'pointer',
                     }}>
@@ -519,7 +519,7 @@ export function ShareLinksModal({ editors, onClose }) {
                 {teamLink ? (
                   <>
                     <div style={{
-                      padding: '8px 12px', background: 'white', border: '1px solid var(--rule)',
+                      padding: '8px 12px', background: 'var(--paper)', border: '1px solid var(--rule)',
                       fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-2)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       userSelect: 'all', cursor: 'text',
@@ -901,7 +901,7 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
             <input type="color" value={color || editorColor({ slug: editor.slug, color: null })}
               onChange={e => setColor(e.target.value)}
               title="Pick a custom hex color"
-              style={{ width: 28, height: 28, border: '1px solid var(--rule)', borderRadius: 4, cursor: 'pointer', background: 'white', padding: 0 }} />
+              style={{ width: 28, height: 28, border: '1px solid var(--rule)', borderRadius: 4, cursor: 'pointer', background: 'var(--paper)', padding: 0 }} />
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 6 }}>
             {color ? `Custom: ${color}` : 'Auto (hash of name)'}
@@ -929,7 +929,7 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
               border: '1px solid rgba(184,106,12,0.3)',
               fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--ink-2)',
             }}>
-              <strong>Pending migration 077.</strong> Apply <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'white', padding: '1px 5px' }}>supabase/migrations/077_editor_share_links.sql</code> in Supabase Studio → SQL Editor to enable share links. Existing functionality is unaffected.
+              <strong>Pending migration 077.</strong> Apply <code style={{ fontFamily: 'var(--mono)', fontSize: 11, background: 'var(--paper)', padding: '1px 5px' }}>supabase/migrations/077_editor_share_links.sql</code> in Supabase Studio → SQL Editor to enable share links. Existing functionality is unaffected.
             </div>
           ) : (
             <div style={{ display: 'grid', gap: 8 }}>
@@ -952,7 +952,7 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
                   <button onClick={() => copyLink(l.token)} style={{
                     padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
                     letterSpacing: '0.06em', textTransform: 'uppercase',
-                    background: copyOk === l.token ? '#3e8a5e' : 'white',
+                    background: copyOk === l.token ? '#3e8a5e' : 'var(--paper)',
                     color: copyOk === l.token ? 'white' : 'var(--ink-2)',
                     border: '1px solid ' + (copyOk === l.token ? '#3e8a5e' : 'var(--rule)'),
                     cursor: 'pointer',
@@ -1482,7 +1482,7 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
                       <span style={{
                         width: 16, height: 16, borderRadius: 2,
                         border: isOn ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
-                        background: isOn ? 'var(--accent)' : 'white',
+                        background: isOn ? 'var(--accent)' : 'var(--paper)',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                         flexShrink: 0,
                       }}>
@@ -1554,7 +1554,7 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
                 style={{
                   padding: 24, textAlign: 'center', cursor: busy ? 'not-allowed' : 'pointer',
                   border: '2px dashed var(--rule)',
-                  background: uploadFiles.length ? 'white' : 'var(--paper-2)',
+                  background: uploadFiles.length ? 'var(--paper)' : 'var(--paper-2)',
                 }}>
                 <input ref={uploadInputRef} type="file" accept="video/*" multiple
                   style={{ display: 'none' }}

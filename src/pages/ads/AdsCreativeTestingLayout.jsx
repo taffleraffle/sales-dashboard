@@ -365,7 +365,7 @@ function AnalyticsToolbar({
           fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
           letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)',
         }}>Window</span>
-        <div style={{ display: 'inline-flex', border: '1px solid var(--ink-3)', background: 'white' }}>
+        <div style={{ display: 'inline-flex', border: '1px solid var(--ink-3)', background: 'var(--paper)' }}>
           {DATE_PRESETS.map((p, i) => {
             const on = activePreset === p.id
             return (
@@ -391,7 +391,7 @@ function AnalyticsToolbar({
           style={{
             fontFamily: 'var(--mono)', fontSize: 11.5,
             padding: '4px 6px', border: '1px solid var(--rule-2)',
-            background: 'white', color: 'var(--ink)', borderRadius: 2,
+            background: 'var(--paper)', color: 'var(--ink)', borderRadius: 2,
           }} />
         <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>→</span>
         <input type="date" value={until} min={since} max={todayISO()}
@@ -399,7 +399,7 @@ function AnalyticsToolbar({
           style={{
             fontFamily: 'var(--mono)', fontSize: 11.5,
             padding: '4px 6px', border: '1px solid var(--rule-2)',
-            background: 'white', color: 'var(--ink)', borderRadius: 2,
+            background: 'var(--paper)', color: 'var(--ink)', borderRadius: 2,
           }} />
       </div>
 
@@ -445,8 +445,8 @@ function AnalyticsToolbar({
           letterSpacing: '-0.005em',
           color: activeCampaigns.length ? 'var(--ink)' : 'var(--ink-2)',
           padding: '7px 14px',
-          background: activeCampaigns.length ? 'var(--accent-soft, #fdf6c5)' : 'white',
-          border: `1px solid ${activeCampaigns.length ? 'var(--accent-2, #ead84a)' : 'var(--ink-3)'}`,
+          background: activeCampaigns.length ? 'var(--accent-soft)' : 'var(--paper)',
+          border: `1px solid ${activeCampaigns.length ? 'var(--accent-dk)' : 'var(--ink-3)'}`,
           cursor: 'pointer',
         }}>
           <span style={{
@@ -471,8 +471,8 @@ function AnalyticsToolbar({
           letterSpacing: '0.04em', textTransform: 'uppercase',
           color: hideInactive ? 'var(--ink)' : 'var(--ink-3)',
           padding: '4px 10px',
-          background: hideInactive ? 'var(--accent-soft, #fdf6c5)' : 'transparent',
-          border: `1px solid ${hideInactive ? 'var(--accent-2, #ead84a)' : 'var(--rule-2)'}`,
+          background: hideInactive ? 'var(--accent-soft)' : 'transparent',
+          border: `1px solid ${hideInactive ? 'var(--accent-dk)' : 'var(--rule-2)'}`,
           cursor: 'pointer',
         }}>
         <input type="checkbox" checked={hideInactive}

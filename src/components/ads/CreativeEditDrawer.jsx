@@ -84,7 +84,7 @@ export default function CreativeEditDrawer({ open, ad, onClose }) {
       style={{
         padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10.5,
         letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
-        border: '1px solid var(--rule-2)', background: 'white', color: 'var(--ink-2)',
+        border: '1px solid var(--rule-2)', background: 'var(--paper)', color: 'var(--ink-2)',
         borderRadius: 2, textDecoration: 'none',
         display: 'inline-flex', alignItems: 'center', gap: 5,
       }}>
@@ -174,7 +174,7 @@ function CreativePreview({ ad, sourceVideoUrl, videoChecked, videoError, onVideo
                    maxHeight: 480, objectFit: 'contain', background: 'var(--paper-2)' }} />
         {ad?.asset_type === 'image' && (
           <div style={{ position: 'absolute', top: 8, right: 8,
-                        padding: '2px 6px', background: 'rgba(10,10,10,0.7)', color: 'white',
+                        padding: '2px 6px', background: 'rgba(10,10,10,0.7)', color: 'var(--paper)',
                         fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
                         textTransform: 'uppercase' }}>
             <ImageIcon size={9} style={{ display: 'inline', marginRight: 3, verticalAlign: 'middle' }} />

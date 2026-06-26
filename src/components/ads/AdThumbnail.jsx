@@ -51,7 +51,7 @@ export default function AdThumbnail({ ad, size = 'md', onClick, rounded = false,
         {isVideo && (
           <div style={{
             position: 'absolute', bottom: 4, right: 4,
-            background: 'rgba(10,10,10,0.7)', color: 'white',
+            background: 'rgba(10,10,10,0.7)', color: 'var(--paper)',
             padding: '1px 5px', fontFamily: 'var(--mono)', fontSize: 9,
             letterSpacing: '0.06em', borderRadius: 2, fontWeight: 600,
             textTransform: 'uppercase',

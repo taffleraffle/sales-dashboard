@@ -163,7 +163,7 @@ export default function CampaignPickerModal({ open, onClose, perfRaw, activeCamp
           style={{
             flex: '1 1 280px', maxWidth: 360,
             padding: '8px 12px', fontFamily: 'var(--sans)', fontSize: 14,
-            border: '1px solid var(--rule-2)', background: 'white', outline: 'none',
+            border: '1px solid var(--rule-2)', background: 'var(--paper)', outline: 'none',
           }} />
         <div style={{ display: 'flex', gap: 4 }}>
           {[
@@ -189,7 +189,7 @@ export default function CampaignPickerModal({ open, onClose, perfRaw, activeCamp
             style={{
               padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 11.5,
               fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase',
-              border: '1px solid var(--rule-2)', background: 'white', outline: 'none',
+              border: '1px solid var(--rule-2)', background: 'var(--paper)', outline: 'none',
             }}>
             <option value="recent">Recent first</option>
             <option value="spend">Spend</option>

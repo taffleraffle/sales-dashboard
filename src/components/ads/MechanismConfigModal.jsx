@@ -327,7 +327,7 @@ function Field({ label, required, helper, value, onChange, placeholder, multilin
   const baseStyle = {
     width: '100%', padding: '10px 12px',
     fontFamily: 'var(--sans)', fontSize: 14,
-    border: '1px solid var(--rule)', background: disabled ? 'var(--paper-2)' : 'white',
+    border: '1px solid var(--rule)', background: disabled ? 'var(--paper-2)' : 'var(--paper)',
     color: disabled ? 'var(--ink-4)' : 'var(--ink)',
     borderRadius: 2, resize: multiline ? 'vertical' : undefined,
   }

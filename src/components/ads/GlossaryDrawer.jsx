@@ -121,7 +121,7 @@ export default function GlossaryDrawer({ open, onClose }) {
           <section style={{ marginTop: 28, marginBottom: 32 }}>
             <Eyebrow style={{ marginBottom: 10 }}>Status terms</Eyebrow>
             <div style={{
-              background: 'white', border: '1px solid var(--rule)',
+              background: 'var(--paper)', border: '1px solid var(--rule)',
             }}>
               {STATUS_TERMS.map((t, i) => (
                 <div key={t.term} style={{
@@ -162,7 +162,7 @@ export default function GlossaryDrawer({ open, onClose }) {
                 fontStyle: 'italic', color: 'var(--ink-4)', lineHeight: 1.5,
               }}>Why we test: {a.why}</p>
 
-              <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+              <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
                 {a.values.map((vv, i) => (
                   <div key={vv.v} style={{
                     display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12,

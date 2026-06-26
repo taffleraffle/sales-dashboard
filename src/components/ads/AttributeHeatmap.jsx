@@ -90,7 +90,7 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
         fontWeight: 600,
       }
     }
-    return { background: 'white', color: 'var(--ink-2)' }
+    return { background: 'var(--paper)', color: 'var(--ink-2)' }
   }
 
   return (
@@ -106,7 +106,7 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
           <select value={attrA} onChange={e => setAttrA(e.target.value)}
             style={{
               padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 13,
-              border: '1px solid var(--rule-2)', background: 'white', borderRadius: 2,
+              border: '1px solid var(--rule-2)', background: 'var(--paper)', borderRadius: 2,
             }}>
             {PIVOT_ATTRS.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
           </select>
@@ -117,7 +117,7 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
           <select value={attrB} onChange={e => setAttrB(e.target.value)}
             style={{
               padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 13,
-              border: '1px solid var(--rule-2)', background: 'white', borderRadius: 2,
+              border: '1px solid var(--rule-2)', background: 'var(--paper)', borderRadius: 2,
             }}>
             {PIVOT_ATTRS.filter(a => a.key !== attrA).map(a => (
               <option key={a.key} value={a.key}>{a.label}</option>
@@ -140,7 +140,7 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
         <div style={{
           padding: 64, textAlign: 'center', color: 'var(--ink-4)',
           fontFamily: 'var(--serif)', fontStyle: 'italic',
-          background: 'white', border: '1px solid var(--rule)',
+          background: 'var(--paper)', border: '1px solid var(--rule)',
         }}>
           Loading heatmap…
         </div>
@@ -148,12 +148,12 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
         <div style={{
           padding: 64, textAlign: 'center', color: 'var(--ink-4)',
           fontFamily: 'var(--serif)', fontStyle: 'italic',
-          background: 'white', border: '1px dashed var(--rule)',
+          background: 'var(--paper)', border: '1px dashed var(--rule)',
         }}>
           No data for this attribute combo in the selected window.
         </div>
       ) : (
-        <div style={{ overflowX: 'auto', background: 'white', border: '1px solid var(--rule)' }}>
+        <div style={{ overflowX: 'auto', background: 'var(--paper)', border: '1px solid var(--rule)' }}>
           <table style={{
             borderCollapse: 'collapse',
             fontFamily: 'var(--sans)',
@@ -299,7 +299,7 @@ function Legend({ baseline }) {
         Beats baseline
       </span>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-        <span style={{ width: 14, height: 14, background: 'white',
+        <span style={{ width: 14, height: 14, background: 'var(--paper)',
                        border: '1px solid var(--rule)' }} />
         Below baseline
       </span>

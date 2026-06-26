@@ -417,7 +417,7 @@ export default function ClipEditorModal({
             {files.map((f, i) => (
               <button key={i} type="button" onClick={() => setActiveIdx(i)} style={{
                 padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-                background: i === activeIdx ? 'var(--ink)' : 'white',
+                background: i === activeIdx ? 'var(--ink)' : 'var(--paper)',
                 color: i === activeIdx ? 'var(--paper)' : 'var(--ink-2)',
                 border: '1px solid var(--rule)', cursor: 'pointer',
                 maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -492,7 +492,7 @@ export default function ClipEditorModal({
             return (
             <div key={s.id} style={{
               display: 'flex', alignItems: 'center', gap: 10,
-              padding: '7px 10px', background: 'white', border: '1px solid var(--rule)',
+              padding: '7px 10px', background: 'var(--paper)', border: '1px solid var(--rule)',
               fontFamily: 'var(--mono)', fontSize: 11,
             }}>
               <span style={{ fontWeight: 700, color: s.bin === 'merge' ? '#b86a0c' : '#3e7eba', minWidth: 60 }}>
@@ -527,7 +527,7 @@ export default function ClipEditorModal({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>Merged file name</span>
             <input type="text" value={outName} onChange={e => setOutName(e.target.value)}
-              style={{ flex: 1, maxWidth: 420, padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 12, border: '1px solid var(--rule)', background: 'white', outline: 'none' }} />
+              style={{ flex: 1, maxWidth: 420, padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 12, border: '1px solid var(--rule)', background: 'var(--paper)', outline: 'none' }} />
           </div>
         )}
       </div>

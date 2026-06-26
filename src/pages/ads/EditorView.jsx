@@ -252,7 +252,7 @@ export default function EditorView() {
                 onClick={() => acceptLifetime('14d')}
                 style={{
                   padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
-                  background: 'white', border: '1px solid var(--rule)',
+                  background: 'var(--paper)', border: '1px solid var(--rule)',
                   borderLeft: '3px solid var(--accent)', borderRadius: 2,
                 }}>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 700, color: 'var(--ink)' }}>
@@ -266,7 +266,7 @@ export default function EditorView() {
                 onClick={() => acceptLifetime('forever')}
                 style={{
                   padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
-                  background: 'white', border: '1px solid var(--rule)',
+                  background: 'var(--paper)', border: '1px solid var(--rule)',
                   borderLeft: '3px solid transparent', borderRadius: 2,
                 }}>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 700, color: 'var(--ink)' }}>
@@ -308,7 +308,7 @@ export default function EditorView() {
           {editor ? (
             <div style={{
               display: 'inline-flex', alignItems: 'center', gap: 8,
-              padding: '6px 12px', background: 'white', border: '1px solid var(--rule)',
+              padding: '6px 12px', background: 'var(--paper)', border: '1px solid var(--rule)',
               fontFamily: 'var(--mono)', fontSize: 11,
             }}>
               <span style={{

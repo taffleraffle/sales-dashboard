@@ -113,7 +113,7 @@ const inputStyle = {
   width: '100%',
   padding: '10px 12px',
   fontFamily: 'var(--sans)', fontSize: 14,
-  border: '1px solid var(--rule)', background: 'white',
+  border: '1px solid var(--rule)', background: 'var(--paper)',
   color: 'var(--ink)', outline: 'none',
 }
 

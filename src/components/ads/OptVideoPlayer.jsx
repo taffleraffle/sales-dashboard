@@ -297,7 +297,7 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
         // height-capped wrapperStyle. Individual call sites can
         // override via wrapperStyle.maxHeight if they want larger.
         maxHeight: 'min(60vh, 520px)',
-        background: '#000', color: 'white',
+        background: '#000', color: 'var(--paper)',
         display: 'flex', flexDirection: 'column',
         userSelect: 'none',
         ...wrapperStyle,
@@ -414,7 +414,7 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
                 position: 'absolute', left: `${hoverPct * 100}%`,
                 top: -22, transform: 'translateX(-50%)',
                 fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                background: 'rgba(0,0,0,0.85)', color: 'white',
+                background: 'rgba(0,0,0,0.85)', color: 'var(--paper)',
                 padding: '2px 6px', borderRadius: 2, whiteSpace: 'nowrap',
                 pointerEvents: 'none',
               }}>{fmtTime(hoverPct * duration)}</div>
@@ -624,7 +624,7 @@ function OptSpeedMenu({ value, onChange }) {
     <div style={{ position: 'relative' }}>
       <button onClick={() => setOpen(v => !v)}
         style={{
-          background: 'rgba(255,255,255,0.1)', color: 'white',
+          background: 'rgba(255,255,255,0.1)', color: 'var(--paper)',
           border: '1px solid rgba(255,255,255,0.18)',
           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
           padding: '3px 9px', cursor: 'pointer', outline: 'none',

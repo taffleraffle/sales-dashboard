@@ -252,7 +252,7 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
                 {/* New row buffer */}
                 <div style={{
                   marginTop: 16, padding: '14px 16px',
-                  background: 'white', border: '1px dashed var(--rule)',
+                  background: 'var(--paper)', border: '1px dashed var(--rule)',
                   borderLeft: '3px solid var(--accent)', borderRadius: 2,
                 }}>
                   <div style={{
@@ -355,7 +355,7 @@ function ProofRow({
   return (
     <div style={{
       padding: isNew ? 0 : 14,
-      background: isNew ? 'transparent' : 'white',
+      background: isNew ? 'transparent' : 'var(--paper)',
       border: isNew ? 'none' : '1px solid var(--rule)',
       borderRadius: 2, marginBottom: isNew ? 0 : 10,
     }}>
@@ -365,7 +365,7 @@ function ProofRow({
           style={{
             padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 11,
             letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600,
-            border: '1px solid var(--rule)', background: 'white',
+            border: '1px solid var(--rule)', background: 'var(--paper)',
             color: 'var(--ink)', borderRadius: 2, outline: 'none', cursor: 'pointer',
           }}>
           {PROOF_TYPES.map(t => (
@@ -469,7 +469,7 @@ function ProofRow({
 const inputStyle = {
   width: '100%', padding: '8px 10px',
   fontFamily: 'var(--sans)', fontSize: 13.5,
-  border: '1px solid var(--rule)', background: 'white',
+  border: '1px solid var(--rule)', background: 'var(--paper)',
   color: 'var(--ink)', borderRadius: 2, outline: 'none',
 }
 

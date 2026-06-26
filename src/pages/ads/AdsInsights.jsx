@@ -304,7 +304,7 @@ function TopPerformersTable({ rows, loading, onClickRow, limit = 10 }) {
 
   if (loading) {
     return (
-      <div style={{ padding: 48, background: 'white', border: '1px solid var(--rule)',
+      <div style={{ padding: 48, background: 'var(--paper)', border: '1px solid var(--rule)',
                     textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic',
                     color: 'var(--ink-4)' }}>
         Loading top performers…
@@ -313,7 +313,7 @@ function TopPerformersTable({ rows, loading, onClickRow, limit = 10 }) {
   }
   if (sorted.length === 0) {
     return (
-      <div style={{ padding: 48, background: 'white', border: '1px solid var(--rule)',
+      <div style={{ padding: 48, background: 'var(--paper)', border: '1px solid var(--rule)',
                     textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic',
                     color: 'var(--ink-4)' }}>
         No booked-call activity in this window yet.
@@ -327,7 +327,7 @@ function TopPerformersTable({ rows, loading, onClickRow, limit = 10 }) {
     // overflow-x: the column template needs ~1030px; below that (split-
     // screen laptop, iPad) the right columns were hard-clipped because
     // the ≤768px CSS hides main overflow. Scroll beats clip.
-    <div style={{ background: 'white', border: '1px solid var(--rule)', overflowX: 'auto' }}>
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)', overflowX: 'auto' }}>
     <div style={{ minWidth: 1030 }}>
       {/* Header */}
       <div style={{
@@ -483,7 +483,7 @@ function WinRateHero({ summary, spark }) {
       borderRight: '1px solid var(--rule)',
       borderBottom: '1px solid var(--rule)',
       paddingLeft: showAccent ? 21 : 24,
-      background: 'white',
+      background: 'var(--paper)',
     }}>
       <Eyebrow>Win rate · {summary.weeksTracked}w</Eyebrow>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 6 }}>
@@ -527,7 +527,7 @@ function VariablesLeaderboard({ items, baseline }) {
   const navigate = useNavigate()
   if (items.length === 0) {
     return (
-      <div style={{ padding: 32, background: 'white', border: '1px solid var(--rule)',
+      <div style={{ padding: 32, background: 'var(--paper)', border: '1px solid var(--rule)',
                     color: 'var(--ink-4)', fontFamily: 'var(--serif)', fontStyle: 'italic',
                     fontSize: 14, textAlign: 'center' }}>
         Not enough tagged data yet. Tag more ads (button top-right) to reveal which
@@ -537,7 +537,7 @@ function VariablesLeaderboard({ items, baseline }) {
   }
   const maxLift = Math.max(...items.map(i => Math.abs(i.lift)), 0.1)
   return (
-    <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
       {items.map((item, i) => {
         const isTop = i === 0 && item.lift > 0
         const stripeColor = attrColor(item.attr, item.value)
@@ -654,7 +654,7 @@ function MiniBarChart({ attr, label, values, baseline }) {
     .slice(0, 8)
   if (rows.length === 0) {
     return (
-      <div style={{ padding: '18px 20px', background: 'white' }}>
+      <div style={{ padding: '18px 20px', background: 'var(--paper)' }}>
         <Eyebrow>{label}</Eyebrow>
         <div style={{ marginTop: 16, padding: 24, color: 'var(--ink-4)',
                       fontFamily: 'var(--serif)', fontStyle: 'italic',
@@ -667,7 +667,7 @@ function MiniBarChart({ attr, label, values, baseline }) {
   const max = Math.max(...rows.map(r => r.winRate), baseline * 1.5, 0.5)
   const baselinePct = (baseline / max) * 100
   return (
-    <div style={{ padding: '18px 20px', background: 'white' }}>
+    <div style={{ padding: '18px 20px', background: 'var(--paper)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
         <Eyebrow>{label}</Eyebrow>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)',

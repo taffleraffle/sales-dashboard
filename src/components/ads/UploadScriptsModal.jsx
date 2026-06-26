@@ -171,7 +171,7 @@ export default function UploadScriptsModal({ open, onClose, batch, onSaved }) {
             rows={12}
             style={{
               width: '100%', padding: '12px 14px', fontFamily: 'var(--sans)', fontSize: 14,
-              border: '1px solid var(--rule)', background: 'white',
+              border: '1px solid var(--rule)', background: 'var(--paper)',
               color: 'var(--ink)', outline: 'none', resize: 'vertical',
               lineHeight: 1.55,
             }} />

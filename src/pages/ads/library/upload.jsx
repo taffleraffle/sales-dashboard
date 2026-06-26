@@ -832,7 +832,7 @@ export function RenameUnnamedButton({ rows, onComplete }) {
         padding: '6px 10px',
         fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
         letterSpacing: '0.06em', textTransform: 'uppercase',
-        background: busy ? 'var(--paper-2)' : 'white',
+        background: busy ? 'var(--paper-2)' : 'var(--paper)',
         color: busy ? 'var(--ink-3)' : '#a86a08',
         border: '1px solid ' + (busy ? 'var(--rule)' : '#e8b408'),
         borderRadius: 2,
@@ -1405,7 +1405,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
               <div style={{
                 position: 'sticky', top: 0, zIndex: 5,
                 display: 'flex', alignItems: 'center', gap: 10,
-                padding: '7px 12px', background: 'var(--ink)', color: 'white',
+                padding: '7px 12px', background: 'var(--ink)', color: 'var(--paper)',
               }}>
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600 }}>
                   {editSel.size} selected
@@ -1620,7 +1620,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                       flexShrink: 0, padding: '3px 9px',
                       fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
                       letterSpacing: '0.06em', textTransform: 'uppercase',
-                      background: 'white', color: 'var(--ink)',
+                      background: 'var(--paper)', color: 'var(--ink)',
                       border: '1px solid var(--ink-3)', cursor: 'pointer',
                     }}>Upload anyway</button>
                   )}

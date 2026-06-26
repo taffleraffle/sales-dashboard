@@ -299,7 +299,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
             onChange={v => setForm({ ...form, brand_voice_md: v })}
             multiline />
 
-          <div style={{ marginTop: 16, padding: 14, background: 'white', border: '1px solid var(--rule)',
+          <div style={{ marginTop: 16, padding: 14, background: 'var(--paper)', border: '1px solid var(--rule)',
                         borderRadius: 2 }}>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
               <input type="checkbox" checked={form.has_dual_guarantee} style={{ marginTop: 3 }}
@@ -389,7 +389,7 @@ function OfferProofRow({ index, proof, onChange, onRemove }) {
   const typeMeta = OFFER_PROOF_TYPES.find(t => t.value === proof.proof_type) || OFFER_PROOF_TYPES[0]
   return (
     <div style={{
-      padding: 12, background: 'white',
+      padding: 12, background: 'var(--paper)',
       border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
       borderRadius: 2,
     }}>
@@ -404,7 +404,7 @@ function OfferProofRow({ index, proof, onChange, onRemove }) {
           style={{
             padding: '5px 8px', fontFamily: 'var(--mono)', fontSize: 10.5,
             letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600,
-            border: '1px solid var(--rule)', background: 'white',
+            border: '1px solid var(--rule)', background: 'var(--paper)',
             color: 'var(--ink)', borderRadius: 2, outline: 'none', cursor: 'pointer',
           }}>
           {OFFER_PROOF_TYPES.map(t => (
@@ -427,14 +427,14 @@ function OfferProofRow({ index, proof, onChange, onRemove }) {
           onChange={e => onChange({ name: e.target.value })}
           style={{
             padding: '8px 10px', fontFamily: 'var(--sans)', fontSize: 13,
-            border: '1px solid var(--rule)', background: 'white',
+            border: '1px solid var(--rule)', background: 'var(--paper)',
             color: 'var(--ink)', borderRadius: 2, outline: 'none',
           }} />
         <input type="text" value={proof.result_short || ''} placeholder={typeMeta.resultPh}
           onChange={e => onChange({ result_short: e.target.value })}
           style={{
             padding: '8px 10px', fontFamily: 'var(--sans)', fontSize: 13,
-            border: '1px solid var(--rule)', background: 'white',
+            border: '1px solid var(--rule)', background: 'var(--paper)',
             color: 'var(--ink)', borderRadius: 2, outline: 'none',
           }} />
       </div>
@@ -446,7 +446,7 @@ function Field({ label, required, helper, value, onChange, placeholder, multilin
   const baseStyle = {
     width: '100%', padding: '10px 12px',
     fontFamily: 'var(--sans)', fontSize: 14,
-    border: '1px solid var(--rule)', background: disabled ? 'var(--paper-2)' : 'white',
+    border: '1px solid var(--rule)', background: disabled ? 'var(--paper-2)' : 'var(--paper)',
     color: disabled ? 'var(--ink-4)' : 'var(--ink)',
     borderRadius: 2, resize: multiline ? 'vertical' : undefined,
   }

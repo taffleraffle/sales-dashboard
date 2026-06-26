@@ -199,7 +199,7 @@ export default function CreativeAttributesPanel({ ad_id }) {
           onChange={e => handleChange('offer_slug', e.target.value || null)}
           style={{
             width: '100%', padding: '10px 12px', fontFamily: 'var(--sans)', fontSize: 14,
-            border: '1px solid var(--rule)', background: 'white', color: 'var(--ink)',
+            border: '1px solid var(--rule)', background: 'var(--paper)', color: 'var(--ink)',
           }}>
           <option value="">— Select offer —</option>
           {offers.map(o => (
@@ -279,7 +279,7 @@ export default function CreativeAttributesPanel({ ad_id }) {
           rows={3}
           style={{
             width: '100%', padding: '10px 12px', fontFamily: 'var(--sans)', fontSize: 13,
-            border: '1px solid var(--rule)', background: 'white', color: 'var(--ink)',
+            border: '1px solid var(--rule)', background: 'var(--paper)', color: 'var(--ink)',
             resize: 'vertical',
           }}
           placeholder="Operator notes on why this tagging or override was applied…"

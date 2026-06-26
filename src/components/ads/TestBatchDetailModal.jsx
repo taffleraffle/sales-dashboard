@@ -170,7 +170,7 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
             <div style={{
               display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
               gap: 16, marginBottom: 24,
-              padding: '14px 18px', border: '1px solid var(--rule)', background: 'white',
+              padding: '14px 18px', border: '1px solid var(--rule)', background: 'var(--paper)',
             }}>
               <Stat label="Scripts" value={batch.script_count} />
               <Stat label="Linked to ads" value={`${batch.linked_count}/${batch.script_count}`} />
@@ -191,7 +191,7 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
               {batch.script_count === 0 && ' Add scripts to see the breakdown.'}
             </p>
             <div style={{
-              background: 'white', border: '1px solid var(--rule)',
+              background: 'var(--paper)', border: '1px solid var(--rule)',
               marginBottom: 28,
             }}>
               {DIMENSIONS.map(d => (
@@ -233,7 +233,7 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
               </div>
             </div>
             {batch.scripts.length > 0 && (
-              <div style={{ background: 'white', border: '1px solid var(--rule)' }}>
+              <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)' }}>
                 {batch.scripts.map((s, i) => (
                   <ScriptRow key={s.id} script={s}
                     isLast={i === batch.scripts.length - 1}
