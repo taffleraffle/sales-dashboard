@@ -3646,7 +3646,10 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               {view === 'tile' ? (
                 <div style={{
                   display: 'grid', gap: 14,
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                  // Smaller base cells so raws stay compact; edited clips span
+                  // two columns to dominate (Ben: edit way more important).
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+                  gridAutoFlow: 'dense',
                 }}>
                   {group.rows.map(r => (
                     <CreativeCard key={r.id} row={r}
@@ -6247,10 +6250,14 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
       onDragStart={onDragStartClip ? (e) => onDragStartClip(row, e) : undefined}
       style={{
         cursor: 'pointer',
+        // Edited clips span two grid columns so the finished cuts dominate the
+        // grid and raws stay compact (Ben 2026-06-26).
+        gridColumn: row.status === 'edited' ? 'span 2' : undefined,
         background: tint ? (hover ? tint.hover : tint.base) : 'var(--paper)',
         border: selected ? '2px solid var(--accent)'
               : hover ? '1px solid var(--ink)'
               : '1px solid var(--rule)',
+        borderRadius: 12, overflow: 'hidden',
         transition: 'border-color 0.12s, background 0.12s',
         position: 'relative',
         outline: selected ? '1px solid rgba(240,224,80,0.5)' : 'none',
