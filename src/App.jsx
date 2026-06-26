@@ -213,11 +213,14 @@ function UpdatePrompt() {
   }, [])
   if (!stale) return null
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-4 py-2.5 rounded-sm bg-[#1a1a1a] border border-opt-yellow/50 shadow-2xl">
-      <span className="text-xs text-text-primary">A new version of the dashboard is available.</span>
+    <div
+      className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-4 py-2.5"
+      style={{ background: 'var(--ink)', border: '1px solid rgba(244,225,74,0.45)', borderRadius: 999, boxShadow: '0 18px 44px -20px rgba(0,0,0,0.55)' }}
+    >
+      <span style={{ fontSize: 12.5, color: '#ffffff' }}>A new version of the dashboard is available.</span>
       <button
         onClick={() => window.location.reload()}
-        className="text-xs font-semibold px-3 py-1 rounded-sm bg-opt-yellow text-black hover:opacity-90"
+        style={{ fontSize: 12.5, fontWeight: 600, padding: '6px 15px', borderRadius: 999, background: 'var(--accent)', color: 'var(--ink)', border: 'none', cursor: 'pointer' }}
       >
         Reload now
       </button>

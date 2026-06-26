@@ -31,10 +31,10 @@
 }
 
 @theme {
-  /* ── Canonical tokens — onboarding palette ── */
-  --color-paper:        #fbfbf9;   /* page bg — onboarding off-white */
-  --color-paper-2:      #f3f1ec;   /* tinted panel / toolbar */
-  --color-paper-3:      #ece9e0;
+  /* ── Canonical tokens — onboarding kit (opt-kit.css) ── */
+  --color-paper:        #ffffff;   /* white cards float on the cream canvas */
+  --color-paper-2:      #fbfbf9;   /* hover rows / faint fills */
+  --color-paper-3:      #f6f5f2;
   --color-ink:          #15161a;   /* onboarding --ink */
   --color-ink-2:        #3b3d44;   /* onboarding --ink-soft */
   --color-ink-3:        #6b6d75;
@@ -100,9 +100,9 @@
   Mirror the @theme values above (Tailwind doesn't expose @theme vars to plain CSS).
 */
 :root {
-  --paper:        #fbfbf9;
-  --paper-2:      #f3f1ec;
-  --paper-3:      #ece9e0;
+  --paper:        #ffffff;
+  --paper-2:      #fbfbf9;
+  --paper-3:      #f6f5f2;
   --ink:          #15161a;
   --ink-2:        #3b3d44;
   --ink-3:        #6b6d75;
@@ -137,8 +137,14 @@
 /* ── Base ── */
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+/* The signature canvas: faint 66px graph paper over a warm radial cream
+   (from opt-kit.css). Fixed so it stays put while content scrolls. Cards
+   are pure white and float above this with soft shadows. */
 body {
-  background: var(--paper);
+  background:
+    repeating-linear-gradient(0deg, rgba(20,22,30,.035) 0 1px, transparent 1px 66px),
+    repeating-linear-gradient(90deg, rgba(20,22,30,.035) 0 1px, transparent 1px 66px),
+    radial-gradient(1200px 620px at 50% -8%, #fffdf2 0%, #fbfaf4 48%, #f6f4ec 100%) fixed;
   color: var(--ink);
   font-family: var(--sans);
   font-size: 14px;

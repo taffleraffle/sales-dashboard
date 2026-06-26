@@ -17,7 +17,7 @@ export default function LoginPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-bg-primary flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <Loader className="animate-spin text-text-primary" size={32} />
       </div>
     )
@@ -67,7 +67,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bg-primary flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         {/* Logo + masthead — editorial */}
         <div className="text-center mb-10">

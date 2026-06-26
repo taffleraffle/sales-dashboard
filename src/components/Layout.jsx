@@ -104,7 +104,7 @@ export default function Layout() {
   return (
     <ToastProvider>
       <UploadProvider>
-      <div className="min-h-screen flex" style={{ background: 'var(--paper)' }}>
+      <div className="min-h-screen flex" style={{ background: 'transparent' }}>
         <UploadDock />
         {/* ── Left Sidebar (desktop) ── editorial paper, hairline border, ink icons */}
         <aside
