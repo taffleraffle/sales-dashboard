@@ -6402,6 +6402,25 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
 
 function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors: editorsProp, offers: offersProp, knownCreators: knownCreatorsProp, onOpenRow, onClose, onSaved, onRowPatched, onDeleted }) {
   const [edit, setEdit] = useState(row)
+  // Lead with the EDITED version (Ben 2026-06-26): pull the sibling versions
+  // (root + parent_id=root) and play the edited one as the big player; the raw
+  // is demoted to a small clickable thumbnail. The metadata form below still
+  // edits whichever row you actually opened.
+  const [siblings, setSiblings] = useState([])
+  useEffect(() => {
+    const rootId = row.parent_id || row.id
+    let on = true
+    supabase.from('lib_creative_library')
+      .select('id, status, preview_url, thumbnail_url, version_number, name, canonical_name, display_name, type')
+      .or(`id.eq.${rootId},parent_id.eq.${rootId}`)
+      .eq('exclude_from_library', false)
+      .order('version_number', { ascending: false })
+      .then(({ data }) => { if (on) setSiblings(data || []) })
+    return () => { on = false }
+  }, [row.parent_id, row.id])
+  const editedSibling = siblings.find(v => v.status === 'edited' && v.preview_url)
+  const playerRow = editedSibling || row
+  const rawSibling = siblings.find(v => v.status === 'raw' && v.preview_url && v.id !== playerRow.id)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle') // idle | saving | saved | error
@@ -6747,7 +6766,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
   // picker + migration 087's auto-task trigger.
 
   // Pick the best playback URL — self-hosted preview > drive iframe
-  const playbackKind = row.preview_url ? 'video' : row.drive_url ? 'iframe' : 'none'
+  const playbackKind = playerRow.preview_url ? 'video' : row.drive_url ? 'iframe' : 'none'
 
   return (
     <Modal open={true} onClose={handleClose} size="lg"
@@ -6863,10 +6882,50 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             player (Ben 2026-06-01: "needs to be pretty congruent
             across the board"). */}
         {playbackKind === 'video' && (
-          <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
-            <OptVideoPlayer src={row.preview_url} compact preload="auto"
-              poster={row.thumbnail_url}
-              wrapperStyle={OPT_PLAYER_WRAP_FILL} />
+          <div>
+            {/* Lead-version label — makes it obvious you're watching the edit. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{
+                padding: '3px 10px', borderRadius: 999,
+                background: editedSibling ? 'var(--up)' : 'rgba(21,22,26,0.70)', color: '#fff',
+                fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 700,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>{editedSibling ? 'Edited version' : (playerRow.status === 'edited' ? 'Edited' : 'Raw')}</span>
+              {editedSibling && (
+                <span style={{ fontFamily: 'var(--sans)', fontSize: 11.5, color: 'var(--ink-3)' }}>
+                  the finished cut — raw source below
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: rawSibling ? '1fr 96px' : '1fr', gap: 10, alignItems: 'start' }}>
+              <div style={{ aspectRatio: '16 / 9', background: 'black', borderRadius: 12, overflow: 'hidden' }}>
+                <OptVideoPlayer src={playerRow.preview_url} compact preload="auto"
+                  poster={playerRow.thumbnail_url}
+                  wrapperStyle={OPT_PLAYER_WRAP_FILL} />
+              </div>
+              {/* Raw source — small clickable thumbnail (Ben: raw only a snippet). */}
+              {rawSibling && (
+                <button type="button" onClick={() => onOpenRow?.(rawSibling.id)}
+                  title="View the raw source"
+                  style={{
+                    padding: 0, border: '1px solid var(--rule)', borderRadius: 10,
+                    overflow: 'hidden', cursor: 'pointer', background: 'var(--ink)',
+                    aspectRatio: '9 / 12', position: 'relative',
+                  }}>
+                  {rawSibling.thumbnail_url
+                    ? <img src={rawSibling.thumbnail_url} alt="" loading="lazy"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    : <div style={{ width: '100%', height: '100%' }} />}
+                  <span style={{
+                    position: 'absolute', bottom: 5, left: 5,
+                    padding: '2px 7px', borderRadius: 999,
+                    background: 'rgba(21,22,26,0.78)', color: '#fff',
+                    fontFamily: 'var(--sans)', fontSize: 8.5, fontWeight: 700,
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                  }}>Raw</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
         {playbackKind === 'iframe' && (
