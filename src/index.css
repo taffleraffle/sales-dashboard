@@ -173,15 +173,31 @@ button:not(:disabled):active, [role="button"]:not(:disabled):active {
    button's own bounds; off-screen at rest so it's invisible until hover.
    Skip square/segmented toggles by opting in via not()? — kept universal but
    subtle. */
-button:not(:disabled) { position: relative; overflow: hidden; }
-button:not(:disabled)::after {
+/* Shine setup must NOT touch absolutely/fixed-positioned buttons (eye toggle,
+   video play-overlay, etc.) — Tailwind v4's .absolute is layered, so an
+   unlayered `button{position:relative}` would win by layer order and re-place
+   them. Exclude position classes AND inline position. */
+.opt-shineable { position: relative; overflow: hidden; }
+.opt-shineable:not(:disabled)::after {
   content: ''; position: absolute; top: 0; left: -150%;
   width: 55%; height: 100%; z-index: 1; pointer-events: none;
   background: linear-gradient(100deg, transparent, rgba(255,255,255,.5), transparent);
   transform: skewX(-18deg);
 }
-button:not(:disabled):hover::after { animation: optShine .7s ease; }
+.opt-shineable:not(:disabled):hover::after { animation: optShine .7s ease; }
 @keyframes optShine { from { left: -150%; } to { left: 165%; } }
+button:not([class*="absolute"]):not([class*="fixed"]):not([style*="absolute"]):not([style*="fixed"]):not(:disabled) {
+  position: relative; overflow: hidden;
+}
+button:not([class*="absolute"]):not([class*="fixed"]):not([style*="absolute"]):not([style*="fixed"]):not(:disabled)::after {
+  content: ''; position: absolute; top: 0; left: -150%;
+  width: 55%; height: 100%; z-index: 1; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.5), transparent);
+  transform: skewX(-18deg);
+}
+button:not([class*="absolute"]):not([class*="fixed"]):not([style*="absolute"]):not([style*="fixed"]):not(:disabled):hover::after {
+  animation: optShine .7s ease;
+}
 
 /* Checkbox / tick pop — when a selection check appears it springs in rather
    than snapping (Ben). Apply via style={{ animation: 'optCheckPop ...' }}. */
