@@ -5907,15 +5907,16 @@ function ConfirmDeleteModal({ row, onClose, onDeleted }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
-  const confirm = async () => {
-    setBusy(true); setErr(null)
-    const { error } = await supabase
+  const confirm = () => {
+    // Optimistic delete: onDeleted() closes the dialog AND drops the row from
+    // local state immediately, so it feels instant. The DB delete runs in the
+    // background; a failure just means the row reappears on the next reload.
+    onDeleted?.()
+    supabase
       .from('lib_creative_library')
       .delete()
       .eq('id', row.id)
-    setBusy(false)
-    if (error) setErr(error.message)
-    else onDeleted?.()
+      .then(({ error }) => { if (error) console.error('Delete failed:', error.message) })
   }
 
   return (
