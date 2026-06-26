@@ -56,6 +56,9 @@ export default function Modal({
   open, onClose,
   title, subtitle, eyebrow, right, footer,
   size = 'md',
+  // drawer = anchor to the right edge, full height (for Inbox / Activity
+  // notification panels) instead of centring.
+  drawer = false,
   children,
 }) {
   // Reserve a stack slot for this modal so nested modals sit above us.
@@ -127,25 +130,34 @@ export default function Modal({
         aria-modal="true"
         aria-label={title}
         style={{
-          // Top-anchored, NOT vertically centred — when modal content height
-          // changes (e.g. toggling Pick-existing/Upload tabs) a centred modal
-          // recentres and the whole dialog jumps. Anchoring the top keeps it
-          // put; content just grows downward (Ben 2026-06-26).
-          position: 'fixed', top: '7vh', left: '50%',
-          transform: 'translateX(-50%)',
-          width: `min(${maxW}px, 94vw)`,
-          // 'full' size renders at a stable tall height so the review surface
-          // doesn't shrink/grow based on sidebar content.
-          maxHeight: '86vh',
-          ...(size === 'full' ? { height: '86vh' } : {}),
+          // drawer: pinned to the right edge, full height. Otherwise:
+          // top-anchored (NOT vertically centred) so a content-height change
+          // (e.g. toggling tabs) doesn't recentre and make the dialog jump.
+          ...(drawer ? {
+            position: 'fixed', top: 0, right: 0, bottom: 0,
+            height: '100dvh', maxHeight: '100dvh',
+            width: `min(${maxW}px, 100vw)`,
+            borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
+            borderRadius: 0,
+            borderLeft: '1px solid var(--rule)',
+            borderTop: '3px solid var(--accent)',
+            borderRight: 'none', borderBottom: 'none',
+            boxShadow: '-24px 0 60px rgba(21,22,26,0.16)',
+          } : {
+            position: 'fixed', top: '7vh', left: '50%',
+            transform: 'translateX(-50%)',
+            width: `min(${maxW}px, 94vw)`,
+            maxHeight: '86vh',
+            ...(size === 'full' ? { height: '86vh' } : {}),
+            borderTop: '3px solid var(--accent)',
+            borderLeft: '1px solid var(--rule)',
+            borderRight: '1px solid var(--rule)',
+            borderBottom: '1px solid var(--rule)',
+            borderRadius: 16,
+            boxShadow: '0 24px 60px rgba(21,22,26,0.18)',
+          }),
           background: 'var(--paper)',
-          borderTop: '3px solid var(--accent)',
-          borderLeft: '1px solid var(--rule)',
-          borderRight: '1px solid var(--rule)',
-          borderBottom: '1px solid var(--rule)',
-          borderRadius: 16,
           overflow: 'hidden',
-          boxShadow: '0 24px 60px rgba(21,22,26,0.18)',
           zIndex: zDialog,
           display: 'flex', flexDirection: 'column',
           // No entrance animation (Ben: no animations) — and a transform

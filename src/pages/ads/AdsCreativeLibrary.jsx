@@ -676,11 +676,8 @@ const EditorNotificationBell = forwardRef(function EditorNotificationBell(
           }}>{unseenCount > 99 ? '99+' : unseenCount}</span>
         )}
       </button>
-      {/* Centered Modal popup — replaces the right-side slide drawer
-          (per Ben 2026-05-31 + 2026-05-18 design preference logged in
-          Modal.jsx). No overlap with page content; backdrop click + Esc
-          to close, same as every other modal in the codebase. */}
-      <Modal open={open} onClose={() => setOpen(false)} size="sm"
+      {/* Right-anchored drawer (Ben 2026-06-26). Backdrop click + Esc close. */}
+      <Modal open={open} onClose={() => setOpen(false)} size="md" drawer
         eyebrow="Inbox"
         title="Notifications"
         subtitle={notificationsSubtitle(notifications, unseenCount, seenAt)}
@@ -883,9 +880,9 @@ const NotificationBell = forwardRef(function NotificationBell(
           }}>{unseenCount > 99 ? '99+' : unseenCount}</span>
         )}
       </button>
-      {/* Centered Modal popup — replaces the right-side slide drawer
-          (Ben 2026-05-31 + earlier 2026-05-18 design preference). */}
-      <Modal open={open} onClose={() => setOpen(false)} size="lg"
+      {/* Right-anchored drawer (Ben 2026-06-26 — the centred modal floated
+          awkwardly mid-screen). */}
+      <Modal open={open} onClose={() => setOpen(false)} size="md" drawer
         eyebrow="Recent activity"
         title={`${submissions.length} submission${submissions.length === 1 ? '' : 's'} this week`}
         subtitle={pendingApproval > 0 ? `${pendingApproval} awaiting review` : 'All caught up'}
