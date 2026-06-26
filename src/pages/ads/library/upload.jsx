@@ -906,6 +906,11 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
     [editorTarget, files],
   )
   const inputRef = useRef(null)
+  // Separate hidden input carrying `webkitdirectory` so "select a whole
+  // folder" pulls every file inside (drag-drop of a folder is handled in
+  // handleDrop via the entries API). Ben 2026-06-26 — "function for bulk
+  // uploading things".
+  const folderInputRef = useRef(null)
   // No `busy` state — the modal is never blocked once Upload is clicked
   // because the queue takes over. The button just dispatches + closes.
   const busy = false
@@ -1016,9 +1021,50 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
     }))
   }
 
-  const handleDrop = (e) => {
+  // Per-file Type override. The batch Type applies to every file, but a
+  // mixed drop (a folder of Hooks + Bodies) needs per-row control. The
+  // pipeline already honours perFileConfig.typeOverride at insert time
+  // (upload.jsx runUploadPipeline), so this just surfaces it in the UI.
+  const setFileType = (idx, type) => {
+    setFiles(prev => prev.map((it, i) => i === idx ? { ...it, typeOverride: type || null } : it))
+  }
+
+  // Recursively pull every File out of a dropped directory entry. The
+  // plain `dataTransfer.files` list is EMPTY for folder drops — you have
+  // to walk the webkitGetAsEntry() tree. readEntries returns in chunks of
+  // ~100, so we keep calling until it yields an empty batch.
+  const collectFilesFromEntry = (entry, out) => new Promise((resolve) => {
+    if (!entry) { resolve(); return }
+    if (entry.isFile) {
+      entry.file(f => { out.push(f); resolve() }, () => resolve())
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader()
+      const readBatch = () => {
+        reader.readEntries(async (entries) => {
+          if (!entries.length) { resolve(); return }
+          await Promise.all(entries.map(en => collectFilesFromEntry(en, out)))
+          readBatch()
+        }, () => resolve())
+      }
+      readBatch()
+    } else { resolve() }
+  })
+
+  const handleDrop = async (e) => {
     e.preventDefault()
-    acceptFiles(e.dataTransfer.files)
+    // Capture entries synchronously — the DataTransfer is cleared the
+    // moment this handler yields to an await.
+    const items = e.dataTransfer.items
+    const entries = items && items.length
+      ? Array.from(items).map(it => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null)).filter(Boolean)
+      : []
+    if (entries.some(en => en.isDirectory)) {
+      const out = []
+      await Promise.all(entries.map(en => collectFilesFromEntry(en, out)))
+      acceptFiles(out)
+    } else {
+      acceptFiles(e.dataTransfer.files)
+    }
   }
 
   // Hand the batch to the module-level queue and close. The queue
@@ -1379,11 +1425,23 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
           <input ref={inputRef} type="file" accept="video/*,image/*" multiple
             style={{ display: 'none' }}
             onChange={e => acceptFiles(e.target.files)} />
+          {/* Folder picker — webkitdirectory pulls every file in the
+              chosen folder (and sub-folders) in one shot. */}
+          <input ref={folderInputRef} type="file" webkitdirectory="" directory="" multiple
+            style={{ display: 'none' }}
+            onChange={e => acceptFiles(e.target.files)} />
           <div style={{ fontFamily: 'var(--serif)', fontSize: 16, color: 'var(--ink-2)', marginBottom: 4 }}>
-            Drop video or image files here
+            Drop files or a whole folder here
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-            or click to select (multi-select allowed)
+            click to select files (multi-select allowed) ·{' '}
+            <span
+              role="button" tabIndex={0}
+              onClick={e => { e.stopPropagation(); folderInputRef.current?.click() }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); folderInputRef.current?.click() } }}
+              style={{ textDecoration: 'underline', cursor: 'pointer', color: 'var(--ink-3)' }}>
+              or select a whole folder
+            </span>
           </div>
         </div>
 
@@ -1430,7 +1488,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
               const isVideo = f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name)
               return (
                 <div key={i} style={{
-                  display: 'grid', gridTemplateColumns: '18px 1fr auto 80px auto 100px 30px',
+                  display: 'grid', gridTemplateColumns: '18px 1fr auto 80px 104px auto 100px 30px',
                   gap: 10, alignItems: 'center',
                   padding: '8px 12px',
                   borderBottom: i === files.length - 1 ? 'none' : '1px solid var(--rule)',
@@ -1479,6 +1537,23 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>
                     {(f.size / 1024 / 1024).toFixed(1)} MB
                   </div>
+                  {/* Per-file Type override. Defaults to "(batch)" which
+                      means inherit the batch Type set above; pick a
+                      specific type to override just this row. */}
+                  <select
+                    value={item.typeOverride || ''}
+                    onChange={e => setFileType(i, e.target.value)}
+                    title="Type for this file — leave on (batch) to use the batch Type above"
+                    style={{
+                      fontFamily: 'var(--mono)', fontSize: 9.5,
+                      padding: '3px 4px', borderRadius: 9,
+                      border: '1px solid var(--rule)', background: 'var(--paper)',
+                      color: item.typeOverride ? 'var(--ink-2)' : 'var(--ink-4)',
+                      cursor: 'pointer', maxWidth: '100%',
+                    }}>
+                    <option value="">(batch)</option>
+                    {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
                   {/* Keep/Bad toggle (Layer 1). Operator-driven mark for
                       takes the operator KNOWS are flubbed before upload
                       — restart, missed cue, audio fail, etc. Auto-flagged

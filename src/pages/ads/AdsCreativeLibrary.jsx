@@ -10958,7 +10958,7 @@ function InboxView({ tasks, onEdit }) {
   if (sections.length === 0) {
     return (
       <div style={{
-        border: '1px dashed var(--rule)', padding: 40, textAlign: 'center',
+        border: '1px dashed var(--rule)', borderRadius: 12, padding: 40, textAlign: 'center',
         background: 'var(--paper-2)',
       }}>
         <div style={{ fontFamily: 'var(--serif)', fontSize: 18, color: 'var(--ink-2)', marginBottom: 6 }}>
@@ -10979,6 +10979,7 @@ function InboxView({ tasks, onEdit }) {
           position: 'sticky', top: 64, zIndex: 50,
           display: 'flex', alignItems: 'center', gap: 10,
           padding: '10px 14px', background: 'var(--ink)', color: 'var(--paper)',
+          borderRadius: 10,
         }}>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em' }}>
             {sel.size} selected
@@ -11096,6 +11097,7 @@ function InboxCard({ task: t, onEdit, sectionColor, selected = false, onToggle =
         background: selected ? 'var(--accent-soft)' : (hover ? 'var(--paper-2)' : 'var(--paper)'),
         border: selected ? '1px solid var(--accent)' : '1px solid var(--rule)',
         borderLeft: `3px solid ${sectionColor}`,
+        borderRadius: 10, overflow: 'hidden',
         cursor: 'pointer', transition: 'background 0.12s',
       }}>
       {onToggle && (
@@ -11118,7 +11120,7 @@ function InboxCard({ task: t, onEdit, sectionColor, selected = false, onToggle =
       )}
       <div style={{
         width: 64, height: 40, background: '#000',
-        border: '1px solid var(--rule)', overflow: 'hidden', position: 'relative',
+        border: '1px solid var(--rule)', borderRadius: 6, overflow: 'hidden', position: 'relative',
       }}>
         {t.thumbnail_url && !(hoverPlay && t.preview_url) && (
           <img src={t.thumbnail_url} alt="" loading="lazy"
@@ -11240,6 +11242,7 @@ function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInC
           style={{
             background: 'var(--paper)',
             border: dragOver === c ? `2px dashed ${TASK_STATUS_COLOR[c]}` : '1px solid var(--rule)',
+            borderRadius: 12, overflow: 'hidden',
             minHeight: 200, transition: 'border-color 0.12s',
             display: 'flex', flexDirection: 'column',
           }}>
@@ -11342,6 +11345,7 @@ function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDrag
       style={{
         background: 'var(--paper)', border: '1px solid var(--rule)',
         borderLeft: `3px solid ${statusColor}`,
+        borderRadius: 10, overflow: 'hidden',
         padding: '10px 12px',
         cursor: draggable ? 'grab' : (onClick ? 'pointer' : 'default'),
         transition: 'background 0.12s, opacity 0.12s',
@@ -11356,7 +11360,7 @@ function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDrag
           of which clips have previews. */}
       <div style={{
         width: '100%', aspectRatio: '16 / 9', background: '#0a0a0a',
-        overflow: 'hidden', border: '1px solid var(--rule)',
+        overflow: 'hidden', border: '1px solid var(--rule)', borderRadius: 7,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
         {task.thumbnail_url ? (

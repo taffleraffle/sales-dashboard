@@ -397,11 +397,12 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
         )}
       </div>
 
-      {/* Custom controls bar */}
+      {/* Custom controls bar — onboarding-style: soft top-fading gradient,
+          no hard hairline. */}
       <div style={{
-        background: 'rgba(10,10,10,0.95)', padding: '8px 14px 10px',
-        borderTop: '1px solid rgba(255,255,255,0.08)',
-        display: 'flex', flexDirection: 'column', gap: 6,
+        background: 'linear-gradient(to top, rgba(8,10,14,0.97), rgba(8,10,14,0.84))',
+        padding: '10px 14px 12px',
+        display: 'flex', flexDirection: 'column', gap: 8,
       }}>
         {/* Scrubber row */}
         <div
