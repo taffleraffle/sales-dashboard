@@ -9190,8 +9190,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             quality source we have: drive_url first (always original for
             old rows), then preview_url (only full-quality for new rows). */}
         {task.preview_url ? (
-          <div style={{ background: '#000', border: '1px solid var(--rule)' }}>
-            <OptVideoPlayer src={task.preview_url} compact
+          <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
+            <OptVideoPlayer src={task.preview_url} compact preload="auto"
+              poster={task.thumbnail_url}
               wrapperStyle={OPT_PLAYER_WRAP_360} />
             <div style={{
               padding: '8px 12px', background: 'var(--paper-2)',
@@ -9959,6 +9960,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                       preview here and across the board". */}
                   <OptVideoPlayer
                     src={sub.file_url}
+                    poster={sub.thumbnail_url}
                     markers={commentsBySubId[sub.id]?.markers || []}
                     compact
                     wrapperStyle={OPT_PLAYER_WRAP_320} />
