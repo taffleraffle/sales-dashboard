@@ -187,7 +187,7 @@ export default function UploadScriptsModal({ open, onClose, batch, onSaved }) {
       {step === STEP.PARSING && (
         <div style={{
           padding: 80, textAlign: 'center', color: 'var(--ink-3)',
-          fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 16,
+          fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 16,
         }}>
           Parsing scripts…
           <div style={{ marginTop: 8, fontFamily: 'var(--sans)', fontStyle: 'normal',
@@ -206,7 +206,7 @@ export default function UploadScriptsModal({ open, onClose, batch, onSaved }) {
           ))}
           {parsed.length === 0 && (
             <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-4)',
-                          fontFamily: 'var(--serif)', fontStyle: 'italic' }}>
+                          fontFamily: 'var(--sans)', fontStyle: 'italic' }}>
               No scripts parsed.
             </div>
           )}
@@ -216,7 +216,7 @@ export default function UploadScriptsModal({ open, onClose, batch, onSaved }) {
       {step === STEP.SAVING && (
         <div style={{
           padding: 80, textAlign: 'center', color: 'var(--ink-3)',
-          fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 16,
+          fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 16,
         }}>
           Saving {checkedCount} scripts to “{batch?.name}”…
         </div>

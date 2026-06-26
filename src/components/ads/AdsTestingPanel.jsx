@@ -245,7 +245,7 @@ export default function AdsTestingPanel() {
         </div>
       ) : angles.length === 0 ? (
         <div style={emptyState}>
-          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 15, color: 'var(--ink-3)' }}>
+          <p style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 15, color: 'var(--ink-3)' }}>
             No angles yet. Click <strong>New angle</strong> to start a hypothesis test —
             name the angle ("Time-poor owner" / "Stress hook" / "Big revenue claim"),
             give it a short label, then assign the creatives that test it.

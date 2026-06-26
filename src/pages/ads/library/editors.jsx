@@ -260,7 +260,7 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
             <div></div>
           </div>
           {editors.length === 0 && (
-            <div style={{ padding: 20, textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
+            <div style={{ padding: 20, textAlign: 'center', fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
               No editors yet — add one above.
             </div>
           )}
@@ -491,7 +491,7 @@ export function ShareLinksModal({ editors, onClose }) {
       }>
       <div style={{ padding: '20px 28px' }}>
         {loading ? (
-          <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 13 }}>Loading…</div>
+          <div style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 13 }}>Loading…</div>
         ) : (
           <>
             {/* Team-wide link — the primary CTA. One link, everyone sees
@@ -544,7 +544,7 @@ export function ShareLinksModal({ editors, onClose }) {
                   </>
                 ) : (
                   <>
-                    <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
+                    <span style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
                       No team-wide link yet
                     </span>
                     <button onClick={generateTeamLink} disabled={busyTeam} style={{
@@ -576,7 +576,7 @@ export function ShareLinksModal({ editors, onClose }) {
             {editors.length === 0 ? (
               <div style={{
                 padding: 16, textAlign: 'center', border: '1px dashed var(--rule)',
-                fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12,
+                fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12,
               }}>
                 No active editors. Add one in Manage editors first.
               </div>
@@ -605,7 +605,7 @@ export function ShareLinksModal({ editors, onClose }) {
                         userSelect: 'all', cursor: 'text',
                       }} title={buildUrl(link.token)}>{buildUrl(link.token)}</div>
                     ) : (
-                      <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)', fontSize: 12 }}>
+                      <span style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-4)', fontSize: 12 }}>
                         No active link yet
                       </span>
                     )}
@@ -922,7 +922,7 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
         {/* Share links — for giving editors a public /editor-view URL */}
         <Field label="Share link">
           {linksLoading ? (
-            <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12 }}>Loading…</div>
+            <div style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12 }}>Loading…</div>
           ) : !linksAvailable ? (
             <div style={{
               padding: '10px 12px', background: 'rgba(184,106,12,0.08)',
@@ -1463,7 +1463,7 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
               </div>
               <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--rule)' }}>
                 {filtered.length === 0 && (
-                  <div style={{ padding: 12, fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12 }}>
+                  <div style={{ padding: 12, fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)', fontSize: 12 }}>
                     No matches.
                   </div>
                 )}

@@ -177,7 +177,7 @@ export default function EditorView() {
       <div style={{
         minHeight: '100vh', background: 'var(--paper)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+        fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)',
       }}>Loading…</div>
     )
   }

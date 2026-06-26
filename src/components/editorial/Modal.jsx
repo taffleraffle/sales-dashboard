@@ -143,7 +143,9 @@ export default function Modal({
           borderLeft: '1px solid var(--rule)',
           borderRight: '1px solid var(--rule)',
           borderBottom: '1px solid var(--rule)',
-          boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
+          borderRadius: 16,
+          overflow: 'hidden',
+          boxShadow: '0 24px 60px rgba(21,22,26,0.18)',
           zIndex: zDialog,
           display: 'flex', flexDirection: 'column',
           // Animation shortened from 220ms -> 100ms (2026-05-22). The

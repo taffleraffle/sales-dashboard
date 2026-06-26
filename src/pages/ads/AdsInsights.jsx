@@ -271,7 +271,7 @@ export default function AdsInsights() {
                       letterSpacing: '0.04em', textTransform: 'uppercase' }}>
           OPT · Creative testing · v22 · {summary.totalAds} ads in scope
         </span>
-        <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13,
+        <span style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 13,
                       color: 'var(--ink-3)' }}>
           Data refreshed continuously via lib_ad_performance(since, until).
         </span>
@@ -305,7 +305,7 @@ function TopPerformersTable({ rows, loading, onClickRow, limit = 10 }) {
   if (loading) {
     return (
       <div style={{ padding: 48, background: 'var(--paper)', border: '1px solid var(--rule)',
-                    textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic',
+                    textAlign: 'center', fontFamily: 'var(--sans)', fontStyle: 'italic',
                     color: 'var(--ink-4)' }}>
         Loading top performers…
       </div>
@@ -314,7 +314,7 @@ function TopPerformersTable({ rows, loading, onClickRow, limit = 10 }) {
   if (sorted.length === 0) {
     return (
       <div style={{ padding: 48, background: 'var(--paper)', border: '1px solid var(--rule)',
-                    textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic',
+                    textAlign: 'center', fontFamily: 'var(--sans)', fontStyle: 'italic',
                     color: 'var(--ink-4)' }}>
         No booked-call activity in this window yet.
       </div>
@@ -528,7 +528,7 @@ function VariablesLeaderboard({ items, baseline }) {
   if (items.length === 0) {
     return (
       <div style={{ padding: 32, background: 'var(--paper)', border: '1px solid var(--rule)',
-                    color: 'var(--ink-4)', fontFamily: 'var(--serif)', fontStyle: 'italic',
+                    color: 'var(--ink-4)', fontFamily: 'var(--sans)', fontStyle: 'italic',
                     fontSize: 14, textAlign: 'center' }}>
         Not enough tagged data yet. Tag more ads (button top-right) to reveal which
         attribute values are pulling ahead.
@@ -657,7 +657,7 @@ function MiniBarChart({ attr, label, values, baseline }) {
       <div style={{ padding: '18px 20px', background: 'var(--paper)' }}>
         <Eyebrow>{label}</Eyebrow>
         <div style={{ marginTop: 16, padding: 24, color: 'var(--ink-4)',
-                      fontFamily: 'var(--serif)', fontStyle: 'italic',
+                      fontFamily: 'var(--sans)', fontStyle: 'italic',
                       fontSize: 13, textAlign: 'center' }}>
           No data.
         </div>

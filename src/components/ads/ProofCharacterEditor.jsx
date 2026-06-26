@@ -153,7 +153,7 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
               <h2 style={{ fontFamily: 'var(--serif)', fontSize: 24, fontWeight: 400, margin: '6px 0 0' }}>
                 {angle?.name || 'angle'}
               </h2>
-              <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
+              <p style={{ fontFamily: 'var(--sans)', fontStyle: 'italic',
                           color: 'var(--ink-3)', fontSize: 13, margin: '6px 0 0', lineHeight: 1.5 }}>
                 Each row is a named client + a one-line result the script generator can pull from.
                 Add 3-5 for healthy rotation. The optional details below each row tune which scripts
@@ -189,8 +189,7 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
                 {rows.length === 0 && (
                   <div style={{
                     padding: '16px 18px', background: 'var(--paper)',
-                    border: '1px dashed var(--rule)', fontFamily: 'var(--serif)',
-                    fontStyle: 'italic', fontSize: 14, color: 'var(--ink-4)', marginBottom: 14,
+                    border: '1px dashed var(--rule)', fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 14, color: 'var(--ink-4)', marginBottom: 14,
                   }}>
                     No proof characters yet for this angle. Add one below to populate the generator.
                   </div>
@@ -373,7 +372,7 @@ function ProofRow({
           ))}
         </select>
         <span style={{
-          fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 11.5,
+          fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 11.5,
           color: 'var(--ink-4)',
         }}>
           {typeMeta.hint}

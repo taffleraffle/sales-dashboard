@@ -300,12 +300,12 @@ export default function AdsTestScope() {
         </div>
         {loading && campaigns.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-4)',
-                        fontFamily: 'var(--serif)', fontStyle: 'italic' }}>
+                        fontFamily: 'var(--sans)', fontStyle: 'italic' }}>
             Loading campaigns…
           </div>
         ) : campaigns.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-4)',
-                        fontFamily: 'var(--serif)', fontStyle: 'italic' }}>
+                        fontFamily: 'var(--sans)', fontStyle: 'italic' }}>
             No campaigns match the current filter.
           </div>
         ) : campaigns.map((c, i) => {

@@ -192,7 +192,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
 
         {/* Form */}
         <div style={{ padding: 24 }}>
-          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+          <p style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)',
                       fontSize: 14, margin: '0 0 20px', lineHeight: 1.5 }}>
             These fields feed directly into the script generator's prompt. The more specific
             you are about mechanism and audience, the better the generated scripts will be.
@@ -250,7 +250,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
                           color: 'var(--ink-3)', marginBottom: 6 }}>
               Proofs (apply across all scripts for this offer)
             </label>
-            <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
+            <p style={{ fontFamily: 'var(--sans)', fontStyle: 'italic',
                         fontSize: 12.5, color: 'var(--ink-4)',
                         margin: '0 0 10px', lineHeight: 1.5 }}>
               Numbered proof items the generator can pull from on top of any
@@ -465,7 +465,7 @@ function Field({ label, required, helper, value, onChange, placeholder, multilin
           placeholder={placeholder} style={baseStyle} disabled={disabled} />
       )}
       {helper && (
-        <div style={{ marginTop: 4, fontFamily: 'var(--serif)', fontStyle: 'italic',
+        <div style={{ marginTop: 4, fontFamily: 'var(--sans)', fontStyle: 'italic',
                       fontSize: 12, color: 'var(--ink-4)', lineHeight: 1.4 }}>
           {helper}
         </div>

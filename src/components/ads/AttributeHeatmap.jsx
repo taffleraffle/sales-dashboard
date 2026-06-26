@@ -139,7 +139,7 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
       {loading ? (
         <div style={{
           padding: 64, textAlign: 'center', color: 'var(--ink-4)',
-          fontFamily: 'var(--serif)', fontStyle: 'italic',
+          fontFamily: 'var(--sans)', fontStyle: 'italic',
           background: 'var(--paper)', border: '1px solid var(--rule)',
         }}>
           Loading heatmap…
@@ -147,7 +147,7 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
       ) : valuesA.length === 0 || valuesB.length === 0 ? (
         <div style={{
           padding: 64, textAlign: 'center', color: 'var(--ink-4)',
-          fontFamily: 'var(--serif)', fontStyle: 'italic',
+          fontFamily: 'var(--sans)', fontStyle: 'italic',
           background: 'var(--paper)', border: '1px dashed var(--rule)',
         }}>
           No data for this attribute combo in the selected window.

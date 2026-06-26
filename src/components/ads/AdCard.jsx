@@ -224,8 +224,7 @@ export default function AdCard({ ad }) {
         {ad.transcript_preview && (
           <div
             style={{
-              fontFamily: 'var(--serif)',
-              fontStyle: 'italic',
+              fontFamily: 'var(--sans)', fontStyle: 'italic',
               fontSize: 12,
               lineHeight: 1.4,
               color: 'var(--ink-2)',

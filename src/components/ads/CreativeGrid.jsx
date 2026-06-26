@@ -311,12 +311,12 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
             flash-to-empty that happens on date-window changes. */}
         {loading && visible.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-4)',
-                        fontFamily: 'var(--serif)', fontStyle: 'italic' }}>
+                        fontFamily: 'var(--sans)', fontStyle: 'italic' }}>
             Loading creatives…
           </div>
         ) : visible.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--ink-4)',
-                        fontFamily: 'var(--serif)', fontStyle: 'italic' }}>
+                        fontFamily: 'var(--sans)', fontStyle: 'italic' }}>
             {filterActive
               ? `No creatives match "${search || filter}".`
               : 'No tagged creatives yet.'}

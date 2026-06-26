@@ -927,7 +927,7 @@ const NotificationBell = forwardRef(function NotificationBell(
         {submissions.length === 0 && (
           <div style={{
             padding: 40, textAlign: 'center',
-            fontFamily: 'var(--serif)', fontStyle: 'italic',
+            fontFamily: 'var(--sans)', fontStyle: 'italic',
             color: 'var(--ink-3)',
           }}>Nothing new this week. When an editor uploads a cut, it'll appear here.</div>
         )}
@@ -1335,7 +1335,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
             {sortedTop.length === 0 && (
               <div style={{
                 padding: '36px 8px', textAlign: 'center',
-                fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 14,
+                fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 14,
                 color: 'var(--ink-3)', lineHeight: 1.6,
               }}>No comments yet.<br/>
                 <span style={{ fontStyle: 'normal', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)' }}>
@@ -2050,13 +2050,13 @@ function InvoiceTab({ scope, active }) {
       </div>
 
       {loading ? (
-        <div style={{ padding: 40, textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
+        <div style={{ padding: 40, textAlign: 'center', fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
           Loading approved edits…
         </div>
       ) : rows.length === 0 ? (
         <div style={{
           padding: 40, textAlign: 'center', border: '1px dashed var(--rule)',
-          fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+          fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)',
         }}>
           No approved edits yet. Once an admin approves a submission, it shows up here with its length.
         </div>
@@ -5010,8 +5010,8 @@ function TranscriptBox({ text: rawText }) {
         overflowY: expanded ? 'visible' : 'auto',
         padding: 14,
         background: 'var(--paper-2)', border: '1px solid var(--rule)',
-        fontFamily: 'var(--serif)', fontSize: 13.5, lineHeight: 1.55,
-        color: 'var(--ink)',
+        fontFamily: 'var(--sans)', fontSize: 13.5, lineHeight: 1.6,
+        color: 'var(--ink-2)', borderRadius: 10,
         whiteSpace: 'pre-wrap',
       }}>
         {text
@@ -5392,7 +5392,7 @@ function UsageHistory({ row, onOpenRow, onRowPatched }) {
         <div style={{
           padding: '10px 12px', background: 'var(--paper-2)',
           border: '1px dashed var(--rule)',
-          fontFamily: 'var(--serif)', fontStyle: 'italic',
+          fontFamily: 'var(--sans)', fontStyle: 'italic',
           fontSize: 12, color: 'var(--ink-3)',
         }}>
           Not yet merged with any body / hook. Once a Joined creative
@@ -6884,7 +6884,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
           <div style={{
             aspectRatio: '16 / 9', background: 'var(--paper-2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+            fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)',
           }}>
             No playback available
           </div>
@@ -7126,7 +7126,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               style={{ ...inputStyle, flex: 1, fontSize: 12 }} />
           )}
           {!edit.is_bad_take && (
-            <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12, color: 'var(--ink-4)', lineHeight: 1.4 }}>
+            <span style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12, color: 'var(--ink-4)', lineHeight: 1.4 }}>
               Flag this clip to hide it from the library. Useful for bad angles, technical failures, or duplicate takes you never want used.
             </span>
           )}

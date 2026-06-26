@@ -220,7 +220,7 @@ export default function CampaignPickerModal({ open, onClose, perfRaw, activeCamp
         {campaigns.length === 0 && (
           <div style={{
             padding: 48, textAlign: 'center', color: 'var(--ink-4)',
-            fontFamily: 'var(--serif)', fontStyle: 'italic',
+            fontFamily: 'var(--sans)', fontStyle: 'italic',
           }}>
             No campaigns match the current filter.
           </div>

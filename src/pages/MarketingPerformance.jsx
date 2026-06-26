@@ -5145,8 +5145,7 @@ function AudienceOverrideModal({ modal, entries, audienceList, overrides, onClos
             background: 'var(--paper-2)', marginBottom: 16,
           }}>
             {campaigns.length === 0 ? (
-              <div style={{ padding: 24, textAlign: 'center', fontFamily: 'var(--serif)',
-                            fontStyle: 'italic', color: 'var(--ink-4)' }}>
+              <div style={{ padding: 24, textAlign: 'center', fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-4)' }}>
                 No campaigns match.
               </div>
             ) : campaigns.map(c => {

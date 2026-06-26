@@ -96,7 +96,7 @@ export default function AttributesView({ filteredPerf, baseline, loading, onClic
   if (loading && withData.length === 0) {
     return (
       <div style={{ padding: 64, textAlign: 'center', color: 'var(--ink-4)',
-                    fontFamily: 'var(--serif)', fontStyle: 'italic',
+                    fontFamily: 'var(--sans)', fontStyle: 'italic',
                     background: 'var(--paper)', border: '1px solid var(--rule)' }}>
         Loading attribute data…
       </div>
@@ -106,7 +106,7 @@ export default function AttributesView({ filteredPerf, baseline, loading, onClic
   if (!activeSummary) {
     return (
       <div style={{ padding: 64, textAlign: 'center', color: 'var(--ink-4)',
-                    fontFamily: 'var(--serif)', fontStyle: 'italic',
+                    fontFamily: 'var(--sans)', fontStyle: 'italic',
                     background: 'var(--paper)', border: '1px dashed var(--rule)' }}>
         No attribute has at least {MIN_SAMPLE} tagged ads in this window yet. Tag more ads to see the breakdown.
       </div>
@@ -261,7 +261,7 @@ function AttributeDetail({ summary, baseline, filteredPerf, attrSummaries, combo
           {isLeading && <WinnerBadge size="lg" />}
         </div>
         <p style={{
-          margin: '12px 0 0', fontFamily: 'var(--serif)', fontStyle: 'italic',
+          margin: '12px 0 0', fontFamily: 'var(--sans)', fontStyle: 'italic',
           color: 'var(--ink-3)', fontSize: 16, lineHeight: 1.45, maxWidth: 680,
         }}>
           {summary.sub}. {summary.totalWinners} winner{summary.totalWinners === 1 ? '' : 's'} across {summary.n} ads

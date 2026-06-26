@@ -267,8 +267,7 @@ export default function CreativeAttributesPanel({ ad_id }) {
           display: 'block', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.12em',
           textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 6,
         }}>
-          Notes {attrs?.notes && <span style={{ color: 'var(--ink-4)', fontStyle: 'italic',
-                                              fontFamily: 'var(--serif)', textTransform: 'none' }}>
+          Notes {attrs?.notes && <span style={{ color: 'var(--ink-4)', fontStyle: 'italic', fontFamily: 'var(--sans)', textTransform: 'none' }}>
             (last extraction reasoning preserved)
           </span>}
         </label>

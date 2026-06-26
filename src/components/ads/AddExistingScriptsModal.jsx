@@ -154,12 +154,12 @@ export default function AddExistingScriptsModal({ open, onClose, batch, onSaved 
       {/* List */}
       {loading ? (
         <div style={{ padding: 64, textAlign: 'center', color: 'var(--ink-4)',
-                      fontFamily: 'var(--serif)', fontStyle: 'italic' }}>
+                      fontFamily: 'var(--sans)', fontStyle: 'italic' }}>
           Loading scripts…
         </div>
       ) : filtered.length === 0 ? (
         <div style={{ padding: 64, textAlign: 'center', color: 'var(--ink-4)',
-                      fontFamily: 'var(--serif)', fontStyle: 'italic' }}>
+                      fontFamily: 'var(--sans)', fontStyle: 'italic' }}>
           {search ? 'No matches.' : filter === 'loose' ? 'No loose drafts. Generate some on the Generate page first.' : 'Nothing to show.'}
         </div>
       ) : filtered.map((s, i) => (

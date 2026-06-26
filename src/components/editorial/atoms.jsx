@@ -567,7 +567,7 @@ export function PodiumRank({ rank, size = 'md' }) {
       display: 'inline-grid', placeItems: 'center',
       width: w, height: w, background: color, color: 'var(--ink)',
       border: isFirst ? '1px solid var(--accent-2)' : '1px solid var(--rule-2)',
-      fontFamily: 'var(--serif)', fontStyle: 'italic',
+      fontFamily: 'var(--sans)', fontStyle: 'italic',
       fontSize: w * 0.5, fontWeight: 500,
       boxShadow: isFirst ? '0 1px 0 rgba(10,10,10,0.06)' : 'none',
     }}>{rank}</span>

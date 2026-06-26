@@ -74,8 +74,7 @@ export default function DataTable({ columns, data, onRowClick, emptyMessage = 'N
                   padding: '32px 12px',
                   textAlign: 'center',
                   color: 'var(--ink-3)',
-                  fontFamily: 'var(--serif)',
-                  fontStyle: 'italic',
+                  fontFamily: 'var(--sans)', fontStyle: 'italic',
                   fontSize: 14,
                 }}
               >

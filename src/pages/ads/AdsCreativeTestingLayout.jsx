@@ -262,7 +262,7 @@ export default function AdsCreativeTestingLayout() {
             display: 'inline-grid', placeItems: 'center',
             width: 16, height: 16, borderRadius: 16,
             background: 'var(--ink)', color: 'var(--paper)',
-            fontFamily: 'var(--serif)', fontStyle: 'italic',
+            fontFamily: 'var(--sans)', fontStyle: 'italic',
             fontSize: 11, fontWeight: 500,
           }}>?</span>
           Glossary

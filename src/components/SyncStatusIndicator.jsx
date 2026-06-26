@@ -167,8 +167,7 @@ export default function SyncStatusIndicator({ pinned = ['meta', 'marketingTracke
               borderTop: '1px solid var(--rule)',
               fontSize: 10,
               color: 'var(--ink-3)',
-              fontFamily: 'var(--serif)',
-              fontStyle: 'italic',
+              fontFamily: 'var(--sans)', fontStyle: 'italic',
               lineHeight: 1.45,
             }}
           >

@@ -305,7 +305,7 @@ export function Field({ label, children }) {
 
 export function LoadingState() {
   return (
-    <div style={{ padding: 60, textAlign: 'center', fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
+    <div style={{ padding: 60, textAlign: 'center', fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)' }}>
       Loading…
     </div>
   )
@@ -349,28 +349,31 @@ export function ErrorBanner({ msg, onRetry }) {
 /* Shared button / input style tokens. Moved here from the page file in
    step 2 of the split because UploadModal (library/upload.jsx) uses
    primaryBtn / ghostBtn / selectStyle; the page imports them back. */
+// Onboarding-style controls: pill buttons, sentence-case Inter Tight,
+// rounded inputs. Drives every button/input across the Library + its modals.
 export const primaryBtn = {
-  padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
-  letterSpacing: '0.06em', textTransform: 'uppercase',
+  padding: '9px 18px', fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600,
+  letterSpacing: '-0.005em',
   background: 'var(--ink)', color: 'var(--paper)',
-  border: '1px solid var(--ink)', cursor: 'pointer',
+  border: '1px solid var(--ink)', borderRadius: 999, cursor: 'pointer',
 }
 export const ghostBtn = {
-  padding: '7px 14px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
-  letterSpacing: '0.06em', textTransform: 'uppercase',
-  background: 'transparent', color: 'var(--ink-3)',
-  border: '1px solid var(--rule)', cursor: 'pointer',
+  padding: '9px 16px', fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600,
+  letterSpacing: '-0.005em',
+  background: 'transparent', color: 'var(--ink-2)',
+  border: '1px solid var(--rule)', borderRadius: 999, cursor: 'pointer',
 }
 export const inputStyle = {
-  width: '100%', padding: '8px 11px',
-  fontFamily: 'var(--mono)', fontSize: 12,
+  width: '100%', padding: '9px 12px',
+  fontFamily: 'var(--sans)', fontSize: 12.5,
   background: 'var(--paper)', border: '1px solid var(--rule)', outline: 'none',
+  borderRadius: 10,
 }
 export const selectStyle = {
-  width: '100%', padding: '8px 11px',
-  fontFamily: 'var(--sans)', fontSize: 12,
+  width: '100%', padding: '9px 12px',
+  fontFamily: 'var(--sans)', fontSize: 12.5,
   background: 'var(--paper)', border: '1px solid var(--rule)', outline: 'none',
-  cursor: 'pointer',
+  borderRadius: 10, cursor: 'pointer',
 }
 
 // Small uppercase eyebrow label used on chips/fields across the page.

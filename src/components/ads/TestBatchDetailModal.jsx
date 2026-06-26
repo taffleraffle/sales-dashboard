@@ -160,7 +160,7 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
         {loading && !batch && (
           <div style={{
             padding: 48, textAlign: 'center', color: 'var(--ink-4)',
-            fontFamily: 'var(--serif)', fontStyle: 'italic',
+            fontFamily: 'var(--sans)', fontStyle: 'italic',
           }}>Loading…</div>
         )}
 

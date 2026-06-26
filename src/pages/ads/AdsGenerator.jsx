@@ -1291,7 +1291,7 @@ export default function AdsGenerator() {
                     {missing.length > 0 && (
                       <div style={{
                         marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--rule)',
-                        fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12,
+                        fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12,
                         color: '#7a5810',
                       }}>
                         {missing.length} of {angleSlugs.length} selected angles have no proofs yet — those will get auto-generated on Generate.
@@ -1474,7 +1474,7 @@ export default function AdsGenerator() {
                       {on && <Check size={11} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />}
                       {opt.label}
                     </span>
-                    <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
+                    <span style={{ fontFamily: 'var(--sans)', fontStyle: 'italic',
                                    fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.45 }}>
                       {opt.desc}
                     </span>
@@ -1594,7 +1594,7 @@ export default function AdsGenerator() {
                       <div style={{
                         padding: '10px 14px', background: '#fef6e6',
                         border: '1px solid #e8c98a',
-                        fontFamily: 'var(--serif)', fontStyle: 'italic',
+                        fontFamily: 'var(--sans)', fontStyle: 'italic',
                         fontSize: 12.5, color: '#7a5810', lineHeight: 1.5,
                       }}>
                         None saved yet. Generate will auto-create 4 proofs for this angle
@@ -1856,7 +1856,7 @@ export default function AdsGenerator() {
               <div style={{ marginTop: 12, padding: '10px 14px', background: '#fef9e7',
                             border: '1px solid #e0a93e', fontSize: 13, borderRadius: 9,
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: '#7a5c12' }}>
+                <span style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', color: '#7a5c12' }}>
                   This offer is missing {[!cur.mechanism_name && 'mechanism', !cur.primary_audience && 'audience'].filter(Boolean).join(' + ')}.
                   Generated scripts will be generic without it.
                 </span>
@@ -2555,7 +2555,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
         {/* Proof character (when present) — italic serif, like the angle tile */}
         {proofChar && (
           <div style={{
-            fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12.5,
+            fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12.5,
             color: 'var(--ink-3)',
           }}>{proofChar}</div>
         )}
@@ -2821,7 +2821,7 @@ function AngleChip({ angle, selected, proofCount, onToggle, onOpenProofs }) {
           }}>{typeLabel}</div>
           {angle.prospect_voice && (
             <div style={{
-              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13.5,
+              fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 13.5,
               color: 'var(--ink)', lineHeight: 1.5, marginBottom: 10,
             }}>"{angle.prospect_voice}"</div>
           )}
@@ -3016,7 +3016,7 @@ function AngleCard({ angle }) {
                   {s.title || s.url}
                 </a>
                 {s.relevance && (
-                  <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
+                  <span style={{ fontFamily: 'var(--sans)', fontStyle: 'italic',
                                  color: 'var(--ink-4)', marginLeft: 6 }}>
                     — {s.relevance}
                   </span>
@@ -3257,7 +3257,7 @@ function InlineProofAdder({ angleSlugs, angles, onAdded }) {
               {PROOF_TYPES_LOCAL.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
             <span style={{
-              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 11.5,
+              fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 11.5,
               color: 'var(--ink-4)',
             }}>{typeMeta.hint}</span>
             <button onClick={() => setOpen(false)}
@@ -3290,13 +3290,13 @@ function InlineProofAdder({ angleSlugs, angles, onAdded }) {
           </div>
           {err && (
             <div style={{
-              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12,
+              fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12,
               color: '#b53e3e',
             }}>{err}</div>
           )}
           {okMsg && (
             <div style={{
-              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12,
+              fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12,
               color: '#2f5f33',
             }}>{okMsg}</div>
           )}
@@ -3578,7 +3578,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
       </div>
       {angle.prospect_voice && (
         <div style={{
-          fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 14,
+          fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 14,
           color: 'var(--ink-2)', lineHeight: 1.55,
         }}>"{angle.prospect_voice}"</div>
       )}
@@ -3702,7 +3702,7 @@ function SavedAngleRow({ angle, onRetire }) {
         <div style={{ padding: '0 16px 14px 16px' }}>
           {angle.prospect_voice && (
             <div style={{
-              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 14,
+              fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 14,
               color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 10,
             }}>"{angle.prospect_voice}"</div>
           )}
@@ -3750,7 +3750,7 @@ function SavedAngleRow({ angle, onRetire }) {
                       {s.title || s.url}
                     </a>
                     {s.relevance && (
-                      <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic',
+                      <span style={{ fontFamily: 'var(--sans)', fontStyle: 'italic',
                                      color: 'var(--ink-4)', marginLeft: 6 }}>
                         — {s.relevance}
                       </span>
@@ -3861,7 +3861,7 @@ function ScriptCard({ script, index, angleLookup }) {
           {angle?.prospect_voice && (
             <div style={{
               marginTop: 4,
-              fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12.5,
+              fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12.5,
               color: 'var(--ink-3)', lineHeight: 1.45,
               display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
               overflow: 'hidden',

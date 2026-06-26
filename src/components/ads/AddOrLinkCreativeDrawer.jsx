@@ -364,7 +364,7 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
 
         {/* Body — Modal owns scrolling; we just pad. */}
         <div style={{ padding: 24 }}>
-          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+          <p style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)',
                       fontSize: 13, margin: '0 0 16px' }}>
             {TABS.find(t => t.key === tab).desc}
           </p>
@@ -538,7 +538,7 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
                     <li><span style={pipelineNumStyle}>4</span> Ad appears in Insights with full tags + thumbnail</li>
                   </ol>
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--rule)',
-                                fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12,
+                                fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12,
                                 color: 'var(--ink-4)' }}>
                     Drop multiple files at once for bulk processing. We'll auto-suggest the Meta ad for each filename — you confirm each pairing before clicking Run all.
                   </div>
@@ -606,7 +606,7 @@ function Empty({ children }) {
   return (
     <div style={{
       padding: 24, textAlign: 'center', color: 'var(--ink-4)',
-      fontStyle: 'italic', fontFamily: 'var(--serif)', fontSize: 13,
+      fontStyle: 'italic', fontFamily: 'var(--sans)', fontSize: 13,
       border: '1px dashed var(--rule)', borderRadius: 9, marginBottom: 16,
     }}>
       {children}
@@ -922,7 +922,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
             ))}
             {adResults.length === 0 && (
               <div style={{ padding: 12, textAlign: 'center', color: 'var(--ink-4)', fontSize: 11,
-                            fontStyle: 'italic', fontFamily: 'var(--serif)' }}>
+                            fontStyle: 'italic', fontFamily: 'var(--sans)' }}>
                 No matches
               </div>
             )}

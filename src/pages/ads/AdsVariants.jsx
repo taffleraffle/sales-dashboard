@@ -668,7 +668,7 @@ function MatrixView({ hooks, bodies, variantByCombo, hookPerf, bodyPerf, maxSpen
                     {shortClipId(h.clip_id, 'hook')}
                   </div>
                   {h.description && (
-                    <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 11, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.3 }}>
+                    <div style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 11, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.3 }}>
                       {h.description.length > 38 ? h.description.slice(0, 36) + '…' : h.description}
                     </div>
                   )}
@@ -832,7 +832,7 @@ function ByHookView({ rows, hooks, hookPerf, clipById, onVariantClick }) {
                 {hid === 'NO_HOOK' ? '(no hook)' : shortClipId(hid, 'hook')}
               </div>
               {hook?.description && (
-                <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13, color: 'var(--ink-3)' }}>{hook.description}</div>
+                <div style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 13, color: 'var(--ink-3)' }}>{hook.description}</div>
               )}
               {perf && perf.spend > 0 && (
                 <div style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', color: 'var(--ink-3)' }}>
@@ -1193,7 +1193,7 @@ function RecipeRow({ label, clip }) {
   if (!clip) return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', background: 'var(--paper-2)', borderRadius: 9, marginBottom: 4 }}>
       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)', minWidth: 50 }}>{label}</span>
-      <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13, color: 'var(--ink-4)' }}>not assigned</span>
+      <span style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 13, color: 'var(--ink-4)' }}>not assigned</span>
     </div>
   )
   return (
@@ -1201,7 +1201,7 @@ function RecipeRow({ label, clip }) {
       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)', minWidth: 50 }}>{label}</span>
       <div style={{ flex: 1 }}>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--ink)' }}>{clip.clip_id}</div>
-        {clip.description && <div style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{clip.description}</div>}
+        {clip.description && <div style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{clip.description}</div>}
       </div>
       {clip.source_file_url && (
         <a href={clip.source_file_url} target="_blank" rel="noreferrer" style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>open</a>

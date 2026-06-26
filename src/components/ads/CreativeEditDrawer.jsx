@@ -130,7 +130,7 @@ function CreativePreview({ ad, sourceVideoUrl, videoChecked, videoError, onVideo
       <div style={{ marginTop: 20, marginBottom: 16, aspectRatio: '16 / 9',
                     background: 'var(--paper)', border: '1px solid var(--rule)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-4)' }}>
+                    fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-4)' }}>
         Loading preview…
       </div>
     )

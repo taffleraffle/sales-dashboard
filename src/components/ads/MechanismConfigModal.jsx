@@ -124,14 +124,14 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
 
         {/* Form */}
         <div style={{ padding: 24 }}>
-          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--ink-3)',
+          <p style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', color: 'var(--ink-3)',
                       fontSize: 14, margin: '0 0 20px', lineHeight: 1.5 }}>
             A mechanism is <strong>what OPT does to deliver the outcome</strong>. Same mechanism
             can pair with multiple angles. The fields below feed straight into the generator's
             prompt — be specific about the short phrasing for hooks and the 3-part HOW for body
             Beat 5.
           </p>
-          <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13,
+          <p style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 13,
                       color: '#7a5810', background: '#fef6e6', border: '1px solid #e8c98a',
                       padding: '10px 14px', borderRadius: 9, margin: '0 0 18px', lineHeight: 1.5 }}>
             <strong>Naming rule:</strong> a mechanism is a <strong>named system</strong> you sell —
@@ -197,7 +197,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
               letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)',
               marginBottom: 10,
             }}>3-part HOW (body Beat 5a / 5b / 5c)</div>
-            <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12.5,
+            <p style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12.5,
                         color: 'var(--ink-4)', margin: '0 0 12px', lineHeight: 1.5 }}>
               One sentence each. These become the three "First, we... Second, we... Third, we..."
               lines in every body for this mechanism. Convention: 5a = foundation, 5b = surface,
@@ -228,7 +228,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
                 letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)',
                 marginBottom: 8,
               }}>Where it applies</div>
-              <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 12.5,
+              <p style={{ fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12.5,
                           color: 'var(--ink-4)', margin: '0 0 10px', lineHeight: 1.5 }}>
                 Tag this mechanism to specific offers and angles it works with. Empty = available
                 everywhere; the picker shows it for any selection.
@@ -346,7 +346,7 @@ function Field({ label, required, helper, value, onChange, placeholder, multilin
           placeholder={placeholder} style={baseStyle} disabled={disabled} />
       )}
       {helper && (
-        <div style={{ marginTop: 4, fontFamily: 'var(--serif)', fontStyle: 'italic',
+        <div style={{ marginTop: 4, fontFamily: 'var(--sans)', fontStyle: 'italic',
                       fontSize: 12, color: 'var(--ink-4)', lineHeight: 1.4 }}>
           {helper}
         </div>
