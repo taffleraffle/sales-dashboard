@@ -8574,6 +8574,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     task.assigned_at ? task.assigned_at.slice(0, 10) : ''
   )
   const [notes, setNotes] = useState(task.notes || '')
+  // Editable creative name from the task modal too (Ben 2026-06-26) — writes
+  // lib_creative_library.display_name for this task's creative.
+  const [name, setName] = useState(task.creative_display_name || task.creative_name || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const [confirmDel, setConfirmDel] = useState(false)
@@ -8741,6 +8744,11 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
     // Auto-set completed_at when moving to done
     if (status === 'done' && !task.completed_at) patch.completed_at = new Date().toISOString()
     const { error } = await supabase.from('lib_editing_tasks').update(patch).eq('id', task.task_id)
+    // Persist an edited creative name (separate table). Only when it changed.
+    if (task.creative_id && name !== (task.creative_display_name || task.creative_name || '')) {
+      await supabase.from('lib_creative_library')
+        .update({ display_name: name.trim() || null }).eq('id', task.creative_id)
+    }
     if (!silent) setBusy(false)
     if (error) {
       if (!silent) setErr(error.message)
@@ -8750,7 +8758,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       dirtyRef.current = false
       if (!silent) onSaved?.()
     }
-  }, [editorId, status, priority, taskType, due, startDate, notes, task.task_id, task.started_at, task.completed_at, onSaved])
+  }, [editorId, status, priority, taskType, due, startDate, notes, name, task.task_id, task.creative_id, task.creative_display_name, task.creative_name, task.started_at, task.completed_at, onSaved])
   const remove = async () => {
     setBusy(true); setErr(null)
     const { error } = await supabase.from('lib_editing_tasks').delete().eq('id', task.task_id)
@@ -9189,7 +9197,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
               fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
             }}>
-              <span>Original file</span>
+              {/* The player above shows the EDIT; this row is explicitly the
+                  RAW source the editor works from (Ben: was confusing). */}
+              <span>Raw source</span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {task.drive_url && (
                   <a href={task.drive_url} target="_blank" rel="noreferrer"
@@ -9197,23 +9207,23 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                     Open in Drive ↗
                   </a>
                 )}
-                {(task.final_cut_url || task.drive_url || task.preview_url) && (
+                {(task.drive_url || task.preview_url) && (
                   <a
-                    href={toDownloadUrl(task.final_cut_url || task.drive_url || task.preview_url, task.creative_name)}
-                    download={task.creative_name || 'creative.mp4'}
+                    href={toDownloadUrl(task.drive_url || task.preview_url, task.creative_name)}
+                    download={task.creative_name || 'raw.mp4'}
                     rel="noreferrer"
-                    title="Download the original full-quality file"
+                    title="Download the raw source file the editor works from"
                     style={{
                       padding: '4px 10px',
                       fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
                       background: 'var(--ink)', color: 'var(--paper)',
                       textDecoration: 'none', borderRadius: 9,
-                    }}>↓ Download original</a>
+                    }}>↓ Download raw</a>
                 )}
                 <CopyLinkButton
-                  url={task.final_cut_url || task.drive_url || task.preview_url}
+                  url={task.drive_url || task.preview_url}
                   label="Copy link"
-                  title="Copy a shareable link to this video" />
+                  title="Copy a shareable link to the raw source" />
               </div>
             </div>
           </div>
@@ -9315,6 +9325,12 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               change ▾
             </span>
           </button>
+        </Field>
+
+        <Field label="Name">
+          <input type="text" value={name} onChange={e => setName(e.target.value)}
+            placeholder={task.creative_canonical_name || 'Creative name'}
+            style={{ ...inputStyle, fontFamily: 'var(--sans)' }} />
         </Field>
 
         <Field label="Notes">
