@@ -96,7 +96,10 @@ export default function LoginPage() {
         </div>
 
         {/* Card */}
-        <div className="bg-bg-card border border-border-default rounded-sm p-7">
+        <div
+          className="bg-bg-card border border-border-default p-8"
+          style={{ borderRadius: 20, boxShadow: '0 1px 3px rgba(20,22,30,.05), 0 26px 56px -30px rgba(20,22,30,.28)' }}
+        >
           {forgotMode ? (
             resetSent ? (
               <div className="text-center py-4">

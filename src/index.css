@@ -200,27 +200,22 @@ input[type="date"], input[type="month"] {
    ─────────────────────────────────────────────────────────────────  */
 
 /* ── .eyebrow — small-caps mono label with dash prefix ── */
+/* Onboarding eyebrow — Inter Tight, wide-tracked caps, NO dash (the dash was
+   the editorial signature). Matches onboarding .eyebrow. */
 .eyebrow {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.16em;
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 0.3em;
   text-transform: uppercase;
-  color: var(--ink-3);
-  font-weight: 500;
+  color: var(--ink-4);
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
-.eyebrow::before {
-  content: "";
-  display: inline-block;
-  width: 16px;
-  height: 1px;
-  background: var(--ink);
-  flex-shrink: 0;
-}
-.eyebrow-accent { color: var(--ink); }
-.eyebrow-accent::before { background: var(--accent); height: 2px; }
+.eyebrow::before { display: none; }
+.eyebrow-accent { color: var(--ink-2); }
+.eyebrow-accent::before { display: none; }
 .eyebrow-bare::before { display: none; }
 
 /* ── .kicker — section subtitle (mono small caps, no dash) ── */
@@ -276,19 +271,19 @@ input[type="date"], input[type="month"] {
 /* ── Display headings ── */
 .h1 {
   font-family: var(--serif);
-  font-weight: 500;
+  font-weight: 400;
   font-size: clamp(34px, 5vw, 56px);
-  line-height: 1.02;
-  letter-spacing: -0.025em;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
   color: var(--ink);
   margin: 0;
 }
 .h2 {
   font-family: var(--serif);
-  font-weight: 500;
+  font-weight: 400;
   font-size: clamp(28px, 3.4vw, 40px);
-  line-height: 1.08;
-  letter-spacing: -0.02em;
+  line-height: 1.14;
+  letter-spacing: -0.01em;
   color: var(--ink);
   margin: 0;
 }
@@ -302,12 +297,12 @@ input[type="date"], input[type="month"] {
   margin: 0;
 }
 .lede {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-weight: 400;
-  font-size: 17px;
-  line-height: 1.5;
+  font-size: 16px;
+  line-height: 1.55;
   color: var(--ink-2);
-  max-width: 60ch;
+  max-width: 64ch;
 }
 .h1 em, .h2 em, .h3 em, .lede em {
   font-style: italic;
@@ -320,13 +315,14 @@ input[type="date"], input[type="month"] {
   border-radius: 1px;
 }
 
-/* ── .panel — base bordered container ── */
+/* ── .panel — onboarding floating card: white on off-white, soft shadow ── */
 .panel {
-  background: var(--paper);
+  background: #ffffff;
   border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 22px;
+  border-radius: 16px;
+  padding: 24px;
   position: relative;
+  box-shadow: 0 1px 3px rgba(20,22,30,.04), 0 18px 40px -28px rgba(20,22,30,.20);
 }
 .panel-flat { border: 0; padding: 0; background: transparent; }
 .panel-alt  { background: var(--paper-2); }
@@ -334,6 +330,13 @@ input[type="date"], input[type="month"] {
 .panel-ink * { color: inherit; }
 .panel-accent { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .panel-tight { padding: 14px 16px; }
+
+/* Onboarding focus ring — soft yellow halo on any focused control. Inline
+   base styles don't define a :focus state, so this applies app-wide. */
+input:focus, textarea:focus, select:focus, [contenteditable]:focus {
+  box-shadow: 0 0 0 4px rgba(244,225,74,.22);
+  border-color: var(--accent-dk);
+}
 
 /* ── Contract workspace — two-pane layout on wide viewports ──
    Chat on the left, contract preview on the right. Each pane scrolls
