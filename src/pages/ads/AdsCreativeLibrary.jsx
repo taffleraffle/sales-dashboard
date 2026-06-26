@@ -6886,15 +6886,49 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               }}>{editedSibling ? 'Edited version' : (playerRow.status === 'edited' ? 'Edited' : 'Raw')}</span>
               {editedSibling && (
                 <span style={{ fontFamily: 'var(--sans)', fontSize: 11.5, color: 'var(--ink-3)' }}>
-                  the finished cut — raw source below
+                  the finished cut — raw source at right
                 </span>
               )}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: rawSibling ? '1fr 96px' : '1fr', gap: 10, alignItems: 'start' }}>
-              <div style={{ aspectRatio: '16 / 9', background: 'black', borderRadius: 12, overflow: 'hidden' }}>
-                <OptVideoPlayer key={playerRow.id} src={playerRow.preview_proxy_url || playerRow.preview_url} compact
-                  poster={playerRow.thumbnail_url}
-                  wrapperStyle={OPT_PLAYER_WRAP_FILL} />
+              {/* Player + download share ONE card — identical structure to
+                  the editing-queue modal so the two views read the same
+                  (Ben 2026-06-26: "we still also have separate views"). The
+                  download lives in the card FOOTER, not a floating bar under
+                  the video, and is labelled by what you're actually watching. */}
+              <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
+                  <OptVideoPlayer key={playerRow.id} src={playerRow.preview_proxy_url || playerRow.preview_url} compact
+                    poster={playerRow.thumbnail_url}
+                    wrapperStyle={OPT_PLAYER_WRAP_FILL} />
+                </div>
+                {(() => {
+                  const dl = playerRow.final_cut_url || playerRow.drive_url || playerRow.preview_url
+                  if (!dl) return null
+                  const isEdit = !!editedSibling || playerRow.status === 'edited'
+                  return (
+                    <div style={{
+                      padding: '8px 12px', background: 'var(--paper-2)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                      fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
+                    }}>
+                      <span>{isEdit ? 'Final cut' : 'Raw source'}</span>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <CopyLinkButton url={toDownloadUrl(dl, rowDisplayName(playerRow))} label="Copy link" />
+                        <a href={toDownloadUrl(dl, rowDisplayName(playerRow))}
+                          download={rowDisplayName(playerRow) || 'creative.mp4'}
+                          rel="noreferrer"
+                          title="Download this file"
+                          style={{
+                            padding: '4px 10px', fontWeight: 600,
+                            letterSpacing: '0.06em', textTransform: 'uppercase',
+                            background: 'var(--ink)', color: 'var(--paper)',
+                            textDecoration: 'none', borderRadius: 9,
+                          }}>↓ Download{isEdit ? '' : ' raw'}</a>
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
               {/* Raw source — small clickable thumbnail (Ben: raw only a snippet). */}
               {rawSibling && (
@@ -6947,36 +6981,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
           </div>
         )}
 
-        {/* Download bar — points at the highest-quality URL available.
-            final_cut_url > drive_url > preview_url. Important: drive_url
-            comes BEFORE preview_url because for old Drive-imported rows
-            preview_url is a 720p transcode (looks dog shit on download). */}
-        {(() => {
-          const dl = row.final_cut_url || row.drive_url || row.preview_url
-          if (!dl) return null
-          return (
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-              padding: '8px 12px', background: 'var(--paper-2)', border: '1px solid var(--rule)',
-              fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
-            }}>
-              <span>Original file</span>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <CopyLinkButton url={toDownloadUrl(dl, rowDisplayName(row))} label="Copy link" />
-                <a href={toDownloadUrl(dl, rowDisplayName(row))}
-                  download={rowDisplayName(row) || 'creative.mp4'}
-                  rel="noreferrer"
-                  title="Download the highest-quality version of this creative"
-                  style={{
-                    padding: '4px 10px', fontWeight: 600,
-                    letterSpacing: '0.06em', textTransform: 'uppercase',
-                    background: 'var(--ink)', color: 'var(--paper)',
-                    textDecoration: 'none', borderRadius: 9,
-                  }}>↓ Download original</a>
-              </div>
-            </div>
-          )
-        })()}
+        {/* (Download moved into the player card footer above — Ben 2026-06-26:
+            no more floating "Download original" bar under the finished video.) */}
 
         {/* Slim form — only the fields Ben actually uses to organise creatives.
             Notes, v21 script, and original filename are tucked into the
