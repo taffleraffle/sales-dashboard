@@ -25,10 +25,10 @@ import { Icon } from '../../components/editorial/atoms'
 // what Ben actually uses day-to-day.
 // Tests hidden from the sub-nav 2026-06-11 (Ben de-clutter) — the route
 // still resolves at /sales/ads/creative/tests for direct links.
+// Library promoted to its own top-level Ads page 2026-06-26 — removed here.
 const SUBNAV = [
   { to: '/sales/ads/creative/insights',     label: 'Insights' },
   { to: '/sales/ads/creative/creatives',    label: 'Creatives' },
-  { to: '/sales/ads/creative/library',      label: 'Library' },
   { to: '/sales/ads/creative/attributes',   label: 'Attributes' },
   { to: '/sales/ads/creative/explorations', label: 'Explorations' },
   { to: '/sales/ads/creative/generate',     label: 'Generate' },

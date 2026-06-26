@@ -1759,26 +1759,34 @@ export default function AdsCreativeLibrary({ editorScope }) {
   })
   useEffect(() => { try { localStorage.setItem('lib.tab', tab) } catch {} }, [tab])
 
+  // Editorial page hero — Library is now a top-level Ads page (2026-06-26),
+  // so it gets its own serif identity like Performance / Insights instead of
+  // the old cramped mono label. Title + italic word swap per active tab.
+  const heroEyebrow = `${scope.isEditorView ? 'Editor portal' : 'Ads'} · ${tab === 'library' ? 'Library' : tab === 'invoice' ? 'Invoice' : 'Editing queue'}`
+  const hero = tab === 'library'
+    ? { title: 'The creative library.', italic: 'creative' }
+    : tab === 'invoice'
+      ? { title: 'Your invoice.', italic: 'invoice' }
+      : { title: 'The editing queue.', italic: 'editing' }
+
   return (
     <div style={{ padding: '12px 0 60px' }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 10, flexWrap: 'wrap', gap: 12,
-      }}>
-        <div style={{
-          fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
-          letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
-        }}>
-          {scope.isEditorView ? 'Editor portal · ' : ''}{tab === 'library' ? 'Library' : tab === 'invoice' ? 'Invoice' : 'Editing queue'}
-        </div>
-        <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper)' }}>
-          <TabBtn active={tab === 'library'} onClick={() => setTab('library')}>Library</TabBtn>
-          <TabBtn active={tab === 'queue'}   onClick={() => setTab('queue')}>Editing queue</TabBtn>
-          {scope.isEditorView && (
-            <TabBtn active={tab === 'invoice'} onClick={() => setTab('invoice')}>Invoice</TabBtn>
-          )}
-        </div>
-      </div>
+      <SectionHead
+        level="page"
+        eyebrow={heroEyebrow}
+        title={hero.title}
+        italicWord={hero.italic}
+        gap={20}
+        right={
+          <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper)' }}>
+            <TabBtn active={tab === 'library'} onClick={() => setTab('library')}>Library</TabBtn>
+            <TabBtn active={tab === 'queue'}   onClick={() => setTab('queue')}>Editing queue</TabBtn>
+            {scope.isEditorView && (
+              <TabBtn active={tab === 'invoice'} onClick={() => setTab('invoice')}>Invoice</TabBtn>
+            )}
+          </div>
+        }
+      />
 
       {/* Both tabs stay mounted — toggle visibility instead of mount/unmount.
           Why: unmounting a tab destroys all of its state (filters, scroll

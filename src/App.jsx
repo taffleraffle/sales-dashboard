@@ -263,6 +263,8 @@ export default function App() {
               <Route path="/sales/ads" element={<Suspense fallback={<PageSkeleton />}><AdsLayout /></Suspense>}>
                 <Route index element={<Navigate to="/sales/ads/performance" replace />} />
                 <Route path="performance" element={<Suspense fallback={<PageSkeleton />}><AdsPerformance /></Suspense>} />
+                {/* Library — promoted to its own top-level Ads page 2026-06-26 (was a Creative-testing sub-tab) */}
+                <Route path="library" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeLibrary /></Suspense>} />
                 <Route path="messaging" element={<Suspense fallback={<PageSkeleton />}><AdsMessaging /></Suspense>} />
 
                 {/* Creative testing — wrapper with sub-nav for Clips · Variants · Ads */}
@@ -273,7 +275,8 @@ export default function App() {
                   <Route path="ads" element={<Suspense fallback={<PageSkeleton />}><AdsList /></Suspense>} />
                   <Route path="insights" element={<Suspense fallback={<PageSkeleton />}><AdsInsights /></Suspense>} />
                   <Route path="creatives" element={<Suspense fallback={<PageSkeleton />}><AdsCreativesLibrary /></Suspense>} />
-                  <Route path="library" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeLibrary /></Suspense>} />
+                  {/* Library moved out to /sales/ads/library — keep deep links working */}
+                  <Route path="library" element={<Navigate to="/sales/ads/library" replace />} />
                   <Route path="attributes" element={<Suspense fallback={<PageSkeleton />}><AdsAttributesPage /></Suspense>} />
                   <Route path="explorations" element={<Suspense fallback={<PageSkeleton />}><AdsExplorations /></Suspense>} />
                   <Route path="tests" element={<Suspense fallback={<PageSkeleton />}><AdsTestScope /></Suspense>} />
