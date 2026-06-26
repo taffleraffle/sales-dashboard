@@ -10884,9 +10884,9 @@ function InboxView({ tasks, onEdit }) {
     // tasks rise to the top.
     const byDueDesc = (a, b) => (b.due_date || '').localeCompare(a.due_date || '')
     return [
-      { key: 'review',  label: 'Awaiting review',    color: '#3e7eba', items: review.sort(byDueDesc) },
-      { key: 'overdue', label: 'Overdue',            color: '#b53e3e', items: overdue.sort(byDueDesc) },
-      { key: 'blocked', label: 'Blocked',            color: '#7a4e08', items: blocked.sort(byDueDesc) },
+      { key: 'review',  label: 'Awaiting review',    color: 'var(--ink)',  items: review.sort(byDueDesc) },
+      { key: 'overdue', label: 'Overdue',            color: 'var(--down)', items: overdue.sort(byDueDesc) },
+      { key: 'blocked', label: 'Blocked',            color: 'var(--flat)', items: blocked.sort(byDueDesc) },
     ].filter(s => s.items.length > 0)
   }, [tasks])
 
@@ -10950,20 +10950,25 @@ function InboxView({ tasks, onEdit }) {
       )}
       {sections.map(section => (
         <div key={section.key}>
+          {/* Editorial section head — mono eyebrow with a coloured dash rule,
+              serif tabular count, and a hairline filling the row. */}
           <div style={{
-            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-            marginBottom: 10,
+            display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12,
           }}>
-            <div style={{
-              fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
-              letterSpacing: '0.14em', textTransform: 'uppercase',
-              color: section.color,
-              display: 'inline-flex', alignItems: 'center', gap: 8,
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.16em', textTransform: 'uppercase',
+              color: 'var(--ink-3)',
+              display: 'inline-flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap',
             }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: section.color }} />
+              <span style={{ width: 18, height: 2, background: section.color }} />
               {section.label}
-              <span style={{ color: 'var(--ink-4)', fontWeight: 500 }}>· {section.items.length}</span>
-            </div>
+              <span style={{
+                fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500,
+                color: 'var(--ink)', fontVariantNumeric: 'tabular-nums', letterSpacing: 0,
+              }}>{section.items.length}</span>
+            </span>
+            <span style={{ flex: 1, height: 1, background: 'var(--rule)' }} />
           </div>
           <div style={{ display: 'grid', gap: 8 }}>
             {section.items.map(t => (
@@ -11023,9 +11028,9 @@ function InboxCard({ task: t, onEdit, sectionColor, selected = false, onToggle =
         gridTemplateColumns: onToggle ? '22px 64px 1fr auto' : '64px 1fr auto',
         gap: 14,
         padding: '12px 16px', alignItems: 'center',
-        background: selected ? 'rgba(244,225,74,0.12)' : (hover ? 'var(--paper-2)' : 'var(--paper)'),
+        background: selected ? 'var(--accent-soft)' : (hover ? 'var(--paper-2)' : 'var(--paper)'),
         border: selected ? '1px solid var(--accent)' : '1px solid var(--rule)',
-        borderLeft: `4px solid ${sectionColor}`,
+        borderLeft: `3px solid ${sectionColor}`,
         cursor: 'pointer', transition: 'background 0.12s',
       }}>
       {onToggle && (
