@@ -1085,6 +1085,12 @@ const NotificationBell = forwardRef(function NotificationBell(
 // that is a mobile video, it is very, very, very tall"). The maxHeight
 // is viewport-relative so the player shrinks on shorter screens too.
 const OPT_PLAYER_WRAP_FILL = { height: '100%', maxHeight: 'min(56vh, 460px)' }
+// Full-stage fill for the SubmissionPreviewModal review surface: the modal
+// is a FIXED 86vh, so the player should fill its column (video centred on
+// black via object-fit: contain) instead of capping at 460px and leaving a
+// dead black void below it (Ben 2026-06-27: "it doesn't expand out"). The
+// fixed modal height already bounds tall 9:16 videos, so no cap is needed.
+const OPT_PLAYER_WRAP_STAGE = { height: '100%', maxHeight: '100%' }
 // Per-row lowercased search text, keyed by row object identity (see the
 // filter pipeline for why this must NOT live as a property on the row).
 const SEARCH_BLOBS = new WeakMap()
@@ -1288,6 +1294,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
               onState={onPlayerState}
               downloadUrl={toDownloadUrl(submission.file_url, filename)}
               downloadName={filename}
+              wrapperStyle={OPT_PLAYER_WRAP_STAGE}
               hoveredMarkerId={hoveredMarkerId}
               onMarkerHoverChange={setHoveredMarkerId} />
           </div>
