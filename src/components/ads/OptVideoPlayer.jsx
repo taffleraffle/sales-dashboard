@@ -61,6 +61,12 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
     // flash black) AND blurred + scaled as the backdrop behind a portrait
     // video instead of hard black bars (Ben 2026-06-26).
     poster,
+    // Download affordance right on the control bar (Ben 2026-06-26).
+    // downloadUrl SHOULD be a toDownloadUrl()-wrapped URL (?download=…) so
+    // the browser saves the file instead of opening it in a tab. Falls back
+    // to `src` so every player gets a download button even without it.
+    downloadUrl,
+    downloadName,
   },
   parentRef,
 ) {
@@ -609,6 +615,21 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
             const v = videoRef.current
             if (v) { v.playbackRate = r; setPlaybackRate(r) }
           }} />
+          {/* Download — grabs the file being shown (Ben 2026-06-26: "add a
+              download button here on the player"). Anchor, not button, so
+              the browser's native download kicks in. */}
+          {(downloadUrl || src) && (
+            <a href={downloadUrl || src}
+              download={downloadName || true}
+              rel="noreferrer"
+              aria-label="Download" title="Download this video"
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                color: 'white', fontSize: 14, padding: '0 4px',
+                minWidth: 18, textDecoration: 'none',
+                display: 'inline-flex', alignItems: 'center',
+              }}>⬇</a>
+          )}
           <button onClick={toggleFullscreen}
             aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
             title="F — fullscreen"

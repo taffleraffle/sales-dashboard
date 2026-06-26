@@ -6870,6 +6870,16 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
           </div>
         )}
 
+        {/* Two-column body — media LEFT, editable fields RIGHT — mirrors the
+            editing-queue task modal so the two views read identically
+            (Ben 2026-06-26: "still different here"). auto-fit collapses to
+            one column on narrow screens. */}
+        <div style={{
+          display: 'grid', gap: 20, alignItems: 'start',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+        }}>
+        {/* ── LEFT: media ── */}
+        <div style={{ display: 'grid', gap: 12, minWidth: 0, alignContent: 'start' }}>
         {/* Video preview — uses the compact OPT player so the chrome
             matches the Review modal + the inline SubmissionsPanel
             player (Ben 2026-06-01: "needs to be pretty congruent
@@ -6900,6 +6910,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                 <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
                   <OptVideoPlayer key={playerRow.id} src={playerRow.preview_proxy_url || playerRow.preview_url} compact
                     poster={playerRow.thumbnail_url}
+                    downloadUrl={toDownloadUrl(playerRow.final_cut_url || playerRow.drive_url || playerRow.preview_url, rowDisplayName(playerRow))}
+                    downloadName={rowDisplayName(playerRow) || 'creative.mp4'}
                     wrapperStyle={OPT_PLAYER_WRAP_FILL} />
                 </div>
                 {/* Download moved OUT from under the video into the form below
@@ -6955,10 +6967,10 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             No playback available
           </div>
         )}
+        </div>{/* end LEFT media column */}
 
-        {/* (Download moved into the player card footer above — Ben 2026-06-26:
-            no more floating "Download original" bar under the finished video.) */}
-
+        {/* ── RIGHT: editable fields rail ── */}
+        <div style={{ display: 'grid', gap: 16, minWidth: 0, alignContent: 'start' }}>
         {/* Slim form — only the fields Ben actually uses to organise creatives.
             Notes, v21 script, and original filename are tucked into the
             'Advanced' disclosure below. */}
@@ -7151,6 +7163,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             }}
           />
         )}
+        </div>{/* end RIGHT fields rail */}
+        </div>{/* end two-column body */}
 
         {/* Bad take flag — coordinator/admin marks clips that should never
             be used (wrong angle, flubbed lines, technical failure, etc.).
@@ -9196,6 +9210,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               return (
                 <OptVideoPlayer key={leadSrc} src={leadSrc} compact
                   poster={leadSub?.thumbnail_url || task.thumbnail_url}
+                  downloadUrl={toDownloadUrl(leadSrc, task.creative_name)}
+                  downloadName={task.creative_name || 'video.mp4'}
                   wrapperStyle={OPT_PLAYER_WRAP_360} />
               )
             })()}
