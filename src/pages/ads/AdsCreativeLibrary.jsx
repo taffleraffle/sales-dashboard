@@ -4040,7 +4040,7 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
   const [hoverPlay, setHoverPlay] = useState(false)
   useEffect(() => {
     if (!hover) { setHoverPlay(false); return }
-    const t = setTimeout(() => setHoverPlay(true), 320)
+    const t = setTimeout(() => setHoverPlay(true), 120)
     return () => clearTimeout(t)
   }, [hover])
   const offerName = r.offer_slug ? r.offer_slug.replace(/^opt-/, '').replace(/-stub$/, '').replace(/-template$/, '') : null
@@ -6223,7 +6223,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
   const [hoverPlay, setHoverPlay] = useState(false)
   useEffect(() => {
     if (!hover) { setHoverPlay(false); return }
-    const t = setTimeout(() => setHoverPlay(true), 320)
+    const t = setTimeout(() => setHoverPlay(true), 120)
     return () => clearTimeout(t)
   }, [hover])
   // In selectionMode, clicking the tile body toggles selection instead of
@@ -6908,7 +6908,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: rawSibling ? '1fr 96px' : '1fr', gap: 10, alignItems: 'start' }}>
               <div style={{ aspectRatio: '16 / 9', background: 'black', borderRadius: 12, overflow: 'hidden' }}>
-                <OptVideoPlayer src={playerRow.preview_url} compact preload="auto"
+                <OptVideoPlayer key={playerRow.id} src={playerRow.preview_url} compact preload="auto"
                   poster={playerRow.thumbnail_url}
                   wrapperStyle={OPT_PLAYER_WRAP_FILL} />
               </div>
@@ -11060,7 +11060,7 @@ function InboxCard({ task: t, onEdit, sectionColor, selected = false, onToggle =
   const [hoverPlay, setHoverPlay] = useState(false)
   useEffect(() => {
     if (!hover) { setHoverPlay(false); return }
-    const tm = setTimeout(() => setHoverPlay(true), 320)
+    const tm = setTimeout(() => setHoverPlay(true), 120)
     return () => clearTimeout(tm)
   }, [hover])
   const editorCol = editorColor(t)
