@@ -6320,11 +6320,13 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
           const tc = typeColor(row.type)
           return (
             <span style={{
-              position: 'absolute', top: 6, left: 6,
-              padding: '2px 7px',
-              background: tc.ink, color: 'var(--paper)',
-              fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600,
-              letterSpacing: '0.06em', textTransform: 'uppercase',
+              /* bottom-left so it never collides with the top-left select
+                 checkbox (Ben: "label for hook appearing above") */
+              position: 'absolute', bottom: 6, left: 6,
+              padding: '3px 9px', borderRadius: 999,
+              background: tc.ink, color: '#fff',
+              fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
             }}>{row.type}</span>
           )
         })()}
