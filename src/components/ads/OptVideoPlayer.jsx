@@ -615,12 +615,14 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
             const v = videoRef.current
             if (v) { v.playbackRate = r; setPlaybackRate(r) }
           }} />
-          {/* Download — grabs the file being shown (Ben 2026-06-26: "add a
-              download button here on the player"). Anchor, not button, so
-              the browser's native download kicks in. */}
-          {(downloadUrl || src) && (
-            <a href={downloadUrl || src}
-              download={downloadName || true}
+          {/* Download — grabs the original (Ben 2026-06-26: "add a download
+              button here on the player"). Only rendered when the caller passes
+              an explicit downloadUrl: `src` is often a low-quality proxy, so we
+              must NOT fall back to it for download. Anchor, not button, so the
+              browser's native download kicks in. */}
+          {downloadUrl && (
+            <a href={downloadUrl}
+              download={downloadName || undefined}
               rel="noreferrer"
               aria-label="Download" title="Download this video"
               style={{

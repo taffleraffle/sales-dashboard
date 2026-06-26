@@ -41,8 +41,8 @@ const BUCKET = 'creative-uploads'
 // source-URL column differs. lib_creative_library plays preview_url (the raw
 // upload), lib_task_submissions plays file_url (the editor's cut).
 const TABLES = {
-  library:     { table: 'lib_creative_library', srcCol: 'preview_url', extraFilter: '' },
-  submissions: { table: 'lib_task_submissions', srcCol: 'file_url',    extraFilter: 'deleted_at IS NULL' },
+  library:     { table: 'lib_creative_library', srcCol: 'preview_url', hasDeletedAt: false },
+  submissions: { table: 'lib_task_submissions', srcCol: 'file_url',    hasDeletedAt: true },
 }
 const TABLE = TABLES[opt('--table', 'library')]
 if (!TABLE) { console.error('--table must be library|submissions'); process.exit(1) }
@@ -114,8 +114,10 @@ async function main() {
     .is('preview_proxy_url', null)
     .not(TABLE.srcCol, 'is', null)
     .limit(LIMIT)
-  if (TABLE.extraFilter) q = q.is('deleted_at', null)
+  if (TABLE.hasDeletedAt) q = q.is('deleted_at', null)
   if (ONLY_ID) {
+    // --id is an explicit single-row FORCE (e.g. regenerate a broken proxy):
+    // drop the proxy-null guard so it re-transcodes even if a proxy exists.
     q = sb.from(TABLE.table).select(cols).eq('id', ONLY_ID)
   }
   const { data, error } = await q

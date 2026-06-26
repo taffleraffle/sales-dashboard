@@ -6918,11 +6918,16 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                   the video, and is labelled by what you're actually watching. */}
               <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
                 <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
+                  {(() => {
+                    const dl = playerRow.final_cut_url || playerRow.drive_url || playerRow.preview_url
+                    return (
                   <OptVideoPlayer key={playerRow.id} src={playerRow.preview_proxy_url || playerRow.preview_url} compact
                     poster={playerRow.thumbnail_url}
-                    downloadUrl={toDownloadUrl(playerRow.final_cut_url || playerRow.drive_url || playerRow.preview_url, rowDisplayName(playerRow))}
+                    downloadUrl={dl ? toDownloadUrl(dl, rowDisplayName(playerRow)) : undefined}
                     downloadName={rowDisplayName(playerRow) || 'creative.mp4'}
                     wrapperStyle={OPT_PLAYER_WRAP_FILL} />
+                    )
+                  })()}
                 </div>
                 {/* Download moved OUT from under the video into the form below
                     (Ben 2026-06-26: not below the live video). Card = player. */}
@@ -9221,11 +9226,13 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               const leadSrc = leadSub?.preview_proxy_url || leadSub?.file_url
                 || task.preview_proxy_url || task.preview_url
               // Download always grabs the full-quality original, not the proxy.
-              const leadDl = leadSub?.file_url || task.preview_url
+              // Keep the same priority as the old download bar so a Drive-only
+              // task (no submission, no preview_url) still resolves a real URL.
+              const leadDl = leadSub?.file_url || task.final_cut_url || task.drive_url || task.preview_url
               return (
                 <OptVideoPlayer key={leadSrc} src={leadSrc} compact
                   poster={leadSub?.thumbnail_url || task.thumbnail_url}
-                  downloadUrl={toDownloadUrl(leadDl, task.creative_name)}
+                  downloadUrl={leadDl ? toDownloadUrl(leadDl, task.creative_name) : undefined}
                   downloadName={task.creative_name || 'video.mp4'}
                   wrapperStyle={OPT_PLAYER_WRAP_360} />
               )
