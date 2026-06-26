@@ -37,6 +37,16 @@ const ONLY_ID = opt('--id', null)
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg'
 const BUCKET = 'creative-uploads'
 
+// Which table to proxy. Both share the same proxy/poster columns; only the
+// source-URL column differs. lib_creative_library plays preview_url (the raw
+// upload), lib_task_submissions plays file_url (the editor's cut).
+const TABLES = {
+  library:     { table: 'lib_creative_library', srcCol: 'preview_url', extraFilter: '' },
+  submissions: { table: 'lib_task_submissions', srcCol: 'file_url',    extraFilter: 'deleted_at IS NULL' },
+}
+const TABLE = TABLES[opt('--table', 'library')]
+if (!TABLE) { console.error('--table must be library|submissions'); process.exit(1) }
+
 const sb = createClient(URL_BASE, KEY, { auth: { persistSession: false } })
 
 function run(cmd, a) {
@@ -67,7 +77,7 @@ async function processOne(row) {
   const orig = join(dir, 'orig'), proxy = join(dir, 'proxy.mp4'), poster = join(dir, 'poster.jpg')
   try {
     process.stdout.write(`  ↓ ${row.id} downloading… `)
-    await download(row.preview_url, orig)
+    await download(row[TABLE.srcCol], orig)
     const mb = (statSync(orig).size / 1048576).toFixed(0)
     process.stdout.write(`${mb}MB → transcoding… `)
     // 720p, H.264 CRF 26, faststart (moov at front) so it streams instantly.
@@ -85,7 +95,7 @@ async function processOne(row) {
     const posterUrl = await uploadPublic(`proxies/${row.id}_${stamp}.jpg`, poster, 'image/jpeg')
     const patch = { preview_proxy_url: proxyUrl }
     if (!row.thumbnail_url) patch.thumbnail_url = posterUrl
-    const { error } = await sb.from('lib_creative_library').update(patch).eq('id', row.id)
+    const { error } = await sb.from(TABLE.table).update(patch).eq('id', row.id)
     if (error) throw error
     console.log('✓')
     return true
@@ -98,16 +108,20 @@ async function processOne(row) {
 }
 
 async function main() {
-  let q = sb.from('lib_creative_library')
-    .select('id, preview_url, thumbnail_url')
+  const cols = `id, ${TABLE.srcCol}, thumbnail_url`
+  let q = sb.from(TABLE.table)
+    .select(cols)
     .is('preview_proxy_url', null)
-    .not('preview_url', 'is', null)
+    .not(TABLE.srcCol, 'is', null)
     .limit(LIMIT)
-  if (ONLY_ID) q = sb.from('lib_creative_library').select('id, preview_url, thumbnail_url').eq('id', ONLY_ID)
+  if (TABLE.extraFilter) q = q.is('deleted_at', null)
+  if (ONLY_ID) {
+    q = sb.from(TABLE.table).select(cols).eq('id', ONLY_ID)
+  }
   const { data, error } = await q
   if (error) { console.error('query failed:', error.message); process.exit(1) }
-  if (!data?.length) { console.log('Nothing to transcode — all clips have proxies.'); return }
-  console.log(`Transcoding ${data.length} clip(s)…`)
+  if (!data?.length) { console.log(`Nothing to transcode — all ${TABLE.table} rows have proxies.`); return }
+  console.log(`Transcoding ${data.length} ${TABLE.table} row(s)…`)
   let ok = 0
   for (const row of data) { if (await processOne(row)) ok++ }
   console.log(`\nDone. ${ok}/${data.length} proxies generated.`)

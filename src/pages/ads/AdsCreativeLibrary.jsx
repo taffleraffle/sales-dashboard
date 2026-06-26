@@ -1242,7 +1242,8 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
   }, [comments])
 
   if (!submission) return null
-  const url = submission.file_url
+  // Stream the proxy for instant playback; download still grabs file_url.
+  const url = submission.preview_proxy_url || submission.file_url
   const filename = `v${submission.version_number || 1}.mp4`
   const editor = submission.submitted_by_name || 'Unknown editor'
   const isApproved = !!submission.approved_at
@@ -1285,6 +1286,8 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
               src={url}
               markers={playerMarkers}
               onState={onPlayerState}
+              downloadUrl={toDownloadUrl(submission.file_url, filename)}
+              downloadName={filename}
               hoveredMarkerId={hoveredMarkerId}
               onMarkerHoverChange={setHoveredMarkerId} />
           </div>
@@ -9206,11 +9209,16 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                 (Ben 2026-06-26 — the edit is the priority; raw is below). */}
             {(() => {
               const leadSub = (submissions || []).find(s => s.file_url)
-              const leadSrc = leadSub?.file_url || task.preview_proxy_url || task.preview_url
+              // Stream the small proxy for instant playback (no black-screen
+              // wait); fall back to the raw cut, then the task source.
+              const leadSrc = leadSub?.preview_proxy_url || leadSub?.file_url
+                || task.preview_proxy_url || task.preview_url
+              // Download always grabs the full-quality original, not the proxy.
+              const leadDl = leadSub?.file_url || task.preview_url
               return (
                 <OptVideoPlayer key={leadSrc} src={leadSrc} compact
                   poster={leadSub?.thumbnail_url || task.thumbnail_url}
-                  downloadUrl={toDownloadUrl(leadSrc, task.creative_name)}
+                  downloadUrl={toDownloadUrl(leadDl, task.creative_name)}
                   downloadName={task.creative_name || 'video.mp4'}
                   wrapperStyle={OPT_PLAYER_WRAP_360} />
               )
@@ -9989,9 +9997,11 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                       "the player still is not a custom one in this
                       preview here and across the board". */}
                   <OptVideoPlayer
-                    src={sub.file_url}
+                    src={sub.preview_proxy_url || sub.file_url}
                     poster={sub.thumbnail_url}
                     markers={commentsBySubId[sub.id]?.markers || []}
+                    downloadUrl={toDownloadUrl(sub.file_url, `v${sub.version_number || 1}.mp4`)}
+                    downloadName={`v${sub.version_number || 1}.mp4`}
                     compact
                     wrapperStyle={OPT_PLAYER_WRAP_320} />
                   <div style={{
