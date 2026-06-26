@@ -4381,12 +4381,12 @@ export default function MarketingPerformance() {
         <DataHealthBanner />
       </div>
       {/* Header — editorial */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8 pb-6 pt-1" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
-          <span className="eyebrow eyebrow-accent">OPT Sales · Marketing</span>
-          <h1 className="h2 mt-2">The <em>state</em> of acquisition.</h1>
+          <span className="eyebrow eyebrow-accent" style={{ display: 'block', marginBottom: 12 }}>OPT Sales · Marketing</span>
+          <h1 className="h2">The <em>state</em> of acquisition.</h1>
           <p
-            className="mt-2"
+            className="mt-3.5"
             style={{
               fontFamily: 'var(--mono)',
               fontSize: 10,
