@@ -3570,7 +3570,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       {/* Bulk selection bar — sticky, appears when ≥1 tile is selected */}
       {selected.size > 0 && scope.canEditCreative && (
         <div style={{
-          position: 'sticky', top: 0, zIndex: 50,
+          position: 'sticky', top: 64, zIndex: 50,
           marginBottom: 14, padding: '10px 14px',
           background: 'var(--ink)', color: 'var(--paper)',
           display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
@@ -7746,7 +7746,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           reassign editor, change status, change priority. */}
       {selectedTasks.size > 0 && canBulkEditTasks && view === 'list' && (
         <div style={{
-          position: 'sticky', top: 0, zIndex: 50,
+          position: 'sticky', top: 64, zIndex: 50,
           marginBottom: 14, padding: '10px 14px',
           background: 'var(--ink)', color: 'var(--paper)',
           display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
@@ -10481,7 +10481,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
           the drag is actually active and see what's being moved. */}
       {draggingTask && (
         <div style={{
-          position: 'sticky', top: 0, zIndex: 50,
+          position: 'sticky', top: 64, zIndex: 50,
           padding: '8px 14px',
           background: 'var(--ink)', color: 'var(--paper)',
           fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
@@ -10975,7 +10975,7 @@ function InboxView({ tasks, onEdit }) {
       {/* Bulk bar — appears when ≥1 card is ticked */}
       {sel.size > 0 && (
         <div style={{
-          position: 'sticky', top: 0, zIndex: 50,
+          position: 'sticky', top: 64, zIndex: 50,
           display: 'flex', alignItems: 'center', gap: 10,
           padding: '10px 14px', background: 'var(--ink)', color: 'var(--paper)',
         }}>
