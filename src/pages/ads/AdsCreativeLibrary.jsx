@@ -6346,6 +6346,16 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
             letterSpacing: '0.06em',
           }}>{row.v21_script_id}</span>
         )}
+        {/* Status pill — bottom-right. Edited = solid green so edited clips
+            jump out from raw at a glance (Ben: hard to tell raw vs edited). */}
+        <span style={{
+          position: 'absolute', bottom: 6, right: 6,
+          padding: '3px 9px', borderRadius: 999,
+          background: row.status === 'edited' ? 'var(--up)' : 'rgba(21,22,26,0.70)',
+          color: '#fff',
+          fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 700,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+        }}>{row.status === 'edited' ? 'Edited' : 'Raw'}</span>
       </div>
       {/* Body */}
       <div style={{ padding: '10px 12px' }}>
