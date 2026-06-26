@@ -5027,7 +5027,7 @@ function TranscriptBox({ text: rawText }) {
    (linked via parent_id pointing at v1). Lets Ben upload a new version
    that inherits most metadata from the current one but gets its own
    row + new transcript + new preview. */
-function VersionsPanel({ row, onReload }) {
+function VersionsPanel({ row, onReload, onOpenRow }) {
   const [versions, setVersions] = useState([])
   const [loading, setLoading] = useState(true)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -5202,13 +5202,18 @@ function VersionsPanel({ row, onReload }) {
       <div style={{ display: 'grid', gap: 6 }}>
         {versions.map(v => {
           const isCurrent = v.id === row.id
+          const canOpen = !isCurrent && onOpenRow
           return (
-            <div key={v.id} style={{
+            <div key={v.id}
+              onClick={canOpen ? () => onOpenRow(v.id) : undefined}
+              title={canOpen ? 'View this version' : undefined}
+              style={{
               display: 'flex', alignItems: 'center', gap: 10,
-              padding: '6px 10px',
-              background: isCurrent ? 'rgba(244,225,74,0.18)' : 'var(--paper-2)',
+              padding: '8px 10px', borderRadius: 10,
+              background: isCurrent ? 'var(--accent-soft)' : 'var(--paper-2)',
               border: isCurrent ? '1px solid var(--ink)' : '1px solid var(--rule)',
               fontFamily: 'var(--mono)', fontSize: 11,
+              cursor: canOpen ? 'pointer' : 'default',
             }}>
               <div style={{ width: 40, height: 24, background: '#000', overflow: 'hidden', flexShrink: 0 }}>
                 {v.thumbnail_url && (
@@ -7163,7 +7168,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
 
         {/* Versions — show v1/v2/v3... if this clip has siblings linked
             via parent_id. Includes an Upload-new-version button. */}
-        <VersionsPanel row={row} onReload={() => onSaved?.()} />
+        <VersionsPanel row={row} onReload={() => onSaved?.()} onOpenRow={onOpenRow} />
 
         {/* Hook/Body history — when viewing a source clip, show which
             Joined composites have used it. */}
