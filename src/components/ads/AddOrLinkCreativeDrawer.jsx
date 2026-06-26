@@ -357,7 +357,7 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
 
         {err && (
           <div style={{ margin: 14, padding: 12, background: '#fef2f2', border: '1px solid #fca5a5',
-                        color: '#b53e3e', fontSize: 13, borderRadius: 2 }}>
+                        color: '#b53e3e', fontSize: 13, borderRadius: 9 }}>
             <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
           </div>
         )}
@@ -456,7 +456,7 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
                         <div style={{
                           marginTop: 12, padding: '10px 14px', background: 'var(--paper)',
                           border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
-                          borderRadius: 2,
+                          borderRadius: 9,
                           display: 'flex', alignItems: 'center', gap: 12,
                         }}>
                           <AdThumbnail ad={chosenAd} size="sm" />
@@ -505,7 +505,7 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
                               letterSpacing: '0.1em', textTransform: 'uppercase',
                               border: '1px solid var(--rule)', background: 'transparent',
                               color: 'var(--ink-4)', cursor: working ? 'wait' : 'pointer',
-                              borderRadius: 2 }}>
+                              borderRadius: 9 }}>
                       Clear queue
                     </button>
                   </div>
@@ -526,7 +526,7 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
               {/* Pipeline explanation — only when nothing dropped yet */}
               {!uploadFile && uploadQueue.length === 0 && (
                 <div style={{ marginTop: 16, padding: 14, background: 'var(--paper)',
-                              border: '1px solid var(--rule)', borderRadius: 2 }}>
+                              border: '1px solid var(--rule)', borderRadius: 9 }}>
                   <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--ink-3)' }}>
                     What happens when you click Save & tag
                   </div>
@@ -567,7 +567,7 @@ function canSubmit({ tab, chosenScript, chosenAd, pasteText, uploadFile, uploadQ
 
 const inputStyle = {
   width: '100%', padding: '10px 12px', fontFamily: 'var(--sans)', fontSize: 13,
-  border: '1px solid var(--rule)', background: 'var(--paper)', borderRadius: 2,
+  border: '1px solid var(--rule)', background: 'var(--paper)', borderRadius: 9,
   color: 'var(--ink)',
 }
 
@@ -580,14 +580,14 @@ const pipelineNumStyle = {
 
 const whisperWarnStyle = {
   marginTop: 10, padding: '8px 12px',
-  background: '#fef9e7', border: '1px solid #e0a93e', borderRadius: 2,
+  background: '#fef9e7', border: '1px solid #e0a93e', borderRadius: 9,
   color: '#7a5c12', fontSize: 12, lineHeight: 1.4,
   display: 'flex', alignItems: 'flex-start', gap: 8,
 }
 
 const extractHintStyle = {
   marginTop: 10, padding: '8px 12px',
-  background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 2,
+  background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9,
   color: 'var(--ink-3)', fontSize: 12, lineHeight: 1.4,
   display: 'flex', alignItems: 'flex-start', gap: 8,
 }
@@ -607,7 +607,7 @@ function Empty({ children }) {
     <div style={{
       padding: 24, textAlign: 'center', color: 'var(--ink-4)',
       fontStyle: 'italic', fontFamily: 'var(--serif)', fontSize: 13,
-      border: '1px dashed var(--rule)', borderRadius: 2, marginBottom: 16,
+      border: '1px dashed var(--rule)', borderRadius: 9, marginBottom: 16,
     }}>
       {children}
     </div>
@@ -621,7 +621,7 @@ function Row({ selected, onClick, children }) {
       background: selected ? 'var(--ink)' : 'var(--paper)',
       color: selected ? 'var(--paper)' : 'var(--ink)',
       border: `1px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
-      borderRadius: 2, cursor: 'pointer',
+      borderRadius: 9, cursor: 'pointer',
       display: 'flex', alignItems: 'center', gap: 10, width: '100%',
     }}>
       {children}
@@ -687,7 +687,7 @@ function StageIndicator({ stage, target }) {
               background: active ? 'var(--ink)' : done ? 'var(--accent)' : 'var(--paper)',
               color: active ? 'var(--accent)' : done ? 'var(--ink)' : 'var(--ink-4)',
               border: '1px solid ' + (active ? 'var(--ink)' : done ? 'var(--accent)' : 'var(--rule)'),
-              borderRadius: 2,
+              borderRadius: 9,
             }}>
               {done && <Check size={10} />}
               {active && <Sparkles size={10} className="pulse" />}
@@ -745,7 +745,7 @@ function DropZone({ file, setFile, onFiles, multiple = false }) {
       display: 'block', padding: 24,
       border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--rule)'}`,
       background: dragOver ? 'var(--paper)' : 'var(--paper)',
-      borderRadius: 2, cursor: 'pointer', textAlign: 'center',
+      borderRadius: 9, cursor: 'pointer', textAlign: 'center',
       transition: 'all 120ms ease',
     }}
       onDragOver={e => { e.preventDefault(); setDragOver(true) }}
@@ -810,7 +810,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
       background: item.status === 'done' ? 'var(--paper)' : 'var(--paper)',
       border: '1px solid var(--rule)',
       borderLeft: `3px solid ${statusBadge.accent}`,
-      borderRadius: 2,
+      borderRadius: 9,
       opacity: item.status === 'done' ? 0.7 : 1,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -827,7 +827,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
             {sizeMB.toFixed(1)} MB
             {willExtract && (
               <span style={{ marginLeft: 8, padding: '1px 6px', background: 'var(--paper)',
-                            color: 'var(--ink-3)', border: '1px solid var(--rule)', borderRadius: 2 }}>
+                            color: 'var(--ink-3)', border: '1px solid var(--rule)', borderRadius: 9 }}>
                 will auto-extract audio
               </span>
             )}
@@ -837,7 +837,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
           padding: '3px 8px', fontFamily: 'var(--mono)', fontSize: 9,
           letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
           background: statusBadge.bg, color: statusBadge.fg,
-          border: `1px solid ${statusBadge.accent}`, borderRadius: 2,
+          border: `1px solid ${statusBadge.accent}`, borderRadius: 9,
         }}>
           {item.status}
         </span>
@@ -857,7 +857,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
             style={{
               flex: 1, textAlign: 'left',
               padding: '6px 10px',
-              background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 2,
+              background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9,
               cursor: disabled ? 'wait' : 'pointer',
               display: 'flex', alignItems: 'center', gap: 8,
             }}>
@@ -884,7 +884,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
               flex: 1, padding: '8px 12px',
               background: 'transparent', border: '1px dashed var(--rule)',
               color: 'var(--ink-3)', fontFamily: 'var(--sans)', fontSize: 12,
-              cursor: disabled ? 'wait' : 'pointer', borderRadius: 2,
+              cursor: disabled ? 'wait' : 'pointer', borderRadius: 9,
               textAlign: 'left',
             }}>
             Pick Meta ad…
@@ -895,11 +895,11 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
       {/* Inline picker */}
       {pickerOpen && (
         <div style={{ marginTop: 8, padding: 8, background: 'var(--paper)',
-                      border: '1px solid var(--rule)', borderRadius: 2 }}>
+                      border: '1px solid var(--rule)', borderRadius: 9 }}>
           <input type="text" value={adQuery} onChange={e => setAdQuery(e.target.value)}
             placeholder="Search ads…" autoFocus
             style={{ width: '100%', padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 12,
-                    border: '1px solid var(--rule)', background: 'var(--paper)', borderRadius: 2,
+                    border: '1px solid var(--rule)', background: 'var(--paper)', borderRadius: 9,
                     marginBottom: 8 }} />
           <div style={{ maxHeight: 200, overflowY: 'auto', display: 'grid', gap: 3 }}>
             {adResults.map(a => (
@@ -908,7 +908,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
                 style={{
                   textAlign: 'left', padding: '6px 8px',
                   background: 'var(--paper)', border: '1px solid var(--rule)',
-                  cursor: 'pointer', borderRadius: 2,
+                  cursor: 'pointer', borderRadius: 9,
                   display: 'flex', alignItems: 'center', gap: 8,
                 }}>
                 <AdThumbnail ad={a} size="sm" />
@@ -934,7 +934,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
       {item.error && (
         <div style={{ marginTop: 8, padding: '6px 10px', background: '#fef2f2',
                       border: '1px solid #fca5a5', color: '#b53e3e', fontSize: 11,
-                      borderRadius: 2 }}>
+                      borderRadius: 9 }}>
           {item.error}
         </div>
       )}
@@ -994,7 +994,7 @@ function DocDropZone({ onText, onError }) {
         display: 'block', padding: '14px 16px',
         border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--rule)'}`,
         background: dragOver ? 'var(--paper)' : 'var(--paper)',
-        borderRadius: 2, cursor: extracting ? 'wait' : 'pointer',
+        borderRadius: 9, cursor: extracting ? 'wait' : 'pointer',
         transition: 'all 120ms ease',
         display: 'flex', alignItems: 'center', gap: 12,
       }}>

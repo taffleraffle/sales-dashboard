@@ -150,7 +150,7 @@ export function Pill({ children, tone = 'default', size = 'sm', uppercase = fals
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 5,
       background: t.bg, color: t.fg, border: `1px solid ${t.bd}`,
-      borderRadius: 2, fontWeight: 500,
+      borderRadius: 9, fontWeight: 500,
       letterSpacing: uppercase ? '0.06em' : '0.02em',
       textTransform: uppercase ? 'uppercase' : 'none',
       whiteSpace: 'nowrap',
@@ -159,7 +159,7 @@ export function Pill({ children, tone = 'default', size = 'sm', uppercase = fals
       ...sizes[size], ...style,
     }}>
       {dot && <span style={{
-        width: 5, height: 5, borderRadius: 5, background: dot, flexShrink: 0,
+        width: 5, height: 5, borderRadius: 11, background: dot, flexShrink: 0,
       }} />}
       {children}
     </span>
@@ -427,7 +427,7 @@ export function ValueChip({ attr, value, size = 'sm', showAttr = false, dot = tr
       background: tint(color, 0.1),
       color: color,
       border: `1px solid ${tint(color, 0.22)}`,
-      borderRadius: 2,
+      borderRadius: 9,
       fontFamily: 'var(--mono)',
       fontVariantNumeric: 'tabular-nums',
       fontSize: s.fontSize, fontWeight: 600,

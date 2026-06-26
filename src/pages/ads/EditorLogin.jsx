@@ -147,7 +147,7 @@ export default function EditorLogin() {
                 width: '100%', padding: '10px 12px',
                 fontFamily: 'var(--sans)', fontSize: 15,
                 background: 'var(--paper)', border: '1px solid var(--rule)',
-                borderRadius: 2, marginBottom: 16,
+                borderRadius: 9, marginBottom: 16,
               }}
             />
             {/* Stay-signed-in preference. Default 14 days. Editors on
@@ -178,7 +178,7 @@ export default function EditorLogin() {
                       background: selected ? 'var(--paper-2)' : 'var(--paper)',
                       border: `1px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
                       borderLeft: `3px solid ${selected ? 'var(--accent)' : 'transparent'}`,
-                      borderRadius: 2,
+                      borderRadius: 9,
                     }}>
                     <div style={{
                       fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
@@ -205,7 +205,7 @@ export default function EditorLogin() {
                 fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
                 letterSpacing: '0.12em', textTransform: 'uppercase',
                 background: 'var(--ink)', color: 'var(--paper)',
-                border: 'none', borderRadius: 2,
+                border: 'none', borderRadius: 9,
                 cursor: sending ? 'wait' : 'pointer',
               }}>{sending ? 'Sending…' : 'Send magic link'}</button>
           </form>
@@ -229,7 +229,7 @@ export default function EditorLogin() {
                 fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
                 letterSpacing: '0.08em', textTransform: 'uppercase',
                 background: 'transparent', color: 'var(--ink-2)',
-                border: '1px solid var(--rule)', borderRadius: 2,
+                border: '1px solid var(--rule)', borderRadius: 9,
                 cursor: 'pointer',
               }}>Send to a different email</button>
           </>

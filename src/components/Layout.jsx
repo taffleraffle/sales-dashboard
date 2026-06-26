@@ -197,7 +197,7 @@ export default function Layout() {
                   onClick={() => setDrawerOpen(false)}
                   className="w-10 h-10 flex items-center justify-center"
                   aria-label="Close menu"
-                  style={{ color: 'var(--ink-3)', borderRadius: 3 }}
+                  style={{ color: 'var(--ink-3)', borderRadius: 9 }}
                 >
                   <X size={ICON.lg} />
                 </button>
@@ -254,7 +254,7 @@ export default function Layout() {
                 aria-expanded={drawerOpen}
                 aria-label="Open navigation menu"
                 className="md:hidden w-11 h-11 flex items-center justify-center"
-                style={{ color: 'var(--ink)', borderRadius: 3 }}
+                style={{ color: 'var(--ink)', borderRadius: 9 }}
               >
                 <Menu size={ICON.xl} />
               </button>
@@ -281,7 +281,7 @@ export default function Layout() {
                     aria-haspopup="menu"
                     aria-label="Open profile menu"
                     className="flex items-center gap-2 md:gap-3 min-h-[44px] px-1.5 md:pl-1.5 md:pr-3"
-                    style={{ borderRadius: 3 }}
+                    style={{ borderRadius: 9 }}
                   >
                     <div
                       className="w-10 h-10 flex items-center justify-center text-[12px] font-semibold"

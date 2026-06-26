@@ -394,18 +394,18 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
           {/* Track (background) */}
           <div style={{
             position: 'absolute', left: 0, right: 0, height: 4,
-            background: 'rgba(255,255,255,0.15)', borderRadius: 2,
+            background: 'rgba(255,255,255,0.15)', borderRadius: 9,
           }} />
           {/* Buffered range — width driven by onVideoTimeUpdate via ref */}
           <div ref={bufferedFillRef} style={{
             position: 'absolute', left: 0, width: '0%',
             height: 4, background: 'rgba(255,255,255,0.35)',
-            borderRadius: 2,
+            borderRadius: 9,
           }} />
           {/* Progress fill — width driven by onVideoTimeUpdate via ref */}
           <div ref={progressFillRef} style={{
             position: 'absolute', left: 0, width: '0%',
-            height: 4, background: '#f4e14a', borderRadius: 2,
+            height: 4, background: '#f4e14a', borderRadius: 9,
           }} />
           {/* Hover preview marker */}
           {hoverPct != null && (
@@ -415,7 +415,7 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
                 top: -22, transform: 'translateX(-50%)',
                 fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
                 background: 'rgba(0,0,0,0.85)', color: 'var(--paper)',
-                padding: '2px 6px', borderRadius: 2, whiteSpace: 'nowrap',
+                padding: '2px 6px', borderRadius: 9, whiteSpace: 'nowrap',
                 pointerEvents: 'none',
               }}>{fmtTime(hoverPct * duration)}</div>
               <div style={{

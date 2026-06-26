@@ -120,7 +120,7 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
           letterSpacing: '0.08em', textTransform: 'uppercase',
         }}>
           <span style={{
-            width: 6, height: 6, borderRadius: 6,
+            width: 6, height: 6, borderRadius: 11,
             background: isDraft ? PALETTE.orange : isClosed ? 'var(--ink-4)' : PALETTE.green,
           }} />
           {isDraft ? 'Draft' : isClosed ? 'Closed' : 'Launched'}
@@ -442,7 +442,7 @@ function ScriptRow({ script, isLast, onRemove, working }) {
             display: 'inline-flex', alignItems: 'center', gap: 4,
           }}>
             <span style={{
-              width: 5, height: 5, borderRadius: 5,
+              width: 5, height: 5, borderRadius: 11,
               background: PALETTE.green,
             }} />
             Linked to ad <span style={{ color: 'var(--ink-3)' }}>{script.ad_id}</span>

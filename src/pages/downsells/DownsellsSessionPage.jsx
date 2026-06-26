@@ -104,12 +104,12 @@ export default function DownsellsSessionPage() {
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {isLocked && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)', padding: '4px 10px', border: '1px solid var(--rule)', borderRadius: 2 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)', padding: '4px 10px', border: '1px solid var(--rule)', borderRadius: 9 }}>
                 <Lock size={11} /> Locked
               </span>
             )}
             {thread.admin_review_requested && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--down)', padding: '4px 10px', border: '1px solid var(--down)', borderRadius: 2 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--down)', padding: '4px 10px', border: '1px solid var(--down)', borderRadius: 9 }}>
                 <Flag size={11} /> Needs Ben
               </span>
             )}
@@ -219,7 +219,7 @@ function SessionContextPane({ thread, messages }) {
         </section>
 
         {thread.locked_at && (
-          <div style={{ marginTop: 18, padding: '10px 12px', background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)' }}>
+          <div style={{ marginTop: 18, padding: '10px 12px', background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 9, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)' }}>
             <Lock size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }} />
             Session locked {new Date(thread.locked_at).toLocaleDateString()} — chat is closed.
           </div>

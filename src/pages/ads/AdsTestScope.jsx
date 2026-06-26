@@ -357,7 +357,7 @@ export default function AdsTestScope() {
                     fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                     letterSpacing: '0.04em', textTransform: 'uppercase',
                   }}>
-                    <span style={{ width: 6, height: 6, borderRadius: 6, background: PALETTE.green }} />
+                    <span style={{ width: 6, height: 6, borderRadius: 11, background: PALETTE.green }} />
                     Live
                   </span>
                 ) : (

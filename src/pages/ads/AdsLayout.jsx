@@ -46,7 +46,7 @@ const secondaryTab = (isActive) => ({
   textTransform: 'uppercase',
   fontWeight: 500,
   whiteSpace: 'nowrap',
-  borderRadius: 2,
+  borderRadius: 9,
   background: isActive ? 'var(--accent-soft)' : 'transparent',
   color: isActive ? 'var(--ink)' : 'var(--ink-3)',
   border: `1px solid ${isActive ? 'var(--accent)' : 'transparent'}`,

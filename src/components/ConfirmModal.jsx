@@ -52,7 +52,7 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
             style={{
               width: 36,
               height: 36,
-              borderRadius: 3,
+              borderRadius: 9,
               background: variant === 'danger' ? 'var(--down-soft)' : 'var(--accent-soft)',
               color: iconColor,
               display: 'flex',
@@ -96,7 +96,7 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
             disabled={loading}
             style={{
               padding: '8px 14px',
-              borderRadius: 3,
+              borderRadius: 9,
               fontSize: 12,
               fontFamily: 'var(--mono)',
               letterSpacing: '0.08em',
@@ -119,7 +119,7 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
             disabled={loading}
             style={{
               padding: '8px 14px',
-              borderRadius: 3,
+              borderRadius: 9,
               fontSize: 12,
               fontFamily: 'var(--mono)',
               letterSpacing: '0.08em',

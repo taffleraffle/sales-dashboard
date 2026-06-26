@@ -106,7 +106,7 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
           <select value={attrA} onChange={e => setAttrA(e.target.value)}
             style={{
               padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 13,
-              border: '1px solid var(--rule-2)', background: 'var(--paper)', borderRadius: 2,
+              border: '1px solid var(--rule-2)', background: 'var(--paper)', borderRadius: 9,
             }}>
             {PIVOT_ATTRS.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
           </select>
@@ -117,7 +117,7 @@ export default function AttributeHeatmap({ since, until, baseline = 0 }) {
           <select value={attrB} onChange={e => setAttrB(e.target.value)}
             style={{
               padding: '6px 10px', fontFamily: 'var(--sans)', fontSize: 13,
-              border: '1px solid var(--rule-2)', background: 'var(--paper)', borderRadius: 2,
+              border: '1px solid var(--rule-2)', background: 'var(--paper)', borderRadius: 9,
             }}>
             {PIVOT_ATTRS.filter(a => a.key !== attrA).map(a => (
               <option key={a.key} value={a.key}>{a.label}</option>

@@ -255,7 +255,7 @@ export default function AdsCreativeTestingLayout() {
             padding: '7px 12px',
             fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
             color: 'var(--ink-3)', background: 'transparent',
-            border: '1px solid var(--rule-2)', borderRadius: 2,
+            border: '1px solid var(--rule-2)', borderRadius: 9,
             marginBottom: 6, cursor: 'pointer',
           }}>
           <span style={{
@@ -391,7 +391,7 @@ function AnalyticsToolbar({
           style={{
             fontFamily: 'var(--mono)', fontSize: 11.5,
             padding: '4px 6px', border: '1px solid var(--rule-2)',
-            background: 'var(--paper)', color: 'var(--ink)', borderRadius: 2,
+            background: 'var(--paper)', color: 'var(--ink)', borderRadius: 9,
           }} />
         <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>→</span>
         <input type="date" value={until} min={since} max={todayISO()}
@@ -399,7 +399,7 @@ function AnalyticsToolbar({
           style={{
             fontFamily: 'var(--mono)', fontSize: 11.5,
             padding: '4px 6px', border: '1px solid var(--rule-2)',
-            background: 'var(--paper)', color: 'var(--ink)', borderRadius: 2,
+            background: 'var(--paper)', color: 'var(--ink)', borderRadius: 9,
           }} />
       </div>
 
@@ -426,7 +426,7 @@ function AnalyticsToolbar({
               display: 'inline-flex', alignItems: 'center', gap: 6,
             }}>
               <span style={{
-                width: 6, height: 6, borderRadius: 6, flexShrink: 0,
+                width: 6, height: 6, borderRadius: 11, flexShrink: 0,
                 background: on ? 'var(--accent)' : (OFFER_DOT[o.slug] || 'var(--ink-3)'),
               }} />
               {o.name.replace('OPT ', '').replace(' (Direct Call Engine)', '').replace(' (placeholder)', '')}
@@ -495,7 +495,7 @@ function AnalyticsToolbar({
           display: 'inline-flex', alignItems: 'center', gap: 5,
         }}>
           <span style={{
-            width: 6, height: 6, borderRadius: 6,
+            width: 6, height: 6, borderRadius: 11,
             background: loading ? '#e0a93e' : '#3e8a5e',
             boxShadow: `0 0 0 3px ${loading ? 'rgba(224,169,62,0.18)' : 'rgba(62,138,94,0.18)'}`,
           }} />

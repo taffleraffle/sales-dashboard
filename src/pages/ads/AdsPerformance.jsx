@@ -1357,7 +1357,7 @@ export default function AdsPerformance() {
           </div>
           <button onClick={() => setShowOrphans(true)} style={{
             padding: '7px 12px', background: 'var(--paper)', color: 'var(--ink)',
-            border: '1px solid var(--ink)', borderRadius: 3,
+            border: '1px solid var(--ink)', borderRadius: 9,
             fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
             cursor: 'pointer', whiteSpace: 'nowrap',
           }}>View {orphanCloses.count} →</button>
@@ -1396,7 +1396,7 @@ export default function AdsPerformance() {
           event — that's the only available source. Sub-line below each
           tile explains the gap between closer-reported truth and
           ad-attributed coverage. */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9, marginBottom: 8 }}>
         <TotalsTile label="Spend" value={fmt$(totals.spend)} />
         {(() => {
           const eod = rowTotals.eod, attr = rowTotals.attributed, prosp = rowTotals.prospects
@@ -1556,7 +1556,7 @@ export default function AdsPerformance() {
       </div>
 
       {/* Inline filter bar — everything visible at once, no drawer */}
-      <div style={{ padding: '12px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 8 }}>
+      <div style={{ padding: '12px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9, marginBottom: 8 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, marginBottom: 12 }}>
           <ChipGroup label="Range" value={dateRange.preset}
             setValue={(v) => setDateRange(v === 'custom' ? { ...dateRange, preset: 'custom' } : rangeFromPreset(v))}
@@ -1633,7 +1633,7 @@ export default function AdsPerformance() {
 
       {/* Hierarchical table */}
       {!loading && tree.length > 0 && (
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, overflowX: 'auto' }}>
+        <div style={{ background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9, overflowX: 'auto' }}>
           <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
@@ -1698,7 +1698,7 @@ function OrphanClosesModal({ rows, onClose }) {
               These prospects closed but couldn't be matched to any Meta ad via Typeform (no form submission) or HYROS (no attributed event with a meta_ad_id). Likely cold outreach, old funnel re-engagements, or historical backfills. The revenue is real — just not creditable to a creative.
             </p>
           </div>
-          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 9, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
             <X size={14} />
           </button>
         </div>
@@ -1773,7 +1773,7 @@ function CampaignBlock({ camp, open, onToggle, expandedAdSets, onToggleAdSet, on
                 padding: '2px 6px',
                 background: anyActive ? 'var(--accent-soft)' : 'transparent',
                 border: anyActive ? '1px solid var(--accent)' : '1px solid var(--rule)',
-                borderRadius: 2,
+                borderRadius: 9,
                 fontWeight: 600,
               }}
             >
@@ -1863,9 +1863,9 @@ function AdSetBlock({ set, open, onToggle, onDrill }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 56 }}>
               <StatusDot active={isActive} size={6} />
               {ad.thumbnail_url || ad.asset_url ? (
-                <img src={ad.asset_url || ad.thumbnail_url} alt="" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 2, background: 'var(--paper-2)', flexShrink: 0 }} />
+                <img src={ad.asset_url || ad.thumbnail_url} alt="" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 9, background: 'var(--paper-2)', flexShrink: 0 }} />
               ) : (
-                <div style={{ width: 28, height: 28, background: 'var(--paper-2)', borderRadius: 2, flexShrink: 0 }} />
+                <div style={{ width: 28, height: 28, background: 'var(--paper-2)', borderRadius: 9, flexShrink: 0 }} />
               )}
               <Link to={`/sales/ads/ad/${ad.ad_id}`} style={{ fontFamily: 'var(--serif)', fontSize: 13, color: isActive ? 'var(--ink)' : 'var(--ink-3)', textDecoration: 'underline', textDecorationColor: 'var(--ink-4)', textDecorationStyle: 'dotted' }}>
                 {ad.ad_name || ad.ad_id}
@@ -1944,7 +1944,7 @@ function StatusPill({ status }) {
       background: isActive ? 'var(--accent-soft)' : 'transparent',
       color: isActive ? 'var(--ink)' : 'var(--ink-3)',
       border: '1px solid', borderColor: isActive ? 'var(--accent)' : 'var(--rule)',
-      borderRadius: 2,
+      borderRadius: 9,
       fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
     }}>{status}</span>
   )
@@ -1963,7 +1963,7 @@ function TotalsTile({ label, value, sub, valueColor, onClick, tip }) {
         cursor: clickable ? 'pointer' : 'default',
         padding: clickable ? '2px 4px' : 0,
         margin: clickable ? '-2px -4px' : 0,
-        borderRadius: 3,
+        borderRadius: 9,
         transition: 'background 0.12s',
       }}
       onMouseEnter={clickable ? (e) => { e.currentTarget.style.background = 'rgba(244,225,74,0.10)' } : undefined}
@@ -2073,7 +2073,7 @@ function EmptyStateDiagnostic({ ads, statusFilter, advFilter, dateRange, onClear
   }
 
   return (
-    <div style={{ border: '1px dashed var(--rule)', borderRadius: 4, padding: 32, textAlign: 'center', background: 'var(--paper-2)' }}>
+    <div style={{ border: '1px dashed var(--rule)', borderRadius: 10, padding: 32, textAlign: 'center', background: 'var(--paper-2)' }}>
       <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center', display: 'inline-flex', marginBottom: 12 }}>
         {eyebrow}
       </span>
@@ -2110,7 +2110,7 @@ function EmptyStateDiagnostic({ ads, statusFilter, advFilter, dateRange, onClear
               padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
               letterSpacing: '0.06em', textTransform: 'uppercase',
               background: 'var(--ink)', color: 'var(--paper)',
-              border: '1px solid var(--ink)', borderRadius: 2, cursor: 'pointer',
+              border: '1px solid var(--ink)', borderRadius: 9, cursor: 'pointer',
             }}>Clear all filters</button>
           </div>
         </>
@@ -2124,7 +2124,7 @@ function EmptyStateDiagnostic({ ads, statusFilter, advFilter, dateRange, onClear
               letterSpacing: '0.06em', textTransform: 'uppercase',
               background: i === 0 ? 'var(--ink)' : 'transparent',
               color: i === 0 ? 'var(--paper)' : 'var(--ink)',
-              border: '1px solid var(--ink)', borderRadius: 2, cursor: 'pointer',
+              border: '1px solid var(--ink)', borderRadius: 9, cursor: 'pointer',
             }}>{c.label}</button>
           ))}
         </div>
@@ -2140,7 +2140,7 @@ function ActiveFilterPill({ label, onClear }) {
       padding: '4px 8px 4px 10px',
       background: 'var(--accent-soft, rgba(244,225,74,0.18))',
       border: '1px solid var(--accent)',
-      borderRadius: 2,
+      borderRadius: 9,
       fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', color: 'var(--ink)',
     }}>
       {label}
@@ -2168,10 +2168,10 @@ function RangeFilter({ label, valueMin, valueMax, onMin, onMax }) {
       <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4, fontWeight: 600 }}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <input type="number" min="0" value={valueMin} onChange={e => onMin(e.target.value)} placeholder="min"
-          style={{ width: '100%', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 7px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none' }} />
+          style={{ width: '100%', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, padding: '5px 7px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none' }} />
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>→</span>
         <input type="number" min="0" value={valueMax} onChange={e => onMax(e.target.value)} placeholder="max"
-          style={{ width: '100%', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 7px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none' }} />
+          style={{ width: '100%', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, padding: '5px 7px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none' }} />
       </div>
     </div>
   )
@@ -2192,13 +2192,13 @@ function ChipGroup({ label, value, setValue, options }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500, marginRight: 4 }}>{label}</span>
-      <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: 2 }}>
+      <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, padding: 2 }}>
         {options.map(opt => {
           const active = value === opt.value
           return (
             <button key={String(opt.value)} onClick={() => setValue(opt.value)} style={{
               padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500,
-              background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink-3)', borderRadius: 2,
+              background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink-3)', borderRadius: 9,
               border: 'none', cursor: 'pointer',
             }}>{opt.label}</button>
           )
@@ -2383,12 +2383,12 @@ function sortCompare(a, b, key, dir) {
 
 const btnGhost = {
   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-  background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 3,
+  background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 9,
   fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
 }
 
 const dateInputStyle = {
-  background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2,
+  background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9,
   padding: '4px 6px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)',
   outline: 'none',
 }
@@ -2923,7 +2923,7 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
             </p>
           </div>
           <button onClick={onClose} aria-label="Close" style={{
-            background: 'transparent', border: '1px solid var(--rule)', borderRadius: 3,
+            background: 'transparent', border: '1px solid var(--rule)', borderRadius: 9,
             padding: '6px 10px', cursor: 'pointer', color: 'var(--ink-3)',
             fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
           }}>
@@ -2932,7 +2932,7 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
         </div>
 
         {error && (
-          <div style={{ padding: '12px 14px', background: 'rgba(180,30,30,0.08)', border: '1px solid #b41e1e', color: '#b41e1e', borderRadius: 3, fontSize: 13, marginBottom: 16 }}>
+          <div style={{ padding: '12px 14px', background: 'rgba(180,30,30,0.08)', border: '1px solid #b41e1e', color: '#b41e1e', borderRadius: 9, fontSize: 13, marginBottom: 16 }}>
             {error}
           </div>
         )}
@@ -2985,7 +2985,7 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
                           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', marginTop: 2 }}>
                             {r._adset_name || '—'}
                             {isPaused && (
-                              <span style={{ marginLeft: 6, padding: '1px 5px', background: '#fee', color: '#a44', borderRadius: 2, fontSize: 9 }}>
+                              <span style={{ marginLeft: 6, padding: '1px 5px', background: '#fee', color: '#a44', borderRadius: 9, fontSize: 9 }}>
                                 {adStatus}
                               </span>
                             )}
@@ -2997,7 +2997,7 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
                     </td>
                     <td style={drillTd}>
                       <span style={{
-                        padding: '2px 8px', borderRadius: 2,
+                        padding: '2px 8px', borderRadius: 9,
                         fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
                         background: r.attribution_source === 'manual' ? 'var(--accent-soft)' : 'transparent',
                         border: '1px solid', borderColor: isTf ? '#b88714' : (r.attribution_source === 'manual' ? 'var(--accent)' : 'var(--rule)'),
@@ -3033,7 +3033,7 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
                   </td>
                   <td style={drillTd}>
                     <span style={{
-                      padding: '2px 8px', borderRadius: 2,
+                      padding: '2px 8px', borderRadius: 9,
                       fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
                       background: r.outcome === 'closed' ? 'rgba(31,122,58,0.10)' : 'transparent',
                       border: '1px solid', borderColor: r.outcome === 'closed' ? '#1f7a3a' : 'var(--rule)',
@@ -3081,7 +3081,7 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
                     </td>
                     <td style={drillTd}>
                       <span style={{
-                        padding: '2px 8px', borderRadius: 2,
+                        padding: '2px 8px', borderRadius: 9,
                         fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
                         background: isGhl ? 'rgba(38,117,212,0.10)' : 'rgba(184,135,20,0.10)',
                         border: '1px solid', borderColor: isGhl ? '#2675d4' : '#b88714',
@@ -3090,7 +3090,7 @@ function ProspectDrillModal({ drill, dateRange, ads, onClose }) {
                     </td>
                     <td style={drillTd}>
                       <span style={{
-                        padding: '2px 8px', borderRadius: 2,
+                        padding: '2px 8px', borderRadius: 9,
                         fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em',
                         background: r.qualified ? 'var(--accent-soft)' : 'transparent',
                         border: '1px solid', borderColor: r.qualified ? 'var(--accent)' : 'var(--rule)',
@@ -3160,7 +3160,7 @@ function RefreshFromMetaButton({ onDone }) {
           fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.12em",
           textTransform: "uppercase", padding: "4px 10px",
           border: "1px solid var(--ink-3)", background: busy ? "var(--paper-2)" : "var(--paper)",
-          color: "var(--ink)", cursor: busy ? "wait" : "pointer", borderRadius: 2,
+          color: "var(--ink)", cursor: busy ? "wait" : "pointer", borderRadius: 9,
         }}
         title="Pulls last 30 days of insights + creatives from Meta. ~60s."
       >

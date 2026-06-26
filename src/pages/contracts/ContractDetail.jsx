@@ -587,7 +587,7 @@ function AmendmentThread({ amendment, messages, contract, onChange, onContractCh
           there's something concrete to lock. One click → lock + regen
           + open the PDF + post a receipt message in the thread. */}
       {canGenerate && (
-        <div className="mb-4 p-4" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
+        <div className="mb-4 p-4" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 9 }}>
           <p style={{ fontSize: 13, color: 'var(--ink)', margin: 0, lineHeight: 1.4 }}>
             The judge has finalised the clause language above. Ready to lock it in and generate the amended document?
           </p>
@@ -698,7 +698,7 @@ function LockedPanel({ amendment, fallbackClause, contract, onContractChange }) 
   }
 
   return (
-    <div className="mt-3 p-4" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
+    <div className="mt-3 p-4" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 9 }}>
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -726,7 +726,7 @@ function LockedPanel({ amendment, fallbackClause, contract, onContractChange }) 
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
             Final clause language captured
           </span>
-          <pre style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)', whiteSpace: 'pre-wrap', margin: '6px 0 0', padding: 10, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3 }}>
+          <pre style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)', whiteSpace: 'pre-wrap', margin: '6px 0 0', padding: 10, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9 }}>
             {clauseText}
           </pre>
         </div>
@@ -795,7 +795,7 @@ function MessageBubble({ message }) {
           background: isCloser ? 'var(--ink)' : 'var(--paper)',
           color: isCloser ? 'var(--paper)' : 'var(--ink)',
           border: isCloser ? '1px solid var(--ink)' : '1px solid var(--rule)',
-          borderRadius: 3,
+          borderRadius: 9,
           fontSize: 13,
           lineHeight: 1.55,
           whiteSpace: 'pre-wrap',
@@ -805,7 +805,7 @@ function MessageBubble({ message }) {
           ))}
         </div>
         {proposedClause && !isCloser && (
-          <div className="mt-2 p-3" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
+          <div className="mt-2 p-3" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 9 }}>
             <div className="flex items-start justify-between gap-2 mb-1">
               <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
                 Proposed clause language

@@ -46,7 +46,7 @@ function AssignmentChip({ status }) {
       whiteSpace: 'nowrap',
     }}>
       <span style={{
-        width: 6, height: 6, borderRadius: 6, background: cfg.color, flexShrink: 0,
+        width: 6, height: 6, borderRadius: 11, background: cfg.color, flexShrink: 0,
       }} />
       {cfg.label}
     </span>
@@ -476,7 +476,7 @@ function FilterGroup({ group, counts, active, toggle }) {
                     color: 'var(--accent)', fontSize: 9, flexShrink: 0,
                   }}>{isActive ? '✓' : ''}</span>
                   <span style={{
-                    width: 7, height: 7, borderRadius: 7, background: valColor, flexShrink: 0,
+                    width: 7, height: 7, borderRadius: 12, background: valColor, flexShrink: 0,
                   }} />
                   <span style={{
                     fontSize: 12.5,
@@ -642,7 +642,7 @@ function CreativeRow({ c, rank, isPodium, onClick, onToggleWinner, onToggleExclu
               fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 500,
               letterSpacing: '0.06em', textTransform: 'uppercase',
               color: isExcluded ? '#b53e3e' : 'var(--ink-5)',
-              borderRadius: 2,
+              borderRadius: 9,
             }}>
             {isExcluded ? '✗ Excluded' : 'Exclude'}
           </button>

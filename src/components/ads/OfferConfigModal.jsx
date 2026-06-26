@@ -170,7 +170,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
           overflow: 'auto',
           border: '1px solid var(--rule)',
           borderTop: '3px solid var(--accent)',
-          borderRadius: 2,
+          borderRadius: 9,
           boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
         }}>
         {/* Header */}
@@ -200,7 +200,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
 
           {err && (
             <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fca5a5',
-                          color: '#b53e3e', fontSize: 13, marginBottom: 16, borderRadius: 2 }}>
+                          color: '#b53e3e', fontSize: 13, marginBottom: 16, borderRadius: 9 }}>
               <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
             </div>
           )}
@@ -283,7 +283,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
                   padding: '10px 14px', fontFamily: 'var(--mono)', fontSize: 11,
                   letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
                   border: '1px dashed var(--ink-3)', background: 'transparent',
-                  color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                  color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9,
                   display: 'inline-flex', alignItems: 'center', gap: 6,
                   alignSelf: 'flex-start',
                 }}>
@@ -300,7 +300,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
             multiline />
 
           <div style={{ marginTop: 16, padding: 14, background: 'var(--paper)', border: '1px solid var(--rule)',
-                        borderRadius: 2 }}>
+                        borderRadius: 9 }}>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
               <input type="checkbox" checked={form.has_dual_guarantee} style={{ marginTop: 3 }}
                 onChange={e => setForm({ ...form, has_dual_guarantee: e.target.checked })} />
@@ -339,7 +339,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
                         letterSpacing: '0.12em', textTransform: 'uppercase',
                         border: '1px solid #b53e3e', background: 'transparent',
                         color: '#b53e3e', cursor: (saving || retiring) ? 'wait' : 'pointer',
-                        opacity: (saving || retiring) ? 0.5 : 1, borderRadius: 2,
+                        opacity: (saving || retiring) ? 0.5 : 1, borderRadius: 9,
                         display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <Trash2 size={12} />
                 Retire offer
@@ -351,7 +351,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
               style={{ padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
                       letterSpacing: '0.12em', textTransform: 'uppercase',
                       border: '1px solid var(--rule)', background: 'transparent',
-                      color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2 }}>
+                      color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9 }}>
               Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
@@ -359,7 +359,7 @@ export default function OfferConfigModal({ open, onClose, onSaved, existing }) {
                       letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
                       border: '2px solid var(--ink)', background: 'var(--ink)',
                       color: 'var(--paper)', cursor: saving ? 'wait' : 'pointer',
-                      opacity: saving ? 0.6 : 1, borderRadius: 2,
+                      opacity: saving ? 0.6 : 1, borderRadius: 9,
                       boxShadow: !saving ? '3px 3px 0 var(--accent)' : 'none' }}>
               <Check size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
               {saving ? 'Saving…' : isEdit ? 'Save offer' : 'Create offer'}
@@ -391,7 +391,7 @@ function OfferProofRow({ index, proof, onChange, onRemove }) {
     <div style={{
       padding: 12, background: 'var(--paper)',
       border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
-      borderRadius: 2,
+      borderRadius: 9,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
         <span style={{
@@ -405,7 +405,7 @@ function OfferProofRow({ index, proof, onChange, onRemove }) {
             padding: '5px 8px', fontFamily: 'var(--mono)', fontSize: 10.5,
             letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600,
             border: '1px solid var(--rule)', background: 'var(--paper)',
-            color: 'var(--ink)', borderRadius: 2, outline: 'none', cursor: 'pointer',
+            color: 'var(--ink)', borderRadius: 9, outline: 'none', cursor: 'pointer',
           }}>
           {OFFER_PROOF_TYPES.map(t => (
             <option key={t.value} value={t.value}>{t.label}</option>
@@ -415,7 +415,7 @@ function OfferProofRow({ index, proof, onChange, onRemove }) {
           style={{
             marginLeft: 'auto', padding: 6, background: 'transparent',
             border: '1px solid var(--rule)', color: 'var(--ink-4)',
-            cursor: 'pointer', borderRadius: 2,
+            cursor: 'pointer', borderRadius: 9,
           }}
           onMouseEnter={(e) => e.currentTarget.style.color = '#b53e3e'}
           onMouseLeave={(e) => e.currentTarget.style.color = 'var(--ink-4)'}>
@@ -428,14 +428,14 @@ function OfferProofRow({ index, proof, onChange, onRemove }) {
           style={{
             padding: '8px 10px', fontFamily: 'var(--sans)', fontSize: 13,
             border: '1px solid var(--rule)', background: 'var(--paper)',
-            color: 'var(--ink)', borderRadius: 2, outline: 'none',
+            color: 'var(--ink)', borderRadius: 9, outline: 'none',
           }} />
         <input type="text" value={proof.result_short || ''} placeholder={typeMeta.resultPh}
           onChange={e => onChange({ result_short: e.target.value })}
           style={{
             padding: '8px 10px', fontFamily: 'var(--sans)', fontSize: 13,
             border: '1px solid var(--rule)', background: 'var(--paper)',
-            color: 'var(--ink)', borderRadius: 2, outline: 'none',
+            color: 'var(--ink)', borderRadius: 9, outline: 'none',
           }} />
       </div>
     </div>
@@ -448,7 +448,7 @@ function Field({ label, required, helper, value, onChange, placeholder, multilin
     fontFamily: 'var(--sans)', fontSize: 14,
     border: '1px solid var(--rule)', background: disabled ? 'var(--paper-2)' : 'var(--paper)',
     color: disabled ? 'var(--ink-4)' : 'var(--ink)',
-    borderRadius: 2, resize: multiline ? 'vertical' : undefined,
+    borderRadius: 9, resize: multiline ? 'vertical' : undefined,
   }
   return (
     <div style={{ marginBottom: 16 }}>

@@ -28,7 +28,7 @@ export function FormatBadge({ format }) {
       padding: '2px 8px', display: 'inline-block',
       fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
       letterSpacing: '0.1em', textTransform: 'uppercase',
-      color, background: bg, border: `1px solid ${color}`, borderRadius: 2,
+      color, background: bg, border: `1px solid ${color}`, borderRadius: 9,
     }}>{label}</span>
   )
 }
@@ -43,7 +43,7 @@ export function TierBadge({ tier }) {
       color: isAdmin ? '#a8650f' : 'var(--ink-3)',
       background: isAdmin ? '#fffaea' : 'var(--paper-2)',
       border: `1px solid ${isAdmin ? '#d09c08' : 'var(--rule)'}`,
-      borderRadius: 2,
+      borderRadius: 9,
     }}>{isAdmin ? 'Admin' : 'Editor'}</span>
   )
 }
@@ -291,7 +291,7 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
                 ) : (
                   <div onClick={ev => { ev.stopPropagation(); toggleSel(e.id) }}
                     style={{
-                      width: 16, height: 16, borderRadius: 2,
+                      width: 16, height: 16, borderRadius: 9,
                       border: isSel ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
                       background: isSel ? 'var(--accent)' : 'var(--paper)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -305,7 +305,7 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
                     )}
                   </div>
                 )}
-                <span style={{ width: 18, height: 18, borderRadius: 3, background: color }} />
+                <span style={{ width: 18, height: 18, borderRadius: 9, background: color }} />
                 <div style={{ fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>
                   {e.name}
                   {!e.active && <span style={{ marginLeft: 8, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)' }}>(inactive)</span>}
@@ -500,7 +500,7 @@ export function ShareLinksModal({ editors, onClose }) {
             <div style={{
               padding: '16px 18px', marginBottom: 20,
               background: '#fffaea', border: '2px solid #e8b408',
-              borderRadius: 2,
+              borderRadius: 9,
             }}>
               <div style={{
                 fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
@@ -592,7 +592,7 @@ export function ShareLinksModal({ editors, onClose }) {
                   display: 'grid', gridTemplateColumns: '180px 1fr auto', gap: 14, alignItems: 'center',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ width: 14, height: 14, borderRadius: 3, background: color }} />
+                    <span style={{ width: 14, height: 14, borderRadius: 9, background: color }} />
                     <span style={{ fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 500 }}>{e.name}</span>
                   </div>
                   <div style={{ minWidth: 0 }}>
@@ -883,7 +883,7 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
             <button type="button" onClick={() => setColor('')}
               title="Use the auto color (hash from name)"
               style={{
-                width: 28, height: 28, borderRadius: 4,
+                width: 28, height: 28, borderRadius: 10,
                 background: 'repeating-linear-gradient(45deg, var(--paper), var(--paper) 4px, var(--rule) 4px, var(--rule) 6px)',
                 border: !color ? '2px solid var(--ink)' : '1px solid var(--rule)',
                 cursor: 'pointer',
@@ -892,7 +892,7 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
               <button key={c} type="button" onClick={() => setColor(c)}
                 title={c}
                 style={{
-                  width: 28, height: 28, borderRadius: 4,
+                  width: 28, height: 28, borderRadius: 10,
                   background: c,
                   border: color === c ? '2px solid var(--ink)' : '1px solid rgba(0,0,0,0.15)',
                   cursor: 'pointer',
@@ -901,7 +901,7 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
             <input type="color" value={color || editorColor({ slug: editor.slug, color: null })}
               onChange={e => setColor(e.target.value)}
               title="Pick a custom hex color"
-              style={{ width: 28, height: 28, border: '1px solid var(--rule)', borderRadius: 4, cursor: 'pointer', background: 'var(--paper)', padding: 0 }} />
+              style={{ width: 28, height: 28, border: '1px solid var(--rule)', borderRadius: 10, cursor: 'pointer', background: 'var(--paper)', padding: 0 }} />
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 6 }}>
             {color ? `Custom: ${color}` : 'Auto (hash of name)'}
@@ -1480,7 +1480,7 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
                         display: 'flex', alignItems: 'center', gap: 10,
                       }}>
                       <span style={{
-                        width: 16, height: 16, borderRadius: 2,
+                        width: 16, height: 16, borderRadius: 9,
                         border: isOn ? '2px solid var(--ink)' : '1.5px solid var(--ink-3)',
                         background: isOn ? 'var(--accent)' : 'var(--paper)',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -1590,7 +1590,7 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
                 )}
               </div>
               {uploadProgress != null && (
-                <div style={{ marginTop: 8, height: 4, background: 'var(--rule)', borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ marginTop: 8, height: 4, background: 'var(--rule)', borderRadius: 9, overflow: 'hidden' }}>
                   <div style={{
                     width: `${uploadProgress}%`, height: '100%',
                     background: uploadProgress === 100 ? '#3e8a5e' : 'var(--accent)',
@@ -1666,13 +1666,13 @@ export function DateEditPopover({ popover, onClose, onSave, onFullEdit }) {
   const left = Math.min(popover.x, window.innerWidth - 256)
   const top  = Math.min(popover.y, window.innerHeight - 180)
   const inp  = { display: 'block', width: '100%', marginTop: 3, padding: '5px 8px',
-                 background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3,
+                 background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9,
                  fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink)', boxSizing: 'border-box' }
   return (
     <div ref={ref} style={{
       position: 'fixed', left, top, zIndex: 1200, width: 236,
       background: 'var(--paper)', border: '1px solid var(--rule)',
-      borderRadius: 4, padding: 14, boxShadow: '0 4px 16px rgba(0,0,0,0.28)',
+      borderRadius: 10, padding: 14, boxShadow: '0 4px 16px rgba(0,0,0,0.28)',
     }}>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                     letterSpacing: '0.08em', textTransform: 'uppercase',
@@ -1691,11 +1691,11 @@ export function DateEditPopover({ popover, onClose, onSave, onFullEdit }) {
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
         <button onClick={() => onSave(start, due)}
           style={{ flex: 1, padding: '6px 0', background: 'var(--ink)', color: 'var(--paper)',
-                   border: 'none', borderRadius: 3, fontFamily: 'var(--mono)', fontSize: 11,
+                   border: 'none', borderRadius: 9, fontFamily: 'var(--mono)', fontSize: 11,
                    fontWeight: 600, cursor: 'pointer', letterSpacing: '0.06em' }}>Save</button>
         <button onClick={onFullEdit}
           style={{ padding: '6px 10px', background: 'transparent', color: 'var(--ink-3)',
-                   border: '1px solid var(--rule)', borderRadius: 3, fontFamily: 'var(--mono)',
+                   border: '1px solid var(--rule)', borderRadius: 9, fontFamily: 'var(--mono)',
                    fontSize: 10, cursor: 'pointer' }}>Full edit</button>
       </div>
     </div>

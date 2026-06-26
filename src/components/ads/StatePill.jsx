@@ -31,7 +31,7 @@ export default function StatePill({ state, size = 'sm' }) {
         padding,
         border: `1px solid ${s.bd}`,
         borderStyle: s.dashed ? 'dashed' : 'solid',
-        borderRadius: 2,
+        borderRadius: 9,
         background: s.bg,
         color: s.fg,
         fontFamily: 'var(--mono)',

@@ -22,8 +22,8 @@ function formatRangeLabel(selected) {
   return null
 }
 
-const segActive = { background: 'var(--ink)', color: 'var(--paper)', borderRadius: 3 }
-const segIdle   = { background: 'transparent', color: 'var(--ink-3)', borderRadius: 3 }
+const segActive = { background: 'var(--ink)', color: 'var(--paper)', borderRadius: 9 }
+const segIdle   = { background: 'transparent', color: 'var(--ink-3)', borderRadius: 9 }
 
 export default function DateRangeSelector({ selected, onChange }) {
   const [open, setOpen] = useState(false)
@@ -100,7 +100,7 @@ export default function DateRangeSelector({ selected, onChange }) {
         style={{
           background: 'var(--paper)',
           border: '1px solid var(--rule)',
-          borderRadius: 3,
+          borderRadius: 9,
           padding: 3,
         }}
       >
@@ -158,7 +158,7 @@ export default function DateRangeSelector({ selected, onChange }) {
             width: popover.maxWidth,
             background: 'var(--paper)',
             border: '1px solid var(--rule)',
-            borderRadius: 4,
+            borderRadius: 10,
             padding: 18,
             boxShadow: '0 16px 40px rgba(10,10,10,0.12)',
           }}
@@ -240,7 +240,7 @@ export default function DateRangeSelector({ selected, onChange }) {
                     letterSpacing: '0.1em',
                     textTransform: 'uppercase',
                     fontWeight: 500,
-                    borderRadius: 2,
+                    borderRadius: 9,
                     transition: 'color 160ms ease, border-color 160ms ease',
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.borderColor = 'var(--ink-3)' }}
@@ -259,7 +259,7 @@ export default function DateRangeSelector({ selected, onChange }) {
               marginTop: 16,
               width: '100%',
               padding: '8px 12px',
-              borderRadius: 3,
+              borderRadius: 9,
               fontFamily: 'var(--mono)',
               fontSize: 11,
               letterSpacing: '0.1em',

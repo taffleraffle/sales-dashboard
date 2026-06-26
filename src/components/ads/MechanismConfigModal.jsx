@@ -102,7 +102,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
           overflow: 'auto',
           border: '1px solid var(--rule)',
           borderTop: '3px solid var(--accent)',
-          borderRadius: 2,
+          borderRadius: 9,
           boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
         }}>
         {/* Header */}
@@ -133,7 +133,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
           </p>
           <p style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13,
                       color: '#7a5810', background: '#fef6e6', border: '1px solid #e8c98a',
-                      padding: '10px 14px', borderRadius: 2, margin: '0 0 18px', lineHeight: 1.5 }}>
+                      padding: '10px 14px', borderRadius: 9, margin: '0 0 18px', lineHeight: 1.5 }}>
             <strong>Naming rule:</strong> a mechanism is a <strong>named system</strong> you sell —
             something brandable a prospect could say. <em>"The Direct CPA Engine"</em>,
             <em> "The Pipe Flow Method"</em>, <em>"The Banker Referral Loop"</em>. Not a strategy
@@ -144,7 +144,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
 
           {err && (
             <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fca5a5',
-                          color: '#b53e3e', fontSize: 13, marginBottom: 16, borderRadius: 2 }}>
+                          color: '#b53e3e', fontSize: 13, marginBottom: 16, borderRadius: 9 }}>
               <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
             </div>
           )}
@@ -251,7 +251,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
                             border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
                             background: on ? 'var(--ink)' : 'var(--paper)',
                             color: on ? 'var(--paper)' : 'var(--ink-3)',
-                            cursor: 'pointer', borderRadius: 2,
+                            cursor: 'pointer', borderRadius: 9,
                           }}>
                           {o.name}
                         </button>
@@ -278,7 +278,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
                             border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
                             background: on ? 'var(--ink)' : 'var(--paper)',
                             color: on ? 'var(--paper)' : 'var(--ink-3)',
-                            cursor: 'pointer', borderRadius: 2,
+                            cursor: 'pointer', borderRadius: 9,
                           }}>
                           {a.name}
                         </button>
@@ -304,7 +304,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
             style={{ padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
                     letterSpacing: '0.12em', textTransform: 'uppercase',
                     border: '1px solid var(--rule)', background: 'transparent',
-                    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2 }}>
+                    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9 }}>
             Cancel
           </button>
           <button onClick={handleSave} disabled={saving}
@@ -312,7 +312,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
                     letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
                     border: '2px solid var(--ink)', background: 'var(--ink)',
                     color: 'var(--paper)', cursor: saving ? 'wait' : 'pointer',
-                    opacity: saving ? 0.6 : 1, borderRadius: 2,
+                    opacity: saving ? 0.6 : 1, borderRadius: 9,
                     boxShadow: !saving ? '3px 3px 0 var(--accent)' : 'none' }}>
             <Check size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
             {saving ? 'Saving…' : isEdit ? 'Save mechanism' : 'Create mechanism'}
@@ -329,7 +329,7 @@ function Field({ label, required, helper, value, onChange, placeholder, multilin
     fontFamily: 'var(--sans)', fontSize: 14,
     border: '1px solid var(--rule)', background: disabled ? 'var(--paper-2)' : 'var(--paper)',
     color: disabled ? 'var(--ink-4)' : 'var(--ink)',
-    borderRadius: 2, resize: multiline ? 'vertical' : undefined,
+    borderRadius: 9, resize: multiline ? 'vertical' : undefined,
   }
   return (
     <div style={{ marginBottom: 16 }}>

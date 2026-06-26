@@ -835,7 +835,7 @@ export function RenameUnnamedButton({ rows, onComplete }) {
         background: busy ? 'var(--paper-2)' : 'var(--paper)',
         color: busy ? 'var(--ink-3)' : '#a86a08',
         border: '1px solid ' + (busy ? 'var(--rule)' : '#e8b408'),
-        borderRadius: 2,
+        borderRadius: 9,
         cursor: busy ? 'wait' : 'pointer',
       }}
     >
@@ -1488,7 +1488,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                       onClick={() => setEditorTarget({ mode: 'split', indices: [i] })}
                       title="Open in the Clip Editor — cut into takes, trim stutters, preview"
                       style={{
-                        padding: '3px 9px', borderRadius: 2,
+                        padding: '3px 9px', borderRadius: 9,
                         background: 'var(--paper)', color: 'var(--ink-2)',
                         border: '1px solid var(--rule)',
                         fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
@@ -1499,7 +1499,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                   <button onClick={() => toggleMarkedBad(i)} type="button"
                     title={item.markedBad ? 'Currently flagged as bad take — click to keep' : 'Mark as bad take (will be hidden from editor library)'}
                     style={{
-                      padding: '3px 9px', borderRadius: 2,
+                      padding: '3px 9px', borderRadius: 9,
                       background: item.markedBad ? '#b53e3e' : 'var(--paper)',
                       color: item.markedBad ? 'white' : 'var(--ink-3)',
                       border: '1px solid ' + (item.markedBad ? '#b53e3e' : 'var(--rule)'),

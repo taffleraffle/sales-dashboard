@@ -339,7 +339,7 @@ export function ErrorBanner({ msg, onRetry }) {
             padding: '4px 12px', fontFamily: 'var(--mono)', fontSize: 11,
             fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
             background: '#b53e3e', color: 'var(--paper)',
-            border: 'none', borderRadius: 2, cursor: 'pointer',
+            border: 'none', borderRadius: 9, cursor: 'pointer',
           }}>Retry</button>
       )}
     </div>

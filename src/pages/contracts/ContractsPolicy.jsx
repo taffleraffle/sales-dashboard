@@ -248,7 +248,7 @@ export default function ContractsPolicy() {
                 fontSize: 13,
                 background: 'var(--paper)',
                 border: '1px solid var(--rule)',
-                borderRadius: 3,
+                borderRadius: 9,
                 color: 'var(--ink)',
                 padding: 12,
                 fontFamily: 'var(--mono)',

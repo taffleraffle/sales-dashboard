@@ -156,7 +156,7 @@ function ChipGroup({ label, value, setValue, options }) {
       >
         {label}
       </span>
-      <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: 2 }}>
+      <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, padding: 2 }}>
         {options.map(opt => {
           const active = value === opt.value
           return (
@@ -172,7 +172,7 @@ function ChipGroup({ label, value, setValue, options }) {
                 fontWeight: 500,
                 background: active ? 'var(--ink)' : 'transparent',
                 color: active ? 'var(--paper)' : 'var(--ink-3)',
-                borderRadius: 2,
+                borderRadius: 9,
               }}
             >
               {opt.label}

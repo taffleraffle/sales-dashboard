@@ -178,7 +178,7 @@ function AttributeRail({ summaries, active, setActive, baseline }) {
               <LiftBadge lift={s.lift} size="sm" />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 7, height: 7, borderRadius: 7, background: color, flexShrink: 0 }} />
+              <span style={{ width: 7, height: 7, borderRadius: 12, background: color, flexShrink: 0 }} />
               <span style={{
                 fontFamily: 'var(--mono)', letterSpacing: '0.02em',
                 fontSize: 11, color: 'var(--ink-3)', fontWeight: 500,
@@ -541,7 +541,7 @@ function CombinationMatrix({ summary, attrSummaries, comboAttr, setComboAttr, fi
               padding: '6px 4px', borderBottom: '1px solid var(--rule)',
             }}>
               <span style={{
-                width: 7, height: 7, borderRadius: 7,
+                width: 7, height: 7, borderRadius: 12,
                 background: attrColor(effectiveCombo, c),
               }} />
               <span style={{

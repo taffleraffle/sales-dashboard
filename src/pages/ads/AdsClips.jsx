@@ -460,7 +460,7 @@ export default function AdsClips() {
       />
 
       {/* Filter bar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 16, alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9, marginBottom: 16, alignItems: 'center' }}>
         <FilterChips label="Type" value={filter.type} setValue={(v) => setFilter({ ...filter, type: v })}
           options={[{ value: 'all', label: 'All' }, ...CLIP_TYPES.map(t => ({ value: t.value, label: t.label, color: t.color }))]} />
         <FilterChips label="Funnel" value={filter.funnel} setValue={(v) => setFilter({ ...filter, funnel: v })}
@@ -474,7 +474,7 @@ export default function AdsClips() {
         <div style={{ flex: '1 1 200px', minWidth: 180, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
           <Search size={12} style={{ color: 'var(--ink-3)', flexShrink: 0, marginLeft: 4 }} />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name / description / notes…"
-            style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }} />
+            style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }} />
         </div>
       </div>
 
@@ -487,7 +487,7 @@ export default function AdsClips() {
       {loading && <div className="flex items-center justify-center py-16"><Loader className="animate-spin" style={{ color: 'var(--ink-3)' }} /></div>}
 
       {!loading && !filtered.length && (
-        <div style={{ border: '1px dashed var(--rule)', borderRadius: 4, padding: 40, textAlign: 'center', background: 'var(--paper-2)' }}>
+        <div style={{ border: '1px dashed var(--rule)', borderRadius: 10, padding: 40, textAlign: 'center', background: 'var(--paper-2)' }}>
           <span className="eyebrow eyebrow-accent" style={{ justifyContent: 'center', display: 'inline-flex', marginBottom: 12 }}>Empty</span>
           <h3 className="h3" style={{ fontSize: 20, marginBottom: 10 }}>{clips.length ? 'Nothing matches your filters.' : 'No clips yet — drop a file to start.'}</h3>
         </div>
@@ -597,7 +597,7 @@ function ClipCard({ clip, onOpen }) {
         background: 'var(--paper)',
         border: '1px solid var(--rule)',
         borderLeft: `3px solid ${tMeta.color}`,
-        borderRadius: 4,
+        borderRadius: 10,
         overflow: 'hidden',
         cursor: 'pointer',
         transition: 'box-shadow 120ms',
@@ -641,7 +641,7 @@ function ClipCard({ clip, onOpen }) {
           padding: '3px 8px',
           background: tMeta.color, color: '#fff',
           fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
-          borderRadius: 2,
+          borderRadius: 9,
         }}>{tMeta.label}</span>
         {/* Top-right: funnel chip */}
         {fMeta && (
@@ -650,7 +650,7 @@ function ClipCard({ clip, onOpen }) {
             padding: '3px 8px',
             background: fMeta.bg, color: fMeta.color, border: `1px solid ${fMeta.color}`,
             fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
-            borderRadius: 2,
+            borderRadius: 9,
           }}>{fMeta.short}</span>
         )}
         {/* Bottom-right: priority */}
@@ -660,7 +660,7 @@ function ClipCard({ clip, onOpen }) {
             padding: '2px 7px',
             background: 'rgba(0,0,0,0.6)', color: pMeta.color,
             fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700,
-            borderRadius: 2,
+            borderRadius: 9,
           }}>{pMeta.label} priority</span>
         )}
         {/* Play indicator when hover starts to load video */}
@@ -682,7 +682,7 @@ function ClipCard({ clip, onOpen }) {
         <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
           {STAGES.map(s => (
             <span key={s.key} title={s.label} style={{
-              width: 14, height: 14, borderRadius: 2,
+              width: 14, height: 14, borderRadius: 9,
               border: `1px solid ${clip[`stage_${s.key}`] ? '#1f7a3a' : 'var(--rule)'}`,
               background: clip[`stage_${s.key}`] ? '#1f7a3a' : 'transparent',
               fontFamily: 'var(--mono)', fontSize: 8, color: '#fff',
@@ -705,13 +705,13 @@ function ClipDrawer({ clip, creators, editors, onSave, onToggleStage, onDelete, 
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <span className="eyebrow eyebrow-accent">Edit clip</span>
-          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 9, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
             <X size={14} />
           </button>
         </div>
 
         {/* Thumbnail preview */}
-        <div style={{ width: '100%', aspectRatio: '16/9', background: '#0c0c0c', borderRadius: 3, overflow: 'hidden', marginBottom: 14 }}>
+        <div style={{ width: '100%', aspectRatio: '16/9', background: '#0c0c0c', borderRadius: 9, overflow: 'hidden', marginBottom: 14 }}>
           {clip.source_file_url ? (
             <video src={clip.source_file_url} controls muted playsInline poster={clip.thumbnail_url || undefined}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -790,7 +790,7 @@ function ClipDrawer({ clip, creators, editors, onSave, onToggleStage, onDelete, 
                 background: clip[`stage_${s.key}`] ? '#1f7a3a' : 'var(--paper-2)',
                 color: clip[`stage_${s.key}`] ? '#fff' : 'var(--ink-2)',
                 border: `1px solid ${clip[`stage_${s.key}`] ? '#1f7a3a' : 'var(--rule)'}`,
-                borderRadius: 2, cursor: 'pointer',
+                borderRadius: 9, cursor: 'pointer',
               }}>{s.label}</button>
             ))}
           </div>
@@ -799,7 +799,7 @@ function ClipDrawer({ clip, creators, editors, onSave, onToggleStage, onDelete, 
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--rule)', display: 'flex', justifyContent: 'space-between' }}>
           <button onClick={onDelete} style={{
             display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-            background: 'transparent', color: '#b41e1e', border: '1px solid #b41e1e', borderRadius: 3,
+            background: 'transparent', color: '#b41e1e', border: '1px solid #b41e1e', borderRadius: 9,
             fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
             cursor: 'pointer',
           }}>
@@ -840,12 +840,12 @@ function AddEntityModal({ kind, onClose, onSubmit }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.5)', zIndex: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div onClick={e => e.stopPropagation()} style={{
-        background: 'var(--paper)', borderRadius: 4, padding: '20px 24px', width: 380,
+        background: 'var(--paper)', borderRadius: 10, padding: '20px 24px', width: 380,
         border: '1px solid var(--rule)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <span className="eyebrow eyebrow-accent">{isCreator ? 'Add creator' : 'Add editor'}</span>
-          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 9, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
             <X size={14} />
           </button>
         </div>
@@ -878,12 +878,12 @@ function TsvModal({ onClose, onSubmit }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.5)', zIndex: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div onClick={e => e.stopPropagation()} style={{
-        background: 'var(--paper)', borderRadius: 4, padding: '20px 24px', width: 640, maxWidth: '95vw',
+        background: 'var(--paper)', borderRadius: 10, padding: '20px 24px', width: 640, maxWidth: '95vw',
         border: '1px solid var(--rule)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <span className="eyebrow eyebrow-accent">Paste TSV from Google Sheets</span>
-          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 9, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
             <X size={14} />
           </button>
         </div>
@@ -906,7 +906,7 @@ function FilterChips({ label, value, setValue, options }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500, marginRight: 4 }}>{label}</span>
-      <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: 2 }}>
+      <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, padding: 2 }}>
         {options.map(opt => {
           const active = value === opt.value
           return (
@@ -914,7 +914,7 @@ function FilterChips({ label, value, setValue, options }) {
               padding: '4px 9px',
               fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500,
               background: active ? (opt.color || 'var(--ink)') : 'transparent',
-              color: active ? '#fff' : 'var(--ink-3)', borderRadius: 2,
+              color: active ? '#fff' : 'var(--ink-3)', borderRadius: 9,
               border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
             }}>{opt.label}</button>
           )
@@ -928,7 +928,7 @@ function FilterSelect({ label, value, setValue, options }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500 }}>{label}</span>
       <select value={value} onChange={(e) => setValue(e.target.value)} style={{
-        background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2,
+        background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9,
         padding: '4px 6px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink)', outline: 'none',
       }}>
         {options.map(o => <option key={String(o.value)} value={o.value}>{o.label}</option>)}
@@ -952,16 +952,16 @@ function FieldRow({ children }) {
 
 const inputStyle = {
   width: '100%',
-  background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2,
+  background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9,
   padding: '7px 9px', fontFamily: 'var(--sans, system-ui)', fontSize: 13, color: 'var(--ink)', outline: 'none',
 }
 const btnSolid = {
   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-  background: 'var(--ink)', color: 'var(--paper)', border: '1px solid var(--ink)', borderRadius: 3,
+  background: 'var(--ink)', color: 'var(--paper)', border: '1px solid var(--ink)', borderRadius: 9,
   fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
 }
 const btnGhost = {
   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-  background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 3,
+  background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 9,
   fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
 }

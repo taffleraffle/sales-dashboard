@@ -538,6 +538,6 @@ export default function ClipEditorModal({
 const nudgeBtn = {
   padding: '3px 7px', fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
   background: 'transparent', color: 'var(--ink-2)',
-  border: '1px solid var(--rule)', borderRadius: 2, cursor: 'pointer',
+  border: '1px solid var(--rule)', borderRadius: 9, cursor: 'pointer',
   whiteSpace: 'nowrap',
 }

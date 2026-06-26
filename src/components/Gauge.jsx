@@ -20,7 +20,7 @@ export default function Gauge({ label, value, target, direction = 'above', max =
       style={{
         background: 'var(--paper)',
         border: '1px solid var(--rule)',
-        borderRadius: 4,
+        borderRadius: 10,
         padding: '16px 18px',
       }}
     >

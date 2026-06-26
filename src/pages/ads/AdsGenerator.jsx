@@ -709,7 +709,7 @@ export default function AdsGenerator() {
 
       {err && (
         <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fca5a5',
-                      color: '#b53e3e', fontSize: 13, marginBottom: 20, borderRadius: 2 }}>
+                      color: '#b53e3e', fontSize: 13, marginBottom: 20, borderRadius: 9 }}>
           <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
         </div>
       )}
@@ -765,7 +765,7 @@ export default function AdsGenerator() {
                   {incomplete && (
                     <span style={{ fontSize: 9, fontFamily: 'var(--mono)', letterSpacing: '0.1em',
                                   background: '#e0a93e', color: '#3b2a04', padding: '2px 5px',
-                                  borderRadius: 2, textTransform: 'uppercase' }}>
+                                  borderRadius: 9, textTransform: 'uppercase' }}>
                       needs config
                     </span>
                   )}
@@ -793,7 +793,7 @@ export default function AdsGenerator() {
               border: '2px dashed var(--rule)', background: 'transparent',
               color: 'var(--ink-3)',
               fontFamily: 'var(--sans)', fontSize: 14,
-              cursor: 'pointer', borderRadius: 2,
+              cursor: 'pointer', borderRadius: 9,
               display: 'inline-flex', alignItems: 'center', gap: 6,
             }}>
             <Plus size={14} />
@@ -822,7 +822,7 @@ export default function AdsGenerator() {
               background: '#fef6e6', border: '1px solid #e8c98a',
               borderLeft: '3px solid #d68f00',
               fontFamily: 'var(--sans)', fontSize: 13, color: '#7a5810',
-              borderRadius: 2, display: 'flex', alignItems: 'center', gap: 12,
+              borderRadius: 9, display: 'flex', alignItems: 'center', gap: 12,
             }}>
               <span style={{
                 display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
@@ -855,7 +855,7 @@ export default function AdsGenerator() {
             marginBottom: 6,
             padding: '16px 18px', background: 'var(--paper)',
             border: '1px solid var(--rule)', borderTop: '3px solid var(--ink)',
-            borderRadius: 2,
+            borderRadius: 9,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
               {[
@@ -885,7 +885,7 @@ export default function AdsGenerator() {
                           background: b.value === n ? 'var(--accent)' : 'var(--paper)',
                           color: 'var(--ink)',
                           fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600,
-                          cursor: 'pointer', borderRadius: 2, minWidth: 42,
+                          cursor: 'pointer', borderRadius: 9, minWidth: 42,
                         }}>{n}</button>
                     ))}
                   </div>
@@ -901,7 +901,7 @@ export default function AdsGenerator() {
                   background: messagingBusy ? 'var(--ink-3)' : 'var(--ink)',
                   color: 'var(--paper)', cursor: messagingBusy ? 'wait' : 'pointer',
                   opacity: (!offerSlug || (nProblems + nCircumstances + nOutcomes === 0)) ? 0.4 : 1,
-                  borderRadius: 2,
+                  borderRadius: 9,
                   boxShadow: !messagingBusy && offerSlug ? '4px 4px 0 var(--accent)' : 'none',
                   display: 'inline-flex', alignItems: 'center', gap: 8,
                 }}>
@@ -937,7 +937,7 @@ export default function AdsGenerator() {
                       width: '100%', maxWidth: 720, padding: '10px 12px',
                       fontFamily: 'var(--sans)', fontSize: 14,
                       border: '1px solid var(--rule)', background: 'var(--paper)',
-                      color: 'var(--ink)', resize: 'vertical', borderRadius: 2, outline: 'none',
+                      color: 'var(--ink)', resize: 'vertical', borderRadius: 9, outline: 'none',
                     }} />
                 </Block>
                 <Block title="Anything specific to mention?" dense
@@ -974,14 +974,14 @@ export default function AdsGenerator() {
                       letterSpacing: '0.12em', textTransform: 'uppercase',
                       border: `1px solid ${findSimilar ? '#3068b5' : 'var(--rule)'}`,
                       background: findSimilar ? '#eaf1fb' : 'transparent',
-                      color: findSimilar ? '#3068b5' : 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                      color: findSimilar ? '#3068b5' : 'var(--ink-3)', cursor: 'pointer', borderRadius: 9,
                     }}>{findSimilar ? '✓ Grouped' : 'Find similar'}</button>
                   <button onClick={() => refreshMessagingLibrary(offerSlug)}
                     style={{
                       padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
                       letterSpacing: '0.12em', textTransform: 'uppercase',
                       border: '1px solid var(--rule)', background: 'transparent',
-                      color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                      color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9,
                     }}>Refresh</button>
                   <button onClick={() => setAngleEditorTarget({ mode: 'create', angle: null })}
                     title="Add a custom angle to the library (skip Claude generation)"
@@ -989,7 +989,7 @@ export default function AdsGenerator() {
                       padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
                       letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
                       border: '1px solid #1a242c', background: '#1a242c',
-                      color: 'var(--paper)', cursor: 'pointer', borderRadius: 2,
+                      color: 'var(--paper)', cursor: 'pointer', borderRadius: 9,
                     }}>+ Custom angle</button>
                 </div>
               </div>
@@ -1003,7 +1003,7 @@ export default function AdsGenerator() {
                   gap: 12, flexWrap: 'wrap',
                   padding: '10px 14px', marginBottom: 12,
                   background: '#1a242c', color: 'var(--paper)',
-                  border: '1px solid #1a242c', borderRadius: 2,
+                  border: '1px solid #1a242c', borderRadius: 9,
                   fontFamily: 'var(--mono)', fontSize: 12,
                   boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                 }}>
@@ -1017,14 +1017,14 @@ export default function AdsGenerator() {
                         padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
                         letterSpacing: '0.12em', textTransform: 'uppercase',
                         background: 'transparent', color: 'var(--paper)',
-                        border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', borderRadius: 2,
+                        border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', borderRadius: 9,
                       }}>Select all {messagingLibrary.length} in library</button>
                     <button onClick={clearAngleSelection}
                       style={{
                         padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 10,
                         letterSpacing: '0.12em', textTransform: 'uppercase',
                         background: 'transparent', color: 'var(--paper)',
-                        border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', borderRadius: 2,
+                        border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', borderRadius: 9,
                       }}>Clear</button>
                   </div>
                   <button onClick={() => setBulkRetireOpen(true)}
@@ -1032,7 +1032,7 @@ export default function AdsGenerator() {
                       padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 11,
                       letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
                       background: '#b53e3e', color: 'var(--paper)',
-                      border: '1px solid #b53e3e', cursor: 'pointer', borderRadius: 2,
+                      border: '1px solid #b53e3e', cursor: 'pointer', borderRadius: 9,
                     }}>Retire {selectedAngleSlugs.size}</button>
                 </div>
               )}
@@ -1099,7 +1099,7 @@ export default function AdsGenerator() {
                     border: `1px solid ${messagingResult.grounding.hits > 0 ? '#bcd9be' : '#e8c98a'}`,
                     fontFamily: 'var(--sans)', fontSize: 12.5,
                     color: messagingResult.grounding.hits > 0 ? '#2f5f33' : '#7a5810',
-                    borderRadius: 2, lineHeight: 1.45,
+                    borderRadius: 9, lineHeight: 1.45,
                   }}>
                     {messagingResult.grounding.hits > 0 ? (
                       <>
@@ -1242,7 +1242,7 @@ export default function AdsGenerator() {
               <div style={{
                 marginBottom: 20, padding: '12px 14px',
                 background: 'var(--paper)', border: '1px solid var(--rule)',
-                borderLeft: '3px solid var(--accent)', borderRadius: 2,
+                borderLeft: '3px solid var(--accent)', borderRadius: 9,
               }}>
                 <div style={{
                   fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.14em',
@@ -1269,7 +1269,7 @@ export default function AdsGenerator() {
                           fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
                           textTransform: 'uppercase', color: 'var(--ink)', fontWeight: 600,
                           padding: '3px 8px', background: 'var(--paper)',
-                          border: '1px solid var(--ink)', borderRadius: 2,
+                          border: '1px solid var(--ink)', borderRadius: 9,
                         }}>
                           {t.replace('_', ' ')} <span style={{ opacity: 0.6, marginLeft: 2 }}>×{byType[t].length}</span>
                         </span>
@@ -1328,7 +1328,7 @@ export default function AdsGenerator() {
                       border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
                       background: on ? 'var(--ink)' : 'var(--paper)',
                       color: on ? 'var(--paper)' : 'var(--ink)',
-                      cursor: 'pointer', borderRadius: 2,
+                      cursor: 'pointer', borderRadius: 9,
                       display: 'flex', flexDirection: 'column', gap: 4,
                       position: 'relative',
                     }}>
@@ -1375,7 +1375,7 @@ export default function AdsGenerator() {
                       padding: '14px 16px',
                       border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
                       background: on ? 'var(--paper)' : 'var(--paper)',
-                      borderRadius: 2,
+                      borderRadius: 9,
                       display: 'flex', flexDirection: 'column', gap: 8,
                     }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
@@ -1401,7 +1401,7 @@ export default function AdsGenerator() {
                           width: 56, padding: '6px 8px',
                           fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 700, textAlign: 'center',
                           border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
-                          background: 'var(--paper)', borderRadius: 2,
+                          background: 'var(--paper)', borderRadius: 9,
                         }} />
                     </div>
                     <div style={{
@@ -1419,7 +1419,7 @@ export default function AdsGenerator() {
                             fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                             border: `1px solid ${n === q ? 'var(--ink)' : 'var(--rule)'}`,
                             background: n === q ? 'var(--accent)' : 'transparent',
-                            color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
+                            color: 'var(--ink)', cursor: 'pointer', borderRadius: 9,
                           }}>{q}</button>
                       ))}
                     </div>
@@ -1432,7 +1432,7 @@ export default function AdsGenerator() {
                 marginTop: 12, padding: '8px 12px',
                 background: 'var(--paper)', border: '1px solid var(--rule)',
                 fontFamily: 'var(--mono)', fontSize: 11.5,
-                color: 'var(--ink-2)', letterSpacing: '0.04em', borderRadius: 2,
+                color: 'var(--ink-2)', letterSpacing: '0.04em', borderRadius: 9,
               }}>
                 Total per (angle × type): <strong>{nConcepts}</strong>
                 {activeModes.length > 1 && (
@@ -1466,7 +1466,7 @@ export default function AdsGenerator() {
                       padding: '12px 14px',
                       border: `2px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
                       background: on ? 'var(--paper)' : 'var(--paper)',
-                      color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
+                      color: 'var(--ink)', cursor: 'pointer', borderRadius: 9,
                       display: 'flex', flexDirection: 'column', gap: 4,
                     }}>
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
@@ -1503,7 +1503,7 @@ export default function AdsGenerator() {
                 marginTop: 8, marginBottom: 6,
                 padding: '16px 18px', background: 'var(--paper)',
                 border: '1px solid var(--rule)', borderTop: '3px solid var(--ink)',
-                borderRadius: 2,
+                borderRadius: 9,
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
                   <div style={{
@@ -1522,7 +1522,7 @@ export default function AdsGenerator() {
                       border: '2px solid var(--ink)',
                       background: generating ? 'var(--ink-3)' : 'var(--ink)',
                       color: 'var(--paper)', cursor: disabled ? 'not-allowed' : (generating ? 'wait' : 'pointer'),
-                      opacity: disabled && !generating ? 0.4 : 1, borderRadius: 2,
+                      opacity: disabled && !generating ? 0.4 : 1, borderRadius: 9,
                       boxShadow: !disabled ? '4px 4px 0 var(--accent)' : 'none',
                       transition: 'all 140ms ease',
                       display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -1583,7 +1583,7 @@ export default function AdsGenerator() {
                           padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11,
                           letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
                           border: '1px solid var(--ink)', background: 'var(--paper)',
-                          color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
+                          color: 'var(--ink)', cursor: 'pointer', borderRadius: 9,
                           display: 'inline-flex', alignItems: 'center', gap: 6,
                         }}>
                         <Settings size={12} />
@@ -1611,7 +1611,7 @@ export default function AdsGenerator() {
                             border: `1px solid ${selectedProofNames.length === 0 ? 'var(--ink)' : 'var(--rule)'}`,
                             background: selectedProofNames.length === 0 ? 'var(--ink)' : 'var(--paper)',
                             color: selectedProofNames.length === 0 ? 'var(--paper)' : 'var(--ink-3)',
-                            cursor: 'pointer', borderRadius: 2,
+                            cursor: 'pointer', borderRadius: 9,
                           }}>
                           All ({proofCharacters.length})
                         </button>
@@ -1627,7 +1627,7 @@ export default function AdsGenerator() {
                                 border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
                                 background: on ? 'var(--ink)' : 'var(--paper)',
                                 color: on ? 'var(--paper)' : 'var(--ink-2)',
-                                cursor: 'pointer', borderRadius: 2,
+                                cursor: 'pointer', borderRadius: 9,
                                 display: 'inline-flex', alignItems: 'center', gap: 6,
                               }}>
                               {on && <Check size={12} />}
@@ -1655,7 +1655,7 @@ export default function AdsGenerator() {
                           background: mechanismSlug === '' ? 'var(--ink)' : 'var(--paper)',
                           color: mechanismSlug === '' ? 'var(--paper)' : 'var(--ink-3)',
                           fontFamily: 'var(--sans)', fontSize: 14, fontWeight: mechanismSlug === '' ? 600 : 400,
-                          cursor: 'pointer', borderRadius: 2,
+                          cursor: 'pointer', borderRadius: 9,
                         }}>None — use angle default</button>
                       {mechanisms.map(m => {
                         const on = m.slug === mechanismSlug
@@ -1698,7 +1698,7 @@ export default function AdsGenerator() {
                           border: '2px dashed var(--rule)', background: 'transparent',
                           color: 'var(--ink-3)',
                           fontFamily: 'var(--sans)', fontSize: 14,
-                          cursor: 'pointer', borderRadius: 2,
+                          cursor: 'pointer', borderRadius: 9,
                           display: 'inline-flex', alignItems: 'center', gap: 6,
                         }}>
                         <Plus size={14} />
@@ -1734,7 +1734,7 @@ export default function AdsGenerator() {
                               border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
                               background: on ? 'var(--accent)' : 'var(--paper)',
                               color: 'var(--ink)', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
-                              cursor: 'pointer', borderRadius: 2,
+                              cursor: 'pointer', borderRadius: 9,
                             }}>{opt.label}</button>
                         )
                       })}
@@ -1812,7 +1812,7 @@ export default function AdsGenerator() {
                   {incomplete && (
                     <span style={{ fontSize: 9, fontFamily: 'var(--mono)', letterSpacing: '0.1em',
                                   background: '#e0a93e', color: '#3b2a04', padding: '2px 5px',
-                                  borderRadius: 2, textTransform: 'uppercase' }}>
+                                  borderRadius: 9, textTransform: 'uppercase' }}>
                       needs config
                     </span>
                   )}
@@ -1840,7 +1840,7 @@ export default function AdsGenerator() {
               border: '2px dashed var(--rule)', background: 'transparent',
               color: 'var(--ink-3)',
               fontFamily: 'var(--sans)', fontSize: 14,
-              cursor: 'pointer', borderRadius: 2,
+              cursor: 'pointer', borderRadius: 9,
               display: 'inline-flex', alignItems: 'center', gap: 6,
               transition: 'all 140ms ease',
             }}>
@@ -1854,7 +1854,7 @@ export default function AdsGenerator() {
           if (!cur.mechanism_name || !cur.primary_audience) {
             return (
               <div style={{ marginTop: 12, padding: '10px 14px', background: '#fef9e7',
-                            border: '1px solid #e0a93e', fontSize: 13, borderRadius: 2,
+                            border: '1px solid #e0a93e', fontSize: 13, borderRadius: 9,
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', color: '#7a5c12' }}>
                   This offer is missing {[!cur.mechanism_name && 'mechanism', !cur.primary_audience && 'audience'].filter(Boolean).join(' + ')}.
@@ -1864,7 +1864,7 @@ export default function AdsGenerator() {
                   style={{ padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 11,
                           letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
                           border: '1px solid #7a5c12', background: '#7a5c12', color: '#fef9e7',
-                          cursor: 'pointer', borderRadius: 2 }}>
+                          cursor: 'pointer', borderRadius: 9 }}>
                   Configure now
                 </button>
               </div>
@@ -1893,7 +1893,7 @@ export default function AdsGenerator() {
                   background: nConcepts === n ? 'var(--accent)' : 'var(--paper)',
                   color: 'var(--ink)',
                   fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600,
-                  cursor: 'pointer', borderRadius: 2,
+                  cursor: 'pointer', borderRadius: 9,
                   transition: 'all 140ms ease',
                   minWidth: 70,
                 }}>{n}</button>
@@ -1908,7 +1908,7 @@ export default function AdsGenerator() {
                 width: 70, padding: '8px 10px',
                 fontFamily: 'var(--mono)', fontSize: 14, textAlign: 'center',
                 border: '1px solid var(--rule)', background: 'var(--paper)',
-                borderRadius: 2,
+                borderRadius: 9,
               }} />
           </div>
         </div>
@@ -1942,7 +1942,7 @@ export default function AdsGenerator() {
                 padding: '8px 12px', fontFamily: 'var(--mono)', fontSize: 11,
                 letterSpacing: '0.12em', textTransform: 'uppercase',
                 border: '1px solid var(--rule)', background: 'transparent',
-                color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9,
                 display: 'inline-flex', alignItems: 'center', gap: 6,
               }}>
               {advancedOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -1950,7 +1950,7 @@ export default function AdsGenerator() {
               {Object.keys(targets).length > 0 && (
                 <span style={{ marginLeft: 6, padding: '1px 6px', fontSize: 9,
                               background: 'var(--accent)', color: 'var(--ink)',
-                              fontWeight: 700, borderRadius: 2 }}>
+                              fontWeight: 700, borderRadius: 9 }}>
                   {Object.keys(targets).length}
                 </span>
               )}
@@ -1958,7 +1958,7 @@ export default function AdsGenerator() {
 
             {advancedOpen && (
               <div style={{ marginTop: 16, padding: 20, background: 'var(--paper)',
-                            border: '1px solid var(--rule)', borderRadius: 2 }}>
+                            border: '1px solid var(--rule)', borderRadius: 9 }}>
                 <p style={{ fontFamily: 'var(--serif)', fontSize: 13, fontStyle: 'italic',
                             color: 'var(--ink-4)', margin: '0 0 16px' }}>
                   Pick values to include. Multiple values within one attribute = the system
@@ -1995,7 +1995,7 @@ export default function AdsGenerator() {
                                 border: `1px solid ${isOn ? 'var(--ink)' : 'var(--rule)'}`,
                                 background: isOn ? 'var(--ink)' : 'var(--paper)',
                                 color: isOn ? 'var(--paper)' : 'var(--ink-3)',
-                                cursor: 'pointer', borderRadius: 2,
+                                cursor: 'pointer', borderRadius: 9,
                                 transition: 'all 120ms ease',
                               }}>
                               {o.label}
@@ -2223,7 +2223,7 @@ function AdvancedExpander({ label = 'Advanced (optional)', defaultOpen = false, 
   return (
     <div style={{ marginTop: 28, marginBottom: 16,
                   border: '1px solid var(--rule)', background: 'var(--paper)',
-                  borderRadius: 2 }}>
+                  borderRadius: 9 }}>
       <button onClick={() => setOpen(o => !o)}
         style={{
           width: '100%', padding: '12px 16px',
@@ -2306,7 +2306,7 @@ function HistoryRunRow({ bucket, rows, angleLookup, currentOfferSlug }) {
   return (
     <div style={{
       background: 'var(--paper)', border: '1px solid var(--rule)',
-      borderLeft: '3px solid var(--accent)', borderRadius: 2,
+      borderLeft: '3px solid var(--accent)', borderRadius: 9,
     }}>
       <button onClick={() => setOpen(o => !o)}
         style={{
@@ -2336,7 +2336,7 @@ function HistoryRunRow({ bucket, rows, angleLookup, currentOfferSlug }) {
               fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
               textTransform: 'uppercase', padding: '2px 7px',
               background: 'var(--paper)', border: '1px solid var(--rule)',
-              color: 'var(--ink-2)', borderRadius: 2,
+              color: 'var(--ink-2)', borderRadius: 9,
             }}>
               {t} · {n}
             </span>
@@ -2352,7 +2352,7 @@ function HistoryRunRow({ bucket, rows, angleLookup, currentOfferSlug }) {
                   fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
                   textTransform: 'uppercase', padding: '2px 7px',
                   background: mm.tint, border: `1px solid ${mm.color}`,
-                  color: mm.color, borderRadius: 2, fontWeight: 600,
+                  color: mm.color, borderRadius: 9, fontWeight: 600,
                 }}>
                   {mm.label} · {n}
                 </span>
@@ -2484,7 +2484,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
           background: 'var(--paper)',
           border: '1px solid var(--rule)',
           borderTop: mode ? `3px solid ${modeMeta.color}` : '3px solid var(--rule)',
-          borderRadius: 2,
+          borderRadius: 9,
           padding: '12px 14px 10px',
           minHeight: 200,
           display: 'flex', flexDirection: 'column', gap: 8,
@@ -2507,7 +2507,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
               fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.14em',
               textTransform: 'uppercase', fontWeight: 700,
               padding: '3px 8px', background: modeMeta.tint, color: modeMeta.color,
-              border: `1px solid ${modeMeta.color}`, borderRadius: 2,
+              border: `1px solid ${modeMeta.color}`, borderRadius: 9,
             }}>{modeMeta.label}</span>
           )}
           {shape && (
@@ -2515,7 +2515,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
               fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
               textTransform: 'uppercase', color: 'var(--ink-3)',
               padding: '2px 7px', background: 'var(--paper)',
-              border: '1px solid var(--rule)', borderRadius: 2,
+              border: '1px solid var(--rule)', borderRadius: 9,
             }}>{shape}</span>
           )}
           <span style={{
@@ -2535,7 +2535,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
             background: angleTypeMetaResolved ? `${angleTypeMetaResolved.color}0d` : 'var(--paper)',
             border: `1px solid ${angleTypeMetaResolved ? angleTypeMetaResolved.color : 'var(--rule)'}`,
             borderLeft: `3px solid ${angleTypeMetaResolved ? angleTypeMetaResolved.color : 'var(--ink-3)'}`,
-            borderRadius: 2,
+            borderRadius: 9,
           }}>
             {angleTypeMetaResolved && (
               <span style={{
@@ -2593,7 +2593,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
           <span style={{
             fontFamily: 'var(--mono)', fontSize: 9.5,
             padding: '2px 6px', background: 'var(--paper)', border: '1px solid var(--rule)',
-            color: 'var(--ink-4)', borderRadius: 2, letterSpacing: '0.08em',
+            color: 'var(--ink-4)', borderRadius: 9, letterSpacing: '0.08em',
             textTransform: 'uppercase',
           }}>{row.status || 'draft'}</span>
           <span style={{
@@ -2604,7 +2604,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
             style={{
               padding: '4px 8px', background: copied ? 'var(--accent)' : 'transparent',
               border: '1px solid var(--rule)', color: 'var(--ink-3)',
-              cursor: 'pointer', borderRadius: 2,
+              cursor: 'pointer', borderRadius: 9,
               display: 'inline-flex', alignItems: 'center', gap: 4,
               fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.08em',
               textTransform: 'uppercase',
@@ -2629,7 +2629,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: 'var(--paper)', borderRadius: 4,
+              background: 'var(--paper)', borderRadius: 10,
               maxWidth: 720, width: '100%', maxHeight: '85vh',
               display: 'flex', flexDirection: 'column',
               borderTop: mode ? `4px solid ${modeMeta.color}` : '4px solid var(--ink)',
@@ -2646,7 +2646,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
                   fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
                   textTransform: 'uppercase', fontWeight: 700,
                   padding: '3px 8px', background: modeMeta.tint, color: modeMeta.color,
-                  border: `1px solid ${modeMeta.color}`, borderRadius: 2,
+                  border: `1px solid ${modeMeta.color}`, borderRadius: 9,
                 }}>{modeMeta.label}</span>
               )}
               {shape && (
@@ -2654,7 +2654,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
                   fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
                   textTransform: 'uppercase', color: 'var(--ink-3)',
                   padding: '2px 8px', background: 'var(--paper)',
-                  border: '1px solid var(--rule)', borderRadius: 2,
+                  border: '1px solid var(--rule)', borderRadius: 9,
                 }}>Shape {shape}</span>
               )}
               {resolvedAngleName && (
@@ -2667,7 +2667,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
                       fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '0.14em',
                       textTransform: 'uppercase', fontWeight: 700,
                       color: 'var(--paper)', background: angleTypeMetaResolved.color,
-                      padding: '2px 6px', borderRadius: 2,
+                      padding: '2px 6px', borderRadius: 9,
                     }}>{angleTypeMetaResolved.label}</span>
                   )}
                   {resolvedAngleName}
@@ -2680,7 +2680,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
               <button onClick={() => setModalOpen(false)} title="Close"
                 style={{
                   padding: 6, background: 'transparent', border: '1px solid var(--rule)',
-                  color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                  color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9,
                 }}>
                 <X size={14} />
               </button>
@@ -2708,7 +2708,7 @@ function HistoryDraftRow({ row, angle, angleName }) {
                   letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
                   background: copied ? 'var(--accent)' : 'var(--ink)',
                   color: copied ? 'var(--ink)' : 'var(--paper)',
-                  border: 'none', cursor: 'pointer', borderRadius: 2,
+                  border: 'none', cursor: 'pointer', borderRadius: 9,
                   display: 'inline-flex', alignItems: 'center', gap: 6,
                 }}>
                 {copied ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy script</>}
@@ -2761,7 +2761,7 @@ function AngleChip({ angle, selected, proofCount, onToggle, onOpenProofs }) {
         border: `2px solid ${selected ? 'var(--ink)' : 'var(--rule)'}`,
         borderLeft: `3px solid ${(hover || selected) ? typeColor : (selected ? 'var(--ink)' : 'var(--rule)')}`,
         background: selected ? 'var(--ink)' : 'var(--paper)',
-        borderRadius: 2,
+        borderRadius: 9,
         transition: 'border-color 120ms ease',
       }}>
         <button onClick={onToggle}
@@ -2808,7 +2808,7 @@ function AngleChip({ angle, selected, proofCount, onToggle, onOpenProofs }) {
           background: 'var(--paper)',
           border: '1px solid var(--rule)',
           borderTop: `3px solid ${typeColor}`,
-          borderRadius: 2,
+          borderRadius: 9,
           boxShadow: '0 16px 40px rgba(10,10,10,0.18)',
           fontFamily: 'var(--sans)', color: 'var(--ink-2)',
           pointerEvents: 'none',   // popup is read-only; lets mouse pass through
@@ -2817,7 +2817,7 @@ function AngleChip({ angle, selected, proofCount, onToggle, onOpenProofs }) {
             display: 'inline-block', padding: '2px 7px', marginBottom: 8,
             background: typeColor, color: 'var(--paper)',
             fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
-            letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+            letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 9,
           }}>{typeLabel}</div>
           {angle.prospect_voice && (
             <div style={{
@@ -2887,7 +2887,7 @@ function pillButtonStyle() {
     padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
     letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
     border: '1px solid var(--rule)', background: 'transparent',
-    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9,
   }
 }
 
@@ -2905,7 +2905,7 @@ function ExtraInstructionsField({ value, onChange }) {
         width: '100%', maxWidth: 720, padding: '12px 14px',
         fontFamily: 'var(--sans)', fontSize: 14, lineHeight: 1.5,
         border: '1px solid var(--rule)', background: 'var(--paper)',
-        color: 'var(--ink)', resize: 'vertical', borderRadius: 2,
+        color: 'var(--ink)', resize: 'vertical', borderRadius: 9,
         outline: 'none',
       }}
       onFocus={(e) => e.currentTarget.style.borderColor = 'var(--ink-3)'}
@@ -2955,14 +2955,14 @@ function AngleCard({ angle }) {
     <div style={{
       padding: '18px 22px', background: 'var(--paper)',
       border: '1px solid var(--rule)', borderLeft: `4px solid ${tagColor}`,
-      borderRadius: 2,
+      borderRadius: 9,
     }}>
       <div style={{
         display: 'inline-block', padding: '2px 8px', marginBottom: 10,
         background: tagColor, color: 'var(--paper)',
         fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
         letterSpacing: '0.14em', textTransform: 'uppercase',
-        borderRadius: 2,
+        borderRadius: 9,
       }}>{tagLabel}</div>
       <h3 style={{
         margin: '0 0 8px', fontFamily: 'var(--serif)', fontSize: 19, fontWeight: 500,
@@ -3111,7 +3111,7 @@ function GenProgress({ kind, total, fanout }) {
       padding: '14px 16px',
       background: 'var(--paper)', border: '1px solid var(--rule)',
       borderLeft: '3px solid var(--accent)',
-      borderRadius: 2,
+      borderRadius: 9,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
         <span style={{
@@ -3146,7 +3146,7 @@ function GenProgress({ kind, total, fanout }) {
       {fanout && fanoutTotal > 0 && (
         <div style={{ marginTop: 10 }}>
           <div style={{
-            height: 4, background: 'var(--rule)', borderRadius: 2, overflow: 'hidden',
+            height: 4, background: 'var(--rule)', borderRadius: 9, overflow: 'hidden',
           }}>
             <div style={{
               width: `${fanoutPct}%`, height: '100%',
@@ -3229,7 +3229,7 @@ function InlineProofAdder({ angleSlugs, angles, onAdded }) {
             padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10.5,
             letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
             border: '1px dashed var(--ink-3)', background: 'transparent',
-            color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+            color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9,
             display: 'inline-flex', alignItems: 'center', gap: 6,
           }}>
           <Plus size={12} /> Add a proof inline
@@ -3283,7 +3283,7 @@ function InlineProofAdder({ angleSlugs, angles, onAdded }) {
                 background: (!name.trim() || !result.trim() || saving) ? 'var(--rule)' : 'var(--ink)',
                 color: (!name.trim() || !result.trim() || saving) ? 'var(--ink-4)' : 'var(--paper)',
                 cursor: (saving || !name.trim() || !result.trim()) ? 'not-allowed' : 'pointer',
-                borderRadius: 2, display: 'inline-flex', alignItems: 'center', gap: 5,
+                borderRadius: 9, display: 'inline-flex', alignItems: 'center', gap: 5,
               }}>
               {saving ? '...' : <><Plus size={12} /> Add</>}
             </button>
@@ -3331,13 +3331,13 @@ const inlineSelectStyle = {
   padding: '5px 8px', fontFamily: 'var(--mono)', fontSize: 10.5,
   letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600,
   border: '1px solid var(--rule)', background: 'var(--paper)',
-  color: 'var(--ink)', borderRadius: 2, outline: 'none', cursor: 'pointer',
+  color: 'var(--ink)', borderRadius: 9, outline: 'none', cursor: 'pointer',
 }
 const inlineInputStyle = {
   width: '100%', padding: '8px 10px',
   fontFamily: 'var(--sans)', fontSize: 13,
   border: '1px solid var(--rule)', background: 'var(--paper)',
-  color: 'var(--ink)', borderRadius: 2, outline: 'none',
+  color: 'var(--ink)', borderRadius: 9, outline: 'none',
 }
 
 // Thin wrapper around upsertProofCharacter so this component doesn't
@@ -3397,7 +3397,7 @@ function LibraryClusterView({ angles, proofs, selected, onToggleSelect, onSelect
                 display: 'inline-block', padding: '3px 8px',
                 background: meta.color, color: 'var(--paper)',
                 fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+                letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 9,
               }}>{meta.label}</span>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.06em' }}>
                 {items.length} total · {dupClusters.length} duplicate cluster{dupClusters.length === 1 ? '' : 's'} · {singles.length} unique
@@ -3410,7 +3410,7 @@ function LibraryClusterView({ angles, proofs, selected, onToggleSelect, onSelect
                   return (
                     <div key={key} style={{
                       marginBottom: 14, padding: 12, background: '#fef6e6',
-                      border: '1px solid #e8c98a', borderRadius: 2,
+                      border: '1px solid #e8c98a', borderRadius: 9,
                     }}>
                       <div style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -3427,7 +3427,7 @@ function LibraryClusterView({ angles, proofs, selected, onToggleSelect, onSelect
                             letterSpacing: '0.12em', textTransform: 'uppercase',
                             background: allSelected ? '#e8c98a' : 'var(--paper)',
                             color: '#7a5810', border: '1px solid #7a5810',
-                            cursor: allSelected ? 'default' : 'pointer', borderRadius: 2,
+                            cursor: allSelected ? 'default' : 'pointer', borderRadius: 9,
                             opacity: allSelected ? 0.7 : 1,
                           }}>
                           {allSelected ? '✓ All in cluster selected' : `Select all ${group.length}`}
@@ -3506,7 +3506,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
       position: 'relative',
       background: 'var(--paper)',
       border: `1px solid ${selected ? '#1a242c' : 'var(--rule)'}`,
-      borderTop: `3px solid ${typeColor}`, borderRadius: 2,
+      borderTop: `3px solid ${typeColor}`, borderRadius: 9,
       padding: 16, display: 'flex', flexDirection: 'column', gap: 10,
       boxShadow: selected ? '0 0 0 2px #1a242c inset, 0 2px 8px rgba(26,36,44,0.18)' : 'none',
       transition: 'box-shadow 120ms ease',
@@ -3521,7 +3521,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
                 width: 22, height: 22, marginTop: 4, flexShrink: 0,
                 border: `1.5px solid ${selected ? '#1a242c' : 'var(--rule)'}`,
                 background: selected ? '#1a242c' : 'var(--paper)',
-                borderRadius: 2, cursor: 'pointer',
+                borderRadius: 9, cursor: 'pointer',
                 transition: 'all 100ms ease',
               }}>
               <input
@@ -3540,7 +3540,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
               display: 'inline-block', padding: '2px 7px', marginBottom: 6,
               background: typeColor, color: 'var(--paper)',
               fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
-              letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+              letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 9,
             }}>{typeLabel}</span>
             <h3 style={{
               margin: 0, fontFamily: 'var(--serif)', fontSize: 19, fontWeight: 500,
@@ -3552,7 +3552,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
           <button onClick={onOpenProofs} title="Manage proof characters"
             style={{
               padding: 6, background: 'transparent', border: '1px solid var(--rule)',
-              color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+              color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9,
             }}>
             <Settings size={13} />
           </button>
@@ -3560,7 +3560,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
             <button onClick={onEdit} title="Edit angle (qualifier, name, mechanism)"
               style={{
                 padding: 6, background: 'transparent', border: '1px solid var(--rule)',
-                color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2,
+                color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9,
               }}>
               <Edit3 size={13} />
             </button>
@@ -3568,7 +3568,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
           <button onClick={onRetire} title="Retire angle"
             style={{
               padding: 6, background: 'transparent', border: '1px solid var(--rule)',
-              color: 'var(--ink-4)', cursor: 'pointer', borderRadius: 2,
+              color: 'var(--ink-4)', cursor: 'pointer', borderRadius: 9,
             }}
             onMouseEnter={(e) => e.currentTarget.style.color = '#b53e3e'}
             onMouseLeave={(e) => e.currentTarget.style.color = 'var(--ink-4)'}>
@@ -3629,7 +3629,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
               fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
               textTransform: 'uppercase', color: '#7a5810',
               padding: '2px 8px', background: '#fef6e6', border: '1px solid #e8c98a',
-              borderRadius: 2,
+              borderRadius: 9,
             }}>No proofs yet</span>
           ) : (
             proofTypes.map(t => (
@@ -3637,7 +3637,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
                 fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
                 textTransform: 'uppercase', color: 'var(--ink-2)',
                 padding: '2px 7px', background: 'var(--paper)',
-                border: '1px solid var(--rule)', borderRadius: 2,
+                border: '1px solid var(--rule)', borderRadius: 9,
               }}>
                 {t.replace('_', ' ')} <span style={{ opacity: 0.6, marginLeft: 2 }}>×{byType[t]}</span>
               </span>
@@ -3669,7 +3669,7 @@ function SavedAngleRow({ angle, onRetire }) {
   return (
     <div style={{
       background: 'var(--paper)', border: '1px solid var(--rule)',
-      borderLeft: `3px solid ${tagColor}`, borderRadius: 2,
+      borderLeft: `3px solid ${tagColor}`, borderRadius: 9,
     }}>
       <div style={{
         padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
@@ -3678,7 +3678,7 @@ function SavedAngleRow({ angle, onRetire }) {
         <span style={{
           padding: '2px 7px', background: tagColor, color: 'var(--paper)',
           fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
-          letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+          letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 9,
           flexShrink: 0,
         }}>{tagLabel}</span>
         <span style={{
@@ -3689,7 +3689,7 @@ function SavedAngleRow({ angle, onRetire }) {
           title="Retire (hide from picker)"
           style={{
             padding: 6, background: 'transparent', border: 'none',
-            color: 'var(--ink-4)', cursor: 'pointer', borderRadius: 2,
+            color: 'var(--ink-4)', cursor: 'pointer', borderRadius: 9,
             display: 'inline-flex',
           }}
           onMouseEnter={(e) => e.currentTarget.style.color = '#b53e3e'}
@@ -3812,7 +3812,7 @@ function ScriptCard({ script, index, angleLookup }) {
 
   return (
     <div style={{ padding: 20, background: 'var(--paper)', border: '1px solid var(--rule)',
-                  position: 'relative', borderRadius: 2 }}>
+                  position: 'relative', borderRadius: 9 }}>
       {/* Top stripe — frame color */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3,
                     background: frameColor }} />
@@ -3829,7 +3829,7 @@ function ScriptCard({ script, index, angleLookup }) {
                 padding: '3px 8px',
                 background: angleTypeMetaResolved.color, color: 'var(--paper)',
                 fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
-                letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 2,
+                letterSpacing: '0.14em', textTransform: 'uppercase', borderRadius: 9,
               }}>{angleTypeMetaResolved.label}</span>
             )}
             {modeMeta && (
@@ -3837,7 +3837,7 @@ function ScriptCard({ script, index, angleLookup }) {
                 fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em',
                 textTransform: 'uppercase', fontWeight: 700,
                 padding: '3px 8px', background: modeMeta.tint, color: modeMeta.color,
-                border: `1px solid ${modeMeta.color}`, borderRadius: 2,
+                border: `1px solid ${modeMeta.color}`, borderRadius: 9,
               }}>{modeMeta.label}</span>
             )}
             <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
@@ -3873,7 +3873,7 @@ function ScriptCard({ script, index, angleLookup }) {
                   letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600,
                   border: `1px solid ${copied ? 'var(--accent)' : 'var(--rule)'}`,
                   background: copied ? 'var(--accent)' : 'var(--paper)',
-                  color: 'var(--ink)', cursor: 'pointer', borderRadius: 2,
+                  color: 'var(--ink)', cursor: 'pointer', borderRadius: 9,
                   flexShrink: 0,
                   display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           {copied ? <Check size={11} /> : <Copy size={11} />}
@@ -3894,7 +3894,7 @@ function ScriptCard({ script, index, angleLookup }) {
           <span key={k} style={{ padding: '3px 7px', background: 'var(--paper)',
                                 fontFamily: 'var(--mono)', fontSize: 10,
                                 letterSpacing: '0.04em', color: 'var(--ink-3)',
-                                border: '1px solid var(--rule)', borderRadius: 2 }}>
+                                border: '1px solid var(--rule)', borderRadius: 9 }}>
             <span style={{ color: 'var(--ink-4)' }}>{k}</span>:&nbsp;
             <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{v}</span>
           </span>

@@ -100,7 +100,7 @@ export function CoachThread({ thread, messages, onChange }) {
           )}
           {sending && (
             <div className="flex justify-start">
-              <div className="p-3" style={{ background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3, fontSize: 13, color: 'var(--ink-3)', fontStyle: 'italic', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <div className="p-3" style={{ background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, fontSize: 13, color: 'var(--ink-3)', fontStyle: 'italic', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <Loader size={12} className="animate-spin" />
                 <span>Thinking…</span>
               </div>
@@ -176,7 +176,7 @@ function Bubble({ message, optimistic }) {
         background: isCloser ? 'var(--ink)' : 'var(--paper)',
         color: isCloser ? 'var(--paper)' : 'var(--ink)',
         border: isCloser ? '1px solid var(--ink)' : '1px solid var(--rule)',
-        borderRadius: 3,
+        borderRadius: 9,
         fontSize: 13,
         lineHeight: 1.55,
         whiteSpace: 'pre-wrap',

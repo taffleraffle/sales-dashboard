@@ -46,7 +46,7 @@ export default function ForecastChart({ clients, payments }) {
           fontFamily: 'var(--mono)',
           fontSize: 10,
           letterSpacing: '0.04em',
-          borderRadius: 3,
+          borderRadius: 9,
           boxShadow: '0 8px 24px rgba(10,10,10,0.16)',
         }}
       >
@@ -102,7 +102,7 @@ export default function ForecastChart({ clients, payments }) {
       style={{
         background: 'var(--paper)',
         border: '1px solid var(--rule)',
-        borderRadius: 4,
+        borderRadius: 10,
         padding: 18,
       }}
     >

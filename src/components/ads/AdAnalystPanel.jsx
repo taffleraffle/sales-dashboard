@@ -99,7 +99,7 @@ export default function AdAnalystPanel({ open, onClose }) {
       style={{
         background: 'var(--paper)',
         border: '1px solid var(--rule)',
-        borderRadius: 4,
+        borderRadius: 10,
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
@@ -133,7 +133,7 @@ export default function AdAnalystPanel({ open, onClose }) {
                 textTransform: 'uppercase',
                 color: 'var(--ink-3)',
                 padding: '4px 8px',
-                borderRadius: 2,
+                borderRadius: 9,
               }}
             >
               Clear
@@ -145,7 +145,7 @@ export default function AdAnalystPanel({ open, onClose }) {
               style={{
                 width: 28,
                 height: 28,
-                borderRadius: 2,
+                borderRadius: 9,
                 color: 'var(--ink-3)',
                 display: 'flex',
                 alignItems: 'center',
@@ -196,7 +196,7 @@ export default function AdAnalystPanel({ open, onClose }) {
                     padding: '10px 12px',
                     background: 'var(--paper)',
                     border: '1px solid var(--rule)',
-                    borderRadius: 3,
+                    borderRadius: 9,
                     cursor: streaming ? 'not-allowed' : 'pointer',
                     transition: 'border-color 160ms ease, background 160ms ease',
                   }}
@@ -286,7 +286,7 @@ export default function AdAnalystPanel({ open, onClose }) {
               flex: 1,
               background: 'var(--paper-2)',
               border: '1px solid var(--rule)',
-              borderRadius: 3,
+              borderRadius: 9,
               padding: '8px 10px',
               fontSize: 13,
               fontFamily: 'var(--sans)',
@@ -307,7 +307,7 @@ export default function AdAnalystPanel({ open, onClose }) {
               border: '1px solid',
               borderColor: input.trim() ? 'var(--accent)' : 'var(--rule)',
               color: 'var(--ink)',
-              borderRadius: 3,
+              borderRadius: 9,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -332,7 +332,7 @@ function Message({ role, content, streaming, working, partial }) {
         style={{
           maxWidth: '92%',
           padding: '10px 13px',
-          borderRadius: 3,
+          borderRadius: 9,
           background: isUser ? 'var(--accent-soft)' : partial ? 'var(--down-soft)' : 'var(--paper-2)',
           border: `1px solid ${isUser ? 'var(--accent)' : partial ? 'var(--down)' : 'var(--rule)'}`,
           color: 'var(--ink)',

@@ -124,7 +124,7 @@ export default function ContractsPending() {
               )}
             </div>
 
-            <div className="mt-3 p-3" style={{ background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3 }}>
+            <div className="mt-3 p-3" style={{ background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9 }}>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
                 Closer's request
               </span>
@@ -132,7 +132,7 @@ export default function ContractsPending() {
             </div>
 
             {a.ai_reasoning && (
-              <div className="mt-3 p-3" style={{ background: 'var(--paper-2)', borderLeft: '3px solid var(--accent)', borderRadius: 3 }}>
+              <div className="mt-3 p-3" style={{ background: 'var(--paper-2)', borderLeft: '3px solid var(--accent)', borderRadius: 9 }}>
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
                   Judge reasoning
                 </span>
@@ -150,7 +150,7 @@ export default function ContractsPending() {
                 placeholder="Why you're approving or rejecting. This goes back to the closer."
                 rows={2}
                 className="w-full mt-1 px-3 py-2"
-                style={{ fontSize: 13, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, color: 'var(--ink)', resize: 'vertical' }}
+                style={{ fontSize: 13, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9, color: 'var(--ink)', resize: 'vertical' }}
               />
             </div>
 

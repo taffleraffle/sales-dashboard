@@ -271,7 +271,7 @@ export default function CampaignPickerModal({ open, onClose, perfRaw, activeCamp
                       fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
                       letterSpacing: '0.08em', textTransform: 'uppercase',
                     }}>
-                      <span style={{ width: 6, height: 6, borderRadius: 6, background: PALETTE.green }} />
+                      <span style={{ width: 6, height: 6, borderRadius: 11, background: PALETTE.green }} />
                       Live
                     </span>
                   ) : (

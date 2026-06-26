@@ -8,7 +8,7 @@ function formatMonth(value) {
   return `${MONTH_NAMES[m - 1]} ${y}`
 }
 
-const segActive = { background: 'var(--ink)', color: 'var(--paper)', borderRadius: 3 }
+const segActive = { background: 'var(--ink)', color: 'var(--paper)', borderRadius: 9 }
 
 export default function MonthPicker({ value, onChange, disabled }) {
   const [open, setOpen] = useState(false)
@@ -44,7 +44,7 @@ export default function MonthPicker({ value, onChange, disabled }) {
 
   const arrowBtn = {
     width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    color: 'var(--ink-3)', borderRadius: 3,
+    color: 'var(--ink-3)', borderRadius: 9,
   }
 
   return (
@@ -54,7 +54,7 @@ export default function MonthPicker({ value, onChange, disabled }) {
         style={{
           background: 'var(--paper)',
           border: '1px solid var(--rule)',
-          borderRadius: 3,
+          borderRadius: 9,
           padding: 3,
         }}
       >
@@ -75,7 +75,7 @@ export default function MonthPicker({ value, onChange, disabled }) {
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
             fontWeight: 500,
-            ...(isCurrentMonth ? segActive : { background: 'transparent', color: 'var(--ink)', borderRadius: 3 }),
+            ...(isCurrentMonth ? segActive : { background: 'transparent', color: 'var(--ink)', borderRadius: 9 }),
           }}
         >
           <Calendar size={11} />
@@ -99,7 +99,7 @@ export default function MonthPicker({ value, onChange, disabled }) {
               textTransform: 'uppercase',
               fontWeight: 500,
               color: 'var(--ink-3)',
-              borderRadius: 3,
+              borderRadius: 9,
               whiteSpace: 'nowrap',
             }}
           >
@@ -114,7 +114,7 @@ export default function MonthPicker({ value, onChange, disabled }) {
           style={{
             background: 'var(--paper)',
             border: '1px solid var(--rule)',
-            borderRadius: 4,
+            borderRadius: 10,
             padding: 16,
             boxShadow: '0 16px 40px rgba(10,10,10,0.12)',
           }}
@@ -155,7 +155,7 @@ export default function MonthPicker({ value, onChange, disabled }) {
                     letterSpacing: '0.08em',
                     textTransform: 'uppercase',
                     fontWeight: 500,
-                    borderRadius: 3,
+                    borderRadius: 9,
                     transition: 'all 140ms ease',
                     ...(isSelected
                       ? { background: 'var(--ink)', color: 'var(--paper)' }

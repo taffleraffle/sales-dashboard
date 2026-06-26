@@ -46,7 +46,7 @@ export default function PhraseTable({ rows, sortKey = 'delta_vs_library', onSort
   return (
     <div
       className="overflow-x-auto"
-      style={{ background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 4 }}
+      style={{ background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 10 }}
     >
       <table className="data" style={{ minWidth: '100%' }}>
         <thead>

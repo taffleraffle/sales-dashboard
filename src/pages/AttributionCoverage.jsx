@@ -958,7 +958,7 @@ function KanbanCard({ ad, pending, onPick }) {
         padding: 10,
         background: 'white',
         border: '1px solid var(--rule)',
-        borderRadius: 2,
+        borderRadius: 9,
         transition: 'border 0.12s, transform 0.12s',
       }}
       onMouseEnter={e => {
@@ -1093,7 +1093,7 @@ function AdDrawer({ ad, pendingVertical, audiences, onClose, onAssign }) {
             aria-label="Close"
             style={{
               all: 'unset', cursor: 'pointer',
-              padding: 6, borderRadius: 2, color: 'var(--ink-2)',
+              padding: 6, borderRadius: 9, color: 'var(--ink-2)',
               display: 'inline-flex', alignItems: 'center',
             }}
             onMouseEnter={e => { e.currentTarget.style.background = 'var(--paper-2)' }}
@@ -1432,7 +1432,7 @@ function QAQueueSection({ queue, onSet, onBulk, bulkBusy, rowBusy }) {
                             border: '1px solid var(--rule)',
                             color: aud === 'REFERRAL' ? 'var(--ink-3)' : 'var(--ink)',
                             cursor: saving ? 'wait' : 'pointer',
-                            borderRadius: 2,
+                            borderRadius: 9,
                           }}>
                           {saving ? '…' : aud === 'Restoration' ? 'Resto' : aud === 'Electricians' ? 'Elec' : 'Ref'}
                         </button>
@@ -1482,7 +1482,7 @@ const chipBtn = {
   textTransform: 'uppercase',
   padding: '6px 12px',
   border: '1px solid var(--rule)',
-  borderRadius: 2,
+  borderRadius: 9,
   cursor: 'pointer',
   background: 'transparent',
 }
@@ -1509,5 +1509,5 @@ const code = {
   fontSize: 11.5,
   background: 'var(--paper-2)',
   padding: '1px 5px',
-  borderRadius: 2,
+  borderRadius: 9,
 }

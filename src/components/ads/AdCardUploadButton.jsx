@@ -62,7 +62,7 @@ export default function AdCardUploadButton({ adId, alreadyTranscribed }) {
     right: 8,
     width: 28,
     height: 28,
-    borderRadius: 3,
+    borderRadius: 9,
     border: '1px solid var(--rule)',
     background: alreadyTranscribed ? 'var(--up-soft)' : 'rgba(10,10,10,0.7)',
     color: alreadyTranscribed ? 'var(--up)' : 'var(--paper)',

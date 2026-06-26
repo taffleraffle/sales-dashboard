@@ -690,7 +690,7 @@ function AudiencesSection() {
                       {r.color && (
                         <span style={{
                           display: 'inline-block', width: 10, height: 10,
-                          borderRadius: 2, background: r.color, flexShrink: 0,
+                          borderRadius: 9, background: r.color, flexShrink: 0,
                         }} />
                       )}
                       <span className="font-medium">{r.display_name}</span>

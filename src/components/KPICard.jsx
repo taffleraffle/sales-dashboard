@@ -51,7 +51,7 @@ export default function KPICard({
       style={{
         background: highlight ? 'var(--accent-soft)' : 'var(--paper)',
         border: `1px solid ${highlight ? 'var(--accent)' : 'var(--rule)'}`,
-        borderRadius: 4,
+        borderRadius: 10,
         cursor: interactive ? 'pointer' : 'default',
         transition: 'border-color 200ms ease, background 200ms ease',
         display: 'flex',

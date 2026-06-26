@@ -85,7 +85,7 @@ export default function CreativeEditDrawer({ open, ad, onClose }) {
         padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10.5,
         letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
         border: '1px solid var(--rule-2)', background: 'var(--paper)', color: 'var(--ink-2)',
-        borderRadius: 2, textDecoration: 'none',
+        borderRadius: 9, textDecoration: 'none',
         display: 'inline-flex', alignItems: 'center', gap: 5,
       }}>
       <ExternalLink size={11} />

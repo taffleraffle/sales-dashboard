@@ -46,7 +46,7 @@ export default function UploadDock() {
             background: 'var(--paper)',
             color: 'var(--ink-3)',
             border: '1px solid var(--rule)',
-            borderRadius: 2,
+            borderRadius: 9,
             fontFamily: 'var(--mono)',
             fontSize: 9,
             letterSpacing: '0.14em',
@@ -75,7 +75,7 @@ function RunCard({ run, onDismiss }) {
         border: '1px solid var(--rule)',
         borderLeftWidth: 3,
         borderLeftColor: accent,
-        borderRadius: 3,
+        borderRadius: 9,
         boxShadow: '0 4px 16px rgba(10,10,10,0.10)',
         padding: 12,
         pointerEvents: 'auto',
@@ -121,7 +121,7 @@ function RunCard({ run, onDismiss }) {
       </div>
 
       {/* Progress bar */}
-      <div style={{ height: 4, background: 'var(--paper-2)', borderRadius: 2, overflow: 'hidden' }}>
+      <div style={{ height: 4, background: 'var(--paper-2)', borderRadius: 9, overflow: 'hidden' }}>
         <div
           style={{
             height: '100%',

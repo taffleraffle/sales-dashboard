@@ -159,7 +159,7 @@ export default function ContractAdd() {
           <p style={{ fontSize: 11, color: 'var(--ink-3)', margin: '4px 0 0' }}>
             The draft agreement that's on the table. Doesn't need to be signed.
           </p>
-          <div className="mt-2 p-4" style={{ background: 'var(--paper)', border: pdfFile ? '1px solid var(--ink)' : '1px dashed var(--rule)', borderRadius: 3 }}>
+          <div className="mt-2 p-4" style={{ background: 'var(--paper)', border: pdfFile ? '1px solid var(--ink)' : '1px dashed var(--rule)', borderRadius: 9 }}>
             {pdfFile ? (
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 min-w-0">
@@ -284,7 +284,7 @@ function TemplateCard({ label, sub, detail, selected, onClick }) {
       style={{
         background: selected ? 'var(--accent-soft)' : 'var(--paper)',
         border: selected ? '2px solid var(--accent)' : '1px solid var(--rule)',
-        borderRadius: 3,
+        borderRadius: 9,
         cursor: 'pointer',
         transition: 'background 160ms, border-color 160ms',
       }}

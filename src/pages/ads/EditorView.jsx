@@ -253,7 +253,7 @@ export default function EditorView() {
                 style={{
                   padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
                   background: 'var(--paper)', border: '1px solid var(--rule)',
-                  borderLeft: '3px solid var(--accent)', borderRadius: 2,
+                  borderLeft: '3px solid var(--accent)', borderRadius: 9,
                 }}>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 700, color: 'var(--ink)' }}>
                   For 14 days
@@ -267,7 +267,7 @@ export default function EditorView() {
                 style={{
                   padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
                   background: 'var(--paper)', border: '1px solid var(--rule)',
-                  borderLeft: '3px solid transparent', borderRadius: 2,
+                  borderLeft: '3px solid transparent', borderRadius: 9,
                 }}>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, fontWeight: 700, color: 'var(--ink)' }}>
                   Indefinitely
@@ -312,7 +312,7 @@ export default function EditorView() {
               fontFamily: 'var(--mono)', fontSize: 11,
             }}>
               <span style={{
-                width: 9, height: 9, borderRadius: 2,
+                width: 9, height: 9, borderRadius: 9,
                 background: '#3e7eba',
               }} />
               <span style={{ color: 'var(--ink-3)' }}>Logged in as</span>
@@ -324,7 +324,7 @@ export default function EditorView() {
               padding: '6px 12px', background: '#fffaea', border: '1px solid #e8b408',
               fontFamily: 'var(--mono)', fontSize: 11,
             }}>
-              <span style={{ width: 9, height: 9, borderRadius: 2, background: '#e8b408' }} />
+              <span style={{ width: 9, height: 9, borderRadius: 9, background: '#e8b408' }} />
               <span style={{ color: '#7a4e08' }}>Team-wide view · all editors</span>
             </div>
           )}

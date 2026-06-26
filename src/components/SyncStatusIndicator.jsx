@@ -79,7 +79,7 @@ export default function SyncStatusIndicator({ pinned = ['meta', 'marketingTracke
           letterSpacing: '0.1em',
           textTransform: 'uppercase',
           fontWeight: 500,
-          borderRadius: 3,
+          borderRadius: 9,
           transition: 'border-color 160ms ease, color 160ms ease',
         }}
       >
@@ -109,7 +109,7 @@ export default function SyncStatusIndicator({ pinned = ['meta', 'marketingTracke
                 letterSpacing: '0.1em',
                 textTransform: 'uppercase',
                 fontWeight: 600,
-                borderRadius: 2,
+                borderRadius: 9,
                 opacity: syncing ? 0.5 : 1,
                 cursor: syncing ? 'wait' : 'pointer',
               }}

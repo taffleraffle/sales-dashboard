@@ -142,7 +142,7 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
           style={{
             background: 'var(--paper)', maxWidth: 820, width: '100%', maxHeight: '90vh',
             overflow: 'auto', border: '1px solid var(--rule)',
-            borderTop: '3px solid var(--accent)', borderRadius: 2,
+            borderTop: '3px solid var(--accent)', borderRadius: 9,
             boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
           }}>
           {/* Header */}
@@ -172,7 +172,7 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
           <div style={{ padding: 24 }}>
             {err && (
               <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fca5a5',
-                            color: '#b53e3e', fontSize: 13, marginBottom: 16, borderRadius: 2 }}>
+                            color: '#b53e3e', fontSize: 13, marginBottom: 16, borderRadius: 9 }}>
                 <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
               </div>
             )}
@@ -253,7 +253,7 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
                 <div style={{
                   marginTop: 16, padding: '14px 16px',
                   background: 'var(--paper)', border: '1px dashed var(--rule)',
-                  borderLeft: '3px solid var(--accent)', borderRadius: 2,
+                  borderLeft: '3px solid var(--accent)', borderRadius: 9,
                 }}>
                   <div style={{
                     fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em',
@@ -288,7 +288,7 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
               style={{ padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
                       letterSpacing: '0.12em', textTransform: 'uppercase',
                       border: '1px solid var(--rule)', background: 'transparent',
-                      color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2 }}>
+                      color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9 }}>
               Done
             </button>
           </div>
@@ -357,7 +357,7 @@ function ProofRow({
       padding: isNew ? 0 : 14,
       background: isNew ? 'transparent' : 'var(--paper)',
       border: isNew ? 'none' : '1px solid var(--rule)',
-      borderRadius: 2, marginBottom: isNew ? 0 : 10,
+      borderRadius: 9, marginBottom: isNew ? 0 : 10,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <Label>Type</Label>
@@ -366,7 +366,7 @@ function ProofRow({
             padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 11,
             letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600,
             border: '1px solid var(--rule)', background: 'var(--paper)',
-            color: 'var(--ink)', borderRadius: 2, outline: 'none', cursor: 'pointer',
+            color: 'var(--ink)', borderRadius: 9, outline: 'none', cursor: 'pointer',
           }}>
           {PROOF_TYPES.map(t => (
             <option key={t.value} value={t.value}>{t.label}</option>
@@ -403,7 +403,7 @@ function ProofRow({
               background: dirty && !saving ? 'var(--ink)' : 'var(--rule)',
               color: dirty && !saving ? 'var(--paper)' : 'var(--ink-4)',
               cursor: dirty && !saving ? 'pointer' : 'not-allowed',
-              borderRadius: 2, display: 'inline-flex', alignItems: 'center', gap: 5,
+              borderRadius: 9, display: 'inline-flex', alignItems: 'center', gap: 5,
               minWidth: 76, justifyContent: 'center',
             }}>
             {saving ? <Loader size={12} className="animate-spin" /> : isNew ? <Plus size={12} /> : <Save size={12} />}
@@ -417,7 +417,7 @@ function ProofRow({
                 letterSpacing: '0.08em', textTransform: 'uppercase',
                 border: '1px solid var(--rule)', background: 'transparent',
                 color: 'var(--ink-4)', cursor: saving ? 'wait' : 'pointer',
-                borderRadius: 2, display: 'inline-flex', alignItems: 'center', gap: 5,
+                borderRadius: 9, display: 'inline-flex', alignItems: 'center', gap: 5,
                 justifyContent: 'center',
               }}
               onMouseEnter={(e) => !saving && (e.currentTarget.style.color = '#b53e3e')}
@@ -470,7 +470,7 @@ const inputStyle = {
   width: '100%', padding: '8px 10px',
   fontFamily: 'var(--sans)', fontSize: 13.5,
   border: '1px solid var(--rule)', background: 'var(--paper)',
-  color: 'var(--ink)', borderRadius: 2, outline: 'none',
+  color: 'var(--ink)', borderRadius: 9, outline: 'none',
 }
 
 function Label({ children }) {

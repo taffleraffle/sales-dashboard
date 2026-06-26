@@ -244,7 +244,7 @@ function FunnelStep({ label, count, prevCount, isFirst, maxCount, stepIndex, tot
           height: `${Math.max(height - 8, 36)}px`,
           background: fillBg,
           border: `1px solid ${fillBorder}`,
-          borderRadius: 3,
+          borderRadius: 9,
         }}
       >
         <span
@@ -310,7 +310,7 @@ function KpiTable({ sections }) {
       style={{
         background: 'var(--paper)',
         border: '1px solid var(--rule)',
-        borderRadius: 4,
+        borderRadius: 10,
         overflow: 'hidden',
       }}
     >
@@ -860,7 +860,7 @@ export default function SalesOverview() {
                       height: 30,
                       background: row.accent ? 'var(--accent-soft)' : 'var(--paper-2)',
                       border: `1px solid ${row.accent ? 'var(--accent)' : 'var(--rule)'}`,
-                      borderRadius: 3,
+                      borderRadius: 9,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',

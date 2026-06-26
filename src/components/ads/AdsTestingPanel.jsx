@@ -464,7 +464,7 @@ function CreativeList({ adIds, adsCache, loadAdsCache, onAssign, onUnassign }) {
             <div style={{ padding: 12, textAlign: 'center' }}><Loader className="animate-spin" style={{ color: 'var(--ink-3)' }} /></div>
           ) : (
             <>
-              <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--rule)', borderRadius: 2 }}>
+              <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--rule)', borderRadius: 9 }}>
                 {candidates.length === 0 ? (
                   <div style={{ padding: 14, textAlign: 'center', fontStyle: 'italic', color: 'var(--ink-3)' }}>No matches</div>
                 ) : candidates.map(ad => {
@@ -485,9 +485,9 @@ function CreativeList({ adIds, adsCache, loadAdsCache, onAssign, onUnassign }) {
                       }}
                     >
                       {ad.thumbnail_url ? (
-                        <img src={ad.thumbnail_url} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 2 }} />
+                        <img src={ad.thumbnail_url} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 9 }} />
                       ) : (
-                        <div style={{ width: 36, height: 36, background: 'var(--paper-2)', borderRadius: 2 }} />
+                        <div style={{ width: 36, height: 36, background: 'var(--paper-2)', borderRadius: 9 }} />
                       )}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.ad_name}</div>
@@ -510,17 +510,17 @@ function CreativeList({ adIds, adsCache, loadAdsCache, onAssign, onUnassign }) {
       )}
 
       {assigned.length === 0 ? (
-        <div style={{ padding: 14, fontStyle: 'italic', color: 'var(--ink-3)', textAlign: 'center', border: '1px dashed var(--rule)', borderRadius: 2 }}>
+        <div style={{ padding: 14, fontStyle: 'italic', color: 'var(--ink-3)', textAlign: 'center', border: '1px dashed var(--rule)', borderRadius: 9 }}>
           No creatives assigned yet. Click <strong>Add creative</strong> above.
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
           {assigned.map(ad => (
-            <div key={ad.ad_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 8, border: '1px solid var(--rule)', borderRadius: 2, background: 'var(--paper)' }}>
+            <div key={ad.ad_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 8, border: '1px solid var(--rule)', borderRadius: 9, background: 'var(--paper)' }}>
               {ad.thumbnail_url ? (
-                <img src={ad.thumbnail_url} alt="" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 2 }} />
+                <img src={ad.thumbnail_url} alt="" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 9 }} />
               ) : (
-                <div style={{ width: 32, height: 32, background: 'var(--paper-2)', borderRadius: 2 }} />
+                <div style={{ width: 32, height: 32, background: 'var(--paper-2)', borderRadius: 9 }} />
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ad.ad_name || ad.ad_id}</div>
@@ -556,17 +556,17 @@ function Stat({ label, value, color }) {
 }
 function BigStat({ label, value, accent }) {
   return (
-    <div style={{ padding: '10px 12px', border: '1px solid var(--rule)', borderRadius: 2, background: 'var(--paper)' }}>
+    <div style={{ padding: '10px 12px', border: '1px solid var(--rule)', borderRadius: 9, background: 'var(--paper)' }}>
       <div style={{ ...mono, marginBottom: 4 }}>{label}</div>
       <div style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 600, color: accent ? '#1f7a3a' : 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
     </div>
   )
 }
 
-const card = { background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, padding: 16 }
+const card = { background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9, padding: 16 }
 const input = {
   width: '100%', padding: '7px 10px', fontFamily: 'var(--serif)', fontSize: 14,
-  background: 'var(--paper-2, rgba(0,0,0,0.02))', border: '1px solid var(--rule)', borderRadius: 2,
+  background: 'var(--paper-2, rgba(0,0,0,0.02))', border: '1px solid var(--rule)', borderRadius: 9,
   color: 'var(--ink)', outline: 'none',
 }
 const mono = { fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500 }
@@ -574,30 +574,30 @@ const btnPrimary = {
   display: 'inline-flex', alignItems: 'center', gap: 6,
   padding: '7px 12px', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em',
   textTransform: 'uppercase', fontWeight: 600,
-  background: 'var(--accent)', color: 'var(--ink)', border: '1px solid var(--accent)', borderRadius: 2, cursor: 'pointer',
+  background: 'var(--accent)', color: 'var(--ink)', border: '1px solid var(--accent)', borderRadius: 9, cursor: 'pointer',
 }
 const btnGhost = {
   display: 'inline-flex', alignItems: 'center', gap: 5,
   padding: '6px 11px', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
   textTransform: 'uppercase', fontWeight: 500,
-  background: 'transparent', color: 'var(--ink-3)', border: '1px solid var(--rule)', borderRadius: 2, cursor: 'pointer',
+  background: 'transparent', color: 'var(--ink-3)', border: '1px solid var(--rule)', borderRadius: 9, cursor: 'pointer',
 }
 const labelChip = {
   padding: '2px 7px', fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
   background: 'var(--accent-soft, rgba(244,225,74,0.18))', border: '1px solid var(--accent)',
-  borderRadius: 2, color: 'var(--ink)', fontWeight: 600,
+  borderRadius: 9, color: 'var(--ink)', fontWeight: 600,
 }
 const statusPill = {
   padding: '2px 7px', fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em',
   textTransform: 'uppercase', fontWeight: 600,
-  background: 'transparent', border: '1px solid', borderRadius: 2,
+  background: 'transparent', border: '1px solid', borderRadius: 9,
 }
 const errorBanner = {
   padding: '10px 14px', marginBottom: 12,
-  background: 'rgba(180,30,30,0.08)', border: '1px solid #b41e1e', borderRadius: 2,
+  background: 'rgba(180,30,30,0.08)', border: '1px solid #b41e1e', borderRadius: 9,
   fontSize: 13, color: '#b41e1e',
 }
 const emptyState = {
   padding: 40, textAlign: 'center',
-  border: '1px dashed var(--rule)', borderRadius: 3,
+  border: '1px dashed var(--rule)', borderRadius: 9,
 }

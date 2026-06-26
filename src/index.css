@@ -22,6 +22,12 @@
   font-weight: 400;
   font-style: normal;
   font-display: swap;
+  /* Bethany ships tall metrics that clip in the tight line-heights the app
+     uses. Override the box so caps/descenders never clip, regardless of the
+     inline line-height a component sets. Tuned against measured overflow. */
+  ascent-override: 84%;
+  descent-override: 18%;
+  line-gap-override: 0%;
 }
 
 @theme {
@@ -73,6 +79,19 @@
   --font-sans:  'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono:  'Inter Tight', 'Inter', system-ui, sans-serif;
   --font-serif: 'Bethany Elingston', 'Cormorant Garamond', Georgia, serif;
+
+  /* Radius scale — onboarding is rounded everywhere. Bumping these reskins
+     every `rounded-sm` / `rounded` / `rounded-lg` usage (~480 across the app)
+     in one place. Square corners (the old 2px default) are gone. */
+  --radius-xs:   6px;
+  --radius-sm:   10px;
+  --radius:      12px;
+  --radius-md:   12px;
+  --radius-lg:   16px;
+  --radius-xl:   20px;
+  --radius-2xl:  24px;
+  --radius-3xl:  30px;
+  --radius-full: 9999px;
 }
 
 /*

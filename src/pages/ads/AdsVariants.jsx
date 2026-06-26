@@ -511,7 +511,7 @@ function QuickAddClipModal({ clipType, onClose, onCreated }) {
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)', zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <form onClick={e => e.stopPropagation()} onSubmit={submit} style={{ width: '100%', maxWidth: 460, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 4, padding: 24 }}>
+      <form onClick={e => e.stopPropagation()} onSubmit={submit} style={{ width: '100%', maxWidth: 460, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 10, padding: 24 }}>
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }}>Add new clip</div>
           <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, margin: 0 }}>
@@ -586,7 +586,7 @@ function PatternSummary({ summary, hookPerf, bodyPerf, hooks, bodies, clipById }
 function PatternTile({ eyebrow, title, sub, accent, warning }) {
   const border = accent ? '3px solid var(--accent)' : warning ? '3px solid var(--ink)' : '1px solid var(--rule)'
   return (
-    <div style={{ padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderLeftWidth: accent ? 3 : warning ? 3 : 1, borderLeftColor: accent ? 'var(--accent)' : warning ? 'var(--ink)' : 'var(--rule)', borderRadius: 3 }}>
+    <div style={{ padding: '14px 16px', background: 'var(--paper)', border: '1px solid var(--rule)', borderLeftWidth: accent ? 3 : warning ? 3 : 1, borderLeftColor: accent ? 'var(--accent)' : warning ? 'var(--ink)' : 'var(--rule)', borderRadius: 9 }}>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }}>{eyebrow}</div>
       <div style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>{title}</div>
       {sub && <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', letterSpacing: '0.08em', marginTop: 4 }}>{sub}</div>}
@@ -600,7 +600,7 @@ function PatternTile({ eyebrow, title, sub, accent, warning }) {
 function MatrixView({ hooks, bodies, variantByCombo, hookPerf, bodyPerf, maxSpend, onCellClick }) {
   if (!hooks.length || !bodies.length) {
     return (
-      <div style={{ padding: 32, textAlign: 'center', background: 'var(--paper-2)', border: '1px dashed var(--rule)', borderRadius: 4 }}>
+      <div style={{ padding: 32, textAlign: 'center', background: 'var(--paper-2)', border: '1px dashed var(--rule)', borderRadius: 10 }}>
         <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)' }}>
           Need at least one hook clip and one body clip to build the matrix. Upload them on the Clips tab.
         </p>
@@ -609,7 +609,7 @@ function MatrixView({ hooks, bodies, variantByCombo, hookPerf, bodyPerf, maxSpen
   }
 
   return (
-    <div style={{ overflowX: 'auto', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3 }}>
+    <div style={{ overflowX: 'auto', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9 }}>
       <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%' }}>
         <thead>
           <tr>
@@ -826,7 +826,7 @@ function ByHookView({ rows, hooks, hookPerf, clipById, onVariantClick }) {
         const perf = hookPerf[hid]
         const hook = clipById[hid]
         return (
-          <div key={hid} style={{ background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3 }}>
+          <div key={hid} style={{ background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9 }}>
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--rule)', background: 'var(--paper-2)', display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
               <div style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: 'var(--ink)', letterSpacing: '0.04em' }}>
                 {hid === 'NO_HOOK' ? '(no hook)' : shortClipId(hid, 'hook')}
@@ -848,7 +848,7 @@ function ByHookView({ rows, hooks, hookPerf, clipById, onVariantClick }) {
                     display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px',
                     background: v.status === 'winner' ? 'var(--accent-soft)' : 'var(--paper)',
                     border: '1px solid var(--rule)', borderLeftWidth: 3, borderLeftColor: c.accent,
-                    borderRadius: 2, cursor: 'pointer',
+                    borderRadius: 9, cursor: 'pointer',
                   }}>
                     {/* Body + full-video composition — color-coded labels
                         match the Clips page palette so the type signals
@@ -860,7 +860,7 @@ function ByHookView({ rows, hooks, hookPerf, clipById, onVariantClick }) {
                           color: CLIP_TYPE_COLORS.body,
                           padding: '2px 6px',
                           background: 'rgba(184,129,11,0.12)',
-                          borderRadius: 2,
+                          borderRadius: 9,
                         }}>BODY</span>
                         <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600, color: 'var(--ink)' }}>
                           {v.body_clip_id ? shortClipId(v.body_clip_id, 'body') : '(none)'}
@@ -873,7 +873,7 @@ function ByHookView({ rows, hooks, hookPerf, clipById, onVariantClick }) {
                             color: CLIP_TYPE_COLORS.full_video,
                             padding: '2px 6px',
                             background: 'rgba(122,58,166,0.10)',
-                            borderRadius: 2,
+                            borderRadius: 9,
                           }}>FULL VIDEO</span>
                           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, color: 'var(--ink-2)' }}>
                             {shortClipId(v.frame_clip_id, 'full_video')}
@@ -921,17 +921,17 @@ function SheetView({ filtered, clips, search, setSearch, statusFilter, setStatus
 
   return (
     <div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, marginBottom: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 12px', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9, marginBottom: 12 }}>
         <ChipGroup label="Status" value={statusFilter} setValue={setStatusFilter}
           options={[{ value: 'all', label: 'All' }, ...STATUS_OPTIONS.map(s => ({ value: s, label: s }))]} />
         <div style={{ flex: '1 1 200px', minWidth: 180, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
           <Search size={12} style={{ color: 'var(--ink-3)', flexShrink: 0, marginLeft: 4 }} />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
-            style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }} />
+            style={{ flex: 1, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, padding: '5px 8px', fontSize: 12, color: 'var(--ink)', outline: 'none' }} />
         </div>
       </div>
 
-      <div style={{ overflowX: 'auto', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3 }}>
+      <div style={{ overflowX: 'auto', background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9 }}>
         <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: 'var(--paper-2)', borderBottom: '1px solid var(--rule)' }}>
@@ -1043,7 +1043,7 @@ function VariantDrawer({ variant, clips, ads, clipById, onClose, onSaveField, on
             <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }}>Variant</div>
             <h3 style={{ fontFamily: 'var(--serif)', fontSize: 18, fontWeight: 500, margin: 0, wordBreak: 'break-all' }}>{variant.variant_id}</h3>
           </div>
-          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 2, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid var(--rule)', borderRadius: 9, padding: 6, cursor: 'pointer', color: 'var(--ink-3)' }}>
             <X size={14} />
           </button>
         </div>
@@ -1083,7 +1083,7 @@ function VariantDrawer({ variant, clips, ads, clipById, onClose, onSaveField, on
                   background: variant[`stage_${s.key}`] ? 'var(--accent)' : 'var(--paper-2)',
                   color: 'var(--ink)',
                   border: '1px solid', borderColor: variant[`stage_${s.key}`] ? 'var(--accent)' : 'var(--rule)',
-                  borderRadius: 2,
+                  borderRadius: 9,
                   fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
                   cursor: 'pointer',
                 }}>{s.label}</button>
@@ -1095,7 +1095,7 @@ function VariantDrawer({ variant, clips, ads, clipById, onClose, onSaveField, on
         {/* Meta ad linkage */}
         <Section title="Linked Meta ad">
           {variant.meta_ad_id ? (
-            <div style={{ padding: 12, background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
+            <div style={{ padding: 12, background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 9 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
                 <Link to={`/sales/ads/ad/${variant.meta_ad_id}`} style={{ fontFamily: 'var(--serif)', fontSize: 14, fontWeight: 500, color: 'var(--ink)', textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'var(--ink-3)' }}>
                   {variant.meta_ad_name || variant.meta_ad_id}
@@ -1120,7 +1120,7 @@ function VariantDrawer({ variant, clips, ads, clipById, onClose, onSaveField, on
                 placeholder="Search by ad name, campaign, or ad ID…"
                 style={{ ...inputStyle, marginBottom: 8 }}
               />
-              <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--rule)', borderRadius: 2 }}>
+              <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--rule)', borderRadius: 9 }}>
                 {filteredAds.map(ad => (
                   <button
                     key={ad.ad_id}
@@ -1133,7 +1133,7 @@ function VariantDrawer({ variant, clips, ads, clipById, onClose, onSaveField, on
                     onMouseEnter={e => { e.currentTarget.style.background = 'var(--paper-2)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'var(--paper)' }}
                   >
-                    {ad.thumbnail_url && <img src={ad.thumbnail_url} alt="" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 2, flexShrink: 0 }} />}
+                    {ad.thumbnail_url && <img src={ad.thumbnail_url} alt="" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 9, flexShrink: 0 }} />}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontFamily: 'var(--serif)', fontSize: 12.5, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {ad.ad_name || ad.ad_id}
@@ -1168,7 +1168,7 @@ function VariantDrawer({ variant, clips, ads, clipById, onClose, onSaveField, on
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
           <button onClick={() => onDelete(variant.variant_id)} style={{
             padding: '8px 14px', background: 'transparent', color: 'var(--down)',
-            border: '1px solid var(--down)', borderRadius: 2,
+            border: '1px solid var(--down)', borderRadius: 9,
             fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
           }}>
             <Trash2 size={11} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }} />
@@ -1191,13 +1191,13 @@ function Section({ title, children }) {
 
 function RecipeRow({ label, clip }) {
   if (!clip) return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', background: 'var(--paper-2)', borderRadius: 2, marginBottom: 4 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', background: 'var(--paper-2)', borderRadius: 9, marginBottom: 4 }}>
       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-4)', minWidth: 50 }}>{label}</span>
       <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13, color: 'var(--ink-4)' }}>not assigned</span>
     </div>
   )
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', background: 'var(--paper-2)', borderRadius: 2, marginBottom: 4 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', background: 'var(--paper-2)', borderRadius: 9, marginBottom: 4 }}>
       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)', minWidth: 50 }}>{label}</span>
       <div style={{ flex: 1 }}>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--ink)' }}>{clip.clip_id}</div>
@@ -1220,7 +1220,7 @@ function ViewToggle({ view, setView }) {
     { value: 'sheet',  label: 'Sheet',  icon: Table2 },
   ]
   return (
-    <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3, padding: 2 }}>
+    <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, padding: 2 }}>
       {VIEWS.map(v => {
         const active = view === v.value
         const Icon = v.icon
@@ -1229,7 +1229,7 @@ function ViewToggle({ view, setView }) {
             display: 'inline-flex', alignItems: 'center', gap: 5,
             padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
             background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink-3)',
-            border: 'none', borderRadius: 2, cursor: 'pointer',
+            border: 'none', borderRadius: 9, cursor: 'pointer',
           }}>
             <Icon size={12} /> {v.label}
           </button>
@@ -1244,7 +1244,7 @@ function ViewToggle({ view, setView }) {
 // ────────────────────────────────────────────────────────────────────
 function EmptyState({ onMatrix, onSeed, seeding }) {
   return (
-    <div style={{ border: '2px dashed var(--rule)', borderRadius: 4, padding: 48, textAlign: 'center', background: 'var(--paper-2)' }}>
+    <div style={{ border: '2px dashed var(--rule)', borderRadius: 10, padding: 48, textAlign: 'center', background: 'var(--paper-2)' }}>
       <Trophy size={48} style={{ color: 'var(--ink-4)', margin: '0 auto 12px' }} />
       <h3 className="h3" style={{ fontSize: 22, marginBottom: 8 }}>Splice your first variants.</h3>
       <p style={{ fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink-2)', maxWidth: '52ch', margin: '0 auto 18px', lineHeight: 1.55 }}>
@@ -1303,7 +1303,7 @@ function MatrixSpliceModal({ clips, onClose, onCreated }) {
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <form onClick={e => e.stopPropagation()} onSubmit={submit} style={{ width: '100%', maxWidth: 760, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 4, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
+      <form onClick={e => e.stopPropagation()} onSubmit={submit} style={{ width: '100%', maxWidth: 760, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 10, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
         <h3 style={{ fontFamily: 'var(--serif)', fontSize: 24, fontWeight: 500, margin: '0 0 6px 0' }}>Matrix splicer</h3>
         <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18, fontFamily: 'var(--serif)' }}>
           Pick hooks × bodies. Click <em>Generate</em> and the system creates one variant per combination.
@@ -1329,7 +1329,7 @@ function MatrixSpliceModal({ clips, onClose, onCreated }) {
           </Field>
         </div>
 
-        <div style={{ marginTop: 18, padding: '12px 14px', background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
+        <div style={{ marginTop: 18, padding: '12px 14px', background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 9 }}>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 4 }}>Will create</div>
           <div style={{ fontFamily: 'var(--serif)', fontSize: 20, color: 'var(--ink)', fontWeight: 500 }}>
             {willCreate === 0 ? 'Pick at least one hook or body' : `${willCreate} variant${willCreate > 1 ? 's' : ''}`}
@@ -1356,14 +1356,14 @@ function SelectGroup({ label, items, selected, onToggle, emptyMsg }) {
       {items.length === 0 ? (
         <div style={{ fontStyle: 'italic', color: 'var(--ink-4)', fontFamily: 'var(--serif)', fontSize: 13 }}>{emptyMsg}</div>
       ) : (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 200, overflowY: 'auto', padding: 6, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 200, overflowY: 'auto', padding: 6, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9 }}>
           {items.map(c => {
             const active = selected.has(c.clip_id)
             return (
               <button key={c.clip_id} type="button" onClick={() => onToggle(c.clip_id)} title={c.description || ''} style={{
                 padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.05em', fontWeight: 500,
                 background: active ? 'var(--accent)' : 'var(--paper)', color: 'var(--ink)',
-                border: '1px solid', borderColor: active ? 'var(--accent)' : 'var(--rule)', borderRadius: 2, cursor: 'pointer',
+                border: '1px solid', borderColor: active ? 'var(--accent)' : 'var(--rule)', borderRadius: 9, cursor: 'pointer',
               }}>{c.clip_id}</button>
             )
           })}
@@ -1405,14 +1405,14 @@ function InlineEdit({ value, onSave, placeholder }) {
   const [v, setV] = useState(value || '')
   useEffect(() => { setV(value || '') }, [value])
   if (editing) {
-    return <input autoFocus value={v} onChange={e => setV(e.target.value)} onBlur={() => { setEditing(false); onSave(v.trim()) }} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur() } if (e.key === 'Escape') { setV(value || ''); setEditing(false) } }} style={{ width: '100%', minWidth: 60, background: 'var(--paper)', border: '1px solid var(--accent)', padding: '3px 6px', fontSize: 12, color: 'var(--ink)', outline: 'none', borderRadius: 2 }} />
+    return <input autoFocus value={v} onChange={e => setV(e.target.value)} onBlur={() => { setEditing(false); onSave(v.trim()) }} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur() } if (e.key === 'Escape') { setV(value || ''); setEditing(false) } }} style={{ width: '100%', minWidth: 60, background: 'var(--paper)', border: '1px solid var(--accent)', padding: '3px 6px', fontSize: 12, color: 'var(--ink)', outline: 'none', borderRadius: 9 }} />
   }
-  return <span onClick={() => setEditing(true)} style={{ display: 'inline-block', minWidth: 40, padding: '3px 6px', cursor: 'text', color: value ? 'var(--ink)' : 'var(--ink-4)', borderRadius: 2 }}>{value || placeholder || '—'}</span>
+  return <span onClick={() => setEditing(true)} style={{ display: 'inline-block', minWidth: 40, padding: '3px 6px', cursor: 'text', color: value ? 'var(--ink)' : 'var(--ink-4)', borderRadius: 9 }}>{value || placeholder || '—'}</span>
 }
 function InlineSelect({ value, options, onSave, placeholder }) {
   return (
     <select value={value || ''} onChange={e => onSave(e.target.value || null)} onClick={e => e.stopPropagation()}
-      style={{ width: '100%', background: 'transparent', border: '1px solid transparent', padding: '3px 6px', fontFamily: 'var(--mono)', fontSize: 11, color: value ? 'var(--ink)' : 'var(--ink-4)', cursor: 'pointer', borderRadius: 2, outline: 'none' }}>
+      style={{ width: '100%', background: 'transparent', border: '1px solid transparent', padding: '3px 6px', fontFamily: 'var(--mono)', fontSize: 11, color: value ? 'var(--ink)' : 'var(--ink-4)', cursor: 'pointer', borderRadius: 9, outline: 'none' }}>
       {!value && <option value="">{placeholder || '—'}</option>}
       {options.map(o => {
         const val = typeof o === 'string' ? o : o.value
@@ -1428,7 +1428,7 @@ function StageCheckbox({ checked, onChange }) {
       width: 18, height: 18,
       background: checked ? 'var(--accent)' : 'var(--paper-2)',
       border: '1px solid', borderColor: checked ? 'var(--accent)' : 'var(--rule)',
-      borderRadius: 2, cursor: 'pointer',
+      borderRadius: 9, cursor: 'pointer',
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       color: 'var(--ink)', fontSize: 11, lineHeight: 1,
     }}>{checked ? '✓' : ''}</button>
@@ -1438,13 +1438,13 @@ function ChipGroup({ label, value, setValue, options }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)', fontWeight: 500, marginRight: 4 }}>{label}</span>
-      <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 2, padding: 2 }}>
+      <div style={{ display: 'inline-flex', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, padding: 2 }}>
         {options.map(opt => {
           const active = value === opt.value
           return (
             <button key={String(opt.value)} onClick={() => setValue(opt.value)} style={{
               padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500,
-              background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink-3)', borderRadius: 2, border: 'none', cursor: 'pointer',
+              background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink-3)', borderRadius: 9, border: 'none', cursor: 'pointer',
             }}>{opt.label}</button>
           )
         })}
@@ -1464,7 +1464,7 @@ function StatusPill({ status, small }) {
       padding: small ? '1px 6px' : '2px 8px',
       background: c.bg, color: c.fg,
       border: '1px solid', borderColor: c.accent,
-      borderRadius: 2,
+      borderRadius: 9,
       fontFamily: 'var(--mono)', fontSize: small ? 8 : 9, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
       whiteSpace: 'nowrap',
       display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -1501,7 +1501,7 @@ function StatusPicker({ value, onChange, options = STATUS_OPTIONS }) {
           padding: '4px 10px',
           background: c.bg, color: c.fg,
           border: '1px solid', borderColor: c.accent,
-          borderRadius: 2,
+          borderRadius: 9,
           fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
           cursor: 'pointer',
           minWidth: 90, justifyContent: 'space-between',
@@ -1516,7 +1516,7 @@ function StatusPicker({ value, onChange, options = STATUS_OPTIONS }) {
       {open && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, marginTop: 4,
-          background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3,
+          background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9,
           boxShadow: '0 6px 20px rgba(10,10,10,0.10)',
           zIndex: 50, padding: 4, minWidth: 140,
           display: 'flex', flexDirection: 'column', gap: 3,
@@ -1534,7 +1534,7 @@ function StatusPicker({ value, onChange, options = STATUS_OPTIONS }) {
                   background: isActive ? oc.bg : 'transparent',
                   color: isActive ? oc.fg : 'var(--ink)',
                   border: '1px solid', borderColor: isActive ? oc.accent : 'transparent',
-                  borderRadius: 2,
+                  borderRadius: 9,
                   fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
                   cursor: 'pointer', textAlign: 'left',
                 }}
@@ -1553,20 +1553,20 @@ function StatusPicker({ value, onChange, options = STATUS_OPTIONS }) {
 }
 
 const inputStyle = {
-  width: '100%', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3,
+  width: '100%', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9,
   padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', color: 'var(--ink)', outline: 'none',
 }
 const btnPrimary = {
   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-  background: 'var(--accent)', color: 'var(--ink)', border: '1px solid var(--accent)', borderRadius: 3,
+  background: 'var(--accent)', color: 'var(--ink)', border: '1px solid var(--accent)', borderRadius: 9,
   fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer',
 }
 const btnGhost = {
   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
-  background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 3,
+  background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 9,
   fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500, cursor: 'pointer',
 }
 const btnSecondary = {
-  padding: '8px 16px', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 3,
+  padding: '8px 16px', background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--rule)', borderRadius: 9,
   fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
 }

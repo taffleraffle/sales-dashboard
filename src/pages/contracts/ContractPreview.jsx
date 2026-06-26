@@ -24,7 +24,7 @@ export default function ContractPreview({ contract, amendments }) {
   return (
     <div className="contract-preview" style={{ background: 'var(--paper)', padding: '24px 28px', fontFamily: 'var(--serif)', color: 'var(--ink)', lineHeight: 1.6 }}>
       {amendedCount > 0 && (
-        <div className="mb-5 p-3" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 3 }}>
+        <div className="mb-5 p-3" style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 9 }}>
           <p style={{ margin: 0, fontSize: 12, fontFamily: 'var(--sans, Inter)', color: 'var(--ink-2)' }}>
             <strong>{amendedCount}</strong> clause{amendedCount === 1 ? '' : 's'} amended.
             {' '}Amended clauses are shown in yellow at their natural position in the document.
@@ -104,7 +104,7 @@ function ClauseBlock({ clause, amendment, subAmendments }) {
           padding: '12px 14px',
           background: 'rgba(244, 225, 74, 0.06)',
           borderLeft: '3px solid var(--accent)',
-          borderRadius: 2,
+          borderRadius: 9,
         }),
       }}
     >
@@ -145,7 +145,7 @@ function AmendedBadge({ count }) {
       fontWeight: 700,
       letterSpacing: '0.12em',
       textTransform: 'uppercase',
-      borderRadius: 2,
+      borderRadius: 9,
       flexShrink: 0,
     }}>
       ★ Amended{count > 1 ? ` (${count})` : ''}
@@ -209,7 +209,7 @@ function AmendedClauseBody({ amendment, originalClause }) {
       border: '2px solid var(--accent)',
       borderLeft: '5px solid var(--accent)',
       padding: '14px 16px',
-      borderRadius: 3,
+      borderRadius: 9,
       position: 'relative',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -232,7 +232,7 @@ function AmendedClauseBody({ amendment, originalClause }) {
       </div>
 
       {showOriginal && (
-        <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.04)', borderRadius: 2, marginBottom: 10, fontSize: 11.5, fontStyle: 'italic', color: 'var(--ink-3)' }}>
+        <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.04)', borderRadius: 9, marginBottom: 10, fontSize: 11.5, fontStyle: 'italic', color: 'var(--ink-3)' }}>
           {amendment.original_excerpt ? (
             <p style={{ margin: 0, whiteSpace: 'pre-line' }}>"{amendment.original_excerpt}"</p>
           ) : (

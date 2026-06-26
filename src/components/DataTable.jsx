@@ -34,7 +34,7 @@ export default function DataTable({ columns, data, onRowClick, emptyMessage = 'N
       className="overflow-x-auto"
       style={{
         border: '1px solid var(--rule)',
-        borderRadius: 4,
+        borderRadius: 10,
         background: 'var(--paper)',
       }}
     >

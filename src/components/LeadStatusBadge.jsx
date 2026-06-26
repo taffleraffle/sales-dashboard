@@ -35,7 +35,7 @@ export default function LeadStatusBadge({ status }) {
         alignItems: 'center',
         padding: '2px 8px',
         border: `1px solid ${s.bd}`,
-        borderRadius: 2,
+        borderRadius: 9,
         background: s.bg,
         color: s.fg,
         fontFamily: 'var(--mono)',

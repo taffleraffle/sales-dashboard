@@ -51,7 +51,7 @@ function ConfidencePill({ score }) {
       fontSize: 10,
       fontFamily: 'var(--mono)',
       letterSpacing: '0.06em',
-      borderRadius: 2,
+      borderRadius: 9,
       color: 'white',
       background: color,
       textTransform: 'uppercase',

@@ -2678,7 +2678,7 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
               : `Avg ${avgB.toFixed(1)}/${granularity} · Total ${totalCount}`}
           </div>
           {/* Granularity toggle */}
-          <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', borderRadius: 9, overflow: 'hidden' }}>
             {[['day','D'],['week','W'],['month','M']].map(([g, lbl]) => (
               <button
                 key={g}
@@ -2702,7 +2702,7 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
             ))}
           </div>
           {/* Bar / Line toggle */}
-          <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', borderRadius: 9, overflow: 'hidden' }}>
             {['bar', 'line'].map(t => (
               <button
                 key={t}
@@ -3126,7 +3126,7 @@ function ResolveDupeModal({ group, onClose, onResolved }) {
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ width: '92%', maxWidth: 880, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 3, padding: '24px 28px', maxHeight: '85vh', overflowY: 'auto' }}
+        style={{ width: '92%', maxWidth: 880, background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 9, padding: '24px 28px', maxHeight: '85vh', overflowY: 'auto' }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--rule)' }}>
           <div>
@@ -3137,7 +3137,7 @@ function ResolveDupeModal({ group, onClose, onResolved }) {
         </div>
 
         {loading && <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-4)' }}>Loading prospect history...</div>}
-        {error && <div style={{ padding: 12, color: '#c44', background: '#fee', borderRadius: 3, marginBottom: 12 }}>{error}</div>}
+        {error && <div style={{ padding: 12, color: '#c44', background: '#fee', borderRadius: 9, marginBottom: 12 }}>{error}</div>}
 
         {!loading && members.length > 0 && (
           <>
@@ -3154,7 +3154,7 @@ function ResolveDupeModal({ group, onClose, onResolved }) {
                   style={{
                     border: idx === primaryIdx ? '2px solid var(--accent)' : '1px solid var(--rule)',
                     padding: 14,
-                    borderRadius: 3,
+                    borderRadius: 9,
                     cursor: 'pointer',
                     background: idx === primaryIdx ? 'var(--accent-soft)' : 'var(--paper-2)',
                   }}
@@ -3194,14 +3194,14 @@ function ResolveDupeModal({ group, onClose, onResolved }) {
               <button
                 disabled={saving}
                 onClick={() => saveResolution('not_duplicate')}
-                style={{ padding: '10px 18px', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 3, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', color: 'var(--ink-2)' }}
+                style={{ padding: '10px 18px', background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 9, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', color: 'var(--ink-2)' }}
               >
                 Different people — dismiss
               </button>
               <button
                 disabled={saving}
                 onClick={() => saveResolution('merge')}
-                style={{ padding: '10px 18px', background: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: 3, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', color: 'var(--ink)', fontWeight: 600 }}
+                style={{ padding: '10px 18px', background: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: 9, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', color: 'var(--ink)', fontWeight: 600 }}
               >
                 Same person — merge into primary
               </button>
@@ -4404,7 +4404,7 @@ export default function MarketingPerformance() {
             style={{
               fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 500,
               padding: '7px 12px', border: '1px solid var(--ink-3)',
-              color: 'var(--ink)', textDecoration: 'none', borderRadius: 2,
+              color: 'var(--ink)', textDecoration: 'none', borderRadius: 9,
               background: 'transparent',
             }}
             title="Attribution coverage report — how much of the chain is actually traced">
@@ -4437,7 +4437,7 @@ export default function MarketingPerformance() {
               color: selectedAudiences.size === 0 ? 'var(--paper)' : 'var(--ink-3)',
               fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
               letterSpacing: '0.08em', textTransform: 'uppercase',
-              cursor: 'pointer', borderRadius: 2,
+              cursor: 'pointer', borderRadius: 9,
             }}>All</button>
           {audienceList.map(a => {
             const on = selectedAudiences.has(a)
@@ -4451,7 +4451,7 @@ export default function MarketingPerformance() {
                   color: on ? 'var(--paper)' : (isUnknown ? '#b53e3e' : 'var(--ink-3)'),
                   fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
                   letterSpacing: '0.08em', textTransform: 'uppercase',
-                  cursor: 'pointer', borderRadius: 2,
+                  cursor: 'pointer', borderRadius: 9,
                   fontStyle: isUnknown ? 'italic' : 'normal',
                 }}>
                 {a}
@@ -4483,7 +4483,7 @@ export default function MarketingPerformance() {
               color: 'var(--ink-3)',
               fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
               letterSpacing: '0.08em', textTransform: 'uppercase',
-              cursor: 'pointer', borderRadius: 2,
+              cursor: 'pointer', borderRadius: 9,
               display: 'inline-flex', alignItems: 'center', gap: 4,
             }}>
             <Edit3 size={11} />
@@ -4627,7 +4627,7 @@ export default function MarketingPerformance() {
           background: 'var(--paper-2)',
           border: '1px solid var(--rule)',
           borderLeft: '3px solid #c08a3a',
-          borderRadius: 2,
+          borderRadius: 9,
           fontFamily: 'var(--sans)',
           fontSize: 13,
           color: 'var(--ink-2)',
@@ -5111,7 +5111,7 @@ function AudienceOverrideModal({ modal, entries, audienceList, overrides, onClos
         style={{
           background: 'var(--paper)', width: '100%', maxWidth: 760, maxHeight: '90vh',
           overflow: 'auto', border: '1px solid var(--rule)', borderTop: '3px solid var(--accent)',
-          borderRadius: 2, boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
+          borderRadius: 9, boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
         }}>
         <div style={{
           padding: '20px 24px', borderBottom: '1px solid var(--rule)',
@@ -5138,7 +5138,7 @@ function AudienceOverrideModal({ modal, entries, audienceList, overrides, onClos
               width: '100%', padding: '10px 12px', marginBottom: 16,
               fontFamily: 'var(--sans)', fontSize: 14,
               border: '1px solid var(--rule)', background: 'var(--paper)',
-              borderRadius: 2,
+              borderRadius: 9,
             }} />
           <div style={{
             maxHeight: 280, overflowY: 'auto', border: '1px solid var(--rule)',
@@ -5188,7 +5188,7 @@ function AudienceOverrideModal({ modal, entries, audienceList, overrides, onClos
                       color: audChoice === a ? 'var(--paper)' : 'var(--ink-3)',
                       fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
                       letterSpacing: '0.08em', textTransform: 'uppercase',
-                      cursor: 'pointer', borderRadius: 2,
+                      cursor: 'pointer', borderRadius: 9,
                     }}>{a}</button>
                 ))}
               </div>
@@ -5197,7 +5197,7 @@ function AudienceOverrideModal({ modal, entries, audienceList, overrides, onClos
                 style={{
                   width: '100%', padding: '8px 10px', fontFamily: 'var(--sans)', fontSize: 13,
                   border: '1px solid var(--rule)', background: 'var(--paper)',
-                  borderRadius: 2,
+                  borderRadius: 9,
                 }} />
             </div>
           )}
@@ -5208,7 +5208,7 @@ function AudienceOverrideModal({ modal, entries, audienceList, overrides, onClos
             style={{ padding: '10px 18px', fontFamily: 'var(--mono)', fontSize: 11,
                     letterSpacing: '0.12em', textTransform: 'uppercase',
                     border: '1px solid var(--rule)', background: 'transparent',
-                    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 2 }}>
+                    color: 'var(--ink-3)', cursor: 'pointer', borderRadius: 9 }}>
             Cancel
           </button>
           <button onClick={handleSave}
@@ -5216,7 +5216,7 @@ function AudienceOverrideModal({ modal, entries, audienceList, overrides, onClos
             style={{ padding: '10px 22px', fontFamily: 'var(--mono)', fontSize: 11,
                     letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
                     border: '2px solid var(--ink)', background: 'var(--ink)',
-                    color: 'var(--paper)', cursor: 'pointer', borderRadius: 2,
+                    color: 'var(--paper)', cursor: 'pointer', borderRadius: 9,
                     boxShadow: '3px 3px 0 var(--accent)',
                     opacity: (!picked || (!newAudience.trim() && !audChoice)) ? 0.4 : 1 }}>
             <Check size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />

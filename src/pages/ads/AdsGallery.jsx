@@ -297,7 +297,7 @@ export default function AdsGallery() {
                 background: 'var(--paper)',
                 color: 'var(--ink)',
                 border: '1px solid var(--rule)',
-                borderRadius: 3,
+                borderRadius: 9,
                 fontFamily: 'var(--mono)',
                 fontSize: 10.5,
                 letterSpacing: '0.1em',
@@ -323,7 +323,7 @@ export default function AdsGallery() {
                 color: analystOpen ? 'var(--paper)' : 'var(--ink)',
                 border: '1px solid',
                 borderColor: analystOpen ? 'var(--ink)' : 'var(--accent)',
-                borderRadius: 3,
+                borderRadius: 9,
                 fontFamily: 'var(--mono)',
                 fontSize: 10.5,
                 letterSpacing: '0.1em',
@@ -380,7 +380,7 @@ export default function AdsGallery() {
           <div
             style={{
               border: '1px dashed var(--rule)',
-              borderRadius: 4,
+              borderRadius: 10,
               padding: 32,
               textAlign: 'center',
               background: 'var(--paper-2)',
@@ -411,7 +411,7 @@ export default function AdsGallery() {
                 background: 'var(--accent)',
                 color: 'var(--ink)',
                 border: '1px solid var(--accent)',
-                borderRadius: 3,
+                borderRadius: 9,
                 fontFamily: 'var(--mono)',
                 fontSize: 11,
                 letterSpacing: '0.1em',
@@ -441,7 +441,7 @@ export default function AdsGallery() {
                 style={{
                   background: 'var(--paper-2)',
                   border: '1px solid var(--rule)',
-                  borderRadius: 4,
+                  borderRadius: 10,
                   height: 360,
                   animation: 'pulse 1.5s ease-in-out infinite',
                 }}
@@ -519,7 +519,7 @@ function FilterBar({
         padding: '10px 12px',
         background: 'var(--paper)',
         border: '1px solid var(--rule)',
-        borderRadius: 3,
+        borderRadius: 9,
       }}
     >
       <ChipGroup label="Status"  value={statusFilter} setValue={setStatusFilter} options={STATUS_FILTERS} />
@@ -552,7 +552,7 @@ function FilterBar({
               background: 'var(--paper-2)',
               color: 'var(--ink)',
               border: '1px solid var(--rule)',
-              borderRadius: 2,
+              borderRadius: 9,
               padding: '4px 8px',
               cursor: 'pointer',
               maxWidth: 240,
@@ -576,7 +576,7 @@ function FilterBar({
             flex: 1,
             background: 'var(--paper-2)',
             border: '1px solid var(--rule)',
-            borderRadius: 2,
+            borderRadius: 9,
             padding: '5px 8px',
             fontSize: 12,
             color: 'var(--ink)',
@@ -609,7 +609,7 @@ function ChipGroup({ label, value, setValue, options }) {
           display: 'inline-flex',
           background: 'var(--paper-2)',
           border: '1px solid var(--rule)',
-          borderRadius: 2,
+          borderRadius: 9,
           padding: 2,
         }}
       >
@@ -628,7 +628,7 @@ function ChipGroup({ label, value, setValue, options }) {
                 fontWeight: 500,
                 background: active ? 'var(--ink)' : 'transparent',
                 color: active ? 'var(--paper)' : 'var(--ink-3)',
-                borderRadius: 2,
+                borderRadius: 9,
               }}
             >
               {opt.label}
