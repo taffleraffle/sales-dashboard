@@ -6309,7 +6309,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
             }} />
         )}
         {hoverPlay && row.preview_url && (
-          <video src={row.preview_url}
+          <video src={row.preview_proxy_url || row.preview_url}
             autoPlay muted loop playsInline preload="metadata"
             poster={row.thumbnail_url || undefined}
             draggable={false}
@@ -6417,7 +6417,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
     const rootId = row.parent_id || row.id
     let on = true
     supabase.from('lib_creative_library')
-      .select('id, status, preview_url, thumbnail_url, version_number, name, canonical_name, display_name, type')
+      .select('id, status, preview_url, preview_proxy_url, thumbnail_url, version_number, name, canonical_name, display_name, type')
       .or(`id.eq.${rootId},parent_id.eq.${rootId}`)
       .eq('exclude_from_library', false)
       .order('version_number', { ascending: false })
@@ -6905,7 +6905,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: rawSibling ? '1fr 96px' : '1fr', gap: 10, alignItems: 'start' }}>
               <div style={{ aspectRatio: '16 / 9', background: 'black', borderRadius: 12, overflow: 'hidden' }}>
-                <OptVideoPlayer key={playerRow.id} src={playerRow.preview_url} compact
+                <OptVideoPlayer key={playerRow.id} src={playerRow.preview_proxy_url || playerRow.preview_url} compact
                   poster={playerRow.thumbnail_url}
                   wrapperStyle={OPT_PLAYER_WRAP_FILL} />
               </div>
@@ -9190,7 +9190,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             old rows), then preview_url (only full-quality for new rows). */}
         {task.preview_url ? (
           <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
-            <OptVideoPlayer src={task.preview_url} compact
+            <OptVideoPlayer src={task.preview_proxy_url || task.preview_url} compact
               poster={task.thumbnail_url}
               wrapperStyle={OPT_PLAYER_WRAP_360} />
             <div style={{
