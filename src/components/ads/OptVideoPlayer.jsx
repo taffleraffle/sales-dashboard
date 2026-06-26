@@ -53,6 +53,10 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
     // mode so the player doesn't push the surrounding card off-screen.
     wrapperStyle,
     autoPlay,
+    // 'metadata' (default, cheap) or 'auto' (eager buffer). The detail modal
+    // passes 'auto' so a single open clip starts playing fast instead of
+    // downloading from zero on the first click. Don't use 'auto' in grids.
+    preload = 'metadata',
   },
   parentRef,
 ) {
@@ -322,7 +326,7 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
         overflow: 'hidden',
       }}>
         {src ? (
-          <video ref={videoRef} src={src} preload="metadata"
+          <video ref={videoRef} src={src} preload={preload}
             autoPlay={autoPlay !== undefined ? autoPlay : !compact}
             playsInline
             onClick={togglePlay}
