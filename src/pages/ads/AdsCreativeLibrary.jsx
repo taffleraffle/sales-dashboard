@@ -6825,10 +6825,10 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                 Delete
               </button>
             )}
-            <button onClick={handleClose} style={ghostBtn}>Close</button>
+            <button onClick={handleClose} style={ghostBtn}>Cancel</button>
             {scope.canEditCreative && (
               <button onClick={() => save()} disabled={saving} style={primaryBtn}>
-                {saving ? 'Saving…' : 'Save now'}
+                {saving ? 'Saving…' : 'Save'}
               </button>
             )}
           </>
@@ -6977,16 +6977,19 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
             }}>
               <span>Original file</span>
-              <a href={toDownloadUrl(dl, rowDisplayName(row))}
-                download={rowDisplayName(row) || 'creative.mp4'}
-                rel="noreferrer"
-                title="Download the highest-quality version of this creative"
-                style={{
-                  padding: '4px 10px', fontWeight: 600,
-                  letterSpacing: '0.06em', textTransform: 'uppercase',
-                  background: 'var(--ink)', color: 'var(--paper)',
-                  textDecoration: 'none', borderRadius: 9,
-                }}>↓ Download original</a>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <CopyLinkButton url={toDownloadUrl(dl, rowDisplayName(row))} label="Copy link" />
+                <a href={toDownloadUrl(dl, rowDisplayName(row))}
+                  download={rowDisplayName(row) || 'creative.mp4'}
+                  rel="noreferrer"
+                  title="Download the highest-quality version of this creative"
+                  style={{
+                    padding: '4px 10px', fontWeight: 600,
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                    background: 'var(--ink)', color: 'var(--paper)',
+                    textDecoration: 'none', borderRadius: 9,
+                  }}>↓ Download original</a>
+              </div>
             </div>
           )
         })()}
@@ -9199,7 +9202,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
               fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
             }}>
-              <span>Source file</span>
+              <span>Original file</span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {task.drive_url && (
                   <a href={task.drive_url} target="_blank" rel="noreferrer"
