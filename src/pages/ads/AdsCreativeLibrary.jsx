@@ -6902,33 +6902,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                     poster={playerRow.thumbnail_url}
                     wrapperStyle={OPT_PLAYER_WRAP_FILL} />
                 </div>
-                {(() => {
-                  const dl = playerRow.final_cut_url || playerRow.drive_url || playerRow.preview_url
-                  if (!dl) return null
-                  const isEdit = !!editedSibling || playerRow.status === 'edited'
-                  return (
-                    <div style={{
-                      padding: '8px 12px', background: 'var(--paper-2)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                      fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
-                    }}>
-                      <span>{isEdit ? 'Final cut' : 'Raw source'}</span>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <CopyLinkButton url={toDownloadUrl(dl, rowDisplayName(playerRow))} label="Copy link" />
-                        <a href={toDownloadUrl(dl, rowDisplayName(playerRow))}
-                          download={rowDisplayName(playerRow) || 'creative.mp4'}
-                          rel="noreferrer"
-                          title="Download this file"
-                          style={{
-                            padding: '4px 10px', fontWeight: 600,
-                            letterSpacing: '0.06em', textTransform: 'uppercase',
-                            background: 'var(--ink)', color: 'var(--paper)',
-                            textDecoration: 'none', borderRadius: 9,
-                          }}>↓ Download{isEdit ? '' : ' raw'}</a>
-                      </div>
-                    </div>
-                  )
-                })()}
+                {/* Download moved OUT from under the video into the form below
+                    (Ben 2026-06-26: not below the live video). Card = player. */}
               </div>
               {/* Raw source — small clickable thumbnail (Ben: raw only a snippet). */}
               {rawSibling && (
@@ -6997,6 +6972,32 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             title={edit.display_name ?? rowDisplayName(edit) ?? ''}
             style={inputStyle} />
         </Field>
+
+        {/* File download — in the form, NOT under the player (Ben 2026-06-26).
+            Points at the best URL of whatever's playing; labelled raw/final. */}
+        {(() => {
+          const dl = playerRow.final_cut_url || playerRow.drive_url || playerRow.preview_url
+          if (!dl) return null
+          const isEdit = !!editedSibling || playerRow.status === 'edited'
+          return (
+            <Field label={isEdit ? 'Final cut' : 'Raw source'}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <a href={toDownloadUrl(dl, rowDisplayName(playerRow))}
+                  download={rowDisplayName(playerRow) || 'creative.mp4'}
+                  rel="noreferrer"
+                  title="Download this file"
+                  style={{
+                    padding: '7px 12px', fontFamily: 'var(--mono)', fontSize: 10.5,
+                    fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                    background: 'var(--ink)', color: 'var(--paper)',
+                    textDecoration: 'none', borderRadius: 9,
+                  }}>↓ Download{isEdit ? '' : ' raw'}</a>
+                <CopyLinkButton url={toDownloadUrl(dl, rowDisplayName(playerRow))} label="Copy link" />
+              </div>
+            </Field>
+          )
+        })()}
+
         <Field label="Messaging angle (override)">
           {/* Free-text override of the AI-generated messaging_angle. The AI
               value is preserved in messaging_angle so we can compare and
@@ -9198,40 +9199,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
                   wrapperStyle={OPT_PLAYER_WRAP_360} />
               )
             })()}
-            <div style={{
-              padding: '8px 12px', background: 'var(--paper-2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-              fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--ink-3)',
-            }}>
-              {/* The player above shows the EDIT; this row is explicitly the
-                  RAW source the editor works from (Ben: was confusing). */}
-              <span>Raw source</span>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {task.drive_url && (
-                  <a href={task.drive_url} target="_blank" rel="noreferrer"
-                    style={{ color: 'var(--ink-2)', textDecoration: 'underline' }}>
-                    Open in Drive ↗
-                  </a>
-                )}
-                {(task.drive_url || task.preview_url) && (
-                  <a
-                    href={toDownloadUrl(task.drive_url || task.preview_url, task.creative_name)}
-                    download={task.creative_name || 'raw.mp4'}
-                    rel="noreferrer"
-                    title="Download the raw source file the editor works from"
-                    style={{
-                      padding: '4px 10px',
-                      fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                      background: 'var(--ink)', color: 'var(--paper)',
-                      textDecoration: 'none', borderRadius: 9,
-                    }}>↓ Download raw</a>
-                )}
-                <CopyLinkButton
-                  url={task.drive_url || task.preview_url}
-                  label="Copy link"
-                  title="Copy a shareable link to the raw source" />
-              </div>
-            </div>
+            {/* Raw-source download moved OUT of the player card and into the
+                right details rail (Ben 2026-06-26: "still have download raw
+                below the actual live video"). The card is just the edit now. */}
           </div>
         ) : task.drive_url ? (
           <div style={{
@@ -9332,6 +9302,38 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             </span>
           </button>
         </Field>
+
+        {/* Raw source — the original footage the editor works FROM. Lives
+            here in the rail (not under the player) so the live edit stays
+            the star. Download + copy + open-in-Drive in one compact row. */}
+        {(task.drive_url || task.preview_url) && (
+          <Field label="Raw source">
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <a
+                href={toDownloadUrl(task.drive_url || task.preview_url, task.creative_name)}
+                download={task.creative_name || 'raw.mp4'}
+                rel="noreferrer"
+                title="Download the raw source file the editor works from"
+                style={{
+                  padding: '7px 12px', fontFamily: 'var(--mono)', fontSize: 10.5,
+                  fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                  background: 'var(--ink)', color: 'var(--paper)',
+                  textDecoration: 'none', borderRadius: 9,
+                }}>↓ Download raw</a>
+              <CopyLinkButton
+                url={task.drive_url || task.preview_url}
+                label="Copy link"
+                title="Copy a shareable link to the raw source" />
+              {task.drive_url && (
+                <a href={task.drive_url} target="_blank" rel="noreferrer"
+                  style={{
+                    fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)',
+                    textDecoration: 'underline',
+                  }}>Open in Drive ↗</a>
+              )}
+            </div>
+          </Field>
+        )}
 
         <Field label="Name">
           <input type="text" value={name} onChange={e => setName(e.target.value)}
