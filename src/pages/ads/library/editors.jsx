@@ -1376,24 +1376,23 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
         </>
       }>
       <div style={{ padding: '20px 28px', display: 'grid', gap: 14 }}>
-        {/* Mode tabs */}
-        <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper-2)' }}>
-          <button onClick={() => setMode('pick')} style={{
-            padding: '8px 18px', flex: 1,
-            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
-            letterSpacing: '0.06em', textTransform: 'uppercase',
-            background: mode === 'pick' ? 'var(--ink)' : 'transparent',
-            color: mode === 'pick' ? 'var(--paper)' : 'var(--ink-3)',
-            border: 'none', cursor: 'pointer',
-          }}>Pick existing</button>
-          <button onClick={() => setMode('upload')} style={{
-            padding: '8px 18px', flex: 1,
-            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
-            letterSpacing: '0.06em', textTransform: 'uppercase',
-            background: mode === 'upload' ? 'var(--ink)' : 'transparent',
-            color: mode === 'upload' ? 'var(--paper)' : 'var(--ink-3)',
-            border: 'none', cursor: 'pointer',
-          }}>↗ Upload new file</button>
+        {/* Mode tabs — onboarding segmented pill control */}
+        <div style={{ display: 'inline-flex', gap: 4, border: '1px solid var(--rule)', background: 'var(--paper-2)', borderRadius: 999, padding: 4 }}>
+          {[
+            { v: 'pick',   label: 'Pick existing' },
+            { v: 'upload', label: '↗ Upload new file' },
+          ].map(t => {
+            const on = mode === t.v
+            return (
+              <button key={t.v} onClick={() => setMode(t.v)} style={{
+                flex: 1, padding: '9px 18px', borderRadius: 999,
+                fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600, letterSpacing: '-0.005em',
+                background: on ? 'var(--ink)' : 'transparent',
+                color: on ? '#fff' : 'var(--ink-3)',
+                border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+              }}>{t.label}</button>
+            )
+          })}
         </div>
 
         {mode === 'pick' ? (
@@ -1407,7 +1406,8 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
                   a raw clip. Ben's ask 2026-05-23. */}
               <div style={{
                 display: 'flex', gap: 4, marginBottom: 8,
-                border: '1px solid var(--rule)', padding: 3,
+                border: '1px solid var(--rule)', borderRadius: 999, padding: 4,
+                background: 'var(--paper-2)',
               }}>
                 {[
                   { value: 'raw', label: `Needs editing · ${rawCount}` },
@@ -1418,11 +1418,11 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
                     <button key={opt.value} type="button"
                       onClick={() => setStatusFilter(opt.value)}
                       style={{
-                        flex: 1, padding: '6px 8px', cursor: 'pointer',
-                        fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
-                        letterSpacing: '0.06em', textTransform: 'uppercase',
+                        flex: 1, padding: '8px 8px', cursor: 'pointer', borderRadius: 999,
+                        fontFamily: 'var(--sans)', fontSize: 12.5, fontWeight: 600,
+                        letterSpacing: '-0.005em',
                         background: selected ? 'var(--ink)' : 'transparent',
-                        color: selected ? 'var(--paper)' : 'var(--ink-3)',
+                        color: selected ? '#fff' : 'var(--ink-3)',
                         border: 'none',
                       }}>{opt.label}</button>
                   )
@@ -1632,11 +1632,29 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
           {/* Task-type select removed 2026-06-11 (Ben) — new tasks default
               to 'edit'; the column and existing values are untouched. */}
           <Field label="Priority">
-            <select value={priority} onChange={e => setPriority(e.target.value)} style={selectStyle}>
-              <option>P1 - High</option>
-              <option>P2 - Medium</option>
-              <option>P3 - Low</option>
-            </select>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[
+                { v: 'P1 - High',   short: 'P1 · High',   c: 'var(--down)' },
+                { v: 'P2 - Medium', short: 'P2 · Med',    c: '#d09c08' },
+                { v: 'P3 - Low',    short: 'P3 · Low',    c: 'var(--up)' },
+              ].map(o => {
+                const on = priority === o.v
+                return (
+                  <button key={o.v} type="button" onClick={() => setPriority(o.v)}
+                    style={{
+                      flex: 1, padding: '8px 10px', borderRadius: 999, cursor: 'pointer',
+                      fontFamily: 'var(--sans)', fontSize: 12, fontWeight: 600,
+                      border: `1.5px solid ${on ? o.c : 'var(--rule)'}`,
+                      background: on ? o.c : 'transparent',
+                      color: on ? '#fff' : 'var(--ink-3)',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: on ? '#fff' : o.c }} />
+                    {o.short}
+                  </button>
+                )
+              })}
+            </div>
           </Field>
           <Field label="Start date">
             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />

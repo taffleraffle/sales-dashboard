@@ -127,17 +127,17 @@ export default function Modal({
         aria-modal="true"
         aria-label={title}
         style={{
-          position: 'fixed', top: '50%', left: '50%',
-          transform: 'translate(-50%, -50%)',
+          // Top-anchored, NOT vertically centred — when modal content height
+          // changes (e.g. toggling Pick-existing/Upload tabs) a centred modal
+          // recentres and the whole dialog jumps. Anchoring the top keeps it
+          // put; content just grows downward (Ben 2026-06-26).
+          position: 'fixed', top: '7vh', left: '50%',
+          transform: 'translateX(-50%)',
           width: `min(${maxW}px, 94vw)`,
-          // 'full' size always renders at the max viewport height so
-          // the review surface doesn't shrink/grow based on how many
-          // comments are in the sidebar (Ben 2026-06-01: "I just want
-          // it to be that size by default and not be this small one
-          // at the start"). Other sizes still hug their content via
-          // maxHeight only.
-          maxHeight: '90vh',
-          ...(size === 'full' ? { height: '90vh' } : {}),
+          // 'full' size renders at a stable tall height so the review surface
+          // doesn't shrink/grow based on sidebar content.
+          maxHeight: '86vh',
+          ...(size === 'full' ? { height: '86vh' } : {}),
           background: 'var(--paper)',
           borderTop: '3px solid var(--accent)',
           borderLeft: '1px solid var(--rule)',
@@ -148,11 +148,8 @@ export default function Modal({
           boxShadow: '0 24px 60px rgba(21,22,26,0.18)',
           zIndex: zDialog,
           display: 'flex', flexDirection: 'column',
-          // Animation shortened from 220ms -> 100ms (2026-05-22). The
-          // longer ease felt premium but ate 100+ms of perceived click latency
-          // on every modal open. 100ms is fast enough that the eye registers
-          // motion but not a wait.
-          animation: 'modalSlideIn 100ms cubic-bezier(0.2,0.7,0.2,1)',
+          // No entrance animation (Ben: no animations) — and a transform
+          // keyframe here would fight the translateX(-50%) centering anyway.
         }}>
         {/* Header — sticky inside the modal */}
         <div style={{
