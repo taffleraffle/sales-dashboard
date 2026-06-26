@@ -6641,6 +6641,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
       // AND manually_marked_used=true, so include the flag in every
       // save. Otherwise the override is lost on the next auto-save.
       manually_marked_used: !!edit.manually_marked_used,
+      // Editable name — blank falls back to the auto canonical_name (NULL).
+      display_name: (edit.display_name ?? '').trim() || null,
       is_bad_take: !!edit.is_bad_take,
       bad_take_reason: edit.bad_take_reason || null,
       // Messaging angle override (migration 103). Coordinator's free-text
@@ -6910,21 +6912,15 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         {/* Slim form — only the fields Ben actually uses to organise creatives.
             Notes, v21 script, and original filename are tucked into the
             'Advanced' disclosure below. */}
-        <Field label="Display name (auto)">
-          {/* Read-only. The display_name is built by creative-library-describe
-              from offer + messaging_angle + creator + take_number. Editing it
-              directly used to produce the messy 5-token strings (Ben 2026-05-31).
-              To change what appears here, edit the Messaging angle field below
-              (free-text) or the Offer / Creator dropdowns. */}
-          <input type="text" readOnly
-            value={rowDisplayName(edit) || ''}
-            title={rowDisplayName(edit) || ''}
-            style={{
-              ...inputStyle,
-              color: 'var(--ink-3)',
-              background: 'var(--paper-2)',
-              cursor: 'default',
-            }} />
+        <Field label="Name">
+          {/* Editable name (Ben 2026-06-26). Sets display_name directly; blank
+              falls back to the auto canonical_name. */}
+          <input type="text"
+            value={edit.display_name ?? rowDisplayName(edit) ?? ''}
+            onChange={e => setEdit({ ...edit, display_name: e.target.value })}
+            placeholder={edit.canonical_name || 'Creative name'}
+            title={edit.display_name ?? rowDisplayName(edit) ?? ''}
+            style={inputStyle} />
         </Field>
         <Field label="Messaging angle (override)">
           {/* Free-text override of the AI-generated messaging_angle. The AI
