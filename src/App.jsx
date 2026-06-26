@@ -118,7 +118,7 @@ class ErrorBoundary extends Component {
   render() {
     if (this.state.error) return (
       <div style={{ padding: 40, fontFamily: 'monospace', maxWidth: 920, margin: '0 auto' }}>
-        <h2 style={{ color: '#b53e3e' }}>Runtime Error</h2>
+        <h2 style={{ color: 'var(--down)' }}>Runtime Error</h2>
         <p style={{ fontFamily: 'system-ui, sans-serif', color: '#333', lineHeight: 1.5 }}>
           Often this is a stale browser cache after a deploy. Try a hard reload first.
         </p>
@@ -127,7 +127,7 @@ class ErrorBoundary extends Component {
           fontFamily: 'system-ui, sans-serif', fontSize: 13, fontWeight: 600,
           background: '#0a0a0a', color: '#fff', border: 'none', cursor: 'pointer',
         }}>Hard reload</button>
-        <pre style={{ whiteSpace: 'pre-wrap', color: '#b53e3e' }}>{this.state.error.message}</pre>
+        <pre style={{ whiteSpace: 'pre-wrap', color: 'var(--down)' }}>{this.state.error.message}</pre>
         <pre style={{ whiteSpace: 'pre-wrap', color: '#999', fontSize: 12 }}>{this.state.error.stack}</pre>
       </div>
     )

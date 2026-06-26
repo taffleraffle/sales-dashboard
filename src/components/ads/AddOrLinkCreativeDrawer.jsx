@@ -357,7 +357,7 @@ export default function AddOrLinkCreativeDrawer({ open, onClose, onSaved, preset
 
         {err && (
           <div style={{ margin: 14, padding: 12, background: '#fef2f2', border: '1px solid #fca5a5',
-                        color: '#b53e3e', fontSize: 13, borderRadius: 9 }}>
+                        color: 'var(--down)', fontSize: 13, borderRadius: 9 }}>
             <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
           </div>
         )}
@@ -933,7 +933,7 @@ function QueueRow({ item, index, onRemove, onChangeAd, disabled }) {
       {/* Error */}
       {item.error && (
         <div style={{ marginTop: 8, padding: '6px 10px', background: '#fef2f2',
-                      border: '1px solid #fca5a5', color: '#b53e3e', fontSize: 11,
+                      border: '1px solid #fca5a5', color: 'var(--down)', fontSize: 11,
                       borderRadius: 9 }}>
           {item.error}
         </div>
@@ -1044,5 +1044,5 @@ const STATUS_STYLES = {
   transcribing: { bg: 'var(--ink)', fg: 'var(--accent)', accent: 'var(--ink)' },
   tagging:      { bg: 'var(--ink)', fg: 'var(--accent)', accent: 'var(--ink)' },
   done:         { bg: 'var(--accent)', fg: 'var(--ink)', accent: 'var(--accent)' },
-  error:        { bg: '#fef2f2', fg: '#b53e3e', accent: '#fca5a5' },
+  error:        { bg: '#fef2f2', fg: 'var(--down)', accent: '#fca5a5' },
 }

@@ -29,11 +29,11 @@ class Boundary extends Component {
       <div style={{
         margin: '40px auto', maxWidth: 720, padding: '28px 32px',
         background: 'white', border: '1px solid var(--rule)',
-        borderTop: '3px solid #b53e3e',
+        borderTop: '3px solid var(--down)',
       }}>
         <div style={{
           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
-          letterSpacing: '0.14em', textTransform: 'uppercase', color: '#b53e3e',
+          letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--down)',
           marginBottom: 8,
         }}>This page hit an error</div>
         <p style={{ fontFamily: 'var(--sans)', fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55, margin: '0 0 16px' }}>
@@ -46,7 +46,7 @@ class Boundary extends Component {
           background: 'var(--ink)', color: 'var(--paper)', border: 'none', cursor: 'pointer',
         }}>Reload this page</button>
         <pre style={{
-          whiteSpace: 'pre-wrap', color: '#b53e3e', fontSize: 12,
+          whiteSpace: 'pre-wrap', color: 'var(--down)', fontSize: 12,
           marginTop: 18, fontFamily: 'var(--mono)',
         }}>{this.state.error.message}</pre>
       </div>

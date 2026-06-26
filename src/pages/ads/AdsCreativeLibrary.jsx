@@ -96,9 +96,9 @@ function CopyLinkButton({ url, label = 'Copy link', title, style }) {
         padding: '4px 10px',
         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
         letterSpacing: '0.06em', textTransform: 'uppercase',
-        background: copied ? '#3e8a5e' : 'transparent',
+        background: copied ? 'var(--up)' : 'transparent',
         color: copied ? 'white' : 'var(--ink-2)',
-        border: '1px solid ' + (copied ? '#3e8a5e' : 'var(--rule)'),
+        border: '1px solid ' + (copied ? 'var(--up)' : 'var(--rule)'),
         borderRadius: 9, cursor: 'pointer', textDecoration: 'none',
         whiteSpace: 'nowrap',
         ...(style || {}),
@@ -127,8 +127,8 @@ const STATUS_LABEL = {
   edited: 'Edited',
 }
 const STATUS_COLOR = {
-  raw: '#b53e3e',      // red — needs attention / not yet edited
-  edited: '#3e8a5e',   // green — done
+  raw: 'var(--down)',      // red — needs attention / not yet edited
+  edited: 'var(--up)',   // green — done
 }
 
 
@@ -136,9 +136,9 @@ const STATUS_COLOR = {
 // Per-stage indicator values for the Matrix view
 const STAGE_VALUES = [
   { v: null,           label: '—',          color: '#ccc',   bg: 'transparent' },
-  { v: 'done',         label: 'X',          color: 'white',  bg: '#3e8a5e' },
+  { v: 'done',         label: 'X',          color: 'white',  bg: 'var(--up)' },
   { v: 'in_progress',  label: 'In progress', color: '#7a4e08', bg: 'rgba(232,180,8,0.25)' },
-  { v: 'blocked',      label: 'Blocked',    color: 'white',  bg: '#b53e3e' },
+  { v: 'blocked',      label: 'Blocked',    color: 'white',  bg: 'var(--down)' },
   { v: 'skip',         label: 'Skip',       color: 'var(--ink-3)', bg: 'rgba(0,0,0,0.05)' },
 ]
 function stageStyle(value) {
@@ -181,7 +181,7 @@ function UploadDock({ onRefresh }) {
           padding: '10px 14px', minWidth: 220,
           background: 'var(--paper)', border: '1px solid var(--rule)',
           borderLeft: failed.length > 0
-            ? '3px solid #b53e3e'
+            ? '3px solid var(--down)'
             : renameTrouble.length > 0
               ? '3px solid #d09c08'
               : '3px solid var(--accent, #e8b408)',
@@ -207,7 +207,7 @@ function UploadDock({ onRefresh }) {
           <div style={{
             position: 'absolute', inset: 0, right: 'auto',
             width: `${Math.round(totalProg * 100)}%`,
-            background: failed.length > 0 ? '#b53e3e' : 'var(--ink)',
+            background: failed.length > 0 ? 'var(--down)' : 'var(--ink)',
             transition: 'width 0.2s',
           }} />
         </div>
@@ -253,8 +253,8 @@ function UploadDock({ onRefresh }) {
                   }
                 }}
                 style={{
-                  background: 'transparent', border: '1px solid #b53e3e', padding: '4px 8px',
-                  fontFamily: 'var(--mono)', fontSize: 10, cursor: 'pointer', color: '#b53e3e',
+                  background: 'transparent', border: '1px solid var(--down)', padding: '4px 8px',
+                  fontFamily: 'var(--mono)', fontSize: 10, cursor: 'pointer', color: 'var(--down)',
                   textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600,
                 }}
                 title="Abort every upload in flight and clear the queue"
@@ -276,7 +276,7 @@ function UploadDock({ onRefresh }) {
           {items.map((it) => {
             const isErr = it.status === 'error'
             const isDone = it.status === 'done'
-            const color = isErr ? '#b53e3e' : isDone ? '#3e8a5e' : 'var(--ink-3)'
+            const color = isErr ? 'var(--down)' : isDone ? 'var(--up)' : 'var(--ink-3)'
             return (
               <div key={it.id} style={{
                 padding: '10px 14px', borderBottom: '1px solid var(--rule)',
@@ -326,7 +326,7 @@ function UploadDock({ onRefresh }) {
                       title={`Cancel upload of ${it.file.name}`}
                       style={{
                         background: 'transparent', border: '1px solid var(--rule)',
-                        cursor: 'pointer', color: '#b53e3e', padding: '2px 6px',
+                        cursor: 'pointer', color: 'var(--down)', padding: '2px 6px',
                         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                         letterSpacing: '0.08em', textTransform: 'uppercase',
                       }}
@@ -394,7 +394,7 @@ function IngestStatusChip({ submission, onRetry, busy }) {
             padding: '1px 6px',
             fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
             letterSpacing: '0.08em', textTransform: 'uppercase',
-            background: '#b53e3e', color: 'var(--paper)',
+            background: 'var(--down)', color: 'var(--paper)',
             border: 'none', borderRadius: 9,
             cursor: busy ? 'not-allowed' : 'pointer',
           }}>Retry</button>
@@ -505,15 +505,15 @@ function groupNotifications(notifications) {
     'reply',
   ]
   const KIND_META = {
-    new_upload_needs_assignment: { label: 'Needs editor',   color: '#b53e3e' },
-    ingest_failed:               { label: 'Ingest failed',  color: '#b53e3e' },
+    new_upload_needs_assignment: { label: 'Needs editor',   color: 'var(--down)' },
+    ingest_failed:               { label: 'Ingest failed',  color: 'var(--down)' },
     revision_requested:          { label: 'Revision asked', color: '#d09c08' },
     submission_comment:          { label: 'New comment',    color: '#3e7eba' },
     feedback:                    { label: 'Feedback',       color: '#e8b408' },
     assignment:                  { label: 'New tasks',      color: '#3e7eba' },
     reassignment:                { label: 'Reassigned',     color: '#3e7eba' },
     source_replaced:             { label: 'Source updated', color: '#a05810' },
-    approved:                    { label: 'Approved',       color: '#3e8a5e' },
+    approved:                    { label: 'Approved',       color: 'var(--up)' },
     reply:                       { label: 'Replies',        color: '#3e7eba' },
   }
   const buckets = new Map()
@@ -668,7 +668,7 @@ const EditorNotificationBell = forwardRef(function EditorNotificationBell(
           <span style={{
             position: 'absolute', top: -2, right: -2,
             minWidth: 18, height: 18, borderRadius: 999,
-            background: '#b53e3e', color: 'var(--paper)',
+            background: 'var(--down)', color: 'var(--paper)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
             padding: '0 5px',
@@ -872,7 +872,7 @@ const NotificationBell = forwardRef(function NotificationBell(
           <span style={{
             position: 'absolute', top: -2, right: -2,
             minWidth: 18, height: 18, borderRadius: 999,
-            background: '#b53e3e', color: 'var(--paper)',
+            background: 'var(--down)', color: 'var(--paper)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
             padding: '0 5px',
@@ -956,7 +956,7 @@ const NotificationBell = forwardRef(function NotificationBell(
                         padding: '8px 10px',
                         background: s.approved_at ? 'rgba(62,138,94,0.05)' : 'var(--paper)',
                         border: '1px solid ' + (isNew ? '#3e7eba' : 'var(--rule)'),
-                        borderLeft: '3px solid ' + (s.approved_at ? '#3e8a5e' : '#3e7eba'),
+                        borderLeft: '3px solid ' + (s.approved_at ? 'var(--up)' : '#3e7eba'),
                         cursor: creativeId ? 'pointer' : 'default',
                         textAlign: 'left', font: 'inherit', color: 'inherit',
                       }}>
@@ -1021,7 +1021,7 @@ const NotificationBell = forwardRef(function NotificationBell(
                         }}>
                           <span style={{
                             fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-                            color: s.approved_at ? '#3e8a5e' : '#3e7eba',
+                            color: s.approved_at ? 'var(--up)' : '#3e7eba',
                           }}>{s.approved_at ? 'Approved' : 'In review'}</span>
                           {s.file_url && (
                             // In-place preview for Supabase-hosted files. Old
@@ -1504,7 +1504,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
           <span style={{
             fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
             letterSpacing: '0.08em', textTransform: 'uppercase',
-            color: '#3e8a5e',
+            color: 'var(--up)',
           }}>Approved · {new Date(submission.approved_at).toLocaleDateString()}</span>
         )}
         {canAct && onRequestRevision && !revisionDraft.open && (
@@ -1525,7 +1525,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
               padding: '8px 18px',
               fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
               letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: parentBusy ? 'var(--ink-4)' : '#3e8a5e',
+              background: parentBusy ? 'var(--ink-4)' : 'var(--up)',
               color: 'white',
               border: 'none', cursor: parentBusy ? 'not-allowed' : 'pointer',
             }}>{parentBusy ? 'Working…' : 'Approve'}</button>
@@ -1604,7 +1604,7 @@ function CommentThread({ comment, replies, onSeek, onReply, onResolve, onDelete,
         border: '1px solid ' + (isHovered ? '#f4e14a' : 'var(--rule)'),
         borderLeft: `3px solid ${
           isHovered ? '#f4e14a'
-            : comment.resolved_at ? '#3e8a5e' : '#3e7eba'
+            : comment.resolved_at ? 'var(--up)' : '#3e7eba'
         }`,
         opacity: comment.resolved_at ? 0.78 : 1,
         cursor: 'pointer',
@@ -1619,7 +1619,7 @@ function CommentThread({ comment, replies, onSeek, onReply, onResolve, onDelete,
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
           <span style={{
             fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
-            color: comment.author_kind === 'admin' ? '#2f5a8a' : '#3e8a5e',
+            color: comment.author_kind === 'admin' ? '#2f5a8a' : 'var(--up)',
           }}>{comment.author_name || 'Anon'}</span>
           {comment.timestamp_seconds != null && (
             <button onClick={() => onSeek?.(comment.timestamp_seconds)}
@@ -1647,7 +1647,7 @@ function CommentThread({ comment, replies, onSeek, onReply, onResolve, onDelete,
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 2 }}>
                 <span style={{
                   fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                  color: r.author_kind === 'admin' ? '#2f5a8a' : '#3e8a5e',
+                  color: r.author_kind === 'admin' ? '#2f5a8a' : 'var(--up)',
                 }}>{r.author_name || 'Anon'}</span>
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)' }}>
                   {relTimeShort(r.created_at)}
@@ -1671,13 +1671,13 @@ function CommentThread({ comment, replies, onSeek, onReply, onResolve, onDelete,
           style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--ink-3)' }}>Reply</button>
         {canResolve && (
           <button onClick={() => onResolve?.(comment)}
-            style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: comment.resolved_at ? '#b8893e' : '#3e8a5e' }}>
+            style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: comment.resolved_at ? '#b8893e' : 'var(--up)' }}>
             {comment.resolved_at ? 'Re-open' : 'Resolve'}
           </button>
         )}
         {isAuthor && (
           <button onClick={() => { if (confirm('Delete this comment?')) onDelete?.(comment) }}
-            style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: '#b53e3e', marginLeft: 'auto' }}>Delete</button>
+            style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--down)', marginLeft: 'auto' }}>Delete</button>
         )}
       </div>
     </div>
@@ -2019,8 +2019,8 @@ function InvoiceTab({ scope, active }) {
       {err && (
         <div style={{
           marginBottom: 12, padding: '10px 12px', background: 'rgba(181,62,62,0.06)',
-          border: '1px solid rgba(181,62,62,0.3)', borderLeft: '3px solid #b53e3e',
-          fontFamily: 'var(--sans)', fontSize: 12.5, color: '#b53e3e',
+          border: '1px solid rgba(181,62,62,0.3)', borderLeft: '3px solid var(--down)',
+          fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--down)',
         }}>{err}</div>
       )}
 
@@ -2039,9 +2039,9 @@ function InvoiceTab({ scope, active }) {
           style={{
             padding: '6px 12px', fontFamily: 'var(--mono)', fontSize: 10,
             letterSpacing: '0.08em', textTransform: 'uppercase',
-            background: copiedKey === '__all__' ? '#3e8a5e' : 'var(--paper)',
+            background: copiedKey === '__all__' ? 'var(--up)' : 'var(--paper)',
             color: copiedKey === '__all__' ? 'white' : 'var(--ink-2)',
-            border: '1px solid ' + (copiedKey === '__all__' ? '#3e8a5e' : 'var(--rule)'),
+            border: '1px solid ' + (copiedKey === '__all__' ? 'var(--up)' : 'var(--rule)'),
             cursor: rows.length === 0 ? 'not-allowed' : 'pointer', opacity: rows.length === 0 ? 0.5 : 1,
           }}>{copiedKey === '__all__' ? 'Copied' : 'Copy all (name · length · link)'}</button>
       </div>
@@ -2131,9 +2131,9 @@ function InvoiceTab({ scope, active }) {
                       style={{
                         padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
                         letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: copiedKey === r.id ? '#3e8a5e' : 'var(--paper)',
+                        background: copiedKey === r.id ? 'var(--up)' : 'var(--paper)',
                         color: copiedKey === r.id ? 'white' : 'var(--ink-2)',
-                        border: '1px solid ' + (copiedKey === r.id ? '#3e8a5e' : 'var(--rule)'), cursor: 'pointer',
+                        border: '1px solid ' + (copiedKey === r.id ? 'var(--up)' : 'var(--rule)'), cursor: 'pointer',
                       }}>{copiedKey === r.id ? 'Copied' : 'Copy'}</button>
                   </>
                 ) : (
@@ -2152,7 +2152,7 @@ function InvoiceTab({ scope, active }) {
             </span>
             <span />
             <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{formatTs(totalSeconds)}</span>
-            <span style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: rate != null ? '#3e8a5e' : 'var(--ink-4)' }}>
+            <span style={{ textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: rate != null ? 'var(--up)' : 'var(--ink-4)' }}>
               {rate != null ? `$${(pay || 0).toFixed(2)}` : '—'}
             </span>
           </div>
@@ -3428,12 +3428,9 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               + Upload creative
             </button>
           )}
-          {scope.canManageEditors && (
-            <button onClick={() => setShareLinksOpen(true)}
-              style={{ ...ghostBtn, color: '#a86a08', borderColor: '#a86a08' }}>
-              ↗ Share with editor
-            </button>
-          )}
+          {/* Share with editor — removed at Ben's request 2026-06-26
+              ("don't need this right now"). ShareLinksModal + state kept
+              intact below so it's a one-line restore. */}
         </div>
 
         {/* Expanded filter panel — everything that used to be a permanent
@@ -3453,9 +3450,9 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
               //   EDITED      = a finished cut (status='edited' in the DB)
               // The filter matcher below maps these to the existing
               // raw_unused / raw_used / edited_seg internal values.
-              { value: 'raw_unused', label: 'RAW',        sublabel: 'needs editing',           count: stageCounts.raw_unused, dot: '#b53e3e' },
+              { value: 'raw_unused', label: 'RAW',        sublabel: 'needs editing',           count: stageCounts.raw_unused, dot: 'var(--down)' },
               { value: 'raw_used',   label: 'EDITED RAW', sublabel: 'already used in a cut',   count: stageCounts.raw_used,   dot: 'var(--ink-4)' },
-              { value: 'edited_seg', label: 'EDITED',     sublabel: 'finished cut',            count: stageCounts.edited_seg, dot: '#3e8a5e' },
+              { value: 'edited_seg', label: 'EDITED',     sublabel: 'finished cut',            count: stageCounts.edited_seg, dot: 'var(--up)' },
             ]}
             allCount={visibleRows.length}
             onChange={setStageFilter} />
@@ -3481,7 +3478,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
           <FilterDropdown label="RUN"
             selected={runFilter}
             options={[
-              { value: 'yes', label: 'RUN BEFORE', count: runCount,    dot: '#3e8a5e' },
+              { value: 'yes', label: 'RUN BEFORE', count: runCount,    dot: 'var(--up)' },
               { value: 'no',  label: 'NOT YET',    count: notRunCount, dot: 'var(--ink-4)' },
             ]}
             allCount={visibleRows.length}
@@ -3903,11 +3900,11 @@ function LivePulseDot() {
     <span style={{ position: 'relative', display: 'inline-block', width: 8, height: 8 }}>
       <span style={{
         position: 'absolute', inset: 0, borderRadius: '50%',
-        background: '#3e8a5e',
+        background: 'var(--up)',
       }} />
       <span style={{
         position: 'absolute', inset: -3, borderRadius: '50%',
-        background: '#3e8a5e', opacity: 0.4,
+        background: 'var(--up)', opacity: 0.4,
         animation: 'libPulse 1.6s ease-in-out infinite',
       }} />
       <style>{`@keyframes libPulse {
@@ -3926,7 +3923,7 @@ function StatusBadge({ status }) {
         display: 'inline-flex', alignItems: 'center', gap: 6,
         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
         letterSpacing: '0.08em', textTransform: 'uppercase',
-        color: '#3e8a5e',
+        color: 'var(--up)',
       }}>
         <LivePulseDot /> Live
       </span>
@@ -4049,9 +4046,9 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
   // grey = raw already merged, green = edited, orange = merged final
   const stripeColor =
     (r.type === 'Joined' && r.status === 'edited') ? '#b86a0c'
-    : (r.status === 'edited')                       ? '#3e8a5e'
+    : (r.status === 'edited')                       ? 'var(--up)'
     : (r.status === 'raw' && isUsed)                ? 'var(--ink-4)'
-    :                                                 '#b53e3e'
+    :                                                 'var(--down)'
   // Soft full-row tint that lets Ben see at a glance:
   //   green = edited / done
   //   yellow = assigned to an editor, in progress
@@ -4142,7 +4139,7 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
             }}>
               {(r.status === 'raw' && isUsed) && (
                 <span title="Already edited"
-                  style={{ color: '#3e8a5e', fontWeight: 600, marginRight: 5 }}>✓</span>
+                  style={{ color: 'var(--up)', fontWeight: 600, marginRight: 5 }}>✓</span>
               )}
               {rowDisplayName(r)}
             </div>
@@ -4183,10 +4180,10 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
                 padding: '2px 7px',
                 fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
                 letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: 'rgba(62,138,94,0.10)', color: '#3e8a5e',
+                background: 'rgba(62,138,94,0.10)', color: 'var(--up)',
                 border: '1px solid rgba(62,138,94,0.35)', borderRadius: 9,
               }}>
-                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#3e8a5e' }} />
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--up)' }} />
                 Yes
               </span>
             ) : (
@@ -4209,8 +4206,8 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
               <button onClick={e => { e.stopPropagation(); onDelete() }} style={{
                 padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
                 letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: 'transparent', color: '#b53e3e',
-                border: '1px solid #b53e3e', cursor: 'pointer',
+                background: 'transparent', color: 'var(--down)',
+                border: '1px solid var(--down)', cursor: 'pointer',
               }}>Delete</button>
             )}
           </div>
@@ -4380,9 +4377,9 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
   // instead of red — so you can spot them as "done, no action needed".
   const stripeColor =
     (r.type === 'Joined' && r.status === 'edited') ? '#b86a0c'     // merged (orange)
-    : (r.status === 'edited')                       ? '#3e8a5e'     // edited (green)
+    : (r.status === 'edited')                       ? 'var(--up)'     // edited (green)
     : (r.status === 'raw' && isUsed)                ? 'var(--ink-4)'        // raw + used (muted)
-    :                                                 '#b53e3e'     // raw + unused (red — needs attention)
+    :                                                 'var(--down)'     // raw + unused (red — needs attention)
   // Soft full-row tint so Ben can scan status from across the matrix:
   //   green  = edited / done
   //   yellow = raw + assigned (in progress)
@@ -4446,7 +4443,7 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
       }} title={rowDisplayName(r)}>
         {(r.status === 'raw' && isUsed) && (
           <span title="Already edited"
-            style={{ color: '#3e8a5e', fontWeight: 600, flexShrink: 0 }}>✓</span>
+            style={{ color: 'var(--up)', fontWeight: 600, flexShrink: 0 }}>✓</span>
         )}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {rowDisplayName(r)}
@@ -4465,7 +4462,7 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
             style={{
               flexShrink: 0,
               padding: '1px 5px',
-              background: '#b53e3e', color: 'var(--paper)',
+              background: 'var(--down)', color: 'var(--paper)',
               fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700,
               letterSpacing: '0.08em', textTransform: 'uppercase',
               borderRadius: 9,
@@ -4601,13 +4598,13 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
               border: r.has_been_run ? '1px solid rgba(62,138,94,0.4)' : '1px solid var(--rule)',
               borderRadius: 9, cursor: 'pointer',
               fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
-              color: r.has_been_run ? '#3e8a5e' : 'var(--ink-4)',
+              color: r.has_been_run ? 'var(--up)' : 'var(--ink-4)',
               letterSpacing: '0.06em', textTransform: 'uppercase',
             }}>
             {r.has_been_run ? 'Yes' : '—'}
           </button>
         ) : (
-          <span style={{ color: r.has_been_run ? '#3e8a5e' : 'var(--ink-4)' }}>
+          <span style={{ color: r.has_been_run ? 'var(--up)' : 'var(--ink-4)' }}>
             {r.has_been_run ? 'Yes' : '—'}
           </span>
         )}
@@ -4643,7 +4640,7 @@ const MatrixRow = memo(function MatrixRow({ row: r, editors, offers, creators, i
               padding: '3px 8px',
               background: 'rgba(62,138,94,0.12)',
               border: '1px solid rgba(62,138,94,0.4)',
-              color: '#3e8a5e', textDecoration: 'none',
+              color: 'var(--up)', textDecoration: 'none',
               fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
               letterSpacing: '0.06em', textTransform: 'uppercase',
               borderRadius: 9,
@@ -4671,7 +4668,7 @@ function StageLinkCell({ value, url, label }) {
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 4,
             padding: '3px 8px', textDecoration: 'none',
-            background: value === 'done' ? '#3e8a5e' : '#1f4e8f',
+            background: value === 'done' ? 'var(--up)' : '#1f4e8f',
             color: 'white',
             fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
             letterSpacing: '0.06em', textTransform: 'uppercase',
@@ -4982,7 +4979,7 @@ function TranscriptBox({ text: rawText }) {
               background: 'none', border: 'none', cursor: 'pointer', padding: 0,
               fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
               letterSpacing: '0.06em', textTransform: 'uppercase',
-              color: copied ? '#3e8a5e' : 'var(--ink-3)',
+              color: copied ? 'var(--up)' : 'var(--ink-3)',
               textDecoration: 'underline',
             }}>{copied ? 'Copied' : 'Copy'}</button>
           <button onClick={() => setExpanded(v => !v)} type="button"
@@ -5190,7 +5187,7 @@ function VersionsPanel({ row, onReload, onOpenRow }) {
         style={{ display: 'none' }}
         onChange={e => { const f = e.target.files?.[0]; if (f) { setUploadFile(f); handleUpload(f) } }} />
       {err && (
-        <div style={{ padding: '6px 10px', background: 'rgba(181,62,62,0.08)', border: '1px solid rgba(181,62,62,0.3)', color: '#b53e3e', fontFamily: 'var(--mono)', fontSize: 11, marginBottom: 6 }}>
+        <div style={{ padding: '6px 10px', background: 'rgba(181,62,62,0.08)', border: '1px solid rgba(181,62,62,0.3)', color: 'var(--down)', fontFamily: 'var(--mono)', fontSize: 11, marginBottom: 6 }}>
           {err}
         </div>
       )}
@@ -5231,7 +5228,7 @@ function VersionsPanel({ row, onReload, onOpenRow }) {
                   {isCurrent && <span style={{ marginLeft: 6, color: 'var(--ink-3)', fontSize: 9.5 }}>CURRENT</span>}
                 </div>
               </div>
-              <span style={{ color: v.status === 'edited' ? '#3e8a5e' : '#b53e3e', fontSize: 9.5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              <span style={{ color: v.status === 'edited' ? 'var(--up)' : 'var(--down)', fontSize: 9.5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                 {v.status}
               </span>
             </div>
@@ -5467,7 +5464,7 @@ function SourceSlot({ role, label, sourceRow, busy, onOpenRow, onPick, onClear }
         style={{
           padding: '3px 8px', fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
           letterSpacing: '0.06em', textTransform: 'uppercase',
-          background: 'transparent', color: '#b53e3e',
+          background: 'transparent', color: 'var(--down)',
           border: '1px solid rgba(181,62,62,0.35)', cursor: 'pointer', borderRadius: 9,
         }}>Clear</button>
     </div>
@@ -5615,7 +5612,7 @@ function DerivationLinkRow({ row, role, onOpenRow }) {
         }}>{role}</span>
       )}
       <span style={{
-        color: row.status === 'edited' ? '#3e8a5e' : 'var(--ink-4)',
+        color: row.status === 'edited' ? 'var(--up)' : 'var(--ink-4)',
         fontSize: 9.5, letterSpacing: '0.08em', textTransform: 'uppercase',
       }}>{row.status}</span>
       {clickable && (
@@ -5735,7 +5732,7 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
       subtitle="Click a field's value to set it. Anything left as KEEP EXISTING stays unchanged."
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           {!hasChanges && !err && (
             <span style={{
               fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--ink-4)',
@@ -5816,9 +5813,9 @@ function BulkEditModal({ ids, editors = [], offers = [], knownCreators = [], onC
               style={{
                 padding: '5px 14px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
                 letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: hasBeenRun === true ? '#3e8a5e' : 'var(--paper)',
-                color: hasBeenRun === true ? 'white' : '#3e8a5e',
-                border: '1px solid #3e8a5e',
+                background: hasBeenRun === true ? 'var(--up)' : 'var(--paper)',
+                color: hasBeenRun === true ? 'white' : 'var(--up)',
+                border: '1px solid var(--up)',
                 borderRadius: 9, cursor: 'pointer',
               }}>Yes — run before</button>
             <button onClick={() => setHasBeenRun(false)} type="button"
@@ -5931,10 +5928,10 @@ function ConfirmDeleteModal({ row, onClose, onDeleted }) {
       subtitle="This removes the database row from your library. The file in Drive is NOT deleted — you can re-add it later by uploading again."
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
           <button onClick={confirm} disabled={busy} style={{
-            ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e',
+            ...primaryBtn, background: 'var(--down)', borderColor: 'var(--down)',
           }}>
             {busy ? 'Deleting…' : 'Delete'}
           </button>
@@ -6374,7 +6371,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
         }} title={row.name}>
           {(row.status === 'raw' && isUsed) && (
             <span title="Already edited"
-              style={{ color: '#3e8a5e', marginRight: 4 }}>✓</span>
+              style={{ color: 'var(--up)', marginRight: 4 }}>✓</span>
           )}
           {rowDisplayName(row)}
         </div>
@@ -6398,7 +6395,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
           })()}
           {row.has_been_run && (
             <span title="Run before"
-              style={{ width: 7, height: 7, borderRadius: '50%', background: '#3e8a5e' }} />
+              style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--up)' }} />
           )}
           <span style={{ marginLeft: 'auto' }}><StatusBadge status={row.status} /></span>
         </div>
@@ -6785,12 +6782,12 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
       footer={
         confirmDelete ? (
           <>
-            <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto', fontFamily: 'var(--mono)' }}>
+            <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto', fontFamily: 'var(--mono)' }}>
               Delete this creative permanently? Can't be undone.
             </span>
             <button onClick={() => setConfirmDelete(false)} disabled={deleting} style={ghostBtn}>Cancel</button>
             <button onClick={deleteCreative} disabled={deleting}
-              style={{ ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e' }}>
+              style={{ ...primaryBtn, background: 'var(--down)', borderColor: 'var(--down)' }}>
               {deleting ? 'Deleting…' : 'Delete forever'}
             </button>
           </>
@@ -6800,16 +6797,16 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               <span style={{
                 fontSize: 11, fontFamily: 'var(--mono)', marginRight: 'auto',
                 display: 'inline-flex', alignItems: 'center', gap: 6,
-                color: autoSaveStatus === 'error' ? '#b53e3e'
+                color: autoSaveStatus === 'error' ? 'var(--down)'
                      : autoSaveStatus === 'saving' ? 'var(--ink-3)'
-                     : autoSaveStatus === 'saved' ? '#3e8a5e'
+                     : autoSaveStatus === 'saved' ? 'var(--up)'
                      : 'var(--ink-4)',
               }}>
                 <span style={{
                   width: 7, height: 7, borderRadius: '50%',
-                  background: autoSaveStatus === 'error' ? '#b53e3e'
+                  background: autoSaveStatus === 'error' ? 'var(--down)'
                             : autoSaveStatus === 'saving' ? '#e8b408'
-                            : autoSaveStatus === 'saved' ? '#3e8a5e'
+                            : autoSaveStatus === 'saved' ? 'var(--up)'
                             : 'var(--ink-4)',
                 }} />
                 {autoSaveStatus === 'saving' ? 'Saving…'
@@ -6818,10 +6815,10 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                   : 'Changes save automatically'}
               </span>
             )}
-            {err && !scope.canEditCreative && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+            {err && !scope.canEditCreative && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
             {scope.canDelete && onDeleted && (
               <button onClick={() => setConfirmDelete(true)}
-                style={{ ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)' }}>
+                style={{ ...ghostBtn, color: 'var(--down)', borderColor: 'rgba(181,62,62,0.4)' }}>
                 Delete
               </button>
             )}
@@ -6842,13 +6839,13 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         {row.is_low_quality && (
           <div style={{
             padding: '12px 14px',
-            background: '#fff1f1', border: '1px solid #b53e3e',
-            borderLeft: '3px solid #b53e3e',
+            background: '#fff1f1', border: '1px solid var(--down)',
+            borderLeft: '3px solid var(--down)',
             display: 'flex', flexDirection: 'column', gap: 8,
           }}>
             <div style={{
               fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-              letterSpacing: '0.14em', textTransform: 'uppercase', color: '#b53e3e',
+              letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--down)',
             }}>Source file is damaged</div>
             <div style={{ fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>
               Only <strong>{row.low_quality_actual_mb ?? '?'} MB</strong> stored on disk
@@ -6866,7 +6863,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             {replaceProgress ? (
               <div style={{
                 padding: '6px 10px', background: 'var(--paper)', border: '1px solid var(--rule)',
-                fontFamily: 'var(--mono)', fontSize: 11, color: replaceProgress.startsWith('error') ? '#b53e3e' : 'var(--ink-2)',
+                fontFamily: 'var(--mono)', fontSize: 11, color: replaceProgress.startsWith('error') ? 'var(--down)' : 'var(--ink-2)',
               }}>{replaceProgress}</div>
             ) : (
               <div>
@@ -7091,9 +7088,9 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               style={{
                 padding: '8px 12px', fontFamily: 'var(--mono)', fontSize: 11,
                 fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: edit.has_been_run ? '#3e8a5e' : 'var(--paper)',
+                background: edit.has_been_run ? 'var(--up)' : 'var(--paper)',
                 color: edit.has_been_run ? 'white' : 'var(--ink-3)',
-                border: edit.has_been_run ? '1px solid #3e8a5e' : '1px solid var(--rule)',
+                border: edit.has_been_run ? '1px solid var(--up)' : '1px solid var(--rule)',
                 cursor: 'pointer', textAlign: 'center', width: '100%',
               }}>
               {edit.has_been_run ? 'Yes — run before' : 'No — not yet'}
@@ -7266,7 +7263,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                   <span style={{ fontWeight: 600 }}>{t.editor_name}</span>
                   <span style={{ color: 'var(--ink-3)' }}>{t.task_type}</span>
                   <span style={{ color: 'var(--ink-3)' }}>{t.status}</span>
-                  <span style={{ marginLeft: 'auto', color: (t.is_overdue && t.status !== 'review') ? '#b53e3e' : 'var(--ink-4)' }}>
+                  <span style={{ marginLeft: 'auto', color: (t.is_overdue && t.status !== 'review') ? 'var(--down)' : 'var(--ink-4)' }}>
                     {(t.is_overdue && t.status !== 'review') ? '⚠ overdue ' : ''}{t.due_date || 'no due date'}
                   </span>
                 </div>
@@ -7676,9 +7673,8 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         )}
         {scope.canManageEditors && (
           <>
-            <button onClick={() => setShareLinksOpen(true)} style={{ ...ghostBtn, color: '#a86a08', borderColor: '#a86a08' }}>
-              ↗ Share with editor
-            </button>
+            {/* Share with editor — removed at Ben's request 2026-06-26.
+                Manage editors stays; ShareLinksModal kept for easy restore. */}
             <button onClick={() => setManageEditorsOpen(true)} style={ghostBtn}>Manage editors</button>
           </>
         )}
@@ -8048,8 +8044,8 @@ function StatusFilterStrip({ tasks, selected, onToggle, onClearAll }) {
     { v: 'queued',      label: 'Queued',      color: 'var(--ink-3)' },
     { v: 'in_progress', label: 'In progress', color: '#b86a0c' },
     { v: 'review',      label: 'In review',   color: '#3e7eba' },
-    { v: 'done',        label: 'Done',        color: '#3e8a5e' },
-    { v: 'blocked',     label: 'Blocked',     color: '#b53e3e' },
+    { v: 'done',        label: 'Done',        color: 'var(--up)' },
+    { v: 'blocked',     label: 'Blocked',     color: 'var(--down)' },
   ]
   const counts = useMemo(() => {
     const m = {}
@@ -8436,7 +8432,7 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds, sel
             <div><StatusPipBadge status={t.status} isOverdue={t.is_overdue && t.status !== 'review'} /></div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)' }}>{t.task_type || '—'}</div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 11,
-                          color: (t.is_overdue && t.status !== 'review') ? '#b53e3e' : 'var(--ink-3)' }}>
+                          color: (t.is_overdue && t.status !== 'review') ? 'var(--down)' : 'var(--ink-3)' }}>
               {(t.is_overdue && t.status !== 'review') && '⚠ '}{t.due_date || '—'}
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-3)' }}>
@@ -8466,7 +8462,7 @@ function StatusPipBadge({ status, isOverdue }) {
         padding: '2px 8px',
         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
         letterSpacing: '0.06em', textTransform: 'uppercase',
-        background: 'rgba(181,62,62,0.1)', color: '#b53e3e',
+        background: 'rgba(181,62,62,0.1)', color: 'var(--down)',
         border: '1px solid rgba(181,62,62,0.3)', borderRadius: 9,
       }}>Blocked</span>
     )
@@ -8479,7 +8475,7 @@ function StatusPipBadge({ status, isOverdue }) {
           <span key={s} style={{
             width: 7, height: 7, borderRadius: '50%',
             background: i <= idx
-              ? (isOverdue ? '#b53e3e' : (s === 'done' ? '#3e8a5e' : '#3e7eba'))
+              ? (isOverdue ? 'var(--down)' : (s === 'done' ? 'var(--up)' : '#3e7eba'))
               : 'var(--rule)',
           }} />
         ))}
@@ -8578,7 +8574,7 @@ function OptionPicker({ value, options, onChange, placeholder = '— Select' }) 
 }
 
 const PRIORITY_OPTIONS = [
-  { value: 'P1 - High',   label: 'P1 · High',   color: '#b53e3e' },
+  { value: 'P1 - High',   label: 'P1 · High',   color: 'var(--down)' },
   { value: 'P2 - Medium', label: 'P2 · Medium', color: '#b8893e' },
   { value: 'P3 - Low',    label: 'P3 · Low',    color: 'var(--ink-4)' },
 ]
@@ -9073,12 +9069,12 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       subtitle={`${task.creative_type || ''}${task.creative_creator ? ' · ' + task.creative_creator : ''}${task.v21_script_id ? ' · ' + task.v21_script_id : ''}`}
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           {confirmDel ? (
             <>
-              <span style={{ fontSize: 12, color: '#b53e3e', marginRight: 'auto' }}>Delete this task? It can't be undone.</span>
+              <span style={{ fontSize: 12, color: 'var(--down)', marginRight: 'auto' }}>Delete this task? It can't be undone.</span>
               <button onClick={() => setConfirmDel(false)} disabled={busy} style={ghostBtn}>Cancel</button>
-              <button onClick={remove} disabled={busy} style={{ ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e' }}>
+              <button onClick={remove} disabled={busy} style={{ ...primaryBtn, background: 'var(--down)', borderColor: 'var(--down)' }}>
                 {busy ? 'Deleting…' : 'Delete task'}
               </button>
             </>
@@ -9086,7 +9082,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             <>
               {scope.canDeleteTask && (
                 <button onClick={() => setConfirmDel(true)} disabled={busy} style={{
-                  ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)',
+                  ...ghostBtn, color: 'var(--down)', borderColor: 'rgba(181,62,62,0.4)',
                 }}>Delete</button>
               )}
               <button onClick={openFileToFolder} disabled={busy}
@@ -9143,8 +9139,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             ),
             borderLeft: '3px solid ' + (
               status === 'needs_revision' ? '#d09c08'
-              : status === 'blocked' ? '#b53e3e'
-              : status === 'done' ? '#3e8a5e'
+              : status === 'blocked' ? 'var(--down)'
+              : status === 'done' ? 'var(--up)'
               : '#3e7eba'
             ),
             display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
@@ -9155,8 +9151,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               letterSpacing: '0.12em', textTransform: 'uppercase',
               color: 'white',
               background: status === 'needs_revision' ? '#d09c08'
-                : status === 'blocked' ? '#b53e3e'
-                : status === 'done' ? '#3e8a5e'
+                : status === 'blocked' ? 'var(--down)'
+                : status === 'done' ? 'var(--up)'
                 : '#3e7eba',
               borderRadius: 9,
             }}>{TASK_STATUS_LABEL[status] || status}</span>
@@ -9442,7 +9438,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           }}>
             <span>Upload edited version</span>
             {uploadProgress === 100 && (
-              <span style={{ color: '#3e8a5e' }}>Submitted for review</span>
+              <span style={{ color: 'var(--up)' }}>Submitted for review</span>
             )}
           </div>
           <div
@@ -9491,7 +9487,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             }}>
               <div style={{
                 width: `${uploadProgress}%`, height: '100%',
-                background: uploadProgress === 100 ? '#3e8a5e' : 'var(--accent)',
+                background: uploadProgress === 100 ? 'var(--up)' : 'var(--accent)',
                 transition: 'width 0.2s',
               }} />
             </div>
@@ -9502,8 +9498,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             <div style={{
               marginTop: 10, padding: '10px 12px',
               background: 'rgba(181,62,62,0.08)', border: '1px solid rgba(181,62,62,0.3)',
-              borderLeft: '3px solid #b53e3e',
-              fontFamily: 'var(--mono)', fontSize: 11, color: '#b53e3e',
+              borderLeft: '3px solid var(--down)',
+              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--down)',
               lineHeight: 1.5,
             }}>
               <strong>Upload failed:</strong> {err}
@@ -9753,12 +9749,12 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
   return (
     <div style={{
       padding: '14px 16px', border: '1px solid var(--rule)',
-      background: 'var(--paper)', borderLeft: '3px solid #3e8a5e',
+      background: 'var(--paper)', borderLeft: '3px solid var(--up)',
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
-        letterSpacing: '0.12em', textTransform: 'uppercase', color: '#3e8a5e',
+        letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--up)',
         marginBottom: 12,
       }}>
         <span>Submitted work · {submissions.length} version{submissions.length === 1 ? '' : 's'}</span>
@@ -9775,7 +9771,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
           return (
             <div key={sub.id} style={{
               border: '1px solid var(--rule)',
-              borderLeft: isApproved ? '3px solid #3e8a5e' : '3px solid var(--ink-4)',
+              borderLeft: isApproved ? '3px solid var(--up)' : '3px solid var(--ink-4)',
               background: isApproved ? 'rgba(62,138,94,0.04)' : 'var(--paper)',
             }}>
               <div
@@ -9797,14 +9793,14 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                   <span style={{
                     fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
                     padding: '3px 8px', borderRadius: 9,
-                    background: isApproved ? '#3e8a5e' : 'var(--ink-3)', color: 'var(--paper)',
+                    background: isApproved ? 'var(--up)' : 'var(--ink-3)', color: 'var(--paper)',
                     letterSpacing: '0.06em',
                   }}>v{sub.version_number}</span>
                   {isApproved && (
                     <span style={{
                       fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
                       letterSpacing: '0.08em', textTransform: 'uppercase',
-                      color: '#3e8a5e',
+                      color: 'var(--up)',
                     }}>Approved</span>
                   )}
                   {/* Ingest status — only renders if this submission came in
@@ -9872,7 +9868,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                         padding: '4px 10px',
                         fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
                         letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: 'transparent', color: '#3e8a5e',
+                        background: 'transparent', color: 'var(--up)',
                         border: '1px solid rgba(62,138,94,0.5)', borderRadius: 9,
                         cursor: busy ? 'not-allowed' : 'pointer',
                       }}>Approve</button>
@@ -9919,7 +9915,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                           padding: '4px 8px',
                           fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
                           letterSpacing: '0.06em', textTransform: 'uppercase',
-                          background: '#b53e3e', color: 'var(--paper)',
+                          background: 'var(--down)', color: 'var(--paper)',
                           border: 'none', borderRadius: 9, cursor: 'pointer',
                         }}>Confirm</button>
                     </>
@@ -10020,7 +10016,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                 //   empty -> yellow (waiting for input)
                 const needsAction = isUnread || hasOpenComments
                 const hasAny = hasFeedback || hasComments
-                const accent = needsAction ? '#b53e3e' : hasAny ? '#3e8a5e' : '#e8b408'
+                const accent = needsAction ? 'var(--down)' : hasAny ? 'var(--up)' : '#e8b408'
                 const bg = needsAction ? '#fff1f1' : hasAny ? 'rgba(62,138,94,0.05)' : '#fffaea'
                 const labelColor = needsAction ? '#8b1f1f' : hasAny ? '#1f5a2f' : '#7a4e08'
                 // Build a status label that reflects ALL signals — feedback
@@ -10132,7 +10128,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
                               padding: '7px 12px',
                               fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
                               letterSpacing: '0.08em', textTransform: 'uppercase',
-                              background: needsAction ? '#b53e3e' : '#3e8a5e',
+                              background: needsAction ? 'var(--down)' : 'var(--up)',
                               color: 'white', border: 'none', borderRadius: 9,
                               cursor: 'pointer', lineHeight: 1.2,
                             }}>Open comments in Review ▶</button>
@@ -10228,7 +10224,7 @@ function SubmissionsPanel({ submissions, commentsBySubId = {}, canApprove, canDe
               <div style={{
                 marginTop: 10, padding: '8px 12px',
                 background: 'rgba(181,62,62,0.08)', border: '1px solid rgba(181,62,62,0.3)',
-                color: '#b53e3e', fontFamily: 'var(--mono)', fontSize: 11.5,
+                color: 'var(--down)', fontFamily: 'var(--mono)', fontSize: 11.5,
               }}>{revisionErr}</div>
             )}
             <div style={{
@@ -10452,8 +10448,8 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
   // Status stripe color (per task bar's left edge in the timeline)
   const STATUS_STRIPE = {
     queued: 'var(--ink-4)', in_progress: '#e0853e',
-    review: '#3e7eba', done: '#3e8a5e',
-    blocked: '#b53e3e',
+    review: '#3e7eba', done: 'var(--up)',
+    blocked: 'var(--down)',
   }
 
   // Pack tasks into non-overlapping rows per editor (interval scheduling).
@@ -10724,7 +10720,7 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                   // showing OVD when an editor had actually submitted, so it
                   // was impossible to tell who was blocking from the timeline.)
                   const editorIsBlocking = t.is_overdue && t.status !== 'review'
-                  const stripe = editorIsBlocking ? '#b53e3e' : (STATUS_STRIPE[t.status] || 'var(--ink-4)')
+                  const stripe = editorIsBlocking ? 'var(--down)' : (STATUS_STRIPE[t.status] || 'var(--ink-4)')
                   const label = taskDisplayName(t)
                   const thumbVisible = !!t.thumbnail_url && w >= 80
                   // Status badge: show prominently for non-queued states.
@@ -10737,12 +10733,12 @@ function TimelineView({ tasks, editors, onEdit, onMoveEditor, onUpdateAssignment
                   const STATUS_BADGE = {
                     review:      { label: 'REVIEW', bg: '#3e7eba' },
                     in_progress: { label: 'WIP',    bg: '#e0853e' },
-                    done:        { label: 'DONE',   bg: '#3e8a5e' },
-                    blocked:     { label: 'BLOCK',  bg: '#b53e3e' },
+                    done:        { label: 'DONE',   bg: 'var(--up)' },
+                    blocked:     { label: 'BLOCK',  bg: 'var(--down)' },
                     needs_revision: { label: 'REVISE', bg: '#c47a1a' },
                   }
                   const badge = editorIsBlocking
-                    ? { label: 'OVD', bg: '#b53e3e' }
+                    ? { label: 'OVD', bg: 'var(--down)' }
                     : STATUS_BADGE[t.status] || null
                   const isDone = t.status === 'done'
                   return (
@@ -11149,7 +11145,7 @@ function InboxCard({ task: t, onEdit, sectionColor, selected = false, onToggle =
           {dueLabel && (
             <>
               <span style={{ color: 'var(--ink-4)' }}>·</span>
-              <span style={{ color: (t.is_overdue && t.status !== 'review') ? '#b53e3e' : 'var(--ink-4)' }}>{dueLabel}</span>
+              <span style={{ color: (t.is_overdue && t.status !== 'review') ? 'var(--down)' : 'var(--ink-4)' }}>{dueLabel}</span>
             </>
           )}
           {t.notes && (
@@ -11413,7 +11409,7 @@ function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDrag
         <span>·</span>
         <span>{task.priority}</span>
         {task.due_date && (
-          <span style={{ marginLeft: 'auto', color: (task.is_overdue && task.status !== 'review') ? '#b53e3e' : 'var(--ink-4)' }}>
+          <span style={{ marginLeft: 'auto', color: (task.is_overdue && task.status !== 'review') ? 'var(--down)' : 'var(--ink-4)' }}>
             {(task.is_overdue && task.status !== 'review') ? '⚠ ' : ''}{task.due_date}
           </span>
         )}

@@ -172,7 +172,7 @@ export default function ProofCharacterEditor({ open, angle, onClose, onSaved }) 
           <div style={{ padding: 24 }}>
             {err && (
               <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fca5a5',
-                            color: '#b53e3e', fontSize: 13, marginBottom: 16, borderRadius: 9 }}>
+                            color: 'var(--down)', fontSize: 13, marginBottom: 16, borderRadius: 9 }}>
                 <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
               </div>
             )}
@@ -419,7 +419,7 @@ function ProofRow({
                 borderRadius: 9, display: 'inline-flex', alignItems: 'center', gap: 5,
                 justifyContent: 'center',
               }}
-              onMouseEnter={(e) => !saving && (e.currentTarget.style.color = '#b53e3e')}
+              onMouseEnter={(e) => !saving && (e.currentTarget.style.color = 'var(--down)')}
               onMouseLeave={(e) => e.currentTarget.style.color = 'var(--ink-4)'}>
               <Trash2 size={11} />
             </button>

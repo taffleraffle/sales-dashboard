@@ -98,7 +98,7 @@ export function Button({ children, variant = 'secondary', onClick, leftIcon, rig
     accent:    { background: 'var(--accent)', color: 'var(--ink)', borderColor: 'var(--accent-2)' },
     secondary: { background: 'transparent', color: 'var(--ink)', borderColor: 'var(--ink-3)' },
     ghost:     { background: 'transparent', color: 'var(--ink-2)', borderColor: 'transparent' },
-    danger:    { background: 'transparent', color: '#b53e3e', borderColor: '#b53e3e' },
+    danger:    { background: 'transparent', color: 'var(--down)', borderColor: 'var(--down)' },
   }
   const hover = {
     primary:   { background: 'var(--ink-2)' },
@@ -134,9 +134,9 @@ export function Pill({ children, tone = 'default', size = 'sm', uppercase = fals
     ink:     { bg: 'var(--ink)', fg: 'var(--paper)', bd: 'var(--ink)' },
     accent:  { bg: 'var(--accent)', fg: 'var(--ink)', bd: 'var(--accent-2)' },
     ghost:   { bg: 'transparent', fg: 'var(--ink-3)', bd: 'var(--rule)' },
-    red:     { bg: 'transparent', fg: '#b53e3e', bd: 'rgba(181,62,62,0.3)' },
+    red:     { bg: 'transparent', fg: 'var(--down)', bd: 'rgba(181,62,62,0.3)' },
     amber:   { bg: 'transparent', fg: '#b86a0c', bd: 'rgba(184,106,12,0.3)' },
-    green:   { bg: 'transparent', fg: '#3e8a5e', bd: 'rgba(62,138,94,0.3)' },
+    green:   { bg: 'transparent', fg: 'var(--up)', bd: 'rgba(62,138,94,0.3)' },
     purple:  { bg: 'transparent', fg: '#5b3a8f', bd: 'rgba(91,58,143,0.3)' },
     teal:    { bg: 'transparent', fg: '#0e7c86', bd: 'rgba(14,124,134,0.3)' },
   }
@@ -294,7 +294,7 @@ export const Icon = {
 
 // ─── Deterministic thumb color from a seed ─────────────────────────────
 export function thumbColor(seed) {
-  const palette = ['#0e7c86', '#5b3a8f', '#b86a0c', '#3e8a5e', '#b53e3e', '#2a2825']
+  const palette = ['#0e7c86', '#5b3a8f', '#b86a0c', 'var(--up)', 'var(--down)', '#2a2825']
   const h = typeof seed === 'string'
     ? seed.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
     : (seed || 0)
@@ -303,9 +303,9 @@ export function thumbColor(seed) {
 
 // ─── PALETTE — base hues (ported from design palette.jsx) ──────────────
 export const PALETTE = {
-  red: '#b53e3e', redDeep: '#8c2c2c',
+  red: 'var(--down)', redDeep: '#8c2c2c',
   amber: '#d97f1e', amberLight: '#e4a23c',
-  green: '#3e8a5e', greenDeep: '#2a6a45',
+  green: 'var(--up)', greenDeep: '#2a6a45',
   purple: '#6b4ba0', purpleDeep: '#4a2f78',
   teal: '#0e7c86', tealDeep: '#085a62',
   blue: '#1f4a8b', blueLight: '#3068b5',
@@ -462,7 +462,7 @@ export function LiftBadge({ lift, size = 'md' }) {
     lg: { font: 28, arrow: 16 },
   }
   const s = sizes[size]
-  const color = positive ? '#3e8a5e' : '#b53e3e'
+  const color = positive ? 'var(--up)' : 'var(--down)'
   return (
     <span style={{
       fontFamily: 'var(--serif)', fontVariantNumeric: 'tabular-nums',
@@ -482,7 +482,7 @@ export function LiftBadge({ lift, size = 'md' }) {
 
 // ─── TrendDelta — tiny inline trend chip (+0.6pt vs prior 30d) ────────
 export function TrendDelta({ dir = 'flat', label, color }) {
-  const fallback = dir === 'up' ? '#3e8a5e' : dir === 'down' ? '#b53e3e' : 'var(--ink-4)'
+  const fallback = dir === 'up' ? 'var(--up)' : dir === 'down' ? 'var(--down)' : 'var(--ink-4)'
   const c = color || fallback
   return (
     <span style={{

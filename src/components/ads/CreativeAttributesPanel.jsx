@@ -42,7 +42,7 @@ function ConfidencePill({ score }) {
   const color =
     score >= 0.85 ? 'var(--accent)' :
     score >= 0.65 ? '#e0a93e' :
-    score >= 0.45 ? '#d97847' : '#b53e3e'
+    score >= 0.45 ? '#d97847' : 'var(--down)'
   const label = score >= 0.85 ? 'high' : score >= 0.65 ? 'med' : score >= 0.45 ? 'low' : 'guess'
   return (
     <span style={{
@@ -77,8 +77,8 @@ function WinnerToggle({ value, onChange }) {
         onClick={() => onChange(value === false ? null : false)}
         style={{
           padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.1em',
-          textTransform: 'uppercase', border: `1px solid ${value === false ? '#b53e3e' : 'var(--rule)'}`,
-          background: value === false ? '#b53e3e' : 'transparent',
+          textTransform: 'uppercase', border: `1px solid ${value === false ? 'var(--down)' : 'var(--rule)'}`,
+          background: value === false ? 'var(--down)' : 'transparent',
           color: value === false ? 'white' : 'var(--ink-3)', cursor: 'pointer',
         }}>
         <XCircle size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
@@ -146,7 +146,7 @@ export default function CreativeAttributesPanel({ ad_id }) {
   }
 
   if (loading) return <div style={{ padding: 24, color: 'var(--ink-3)' }}>Loading creative attributes…</div>
-  if (err && !attrs) return <div style={{ padding: 24, color: '#b53e3e' }}>Error: {err}</div>
+  if (err && !attrs) return <div style={{ padding: 24, color: 'var(--down)' }}>Error: {err}</div>
 
   const confidence = attrs?.extraction_confidence || {}
 
@@ -184,7 +184,7 @@ export default function CreativeAttributesPanel({ ad_id }) {
         </div>
       </div>
 
-      {err && <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fca5a5', color: '#b53e3e', fontSize: 13, marginBottom: 16 }}>
+      {err && <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fca5a5', color: 'var(--down)', fontSize: 13, marginBottom: 16 }}>
         <AlertCircle size={14} style={{ display: 'inline', marginRight: 6 }} />{err}
       </div>}
 

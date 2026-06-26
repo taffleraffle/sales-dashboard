@@ -153,7 +153,7 @@ export default function TestBatchDetailModal({ open, onClose, batchId, onChanged
           <div style={{
             padding: '10px 12px', marginBottom: 16,
             background: '#fef2f2', border: '1px solid #fca5a5',
-            color: '#b53e3e', fontSize: 13,
+            color: 'var(--down)', fontSize: 13,
           }}>{err}</div>
         )}
 
@@ -507,7 +507,7 @@ const btnDanger = {
   padding: '8px 12px',
   fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
   letterSpacing: '0.08em', textTransform: 'uppercase',
-  background: 'transparent', color: '#b53e3e',
+  background: 'transparent', color: 'var(--down)',
   border: '1px solid rgba(181,62,62,0.3)', cursor: 'pointer',
   display: 'inline-flex', alignItems: 'center', gap: 4,
 }

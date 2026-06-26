@@ -20,11 +20,11 @@ const FILTER_GROUPS = [
 // Assignment status badge — quick visual for assigned/unassigned per row.
 // Falls back gracefully if migration 065 hasn't been applied (assignment_status undefined → 'unknown').
 const ASSIGNMENT_LABELS = {
-  assigned:          { label: 'Assigned',   color: '#3e8a5e', desc: 'Linked to a generated script' },
+  assigned:          { label: 'Assigned',   color: 'var(--up)', desc: 'Linked to a generated script' },
   manual_transcript: { label: 'Manual',     color: '#1f4a8b', desc: 'Operator added transcript' },
   auto_transcript:   { label: 'Auto',       color: '#5a5650', desc: 'Whisper or Meta captions' },
   ad_copy_only:      { label: 'Copy only',  color: '#88847e', desc: 'Only Meta ad copy as transcript' },
-  unassigned:        { label: 'Unassigned', color: '#b53e3e', desc: 'No transcript, no script link' },
+  unassigned:        { label: 'Unassigned', color: 'var(--down)', desc: 'No transcript, no script link' },
   unknown:           { label: '—',          color: '#b8b3a8', desc: 'Status unknown (migration 065 pending)' },
 }
 function tintRgba(hex, a) {
@@ -267,7 +267,7 @@ export default function CreativeGrid({ rows, loading, onClickRow, pinnedTopN = 3
               marginLeft: 'auto', padding: '4px 10px',
               fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.04em',
               textTransform: 'uppercase', fontWeight: 500,
-              background: 'transparent', color: '#b53e3e',
+              background: 'transparent', color: 'var(--down)',
               border: '1px solid rgba(181,62,62,0.4)', cursor: 'pointer',
             }}>
             Clear {attrFilterCount > 0 ? `${attrFilterCount} filter${attrFilterCount === 1 ? '' : 's'}` : 'all'}
@@ -641,7 +641,7 @@ function CreativeRow({ c, rank, isPodium, onClick, onToggleWinner, onToggleExclu
               border: 'none', cursor: 'pointer', padding: '2px 6px', background: 'transparent',
               fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 500,
               letterSpacing: '0.06em', textTransform: 'uppercase',
-              color: isExcluded ? '#b53e3e' : 'var(--ink-5)',
+              color: isExcluded ? 'var(--down)' : 'var(--ink-5)',
               borderRadius: 9,
             }}>
             {isExcluded ? '✗ Excluded' : 'Exclude'}

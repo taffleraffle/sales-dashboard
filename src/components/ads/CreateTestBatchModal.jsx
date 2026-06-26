@@ -66,7 +66,7 @@ export default function CreateTestBatchModal({ open, onClose, onCreated }) {
           <div style={{
             padding: '10px 12px', marginBottom: 16,
             background: '#fef2f2', border: '1px solid #fca5a5',
-            color: '#b53e3e', fontSize: 13,
+            color: 'var(--down)', fontSize: 13,
           }}>{err}</div>
         )}
 

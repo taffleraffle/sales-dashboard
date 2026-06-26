@@ -301,7 +301,7 @@ export const FolderBar = memo(function FolderBar({
                           fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
                           letterSpacing: '0.06em', textTransform: 'uppercase',
                           background: 'transparent', border: 'none', cursor: 'pointer',
-                          color: item.danger ? '#b53e3e' : 'var(--ink-2)',
+                          color: item.danger ? 'var(--down)' : 'var(--ink-2)',
                         }}>{item.label}</button>
                     ))}
                   </div>
@@ -397,7 +397,7 @@ function FolderNameModal({ folder, onClose, onSave }) {
       title={folder ? `Rename “${folder.name}”` : 'Create folder'}
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
           <Button variant="primary" onClick={save} disabled={busy || !valid}>
             {busy ? 'Saving…' : (folder ? 'Rename' : 'Create')}
@@ -468,7 +468,7 @@ export function FolderPickerModal({
       eyebrow="FOLDERS" title={title} subtitle={subtitle}
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={busy || (hasCurrent && picked === currentId)}
             onClick={async () => {

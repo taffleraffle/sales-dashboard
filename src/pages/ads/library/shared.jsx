@@ -95,8 +95,8 @@ export const TASK_STATUS_COLOR = {
   // in_progress (orange) so admin can tell "editor is working" from
   // "editor needs to rework v_n based on my feedback" at a glance.
   needs_revision:  '#d09c08',
-  done:            '#3e8a5e',
-  blocked:         '#b53e3e',
+  done:            'var(--up)',
+  blocked:         'var(--down)',
 }
 
 // Known offer slugs surface as filter chips + pill colors. Source of truth
@@ -227,7 +227,7 @@ export const ADMIN_SCOPE = {
 // untriaged uploads. badgeTone='ready' = yellow — for "ready to ship"
 // counts where the number being big is a positive signal of inventory.
 export function TabBtn({ active, onClick, children, badge, badgeTone = 'alert' }) {
-  const inactiveBg = badgeTone === 'ready' ? '#f4e14a' : '#b53e3e'
+  const inactiveBg = badgeTone === 'ready' ? '#f4e14a' : 'var(--down)'
   const inactiveColor = badgeTone === 'ready' ? 'var(--ink)' : 'white'
   return (
     <button onClick={onClick} style={{
@@ -331,7 +331,7 @@ export function ErrorBanner({ msg, onRetry }) {
   return (
     <div style={{
       padding: '10px 14px', marginBottom: 14,
-      background: 'rgba(181,62,62,0.08)', border: '1px solid #b53e3e', color: '#b53e3e',
+      background: 'rgba(181,62,62,0.08)', border: '1px solid var(--down)', color: 'var(--down)',
       fontFamily: 'var(--mono)', fontSize: 12,
       display: 'flex', alignItems: 'center', gap: 12,
     }}>
@@ -341,7 +341,7 @@ export function ErrorBanner({ msg, onRetry }) {
           style={{
             padding: '4px 12px', fontFamily: 'var(--mono)', fontSize: 11,
             fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-            background: '#b53e3e', color: 'var(--paper)',
+            background: 'var(--down)', color: 'var(--paper)',
             border: 'none', borderRadius: 9, cursor: 'pointer',
           }}>Retry</button>
       )}

@@ -195,7 +195,7 @@ export default function EditorLogin() {
               <div style={{
                 padding: '8px 12px', marginBottom: 12,
                 background: 'rgba(181,62,62,0.08)', border: '1px solid rgba(181,62,62,0.3)',
-                color: '#b53e3e', fontFamily: 'var(--mono)', fontSize: 11.5,
+                color: 'var(--down)', fontFamily: 'var(--mono)', fontSize: 11.5,
               }}>{err}</div>
             )}
             <button

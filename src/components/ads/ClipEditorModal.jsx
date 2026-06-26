@@ -387,7 +387,7 @@ export default function ClipEditorModal({
       subtitle="Cut takes, drag the handles to trim stutters, preview, then render. Originals are kept."
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto', maxWidth: 480 }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto', maxWidth: 480 }}>{err}</span>}
           {busy && (
             <span style={{ marginRight: 'auto', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)' }}>
               {busyMsg}{progress != null ? ` ${Math.round(progress * 100)}%` : ''}
@@ -404,8 +404,8 @@ export default function ClipEditorModal({
         {overBudget && (
           <div style={{
             padding: '10px 14px', background: 'rgba(181,62,62,0.08)',
-            border: '1px solid rgba(181,62,62,0.35)', borderLeft: '3px solid #b53e3e',
-            fontFamily: 'var(--mono)', fontSize: 11.5, color: '#b53e3e',
+            border: '1px solid rgba(181,62,62,0.35)', borderLeft: '3px solid var(--down)',
+            fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--down)',
           }}>
             {Math.round(totalBytes / 1024 / 1024)}MB selected — the editor handles up to {Math.round(MAX_INPUT_BYTES / 1024 / 1024)}MB at once. Remove some files.
           </div>
@@ -516,7 +516,7 @@ export default function ClipEditorModal({
                     onClick={() => setMergeOrder(o => { const i2 = o.indexOf(s.id); if (i2 < 0 || i2 >= o.length - 1) return o; const n = [...o]; [n[i2 + 1], n[i2]] = [n[i2], n[i2 + 1]]; return n })}>↓</button>
                 </>
               )}
-              <button type="button" onClick={() => removeSegment(s.id)} title="Remove this cut (footage rejoins its neighbour)" style={{ ...nudgeBtn, color: '#b53e3e' }}>✕</button>
+              <button type="button" onClick={() => removeSegment(s.id)} title="Remove this cut (footage rejoins its neighbour)" style={{ ...nudgeBtn, color: 'var(--down)' }}>✕</button>
             </div>
             )
           }) })()}

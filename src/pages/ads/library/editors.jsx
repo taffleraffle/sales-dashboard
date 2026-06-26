@@ -136,7 +136,7 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
     setNewName(''); setNewEmail('')
     if (data) onEditorAdded?.(data)
     setAddStatus(
-      inviteStatus === 'sent'    ? { color: '#3e8a5e', text: `Added ${added} · invite emailed to ${cleanEmail}` }
+      inviteStatus === 'sent'    ? { color: 'var(--up)', text: `Added ${added} · invite emailed to ${cleanEmail}` }
       : inviteStatus === 'skipped' ? { color: 'var(--ink-3)', text: `Added ${added} · no email, so no invite sent (add one via the row to enable login)` }
       :                            { color: '#a8650f', text: `Added ${added} · invite email didn't send — they can still log in at /editor-login` }
     )
@@ -158,7 +158,7 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
       subtitle="Roster of editors. Add new ones, set their format + tier, deactivate inactive ones, click any row to edit details + share links."
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <button onClick={onClose} disabled={busy} style={primaryBtn}>Done</button>
         </>
       }>
@@ -225,7 +225,7 @@ export function ManageEditorsModal({ editors, tasks, selfEditorId, onClose, onEd
                 <button onClick={bulkDelete} disabled={busy} style={{
                   padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
                   letterSpacing: '0.08em', textTransform: 'uppercase',
-                  background: '#b53e3e', color: 'var(--paper)', border: 'none', cursor: 'pointer',
+                  background: 'var(--down)', color: 'var(--paper)', border: 'none', cursor: 'pointer',
                 }}>{busy ? 'Deleting…' : 'Delete forever'}</button>
               </>
             ) : (
@@ -485,7 +485,7 @@ export function ShareLinksModal({ editors, onClose }) {
       subtitle="One link the whole team uses, OR per-editor links. No login required for either."
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <button onClick={onClose} style={primaryBtn}>Done</button>
         </>
       }>
@@ -529,7 +529,7 @@ export function ShareLinksModal({ editors, onClose }) {
                         padding: '8px 16px',
                         fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
                         letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: copyOk === teamLink.token ? '#3e8a5e' : '#e8b408',
+                        background: copyOk === teamLink.token ? 'var(--up)' : '#e8b408',
                         color: copyOk === teamLink.token ? 'white' : '#3a2a08',
                         border: 'none', cursor: 'pointer',
                       }}>{copyOk === teamLink.token ? '✓ Copied' : '↗ Copy link'}</button>
@@ -537,7 +537,7 @@ export function ShareLinksModal({ editors, onClose }) {
                         padding: '8px 12px',
                         fontFamily: 'var(--mono)', fontSize: 10,
                         letterSpacing: '0.06em', textTransform: 'uppercase',
-                        background: 'transparent', color: '#b53e3e',
+                        background: 'transparent', color: 'var(--down)',
                         border: '1px solid rgba(181,62,62,0.4)', cursor: 'pointer',
                       }}>Revoke</button>
                     </div>
@@ -617,7 +617,7 @@ export function ShareLinksModal({ editors, onClose }) {
                           padding: '6px 12px',
                           fontFamily: 'var(--mono)', fontSize: 10.5,
                           letterSpacing: '0.06em', textTransform: 'uppercase',
-                          background: copyOk === link.token ? '#3e8a5e' : 'var(--ink)',
+                          background: copyOk === link.token ? 'var(--up)' : 'var(--ink)',
                           color: copyOk === link.token ? 'white' : 'var(--paper)',
                           border: 'none', cursor: 'pointer',
                         }}>{copyOk === link.token ? '✓ Copied' : '↗ Copy link'}</button>
@@ -626,7 +626,7 @@ export function ShareLinksModal({ editors, onClose }) {
                             padding: '6px 10px',
                             fontFamily: 'var(--mono)', fontSize: 10,
                             letterSpacing: '0.06em', textTransform: 'uppercase',
-                            background: 'transparent', color: '#b53e3e',
+                            background: 'transparent', color: 'var(--down)',
                             border: '1px solid rgba(181,62,62,0.4)', cursor: 'pointer',
                           }}>Revoke</button>
                       </>
@@ -777,22 +777,22 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
       title={editor.name}
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           {confirmDeactivate ? (
             <>
-              <span style={{ fontSize: 12, color: '#b53e3e', marginRight: 'auto' }}>Deactivate this editor? Their existing tasks stay.</span>
+              <span style={{ fontSize: 12, color: 'var(--down)', marginRight: 'auto' }}>Deactivate this editor? Their existing tasks stay.</span>
               <button onClick={() => setConfirmDeactivate(false)} disabled={busy} style={ghostBtn}>Cancel</button>
-              <button onClick={deactivate} disabled={busy} style={{ ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e' }}>
+              <button onClick={deactivate} disabled={busy} style={{ ...primaryBtn, background: 'var(--down)', borderColor: 'var(--down)' }}>
                 {busy ? '…' : 'Deactivate'}
               </button>
             </>
           ) : confirmHardDelete ? (
             <>
-              <span style={{ fontSize: 12, color: '#b53e3e', marginRight: 'auto' }}>
+              <span style={{ fontSize: 12, color: 'var(--down)', marginRight: 'auto' }}>
                 Permanently delete? Their existing tasks become Unassigned. Can't be undone.
               </span>
               <button onClick={() => setConfirmHardDelete(false)} disabled={busy} style={ghostBtn}>Cancel</button>
-              <button onClick={hardDelete} disabled={busy} style={{ ...primaryBtn, background: '#b53e3e', borderColor: '#b53e3e' }}>
+              <button onClick={hardDelete} disabled={busy} style={{ ...primaryBtn, background: 'var(--down)', borderColor: 'var(--down)' }}>
                 {busy ? '…' : 'Delete forever'}
               </button>
             </>
@@ -808,7 +808,7 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
                     ...ghostBtn, color: 'var(--ink-3)', borderColor: 'var(--rule)', marginRight: 4,
                   }}>Deactivate</button>
                   <button onClick={() => setConfirmHardDelete(true)} disabled={busy} style={{
-                    ...ghostBtn, color: '#b53e3e', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
+                    ...ghostBtn, color: 'var(--down)', borderColor: 'rgba(181,62,62,0.4)', marginRight: 'auto',
                   }}>Delete forever</button>
                 </>
               )}
@@ -831,7 +831,7 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
             style={inputStyle} />
           <div style={{
             marginTop: 4, fontFamily: 'var(--mono)', fontSize: 10,
-            color: editor.auth_user_id ? '#3e8a5e' : 'var(--ink-4)',
+            color: editor.auth_user_id ? 'var(--up)' : 'var(--ink-4)',
             letterSpacing: '0.04em',
           }}>
             {editor.auth_user_id
@@ -952,15 +952,15 @@ export function EditEditorModal({ editor, selfEditorId, onClose, onSavedPatch, o
                   <button onClick={() => copyLink(l.token)} style={{
                     padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
                     letterSpacing: '0.06em', textTransform: 'uppercase',
-                    background: copyOk === l.token ? '#3e8a5e' : 'var(--paper)',
+                    background: copyOk === l.token ? 'var(--up)' : 'var(--paper)',
                     color: copyOk === l.token ? 'white' : 'var(--ink-2)',
-                    border: '1px solid ' + (copyOk === l.token ? '#3e8a5e' : 'var(--rule)'),
+                    border: '1px solid ' + (copyOk === l.token ? 'var(--up)' : 'var(--rule)'),
                     cursor: 'pointer',
                   }}>{copyOk === l.token ? 'Copied' : 'Copy'}</button>
                   <button onClick={() => revokeLink(l.id)} style={{
                     padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10,
                     letterSpacing: '0.06em', textTransform: 'uppercase',
-                    background: 'transparent', color: '#b53e3e',
+                    background: 'transparent', color: 'var(--down)',
                     border: '1px solid rgba(181,62,62,0.4)', cursor: 'pointer',
                   }}>Revoke</button>
                 </div>
@@ -1024,7 +1024,7 @@ export function AddEditorModal({ onClose, onSaved }) {
   if (result) {
     const { inviteStatus } = result
     const inviteLine =
-      inviteStatus === 'sent'    ? { color: '#3e8a5e', text: `Invite emailed to ${result.email}. They log in at /editor-login — no password needed.` }
+      inviteStatus === 'sent'    ? { color: 'var(--up)', text: `Invite emailed to ${result.email}. They log in at /editor-login — no password needed.` }
       : inviteStatus === 'skipped' ? { color: 'var(--ink-3)', text: 'No email yet — add one via Edit to enable their login + send an invite.' }
       :                            { color: '#a8650f', text: `Couldn't send the invite email. ${result.name} can still log in at /editor-login with ${result.email || 'their email'} — or resend later.` }
     return (
@@ -1061,7 +1061,7 @@ export function AddEditorModal({ onClose, onSaved }) {
       title="Add an editor"
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
           <button onClick={submit} disabled={!name.trim() || busy} style={primaryBtn}>
             {busy ? 'Adding…' : 'Add + invite'}
@@ -1364,7 +1364,7 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
       subtitle="Either pick an existing creative to assign, or upload your finished output and we'll create a new library row for it."
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           <button onClick={onClose} disabled={busy} style={ghostBtn}>Cancel</button>
           <button onClick={submit} disabled={!canSubmit || busy} style={primaryBtn}>
             {busy
@@ -1593,7 +1593,7 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
                 <div style={{ marginTop: 8, height: 4, background: 'var(--rule)', borderRadius: 9, overflow: 'hidden' }}>
                   <div style={{
                     width: `${uploadProgress}%`, height: '100%',
-                    background: uploadProgress === 100 ? '#3e8a5e' : 'var(--accent)',
+                    background: uploadProgress === 100 ? 'var(--up)' : 'var(--accent)',
                     transition: 'width 0.2s',
                   }} />
                 </div>

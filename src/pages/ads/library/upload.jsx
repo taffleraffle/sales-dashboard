@@ -775,7 +775,7 @@ export function TopUploadProgressBar() {
         style={{
           height: '100%',
           width: `${Math.max(2, Math.round(totalProg * 100))}%`,
-          background: failed > 0 ? '#b53e3e' : 'var(--accent, #e8b408)',
+          background: failed > 0 ? 'var(--down)' : 'var(--accent, #e8b408)',
           transition: 'width 0.25s ease',
           boxShadow: '0 0 6px rgba(232,180,8,0.6)',
         }}
@@ -1130,7 +1130,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
       })()}
       footer={
         <>
-          {err && <span style={{ color: '#b53e3e', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
+          {err && <span style={{ color: 'var(--down)', fontSize: 12, marginRight: 'auto' }}>{err}</span>}
           {/* "Close" instead of "Cancel" — uploads, once queued, keep
               running in the background regardless of this modal's state.
               Naming it Cancel implied the uploads would die, which is
@@ -1262,7 +1262,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                     }}
                   />
                   {newNicheErr && (
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#b53e3e' }}>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--down)' }}>
                       {newNicheErr}
                     </div>
                   )}
@@ -1435,7 +1435,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                   padding: '8px 12px',
                   borderBottom: i === files.length - 1 ? 'none' : '1px solid var(--rule)',
                   background: item.markedBad ? 'rgba(181,62,62,0.05)' : (i % 2 === 0 ? 'transparent' : 'var(--paper-2)'),
-                  borderLeft: item.markedBad ? '3px solid #b53e3e' : '3px solid transparent',
+                  borderLeft: item.markedBad ? '3px solid var(--down)' : '3px solid transparent',
                 }}>
                   {/* merge-select checkbox (videos only) */}
                   {isVideo ? (
@@ -1466,7 +1466,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                     )}
                     {item.markedBad && item.badReason && (
                       <div style={{
-                        fontFamily: 'var(--mono)', fontSize: 9.5, color: '#b53e3e',
+                        fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--down)',
                         marginTop: 2, letterSpacing: '0.04em',
                       }}>
                         BAD{item.badSource === 'heuristic' ? ' (auto)' : ' (operator)'} · {item.badReason}
@@ -1500,9 +1500,9 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                     title={item.markedBad ? 'Currently flagged as bad take — click to keep' : 'Mark as bad take (will be hidden from editor library)'}
                     style={{
                       padding: '3px 9px', borderRadius: 9,
-                      background: item.markedBad ? '#b53e3e' : 'var(--paper)',
+                      background: item.markedBad ? 'var(--down)' : 'var(--paper)',
                       color: item.markedBad ? 'white' : 'var(--ink-3)',
-                      border: '1px solid ' + (item.markedBad ? '#b53e3e' : 'var(--rule)'),
+                      border: '1px solid ' + (item.markedBad ? 'var(--down)' : 'var(--rule)'),
                       fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
                       letterSpacing: '0.08em', textTransform: 'uppercase',
                       cursor: 'pointer', whiteSpace: 'nowrap',
@@ -1571,7 +1571,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
         )}
         {rejected.length > 0 && (
           <div style={{
-            marginTop: 12, border: '1px solid #b53e3e', borderLeft: '3px solid #b53e3e',
+            marginTop: 12, border: '1px solid var(--down)', borderLeft: '3px solid var(--down)',
             background: 'rgba(181,62,62,0.04)',
           }}>
             <div style={{
@@ -1581,7 +1581,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
             }}>
               <div style={{
                 fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                letterSpacing: '0.12em', textTransform: 'uppercase', color: '#b53e3e',
+                letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--down)',
               }}>
                 {rejected.length} file{rejected.length === 1 ? '' : 's'} held back · under 1080p
               </div>
@@ -1611,7 +1611,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                       fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-2)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }} title={r.name}>{r.name}</div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: r.lowres ? '#a86a08' : '#b53e3e', marginTop: 1 }}>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: r.lowres ? '#a86a08' : 'var(--down)', marginTop: 1 }}>
                       {r.reason}
                     </div>
                   </div>

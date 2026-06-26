@@ -113,7 +113,7 @@ export default function UploadScriptsModal({ open, onClose, batch, onSaved }) {
         <>
           {err && (
             <span style={{
-              flex: 1, fontFamily: 'var(--sans)', fontSize: 12.5, color: '#b53e3e',
+              flex: 1, fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--down)',
               display: 'inline-flex', alignItems: 'center', gap: 6,
             }}>
               <AlertCircle size={14} /> {err}

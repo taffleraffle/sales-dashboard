@@ -313,7 +313,7 @@ const DATE_PRESETS = [
   { id: 'all', label: 'All',  days: 365 * 3 },
 ]
 const OFFER_DOT = {
-  'opt-restoration':  '#b53e3e',
+  'opt-restoration':  'var(--down)',
   'opt-plumbing':     '#0e7c86',
   'opt-roofing-stub': '#5b3a8f',
 }
@@ -451,7 +451,7 @@ function AnalyticsToolbar({
         }}>
           <span style={{
             width: 8, height: 8, borderRadius: 8, flexShrink: 0,
-            background: activeCampaigns.length ? '#3e8a5e' : 'var(--ink-4)',
+            background: activeCampaigns.length ? 'var(--up)' : 'var(--ink-4)',
           }} />
         Campaigns
         <span style={{
@@ -496,7 +496,7 @@ function AnalyticsToolbar({
         }}>
           <span style={{
             width: 6, height: 6, borderRadius: 11,
-            background: loading ? '#e0a93e' : '#3e8a5e',
+            background: loading ? '#e0a93e' : 'var(--up)',
             boxShadow: `0 0 0 3px ${loading ? 'rgba(224,169,62,0.18)' : 'rgba(62,138,94,0.18)'}`,
           }} />
           {loading ? 'Syncing…' : (lastSyncedAt ? minutesAgo(lastSyncedAt) + ' ago' : 'idle')}

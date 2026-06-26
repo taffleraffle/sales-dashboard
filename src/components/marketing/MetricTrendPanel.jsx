@@ -329,7 +329,7 @@ export default function MetricTrendPanel({ metric, selectedAudiences, height = 3
       </div>
 
       {busy && <div style={{ padding: 60, textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.10em', color: 'var(--ink-3)' }}>Loading historical data…</div>}
-      {err && <div style={{ padding: 12, color: '#b53e3e', fontFamily: 'var(--mono)', fontSize: 11 }}>Error: {err}</div>}
+      {err && <div style={{ padding: 12, color: 'var(--down)', fontFamily: 'var(--mono)', fontSize: 11 }}>Error: {err}</div>}
       {!busy && !err && buckets.length === 0 && (
         <div style={{ padding: 60, textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.10em', color: 'var(--ink-3)' }}>No data in range</div>
       )}

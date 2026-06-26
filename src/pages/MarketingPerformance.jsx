@@ -4448,7 +4448,7 @@ export default function MarketingPerformance() {
                   padding: '6px 12px',
                   border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
                   background: on ? 'var(--ink)' : 'var(--paper)',
-                  color: on ? 'var(--paper)' : (isUnknown ? '#b53e3e' : 'var(--ink-3)'),
+                  color: on ? 'var(--paper)' : (isUnknown ? 'var(--down)' : 'var(--ink-3)'),
                   fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
                   letterSpacing: '0.08em', textTransform: 'uppercase',
                   cursor: 'pointer', borderRadius: 9,
@@ -4470,7 +4470,7 @@ export default function MarketingPerformance() {
             </span>
           )}
           {audienceDailyError && (
-            <span title={audienceDailyError} style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#b53e3e', marginRight: 8 }}>
+            <span title={audienceDailyError} style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--down)', marginRight: 8 }}>
               ⚠ audience query failed — KPIs may be incomplete
             </span>
           )}
@@ -5031,7 +5031,7 @@ function AudienceComparisonTable({ rows, selected, onSelect, onOverride }) {
                   <td style={{
                     padding: '10px 12px', textAlign: 'left',
                     fontFamily: 'var(--sans)', fontSize: 14, fontWeight: isSelected ? 700 : 600,
-                    color: isUnknown ? '#b53e3e' : 'var(--ink)',
+                    color: isUnknown ? 'var(--down)' : 'var(--ink)',
                     borderBottom: '1px solid var(--rule)',
                     fontStyle: isUnknown ? 'italic' : 'normal',
                   }}>
@@ -5039,7 +5039,7 @@ function AudienceComparisonTable({ rows, selected, onSelect, onOverride }) {
                     {isUnknown && (
                       <span style={{
                         marginLeft: 8, fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
-                        letterSpacing: '0.08em', textTransform: 'uppercase', color: '#b53e3e',
+                        letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--down)',
                       }}>(unparsed — override below)</span>
                     )}
                   </td>

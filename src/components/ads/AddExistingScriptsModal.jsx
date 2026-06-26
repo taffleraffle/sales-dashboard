@@ -93,7 +93,7 @@ export default function AddExistingScriptsModal({ open, onClose, batch, onSaved 
         <>
           {err && (
             <span style={{
-              flex: 1, fontFamily: 'var(--sans)', fontSize: 12.5, color: '#b53e3e',
+              flex: 1, fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--down)',
               display: 'inline-flex', alignItems: 'center', gap: 6,
             }}>
               <AlertCircle size={14} /> {err}
@@ -231,7 +231,7 @@ function ScriptPickerRow({ script, checked, onToggle, isLast }) {
             padding: '2px 7px',
             fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
             letterSpacing: '0.06em', textTransform: 'uppercase',
-            color: '#3e8a5e',
+            color: 'var(--up)',
             border: '1px solid rgba(62,138,94,0.3)',
             background: 'rgba(62,138,94,0.06)',
           }}>Linked</span>

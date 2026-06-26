@@ -222,7 +222,7 @@ export default function AdsInsights() {
 
       {err && (
         <div style={{ marginTop: 16, padding: '12px 16px', background: '#fef2f2',
-                      border: '1px solid #fca5a5', color: '#b53e3e', fontSize: 13 }}>
+                      border: '1px solid #fca5a5', color: 'var(--down)', fontSize: 13 }}>
           {err}
         </div>
       )}
@@ -731,7 +731,7 @@ function ProofDonut({ data }) {
   const total = filtered.reduce((s, d) => s + Number(d.booked), 0)
   if (total === 0) return null
 
-  const palette = ['var(--accent)', '#b53e3e', '#3e8a5e', '#5b3a8f', '#0e7c86', '#b86a0c', '#e0a93e', 'var(--ink-4)']
+  const palette = ['var(--accent)', 'var(--down)', 'var(--up)', '#5b3a8f', '#0e7c86', '#b86a0c', '#e0a93e', 'var(--ink-4)']
   let acc = 0
   const arcs = filtered.map((d, i) => {
     const start = acc

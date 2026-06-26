@@ -709,7 +709,7 @@ export default function AdsGenerator() {
 
       {err && (
         <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fca5a5',
-                      color: '#b53e3e', fontSize: 13, marginBottom: 20, borderRadius: 9 }}>
+                      color: 'var(--down)', fontSize: 13, marginBottom: 20, borderRadius: 9 }}>
           <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
         </div>
       )}
@@ -859,7 +859,7 @@ export default function AdsGenerator() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
               {[
-                { key: 'Problems',      value: nProblems,      set: setNProblems,      color: '#b53e3e' },
+                { key: 'Problems',      value: nProblems,      set: setNProblems,      color: 'var(--down)' },
                 { key: 'Circumstances', value: nCircumstances, set: setNCircumstances, color: '#d4a535' },
                 { key: 'Outcomes',      value: nOutcomes,      set: setNOutcomes,      color: '#3068b5' },
               ].map(b => (
@@ -918,7 +918,7 @@ export default function AdsGenerator() {
             )}
             {messagingResult?.save_error && (
               <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef2f2',
-                            border: '1px solid #fca5a5', color: '#b53e3e', fontSize: 13 }}>
+                            border: '1px solid #fca5a5', color: 'var(--down)', fontSize: 13 }}>
                 Save error: {messagingResult.save_error}
               </div>
             )}
@@ -1031,8 +1031,8 @@ export default function AdsGenerator() {
                     style={{
                       padding: '6px 14px', fontFamily: 'var(--mono)', fontSize: 11,
                       letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700,
-                      background: '#b53e3e', color: 'var(--paper)',
-                      border: '1px solid #b53e3e', cursor: 'pointer', borderRadius: 9,
+                      background: 'var(--down)', color: 'var(--paper)',
+                      border: '1px solid var(--down)', cursor: 'pointer', borderRadius: 9,
                     }}>Retire {selectedAngleSlugs.size}</button>
                 </div>
               )}
@@ -3150,7 +3150,7 @@ function GenProgress({ kind, total, fanout }) {
           }}>
             <div style={{
               width: `${fanoutPct}%`, height: '100%',
-              background: fanoutFailed ? '#b53e3e' : 'var(--ink)',
+              background: fanoutFailed ? 'var(--down)' : 'var(--ink)',
               transition: 'width 240ms ease',
             }} />
           </div>
@@ -3291,7 +3291,7 @@ function InlineProofAdder({ angleSlugs, angles, onAdded }) {
           {err && (
             <div style={{
               fontFamily: 'var(--sans)', fontStyle: 'italic', fontSize: 12,
-              color: '#b53e3e',
+              color: 'var(--down)',
             }}>{err}</div>
           )}
           {okMsg && (
@@ -3570,7 +3570,7 @@ function LibraryAngleTile({ angle, proofs, selected, onToggleSelect, onRetire, o
               padding: 6, background: 'transparent', border: '1px solid var(--rule)',
               color: 'var(--ink-4)', cursor: 'pointer', borderRadius: 9,
             }}
-            onMouseEnter={(e) => e.currentTarget.style.color = '#b53e3e'}
+            onMouseEnter={(e) => e.currentTarget.style.color = 'var(--down)'}
             onMouseLeave={(e) => e.currentTarget.style.color = 'var(--ink-4)'}>
             <Trash2 size={13} />
           </button>
@@ -3692,7 +3692,7 @@ function SavedAngleRow({ angle, onRetire }) {
             color: 'var(--ink-4)', cursor: 'pointer', borderRadius: 9,
             display: 'inline-flex',
           }}
-          onMouseEnter={(e) => e.currentTarget.style.color = '#b53e3e'}
+          onMouseEnter={(e) => e.currentTarget.style.color = 'var(--down)'}
           onMouseLeave={(e) => e.currentTarget.style.color = 'var(--ink-4)'}>
           <Trash2 size={14} />
         </button>
@@ -3798,9 +3798,9 @@ function ScriptCard({ script, index, angleLookup }) {
   // OUTCOME=green) so the operator can scan the message-frame variety
   // across a deck even without reading the angle name.
   const frameColor = {
-    PROBLEM: '#b53e3e',
+    PROBLEM: 'var(--down)',
     CIRCUMSTANCE: '#e0a93e',
-    OUTCOME: '#3e8a5e',
+    OUTCOME: 'var(--up)',
   }[script.frame] || 'var(--ink-4)'
 
   const angleSlug = script._combo?.angle_slug

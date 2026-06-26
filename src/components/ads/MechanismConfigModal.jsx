@@ -144,7 +144,7 @@ export default function MechanismConfigModal({ open, onClose, onSaved, existing,
 
           {err && (
             <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fca5a5',
-                          color: '#b53e3e', fontSize: 13, marginBottom: 16, borderRadius: 9 }}>
+                          color: 'var(--down)', fontSize: 13, marginBottom: 16, borderRadius: 9 }}>
               <AlertCircle size={14} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />{err}
             </div>
           )}
@@ -336,7 +336,7 @@ function Field({ label, required, helper, value, onChange, placeholder, multilin
       <label style={{ display: 'block', fontFamily: 'var(--mono)', fontSize: 11,
                      letterSpacing: '0.12em', textTransform: 'uppercase',
                      color: 'var(--ink-3)', marginBottom: 6 }}>
-        {label} {required && <span style={{ color: '#b53e3e' }}>*</span>}
+        {label} {required && <span style={{ color: 'var(--down)' }}>*</span>}
       </label>
       {multiline ? (
         <textarea value={value} onChange={e => onChange(e.target.value)} rows={3}
