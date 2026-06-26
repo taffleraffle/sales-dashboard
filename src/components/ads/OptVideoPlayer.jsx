@@ -57,6 +57,10 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
     // passes 'auto' so a single open clip starts playing fast instead of
     // downloading from zero on the first click. Don't use 'auto' in grids.
     preload = 'metadata',
+    // Poster image (thumbnail). Shown while the video loads (so it doesn't
+    // flash black) AND blurred + scaled as the backdrop behind a portrait
+    // video instead of hard black bars (Ben 2026-06-26).
+    poster,
   },
   parentRef,
 ) {
@@ -321,12 +325,25 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
           inside an EditTaskModal submission card. */}
       <div style={{
         flex: '1 1 auto', minHeight: compact ? 0 : 400, position: 'relative',
-        background: '#000', display: 'flex',
+        background: poster ? 'var(--ink)' : '#0c0d10', display: 'flex',
         justifyContent: 'center', alignItems: 'center',
         overflow: 'hidden',
       }}>
+        {/* Blurred backdrop — a scaled, blurred copy of the poster fills the
+            box so portrait videos sit on a soft blur instead of hard black
+            bars (Ben 2026-06-26). */}
+        {poster && (
+          <div aria-hidden style={{
+            position: 'absolute', inset: 0,
+            backgroundImage: `url(${poster})`,
+            backgroundSize: 'cover', backgroundPosition: 'center',
+            filter: 'blur(34px) brightness(0.55) saturate(1.1)',
+            transform: 'scale(1.25)',
+            pointerEvents: 'none',
+          }} />
+        )}
         {src ? (
-          <video ref={videoRef} src={src} preload={preload}
+          <video ref={videoRef} src={src} preload={preload} poster={poster || undefined}
             autoPlay={autoPlay !== undefined ? autoPlay : !compact}
             playsInline
             onClick={togglePlay}
@@ -355,7 +372,8 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
               width: '100%', height: '100%',
               objectFit: 'contain',
               display: 'block', cursor: 'pointer',
-              background: '#000',
+              background: 'transparent',
+              position: 'relative', zIndex: 1,
             }} />
         ) : (
           <div style={{

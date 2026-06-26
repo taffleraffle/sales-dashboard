@@ -6865,6 +6865,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         {playbackKind === 'video' && (
           <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
             <OptVideoPlayer src={row.preview_url} compact preload="auto"
+              poster={row.thumbnail_url}
               wrapperStyle={OPT_PLAYER_WRAP_FILL} />
           </div>
         )}
