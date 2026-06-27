@@ -3707,6 +3707,10 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
 
       {drawerRow && (
         <CreativeDetailModal
+          // Remount per row so local state (viewRaw toggle, approvedSub fetch,
+          // edit form) resets when navigating between clips via VersionsPanel /
+          // UsageHistory — otherwise the raw/edit toggle leaks across rows.
+          key={drawerRow.id}
           row={drawerRow}
           isUsed={!!usedRawIds?.has(drawerRow.id)}
           scope={scope}
@@ -6963,15 +6967,22 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                     wrapperStyle={OPT_PLAYER_WRAP_FILL} />
                 </div>
               </div>
-              {/* Secondary — the OTHER version. Click swaps the big player. */}
+              {/* Secondary — the OTHER version. Click swaps the big player.
+                  Disabled when that version has no playable source (e.g. an
+                  edit-only row with no raw preview) so we never swap to blank. */}
               {(() => {
                 const other = viewRaw ? editView : rawView
+                const canSwap = !!other.src
                 return (
-                  <button type="button" onClick={() => setViewRaw(v => !v)}
-                    title={viewRaw ? 'Back to the approved edit' : 'View the raw source'}
+                  <button type="button"
+                    onClick={canSwap ? () => setViewRaw(v => !v) : undefined}
+                    disabled={!canSwap}
+                    title={!canSwap ? (viewRaw ? 'No edit source' : 'No raw source available')
+                      : (viewRaw ? 'Back to the approved edit' : 'View the raw source')}
                     style={{
                       padding: 0, border: '1px solid var(--rule)', borderRadius: 10,
-                      overflow: 'hidden', cursor: 'pointer', background: 'var(--ink)',
+                      overflow: 'hidden', cursor: canSwap ? 'pointer' : 'default',
+                      opacity: canSwap ? 1 : 0.45, background: 'var(--ink)',
                       aspectRatio: '9 / 12', position: 'relative',
                     }}>
                     {other.poster
@@ -9058,9 +9069,10 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         // the edit (raw stays in preview_url), and status flips to 'edited' so
         // the library surfaces it as the edited version. The detail modal's
         // merged-view branch keeps the raw one click away (Ben 2026-06-27).
-        await supabase.from('lib_creative_library')
+        const { error: e2 } = await supabase.from('lib_creative_library')
           .update({ final_cut_url: sub.file_url, stage_final_cut: 'done', status: 'edited' })
           .eq('id', task.creative_id)
+        if (e2) throw e2
       }
       // Move task to 'done' on approval
       await supabase.from('lib_editing_tasks')
