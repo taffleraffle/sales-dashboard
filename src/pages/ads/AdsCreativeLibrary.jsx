@@ -5300,6 +5300,208 @@ function EditedVersionsPanel({ creativeId, onApproved }) {
   )
 }
 
+// Full version-management panel for a creative's editing task — renders the
+// SAME SubmissionsPanel + upload zone + review modal as the editing-queue task
+// modal, so the library detail modal is 1:1 (Ben 2026-06-28: "missing approve,
+// revise, copy link, review, upload edited versions"). Self-contained so it
+// never touches the queue modal. `task` is a lib_editing_queue row.
+function TaskWorkPanel({ task, scope = ADMIN_SCOPE, onChanged }) {
+  const [submissions, setSubmissions] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [uploadFile, setUploadFile] = useState(null)
+  const [uploadProgress, setUploadProgress] = useState(null)
+  const [reviewingSub, setReviewingSub] = useState(null)
+  const [commentsBySubId, setCommentsBySubId] = useState({})
+  const uploadInputRef = useRef(null)
+  const uploadXhrRef = useRef(null)
+  const adminIdentity = useAdminIdentity()
+  const reviewIdentity = (scope.isEditorView && scope.editorId)
+    ? { kind: 'editor', id: scope.editorId, name: scope.editorName || 'Editor' }
+    : adminIdentity
+
+  const reloadSubmissions = useCallback(async () => {
+    if (!task?.task_id) { setSubmissions([]); return }
+    const { data } = await supabase.from('lib_task_submissions')
+      .select('*').eq('task_id', task.task_id).is('deleted_at', null)
+      .order('version_number', { ascending: false })
+    setSubmissions(data || [])
+  }, [task?.task_id])
+  useEffect(() => { reloadSubmissions() }, [reloadSubmissions])
+
+  const submissionIdsKey = submissions.map(s => s.id).join(',')
+  const reloadCommentCounts = useCallback(async () => {
+    if (!submissions.length) { setCommentsBySubId({}); return }
+    const ids = submissions.map(s => s.id)
+    const { data, error } = await supabase.from('lib_submission_comments')
+      .select('id, submission_id, parent_id, timestamp_seconds, body, author_name, resolved_at, deleted_at')
+      .in('submission_id', ids).is('deleted_at', null)
+    if (error || !data) return
+    const map = {}
+    for (const id of ids) map[id] = { total: 0, open: 0, markers: [] }
+    for (const c of data) {
+      const bucket = map[c.submission_id]; if (!bucket) continue
+      bucket.total += 1
+      if (!c.parent_id && !c.resolved_at) bucket.open += 1
+      if (!c.parent_id && c.timestamp_seconds != null) {
+        bucket.markers.push({ id: c.id, ts: c.timestamp_seconds, color: c.resolved_at ? 'rgba(255,255,255,0.4)' : '#3e7eba', title: c.body, authorName: c.author_name })
+      }
+    }
+    for (const id of ids) map[id].markers.sort((a, b) => a.ts - b.ts)
+    setCommentsBySubId(map)
+  }, [submissionIdsKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { reloadCommentCounts() }, [reloadCommentCounts])
+
+  const startUpload = useCallback(async (file) => {
+    if (!file || !task?.task_id) return
+    setUploadFile(file); setBusy(true); setErr(null); setUploadProgress(0)
+    try {
+      const sanitized = file.name.replace(/[^A-Za-z0-9._-]+/g, '_')
+      const storagePath = `edited/${Date.now()}_${sanitized}`
+      await uploadWithResume(file, {
+        bucket: 'creative-uploads', path: storagePath, contentType: file.type || 'video/mp4',
+        onProgress: (frac) => setUploadProgress(Math.round(frac * 70)),
+        registerHandle: (instance) => { uploadXhrRef.current = instance },
+      })
+      uploadXhrRef.current = null
+      setUploadProgress(72)
+      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
+      let submissionThumbUrl = null
+      let thumbBlob = await captureVideoThumbnail(file)
+      if (!thumbBlob) thumbBlob = await captureVideoThumbnailFromUrl(publicUrl)
+      if (thumbBlob) {
+        const thumbPath = `edited/${Date.now()}_${sanitized}_thumb.jpg`
+        try {
+          await uploadWithResume(thumbBlob, { bucket: 'creative-uploads', path: thumbPath, contentType: 'image/jpeg', upsert: true })
+          submissionThumbUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${thumbPath}`
+        } catch { /* best-effort */ }
+      }
+      setUploadProgress(78)
+      const nextVersion = (submissions.length || 0) + 1
+      let durationSeconds = null
+      try { const dims = await probeMediaDimensions(file); if (dims?.duration_s != null) durationSeconds = dims.duration_s } catch { /* manual fallback */ }
+      const { error: sErr } = await supabase.from('lib_task_submissions').insert({
+        task_id: task.task_id, submitted_by_editor_id: task.editor_id || null, submitted_by_name: task.editor_name || null,
+        file_url: publicUrl, file_storage_path: storagePath, thumbnail_url: submissionThumbUrl,
+        version_number: nextVersion, duration_seconds: durationSeconds, duration_source: durationSeconds != null ? 'auto' : null,
+      })
+      if (sErr) throw sErr
+      setUploadProgress(85)
+      await supabase.from('lib_creative_library').update({ final_cut_url: publicUrl, stage_final_cut: 'done' }).eq('id', task.creative_id)
+      setUploadProgress(95)
+      await supabase.from('lib_editing_tasks').update({ status: 'review', started_at: task.started_at || new Date().toISOString() }).eq('id', task.task_id)
+      setUploadProgress(100)
+      await reloadSubmissions()
+      setUploadFile(null)
+      onChanged?.()
+    } catch (e) {
+      setErr(e.message || 'upload failed'); setUploadProgress(null)
+    } finally { setBusy(false) }
+  }, [task?.task_id, task?.creative_id, task?.started_at, task?.editor_id, task?.editor_name, submissions.length, reloadSubmissions, onChanged])
+
+  const approveSubmission = useCallback(async (sub) => {
+    setBusy(true); setErr(null)
+    try {
+      await supabase.from('lib_task_submissions').update({ approved_at: new Date().toISOString(), approved_by_name: 'admin' }).eq('id', sub.id)
+      if (sub.file_url) {
+        await supabase.from('lib_creative_library').update({ final_cut_url: sub.file_url, stage_final_cut: 'done', status: 'edited' }).eq('id', task.creative_id)
+      }
+      await supabase.from('lib_editing_tasks').update({ status: 'done', completed_at: new Date().toISOString() }).eq('id', task.task_id)
+      if (task.editor_id) {
+        notifyEditor({ editor_id: task.editor_id, kind: 'approved', task_id: task.task_id, submission_id: sub.id, creative_id: task.creative_id,
+          title: `v${sub.version_number || 1} approved — ${taskDisplayName(task)}`, body: 'Admin approved your cut. Task moved to done.', link_path: `/editor-view?task=${task.task_id}` })
+      }
+      await reloadSubmissions(); onChanged?.()
+    } catch (e) { setErr(e.message || 'approve failed') } finally { setBusy(false) }
+  }, [task?.task_id, task?.creative_id, task?.editor_id, reloadSubmissions, onChanged])
+
+  const deleteSubmission = useCallback(async (sub) => {
+    setBusy(true); setErr(null)
+    try {
+      await supabase.from('lib_task_submissions').update({ deleted_at: new Date().toISOString() }).eq('id', sub.id)
+      await reloadSubmissions()
+    } catch (e) { setErr(e.message || 'delete failed') } finally { setBusy(false) }
+  }, [reloadSubmissions])
+
+  const requestRevision = useCallback(async (sub, feedbackText) => {
+    setBusy(true)
+    try {
+      await supabase.from('lib_task_submissions').update({ feedback_text: feedbackText, feedback_at: new Date().toISOString(), feedback_by_name: reviewIdentity?.name || 'Admin', feedback_read_at: null }).eq('id', sub.id)
+      await supabase.from('lib_editing_tasks').update({ status: 'needs_revision' }).eq('id', task.task_id)
+      if (task.editor_id) {
+        notifyEditor({ editor_id: task.editor_id, kind: 'revision_requested', task_id: task.task_id, submission_id: sub.id, creative_id: task.creative_id,
+          title: `Revision requested on v${sub.version_number || 1} — ${taskDisplayName(task)}`, body: feedbackText.length > 180 ? feedbackText.slice(0, 177) + '…' : feedbackText, link_path: `/editor-view?task=${task.task_id}` })
+      }
+      await reloadSubmissions(); onChanged?.()
+    } catch (e) { setErr(`Revision request failed: ${e.message || e}`) } finally { setBusy(false) }
+  }, [task?.task_id, task?.editor_id, reviewIdentity, reloadSubmissions, onChanged])
+
+  if (!task?.task_id) return null
+
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      {err && (
+        <div style={{ padding: '8px 12px', background: '#fff1f1', border: '1px solid var(--down)', borderRadius: 9, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--down)' }}>{err}</div>
+      )}
+      <SubmissionsPanel
+        submissions={submissions}
+        commentsBySubId={commentsBySubId}
+        canApprove={scope.canEditTask}
+        canDelete={scope.canEditTask}
+        canFeedback={true}
+        onOpenReview={(sub) => setReviewingSub(sub)}
+        currentUserName={reviewIdentity?.name || 'Admin'}
+        currentUserRole={(scope.isEditorView && scope.editorId) ? 'editor' : 'admin'}
+        taskEditorId={task.editor_id}
+        taskName={taskDisplayName(task)}
+        busy={busy}
+        onApprove={approveSubmission}
+        onDelete={deleteSubmission}
+        onFeedbackSaved={(subId, patch) => setSubmissions(curr => curr.map(s => s.id === subId ? { ...s, ...patch } : s))}
+        onRequestRevision={requestRevision}
+      />
+      {scope.canUpload && (
+        <div style={{ padding: '14px 16px', border: '1px solid var(--rule)', background: 'var(--paper-2)', borderRadius: 9 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 10 }}>
+            <span>Upload edited version</span>
+            {uploadProgress === 100 && <span style={{ color: 'var(--up)' }}>Submitted for review</span>}
+          </div>
+          <div
+            onClick={() => !busy && uploadInputRef.current?.click()}
+            onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f && !busy) startUpload(f) }}
+            onDragOver={e => e.preventDefault()}
+            style={{ padding: 20, textAlign: 'center', cursor: busy ? 'not-allowed' : 'pointer', border: '2px dashed ' + (busy ? 'var(--accent)' : 'var(--rule)'), background: uploadFile ? 'var(--paper)' : 'transparent', borderRadius: 9, transition: 'border-color 0.2s' }}>
+            <input ref={uploadInputRef} type="file" accept="video/*" style={{ display: 'none' }}
+              onChange={e => { const f = e.target.files?.[0]; if (f && !busy) startUpload(f) }} />
+            {uploadFile ? (
+              <>
+                <div style={{ fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 500 }}>{uploadFile.name}</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--ink-3)', marginTop: 4 }}>
+                  {(uploadFile.size / 1024 / 1024).toFixed(1)} MB
+                  {busy && uploadProgress != null && ` · ${uploadProgress}%`}
+                  {uploadProgress === 100 && ' · Done'}
+                </div>
+              </>
+            ) : (
+              <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-3)' }}>
+                Drop the edited cut here, or <span style={{ color: 'var(--ink)', fontWeight: 600 }}>click to select</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      <SubmissionPreviewModal
+        submission={reviewingSub}
+        currentUser={reviewIdentity}
+        busy={busy}
+        onApprove={async (sub) => { await approveSubmission(sub); setReviewingSub(null) }}
+        onRequestRevision={async (sub, fb) => { await requestRevision(sub, fb); setReviewingSub(null) }}
+        onCommentsChanged={reloadCommentCounts}
+        onClose={() => setReviewingSub(null)} />
+    </div>
+  )
+}
+
 function VersionsPanel({ row, onReload, onOpenRow }) {
   const [versions, setVersions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -7742,10 +7944,13 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
 
         {row.transcript && <TranscriptBox text={row.transcript} />}
 
-        {/* Edited versions — the editor's submitted cuts for this creative's
-            task(s), playable inline (Ben 2026-06-27: "still cant see the
-            edited versions in here"). */}
-        <EditedVersionsPanel creativeId={row.id} onApproved={() => { setEdit(e => ({ ...e, status: 'edited' })); onSaved?.() }} />
+        {/* Submitted work — the SAME SubmissionsPanel + upload + review the
+            editing-queue task modal uses, so the two are 1:1 (Ben 2026-06-28:
+            "missing approve, revise, copy link, review, upload"). Scoped to
+            this creative's editing task. */}
+        {existingTasks[0] && (
+          <TaskWorkPanel task={existingTasks[0]} scope={scope} onChanged={onSaved} />
+        )}
 
         {/* Versions — raw library siblings linked via parent_id (NOT the
             editor's cuts — those are in Edited versions above). */}
