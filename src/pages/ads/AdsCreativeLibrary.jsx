@@ -10025,10 +10025,17 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         )}{/* end LEFT column (player) */}
         {/* ── RIGHT details rail ── */}
         <div style={{ display: 'grid', gap: 16, minWidth: 0, alignContent: 'start' }}>
-        {/* Quick-action status row — colored pill per status when selected. */}
-        <div>
-          <div style={chipLabelStyle}>Status</div>
-          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+        {/* Name first — mirrors the library detail modal's field order so the
+            two rails line up (Ben 2026-06-28). */}
+        <Field label="Name">
+          <input type="text" value={name} onChange={e => setName(e.target.value)}
+            placeholder={task.creative_canonical_name || 'Creative name'}
+            style={{ ...inputStyle, fontFamily: 'var(--sans)' }} />
+        </Field>
+        {/* Status — wrapped in Field for the same label/spacing as every other
+            field (was a bare chipLabelStyle div). */}
+        <Field label="Status">
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {['queued', 'in_progress', 'review', 'needs_revision', 'done', 'blocked'].map(s => {
               const isOn = status === s
               const c = TASK_STATUS_COLOR[s] || 'var(--ink)'
@@ -10049,7 +10056,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               )
             })}
           </div>
-        </div>
+        </Field>
 
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
           <Field label="Editor">
@@ -10124,11 +10131,8 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           </Field>
         )}
 
-        <Field label="Name">
-          <input type="text" value={name} onChange={e => setName(e.target.value)}
-            placeholder={task.creative_canonical_name || 'Creative name'}
-            style={{ ...inputStyle, fontFamily: 'var(--sans)' }} />
-        </Field>
+        {/* Name moved to the top of the rail (Ben 2026-06-28) to match the
+            library detail modal. */}
 
         <Field label="Notes">
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
