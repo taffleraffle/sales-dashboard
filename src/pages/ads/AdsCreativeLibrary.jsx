@@ -6424,6 +6424,47 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
   const editedSibling = siblings.find(v => v.status === 'edited' && v.preview_url)
   const playerRow = editedSibling || row
   const rawSibling = siblings.find(v => v.status === 'raw' && v.preview_url && v.id !== playerRow.id)
+
+  // ── Task-flow merge (Ben 2026-06-27: "merge raw + approved edit into 1
+  //    file, edited taking precedence") ───────────────────────────────────
+  // When an editor's cut is approved, it's written to THIS row's
+  // final_cut_url while the raw stays in preview_url — one record holds both.
+  // hasRowEdit = the row carries an approved edit distinct from its raw.
+  const hasRowEdit = !!(row.final_cut_url && row.final_cut_url !== row.preview_url)
+  // Pull the submission behind final_cut_url so we can stream its fast proxy
+  // and show its poster instead of the heavy original.
+  const [approvedSub, setApprovedSub] = useState(null)
+  useEffect(() => {
+    if (!hasRowEdit) { setApprovedSub(null); return }
+    let on = true
+    supabase.from('lib_task_submissions')
+      .select('file_url, preview_proxy_url, thumbnail_url, version_number, approved_at')
+      .eq('file_url', row.final_cut_url)
+      .order('approved_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .then(({ data }) => { if (on) setApprovedSub(data?.[0] || null) })
+    return () => { on = false }
+  }, [hasRowEdit, row.final_cut_url])
+  // The big player leads with the edit; the user can flip to the raw.
+  const [viewRaw, setViewRaw] = useState(false)
+  const editApproved = !!approvedSub?.approved_at
+  const editView = {
+    src: approvedSub?.preview_proxy_url || approvedSub?.file_url || row.final_cut_url,
+    poster: approvedSub?.thumbnail_url || row.thumbnail_url,
+    download: row.final_cut_url, name: rowDisplayName(row),
+    key: 'edit-' + (approvedSub?.file_url || row.final_cut_url || row.id),
+    // Honest label: final_cut_url is set on every upload, not just approval.
+    label: (editApproved ? 'Approved edit' : 'Edited cut')
+      + (approvedSub?.version_number ? ` · v${approvedSub.version_number}` : ''),
+  }
+  const rawView = {
+    src: row.preview_proxy_url || row.preview_url,
+    poster: row.thumbnail_url,
+    download: row.drive_url || row.preview_url, name: rowDisplayName(row),
+    key: 'raw-' + row.id, label: 'Raw source',
+  }
+  const lead = viewRaw ? rawView : editView
+
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle') // idle | saving | saved | error
@@ -6768,8 +6809,9 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
   // assignment now flows through the upper `assigned_editor_id`
   // picker + migration 087's auto-task trigger.
 
-  // Pick the best playback URL — self-hosted preview > drive iframe
-  const playbackKind = playerRow.preview_url ? 'video' : row.drive_url ? 'iframe' : 'none'
+  // Pick the best playback URL — self-hosted preview > drive iframe.
+  // An edit-only row (final_cut_url, no raw preview) still plays as video.
+  const playbackKind = (playerRow.preview_url || (hasRowEdit && lead.src)) ? 'video' : row.drive_url ? 'iframe' : 'none'
 
   return (
     <Modal open={true} onClose={handleClose} size="lg"
@@ -6894,7 +6936,61 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             matches the Review modal + the inline SubmissionsPanel
             player (Ben 2026-06-01: "needs to be pretty congruent
             across the board"). */}
-        {playbackKind === 'video' && (
+        {playbackKind === 'video' && (hasRowEdit ? (
+          /* ── Merged view: ONE record holds the approved edit + the raw.
+             The edit leads; the secondary thumbnail flips the player to the
+             raw and back (Ben 2026-06-27). ── */
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <span style={{
+                padding: '3px 10px', borderRadius: 999,
+                background: viewRaw ? 'rgba(21,22,26,0.70)' : 'var(--up)', color: '#fff',
+                fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 700,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>{lead.label}</span>
+              <span style={{ fontFamily: 'var(--sans)', fontSize: 11.5, color: 'var(--ink-3)' }}>
+                {viewRaw ? 'the original footage — edit at right'
+                  : (editApproved ? 'the approved cut — raw at right' : 'the latest cut — raw at right')}
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px', gap: 10, alignItems: 'start' }}>
+              <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
+                  <OptVideoPlayer key={lead.key} src={lead.src} compact
+                    poster={lead.poster}
+                    downloadUrl={lead.download ? toDownloadUrl(lead.download, lead.name) : undefined}
+                    downloadName={lead.name || 'creative.mp4'}
+                    wrapperStyle={OPT_PLAYER_WRAP_FILL} />
+                </div>
+              </div>
+              {/* Secondary — the OTHER version. Click swaps the big player. */}
+              {(() => {
+                const other = viewRaw ? editView : rawView
+                return (
+                  <button type="button" onClick={() => setViewRaw(v => !v)}
+                    title={viewRaw ? 'Back to the approved edit' : 'View the raw source'}
+                    style={{
+                      padding: 0, border: '1px solid var(--rule)', borderRadius: 10,
+                      overflow: 'hidden', cursor: 'pointer', background: 'var(--ink)',
+                      aspectRatio: '9 / 12', position: 'relative',
+                    }}>
+                    {other.poster
+                      ? <img src={other.poster} alt="" loading="lazy"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      : <div style={{ width: '100%', height: '100%' }} />}
+                    <span style={{
+                      position: 'absolute', bottom: 5, left: 5,
+                      padding: '2px 7px', borderRadius: 999,
+                      background: viewRaw ? 'var(--up)' : 'rgba(21,22,26,0.78)', color: '#fff',
+                      fontFamily: 'var(--sans)', fontSize: 8.5, fontWeight: 700,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                    }}>{viewRaw ? 'Edit' : 'Raw'}</span>
+                  </button>
+                )
+              })()}
+            </div>
+          </div>
+        ) : (
           <div>
             {/* Lead-version label — makes it obvious you're watching the edit. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -6956,7 +7052,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               )}
             </div>
           </div>
-        )}
+        ))}
         {playbackKind === 'iframe' && (
           <div style={{ aspectRatio: '16 / 9', background: 'black', position: 'relative' }}>
             <iframe src={driveEmbedUrl(row.drive_url)}
@@ -7001,8 +7097,35 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         </Field>
 
         {/* File download — in the form, NOT under the player (Ben 2026-06-26).
-            Points at the best URL of whatever's playing; labelled raw/final. */}
-        {(() => {
+            For a merged row (raw + approved edit on one record) we offer BOTH
+            downloads explicitly so the flow is clear; otherwise a single
+            download labelled raw/final. */}
+        {hasRowEdit ? (
+          <Field label="Downloads">
+            <div style={{ display: 'grid', gap: 8 }}>
+              {[
+                { label: '↓ Final cut', url: row.final_cut_url, name: rowDisplayName(row), primary: true },
+                { label: '↓ Raw source', url: row.drive_url || row.preview_url, name: rowDisplayName(row) + '-raw', primary: false },
+              ].filter(d => d.url).map(d => (
+                <div key={d.label} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <a href={toDownloadUrl(d.url, d.name)}
+                    download={d.name || 'creative.mp4'}
+                    rel="noreferrer"
+                    title={`Download the ${d.primary ? 'approved edit' : 'raw source'}`}
+                    style={{
+                      padding: '7px 12px', fontFamily: 'var(--mono)', fontSize: 10.5,
+                      fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                      background: d.primary ? 'var(--ink)' : 'var(--paper)',
+                      color: d.primary ? 'var(--paper)' : 'var(--ink-2)',
+                      border: d.primary ? '1px solid var(--ink)' : '1px solid var(--rule)',
+                      textDecoration: 'none', borderRadius: 9, minWidth: 130, textAlign: 'center',
+                    }}>{d.label}</a>
+                  <CopyLinkButton url={toDownloadUrl(d.url, d.name)} label="Copy link" />
+                </div>
+              ))}
+            </div>
+          </Field>
+        ) : (() => {
           const dl = playerRow.final_cut_url || playerRow.drive_url || playerRow.preview_url
           if (!dl) return null
           const isEdit = !!editedSibling || playerRow.status === 'edited'
@@ -8931,8 +9054,12 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         .eq('id', sub.id)
       if (e1) throw e1
       if (sub.file_url) {
+        // Merge the approved cut onto the source creative: final_cut_url holds
+        // the edit (raw stays in preview_url), and status flips to 'edited' so
+        // the library surfaces it as the edited version. The detail modal's
+        // merged-view branch keeps the raw one click away (Ben 2026-06-27).
         await supabase.from('lib_creative_library')
-          .update({ final_cut_url: sub.file_url, stage_final_cut: 'done' })
+          .update({ final_cut_url: sub.file_url, stage_final_cut: 'done', status: 'edited' })
           .eq('id', task.creative_id)
       }
       // Move task to 'done' on approval
