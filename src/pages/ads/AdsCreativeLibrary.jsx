@@ -5402,11 +5402,14 @@ function TaskWorkPanel({ task, scope = ADMIN_SCOPE, onChanged }) {
   const approveSubmission = useCallback(async (sub) => {
     setBusy(true); setErr(null)
     try {
-      await supabase.from('lib_task_submissions').update({ approved_at: new Date().toISOString(), approved_by_name: 'admin' }).eq('id', sub.id)
+      const { error: e1 } = await supabase.from('lib_task_submissions').update({ approved_at: new Date().toISOString(), approved_by_name: 'admin' }).eq('id', sub.id)
+      if (e1) throw e1
       if (sub.file_url) {
-        await supabase.from('lib_creative_library').update({ final_cut_url: sub.file_url, stage_final_cut: 'done', status: 'edited' }).eq('id', task.creative_id)
+        const { error: e2 } = await supabase.from('lib_creative_library').update({ final_cut_url: sub.file_url, stage_final_cut: 'done', status: 'edited' }).eq('id', task.creative_id)
+        if (e2) throw e2
       }
-      await supabase.from('lib_editing_tasks').update({ status: 'done', completed_at: new Date().toISOString() }).eq('id', task.task_id)
+      const { error: e3 } = await supabase.from('lib_editing_tasks').update({ status: 'done', completed_at: new Date().toISOString() }).eq('id', task.task_id)
+      if (e3) throw e3
       if (task.editor_id) {
         notifyEditor({ editor_id: task.editor_id, kind: 'approved', task_id: task.task_id, submission_id: sub.id, creative_id: task.creative_id,
           title: `v${sub.version_number || 1} approved — ${taskDisplayName(task)}`, body: 'Admin approved your cut. Task moved to done.', link_path: `/editor-view?task=${task.task_id}` })
@@ -5424,10 +5427,12 @@ function TaskWorkPanel({ task, scope = ADMIN_SCOPE, onChanged }) {
   }, [reloadSubmissions])
 
   const requestRevision = useCallback(async (sub, feedbackText) => {
-    setBusy(true)
+    setBusy(true); setErr(null)
     try {
-      await supabase.from('lib_task_submissions').update({ feedback_text: feedbackText, feedback_at: new Date().toISOString(), feedback_by_name: reviewIdentity?.name || 'Admin', feedback_read_at: null }).eq('id', sub.id)
-      await supabase.from('lib_editing_tasks').update({ status: 'needs_revision' }).eq('id', task.task_id)
+      const { error: fbErr } = await supabase.from('lib_task_submissions').update({ feedback_text: feedbackText, feedback_at: new Date().toISOString(), feedback_by_name: reviewIdentity?.name || 'Admin', feedback_read_at: null }).eq('id', sub.id)
+      if (fbErr) throw fbErr
+      const { error: stErr } = await supabase.from('lib_editing_tasks').update({ status: 'needs_revision' }).eq('id', task.task_id)
+      if (stErr) { setErr(`Feedback saved but task status update failed: ${stErr.message}`); await reloadSubmissions(); return }
       if (task.editor_id) {
         notifyEditor({ editor_id: task.editor_id, kind: 'revision_requested', task_id: task.task_id, submission_id: sub.id, creative_id: task.creative_id,
           title: `Revision requested on v${sub.version_number || 1} — ${taskDisplayName(task)}`, body: feedbackText.length > 180 ? feedbackText.slice(0, 177) + '…' : feedbackText, link_path: `/editor-view?task=${task.task_id}` })
