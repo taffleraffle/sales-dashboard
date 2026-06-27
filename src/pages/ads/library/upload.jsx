@@ -487,7 +487,7 @@ async function runUploadPipeline(item, update) {
   const { file, config, perFileConfig } = item
   const {
     batchType, batchStatus, batchEditorId, batchOfferSlug, stamp,
-    batchCreator, uploadBatchId, batchFolderId,
+    batchCreator, uploadBatchId, batchFolderId, batchCategory,
   } = config
   // Per-file config from the rename allocator. Falls back to safe
   // defaults if the modal didn't supply it (very old enqueue path).
@@ -531,6 +531,7 @@ async function runUploadPipeline(item, update) {
     name: renamedName,
     original_filename: file.name,
     type: batchType || 'Joined',
+    content_category: batchCategory === 'short' ? 'short' : 'ad',
     size_mb: Math.round((file.size / 1024 / 1024) * 10) / 10,
     status: batchStatus,
     assigned_editor_id: batchEditorId || null,
@@ -861,6 +862,8 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
   const [files, setFiles] = useState([])
   const [err, setErr] = useState(null)
   const [batchType, setBatchType] = useState('Joined')
+  // Ad vs short-form — drives the editing-queue Ads | Shorts toggle.
+  const [batchCategory, setBatchCategory] = useState('ad')
   // batchStatus: 'raw' = needs editing (default), 'edited' = the file
   // is already a finished cut. Edited uploads also get final_cut_url +
   // stage_final_cut='done' so the library matrix surfaces them as done
@@ -1146,6 +1149,7 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
 
     uploadQueue.enqueue(perFile.map(p => p.file), {
       batchType,
+      batchCategory,
       batchStatus,
       batchEditorId,
       batchOfferSlug,
@@ -1224,6 +1228,26 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
                 {' '}<span style={{ color: 'var(--ink-4)' }}>(batch number assigned at queue time)</span>
               </div>
             )}
+          </div>
+          {/* Format — ad vs short-form. Sets content_category on every file in
+              the batch; drives the editing-queue Ads | Shorts toggle. */}
+          <div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Format</div>
+            <div style={{ display: 'inline-flex', gap: 4, padding: 4, background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 999 }}>
+              {[{ v: 'ad', label: 'Ad creative' }, { v: 'short', label: 'Short creative' }].map(opt => {
+                const on = batchCategory === opt.v
+                return (
+                  <button key={opt.v} type="button" onClick={() => setBatchCategory(opt.v)} disabled={busy}
+                    style={{
+                      padding: '6px 14px', borderRadius: 999, cursor: busy ? 'not-allowed' : 'pointer',
+                      fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+                      letterSpacing: '0.06em', textTransform: 'uppercase', border: 'none',
+                      background: on ? 'var(--ink)' : 'transparent',
+                      color: on ? 'var(--paper)' : 'var(--ink-3)',
+                    }}>{opt.label}</button>
+                )
+              })}
+            </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr 1fr', gap: 10 }}>
             <div>

@@ -1105,7 +1105,7 @@ export function AddEditorModal({ onClose, onSaved }) {
   )
 }
 
-export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefillDue = '', prefillStart = '', existingTaskCreativeIds = null }) {
+export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', prefillDue = '', prefillStart = '', existingTaskCreativeIds = null, category = 'ad' }) {
   const [mode, setMode] = useState('pick')   // 'pick' or 'upload'
   const [creatives, setCreatives] = useState([])
   const [search, setSearch] = useState('')
@@ -1326,6 +1326,13 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
         .insert(rows)
         .select('id')
       if (taskErr) throw taskErr
+      // Stamp the chosen creatives with the queue's current Ads | Shorts
+      // category so the new tasks land under the right toggle.
+      if (cids.length) {
+        await supabase.from('lib_creative_library')
+          .update({ content_category: category === 'short' ? 'short' : 'ad' })
+          .in('id', cids)
+      }
       // Pull the queue-view rows for the just-inserted task ids so the
       // shape matches what the parent already has in state.
       let newQueueRows = []

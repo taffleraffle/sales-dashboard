@@ -2574,7 +2574,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // of transcript = 600KB+ wasted on the first paint. Pulling without it
   // cuts the initial payload roughly in half. Transcripts get lazy-loaded
   // in a follow-up query after first paint so library search still works.
-  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,final_cut_thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id'
+  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,final_cut_thumbnail_url,content_category,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id'
 
   const load = useCallback(async (background = false, attempt = 0) => {
     if (!background) setLoading(true)
@@ -7282,6 +7282,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
       canonical_name: edit.canonical_name,
       assigned_editor_id: edit.assigned_editor_id || null,
       offer_slug: edit.offer_slug || null,
+      content_category: edit.content_category === 'short' ? 'short' : 'ad',
       has_been_run: !!edit.has_been_run,
       // The third STATUS button (EDITED RAW) writes both status='raw'
       // AND manually_marked_used=true, so include the flag in every
@@ -7766,6 +7767,34 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
           </div>
         </Field>
 
+        {/* Format — ad vs short-form. Drives the editing-queue Ads | Shorts
+            toggle (Ben 2026-06-28). */}
+        <Field label="Format">
+          <div style={{ display: 'flex', gap: 5 }}>
+            {[
+              { v: 'ad', label: 'Ad creative' },
+              { v: 'short', label: 'Short creative' },
+            ].map(opt => {
+              const isOn = (edit.content_category || 'ad') === opt.v
+              return (
+                <button key={opt.v} type="button"
+                  onClick={() => setEdit({ ...edit, content_category: opt.v })}
+                  style={{
+                    flex: 1, padding: '8px 12px',
+                    fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                    background: isOn ? 'var(--ink)' : 'var(--paper)',
+                    color: isOn ? 'var(--paper)' : 'var(--ink-3)',
+                    border: '1px solid ' + (isOn ? 'var(--ink)' : 'var(--rule)'),
+                    cursor: 'pointer', borderRadius: 9,
+                  }}>
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+        </Field>
+
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
           <Field label="Status">
             {/* When the clip carries a submitted edit, the status is DERIVED
@@ -8064,6 +8093,13 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     } catch { return 'list' }
   })
   useEffect(() => { try { localStorage.setItem('queue.view', view) } catch {} }, [view])
+  // Ads | Shorts toggle — flips the whole board between ad creatives and
+  // short-form creatives (Ben 2026-06-28). content_category lives on the
+  // creative; the queue view exposes it. Default 'ad' (the existing pipeline).
+  const [category, setCategory] = useState(() => {
+    try { return localStorage.getItem('queue.category') || 'ad' } catch { return 'ad' }
+  })
+  useEffect(() => { try { localStorage.setItem('queue.category', category) } catch {} }, [category])
   const [addEditorOpen, setAddEditorOpen] = useState(false)
   const [addTaskOpen, setAddTaskOpen] = useState(false)
   // Prefill for AddTaskModal — set when the user drags across days in
@@ -8232,7 +8268,9 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
   // Filter tasks by selected editors + selected statuses. Empty sets =
   // no filter on that dimension. Both filters are AND-combined.
   const filteredTasks = useMemo(() => {
-    let out = tasks
+    // Ads | Shorts first — scopes the whole board (KPIs + every view derive
+    // from this). Legacy rows with no category read as 'ad'.
+    let out = tasks.filter(t => (t.content_category || 'ad') === category)
     if (selectedEditors.size > 0) {
       out = out.filter(t => selectedEditors.has(t.editor_id) || (t.editor_id == null && selectedEditors.has('unassigned')))
     }
@@ -8240,7 +8278,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       out = out.filter(t => selectedStatuses.has(t.status))
     }
     return out
-  }, [tasks, selectedEditors, selectedStatuses])
+  }, [tasks, category, selectedEditors, selectedStatuses])
 
   // Only count as overdue when the editor is actually blocking. status='review'
   // means the editor has submitted; the task is on the coordinator now.
@@ -8380,6 +8418,41 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
           <span style={{ textDecoration: 'underline' }}>Open the tasks →</span>
         </div>
       )}
+
+      {/* Ads | Shorts toggle — top-level switch between ad creatives and
+          short-form creatives. Flips the whole board (KPIs + every view)
+          (Ben 2026-06-28). */}
+      <div style={{
+        display: 'inline-flex', gap: 4, padding: 4, marginBottom: 16,
+        background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 999,
+      }}>
+        {[
+          { v: 'ad', label: 'Ad creatives' },
+          { v: 'short', label: 'Short creatives' },
+        ].map(opt => {
+          const on = category === opt.v
+          const count = tasks.filter(t => (t.content_category || 'ad') === opt.v).length
+          return (
+            <button key={opt.v} type="button" onClick={() => setCategory(opt.v)}
+              style={{
+                padding: '7px 16px', borderRadius: 999, cursor: 'pointer',
+                fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                background: on ? 'var(--ink)' : 'transparent',
+                color: on ? 'var(--paper)' : 'var(--ink-3)',
+                border: 'none', display: 'inline-flex', alignItems: 'center', gap: 7,
+                transition: 'background 0.12s, color 0.12s',
+              }}>
+              {opt.label}
+              <span style={{
+                fontSize: 9.5, padding: '1px 7px', borderRadius: 999,
+                background: on ? 'rgba(255,255,255,0.18)' : 'var(--rule)',
+                color: on ? 'var(--paper)' : 'var(--ink-4)',
+              }}>{count}</span>
+            </button>
+          )
+        })}
+      </div>
 
       {/* KPI bar. Six tiles so Review + Revision get their own slots
           alongside Overdue / In progress / Queued / Done — Ben 2026-05-31
@@ -8706,6 +8779,7 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       {addTaskOpen && (
         <AddTaskModal
           editors={editors.filter(e => e.active && e.tier !== 'admin')}
+          category={category}
           prefillEditorId={addTaskPrefill.editorId}
           prefillDue={addTaskPrefill.due}
           prefillStart={addTaskPrefill.start}
