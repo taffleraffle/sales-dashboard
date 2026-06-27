@@ -9085,6 +9085,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   // up-to-date with the latest submission so existing read paths
   // (library matrix view, etc.) continue to work.
   const [submissions, setSubmissions] = useState([])
+  // Raw/edit toggle for the player — mirrors the library detail modal so both
+  // views read identically (Ben 2026-06-27: "no congruency").
+  const [taskViewRaw, setTaskViewRaw] = useState(false)
   const reloadSubmissions = useCallback(async () => {
     if (!task.task_id) return
     const { data } = await supabase.from('lib_task_submissions')
@@ -9637,51 +9640,88 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             script. auto-fit collapses to one column on narrow screens. */}
         <div style={{
           display: 'grid', gap: 20, alignItems: 'start',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
         }}>
         {/* Left column only when there's media — an empty div would still
             claim an auto-fit track and render a blank half-modal for rows
             with no preview/source URL. */}
         {(task.preview_url || task.drive_url) && (
-        <div style={{ display: 'grid', gap: 14, minWidth: 0 }}>
-        {/* Inline video preview — playable in the modal so the editor
-            can watch the source without bouncing elsewhere. preview_url
-            is the compressed 720p mp4 for OLD Drive-imported rows; for
-            new TUS-uploaded rows it's the ORIGINAL full-quality file.
-            The Download Original button always points at the highest-
-            quality source we have: drive_url first (always original for
-            old rows), then preview_url (only full-quality for new rows). */}
-        {task.preview_url ? (
-          <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
-            {/* Lead with the most recent EDITED submission, not the raw source
-                (Ben 2026-06-26 — the edit is the priority; raw is below). */}
-            {(() => {
-              const leadSub = (submissions || []).find(s => s.file_url)
-              // Stream the small proxy for instant playback (no black-screen
-              // wait); fall back to the raw cut, then the task source.
-              const leadSrc = leadSub?.preview_proxy_url || leadSub?.file_url
-                || task.preview_proxy_url || task.preview_url
-              // Download always grabs the full-quality original, not the proxy.
-              // Keep the same priority as the old download bar so a Drive-only
-              // task (no submission, no preview_url) still resolves a real URL.
-              const leadDl = leadSub?.file_url || task.final_cut_url || task.drive_url || task.preview_url
-              return (
-                // Tall stage — identical treatment to the library detail
-                // modal so the two views read the same (Ben 2026-06-27).
-                <div style={{ height: 'min(62vh, 540px)', background: 'black' }}>
-                  <OptVideoPlayer key={leadSrc} src={leadSrc} compact
-                    poster={leadSub?.thumbnail_url || task.thumbnail_url}
-                    downloadUrl={leadDl ? toDownloadUrl(leadDl, task.creative_name) : undefined}
-                    downloadName={task.creative_name || 'video.mp4'}
-                    wrapperStyle={OPT_PLAYER_WRAP_STAGE} />
+        <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+        {/* Media — IDENTICAL structure to the library detail modal: a
+            lead-version badge, the tall player, and a raw↔edit sidecar
+            toggle (Ben 2026-06-27: "no congruency in the library or
+            editing queue"). Leads with the latest edited submission; the
+            raw source is one click away. */}
+        {task.preview_url ? (() => {
+          const leadSub = (submissions || []).find(s => s.file_url)
+          const hasEdit = !!leadSub
+          const editV = {
+            src: leadSub?.preview_proxy_url || leadSub?.file_url || task.preview_proxy_url || task.preview_url,
+            poster: leadSub?.thumbnail_url || task.thumbnail_url,
+            dl: leadSub?.file_url || task.final_cut_url || task.drive_url || task.preview_url,
+            label: leadSub?.version_number ? `Edited cut · v${leadSub.version_number}` : 'Edited cut',
+            key: 'e-' + (leadSub?.id || task.task_id),
+          }
+          const rawV = {
+            src: task.preview_proxy_url || task.preview_url,
+            poster: task.thumbnail_url,
+            dl: task.drive_url || task.preview_url,
+            label: 'Raw source',
+            key: 'r-' + task.task_id,
+          }
+          const showRaw = !hasEdit || taskViewRaw
+          const lead = showRaw ? rawV : editV
+          const other = showRaw ? editV : rawV
+          return (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                <span style={{
+                  padding: '3px 10px', borderRadius: 999,
+                  background: showRaw ? 'rgba(21,22,26,0.70)' : 'var(--up)', color: '#fff',
+                  fontFamily: 'var(--sans)', fontSize: 10, fontWeight: 700,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                }}>{lead.label}</span>
+                {hasEdit && (
+                  <span style={{ fontFamily: 'var(--sans)', fontSize: 11.5, color: 'var(--ink-3)' }}>
+                    {showRaw ? 'the original footage — edit at right' : 'the latest cut — raw at right'}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: hasEdit ? '1fr 96px' : '1fr', gap: 10, alignItems: 'start' }}>
+                <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
+                  <div style={{ height: 'min(62vh, 540px)', background: 'black' }}>
+                    <OptVideoPlayer key={lead.key} src={lead.src} compact
+                      poster={lead.poster}
+                      downloadUrl={lead.dl ? toDownloadUrl(lead.dl, task.creative_name) : undefined}
+                      downloadName={task.creative_name || 'video.mp4'}
+                      wrapperStyle={OPT_PLAYER_WRAP_STAGE} />
+                  </div>
                 </div>
-              )
-            })()}
-            {/* Raw-source download moved OUT of the player card and into the
-                right details rail (Ben 2026-06-26: "still have download raw
-                below the actual live video"). The card is just the edit now. */}
-          </div>
-        ) : task.drive_url ? (
+                {hasEdit && (
+                  <button type="button" onClick={() => setTaskViewRaw(v => !v)}
+                    title={showRaw ? 'Back to the edited cut' : 'View the raw source'}
+                    style={{
+                      padding: 0, border: '1px solid var(--rule)', borderRadius: 10,
+                      overflow: 'hidden', cursor: 'pointer', background: 'var(--ink)',
+                      aspectRatio: '9 / 12', position: 'relative',
+                    }}>
+                    {other.poster
+                      ? <img src={other.poster} alt="" loading="lazy"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      : <div style={{ width: '100%', height: '100%' }} />}
+                    <span style={{
+                      position: 'absolute', bottom: 5, left: 5,
+                      padding: '2px 7px', borderRadius: 999,
+                      background: showRaw ? 'var(--up)' : 'rgba(21,22,26,0.78)', color: '#fff',
+                      fontFamily: 'var(--sans)', fontSize: 8.5, fontWeight: 700,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                    }}>{showRaw ? 'Edit' : 'Raw'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })() : task.drive_url ? (
           <div style={{
             padding: '14px 16px', background: 'var(--paper-2)',
             border: '1px solid var(--rule)', borderLeft: '3px solid var(--accent)',
@@ -9713,7 +9753,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         </div>
         )}{/* end LEFT column (player) */}
         {/* ── RIGHT details rail ── */}
-        <div style={{ display: 'grid', gap: 14, minWidth: 0, alignContent: 'start' }}>
+        <div style={{ display: 'grid', gap: 16, minWidth: 0, alignContent: 'start' }}>
         {/* Quick-action status row — colored pill per status when selected. */}
         <div>
           <div style={chipLabelStyle}>Status</div>
