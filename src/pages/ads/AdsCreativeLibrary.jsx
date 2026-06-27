@@ -2574,7 +2574,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // of transcript = 600KB+ wasted on the first paint. Pulling without it
   // cuts the initial payload roughly in half. Transcripts get lazy-loaded
   // in a follow-up query after first paint so library search still works.
-  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id'
+  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,final_cut_thumbnail_url,preview_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id'
 
   const load = useCallback(async (background = false, attempt = 0) => {
     if (!background) setLoading(true)
@@ -5387,7 +5387,7 @@ function TaskWorkPanel({ task, scope = ADMIN_SCOPE, onChanged }) {
       })
       if (sErr) throw sErr
       setUploadProgress(85)
-      await supabase.from('lib_creative_library').update({ final_cut_url: publicUrl, stage_final_cut: 'done' }).eq('id', task.creative_id)
+      await supabase.from('lib_creative_library').update({ final_cut_url: publicUrl, final_cut_thumbnail_url: submissionThumbUrl, stage_final_cut: 'done' }).eq('id', task.creative_id)
       setUploadProgress(95)
       await supabase.from('lib_editing_tasks').update({ status: 'review', started_at: task.started_at || new Date().toISOString() }).eq('id', task.task_id)
       setUploadProgress(100)
@@ -5405,7 +5405,7 @@ function TaskWorkPanel({ task, scope = ADMIN_SCOPE, onChanged }) {
       const { error: e1 } = await supabase.from('lib_task_submissions').update({ approved_at: new Date().toISOString(), approved_by_name: 'admin' }).eq('id', sub.id)
       if (e1) throw e1
       if (sub.file_url) {
-        const { error: e2 } = await supabase.from('lib_creative_library').update({ final_cut_url: sub.file_url, stage_final_cut: 'done', status: 'edited' }).eq('id', task.creative_id)
+        const { error: e2 } = await supabase.from('lib_creative_library').update({ final_cut_url: sub.file_url, final_cut_thumbnail_url: sub.thumbnail_url, stage_final_cut: 'done', status: 'edited' }).eq('id', task.creative_id)
         if (e2) throw e2
       }
       const { error: e3 } = await supabase.from('lib_editing_tasks').update({ status: 'done', completed_at: new Date().toISOString() }).eq('id', task.task_id)
@@ -6714,6 +6714,21 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
   const dispStatus = row.status === 'edited' ? 'edited'
     : (row.final_cut_url && row.final_cut_url !== row.preview_url) ? 'review'
     : 'raw'
+  // Prefer the EDITED frame on the tile so edited clips show the edit, not the
+  // raw (Ben 2026-06-28: "some thumbnails aren't pulling through the edited").
+  const tileThumb = row.final_cut_thumbnail_url || row.thumbnail_url
+  // Inline rename from the grid (Ben 2026-06-28: "need to be able to rename
+  // these"). Double-click the name → edit → save display_name.
+  const [renaming, setRenaming] = useState(false)
+  const [localName, setLocalName] = useState(null)
+  const displayedName = localName ?? rowDisplayName(row)
+  const saveRename = async (val) => {
+    const v = (val || '').trim()
+    setRenaming(false)
+    if (!v || v === displayedName) return
+    setLocalName(v)
+    try { await supabase.from('lib_creative_library').update({ display_name: v }).eq('id', row.id) } catch { /* surfaced on next refetch */ }
+  }
   return (
     <div onClick={handleCardClick}
       onMouseEnter={() => setHover(true)}
@@ -6763,7 +6778,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
       {/* Thumbnail */}
       <div style={{
         aspectRatio: '16 / 9',
-        background: row.thumbnail_url
+        background: tileThumb
           ? '#000'   // black behind the image to hide letterbox for portrait
           : 'linear-gradient(135deg, var(--paper-2) 0%, var(--rule) 100%)',
         position: 'relative', overflow: 'hidden',
@@ -6775,8 +6790,8 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
             on the floor. The card div must own every drag. */}
         {/* Thumbnail stays as the base layer so the hover video can fade in
             on top of it — no black flash while the video buffers (Ben). */}
-        {row.thumbnail_url && (
-          <img src={row.thumbnail_url} alt=""
+        {tileThumb && (
+          <img src={tileThumb} alt=""
             loading="lazy"
             draggable={false}
             style={{
@@ -6788,7 +6803,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
         {hoverPlay && row.preview_url && (
           <video src={row.preview_proxy_url || row.preview_url}
             autoPlay muted loop playsInline preload="metadata"
-            poster={row.thumbnail_url || undefined}
+            poster={tileThumb || undefined}
             draggable={false}
             style={{
               position: 'absolute', inset: 0,
@@ -6796,7 +6811,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
               display: 'block',
             }} />
         )}
-        {!row.thumbnail_url && (
+        {!tileThumb && (
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
             No thumbnail
           </span>
@@ -6842,19 +6857,38 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
       </div>
       {/* Body */}
       <div style={{ padding: '10px 12px' }}>
-        <div style={{
-          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
-          color: 'var(--ink)', lineHeight: 1.35,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          textDecoration: (row.status === 'raw' && isUsed) ? 'line-through' : 'none',
-          opacity: (row.status === 'raw' && isUsed) ? 0.7 : 1,
-        }} title={row.name}>
-          {(row.status === 'raw' && isUsed) && (
-            <span title="Already edited"
-              style={{ color: 'var(--up)', marginRight: 4 }}>✓</span>
-          )}
-          {rowDisplayName(row)}
-        </div>
+        {renaming ? (
+          <input autoFocus type="text" defaultValue={displayedName}
+            onClick={e => e.stopPropagation()}
+            onMouseDown={e => e.stopPropagation()}
+            onDoubleClick={e => e.stopPropagation()}
+            onBlur={e => saveRename(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') e.target.blur()
+              else if (e.key === 'Escape') { setLocalName(localName); setRenaming(false) }
+            }}
+            style={{
+              width: '100%', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+              color: 'var(--ink)', padding: '2px 6px', borderRadius: 6,
+              border: '1px solid var(--ink)', outline: 'none', boxSizing: 'border-box',
+            }} />
+        ) : (
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+            color: 'var(--ink)', lineHeight: 1.35,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            textDecoration: (row.status === 'raw' && isUsed) ? 'line-through' : 'none',
+            opacity: (row.status === 'raw' && isUsed) ? 0.7 : 1,
+            cursor: 'text',
+          }} title="Double-click to rename"
+            onDoubleClick={e => { e.stopPropagation(); setRenaming(true) }}>
+            {(row.status === 'raw' && isUsed) && (
+              <span title="Already edited"
+                style={{ color: 'var(--up)', marginRight: 4 }}>✓</span>
+            )}
+            {displayedName}
+          </div>
+        )}
         <div style={{
           marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center',
           fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',
@@ -6993,7 +7027,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
           .update({ status: 'done', completed_at: nowIso }).eq('id', approvedSub.task_id)
       }
       const { error } = await supabase.from('lib_creative_library')
-        .update({ status: 'edited' }).eq('id', row.id)
+        .update({ status: 'edited', final_cut_thumbnail_url: approvedSub?.thumbnail_url || undefined }).eq('id', row.id)
       if (error) throw error
       setEdit(e => ({ ...e, status: 'edited' }))
       setApprovedSub(s => (s ? { ...s, approved_at: nowIso } : s))
@@ -9600,7 +9634,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
       // most recent cut. Approving an older version explicitly
       // (via the Approve button on the submissions list) overrides this.
       const { error: pErr } = await supabase.from('lib_creative_library')
-        .update({ final_cut_url: publicUrl, stage_final_cut: 'done' })
+        .update({ final_cut_url: publicUrl, final_cut_thumbnail_url: submissionThumbUrl, stage_final_cut: 'done' })
         .eq('id', task.creative_id)
       if (pErr) throw pErr
       setUploadProgress(95)
@@ -9639,7 +9673,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         // the library surfaces it as the edited version. The detail modal's
         // merged-view branch keeps the raw one click away (Ben 2026-06-27).
         const { error: e2 } = await supabase.from('lib_creative_library')
-          .update({ final_cut_url: sub.file_url, stage_final_cut: 'done', status: 'edited' })
+          .update({ final_cut_url: sub.file_url, final_cut_thumbnail_url: sub.thumbnail_url, stage_final_cut: 'done', status: 'edited' })
           .eq('id', task.creative_id)
         if (e2) throw e2
       }
