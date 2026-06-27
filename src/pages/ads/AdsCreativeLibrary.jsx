@@ -9588,7 +9588,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
   }, [task.creative_id, task.creative_name, task.creative_type, task.thumbnail_url, submissions])
 
   return (
-    <Modal open={true} onClose={handleCloseModal} size="xl"
+    // lg (920px) matches the library detail modal so the two are 1:1 — same
+    // width => same player size + layout (Ben 2026-06-28).
+    <Modal open={true} onClose={handleCloseModal} size="lg"
       eyebrow="Edit task"
       title={task.creative_name}
       subtitle={`${task.creative_type || ''}${task.creative_creator ? ' · ' + task.creative_creator : ''}${task.v21_script_id ? ' · ' + task.v21_script_id : ''}`}
