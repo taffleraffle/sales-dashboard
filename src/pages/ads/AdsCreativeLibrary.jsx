@@ -1287,11 +1287,17 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
         }}>
           {/* Custom OPT-branded player. Comment markers sit on the
               actual scrubber, click anywhere on the bar to scrub. */}
-          <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex' }}>
+          {/* DEFINITE-height container (not a flex-fill chain) so the
+              player's height:100% resolves and can't overflow the 86vh modal
+              — the flex-fill version pushed the footer (Revise) off-screen and
+              broke Review. compact drops the minHeight:400 floor, matching the
+              working library detail-modal player. (Root-caused 2026-06-27.) */}
+          <div style={{ height: 'min(72vh, 620px)', background: 'black', flexShrink: 0 }}>
             <OptVideoPlayer ref={playerRef}
               src={url}
               markers={playerMarkers}
               onState={onPlayerState}
+              compact
               downloadUrl={toDownloadUrl(submission.file_url, filename)}
               downloadName={filename}
               wrapperStyle={OPT_PLAYER_WRAP_STAGE}
@@ -9612,11 +9618,15 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
               // task (no submission, no preview_url) still resolves a real URL.
               const leadDl = leadSub?.file_url || task.final_cut_url || task.drive_url || task.preview_url
               return (
-                <OptVideoPlayer key={leadSrc} src={leadSrc} compact
-                  poster={leadSub?.thumbnail_url || task.thumbnail_url}
-                  downloadUrl={leadDl ? toDownloadUrl(leadDl, task.creative_name) : undefined}
-                  downloadName={task.creative_name || 'video.mp4'}
-                  wrapperStyle={OPT_PLAYER_WRAP_360} />
+                // Tall stage — identical treatment to the library detail
+                // modal so the two views read the same (Ben 2026-06-27).
+                <div style={{ height: 'min(62vh, 540px)', background: 'black' }}>
+                  <OptVideoPlayer key={leadSrc} src={leadSrc} compact
+                    poster={leadSub?.thumbnail_url || task.thumbnail_url}
+                    downloadUrl={leadDl ? toDownloadUrl(leadDl, task.creative_name) : undefined}
+                    downloadName={task.creative_name || 'video.mp4'}
+                    wrapperStyle={OPT_PLAYER_WRAP_STAGE} />
+                </div>
               )
             })()}
             {/* Raw-source download moved OUT of the player card and into the
