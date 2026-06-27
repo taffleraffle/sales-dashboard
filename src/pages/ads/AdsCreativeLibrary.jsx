@@ -5179,9 +5179,10 @@ function TranscriptBox({ text: rawText }) {
 // showed the TASK ("Gahen · in_progress") with no way to see the work; this
 // surfaces every submitted cut with an inline player + download, newest first
 // (Ben 2026-06-27: "still cant see the edited versions in here").
-function EditedVersionsPanel({ creativeId }) {
+function EditedVersionsPanel({ creativeId, onApproved }) {
   const [subs, setSubs] = useState(null)
   const [openId, setOpenId] = useState(null)
+  const [busyId, setBusyId] = useState(null)
   useEffect(() => {
     let on = true
     ;(async () => {
@@ -5191,13 +5192,39 @@ function EditedVersionsPanel({ creativeId }) {
       const ids = [...new Set((q || []).map(t => t.task_id).filter(Boolean))]
       if (!ids.length) { if (on) setSubs([]); return }
       const { data } = await supabase.from('lib_task_submissions')
-        .select('id, version_number, submitted_by_name, file_url, preview_proxy_url, thumbnail_url, approved_at, created_at')
+        .select('id, task_id, version_number, submitted_by_name, file_url, preview_proxy_url, thumbnail_url, approved_at, created_at')
         .in('task_id', ids).is('deleted_at', null)
         .order('created_at', { ascending: false })
       if (on) setSubs((data || []).filter(s => s.file_url))
     })()
     return () => { on = false }
   }, [creativeId])
+
+  // Approve a version straight from the library (Ben 2026-06-28: "still
+  // missing the ability to approve down here"). Marks the submission approved,
+  // moves its task to done, and points the creative's final cut at this cut.
+  const approve = async (s) => {
+    if (busyId) return
+    setBusyId(s.id)
+    try {
+      const nowIso = new Date().toISOString()
+      await supabase.from('lib_task_submissions')
+        .update({ approved_at: nowIso, approved_by_name: 'admin' }).eq('id', s.id)
+      if (s.task_id) {
+        await supabase.from('lib_editing_tasks')
+          .update({ status: 'done', completed_at: nowIso }).eq('id', s.task_id)
+      }
+      await supabase.from('lib_creative_library')
+        .update({ final_cut_url: s.file_url, stage_final_cut: 'done', status: 'edited' })
+        .eq('id', creativeId)
+      setSubs(curr => (curr || []).map(x => x.id === s.id ? { ...x, approved_at: nowIso } : x))
+      onApproved?.()
+    } catch (e) {
+      try { alert(`Approve failed: ${e?.message || e}`) } catch {}
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   if (!subs || subs.length === 0) return null  // nothing submitted yet — stay quiet
 
@@ -5209,37 +5236,53 @@ function EditedVersionsPanel({ creativeId }) {
           const approved = !!s.approved_at
           return (
             <div key={s.id} style={{ border: '1px solid var(--rule)', borderRadius: 10, overflow: 'hidden', background: 'var(--paper)' }}>
-              <button type="button" onClick={() => setOpenId(isOpen ? null : s.id)}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-                  padding: 8, background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
-                }}>
-                <div style={{ width: 64, height: 40, flexShrink: 0, background: 'var(--ink)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
-                  {s.thumbnail_url && (
-                    <img src={s.thumbnail_url} alt="" loading="lazy"
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 8 }}>
+                {/* Clickable area — expands the inline player. Kept a div (not a
+                    button) so the Approve button can sit beside it without
+                    nesting buttons. */}
+                <div onClick={() => setOpenId(isOpen ? null : s.id)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0, cursor: 'pointer' }}>
+                  <div style={{ width: 64, height: 40, flexShrink: 0, background: 'var(--ink)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
+                    {s.thumbnail_url && (
+                      <img src={s.thumbnail_url} alt="" loading="lazy"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    )}
+                    <span style={{
+                      position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', color: '#fff', fontSize: 13,
+                      textShadow: '0 1px 3px rgba(0,0,0,0.6)',
+                    }}>{isOpen ? '▾' : '▶'}</span>
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, color: 'var(--ink)' }}>
+                      v{s.version_number || 1} · {s.submitted_by_name || 'editor'}
+                    </div>
+                    <div style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)' }}>
+                      {s.created_at ? new Date(s.created_at).toLocaleDateString() : ''}
+                    </div>
+                  </div>
+                </div>
+                {/* Status + Approve action. Approve flips this version to the
+                    creative's final cut + marks the task done. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                   <span style={{
-                    position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', color: '#fff', fontSize: 13,
-                    textShadow: '0 1px 3px rgba(0,0,0,0.6)',
-                  }}>{isOpen ? '▾' : '▶'}</span>
+                    padding: '3px 9px', borderRadius: 999,
+                    fontFamily: 'var(--sans)', fontSize: 9.5, fontWeight: 700,
+                    letterSpacing: '0.06em', textTransform: 'uppercase', color: '#fff',
+                    background: approved ? 'var(--up)' : '#3e7eba',
+                  }}>{approved ? 'Approved' : 'In review'}</span>
+                  {!approved && (
+                    <button type="button" onClick={() => approve(s)} disabled={busyId === s.id}
+                      title="Approve this cut as the final version"
+                      style={{
+                        padding: '5px 11px', fontFamily: 'var(--mono)', fontSize: 10,
+                        fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        background: 'var(--up)', color: '#fff', border: '1px solid var(--up)',
+                        borderRadius: 9, cursor: busyId === s.id ? 'wait' : 'pointer',
+                      }}>{busyId === s.id ? '…' : '✓ Approve'}</button>
+                  )}
                 </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, color: 'var(--ink)' }}>
-                    v{s.version_number || 1} · {s.submitted_by_name || 'editor'}
-                  </div>
-                  <div style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)' }}>
-                    {s.created_at ? new Date(s.created_at).toLocaleDateString() : ''}
-                  </div>
-                </div>
-                <span style={{
-                  flexShrink: 0, padding: '3px 9px', borderRadius: 999,
-                  fontFamily: 'var(--sans)', fontSize: 9.5, fontWeight: 700,
-                  letterSpacing: '0.06em', textTransform: 'uppercase', color: '#fff',
-                  background: approved ? 'var(--up)' : '#3e7eba',
-                }}>{approved ? 'Approved' : 'In review'}</span>
-              </button>
+              </div>
               {isOpen && (
                 <div style={{ background: 'var(--ink)', borderTop: '1px solid var(--rule)' }}>
                   <OptVideoPlayer src={s.preview_proxy_url || s.file_url} compact
@@ -7702,7 +7745,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         {/* Edited versions — the editor's submitted cuts for this creative's
             task(s), playable inline (Ben 2026-06-27: "still cant see the
             edited versions in here"). */}
-        <EditedVersionsPanel creativeId={row.id} />
+        <EditedVersionsPanel creativeId={row.id} onApproved={() => { setEdit(e => ({ ...e, status: 'edited' })); onSaved?.() }} />
 
         {/* Versions — raw library siblings linked via parent_id (NOT the
             editor's cuts — those are in Edited versions above). */}
