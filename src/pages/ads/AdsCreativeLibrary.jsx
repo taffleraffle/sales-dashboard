@@ -4840,6 +4840,91 @@ function EditorPicker({ value, editors, onChange, placeholder = '— Unassigned'
   )
 }
 
+/* Branded offer / niche picker — same portal dropdown as EditorPicker so the
+   dropdowns share the OPT look instead of an unbranded native <select>
+   (Ben 2026-06-27: "all dropdowns should be branded"). Shows each offer's
+   colour chip. */
+function OfferPicker({ value, offers, onChange, placeholder = '— Pick offer —' }) {
+  const [popover, setPopover] = useState(null)
+  const ref = useRef(null)
+  const popRef = useRef(null)
+  const open = !!popover
+  const handleToggle = () => {
+    if (popover) setPopover(null)
+    else if (ref.current) setPopover({ rect: rectToObj(ref.current.getBoundingClientRect()) })
+  }
+  const closePopover = () => setPopover(null)
+  useEffect(() => {
+    if (!popover) return
+    const onDoc = (e) => {
+      const inBtn = ref.current && ref.current.contains(e.target)
+      const inPop = popRef.current && popRef.current.contains(e.target)
+      if (!inBtn && !inPop) setPopover(null)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setPopover(null) }
+    const onScroll = () => { if (ref.current) setPopover({ rect: rectToObj(ref.current.getBoundingClientRect()) }) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [!!popover])
+  const current = offers.find(o => o.slug === value)
+  const coords = popover ? popoverCoords(popover.rect) : null
+  const chip = (slug) => { const c = offerColor(slug); return (c && c.ink) || 'var(--ink-4)' }
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" onClick={handleToggle}
+        style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+        {current ? (
+          <>
+            <span style={{ width: 10, height: 10, borderRadius: 9, background: chip(current.slug), flexShrink: 0 }} />
+            <span style={{ flex: 1, fontFamily: 'var(--sans)' }}>{current.name}</span>
+          </>
+        ) : (
+          <span style={{ flex: 1, fontFamily: 'var(--sans)', color: 'var(--ink-4)' }}>{placeholder}</span>
+        )}
+        <span style={{ fontSize: 9, opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {popover && coords && createPortal(
+        <div ref={popRef} style={{
+          position: 'fixed', top: coords.top, left: coords.left, width: coords.width,
+          maxHeight: coords.maxHeight, overflowY: 'auto', zIndex: 9999,
+          background: 'var(--paper)', border: '1px solid var(--ink)',
+          boxShadow: '0 8px 24px rgba(10,10,10,0.25)', padding: 4,
+        }}>
+          <button type="button" onClick={() => { onChange(null); closePopover() }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '6px 10px',
+              background: !value ? 'var(--paper-2)' : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: !value ? 700 : 500,
+              letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            <span style={{ width: 10, height: 10, borderRadius: 9, background: 'var(--ink-4)', flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>No offer</span>
+          </button>
+          {offers.map(o => {
+            const isOn = o.slug === value
+            return (
+              <button key={o.slug} type="button" onClick={() => { onChange(o.slug); closePopover() }}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '6px 10px',
+                  background: isOn ? 'var(--paper-2)' : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
+                  fontFamily: 'var(--sans)', fontSize: 13, fontWeight: isOn ? 600 : 500 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 9, background: chip(o.slug), flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>{o.name}</span>
+              </button>
+            )
+          })}
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+
 /* Creator picker — dropdown of known creators with an inline 'Add new'
    that switches to a free-text input. Avoids typos that fragment creators
    into multiple variants (NATALIE vs Natalie vs natalie). */
@@ -6525,7 +6610,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
     if (!hasRowEdit) { setApprovedSub(null); return }
     let on = true
     supabase.from('lib_task_submissions')
-      .select('file_url, preview_proxy_url, thumbnail_url, version_number, approved_at')
+      .select('id, task_id, file_url, preview_proxy_url, thumbnail_url, version_number, approved_at')
       .eq('file_url', row.final_cut_url)
       .order('approved_at', { ascending: false, nullsFirst: false })
       .limit(1)
@@ -6534,6 +6619,26 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
   }, [hasRowEdit, row.final_cut_url])
   // The big player leads with the edit; the user can flip to the raw.
   const [viewRaw, setViewRaw] = useState(false)
+
+  // Auto-pick the offer/niche from the folder when none is set yet
+  // (Ben 2026-06-27: "automatically pick the offer and niche"). Uses the
+  // majority offer of the other clips in the same folder; only fills an EMPTY
+  // field — never overrides a manual choice.
+  useEffect(() => {
+    if (row.offer_slug || !row.folder_id) return
+    let on = true
+    supabase.from('lib_creative_library')
+      .select('offer_slug').eq('folder_id', row.folder_id).not('offer_slug', 'is', null)
+      .then(({ data }) => {
+        if (!on || !data || !data.length) return
+        const counts = {}
+        for (const r of data) counts[r.offer_slug] = (counts[r.offer_slug] || 0) + 1
+        const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+        if (best && best[0]) setEdit(e => (e.offer_slug ? e : { ...e, offer_slug: best[0] }))
+      })
+    return () => { on = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.id, row.folder_id])
   const editApproved = !!approvedSub?.approved_at
   const editView = {
     src: approvedSub?.preview_proxy_url || approvedSub?.file_url || row.final_cut_url,
@@ -6555,6 +6660,34 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle') // idle | saving | saved | error
+  // Approve the pending edit straight from the library (Ben 2026-06-27: "it
+  // really just needs to be reviewed"). Marks the submission approved, moves
+  // its task to done, and flips the row to status='edited'.
+  const [approving, setApproving] = useState(false)
+  const approveRowEdit = async () => {
+    setApproving(true)
+    try {
+      const nowIso = new Date().toISOString()
+      if (approvedSub?.id) {
+        await supabase.from('lib_task_submissions')
+          .update({ approved_at: nowIso, approved_by_name: 'admin' }).eq('id', approvedSub.id)
+        if (approvedSub.task_id) {
+          await supabase.from('lib_editing_tasks')
+            .update({ status: 'done', completed_at: nowIso }).eq('id', approvedSub.task_id)
+        }
+      }
+      const { error } = await supabase.from('lib_creative_library')
+        .update({ status: 'edited' }).eq('id', row.id)
+      if (error) throw error
+      setEdit(e => ({ ...e, status: 'edited' }))
+      setApprovedSub(s => (s ? { ...s, approved_at: nowIso } : s))
+      onSaved?.()
+    } catch (e) {
+      setErr(e.message || 'approve failed')
+    } finally {
+      setApproving(false)
+    }
+  }
   // Replace-source-file state. Only used when the row is is_low_quality:
   // operator clicks "Replace original" → file picker → TUS upload → patch
   // the SAME row's preview_url (preserves editor task links). is_low_quality
@@ -7042,12 +7175,12 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px', gap: 10, alignItems: 'start' }}>
               <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
-                <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
+                <div style={{ height: 'min(62vh, 540px)', background: 'black' }}>
                   <OptVideoPlayer key={lead.key} src={lead.src} compact
                     poster={lead.poster}
                     downloadUrl={lead.download ? toDownloadUrl(lead.download, lead.name) : undefined}
                     downloadName={lead.name || 'creative.mp4'}
-                    wrapperStyle={OPT_PLAYER_WRAP_FILL} />
+                    wrapperStyle={OPT_PLAYER_WRAP_STAGE} />
                 </div>
               </div>
               {/* Secondary — the OTHER version. Click swaps the big player.
@@ -7107,7 +7240,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                   download lives in the card FOOTER, not a floating bar under
                   the video, and is labelled by what you're actually watching. */}
               <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
-                <div style={{ aspectRatio: '16 / 9', background: 'black' }}>
+                <div style={{ height: 'min(62vh, 540px)', background: 'black' }}>
                   {(() => {
                     const dl = playerRow.final_cut_url || playerRow.drive_url || playerRow.preview_url
                     return (
@@ -7115,7 +7248,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                     poster={playerRow.thumbnail_url}
                     downloadUrl={dl ? toDownloadUrl(dl, rowDisplayName(playerRow)) : undefined}
                     downloadName={rowDisplayName(playerRow) || 'creative.mp4'}
-                    wrapperStyle={OPT_PLAYER_WRAP_FILL} />
+                    wrapperStyle={OPT_PLAYER_WRAP_STAGE} />
                     )
                   })()}
                 </div>
@@ -7285,40 +7418,66 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
 
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
           <Field label="Status">
-            {/* Three buttons matching the Library STATUS filter +
-                Bulk Edit modal. Selected-state uses the SAME isUsed
-                calculation as the filter (manually_marked_used OR
-                Hook fast-path OR transcript overlap), so a row that
-                lands in the EDITED RAW filter bucket also shows the
-                EDITED RAW button highlighted. Clicking writes a tri-
-                state value to manually_marked_used:
-                  RAW         → false (explicit override of heuristic)
-                  EDITED RAW  → true  (force into used set)
-                  EDITED      → status='edited' (flag left alone) */}
-            <div style={{ display: 'flex', gap: 5 }}>
-              {[
-                { v: 'raw',    label: 'RAW',    color: 'var(--down)',
-                  isOn: edit.status === 'raw',
-                  apply: () => setEdit({ ...edit, status: 'raw', manually_marked_used: false }) },
-                { v: 'edited', label: 'EDITED', color: 'var(--up)',
-                  isOn: edit.status === 'edited',
-                  apply: () => setEdit({ ...edit, status: 'edited' }) },
-              ].map(opt => (
-                <button key={opt.v} type="button"
-                  onClick={opt.apply}
+            {/* When the clip carries a submitted edit, the status is DERIVED
+                from the edit (Ben 2026-06-27: an edited clip shouldn't read
+                RAW). Unapproved edit → "Needs review" + one-click Approve;
+                approved/edited → "Edited". No edit → the manual RAW/EDITED
+                pills. */}
+            {hasRowEdit && !editApproved && edit.status !== 'edited' ? (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 9,
+                  background: '#fffaea', border: '1px solid #e8b408', color: '#9a7400',
+                  fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#d09c08' }} />
+                  Needs review
+                </div>
+                <button type="button" onClick={approveRowEdit} disabled={approving}
                   style={{
-                    flex: 1, padding: '8px 14px',
-                    fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                    padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
                     letterSpacing: '0.08em', textTransform: 'uppercase',
-                    background: opt.isOn ? opt.color : 'var(--paper)',
-                    color: opt.isOn ? 'white' : opt.color,
-                    border: '1px solid ' + opt.color,
-                    cursor: 'pointer', borderRadius: 9,
+                    background: 'var(--up)', color: '#fff', border: '1px solid var(--up)',
+                    borderRadius: 9, cursor: approving ? 'wait' : 'pointer', width: '100%',
                   }}>
-                  {opt.label}
+                  {approving ? 'Approving…' : '✓ Approve edit'}
                 </button>
-              ))}
-            </div>
+              </div>
+            ) : (hasRowEdit || edit.status === 'edited') ? (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '8px 14px', borderRadius: 9,
+                background: 'var(--up)', color: '#fff',
+                fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}>✓ Edited</div>
+            ) : (
+              <div style={{ display: 'flex', gap: 5 }}>
+                {[
+                  { v: 'raw',    label: 'RAW',    color: 'var(--down)',
+                    isOn: edit.status === 'raw',
+                    apply: () => setEdit({ ...edit, status: 'raw', manually_marked_used: false }) },
+                  { v: 'edited', label: 'EDITED', color: 'var(--up)',
+                    isOn: edit.status === 'edited',
+                    apply: () => setEdit({ ...edit, status: 'edited' }) },
+                ].map(opt => (
+                  <button key={opt.v} type="button"
+                    onClick={opt.apply}
+                    style={{
+                      flex: 1, padding: '8px 14px',
+                      fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                      background: opt.isOn ? opt.color : 'var(--paper)',
+                      color: opt.isOn ? 'white' : opt.color,
+                      border: '1px solid ' + opt.color,
+                      cursor: 'pointer', borderRadius: 9,
+                    }}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </Field>
           <Field label="Run before?">
             <button type="button"
@@ -7339,12 +7498,8 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
         {/* Creator field removed 2026-06-26 (Ben) — offer + editor only. */}
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, 1fr)' }}>
           <Field label="Offer / niche">
-            <select value={edit.offer_slug || ''}
-              onChange={e => setEdit({ ...edit, offer_slug: e.target.value || null })}
-              style={selectStyle}>
-              <option value="">— Pick offer —</option>
-              {offers.map(o => <option key={o.slug} value={o.slug}>{o.name}</option>)}
-            </select>
+            <OfferPicker value={edit.offer_slug || null} offers={offers}
+              onChange={v => setEdit({ ...edit, offer_slug: v || null })} />
             {scope.canEditCreative && (
               <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                 <button type="button" onClick={() => setOfferModal({ existing: null })}
