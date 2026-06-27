@@ -124,10 +124,12 @@ function CopyLinkButton({ url, label = 'Copy link', title, style }) {
 const STATUSES = ['raw', 'edited']
 const STATUS_LABEL = {
   raw: 'Raw',
+  review: 'Review',
   edited: 'Edited',
 }
 const STATUS_COLOR = {
   raw: 'var(--down)',      // red — needs attention / not yet edited
+  review: '#d09c08',       // amber — an edit was submitted, awaiting review
   edited: 'var(--up)',   // green — done
 }
 
@@ -578,6 +580,26 @@ const EditorNotificationBell = forwardRef(function EditorNotificationBell(
     return () => { mounted = false; clearInterval(interval) }
   }, [editorId])
 
+  // Thumbnails per notification — so you can tell at a glance WHICH clip each
+  // notification is about (Ben 2026-06-27: "easier way to know what is what
+  // w/ some thumbnails"). Fetch the creative thumbnails for the notifications'
+  // creative_ids in one query and map by id.
+  const [notifThumbs, setNotifThumbs] = useState({})
+  useEffect(() => {
+    const ids = [...new Set(notifications.map(n => n.creative_id).filter(Boolean))]
+    if (!ids.length) { setNotifThumbs({}); return }
+    let on = true
+    supabase.from('lib_creative_library')
+      .select('id, thumbnail_url').in('id', ids)
+      .then(({ data }) => {
+        if (!on) return
+        const m = {}
+        for (const r of (data || [])) if (r.thumbnail_url) m[r.id] = r.thumbnail_url
+        setNotifThumbs(m)
+      })
+    return () => { on = false }
+  }, [notifications])
+
   const unseenCount = notifications.filter(n => !seenAt || n.created_at > seenAt).length
   // Pending = unread (read_at is null) AND created since last bell open.
   // We mark them read via the bell-open path; reading happens implicitly
@@ -723,7 +745,7 @@ const EditorNotificationBell = forwardRef(function EditorNotificationBell(
                     <button key={n.id}
                       onClick={() => handleNotificationClick(n)}
                       style={{
-                        display: 'block', width: '100%',
+                        display: 'flex', alignItems: 'flex-start', gap: 12, width: '100%',
                         padding: '12px 22px 13px',
                         background: n.read_at ? 'transparent' : 'rgba(244,225,74,0.08)',
                         border: 'none',
@@ -735,40 +757,56 @@ const EditorNotificationBell = forwardRef(function EditorNotificationBell(
                       }}
                       onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--paper-2)' }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = n.read_at ? 'transparent' : 'rgba(244,225,74,0.08)' }}>
+                      {/* Thumbnail of the clip the notification is about — quick
+                          visual ID (Ben 2026-06-27). Falls back to a kind-coloured
+                          tile when there's no thumbnail. */}
                       <div style={{
-                        display: 'flex', alignItems: 'baseline',
-                        gap: 10, marginBottom: cleanBody ? 4 : 0,
+                        flexShrink: 0, width: 56, height: 38, borderRadius: 7,
+                        overflow: 'hidden', background: 'var(--ink)',
+                        border: '1px solid var(--rule)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
-                        <div style={{
-                          flex: 1, minWidth: 0,
-                          fontFamily: 'var(--serif)', fontSize: 14.5, fontWeight: 500,
-                          color: 'var(--ink)', lineHeight: 1.3,
-                          letterSpacing: '-0.005em',
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        }}>{cleanTitle}</div>
-                        {isNew && (
-                          <span style={{
-                            flexShrink: 0,
-                            width: 6, height: 6, borderRadius: '50%',
-                            background: group.color,
-                            display: 'inline-block',
-                          }} />
-                        )}
+                        {notifThumbs[n.creative_id]
+                          ? <img src={notifThumbs[n.creative_id]} alt="" loading="lazy"
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          : <span style={{ width: 8, height: 8, borderRadius: '50%', background: group.color }} />}
                       </div>
-                      {cleanBody && (
+                      <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{
-                          fontFamily: 'var(--sans)', fontSize: 12.5,
-                          color: 'var(--ink-2)', lineHeight: 1.45,
-                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                          marginBottom: 5,
-                        }}>{cleanBody}</div>
-                      )}
-                      <div style={{
-                        fontFamily: 'var(--mono)', fontSize: 9.5,
-                        color: 'var(--ink-4)', letterSpacing: '0.08em',
-                        textTransform: 'uppercase',
-                      }}>{relTime(n.created_at)}</div>
+                          display: 'flex', alignItems: 'baseline',
+                          gap: 10, marginBottom: cleanBody ? 4 : 0,
+                        }}>
+                          <div style={{
+                            flex: 1, minWidth: 0,
+                            fontFamily: 'var(--serif)', fontSize: 14.5, fontWeight: 500,
+                            color: 'var(--ink)', lineHeight: 1.3,
+                            letterSpacing: '-0.005em',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>{cleanTitle}</div>
+                          {isNew && (
+                            <span style={{
+                              flexShrink: 0,
+                              width: 6, height: 6, borderRadius: '50%',
+                              background: group.color,
+                              display: 'inline-block',
+                            }} />
+                          )}
+                        </div>
+                        {cleanBody && (
+                          <div style={{
+                            fontFamily: 'var(--sans)', fontSize: 12.5,
+                            color: 'var(--ink-2)', lineHeight: 1.45,
+                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            marginBottom: 5,
+                          }}>{cleanBody}</div>
+                        )}
+                        <div style={{
+                          fontFamily: 'var(--mono)', fontSize: 9.5,
+                          color: 'var(--ink-4)', letterSpacing: '0.08em',
+                          textTransform: 'uppercase',
+                        }}>{relTime(n.created_at)}</div>
+                      </div>
                     </button>
                   )
                 })}
@@ -6412,6 +6450,13 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
     if (onToggleSelect) onToggleSelect(row.id)
   }
   const tint = rowStatusTint(row, isUsed)
+  // Display status — a clip carrying a submitted edit (final_cut_url) must NOT
+  // read RAW just because it isn't approved yet (Ben 2026-06-27: "these are
+  // still saying raw even though theyre edited"). edited (approved) > review
+  // (edit submitted) > raw.
+  const dispStatus = row.status === 'edited' ? 'edited'
+    : (row.final_cut_url && row.final_cut_url !== row.preview_url) ? 'review'
+    : 'raw'
   return (
     <div onClick={handleCardClick}
       onMouseEnter={() => setHover(true)}
@@ -6524,16 +6569,19 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
             letterSpacing: '0.06em',
           }}>{row.v21_script_id}</span>
         )}
-        {/* Status pill — bottom-right. Edited = solid green so edited clips
-            jump out from raw at a glance (Ben: hard to tell raw vs edited). */}
+        {/* Status pill — bottom-right. Edited = green, Review = amber (edit
+            submitted, not yet approved), Raw = dark. Derived so a clip with an
+            edit never shows Raw (Ben 2026-06-27). */}
         <span style={{
           position: 'absolute', bottom: 6, right: 6,
           padding: '3px 9px', borderRadius: 999,
-          background: row.status === 'edited' ? 'var(--up)' : 'rgba(21,22,26,0.70)',
+          background: dispStatus === 'edited' ? 'var(--up)'
+            : dispStatus === 'review' ? '#d09c08'
+            : 'rgba(21,22,26,0.70)',
           color: '#fff',
           fontFamily: 'var(--sans)', fontSize: 9, fontWeight: 700,
           letterSpacing: '0.08em', textTransform: 'uppercase',
-        }}>{row.status === 'edited' ? 'Edited' : 'Raw'}</span>
+        }}>{dispStatus === 'edited' ? 'Edited' : dispStatus === 'review' ? 'Review' : 'Raw'}</span>
       </div>
       {/* Body */}
       <div style={{ padding: '10px 12px' }}>
@@ -6572,7 +6620,7 @@ function CreativeCard({ row, isUsed = false, onClick, selected = false, selectio
             <span title="Run before"
               style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--up)' }} />
           )}
-          <span style={{ marginLeft: 'auto' }}><StatusBadge status={row.status} /></span>
+          <span style={{ marginLeft: 'auto' }}><StatusBadge status={dispStatus} /></span>
         </div>
       </div>
     </div>
