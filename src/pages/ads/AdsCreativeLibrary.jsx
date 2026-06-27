@@ -585,8 +585,15 @@ const EditorNotificationBell = forwardRef(function EditorNotificationBell(
   // w/ some thumbnails"). Fetch the creative thumbnails for the notifications'
   // creative_ids in one query and map by id.
   const [notifThumbs, setNotifThumbs] = useState({})
+  // Key the fetch on the actual SET of creative ids, not the array reference —
+  // the 60s reload replaces `notifications` every tick, which would otherwise
+  // re-run this effect needlessly.
+  const notifCreativeIds = useMemo(
+    () => [...new Set(notifications.map(n => n.creative_id).filter(Boolean))].sort().join(','),
+    [notifications],
+  )
   useEffect(() => {
-    const ids = [...new Set(notifications.map(n => n.creative_id).filter(Boolean))]
+    const ids = notifCreativeIds ? notifCreativeIds.split(',') : []
     if (!ids.length) { setNotifThumbs({}); return }
     let on = true
     supabase.from('lib_creative_library')
@@ -598,7 +605,7 @@ const EditorNotificationBell = forwardRef(function EditorNotificationBell(
         setNotifThumbs(m)
       })
     return () => { on = false }
-  }, [notifications])
+  }, [notifCreativeIds])
 
   const unseenCount = notifications.filter(n => !seenAt || n.created_at > seenAt).length
   // Pending = unread (read_at is null) AND created since last bell open.
@@ -6719,16 +6726,21 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
   // its task to done, and flips the row to status='edited'.
   const [approving, setApproving] = useState(false)
   const approveRowEdit = async () => {
+    // Don't partial-apply: if we can't resolve the submission behind
+    // final_cut_url, flipping the library to 'edited' while the queue task
+    // stays open is a silent inconsistency. Bail with a clear message.
+    if (!approvedSub?.id) {
+      setErr("Couldn't find the submitted file to approve — reload and try again.")
+      return
+    }
     setApproving(true)
     try {
       const nowIso = new Date().toISOString()
-      if (approvedSub?.id) {
-        await supabase.from('lib_task_submissions')
-          .update({ approved_at: nowIso, approved_by_name: 'admin' }).eq('id', approvedSub.id)
-        if (approvedSub.task_id) {
-          await supabase.from('lib_editing_tasks')
-            .update({ status: 'done', completed_at: nowIso }).eq('id', approvedSub.task_id)
-        }
+      await supabase.from('lib_task_submissions')
+        .update({ approved_at: nowIso, approved_by_name: 'admin' }).eq('id', approvedSub.id)
+      if (approvedSub.task_id) {
+        await supabase.from('lib_editing_tasks')
+          .update({ status: 'done', completed_at: nowIso }).eq('id', approvedSub.task_id)
       }
       const { error } = await supabase.from('lib_creative_library')
         .update({ status: 'edited' }).eq('id', row.id)
@@ -8436,6 +8448,10 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
       )}
       {editingTask && (
         <EditTaskModal
+          // Remount per task so local state (the raw/edit toggle, submissions,
+          // form fields) resets when switching tasks — otherwise the toggle
+          // leaks across tasks (matches CreativeDetailModal's key).
+          key={editingTask.task_id}
           task={editingTask}
           editors={editors}
           scope={scope}
