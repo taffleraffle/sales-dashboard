@@ -5038,6 +5038,89 @@ function TranscriptBox({ text: rawText }) {
    (linked via parent_id pointing at v1). Lets Ben upload a new version
    that inherits most metadata from the current one but gets its own
    row + new transcript + new preview. */
+// Edited versions — the editor's actual submitted cuts (lib_task_submissions)
+// for THIS creative's editing task(s). The library modal previously only
+// showed the TASK ("Gahen · in_progress") with no way to see the work; this
+// surfaces every submitted cut with an inline player + download, newest first
+// (Ben 2026-06-27: "still cant see the edited versions in here").
+function EditedVersionsPanel({ creativeId }) {
+  const [subs, setSubs] = useState(null)
+  const [openId, setOpenId] = useState(null)
+  useEffect(() => {
+    let on = true
+    ;(async () => {
+      // creative → its task ids (via the queue view we already trust) → subs.
+      const { data: q } = await supabase.from('lib_editing_queue')
+        .select('task_id').eq('creative_id', creativeId)
+      const ids = [...new Set((q || []).map(t => t.task_id).filter(Boolean))]
+      if (!ids.length) { if (on) setSubs([]); return }
+      const { data } = await supabase.from('lib_task_submissions')
+        .select('id, version_number, submitted_by_name, file_url, preview_proxy_url, thumbnail_url, approved_at, created_at')
+        .in('task_id', ids).is('deleted_at', null)
+        .order('created_at', { ascending: false })
+      if (on) setSubs((data || []).filter(s => s.file_url))
+    })()
+    return () => { on = false }
+  }, [creativeId])
+
+  if (!subs || subs.length === 0) return null  // nothing submitted yet — stay quiet
+
+  return (
+    <Field label={`Edited versions (${subs.length})`}>
+      <div style={{ display: 'grid', gap: 8 }}>
+        {subs.map(s => {
+          const isOpen = openId === s.id
+          const approved = !!s.approved_at
+          return (
+            <div key={s.id} style={{ border: '1px solid var(--rule)', borderRadius: 10, overflow: 'hidden', background: 'var(--paper)' }}>
+              <button type="button" onClick={() => setOpenId(isOpen ? null : s.id)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                  padding: 8, background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
+                }}>
+                <div style={{ width: 64, height: 40, flexShrink: 0, background: 'var(--ink)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
+                  {s.thumbnail_url && (
+                    <img src={s.thumbnail_url} alt="" loading="lazy"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  )}
+                  <span style={{
+                    position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', color: '#fff', fontSize: 13,
+                    textShadow: '0 1px 3px rgba(0,0,0,0.6)',
+                  }}>{isOpen ? '▾' : '▶'}</span>
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, color: 'var(--ink)' }}>
+                    v{s.version_number || 1} · {s.submitted_by_name || 'editor'}
+                  </div>
+                  <div style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)' }}>
+                    {s.created_at ? new Date(s.created_at).toLocaleDateString() : ''}
+                  </div>
+                </div>
+                <span style={{
+                  flexShrink: 0, padding: '3px 9px', borderRadius: 999,
+                  fontFamily: 'var(--sans)', fontSize: 9.5, fontWeight: 700,
+                  letterSpacing: '0.06em', textTransform: 'uppercase', color: '#fff',
+                  background: approved ? 'var(--up)' : '#3e7eba',
+                }}>{approved ? 'Approved' : 'In review'}</span>
+              </button>
+              {isOpen && (
+                <div style={{ background: 'var(--ink)', borderTop: '1px solid var(--rule)' }}>
+                  <OptVideoPlayer src={s.preview_proxy_url || s.file_url} compact
+                    poster={s.thumbnail_url}
+                    downloadUrl={toDownloadUrl(s.file_url, `v${s.version_number || 1}.mp4`)}
+                    downloadName={`v${s.version_number || 1}.mp4`}
+                    wrapperStyle={OPT_PLAYER_WRAP_320} />
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </Field>
+  )
+}
+
 function VersionsPanel({ row, onReload, onOpenRow }) {
   const [versions, setVersions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -7395,8 +7478,13 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
 
         {row.transcript && <TranscriptBox text={row.transcript} />}
 
-        {/* Versions — show v1/v2/v3... if this clip has siblings linked
-            via parent_id. Includes an Upload-new-version button. */}
+        {/* Edited versions — the editor's submitted cuts for this creative's
+            task(s), playable inline (Ben 2026-06-27: "still cant see the
+            edited versions in here"). */}
+        <EditedVersionsPanel creativeId={row.id} />
+
+        {/* Versions — raw library siblings linked via parent_id (NOT the
+            editor's cuts — those are in Edited versions above). */}
         <VersionsPanel row={row} onReload={() => onSaved?.()} onOpenRow={onOpenRow} />
 
         {/* Hook/Body history — when viewing a source clip, show which
