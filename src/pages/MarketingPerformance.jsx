@@ -4795,8 +4795,9 @@ export default function MarketingPerformance() {
         const netShowRate   = rate(W.lives, netDenom)
         const netShowRate30 = rate(W30.lives, netDenom30)
         return (
-          <Section title="Calls & Show Rates" cols={7}>
+          <Section title="Calls & Show Rates" cols={8}>
             <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={gated(upstream.live, wf?.new_live_calls)} tip={`NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Denominator for show rates uses Qualified Bookings (${denom}) from the calendar, not the closer's EOD count. Click to view.`} onClick={() => setDrilldown('live')} />
+            <KPI label="Total Live" value={stats.net_live_calls} format="n" prev={sp.net_live_calls} tip={`ALL calls that showed up live — new customers (${stats.new_live_calls}) PLUS follow-ups. This is the number that should be ≥ closes, since closes include follow-up/ascension calls. 'Net New Live' to the left is new-customer-only.`} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={gated(upstream.live, wf?.no_shows)} tip="NC no-shows from closer EOD. Click for daily trend + prospects." onClick={() => setDrilldown('noshows')} />
             <KPI label="Reschedule%" value={reschedRate} format="%" trailing={reschedRate30} prev={reschedRatePrev} tip={`Reschedules ÷ Qualified Bookings (same audience rollup as the drilldown). ${W.resch} reschedules out of ${W.qb} qualified bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
             <KPI label="Cancel%" value={cancelRate} format="%" trailing={cancelRate30} prev={cancelRatePrev} tip={`Cancellations ÷ Qualified Bookings (same audience rollup as the drilldown). ${W.cancels} cancels out of ${W.qb} qualified bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
