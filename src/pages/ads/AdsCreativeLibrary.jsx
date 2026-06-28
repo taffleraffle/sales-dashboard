@@ -2441,7 +2441,11 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
   // Boolean (not the array) is what the hot filter memo keys on — a
   // rename/re-parent producing a fresh folders array must not re-run the
   // whole filter/sort pipeline.
-  const hasFolders = folders.length > 0
+  // The Shorts page is a flat, fully-separate library — no folders at all
+  // (Ben 2026-06-28: "shouldn't even have the folders"). Folders are an
+  // ad-library feature.
+  const isShorts = category === 'short'
+  const hasFolders = !isShorts && folders.length > 0
   // Admins are tracked in lib_creative_editors but should NOT appear in
   // the "EDITORS" filter chip, the assignment dropdown, or the per-editor
   // stats breakdown — they don't take queue work, they manage it.
@@ -3605,21 +3609,23 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
           folder exists. While a search is active the cards hide and a
           "search covers all folders" tag shows instead, because results
           are global. */}
-      <FolderBar
-        folders={folders}
-        currentFolderId={folderId}
-        onNavigate={navigateFolder}
-        clipCounts={folderClipCounts}
-        searching={Boolean(deferredQ.trim()) || filtersActive}
-        canManage={scope.canEditCreative}
-        onCreate={createFolder}
-        onRename={renameFolder}
-        onDelete={deleteFolder}
-        onMoveFolder={reparentFolder}
-        onDropClips={dropClipsToFolder}
-        dropReady={dragActive}
-        onError={setErr}
-      />
+      {!isShorts && (
+        <FolderBar
+          folders={folders}
+          currentFolderId={folderId}
+          onNavigate={navigateFolder}
+          clipCounts={folderClipCounts}
+          searching={Boolean(deferredQ.trim()) || filtersActive}
+          canManage={scope.canEditCreative}
+          onCreate={createFolder}
+          onRename={renameFolder}
+          onDelete={deleteFolder}
+          onMoveFolder={reparentFolder}
+          onDropClips={dropClipsToFolder}
+          dropReady={dragActive}
+          onError={setErr}
+        />
+      )}
 
       {/* Move-confirmation pill — fixed bottom-center, Drive-style */}
       {toast && (
@@ -3820,8 +3826,8 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
           offers={offers}
           defaultCategory={category}
           knownCreators={knownCreators}
-          folderId={folderId}
-          folders={folders}
+          folderId={isShorts ? null : folderId}
+          folders={isShorts ? [] : folders}
           onCreateFolder={createFolder}
           onClose={() => setUploadOpen(false)}
           onSaved={() => { setUploadOpen(false); load() }}
