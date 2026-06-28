@@ -1,12 +1,15 @@
-/* Ad Library — every currently-running (ACTIVE) Meta ad in one sortable table,
-   keyed on the ad ID + creative so winners are easy to spot and scale. Ben
-   2026-06-29: the ads are named "1, 2, 3…" on the account, useless for finding
-   winners; here you sort by cost/result, copy the ad ID, and pull up the
-   creative. Reuses the `ads` + `ad_daily_stats` tables (same as AdsList). */
+/* Ad Library — running + recently-spent Meta ads in one sortable table, keyed
+   on the ad ID + creative so winners are easy to spot and scale. Ben
+   2026-06-29: ads are named "1, 2, 3…" on the account, useless for finding
+   winners; here you sort by cost/result, copy the ad ID, see the inferred
+   offer, filter by date range + status, and pull up the creative. Reuses the
+   `ads` + `ad_daily_stats` tables (same as AdsList). */
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Loader, RefreshCw, AlertTriangle, PlayCircle, X, Copy, Check } from 'lucide-react'
+import DateRangeSelector from '../../components/DateRangeSelector'
 import { supabase } from '../../lib/supabase'
 import { pagedFetch } from '../../lib/pagedFetch'
+import { rangeToDays } from '../../lib/dateUtils'
 import { runAutoSync, subscribeSyncStatus } from '../../services/autoSync'
 import { syncMetaAdsAtAdLevel } from '../../services/metaAdsSync'
 import { SectionHead } from '../../components/editorial/atoms'
@@ -16,7 +19,33 @@ const f$ = n => n == null || isNaN(n) ? '—' : (n >= 1000 ? `$${(n / 1000).toFi
 const fNum = n => n == null || isNaN(n) ? '—' : Math.round(n).toLocaleString()
 const fPct = n => n == null || isNaN(n) ? '—' : `${n.toFixed(2)}%`
 
-// Copyable ad ID — the whole point (paste into a scaling campaign).
+// Offer inference — the campaign/adset name + ad copy reliably encode the niche
+// (campaigns are named "…Restoration…", "…Electricians…"). This beats analysing
+// pixels and is instant. First match wins; null = couldn't tell.
+const OFFER_RULES = [
+  { label: 'Electricians', re: /electric/i },
+  { label: 'Restoration',  re: /restorat|water ?damage|mould|mold|fire ?damage|flood|water ?restor/i },
+  { label: 'Accounting',   re: /account|bookkeep|\bcpa\b|\btax\b/i },
+  { label: 'Roofing',      re: /roof/i },
+  { label: 'Plumbing',     re: /plumb|gasfit/i },
+  { label: 'HVAC',         re: /\bhvac\b|heating|cooling|air ?con/i },
+  { label: 'Dental',       re: /dental|dentist|ortho/i },
+  { label: 'Legal',        re: /\blaw\b|lawyer|attorney|legal/i },
+]
+function inferOffer(ad) {
+  const hay = `${ad.campaign_name || ''} ${ad.adset_name || ''} ${ad.ad_name || ''} ${ad.headline || ''} ${ad.primary_text || ''}`
+  for (const r of OFFER_RULES) if (r.re.test(hay)) return r.label
+  return null
+}
+function offerColor(offer) {
+  switch (offer) {
+    case 'Electricians': return { bg: 'rgba(62,126,186,0.15)', fg: '#3e7eba' }
+    case 'Restoration':  return { bg: 'rgba(224,133,62,0.15)', fg: '#c4701a' }
+    case 'Accounting':   return { bg: 'rgba(62,138,94,0.15)',  fg: '#3e8a5e' }
+    default:             return { bg: 'var(--bg-primary, rgba(0,0,0,0.05))', fg: 'var(--text-400, #888)' }
+  }
+}
+
 function AdIdCell({ id }) {
   const [copied, setCopied] = useState(false)
   return (
@@ -28,6 +57,12 @@ function AdIdCell({ id }) {
       {copied ? <Check size={11} className="text-success" /> : <Copy size={11} className="opacity-40" />}
     </button>
   )
+}
+
+function OfferTag({ offer }) {
+  if (!offer) return <span className="text-text-400 text-[10px]">—</span>
+  const c = offerColor(offer)
+  return <span className="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded" style={{ background: c.bg, color: c.fg }}>{offer}</span>
 }
 
 function CreativeThumb({ ad, onOpen }) {
@@ -83,31 +118,43 @@ function CreativeModal({ ad, onClose }) {
   )
 }
 
+const STATUS_OPTS = [
+  { v: 'ran', label: 'Ran in range' },   // active OR had spend in the window
+  { v: 'active', label: 'Active only' },
+  { v: 'all', label: 'All ads' },
+]
+
 export default function AdLibrary() {
+  const [range, setRange] = useState(30)
+  const days = typeof range === 'number' ? range : rangeToDays(range)
+
   const [ads, setAds] = useState([])
   const [stats, setStats] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [syncing, setSyncing] = useState(false)
   const [search, setSearch] = useState('')
-  const [sortKey, setSortKey] = useState('cpa')   // cost per result — winners first
+  const [statusFilter, setStatusFilter] = useState('ran')
+  const [offerFilter, setOfferFilter] = useState('all')
+  const [sortKey, setSortKey] = useState('cpa')
   const [sortDir, setSortDir] = useState('asc')
   const [preview, setPreview] = useState(null)
 
   const reload = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const adsData = await pagedFetch(() =>
-        supabase.from('ads').select('*').eq('effective_status', 'ACTIVE'))
-      const ids = adsData.map(a => a.ad_id)
-      // Lifetime stats for just the active ads — small set, so the all-time
-      // cost/result is a reliable winner signal without a date window.
-      const statsData = ids.length
-        ? await pagedFetch(() => supabase.from('ad_daily_stats').select('*').in('ad_id', ids))
-        : []
+      const since = new Date()
+      since.setDate(since.getDate() - (typeof days === 'number' ? days : 3650))
+      const sinceStr = since.toISOString().split('T')[0]
+      // ALL ads (not just active) + stats over the selected window. pagedFetch
+      // handles the 1000-row cap; the account is large.
+      const [adsData, statsData] = await Promise.all([
+        pagedFetch(() => supabase.from('ads').select('*')),
+        pagedFetch(() => supabase.from('ad_daily_stats').select('*').gte('date', sinceStr)),
+      ])
       setAds(adsData); setStats(statsData)
     } catch (e) { setError(e.message) } finally { setLoading(false) }
-  }, [])
+  }, [days])
 
   useEffect(() => {
     reload()
@@ -126,13 +173,11 @@ export default function AdLibrary() {
   const rows = useMemo(() => {
     const byAd = {}
     for (const s of stats) {
-      const c = byAd[s.ad_id] || { spend: 0, impressions: 0, clicks: 0, results: 0, v3: 0, vtp: 0 }
+      const c = byAd[s.ad_id] || { spend: 0, impressions: 0, clicks: 0, results: 0 }
       c.spend += parseFloat(s.spend || 0)
       c.impressions += parseInt(s.impressions || 0)
       c.clicks += parseInt(s.clicks || 0)
       c.results += parseInt(s.results || 0)
-      c.v3 += parseInt(s.video_3s_views || 0)
-      c.vtp += parseInt(s.video_thruplays || 0)
       byAd[s.ad_id] = c
     }
     return ads.map(ad => {
@@ -141,35 +186,47 @@ export default function AdLibrary() {
       const ctr = a.impressions > 0 ? (a.clicks / a.impressions) * 100 : null
       const cpm = a.impressions > 0 ? (spend / a.impressions) * 1000 : null
       const cpa = a.results > 0 ? spend / a.results : null
-      return { ...ad, spend, ctr, cpm, cpa, results: a.results, impressions: a.impressions }
+      const isActive = (ad.effective_status || ad.status || '').toUpperCase() === 'ACTIVE'
+      return { ...ad, spend, ctr, cpm, cpa, results: a.results, impressions: a.impressions, isActive, offer: inferOffer(ad) }
     })
   }, [ads, stats])
 
+  const offerOptions = useMemo(() => {
+    const set = new Set()
+    for (const r of rows) if (r.offer) set.add(r.offer)
+    return ['all', ...[...set].sort(), '__none__']
+  }, [rows])
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    let list = rows
-    if (q) list = list.filter(r =>
-      (r.ad_name || '').toLowerCase().includes(q) ||
-      (r.campaign_name || '').toLowerCase().includes(q) ||
-      (r.ad_id || '').includes(q))
+    let list = rows.filter(r => {
+      // Status scope
+      if (statusFilter === 'active' && !r.isActive) return false
+      if (statusFilter === 'ran' && !(r.isActive || (r.spend || 0) > 0)) return false
+      // Offer
+      if (offerFilter === '__none__' && r.offer) return false
+      else if (offerFilter !== 'all' && offerFilter !== '__none__' && r.offer !== offerFilter) return false
+      if (q && !(r.ad_name || '').toLowerCase().includes(q) && !(r.campaign_name || '').toLowerCase().includes(q) && !(r.ad_id || '').includes(q)) return false
+      return true
+    })
     const dir = sortDir === 'asc' ? 1 : -1
-    return [...list].sort((a, b) => {
+    return list.sort((a, b) => {
       const av = a[sortKey], bv = b[sortKey]
       if (av == null && bv == null) return 0
-      if (av == null) return 1       // nulls always last
+      if (av == null) return 1
       if (bv == null) return -1
       if (typeof av === 'string') return dir * av.localeCompare(bv)
       return dir * (av - bv)
     })
-  }, [rows, search, sortKey, sortDir])
+  }, [rows, search, statusFilter, offerFilter, sortKey, sortDir])
 
   const setSort = (k) => {
     if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(k); setSortDir(k === 'cpa' ? 'asc' : 'desc') }
   }
 
-  // Body columns after Creative + Ad ID. Header order must match the <td>s.
   const COLS = [
+    { k: 'offer', label: 'Offer', align: 'left' },
     { k: 'ad_name', label: 'Ad', align: 'left' },
     { k: 'campaign_name', label: 'Campaign', align: 'left' },
     { k: 'spend', label: 'Spend', align: 'right' },
@@ -183,17 +240,21 @@ export default function AdLibrary() {
 
   const totalSpend = filtered.reduce((s, r) => s + (r.spend || 0), 0)
   const totalResults = filtered.reduce((s, r) => s + (r.results || 0), 0)
+  const selectCls = "px-2 py-1.5 text-[11px] bg-bg-card border border-border-default rounded-sm outline-none text-text-secondary"
 
   return (
     <div>
       <SectionHead level="page" eyebrow="Ads · Library" title="The ad library." italicWord="ad"
-        tagline={`${filtered.length} running ads · ${f$(totalSpend)} spend · ${fNum(totalResults)} results. Sort to find winners, copy the ad ID to scale.`}
+        tagline={`${filtered.length} ads · ${f$(totalSpend)} spend · ${fNum(totalResults)} results in range. Sort to find winners, copy the ad ID to scale.`}
         gap={20}
         right={
-          <button onClick={handleSync} disabled={syncing}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs border border-border-default rounded-sm text-text-secondary hover:bg-bg-card-hover disabled:opacity-50">
-            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />{syncing ? 'Syncing…' : 'Refresh now'}
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={handleSync} disabled={syncing}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs border border-border-default rounded-sm text-text-secondary hover:bg-bg-card-hover disabled:opacity-50">
+              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />{syncing ? 'Syncing…' : 'Refresh now'}
+            </button>
+            <DateRangeSelector selected={range} onChange={setRange} />
+          </div>
         }
       />
 
@@ -203,10 +264,16 @@ export default function AdLibrary() {
         </div>
       )}
 
-      <div className="mb-3">
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search ad name, campaign, or ad ID…"
-          className="w-full max-w-md px-3 py-2 text-xs bg-bg-card border border-border-default rounded-sm outline-none" />
+          className="flex-1 min-w-[220px] max-w-md px-3 py-2 text-xs bg-bg-card border border-border-default rounded-sm outline-none" />
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={selectCls}>
+          {STATUS_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+        </select>
+        <select value={offerFilter} onChange={e => setOfferFilter(e.target.value)} className={selectCls}>
+          {offerOptions.map(o => <option key={o} value={o}>{o === 'all' ? 'All offers' : o === '__none__' ? 'No offer' : o}</option>)}
+        </select>
       </div>
 
       <div className="tile overflow-x-auto p-0">
@@ -229,6 +296,7 @@ export default function AdLibrary() {
               <tr key={ad.ad_id} className="border-b border-border-subtle hover:bg-bg-card-hover">
                 <td className="px-3 py-2"><CreativeThumb ad={ad} onOpen={setPreview} /></td>
                 <td className="px-3 py-2"><AdIdCell id={ad.ad_id} /></td>
+                <td className="px-3 py-2"><OfferTag offer={ad.offer} /></td>
                 <td className="px-3 py-2 max-w-[90px] truncate text-text-primary" title={ad.ad_name}>{ad.ad_name || '—'}</td>
                 <td className="px-3 py-2 max-w-[220px] truncate text-text-secondary" title={ad.campaign_name}>{ad.campaign_name || '—'}</td>
                 <td className="px-3 py-2 text-right">{f$(ad.spend)}</td>
@@ -239,7 +307,7 @@ export default function AdLibrary() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={9} className="px-3 py-12 text-center text-text-400">No running ads match.</td></tr>
+              <tr><td colSpan={10} className="px-3 py-12 text-center text-text-400">No ads match.</td></tr>
             )}
           </tbody>
         </table>
