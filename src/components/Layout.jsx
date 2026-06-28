@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown, Library as LibraryIcon } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
@@ -22,7 +22,10 @@ const navItems = [
   { to: '/sales/closers', icon: UserCheck, label: 'Closers' },
   { to: '/sales/setters', icon: Users, label: 'Setters' },
   { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
-  { to: '/sales/ads', icon: Megaphone, label: 'Ads' },
+  // Ads owns /sales/ads/* EXCEPT the Library, which is its own nav item — so
+  // being on the library doesn't also light up Ads (Ben 2026-06-28).
+  { to: '/sales/ads', icon: Megaphone, label: 'Ads',
+    match: (p) => p.startsWith('/sales/ads') && !p.startsWith('/sales/ads/library') },
   { to: '/sales/ads/library', icon: LibraryIcon, label: 'Library' },
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
   { to: '/sales/contracts', icon: FileText, label: 'Contracts' },
@@ -38,6 +41,7 @@ function initialsOf(name) {
 
 export default function Layout() {
   const { profile, signOut, isAdmin } = useAuth()
+  const { pathname } = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const profileRef = useRef(null)
@@ -127,14 +131,16 @@ export default function Layout() {
 
           {/* Nav icons */}
           <nav className="flex flex-col items-center gap-1 flex-1">
-            {navItems.map(({ to, icon: Icon, label, end }) => (
+            {navItems.map(({ to, icon: Icon, label, end, match }) => (
               <NavLink
                 key={to}
                 to={to}
                 end={end}
                 title={label}
                 className={({ isActive }) =>
-                  `editorial-nav-item ${isActive ? 'is-active' : ''}`
+                  // Items with a custom `match` (e.g. Ads excluding Library)
+                  // override React Router's prefix-based isActive.
+                  `editorial-nav-item ${(match ? match(pathname) : isActive) ? 'is-active' : ''}`
                 }
               >
                 <Icon size={ICON.xl} />

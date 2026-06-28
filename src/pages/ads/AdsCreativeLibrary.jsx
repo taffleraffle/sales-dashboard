@@ -7386,9 +7386,15 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
 
   return (
     <Modal open={true} onClose={handleClose} size="lg"
-      eyebrow={edit.display_name || edit.canonical_name || row.type || 'Creative'}
-      title={rowDisplayName(row)}
-      subtitle={row.canonical_name ? row.name : `${row.source_bucket || ''}${row.size_mb ? ' · ' + Math.round(row.size_mb) + ' MB' : ''}`}
+      eyebrow={edit.type || row.type || 'Creative'}
+      title={rowDisplayName(edit)}
+      subtitle={(() => {
+        // The big title is the name you input (display_name); the subtitle
+        // keeps the original/canonical filename for reference (Ben 2026-06-28).
+        const orig = edit.canonical_name || row.name
+        const sizeBit = row.size_mb ? `${row.source_bucket || 'Manual upload'} · ${Math.round(row.size_mb)} MB` : (row.source_bucket || '')
+        return (orig && orig !== rowDisplayName(edit)) ? orig : sizeBit
+      })()}
       footer={
         confirmDelete ? (
           <>
