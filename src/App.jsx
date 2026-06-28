@@ -74,6 +74,7 @@ const AdsCreativeTestingLayout = lazyWithReload(() => import('./pages/ads/AdsCre
 const AdsInsights = lazyWithReload(() => import('./pages/ads/AdsInsights'))
 const AdsCreativesLibrary = lazyWithReload(() => import('./pages/ads/AdsCreativesLibrary'))
 const AdsCreativeLibrary = lazyWithReload(() => import('./pages/ads/AdsCreativeLibrary'))
+const AdLibrary = lazyWithReload(() => import('./pages/ads/AdLibrary'))
 const EditorView = lazyWithReload(() => import('./pages/ads/EditorView'))
 const EditorLogin = lazyWithReload(() => import('./pages/ads/EditorLogin'))
 const AdsAttributesPage = lazyWithReload(() => import('./pages/ads/AdsAttributesPage'))
@@ -270,6 +271,8 @@ export default function App() {
                 <Route path="library" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeLibrary category="ad" /></Suspense>} />
                 {/* Shorts — its own page (short-form creatives + their editing queue), 2026-06-28 */}
                 <Route path="shorts" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeLibrary category="short" /></Suspense>} />
+                {/* Ad Library — running ads keyed on ad ID, sortable to find winners (2026-06-29) */}
+                <Route path="ad-library" element={<Suspense fallback={<PageSkeleton />}><AdLibrary /></Suspense>} />
                 <Route path="messaging" element={<Suspense fallback={<PageSkeleton />}><AdsMessaging /></Suspense>} />
 
                 {/* Creative testing — wrapper with sub-nav for Clips · Variants · Ads */}
