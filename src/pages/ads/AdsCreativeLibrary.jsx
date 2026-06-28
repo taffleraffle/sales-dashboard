@@ -1310,7 +1310,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
     }
   }
   return (
-    <Modal open={!!submission} onClose={onClose} size="full"
+    <Modal open={!!submission} onClose={onClose} size="lg"
       eyebrow={isApproved ? 'Approved submission' : 'Review submission'}
       title={`v${submission.version_number || 1} · ${editor}`}
       subtitle={`${openCount} open comment${openCount === 1 ? '' : 's'}${submission.__synthetic ? ' · direct upload' : ''}`}>
@@ -1337,7 +1337,7 @@ function SubmissionPreviewModal({ submission, onClose, currentUser, onApprove, o
               — the flex-fill version pushed the footer (Revise) off-screen and
               broke Review. compact drops the minHeight:400 floor, matching the
               working library detail-modal player. (Root-caused 2026-06-27.) */}
-          <div style={{ height: 'min(72vh, 620px)', background: 'black', flexShrink: 0 }}>
+          <div style={{ height: 'min(58vh, 520px)', background: 'black', flexShrink: 0 }}>
             <OptVideoPlayer ref={playerRef}
               src={url}
               markers={playerMarkers}
@@ -2866,7 +2866,9 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
     || (stageFilter.size > 0 && !rawQueueView)
 
   const filtered = useMemo(() => {
-    let list = rows
+    // Scope to the page's category FIRST (Ads library vs Shorts page) so the
+    // Shorts page only shows short creatives — not ads (Ben 2026-06-28).
+    let list = rows.filter(r => (r.content_category || 'ad') === category)
     // Hide rows whose stored file is broken / sub-par. Default ON. Operator
     // toggles via the chip in the toolbar when they want to see/triage them.
     if (hideLowQuality) list = list.filter(r => !r.is_low_quality)
@@ -2974,7 +2976,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
       })
     }
     return list
-  }, [rows, deferredQ, typeFilter, offerFilter, runFilter, creatorFilter, stageFilter, rawQueueView, filtersActive, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
+  }, [rows, category, deferredQ, typeFilter, offerFilter, runFilter, creatorFilter, stageFilter, rawQueueView, filtersActive, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
