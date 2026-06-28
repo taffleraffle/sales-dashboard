@@ -851,7 +851,7 @@ export function RenameUnnamedButton({ rows, onComplete }) {
 
 /* ─────────────────────────── UPLOAD MODAL ─────────────────────────── */
 
-export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded, knownCreators = [], folderId = null, folders = [], onCreateFolder }) {
+export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOfferAdded, knownCreators = [], folderId = null, folders = [], onCreateFolder, defaultCategory = 'ad' }) {
   // The modal is now a thin shell: it collects files + batch config,
   // hands them off to the module-level upload queue, and closes. The
   // queue owns all upload state, runs in the background regardless of
@@ -862,8 +862,8 @@ export function UploadModal({ onClose, onSaved, editors = [], offers = [], onOff
   const [files, setFiles] = useState([])
   const [err, setErr] = useState(null)
   const [batchType, setBatchType] = useState('Joined')
-  // Ad vs short-form — drives the editing-queue Ads | Shorts toggle.
-  const [batchCategory, setBatchCategory] = useState('ad')
+  // Ad vs short-form — defaults to the page you uploaded from (Ads vs Shorts).
+  const [batchCategory, setBatchCategory] = useState(defaultCategory === 'short' ? 'short' : 'ad')
   // batchStatus: 'raw' = needs editing (default), 'edited' = the file
   // is already a finished cut. Edited uploads also get final_cut_url +
   // stage_final_cut='done' so the library matrix surfaces them as done

@@ -1800,32 +1800,36 @@ function normaliseTranscript(text) {
 
 
 
-export default function AdsCreativeLibrary({ editorScope }) {
+export default function AdsCreativeLibrary({ editorScope, category = 'ad' }) {
   const scope = editorScope || ADMIN_SCOPE
+  // Shorts is its OWN page (Ben 2026-06-28: "shorts should be its own page not
+  // a tab"). `category` scopes the whole platform — library, queue, uploads —
+  // to ad creatives or short-form creatives. No in-page toggle.
+  const isShorts = category === 'short'
   // In editor-view mode, default to the Editing Queue tab since that's why
   // they came (to see their assignments). Admins land on Library.
   // Ben (2026-06-10) cut the Triage and Launch queue views to de-clutter —
   // two sub-views only, so a saved 'triage'/'launch' from before the cut
   // falls back to the default.
+  const tabKey = `lib.tab.${category}`
   const [tab, setTab] = useState(() => {
     const fallback = scope.isEditorView ? 'queue' : 'library'
     try {
-      const saved = localStorage.getItem('lib.tab')
+      const saved = localStorage.getItem(tabKey)
       if (saved === 'invoice') return scope.isEditorView ? 'invoice' : fallback
       return (saved === 'library' || saved === 'queue') ? saved : fallback
     } catch { return fallback }
   })
-  useEffect(() => { try { localStorage.setItem('lib.tab', tab) } catch {} }, [tab])
+  useEffect(() => { try { localStorage.setItem(tabKey, tab) } catch {} }, [tab, tabKey])
 
-  // Editorial page hero — Library is now a top-level Ads page (2026-06-26),
-  // so it gets its own serif identity like Performance / Insights instead of
-  // the old cramped mono label. Title + italic word swap per active tab.
-  const heroEyebrow = `${scope.isEditorView ? 'Editor portal' : 'Ads'} · ${tab === 'library' ? 'Library' : tab === 'invoice' ? 'Invoice' : 'Editing queue'}`
+  // Editorial page hero — its own serif identity per platform + active tab.
+  const platformLabel = scope.isEditorView ? 'Editor portal' : (isShorts ? 'Shorts' : 'Ads')
+  const heroEyebrow = `${platformLabel} · ${tab === 'library' ? 'Library' : tab === 'invoice' ? 'Invoice' : 'Editing queue'}`
   const hero = tab === 'library'
-    ? { title: 'The creative library.', italic: 'creative' }
+    ? (isShorts ? { title: 'The shorts library.', italic: 'shorts' } : { title: 'The creative library.', italic: 'creative' })
     : tab === 'invoice'
       ? { title: 'Your invoice.', italic: 'invoice' }
-      : { title: 'The editing queue.', italic: 'editing' }
+      : (isShorts ? { title: 'The shorts queue.', italic: 'shorts' } : { title: 'The editing queue.', italic: 'editing' })
 
   return (
     <div style={{ padding: '12px 0 60px' }}>
@@ -1854,10 +1858,10 @@ export default function AdsCreativeLibrary({ editorScope }) {
           of paint time. Keeping both mounted means switching is a
           near-instant visibility flip and the user's filters survive. */}
       <div style={{ display: tab === 'library' ? 'block' : 'none' }}>
-        <LibraryTab scope={scope} />
+        <LibraryTab scope={scope} category={category} />
       </div>
       <div style={{ display: tab === 'queue' ? 'block' : 'none' }}>
-        <EditingQueueTab scope={scope} />
+        <EditingQueueTab scope={scope} category={category} />
       </div>
       {scope.isEditorView && (
         <div style={{ display: tab === 'invoice' ? 'block' : 'none' }}>
@@ -2292,7 +2296,7 @@ function useCoordinatorEditorId(scope) {
   return coordinatorId
 }
 
-function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
+function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }) {
   // Assignment coordinator (e.g. Kirill) gets the editor-style bell so
   // new_upload_needs_assignment notifications surface inside the dashboard.
   // Null for everyone else (editors already have scope.editorId).
@@ -2987,16 +2991,12 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // 2026-06-11, so every count the operator sees is computed over the
   // rows that can actually appear — a chip advertising clips the view
   // can never show reads as a bug.
-  // Ads | Shorts | All — lets you browse short-form vs ad creatives in the
-  // library, mirroring the editing-queue toggle (Ben 2026-06-28). Persisted.
-  const [libCategory, setLibCategory] = useState(() => {
-    try { return localStorage.getItem('lib.category') || 'all' } catch { return 'all' }
-  })
-  useEffect(() => { try { localStorage.setItem('lib.category', libCategory) } catch {} }, [libCategory])
+  // Scoped to the page's category — Ads library shows ad creatives, the Shorts
+  // page shows short-form (Ben 2026-06-28: shorts is its own page). No toggle.
   const visibleRows = useMemo(
     () => rows.filter(r => !r.is_low_quality && !r.is_bad_take
-      && (libCategory === 'all' || (r.content_category || 'ad') === libCategory)),
-    [rows, libCategory],
+      && (r.content_category || 'ad') === category),
+    [rows, category],
   )
 
   // Per-type counts for the chip badges (over all VISIBLE rows, ignoring current type filter)
@@ -3436,42 +3436,6 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
       <UploadDock onRefresh={() => load(true)} />
       <TopUploadProgressBar />
 
-      {/* Ads | Shorts toggle — browse ad creatives vs short-form creatives,
-          mirroring the editing-queue toggle (Ben 2026-06-28). */}
-      <div style={{
-        display: 'inline-flex', gap: 4, padding: 4, marginBottom: 12,
-        background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 999,
-      }}>
-        {[
-          { v: 'all', label: 'All' },
-          { v: 'ad', label: 'Ad creatives' },
-          { v: 'short', label: 'Short creatives' },
-        ].map(opt => {
-          const on = libCategory === opt.v
-          const count = opt.v === 'all'
-            ? rows.filter(r => !r.is_low_quality && !r.is_bad_take).length
-            : rows.filter(r => !r.is_low_quality && !r.is_bad_take && (r.content_category || 'ad') === opt.v).length
-          return (
-            <button key={opt.v} type="button" onClick={() => setLibCategory(opt.v)}
-              style={{
-                padding: '6px 15px', borderRadius: 999, cursor: 'pointer', border: 'none',
-                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
-                letterSpacing: '0.07em', textTransform: 'uppercase',
-                background: on ? 'var(--ink)' : 'transparent',
-                color: on ? 'var(--paper)' : 'var(--ink-3)',
-                display: 'inline-flex', alignItems: 'center', gap: 7,
-              }}>
-              {opt.label}
-              <span style={{
-                fontSize: 9, padding: '1px 6px', borderRadius: 999,
-                background: on ? 'rgba(255,255,255,0.18)' : 'var(--rule)',
-                color: on ? 'var(--paper)' : 'var(--ink-4)',
-              }}>{count}</span>
-            </button>
-          )
-        })}
-      </div>
-
       {/* Toolbar — ONE visible row. The five filter dropdowns + toggles
           live behind a single FILTERS button (count badge = active
           filters) so the resting state is calm; the old full-width yellow
@@ -3852,6 +3816,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
         <UploadModal
           editors={editors}
           offers={offers}
+          defaultCategory={category}
           knownCreators={knownCreators}
           folderId={folderId}
           folders={folders}
@@ -8122,7 +8087,7 @@ function driveEmbedUrl(url) {
   return url
 }
 
-function EditingQueueTab({ scope = ADMIN_SCOPE }) {
+function EditingQueueTab({ scope = ADMIN_SCOPE, category = 'ad' }) {
   // Stale-while-revalidate: hydrate from the cross-tab module cache
   // so re-mounting the queue tab doesn't show a blank loading state
   // for 2+ seconds while the same data re-fetches.
@@ -8142,13 +8107,8 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
     } catch { return 'list' }
   })
   useEffect(() => { try { localStorage.setItem('queue.view', view) } catch {} }, [view])
-  // Ads | Shorts toggle — flips the whole board between ad creatives and
-  // short-form creatives (Ben 2026-06-28). content_category lives on the
-  // creative; the queue view exposes it. Default 'ad' (the existing pipeline).
-  const [category, setCategory] = useState(() => {
-    try { return localStorage.getItem('queue.category') || 'ad' } catch { return 'ad' }
-  })
-  useEffect(() => { try { localStorage.setItem('queue.category', category) } catch {} }, [category])
+  // `category` ('ad' | 'short') comes from the PAGE now — the queue is scoped
+  // to ad creatives or the Shorts page, not an in-page toggle (Ben 2026-06-28).
   const [addEditorOpen, setAddEditorOpen] = useState(false)
   const [addTaskOpen, setAddTaskOpen] = useState(false)
   // Prefill for AddTaskModal — set when the user drags across days in
@@ -8468,40 +8428,6 @@ function EditingQueueTab({ scope = ADMIN_SCOPE }) {
         </div>
       )}
 
-      {/* Ads | Shorts toggle — top-level switch between ad creatives and
-          short-form creatives. Flips the whole board (KPIs + every view)
-          (Ben 2026-06-28). */}
-      <div style={{
-        display: 'inline-flex', gap: 4, padding: 4, marginBottom: 16,
-        background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 999,
-      }}>
-        {[
-          { v: 'ad', label: 'Ad creatives' },
-          { v: 'short', label: 'Short creatives' },
-        ].map(opt => {
-          const on = category === opt.v
-          const count = tasks.filter(t => (t.content_category || 'ad') === opt.v).length
-          return (
-            <button key={opt.v} type="button" onClick={() => setCategory(opt.v)}
-              style={{
-                padding: '7px 16px', borderRadius: 999, cursor: 'pointer',
-                fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
-                letterSpacing: '0.08em', textTransform: 'uppercase',
-                background: on ? 'var(--ink)' : 'transparent',
-                color: on ? 'var(--paper)' : 'var(--ink-3)',
-                border: 'none', display: 'inline-flex', alignItems: 'center', gap: 7,
-                transition: 'background 0.12s, color 0.12s',
-              }}>
-              {opt.label}
-              <span style={{
-                fontSize: 9.5, padding: '1px 7px', borderRadius: 999,
-                background: on ? 'rgba(255,255,255,0.18)' : 'var(--rule)',
-                color: on ? 'var(--paper)' : 'var(--ink-4)',
-              }}>{count}</span>
-            </button>
-          )
-        })}
-      </div>
 
       {/* KPI bar. Six tiles so Review + Revision get their own slots
           alongside Overdue / In progress / Queued / Done — Ben 2026-05-31

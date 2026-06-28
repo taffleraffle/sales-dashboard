@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown, Library as LibraryIcon } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown, Library as LibraryIcon, Smartphone } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -22,11 +22,12 @@ const navItems = [
   { to: '/sales/closers', icon: UserCheck, label: 'Closers' },
   { to: '/sales/setters', icon: Users, label: 'Setters' },
   { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
-  // Ads owns /sales/ads/* EXCEPT the Library, which is its own nav item — so
-  // being on the library doesn't also light up Ads (Ben 2026-06-28).
+  // Ads owns /sales/ads/* EXCEPT Library and Shorts, which are their own nav
+  // items — so being on those doesn't also light up Ads (Ben 2026-06-28).
   { to: '/sales/ads', icon: Megaphone, label: 'Ads',
-    match: (p) => p.startsWith('/sales/ads') && !p.startsWith('/sales/ads/library') },
+    match: (p) => p.startsWith('/sales/ads') && !p.startsWith('/sales/ads/library') && !p.startsWith('/sales/ads/shorts') },
   { to: '/sales/ads/library', icon: LibraryIcon, label: 'Library' },
+  { to: '/sales/ads/shorts', icon: Smartphone, label: 'Shorts' },
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
   { to: '/sales/contracts', icon: FileText, label: 'Contracts' },
   { to: '/sales/downsells', icon: TrendingDown, label: 'Downsells' },

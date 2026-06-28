@@ -267,7 +267,9 @@ export default function App() {
                 <Route index element={<Navigate to="/sales/ads/performance" replace />} />
                 <Route path="performance" element={<Suspense fallback={<PageSkeleton />}><AdsPerformance /></Suspense>} />
                 {/* Library — promoted to its own top-level Ads page 2026-06-26 (was a Creative-testing sub-tab) */}
-                <Route path="library" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeLibrary /></Suspense>} />
+                <Route path="library" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeLibrary category="ad" /></Suspense>} />
+                {/* Shorts — its own page (short-form creatives + their editing queue), 2026-06-28 */}
+                <Route path="shorts" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeLibrary category="short" /></Suspense>} />
                 <Route path="messaging" element={<Suspense fallback={<PageSkeleton />}><AdsMessaging /></Suspense>} />
 
                 {/* Creative testing — wrapper with sub-nav for Clips · Variants · Ads */}
