@@ -2987,9 +2987,16 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
   // 2026-06-11, so every count the operator sees is computed over the
   // rows that can actually appear — a chip advertising clips the view
   // can never show reads as a bug.
+  // Ads | Shorts | All — lets you browse short-form vs ad creatives in the
+  // library, mirroring the editing-queue toggle (Ben 2026-06-28). Persisted.
+  const [libCategory, setLibCategory] = useState(() => {
+    try { return localStorage.getItem('lib.category') || 'all' } catch { return 'all' }
+  })
+  useEffect(() => { try { localStorage.setItem('lib.category', libCategory) } catch {} }, [libCategory])
   const visibleRows = useMemo(
-    () => rows.filter(r => !r.is_low_quality && !r.is_bad_take),
-    [rows],
+    () => rows.filter(r => !r.is_low_quality && !r.is_bad_take
+      && (libCategory === 'all' || (r.content_category || 'ad') === libCategory)),
+    [rows, libCategory],
   )
 
   // Per-type counts for the chip badges (over all VISIBLE rows, ignoring current type filter)
@@ -3428,6 +3435,42 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null }) {
           rows surface without a manual refresh. */}
       <UploadDock onRefresh={() => load(true)} />
       <TopUploadProgressBar />
+
+      {/* Ads | Shorts toggle — browse ad creatives vs short-form creatives,
+          mirroring the editing-queue toggle (Ben 2026-06-28). */}
+      <div style={{
+        display: 'inline-flex', gap: 4, padding: 4, marginBottom: 12,
+        background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 999,
+      }}>
+        {[
+          { v: 'all', label: 'All' },
+          { v: 'ad', label: 'Ad creatives' },
+          { v: 'short', label: 'Short creatives' },
+        ].map(opt => {
+          const on = libCategory === opt.v
+          const count = opt.v === 'all'
+            ? rows.filter(r => !r.is_low_quality && !r.is_bad_take).length
+            : rows.filter(r => !r.is_low_quality && !r.is_bad_take && (r.content_category || 'ad') === opt.v).length
+          return (
+            <button key={opt.v} type="button" onClick={() => setLibCategory(opt.v)}
+              style={{
+                padding: '6px 15px', borderRadius: 999, cursor: 'pointer', border: 'none',
+                fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+                letterSpacing: '0.07em', textTransform: 'uppercase',
+                background: on ? 'var(--ink)' : 'transparent',
+                color: on ? 'var(--paper)' : 'var(--ink-3)',
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+              }}>
+              {opt.label}
+              <span style={{
+                fontSize: 9, padding: '1px 6px', borderRadius: 999,
+                background: on ? 'rgba(255,255,255,0.18)' : 'var(--rule)',
+                color: on ? 'var(--paper)' : 'var(--ink-4)',
+              }}>{count}</span>
+            </button>
+          )
+        })}
+      </div>
 
       {/* Toolbar — ONE visible row. The five filter dropdowns + toggles
           live behind a single FILTERS button (count badge = active
