@@ -139,6 +139,18 @@ export default function AdLibrary() {
   const [sortKey, setSortKey] = useState('cpa')
   const [sortDir, setSortDir] = useState('asc')
   const [preview, setPreview] = useState(null)
+  const [outcomeFilter, setOutcomeFilter] = useState('all')
+  // Optimistic win/loss overrides (ad_id -> 'winner'|'loser'|null) so a click
+  // reflects instantly without refetching.
+  const [outcomeOverride, setOutcomeOverride] = useState({})
+  const setOutcome = useCallback(async (ad, val) => {
+    const next = ad.outcome === val ? null : val   // click the active one again to clear
+    setOutcomeOverride(o => ({ ...o, [ad.ad_id]: next }))
+    try {
+      const { error: e } = await supabase.from('ads').update({ outcome: next }).eq('ad_id', ad.ad_id)
+      if (e) throw e
+    } catch (e) { setError(`Couldn't save win/loss: ${e.message}`) }
+  }, [])
 
   const reload = useCallback(async () => {
     setLoading(true); setError(null)
@@ -187,9 +199,10 @@ export default function AdLibrary() {
       const cpm = a.impressions > 0 ? (spend / a.impressions) * 1000 : null
       const cpa = a.results > 0 ? spend / a.results : null
       const isActive = (ad.effective_status || ad.status || '').toUpperCase() === 'ACTIVE'
-      return { ...ad, spend, ctr, cpm, cpa, results: a.results, impressions: a.impressions, isActive, offer: inferOffer(ad) }
+      const outcome = outcomeOverride[ad.ad_id] !== undefined ? outcomeOverride[ad.ad_id] : (ad.outcome || null)
+      return { ...ad, spend, ctr, cpm, cpa, results: a.results, impressions: a.impressions, isActive, outcome, offer: inferOffer(ad) }
     })
-  }, [ads, stats])
+  }, [ads, stats, outcomeOverride])
 
   const offerOptions = useMemo(() => {
     const set = new Set()
@@ -206,6 +219,9 @@ export default function AdLibrary() {
       // Offer
       if (offerFilter === '__none__' && r.offer) return false
       else if (offerFilter !== 'all' && offerFilter !== '__none__' && r.offer !== offerFilter) return false
+      // Win/loss
+      if (outcomeFilter === 'unmarked' && r.outcome) return false
+      else if (outcomeFilter !== 'all' && outcomeFilter !== 'unmarked' && r.outcome !== outcomeFilter) return false
       if (q && !(r.ad_name || '').toLowerCase().includes(q) && !(r.campaign_name || '').toLowerCase().includes(q) && !(r.ad_id || '').includes(q)) return false
       return true
     })
@@ -218,7 +234,7 @@ export default function AdLibrary() {
       if (typeof av === 'string') return dir * av.localeCompare(bv)
       return dir * (av - bv)
     })
-  }, [rows, search, statusFilter, offerFilter, sortKey, sortDir])
+  }, [rows, search, statusFilter, offerFilter, outcomeFilter, sortKey, sortDir])
 
   const setSort = (k) => {
     if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -226,6 +242,7 @@ export default function AdLibrary() {
   }
 
   const COLS = [
+    { k: 'outcome', label: 'W/L', align: 'left' },
     { k: 'offer', label: 'Offer', align: 'left' },
     { k: 'ad_name', label: 'Ad', align: 'left' },
     { k: 'campaign_name', label: 'Campaign', align: 'left' },
@@ -245,7 +262,7 @@ export default function AdLibrary() {
   return (
     <div>
       <SectionHead level="page" eyebrow="Ads · Library" title="The ad library." italicWord="ad"
-        tagline={`${filtered.length} ads · ${f$(totalSpend)} spend · ${fNum(totalResults)} results in range. Sort to find winners, copy the ad ID to scale.`}
+        tagline={`${filtered.length} ads · ${f$(totalSpend)} spend · ${fNum(totalResults)} results in range (all $ in USD). Mark winners/losers, sort to find them, copy the ad ID to scale.`}
         gap={20}
         right={
           <div className="flex items-center gap-2 flex-wrap">
@@ -274,6 +291,12 @@ export default function AdLibrary() {
         <select value={offerFilter} onChange={e => setOfferFilter(e.target.value)} className={selectCls}>
           {offerOptions.map(o => <option key={o} value={o}>{o === 'all' ? 'All offers' : o === '__none__' ? 'No offer' : o}</option>)}
         </select>
+        <select value={outcomeFilter} onChange={e => setOutcomeFilter(e.target.value)} className={selectCls}>
+          <option value="all">All outcomes</option>
+          <option value="winner">Winners</option>
+          <option value="loser">Losers</option>
+          <option value="unmarked">Unmarked</option>
+        </select>
       </div>
 
       <div className="tile overflow-x-auto p-0">
@@ -296,6 +319,14 @@ export default function AdLibrary() {
               <tr key={ad.ad_id} className="border-b border-border-subtle hover:bg-bg-card-hover">
                 <td className="px-3 py-2"><CreativeThumb ad={ad} onOpen={setPreview} /></td>
                 <td className="px-3 py-2"><AdIdCell id={ad.ad_id} /></td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setOutcome(ad, 'winner')} title="Mark winner"
+                      className={`px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border ${ad.outcome === 'winner' ? 'bg-success text-white border-success' : 'border-border-default text-text-400 hover:text-success'}`}>Win</button>
+                    <button onClick={() => setOutcome(ad, 'loser')} title="Mark loser"
+                      className={`px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border ${ad.outcome === 'loser' ? 'bg-danger text-white border-danger' : 'border-border-default text-text-400 hover:text-danger'}`}>Lose</button>
+                  </div>
+                </td>
                 <td className="px-3 py-2"><OfferTag offer={ad.offer} /></td>
                 <td className="px-3 py-2 max-w-[90px] truncate text-text-primary" title={ad.ad_name}>{ad.ad_name || '—'}</td>
                 <td className="px-3 py-2 max-w-[220px] truncate text-text-secondary" title={ad.campaign_name}>{ad.campaign_name || '—'}</td>
@@ -307,7 +338,7 @@ export default function AdLibrary() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={10} className="px-3 py-12 text-center text-text-400">No ads match.</td></tr>
+              <tr><td colSpan={11} className="px-3 py-12 text-center text-text-400">No ads match.</td></tr>
             )}
           </tbody>
         </table>
