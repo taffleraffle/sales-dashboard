@@ -61,6 +61,57 @@ const offerChipStyle = (on) => ({
   cursor: 'pointer', whiteSpace: 'nowrap',
 })
 
+// Picker to tie a run Meta ad to the library video creative it used.
+function LinkCreativeModal({ ad, creatives, busy, currentId, onLink, onClose }) {
+  const [q, setQ] = useState('')
+  const ql = q.trim().toLowerCase()
+  const list = useMemo(() => {
+    const arr = ql
+      ? creatives.filter(c => (c.canonical_name || c.name || '').toLowerCase().includes(ql))
+      : creatives
+    return arr.slice(0, 200)
+  }, [creatives, ql])
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-bg-card border border-border-default rounded-sm max-w-lg w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold">Link a video creative</h2>
+            <p className="text-[10px] text-text-400 truncate">Ad {ad.ad_id} · {ad.ad_name || ad.campaign_name || ''}</p>
+          </div>
+          <button onClick={onClose} className="text-text-400 hover:text-text-primary shrink-0"><X size={18} /></button>
+        </div>
+        <div className="p-3 border-b border-border-default">
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search creatives by name…"
+            className="w-full px-3 py-2 text-xs bg-bg-primary border border-border-default rounded-sm outline-none" />
+        </div>
+        <div className="flex-1 overflow-auto">
+          {currentId && (
+            <button onClick={() => onLink(null)} disabled={busy}
+              className="w-full text-left px-4 py-2 text-[11px] text-danger hover:bg-white/[0.03] border-b border-border-default/40">✕ Unlink current creative</button>
+          )}
+          {list.map(c => (
+            <button key={c.id} onClick={() => onLink(c.id)} disabled={busy}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] border-b border-border-default/30 ${c.id === currentId ? 'bg-opt-yellow/10' : ''}`}>
+              <div className="w-12 h-8 rounded overflow-hidden bg-bg-primary shrink-0">
+                {c.thumbnail_url
+                  ? <img src={c.thumbnail_url} alt="" loading="lazy" className="w-full h-full object-cover" />
+                  : <div className="w-full h-full flex items-center justify-center text-text-400"><PlayCircle size={14} /></div>}
+              </div>
+              <div className="min-w-0">
+                <div className="text-[11px] text-text-primary truncate">{c.canonical_name || c.name || c.id}</div>
+                <div className="text-[9px] text-text-400 uppercase tracking-wider">{c.type}</div>
+              </div>
+              {c.id === currentId && <Check size={13} className="text-opt-yellow ml-auto shrink-0" />}
+            </button>
+          ))}
+          {list.length === 0 && <div className="p-6 text-center text-text-400 text-xs">No creatives match.</div>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AdIdCell({ id }) {
   const [copied, setCopied] = useState(false)
   return (
@@ -161,6 +212,9 @@ export default function AdLibrary() {
   const [sortDir, setSortDir] = useState('asc')
   const [preview, setPreview] = useState(null)
   const [outcomeFilter, setOutcomeFilter] = useState('all')
+  const [linkPicker, setLinkPicker] = useState(null)   // the ad being linked, or null
+  const [creatives, setCreatives] = useState([])       // library video creatives for the picker + linked-name lookup
+  const [linkBusy, setLinkBusy] = useState(false)
   // Live NZD->USD rate (cached 12h). Starts at the static fallback so first paint
   // isn't blank, then upgrades to the live rate when it resolves.
   const [fx, setFx] = useState({ rate: parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56'), ts: null, live: false })
@@ -203,6 +257,30 @@ export default function AdLibrary() {
     const unsub = subscribeSyncStatus(() => reload().catch(() => {}))
     return () => unsub()
   }, [reload])
+
+  // Library video creatives — powers the link picker + resolves a linked ad's
+  // creative name/thumbnail for the row. Loaded once; the library is small.
+  useEffect(() => {
+    supabase.from('lib_creative_library')
+      .select('id, canonical_name, name, type, thumbnail_url')
+      .in('type', ['Hook', 'Body', 'Joined', 'Full Video', 'Testimony', 'Retargeting'])
+      .eq('exclude_from_library', false)
+      .order('added_at', { ascending: false })
+      .limit(2000)
+      .then(({ data }) => setCreatives(data || []))
+      .catch(() => {})
+  }, [])
+  const creativesById = useMemo(() => Object.fromEntries((creatives || []).map(c => [c.id, c])), [creatives])
+
+  // Tie a run ad to a library video creative (or pass null to unlink).
+  const linkCreative = useCallback(async (ad, creativeId) => {
+    setLinkBusy(true)
+    const { error: e } = await supabase.from('ads').update({ linked_creative_id: creativeId }).eq('ad_id', ad.ad_id)
+    setLinkBusy(false)
+    if (e) { setError(`Link failed: ${e.message}`); return }
+    setAds(prev => prev.map(a => a.ad_id === ad.ad_id ? { ...a, linked_creative_id: creativeId } : a))
+    setLinkPicker(null)
+  }, [])
 
   const handleSync = useCallback(async () => {
     setSyncing(true)
@@ -381,7 +459,16 @@ export default function AdLibrary() {
           <tbody>
             {filtered.map(ad => (
               <tr key={ad.ad_id} className="border-b border-border-subtle hover:bg-bg-card-hover">
-                <td className="px-3 py-2"><CreativeThumb ad={ad} onOpen={setPreview} /></td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-col gap-1 items-start">
+                    <CreativeThumb ad={ad} onOpen={setPreview} />
+                    {ad.linked_creative_id && creativesById[ad.linked_creative_id]
+                      ? <button onClick={() => setLinkPicker(ad)} title="Linked video creative — click to change or unlink"
+                          className="text-[9px] text-opt-yellow hover:underline truncate max-w-[64px] text-left">🔗 {creativesById[ad.linked_creative_id].canonical_name || creativesById[ad.linked_creative_id].name}</button>
+                      : <button onClick={() => setLinkPicker(ad)} title="Link this ad to a library video creative"
+                          className="text-[9px] text-text-400 hover:text-text-primary text-left">🔗 Link</button>}
+                  </div>
+                </td>
                 <td className="px-3 py-2"><AdIdCell id={ad.ad_id} /></td>
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-1">
@@ -413,6 +500,16 @@ export default function AdLibrary() {
       </div>
 
       <CreativeModal ad={preview} onClose={() => setPreview(null)} />
+      {linkPicker && (
+        <LinkCreativeModal
+          ad={linkPicker}
+          creatives={creatives}
+          busy={linkBusy}
+          currentId={linkPicker.linked_creative_id || null}
+          onLink={(cid) => linkCreative(linkPicker, cid)}
+          onClose={() => setLinkPicker(null)}
+        />
+      )}
     </div>
   )
 }
