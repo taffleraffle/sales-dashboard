@@ -13,9 +13,10 @@ import { rangeToDays } from '../../lib/dateUtils'
 import { runAutoSync, subscribeSyncStatus } from '../../services/autoSync'
 import { syncMetaAdsAtAdLevel } from '../../services/metaAdsSync'
 import { SectionHead } from '../../components/editorial/atoms'
+import { getNzdToUsd } from '../../lib/fxRate'
 
-// Spend in ad_daily_stats is stored in NZD (the account's currency). We display
-// it as-is — no USD conversion (Ben 2026-06-29: show NZD, what it's actually worth).
+// Spend in ad_daily_stats is stored in NZD; we display USD using a live FX rate
+// (Ben 2026-06-29: USD values, but the rate must track reality, not 0.56).
 const f$ = n => n == null || isNaN(n) ? '—' : (n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(0)}`)
 const fNum = n => n == null || isNaN(n) ? '—' : Math.round(n).toLocaleString()
 const fPct = n => n == null || isNaN(n) ? '—' : `${n.toFixed(2)}%`
@@ -145,6 +146,10 @@ export default function AdLibrary() {
   const [sortDir, setSortDir] = useState('asc')
   const [preview, setPreview] = useState(null)
   const [outcomeFilter, setOutcomeFilter] = useState('all')
+  // Live NZD->USD rate (cached 12h). Starts at the static fallback so first paint
+  // isn't blank, then upgrades to the live rate when it resolves.
+  const [fx, setFx] = useState({ rate: parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56'), ts: null, live: false })
+  useEffect(() => { getNzdToUsd().then(setFx).catch(() => {}) }, [])
   // Optimistic win/loss overrides (ad_id -> 'winner'|'loser'|null) so a click
   // reflects instantly without refetching.
   const [outcomeOverride, setOutcomeOverride] = useState({})
@@ -203,7 +208,7 @@ export default function AdLibrary() {
     }
     return ads.map(ad => {
       const a = byAd[ad.ad_id] || { spend: 0, impressions: 0, clicks: 0, results: 0 }
-      const spend = a.spend   // NZD, shown as-is
+      const spend = a.spend * fx.rate   // NZD -> USD at the live rate
       const ctr = a.impressions > 0 ? (a.clicks / a.impressions) * 100 : null
       const cpm = a.impressions > 0 ? (spend / a.impressions) * 1000 : null
       const cpa = a.results > 0 ? spend / a.results : null
@@ -211,7 +216,7 @@ export default function AdLibrary() {
       const outcome = outcomeOverride[ad.ad_id] !== undefined ? outcomeOverride[ad.ad_id] : (ad.outcome || null)
       return { ...ad, spend, ctr, cpm, cpa, results: a.results, impressions: a.impressions, isActive, outcome, offer: inferOffer(ad) }
     })
-  }, [ads, stats, outcomeOverride])
+  }, [ads, stats, outcomeOverride, fx.rate])
 
   const offerOptions = useMemo(() => {
     const set = new Set()
@@ -271,7 +276,7 @@ export default function AdLibrary() {
   return (
     <div>
       <SectionHead level="page" eyebrow="Ads · Library" title="The ad library." italicWord="ad"
-        tagline={`${filtered.length} ads · ${f$(totalSpend)} spend · ${fNum(totalResults)} results ${range === 'all' ? 'all-time' : 'in range'} (NZD). Mark winners/losers, sort to find them, copy the ad ID to scale.`}
+        tagline={`${filtered.length} ads · ${f$(totalSpend)} spend · ${fNum(totalResults)} results ${range === 'all' ? 'all-time' : 'in range'} (USD @ ${fx.rate.toFixed(4)} NZD→USD${fx.live ? ' · live' : ''}). Mark winners/losers, sort to find them, copy the ad ID to scale.`}
         gap={20}
         right={
           <div className="flex items-center gap-2 flex-wrap">
