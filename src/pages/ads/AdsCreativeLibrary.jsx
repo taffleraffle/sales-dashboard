@@ -2583,7 +2583,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
   // of transcript = 600KB+ wasted on the first paint. Pulling without it
   // cuts the initial payload roughly in half. Transcripts get lazy-loaded
   // in a follow-up query after first paint so library search still works.
-  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,final_cut_thumbnail_url,content_category,outcome,preview_url,preview_proxy_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id'
+  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,final_cut_thumbnail_url,content_category,outcome,enough_spend,preview_url,preview_proxy_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id'
 
   const load = useCallback(async (background = false, attempt = 0) => {
     if (!background) setLoading(true)
@@ -7324,6 +7324,9 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
       has_been_run: !!edit.has_been_run,
       // Manual winner/loser grade on the creative (migration 031). null = ungraded.
       outcome: edit.outcome === 'winner' || edit.outcome === 'loser' ? edit.outcome : null,
+      // Manual "did it get enough spend to judge?" grade (migration 156).
+      // true = enough, false = not enough, null = undecided.
+      enough_spend: typeof edit.enough_spend === 'boolean' ? edit.enough_spend : null,
       // The third STATUS button (EDITED RAW) writes both status='raw'
       // AND manually_marked_used=true, so include the flag in every
       // save. Otherwise the override is lost on the next auto-save.
@@ -7945,6 +7948,35 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                 border: '1px solid var(--down)', borderRadius: 9, cursor: 'pointer',
               }}>
               ✕ Loser
+            </button>
+          </div>
+        </Field>
+
+        {/* ENOUGH SPEND? — manual judgement on whether the creative got enough
+            spend to grade (migration 156). Click the active one again to clear. */}
+        <Field label="Enough spend?">
+          <div style={{ display: 'flex', gap: 5 }}>
+            <button type="button"
+              onClick={() => setEdit({ ...edit, enough_spend: edit.enough_spend === true ? null : true })}
+              style={{
+                flex: 1, padding: '8px 12px', fontFamily: 'var(--mono)', fontSize: 11,
+                fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: edit.enough_spend === true ? 'var(--up)' : 'var(--paper)',
+                color: edit.enough_spend === true ? '#fff' : 'var(--up)',
+                border: '1px solid var(--up)', borderRadius: 9, cursor: 'pointer',
+              }}>
+              ✓ Enough spend
+            </button>
+            <button type="button"
+              onClick={() => setEdit({ ...edit, enough_spend: edit.enough_spend === false ? null : false })}
+              style={{
+                flex: 1, padding: '8px 12px', fontFamily: 'var(--mono)', fontSize: 11,
+                fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                background: edit.enough_spend === false ? 'var(--down)' : 'var(--paper)',
+                color: edit.enough_spend === false ? '#fff' : 'var(--down)',
+                border: '1px solid var(--down)', borderRadius: 9, cursor: 'pointer',
+              }}>
+              ✕ Not enough
             </button>
           </div>
         </Field>

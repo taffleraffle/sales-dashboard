@@ -13,6 +13,7 @@ import { rangeToDays } from '../../lib/dateUtils'
 import { runAutoSync, subscribeSyncStatus } from '../../services/autoSync'
 import { syncMetaAdsAtAdLevel } from '../../services/metaAdsSync'
 import { SectionHead } from '../../components/editorial/atoms'
+import Select from '../../components/editorial/Select'
 import { getNzdToUsd } from '../../lib/fxRate'
 
 // Spend in ad_daily_stats is stored in NZD; we display USD using a live FX rate
@@ -411,17 +412,17 @@ export default function AdLibrary() {
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search ad name, campaign, or ad ID…"
           className="flex-1 min-w-[220px] max-w-md px-3 py-2 text-xs bg-bg-card border border-border-default rounded-sm outline-none" />
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={selectCls}>
-          {STATUS_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
-        </select>
-        <select value={outcomeFilter} onChange={e => setOutcomeFilter(e.target.value)} className={selectCls}>
-          <option value="all">All outcomes</option>
-          <option value="winner">Winners</option>
-          <option value="loser">Losers</option>
-          <option value="unmarked">Unmarked</option>
-          <option value="lowspend">Not enough spend (&lt;$250)</option>
-          <option value="enough">Enough spend (≥$250)</option>
-        </select>
+        <Select value={statusFilter} onChange={setStatusFilter} minWidth={130}
+          options={STATUS_OPTS.map(o => ({ value: o.v, label: o.label }))} />
+        <Select value={outcomeFilter} onChange={setOutcomeFilter} minWidth={170}
+          options={[
+            { value: 'all', label: 'All outcomes' },
+            { value: 'winner', label: 'Winners' },
+            { value: 'loser', label: 'Losers' },
+            { value: 'unmarked', label: 'Unmarked' },
+            { value: 'lowspend', label: 'Not enough spend (<$250)' },
+            { value: 'enough', label: 'Enough spend (≥$250)' },
+          ]} />
       </div>
 
       {/* Offer multi-select — chip row matching the audience filter on the ads pages.
