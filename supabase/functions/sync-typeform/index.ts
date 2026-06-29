@@ -62,7 +62,7 @@ function classifyTier(revenueLabel: string | null, endingScreen: string | null):
 }
 
 // Pull the meaningful values out of the unstructured Typeform answers[].
-function extractFields(answers: any[]): {
+function extractFields(answers: any[], revenueRefs?: Set<string>): {
   first_name: string | null
   last_name: string | null
   email: string | null
@@ -73,13 +73,15 @@ function extractFields(answers: any[]): {
   let last_name: string | null = null
   let email: string | null = null
   let phone: string | null = null
-  let revenue_tier: string | null = null
 
   let textCount = 0
-  // Capture every choice answer with a $-tier label. The form asks
-  // marketing spend FIRST and revenue SECOND. The LAST $-tier choice in
-  // the answers array is the revenue answer.
-  const dollarChoices: string[] = []
+  // The revenue answer is identified by its FIELD ref (the "monthly revenue"
+  // question — see fetchFormMeta), NOT by position. The forms also carry a
+  // marketing-spend $-question, so the old "last $-tier choice" heuristic
+  // stored the marketing-spend band as revenue whenever a prospect answered
+  // spend but abandoned before the revenue question (Ben 2026-06-29).
+  let revenueByRef: string | null = null
+  const dollarChoices: string[] = []   // legacy positional fallback only
   for (const a of answers || []) {
     const t = a?.type
     if (t === 'text') {
@@ -93,11 +95,18 @@ function extractFields(answers: any[]): {
       phone = a.phone_number || null
     } else if (t === 'choice') {
       const label = a.choice?.label || ''
+      const ref = a.field?.ref
+      if (ref && revenueRefs?.has(ref)) revenueByRef = label || null
       if (/\$\s*\d/.test(label)) dollarChoices.push(label)
     }
   }
-  // Revenue tier = the LAST $-tier choice in the form (marketing spend comes first).
-  if (dollarChoices.length) revenue_tier = dollarChoices[dollarChoices.length - 1]
+  // Prefer the field-matched revenue answer. Fall back to the positional
+  // "last $-choice" ONLY when form meta couldn't identify a revenue field
+  // (e.g. the form-definition fetch failed) — never when we know the field but
+  // the prospect skipped it, so a spend answer can't masquerade as revenue.
+  const revenue_tier = (revenueRefs && revenueRefs.size)
+    ? revenueByRef
+    : (dollarChoices.length ? dollarChoices[dollarChoices.length - 1] : null)
   return { first_name, last_name, email, phone, revenue_tier }
 }
 
@@ -107,17 +116,29 @@ function extractFields(answers: any[]): {
 // "30k+ Booking Confirmation" page (the typeform-side signal that they
 // completed the booking step). Without resolving this, ending_screen is
 // just an opaque UUID and we can't tell a booker from a DQ.
-async function fetchScreenMap(formId: string): Promise<Record<string, string>> {
+async function fetchFormMeta(formId: string): Promise<{ screenMap: Record<string, string>; revenueRefs: Set<string> }> {
   const res = await fetch(`${TYPEFORM_BASE}/forms/${formId}`, {
     headers: { Authorization: `Bearer ${TYPEFORM_KEY}`, Accept: 'application/json' },
   })
   if (!res.ok) throw new Error(`Typeform /forms/${formId} ${res.status}`)
   const def = await res.json()
-  const map: Record<string, string> = {}
+  const screenMap: Record<string, string> = {}
   for (const s of def.thankyou_screens || []) {
-    if (s.ref && s.title) map[s.ref] = s.title.trim()
+    if (s.ref && s.title) screenMap[s.ref] = s.title.trim()
   }
-  return map
+  // Identify the "What's your current monthly revenue?" field(s) by title so
+  // the extractor reads revenue from that exact field and never confuses it
+  // with the marketing-spend $-question. Recurse into Typeform group fields.
+  const revenueRefs = new Set<string>()
+  const walk = (fields: any[]) => {
+    for (const fld of fields || []) {
+      const title = (fld.title || '').toLowerCase()
+      if (/monthly revenue/.test(title) && fld.ref) revenueRefs.add(fld.ref)
+      if (fld.properties?.fields) walk(fld.properties.fields)
+    }
+  }
+  walk(def.fields || [])
+  return { screenMap, revenueRefs }
 }
 
 async function fetchPagedResponses(formId: string, since: string | null) {
@@ -150,9 +171,9 @@ async function fetchPagedResponses(formId: string, since: string | null) {
   return all
 }
 
-function toRow(formId: string, formName: string, raw: any, screenMap: Record<string, string>) {
+function toRow(formId: string, formName: string, raw: any, screenMap: Record<string, string>, revenueRefs?: Set<string>) {
   const hidden = raw.hidden || {}
-  const { first_name, last_name, email, phone, revenue_tier } = extractFields(raw.answers || [])
+  const { first_name, last_name, email, phone, revenue_tier } = extractFields(raw.answers || [], revenueRefs)
   const ref = raw.thankyou_screen_ref || null
   // Resolve UUID → readable title when we know the form. Falls back to the
   // raw ref so we still capture *something* for screens added after the
@@ -202,9 +223,9 @@ serve(async (req) => {
 
   for (const f of forms) {
     try {
-      const screenMap = await fetchScreenMap(f.id)
+      const { screenMap, revenueRefs } = await fetchFormMeta(f.id)
       const items = await fetchPagedResponses(f.id, sinceTs)
-      const rows = items.map(r => toRow(f.id, f.name, r, screenMap))
+      const rows = items.map(r => toRow(f.id, f.name, r, screenMap, revenueRefs))
       if (rows.length) {
         const { error } = await supabase
           .from('typeform_responses')

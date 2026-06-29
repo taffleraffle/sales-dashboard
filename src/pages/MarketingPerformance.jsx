@@ -2083,7 +2083,11 @@ const DRILLDOWN_CONFIG = {
   qbookings: {
     title: 'Qualified Bookings',
     subtitle: 'Strategy bookings excluding the DQ Calendly calendar',
-    fetcher: async (range) => (await fetchBookings(range)).filter(r => r.status === 'qual'),
+    // Keep qualified rows AND any operator-marked rows (mark != null) so an
+    // accidental spam/DQ/dup stays visible with a Restore button instead of
+    // silently vanishing. Auto-DQ rows the operator never touched stay hidden.
+    // (Ben 2026-06-29 — couldn't unmark an accidental spam.)
+    fetcher: async (range) => (await fetchBookings(range)).filter(r => r.status === 'qual' || r.mark),
     chart: { dateKey: 'booked', label: 'Qualified bookings per day' },
     columns: [
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
@@ -2091,9 +2095,16 @@ const DRILLDOWN_CONFIG = {
       BOOKING_FUNNEL_COL,
       BOOKING_REVENUE_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
+      BOOKING_TYPE_COL,
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No qualified bookings in this window.',
+    footer: rows => {
+      const counted = rows.filter(r => r.status === 'qual').length
+      return counted === rows.length
+        ? `${rows.length} qualified bookings`
+        : `${rows.length} listed · ${counted} qualified (${rows.length - counted} marked — click restore to undo)`
+    },
   },
   cpl: {
     title: 'Cost Per Lead',
@@ -2139,7 +2150,10 @@ const DRILLDOWN_CONFIG = {
   cpqb: {
     title: 'Cost Per Qualified Booking',
     subtitle: 'Daily Meta adspend ÷ qualified bookings made that day',
-    fetcher: async (range) => (await fetchBookings(range)).filter(r => r.status === 'qual'),
+    // Keep operator-marked rows visible (mark != null) so an accidental
+    // spam/DQ/dup can be undone via Restore instead of disappearing.
+    // (Ben 2026-06-29.)
+    fetcher: async (range) => (await fetchBookings(range)).filter(r => r.status === 'qual' || r.mark),
     chart: { dateKey: 'booked', mode: 'cost', label: 'Cost per Q.Book per day', fmtValue: v => `$${Math.round(v)}` },
     columns: [
       { key: 'booked', label: 'Booked', cls: 'tabular-nums' },
@@ -2147,9 +2161,16 @@ const DRILLDOWN_CONFIG = {
       BOOKING_FUNNEL_COL,
       BOOKING_REVENUE_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
+      BOOKING_TYPE_COL,
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No qualified bookings in this window.',
+    footer: rows => {
+      const counted = rows.filter(r => r.status === 'qual').length
+      return counted === rows.length
+        ? `${rows.length} qualified bookings`
+        : `${rows.length} listed · ${counted} qualified (${rows.length - counted} marked — click restore to undo)`
+    },
   },
   // Close Rate, Show Rate etc. don't have a meaningful row list — the
   // chart IS the drilldown. fetcher returns the close drilldown rows so
