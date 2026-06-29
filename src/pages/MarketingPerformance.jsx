@@ -189,7 +189,7 @@ const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev,
         {tip && (
           <div className="relative">
             <span className="text-[8px] text-text-400/50 cursor-help mb-0.5">&#9432;</span>
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] border border-border-default text-[10px] text-text-secondary whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl">
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] border border-white/10 text-[10px] text-white/90 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl">
               {tip}
               <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-[#1a1a1a]" />
             </div>
