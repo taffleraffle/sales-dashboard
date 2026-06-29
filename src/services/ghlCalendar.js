@@ -250,14 +250,38 @@ async function enrichRowsWithRevenueTier(rows, onProgress = () => {}) {
   }
 }
 
+// Qualified-booking floor: a prospect must do at least this much monthly
+// revenue to count as qualified. Anything below auto-DQs. (Ben, 2026-06-29.)
+const QUALIFIED_REVENUE_FLOOR = 50_000
+
 /**
- * Classify a revenue tier value as DQ (≤$30k) or not. The form's tier values
- * include "$0-$30,000", "$30-$50,000", "$50k-$75k/m", "$75k-$100k/m",
- * "$100-250k/m", "$250,000/m+". Only the first one is DQ.
+ * Classify a revenue tier value as DQ (below the qualified floor) or not.
+ *
+ * Parses the band's LOWER bound and DQs when it's below
+ * QUALIFIED_REVENUE_FLOOR. Threshold-based rather than matching a fixed
+ * string prefix, so it survives Typeform band-label changes — the old
+ * `/^\$0-/` check silently passed new low bands ("$1,000-$3,000/m",
+ * "$5,000-$10,000/m", "$15,000/m+") through as qualified (Ben updated the
+ * form 2026-06; that's the bug this fixes).
+ *
+ * Handles "$50k - $100k/m", "$0 - $50,000/m", "$15,000/m+", "$500k/m+",
+ * "$1,000-$3,000/m" etc. The trailing "/m" (per-month) is NOT treated as a
+ * millions suffix — only a "k"/"m" immediately after the number is.
+ *   "$50k - $100k/m" -> 50000  -> qualified
+ *   "$0 - $50,000/m" -> 0      -> DQ
+ *   "$15,000/m+"     -> 15000  -> DQ
+ *   "$1,000-$3,000/m"-> 1000   -> DQ
  */
 export function isDQRevenueTier(tier) {
   if (!tier) return false
-  return /^\$\s*0\s*[-–]/.test(String(tier).trim())
+  const m = String(tier).trim().match(/\$?\s*([\d,]+(?:\.\d+)?)\s*([km])?/i)
+  if (!m) return false
+  let n = parseFloat(m[1].replace(/,/g, ''))
+  if (!Number.isFinite(n)) return false
+  const suffix = (m[2] || '').toLowerCase()
+  if (suffix === 'k') n *= 1_000
+  else if (suffix === 'm') n *= 1_000_000
+  return n < QUALIFIED_REVENUE_FLOOR
 }
 
 // Track sync state to avoid duplicate syncs
