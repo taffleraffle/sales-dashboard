@@ -5436,8 +5436,14 @@ function TaskWorkPanel({ task, scope = ADMIN_SCOPE, onChanged }) {
     try {
       const { error: e1 } = await supabase.from('lib_task_submissions').update({ approved_at: new Date().toISOString(), approved_by_name: 'admin' }).eq('id', sub.id)
       if (e1) throw e1
-      if (sub.file_url) {
-        const { error: e2 } = await supabase.from('lib_creative_library').update({ final_cut_url: sub.file_url, final_cut_thumbnail_url: sub.thumbnail_url, stage_final_cut: 'done', status: 'edited' }).eq('id', task.creative_id)
+      // Always flip the creative to 'edited' on approval — even for review-link /
+      // external submissions with no hosted file_url. Guarding the whole status
+      // update behind file_url left those approved clips stuck on "review"
+      // (Ben 2026-06-29). Final-cut fields only set when we actually have a file.
+      {
+        const patch = { stage_final_cut: 'done', status: 'edited' }
+        if (sub.file_url) { patch.final_cut_url = sub.file_url; patch.final_cut_thumbnail_url = sub.thumbnail_url }
+        const { error: e2 } = await supabase.from('lib_creative_library').update(patch).eq('id', task.creative_id)
         if (e2) throw e2
       }
       const { error: e3 } = await supabase.from('lib_editing_tasks').update({ status: 'done', completed_at: new Date().toISOString() }).eq('id', task.task_id)
@@ -9771,13 +9777,17 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         .update({ approved_at: new Date().toISOString(), approved_by_name: 'admin' })
         .eq('id', sub.id)
       if (e1) throw e1
-      if (sub.file_url) {
+      {
         // Merge the approved cut onto the source creative: final_cut_url holds
         // the edit (raw stays in preview_url), and status flips to 'edited' so
         // the library surfaces it as the edited version. The detail modal's
         // merged-view branch keeps the raw one click away (Ben 2026-06-27).
+        // status flips on EVERY approval — incl. review-link/external subs with
+        // no file_url — else those stay stuck on "review" (Ben 2026-06-29).
+        const patch = { stage_final_cut: 'done', status: 'edited' }
+        if (sub.file_url) { patch.final_cut_url = sub.file_url; patch.final_cut_thumbnail_url = sub.thumbnail_url }
         const { error: e2 } = await supabase.from('lib_creative_library')
-          .update({ final_cut_url: sub.file_url, final_cut_thumbnail_url: sub.thumbnail_url, stage_final_cut: 'done', status: 'edited' })
+          .update(patch)
           .eq('id', task.creative_id)
         if (e2) throw e2
       }
