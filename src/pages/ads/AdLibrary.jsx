@@ -378,7 +378,6 @@ export default function AdLibrary() {
 
   const totalSpend = filtered.reduce((s, r) => s + (r.spend || 0), 0)
   const totalResults = filtered.reduce((s, r) => s + (r.results || 0), 0)
-  const selectCls = "px-2 py-1.5 text-[11px] bg-bg-card border border-border-default rounded-sm outline-none text-text-secondary"
 
   return (
     <div>

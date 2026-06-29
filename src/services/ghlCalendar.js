@@ -274,11 +274,21 @@ const QUALIFIED_REVENUE_FLOOR = 50_000
  */
 export function isDQRevenueTier(tier) {
   if (!tier) return false
-  const m = String(tier).trim().match(/\$?\s*([\d,]+(?:\.\d+)?)\s*([km])?/i)
+  const s = String(tier).trim()
+  const m = s.match(/\$?\s*([\d,]+(?:\.\d+)?)\s*([km])?/i)
   if (!m) return false
   let n = parseFloat(m[1].replace(/,/g, ''))
   if (!Number.isFinite(n)) return false
-  const suffix = (m[2] || '').toLowerCase()
+  let suffix = (m[2] || '').toLowerCase()
+  // If the lower bound carries no magnitude suffix, borrow a k/m that sits on
+  // the band's upper bound — "$100-250k" means $100k–$250k, both in thousands.
+  // (Guards against reading "$100-250k" as 100 and wrongly DQ-ing it.) The "/m"
+  // per-month marker can't false-match: a digit must be immediately followed
+  // by the k/m, and "/m" has a slash in between.
+  if (!suffix) {
+    const tail = s.match(/\d\s*([km])/i)
+    if (tail) suffix = tail[1].toLowerCase()
+  }
   if (suffix === 'k') n *= 1_000
   else if (suffix === 'm') n *= 1_000_000
   return n < QUALIFIED_REVENUE_FLOOR
