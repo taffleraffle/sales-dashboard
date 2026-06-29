@@ -7024,7 +7024,12 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
   }, [row.id, row.folder_id])
   const editApproved = !!approvedSub?.approved_at
   const editView = {
-    src: approvedSub?.preview_proxy_url || approvedSub?.file_url || row.final_cut_url,
+    // Always lead with a fast faststart PROXY; never a heavy non-faststart
+    // original. A final_cut original is often a 148MB non-faststart file the
+    // browser can't start playing until the WHOLE thing downloads → stuck at
+    // 0:00 (Ben 2026-06-29: "none of the videos can be played"). Order: edit's
+    // proxy → the clip's own proxy → only then heavy originals as last resort.
+    src: approvedSub?.preview_proxy_url || row.preview_proxy_url || approvedSub?.file_url || row.final_cut_url || row.preview_url,
     poster: approvedSub?.thumbnail_url || row.thumbnail_url,
     download: row.final_cut_url, name: rowDisplayName(row),
     key: 'edit-' + (approvedSub?.file_url || row.final_cut_url || row.id),
