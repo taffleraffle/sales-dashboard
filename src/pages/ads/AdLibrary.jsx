@@ -14,7 +14,8 @@ import { runAutoSync, subscribeSyncStatus } from '../../services/autoSync'
 import { syncMetaAdsAtAdLevel } from '../../services/metaAdsSync'
 import { SectionHead } from '../../components/editorial/atoms'
 
-const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+// Spend in ad_daily_stats is stored in NZD (the account's currency). We display
+// it as-is — no USD conversion (Ben 2026-06-29: show NZD, what it's actually worth).
 const f$ = n => n == null || isNaN(n) ? '—' : (n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(0)}`)
 const fNum = n => n == null || isNaN(n) ? '—' : Math.round(n).toLocaleString()
 const fPct = n => n == null || isNaN(n) ? '—' : `${n.toFixed(2)}%`
@@ -25,6 +26,7 @@ const fPct = n => n == null || isNaN(n) ? '—' : `${n.toFixed(2)}%`
 const OFFER_RULES = [
   { label: 'Electricians', re: /electric/i },
   { label: 'Restoration',  re: /restorat|water ?damage|mould|mold|fire ?damage|flood|water ?restor/i },
+  { label: 'Remodeling',   re: /remodel|renovat/i },
   { label: 'Accounting',   re: /account|bookkeep|\bcpa\b|\btax\b/i },
   { label: 'Roofing',      re: /roof/i },
   { label: 'Plumbing',     re: /plumb|gasfit/i },
@@ -125,8 +127,11 @@ const STATUS_OPTS = [
 ]
 
 export default function AdLibrary() {
-  const [range, setRange] = useState(30)
-  const days = typeof range === 'number' ? range : rangeToDays(range)
+  // Default to all-time so every ad that has EVER run is gradeable here, not just
+  // the last 30 days (Ben grades current + historical winners). null days = no
+  // date floor on the stats fetch.
+  const [range, setRange] = useState('all')
+  const days = range === 'all' ? null : (typeof range === 'number' ? range : rangeToDays(range))
 
   const [ads, setAds] = useState([])
   const [stats, setStats] = useState([])
@@ -155,14 +160,18 @@ export default function AdLibrary() {
   const reload = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const since = new Date()
-      since.setDate(since.getDate() - (typeof days === 'number' ? days : 3650))
-      const sinceStr = since.toISOString().split('T')[0]
-      // ALL ads (not just active) + stats over the selected window. pagedFetch
-      // handles the 1000-row cap; the account is large.
+      // ALL ads (not just active) + stats over the selected window. When days is
+      // null (All time) we pull the full history so older ads carry real spend
+      // and can be graded. pagedFetch handles the 1000-row cap; the account is large.
+      const sinceStr = typeof days === 'number'
+        ? (() => { const s = new Date(); s.setDate(s.getDate() - days); return s.toISOString().split('T')[0] })()
+        : null
       const [adsData, statsData] = await Promise.all([
         pagedFetch(() => supabase.from('ads').select('*')),
-        pagedFetch(() => supabase.from('ad_daily_stats').select('*').gte('date', sinceStr)),
+        pagedFetch(() => {
+          const q = supabase.from('ad_daily_stats').select('*')
+          return sinceStr ? q.gte('date', sinceStr) : q
+        }),
       ])
       setAds(adsData); setStats(statsData)
     } catch (e) { setError(e.message) } finally { setLoading(false) }
@@ -194,7 +203,7 @@ export default function AdLibrary() {
     }
     return ads.map(ad => {
       const a = byAd[ad.ad_id] || { spend: 0, impressions: 0, clicks: 0, results: 0 }
-      const spend = a.spend * NZD_TO_USD
+      const spend = a.spend   // NZD, shown as-is
       const ctr = a.impressions > 0 ? (a.clicks / a.impressions) * 100 : null
       const cpm = a.impressions > 0 ? (spend / a.impressions) * 1000 : null
       const cpa = a.results > 0 ? spend / a.results : null
@@ -262,13 +271,19 @@ export default function AdLibrary() {
   return (
     <div>
       <SectionHead level="page" eyebrow="Ads · Library" title="The ad library." italicWord="ad"
-        tagline={`${filtered.length} ads · ${f$(totalSpend)} spend · ${fNum(totalResults)} results in range (all $ in USD). Mark winners/losers, sort to find them, copy the ad ID to scale.`}
+        tagline={`${filtered.length} ads · ${f$(totalSpend)} spend · ${fNum(totalResults)} results ${range === 'all' ? 'all-time' : 'in range'} (NZD). Mark winners/losers, sort to find them, copy the ad ID to scale.`}
         gap={20}
         right={
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={handleSync} disabled={syncing}
               className="flex items-center gap-1.5 px-3 py-2 text-xs border border-border-default rounded-sm text-text-secondary hover:bg-bg-card-hover disabled:opacity-50">
               <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />{syncing ? 'Syncing…' : 'Refresh now'}
+            </button>
+            <button onClick={() => setRange(range === 'all' ? 30 : 'all')}
+              title="Show every ad that has ever run"
+              style={range === 'all' ? { background: 'var(--ink)', color: 'var(--paper)', borderColor: 'var(--ink)' } : {}}
+              className="px-3 py-2 text-xs border border-border-default rounded-sm text-text-secondary hover:bg-bg-card-hover">
+              All time
             </button>
             <DateRangeSelector selected={range} onChange={setRange} />
           </div>
