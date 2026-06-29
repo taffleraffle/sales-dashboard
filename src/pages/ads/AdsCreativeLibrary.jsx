@@ -2944,10 +2944,11 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
     })
     if (stageFilter.size > 0) {
       list = list.filter(r => {
-        if (stageFilter.has('raw_used') && r.status === 'raw' && usedRawIds.has(r.id)) return true
-        // raw_unused must mirror the banner exactly: raw + not yet used + no editor + not Testimony.
-        // Without the editor/Testimony checks, the "Filter to these →" view showed rows the operator
-        // had already assigned (Mohamed/Ahmed/Dean in the wild), which defeated the whole banner.
+        // STATUS filter "RAW" = every raw clip (Ben 2026-06-29 — no more
+        // "edited raw" split, so RAW shows all raw, EDITED shows all edited).
+        if (stageFilter.has('raw_all') && r.status === 'raw') return true
+        // raw_unused stays strict for the "needs editor" banner only: raw +
+        // not yet used + no editor + not Testimony. (Not a STATUS option.)
         if (stageFilter.has('raw_unused') && r.status === 'raw' && !usedRawIds.has(r.id) && !r.assigned_editor_id && r.type !== 'Testimony') return true
         if (stageFilter.has('edited_seg') && r.status === 'edited') return true
         return false
@@ -3042,7 +3043,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
   // Status counts. 'Edited' includes Joined (since Joined is a sub-state of
   // edited). 'Merged' is a narrower filter showing only Joined.
   const stageCounts = useMemo(() => ({
-    raw_used:   visibleRows.filter(r => r.status === 'raw' && usedRawIds.has(r.id)).length,
+    raw_all:    visibleRows.filter(r => r.status === 'raw').length,
     raw_unused: visibleRows.filter(r => r.status === 'raw' && !usedRawIds.has(r.id) && !r.assigned_editor_id && r.type !== 'Testimony').length,
     edited_seg: visibleRows.filter(r => r.status === 'edited').length,
   }), [visibleRows, usedRawIds])
@@ -3518,15 +3519,11 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
           <FilterDropdown label="STATUS"
             selected={stageFilter}
             options={[
-              // Three states matching Ben's mental model:
-              //   RAW         = needs editing (not used in any composite yet)
-              //   EDITED RAW  = raw clip already merged into a composite
-              //   EDITED      = a finished cut (status='edited' in the DB)
-              // The filter matcher below maps these to the existing
-              // raw_unused / raw_used / edited_seg internal values.
-              { value: 'raw_unused', label: 'RAW',        sublabel: 'needs editing',           count: stageCounts.raw_unused, dot: 'var(--down)' },
-              { value: 'raw_used',   label: 'EDITED RAW', sublabel: 'already used in a cut',   count: stageCounts.raw_used,   dot: 'var(--ink-4)' },
-              { value: 'edited_seg', label: 'EDITED',     sublabel: 'finished cut',            count: stageCounts.edited_seg, dot: 'var(--up)' },
+              // Two states only (Ben 2026-06-29 retired "Edited raw"):
+              //   RAW    = needs editing
+              //   EDITED = a finished cut (status='edited' in the DB)
+              { value: 'raw_all',    label: 'RAW',    sublabel: 'needs editing', count: stageCounts.raw_all,    dot: 'var(--down)' },
+              { value: 'edited_seg', label: 'EDITED', sublabel: 'finished cut',  count: stageCounts.edited_seg, dot: 'var(--up)' },
             ]}
             allCount={visibleRows.length}
             onChange={setStageFilter} />
