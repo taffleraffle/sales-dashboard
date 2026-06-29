@@ -7581,7 +7581,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px', gap: 10, alignItems: 'start' }}>
               <div style={{ background: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 12, overflow: 'hidden' }}>
                 <div style={{ height: 'min(62vh, 540px)', background: 'black' }}>
-                  <OptVideoPlayer key={lead.key} src={lead.src} compact
+                  <OptVideoPlayer key={lead.key} src={lead.src} compact preload="auto"
                     poster={lead.poster}
                     downloadUrl={lead.download ? toDownloadUrl(lead.download, lead.name) : undefined}
                     downloadName={lead.name || 'creative.mp4'}
@@ -7649,7 +7649,7 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
                   {(() => {
                     const dl = playerRow.final_cut_url || playerRow.drive_url || playerRow.preview_url
                     return (
-                  <OptVideoPlayer key={playerRow.id} src={playerRow.preview_proxy_url || playerRow.preview_url} compact
+                  <OptVideoPlayer key={playerRow.id} src={playerRow.preview_proxy_url || playerRow.preview_url} compact preload="auto"
                     poster={playerRow.thumbnail_url}
                     downloadUrl={dl ? toDownloadUrl(dl, rowDisplayName(playerRow)) : undefined}
                     downloadName={rowDisplayName(playerRow) || 'creative.mp4'}
