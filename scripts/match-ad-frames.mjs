@@ -87,10 +87,13 @@ const fileName = c => c.original_filename || c.custom_name || c.display_name || 
 (async () => {
   console.log(`frame matcher · threshold=${THRESHOLD} fbcdnGap=${FBCDN_GAP}ms activeOnly=${ACTIVE_ONLY} dry=${DRY}`);
 
-  // Library finals (Supabase) — modest concurrency, short gap
-  const lib = await rest('lib_creative_library?select=id,name,canonical_name,display_name,custom_name,original_filename,final_cut_url,offer_slug&final_cut_url=not.is.null&limit=5000');
-  console.log(`library finals: ${lib.length} — hashing frames…`);
-  const libFrames = await pool(lib, 3, c => frameHashes(c.final_cut_url, SB_GAP));
+  // Library finals (Supabase) — use the 720p faststart PROXY, not the raw
+  // final-cut original. ffmpeg can grab frames from a faststart proxy in a
+  // second; the originals are huge non-faststart files that time out (~80%
+  // failed in the first run). Falls back to final_cut_url if no proxy.
+  const lib = await rest('lib_creative_library?select=id,name,canonical_name,display_name,custom_name,original_filename,final_cut_url,preview_proxy_url,offer_slug&final_cut_url=not.is.null&limit=5000');
+  console.log(`library finals: ${lib.length} — hashing frames (via proxy)…`);
+  const libFrames = await pool(lib, 4, c => frameHashes(c.preview_proxy_url || c.final_cut_url, SB_GAP));
   const libIdx = lib.map((c, i) => ({ c, h: libFrames[i] })).filter(x => x.h.length);
   console.log(`library finals hashed: ${libIdx.length}`);
 

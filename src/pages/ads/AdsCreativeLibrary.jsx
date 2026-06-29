@@ -2323,6 +2323,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
   const [typeFilter, setTypeFilter]   = useState(() => new Set())
   const [offerFilter, setOfferFilter] = useState(() => new Set())  // values: offer_slug | '__none__'
   const [runFilter, setRunFilter]     = useState(() => new Set())  // values: 'yes' | 'no'
+  const [outcomeFilter, setOutcomeFilter] = useState(() => new Set())  // values: 'winner' | 'loser' | 'ungraded'
   const [creatorFilter, setCreatorFilter] = useState(() => new Set())  // values: creator name | '__none__'
   const [stageFilter, setStageFilter] = useState(() => new Set())  // values: 'raw_unused' | 'raw_used' | 'edited_seg' | 'merged'
   // Upload-date filter. Preset windows only — operator picks a quick range
@@ -2866,7 +2867,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
   // goes global like search (see the folder-scope block below + FolderBar).
   const rawQueueView = stageFilter.size === 1 && stageFilter.has('raw_unused')
   const filtersActive = typeFilter.size > 0 || offerFilter.size > 0
-    || runFilter.size > 0 || creatorFilter.size > 0
+    || runFilter.size > 0 || outcomeFilter.size > 0 || creatorFilter.size > 0
     || (stageFilter.size > 0 && !rawQueueView)
 
   const filtered = useMemo(() => {
@@ -2938,6 +2939,12 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
       if (runFilter.has('no') && !r.has_been_run) return true
       return false
     })
+    if (outcomeFilter.size > 0) list = list.filter(r => {
+      if (outcomeFilter.has('winner') && r.outcome === 'winner') return true
+      if (outcomeFilter.has('loser') && r.outcome === 'loser') return true
+      if (outcomeFilter.has('ungraded') && !r.outcome) return true
+      return false
+    })
     if (creatorFilter.size > 0) list = list.filter(r => {
       if (creatorFilter.has('__none__') && !r.creator) return true
       return r.creator && creatorFilter.has(r.creator)
@@ -2981,7 +2988,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
       })
     }
     return list
-  }, [rows, category, deferredQ, typeFilter, offerFilter, runFilter, creatorFilter, stageFilter, rawQueueView, filtersActive, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
+  }, [rows, category, deferredQ, typeFilter, offerFilter, runFilter, outcomeFilter, creatorFilter, stageFilter, rawQueueView, filtersActive, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -3033,6 +3040,9 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
 
   const runCount    = useMemo(() => visibleRows.filter(r => r.has_been_run).length, [visibleRows])
   const notRunCount = useMemo(() => visibleRows.filter(r => !r.has_been_run).length, [visibleRows])
+  const winnerCount = useMemo(() => visibleRows.filter(r => r.outcome === 'winner').length, [visibleRows])
+  const loserCount  = useMemo(() => visibleRows.filter(r => r.outcome === 'loser').length, [visibleRows])
+  const ungradedCount = useMemo(() => visibleRows.filter(r => !r.outcome).length, [visibleRows])
   // Stable reference for MatrixRow's editor dropdown — same memo concern
   // as openDrawer: avoid re-creating this array each render.
   // Excludes admins so they don't show up in assignment dropdowns.
@@ -3328,7 +3338,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
 
   // Badge for the FILTERS button: how many filter groups are active.
   const activeFilterCount =
-    stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size
+    stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size + outcomeFilter.size
 
   // Where the current selection lives, for the move picker's "current"
   // tag + no-op guard: a folder id (or null = root) only when EVERY
@@ -3554,16 +3564,25 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
             ]}
             allCount={visibleRows.length}
             onChange={setRunFilter} />
+          <FilterDropdown label="GRADE"
+            selected={outcomeFilter}
+            options={[
+              { value: 'winner',   label: 'WINNERS',  count: winnerCount,   dot: 'var(--up)' },
+              { value: 'loser',    label: 'LOSERS',   count: loserCount,    dot: 'var(--down)' },
+              { value: 'ungraded', label: 'UNGRADED', count: ungradedCount, dot: 'var(--ink-4)' },
+            ]}
+            allCount={visibleRows.length}
+            onChange={setOutcomeFilter} />
           {/* Uploaded-date filter, latest-only and the low-quality / bad-take
               show/hide toggles removed 2026-06-11 (Ben: too much noise).
               Flagged clips are now simply always hidden; their state vars
               keep their defaults so the filter pipeline is unchanged. */}
-          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size + creatorFilter.size > 0) && (
+          {(stageFilter.size + typeFilter.size + offerFilter.size + runFilter.size + outcomeFilter.size + creatorFilter.size > 0) && (
             <button type="button"
               onClick={() => {
                 setStageFilter(new Set()); setTypeFilter(new Set())
                 setOfferFilter(new Set()); setRunFilter(new Set())
-                setCreatorFilter(new Set())
+                setOutcomeFilter(new Set()); setCreatorFilter(new Set())
               }}
               style={{
                 marginLeft: 4, padding: '4px 9px',
