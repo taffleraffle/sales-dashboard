@@ -49,6 +49,18 @@ function offerColor(offer) {
   }
 }
 
+// Toggle-chip style matching the audience filter on the marketing/ads pages
+// (active = ink fill / paper text; idle = paper fill / muted ink).
+const offerChipStyle = (on) => ({
+  padding: '5px 11px', borderRadius: 8,
+  border: `1px solid ${on ? 'var(--ink)' : 'var(--rule)'}`,
+  background: on ? 'var(--ink)' : 'var(--paper)',
+  color: on ? 'var(--paper)' : 'var(--ink-3)',
+  fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
+  textTransform: 'uppercase', letterSpacing: '0.04em',
+  cursor: 'pointer', whiteSpace: 'nowrap',
+})
+
 function AdIdCell({ id }) {
   const [copied, setCopied] = useState(false)
   return (
@@ -141,7 +153,10 @@ export default function AdLibrary() {
   const [syncing, setSyncing] = useState(false)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('ran')
-  const [offerFilter, setOfferFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')   // all | video | static
+  // Multi-select offers (Set of offer labels + '__none__' for untagged).
+  // Empty set = all offers, matching the audience-chip filter on the ads pages.
+  const [selectedOffers, setSelectedOffers] = useState(() => new Set())
   const [sortKey, setSortKey] = useState('cpa')
   const [sortDir, setSortDir] = useState('asc')
   const [preview, setPreview] = useState(null)
@@ -214,15 +229,24 @@ export default function AdLibrary() {
       const cpa = a.results > 0 ? spend / a.results : null
       const isActive = (ad.effective_status || ad.status || '').toUpperCase() === 'ACTIVE'
       const outcome = outcomeOverride[ad.ad_id] !== undefined ? outcomeOverride[ad.ad_id] : (ad.outcome || null)
-      return { ...ad, spend, ctr, cpm, cpa, results: a.results, impressions: a.impressions, isActive, outcome, offer: inferOffer(ad) }
+      // notEnoughSpend: under $250 USD spend = not enough data to grade a winner.
+      // isVideo: drives the Video/Static type filter (static = anything not video).
+      return { ...ad, spend, ctr, cpm, cpa, results: a.results, impressions: a.impressions, isActive, outcome, offer: inferOffer(ad), notEnoughSpend: spend < 250, isVideo: ad.asset_type === 'video' }
     })
   }, [ads, stats, outcomeOverride, fx.rate])
 
   const offerOptions = useMemo(() => {
     const set = new Set()
-    for (const r of rows) if (r.offer) set.add(r.offer)
-    return ['all', ...[...set].sort(), '__none__']
+    let hasNone = false
+    for (const r of rows) { if (r.offer) set.add(r.offer); else hasNone = true }
+    return { offers: [...set].sort(), hasNone }
   }, [rows])
+
+  const toggleOffer = (o) => setSelectedOffers(prev => {
+    const next = new Set(prev)
+    next.has(o) ? next.delete(o) : next.add(o)
+    return next
+  })
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -230,12 +254,16 @@ export default function AdLibrary() {
       // Status scope
       if (statusFilter === 'active' && !r.isActive) return false
       if (statusFilter === 'ran' && !(r.isActive || (r.spend || 0) > 0)) return false
-      // Offer
-      if (offerFilter === '__none__' && r.offer) return false
-      else if (offerFilter !== 'all' && offerFilter !== '__none__' && r.offer !== offerFilter) return false
-      // Win/loss
+      // Offer (multi-select; empty set = all). '__none__' matches untagged ads.
+      if (selectedOffers.size > 0 && !selectedOffers.has(r.offer || '__none__')) return false
+      // Creative type
+      if (typeFilter === 'video' && !r.isVideo) return false
+      else if (typeFilter === 'static' && r.isVideo) return false
+      // Win/loss + spend-readiness
       if (outcomeFilter === 'unmarked' && r.outcome) return false
-      else if (outcomeFilter !== 'all' && outcomeFilter !== 'unmarked' && r.outcome !== outcomeFilter) return false
+      else if (outcomeFilter === 'lowspend' && !r.notEnoughSpend) return false
+      else if (outcomeFilter === 'enough' && r.notEnoughSpend) return false
+      else if (!['all', 'unmarked', 'lowspend', 'enough'].includes(outcomeFilter) && r.outcome !== outcomeFilter) return false
       if (q && !(r.ad_name || '').toLowerCase().includes(q) && !(r.campaign_name || '').toLowerCase().includes(q) && !(r.ad_id || '').includes(q)) return false
       return true
     })
@@ -248,7 +276,7 @@ export default function AdLibrary() {
       if (typeof av === 'string') return dir * av.localeCompare(bv)
       return dir * (av - bv)
     })
-  }, [rows, search, statusFilter, offerFilter, outcomeFilter, sortKey, sortDir])
+  }, [rows, search, statusFilter, typeFilter, selectedOffers, outcomeFilter, sortKey, sortDir])
 
   const setSort = (k) => {
     if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -308,15 +336,31 @@ export default function AdLibrary() {
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={selectCls}>
           {STATUS_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
         </select>
-        <select value={offerFilter} onChange={e => setOfferFilter(e.target.value)} className={selectCls}>
-          {offerOptions.map(o => <option key={o} value={o}>{o === 'all' ? 'All offers' : o === '__none__' ? 'No offer' : o}</option>)}
-        </select>
         <select value={outcomeFilter} onChange={e => setOutcomeFilter(e.target.value)} className={selectCls}>
           <option value="all">All outcomes</option>
           <option value="winner">Winners</option>
           <option value="loser">Losers</option>
           <option value="unmarked">Unmarked</option>
+          <option value="lowspend">Not enough spend (&lt;$250)</option>
+          <option value="enough">Enough spend (≥$250)</option>
         </select>
+      </div>
+
+      {/* Offer multi-select — chip row matching the audience filter on the ads pages.
+          Empty selection = all offers; click to include one or several. */}
+      <div className="mb-3 flex items-center gap-1.5 flex-wrap">
+        <span className="text-[9px] uppercase tracking-wider text-text-400 mr-1">Offers</span>
+        <button onClick={() => setSelectedOffers(new Set())} style={offerChipStyle(selectedOffers.size === 0)}>All</button>
+        {offerOptions.offers.map(o => (
+          <button key={o} onClick={() => toggleOffer(o)} style={offerChipStyle(selectedOffers.has(o))}>{o}</button>
+        ))}
+        {offerOptions.hasNone && (
+          <button onClick={() => toggleOffer('__none__')} style={offerChipStyle(selectedOffers.has('__none__'))}>No offer</button>
+        )}
+        <span className="text-[9px] uppercase tracking-wider text-text-400 ml-4 mr-1">Type</span>
+        <button onClick={() => setTypeFilter('all')} style={offerChipStyle(typeFilter === 'all')}>All</button>
+        <button onClick={() => setTypeFilter('video')} style={offerChipStyle(typeFilter === 'video')}>Video</button>
+        <button onClick={() => setTypeFilter('static')} style={offerChipStyle(typeFilter === 'static')}>Static</button>
       </div>
 
       <div className="tile overflow-x-auto p-0">
@@ -345,6 +389,10 @@ export default function AdLibrary() {
                       className={`px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border ${ad.outcome === 'winner' ? 'bg-success text-white border-success' : 'border-border-default text-text-400 hover:text-success'}`}>Win</button>
                     <button onClick={() => setOutcome(ad, 'loser')} title="Mark loser"
                       className={`px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border ${ad.outcome === 'loser' ? 'bg-danger text-white border-danger' : 'border-border-default text-text-400 hover:text-danger'}`}>Lose</button>
+                    {ad.notEnoughSpend && (
+                      <span title="Under $250 spend — not enough data to grade this creative yet"
+                        className="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border border-border-default bg-bg-primary text-text-400/70 whitespace-nowrap">Low spend</span>
+                    )}
                   </div>
                 </td>
                 <td className="px-3 py-2"><OfferTag offer={ad.offer} /></td>
