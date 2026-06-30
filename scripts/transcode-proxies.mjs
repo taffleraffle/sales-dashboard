@@ -65,11 +65,72 @@ async function download(url, dest) {
   await pipeline(Readable.fromWeb(r.body), createWriteStream(dest))
 }
 
+// 1-year immutable cache. Proxy filenames are content-unique (`id_timestamp`)
+// so they can never go stale. Without this, Supabase serves proxies with
+// `Cache-Control: no-cache` → Cloudflare's edge (Ben is on the Auckland PoP)
+// REVALIDATES against the US origin on every request AND every scrub-seek, so
+// playback + scrubbing pay a trans-Pacific round-trip each time. With it the
+// edge serves the bytes straight from Auckland (CF-Cache-Status: HIT).
+const CACHE_CONTROL = '31536000'
+
 async function uploadPublic(path, localFile, contentType) {
   const bytes = readFileSync(localFile)
-  const { error } = await sb.storage.from(BUCKET).upload(path, bytes, { contentType, upsert: true })
+  const { error } = await sb.storage.from(BUCKET).upload(path, bytes, { contentType, upsert: true, cacheControl: CACHE_CONTROL })
   if (error) throw error
   return `${URL_BASE}/storage/v1/object/public/${BUCKET}/${path}`
+}
+
+// Re-tag an EXISTING proxy object with the long cache header without
+// re-transcoding: download the small proxy and re-upload it to the same path
+// with cacheControl set. The stored object's metadata (hence the served
+// Cache-Control header) is rewritten; the URL is unchanged so no DB update is
+// needed. Used by --retag to fix the back-catalogue uploaded before
+// CACHE_CONTROL existed.
+function proxyPathFromUrl(url) {
+  const m = String(url).match(new RegExp(`/object/public/${BUCKET}/(.+)$`))
+  return m ? decodeURIComponent(m[1].split('?')[0]) : null
+}
+async function retagOne(url) {
+  const path = proxyPathFromUrl(url)
+  if (!path) return false
+  const dir = mkdtempSync(join(tmpdir(), 'opt-retag-'))
+  const tmp = join(dir, 'proxy.mp4')
+  try {
+    await download(url, tmp)
+    const ct = path.endsWith('.jpg') ? 'image/jpeg' : 'video/mp4'
+    const bytes = readFileSync(tmp)
+    const { error } = await sb.storage.from(BUCKET).upload(path, bytes, { contentType: ct, upsert: true, cacheControl: CACHE_CONTROL })
+    if (error) throw error
+    return true
+  } catch (e) {
+    console.log(`  ✗ retag ${path}: ${e.message}`)
+    return false
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+async function retagAll() {
+  // Pull every distinct proxy URL across both tables, re-tag each.
+  const urls = new Set()
+  for (const t of ['lib_creative_library', 'lib_task_submissions']) {
+    let from = 0
+    for (;;) {
+      const { data, error } = await sb.from(t).select('preview_proxy_url').not('preview_proxy_url', 'is', null).range(from, from + 999)
+      if (error) { console.error(`${t}:`, error.message); break }
+      data.forEach(r => r.preview_proxy_url && urls.add(r.preview_proxy_url))
+      if (data.length < 1000) break
+      from += 1000
+    }
+  }
+  const list = [...urls]
+  console.log(`Re-tagging ${list.length} proxy object(s) with cacheControl=${CACHE_CONTROL}…`)
+  let ok = 0
+  for (let i = 0; i < list.length; i++) {
+    process.stdout.write(`  [${i + 1}/${list.length}] `)
+    if (await retagOne(list[i])) { ok++; console.log('✓') }
+  }
+  console.log(`\nDone. ${ok}/${list.length} re-tagged.`)
 }
 
 async function processOne(row) {
@@ -108,6 +169,7 @@ async function processOne(row) {
 }
 
 async function main() {
+  if (args.includes('--retag')) { await retagAll(); return }
   const cols = `id, ${TABLE.srcCol}, thumbnail_url`
   let q = sb.from(TABLE.table)
     .select(cols)

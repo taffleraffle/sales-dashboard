@@ -177,16 +177,31 @@ export const OptVideoPlayer = memo(forwardRef(function OptVideoPlayer(
     }
   }, [duration])
 
-  // Teardown — same cleanup pattern as the rest of the codebase.
+  // Load the new source whenever `src` changes. Swapping the src attribute on
+  // an already-initialised <video> doesn't reliably re-fetch on its own, so we
+  // call load() explicitly. This effect must NOT also tear the src down on
+  // change: the detail modal flips src from the raw proxy to the edit proxy
+  // the moment its async approvedSub fetch resolves (same React key, so no
+  // remount). The old teardown ran on every src change and — because effect
+  // cleanup fires AFTER React commits the new src — stripped the just-set src
+  // back out, leaving the <video> blank at 0:00/0:00. That was the "edited
+  // version is impossible to watch, some play some don't" race (Ben
+  // 2026-06-30): it only broke when approvedSub resolved AFTER first paint.
   useEffect(() => {
-    if (!src) return
     const v = videoRef.current
+    if (!v || !src) return
+    try { v.load() } catch {}
+  }, [src])
+  // Teardown only on unmount — pausing + releasing the source so we don't keep
+  // a detached <video> buffering. Empty deps so it never fires on a src swap.
+  useEffect(() => {
     return () => {
+      const v = videoRef.current
       if (!v) return
       try { v.pause() } catch {}
       try { v.removeAttribute('src'); v.load() } catch {}
     }
-  }, [src])
+  }, [])
 
   // Keyboard shortcuts. Modal-only — when multiple compact inline
   // players are mounted in a SubmissionsPanel (one per expanded

@@ -7029,10 +7029,19 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
     // browser can't start playing until the WHOLE thing downloads → stuck at
     // 0:00 (Ben 2026-06-29: "none of the videos can be played"). Order: edit's
     // proxy → the clip's own proxy → only then heavy originals as last resort.
-    src: approvedSub?.preview_proxy_url || row.preview_proxy_url || approvedSub?.file_url || row.final_cut_url || row.preview_url,
+    // Order: the EDIT's fast proxy → the edit original (only when this row
+    // actually carries an edit) → the raw's proxy → the raw original. Putting
+    // the raw proxy ABOVE the edit original was wrong — an edited clip with no
+    // edit-proxy yet would silently play the RAW clip ("default video instead
+    // of the normal one", Ben 2026-06-30). Now it plays the real edit.
+    src: approvedSub?.preview_proxy_url
+      || (hasRowEdit ? (approvedSub?.file_url || row.final_cut_url) : null)
+      || row.preview_proxy_url || row.preview_url,
     poster: approvedSub?.thumbnail_url || row.thumbnail_url,
     download: row.final_cut_url, name: rowDisplayName(row),
-    key: 'edit-' + (approvedSub?.file_url || row.final_cut_url || row.id),
+    // Key must change once the edit proxy resolves so the player remounts onto
+    // the proxy cleanly instead of swapping src under the same key.
+    key: 'edit-' + (approvedSub?.preview_proxy_url || approvedSub?.file_url || row.final_cut_url || row.id),
     // Honest label: final_cut_url is set on every upload, not just approval.
     label: (editApproved ? 'Approved edit' : 'Edited cut')
       + (approvedSub?.version_number ? ` · v${approvedSub.version_number}` : ''),
