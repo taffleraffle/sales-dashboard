@@ -2583,7 +2583,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
   // of transcript = 600KB+ wasted on the first paint. Pulling without it
   // cuts the initial payload roughly in half. Transcripts get lazy-loaded
   // in a follow-up query after first paint so library search still works.
-  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,final_cut_thumbnail_url,content_category,outcome,enough_spend,preview_url,preview_proxy_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id'
+  const LIB_LEAN_COLS = 'id,name,canonical_name,description,type,creator,status,offer_slug,has_been_run,manually_marked_used,assigned_editor_id,parent_id,version_number,thumbnail_url,final_cut_thumbnail_url,content_category,outcome,enough_spend,preview_url,preview_proxy_url,final_cut_proxy_url,drive_url,size_mb,duration_seconds,v21_script_id,derived_hook_id,derived_body_id,derivation_score,stage_rough_cut,stage_final_cut,stage_approved,stage_delivered,rough_cut_url,final_cut_url,approved_url,delivered_url,exclude_from_library,added_at,updated_at,notes,priority,source_bucket,drive_id,is_low_quality,low_quality_reason,low_quality_actual_mb,is_bad_take,bad_take_reason,folder_id'
 
   const load = useCallback(async (background = false, attempt = 0) => {
     if (!background) setLoading(true)
@@ -7034,14 +7034,14 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
     // the raw proxy ABOVE the edit original was wrong — an edited clip with no
     // edit-proxy yet would silently play the RAW clip ("default video instead
     // of the normal one", Ben 2026-06-30). Now it plays the real edit.
-    src: approvedSub?.preview_proxy_url
+    src: approvedSub?.preview_proxy_url || row.final_cut_proxy_url
       || (hasRowEdit ? (approvedSub?.file_url || row.final_cut_url) : null)
       || row.preview_proxy_url || row.preview_url,
     poster: approvedSub?.thumbnail_url || row.thumbnail_url,
     download: row.final_cut_url, name: rowDisplayName(row),
     // Key must change once the edit proxy resolves so the player remounts onto
     // the proxy cleanly instead of swapping src under the same key.
-    key: 'edit-' + (approvedSub?.preview_proxy_url || approvedSub?.file_url || row.final_cut_url || row.id),
+    key: 'edit-' + (approvedSub?.preview_proxy_url || row.final_cut_proxy_url || approvedSub?.file_url || row.final_cut_url || row.id),
     // Honest label: final_cut_url is set on every upload, not just approval.
     label: (editApproved ? 'Approved edit' : 'Edited cut')
       + (approvedSub?.version_number ? ` · v${approvedSub.version_number}` : ''),

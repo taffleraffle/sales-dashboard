@@ -40,9 +40,15 @@ const BUCKET = 'creative-uploads'
 // Which table to proxy. Both share the same proxy/poster columns; only the
 // source-URL column differs. lib_creative_library plays preview_url (the raw
 // upload), lib_task_submissions plays file_url (the editor's cut).
+// proxyCol = the column the generated proxy URL is written to (defaults to
+// preview_proxy_url). library_edit proxies the EDITED cut (final_cut_url) into
+// final_cut_proxy_url for rows whose edit isn't backed by a submission row —
+// `editOnly` makes it skip rows where final_cut_url === preview_url (no real
+// edit) since PostgREST can't express a column<>column filter server-side.
 const TABLES = {
-  library:     { table: 'lib_creative_library', srcCol: 'preview_url', hasDeletedAt: false },
-  submissions: { table: 'lib_task_submissions', srcCol: 'file_url',    hasDeletedAt: true },
+  library:      { table: 'lib_creative_library', srcCol: 'preview_url',   proxyCol: 'preview_proxy_url',   hasDeletedAt: false },
+  submissions:  { table: 'lib_task_submissions', srcCol: 'file_url',      proxyCol: 'preview_proxy_url',   hasDeletedAt: true },
+  library_edit: { table: 'lib_creative_library', srcCol: 'final_cut_url', proxyCol: 'final_cut_proxy_url', hasDeletedAt: false, editOnly: true },
 }
 const TABLE = TABLES[opt('--table', 'library')]
 if (!TABLE) { console.error('--table must be library|submissions'); process.exit(1) }
@@ -154,7 +160,7 @@ async function processOne(row) {
     const stamp = Date.now()
     const proxyUrl = await uploadPublic(`proxies/${row.id}_${stamp}.mp4`, proxy, 'video/mp4')
     const posterUrl = await uploadPublic(`proxies/${row.id}_${stamp}.jpg`, poster, 'image/jpeg')
-    const patch = { preview_proxy_url: proxyUrl }
+    const patch = { [TABLE.proxyCol]: proxyUrl }
     if (!row.thumbnail_url) patch.thumbnail_url = posterUrl
     const { error } = await sb.from(TABLE.table).update(patch).eq('id', row.id)
     if (error) throw error
@@ -170,10 +176,12 @@ async function processOne(row) {
 
 async function main() {
   if (args.includes('--retag')) { await retagAll(); return }
-  const cols = `id, ${TABLE.srcCol}, thumbnail_url`
+  // editOnly needs preview_url too so we can skip rows whose "edit" is just the
+  // raw (final_cut_url === preview_url) — PostgREST can't filter column<>column.
+  const cols = `id, ${TABLE.srcCol}, thumbnail_url${TABLE.editOnly ? ', preview_url' : ''}`
   let q = sb.from(TABLE.table)
     .select(cols)
-    .is('preview_proxy_url', null)
+    .is(TABLE.proxyCol, null)
     .not(TABLE.srcCol, 'is', null)
     .limit(LIMIT)
   if (TABLE.hasDeletedAt) q = q.is('deleted_at', null)
@@ -182,8 +190,9 @@ async function main() {
     // drop the proxy-null guard so it re-transcodes even if a proxy exists.
     q = sb.from(TABLE.table).select(cols).eq('id', ONLY_ID)
   }
-  const { data, error } = await q
+  let { data, error } = await q
   if (error) { console.error('query failed:', error.message); process.exit(1) }
+  if (TABLE.editOnly && data) data = data.filter(r => r[TABLE.srcCol] !== r.preview_url)
   if (!data?.length) { console.log(`Nothing to transcode — all ${TABLE.table} rows have proxies.`); return }
   console.log(`Transcoding ${data.length} ${TABLE.table} row(s)…`)
   let ok = 0
