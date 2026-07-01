@@ -307,7 +307,7 @@ export default function CommissionForecast() {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 340px) 1fr', gap: 20, alignItems: 'start' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 384px) 1fr', gap: 20, alignItems: 'start' }}>
             {/* LEFT — inputs */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {/* Goal */}
@@ -451,23 +451,24 @@ function Snap({ label, value }) {
 
 function Field({ label, hint, suffix, prefix, value, baseline, onChange, fmtBase = (n) => n, status, last }) {
   return (
-    <div style={{ marginBottom: last ? 0 : 14 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 5 }}>
-        <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink-2)' }}>{label}</label>
+    <div style={{ marginBottom: last ? 0 : 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+        <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)' }}>{label}</label>
         {hint && <span style={{ fontSize: 9.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>{hint}</span>}
       </div>
-      <div style={{ position: 'relative' }}>
-        {prefix && <span style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-4)', fontSize: 12 }}>{prefix}</span>}
-        <input type="number" inputMode="decimal" value={value ?? ''} onChange={(e) => onChange(e.target.value)}
-          placeholder={String(fmtBase(baseline))}
-          style={{ ...inputStyle, paddingLeft: prefix ? 22 : 12, paddingRight: suffix ? 26 : 12, fontVariantNumeric: 'tabular-nums' }} />
-        {suffix && <span style={{ position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-4)', fontSize: 12 }}>{suffix}</span>}
+      {/* Input + status on one row — the up/down chip sits right beside the field */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ position: 'relative', flex: 1 }}>
+          {prefix && <span style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-4)', fontSize: 15 }}>{prefix}</span>}
+          <input type="number" inputMode="decimal" value={value ?? ''} onChange={(e) => onChange(e.target.value)}
+            placeholder={String(fmtBase(baseline))}
+            style={{ ...inputStyle, height: 46, fontSize: 17, fontWeight: 500, paddingLeft: prefix ? 26 : 14, paddingRight: suffix ? 30 : 14, fontVariantNumeric: 'tabular-nums' }} />
+          {suffix && <span style={{ position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-4)', fontSize: 14 }}>{suffix}</span>}
+        </div>
+        {status && <div style={{ flexShrink: 0 }}>{status}</div>}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 5 }}>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.04em' }}>
-          now: {prefix || ''}{fmtBase(baseline)}{suffix || ''}
-        </span>
-        {status}
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.04em', marginTop: 5 }}>
+        now: {prefix || ''}{fmtBase(baseline)}{suffix || ''}
       </div>
     </div>
   )
@@ -480,18 +481,24 @@ function Field({ label, hint, suffix, prefix, value, baseline, onChange, fmtBase
 function RateStatus({ row, isTop, hasVolume }) {
   const { target, upside, below } = row
   const color = below ? 'var(--down)' : 'var(--up)'
+  const bg = below ? 'rgba(180,35,24,0.09)' : 'rgba(31,122,58,0.10)'
   const showUpside = below && hasVolume && upside > 0.5
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, minWidth: 78 }}
       title={`Target ${one(target)}%`}>
       {isTop && below && (
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 7.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink)', background: 'var(--accent)', padding: '2px 5px', borderRadius: 4 }}>Focus</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 7.5, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--ink)', background: 'var(--accent)', padding: '2px 6px', borderRadius: 5 }}>Focus</span>
       )}
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700, color, letterSpacing: '0.03em', whiteSpace: 'nowrap' }}>
-        <span style={{ fontSize: 11, lineHeight: 1 }}>{below ? '▼' : '▴'}</span>
-        {below ? (showUpside ? `+${shortMoney(upside)}/mo` : `↑ ${one(target)}%`) : 'on target'}
-      </span>
-    </span>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '8px 10px', borderRadius: 9, background: bg,
+        border: `1px solid ${below ? 'rgba(180,35,24,0.25)' : 'rgba(31,122,58,0.25)'}`,
+        color, fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, letterSpacing: '0.02em', whiteSpace: 'nowrap',
+      }}>
+        <span style={{ fontSize: 13, lineHeight: 1 }}>{below ? '▼' : '▴'}</span>
+        {below ? (showUpside ? `+${shortMoney(upside)}/mo` : `to ${one(target)}%`) : 'on target'}
+      </div>
+    </div>
   )
 }
 
