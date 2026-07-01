@@ -34,12 +34,22 @@ const TARGETS = { showRate: 70, closeRate: 30, ascRate: 40, pifRate: 35 }
 
 // ── formatting helpers ──────────────────────────────────────────────────────
 const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('en-US')
+const shortMoney = (n) => {
+  const v = Number(n) || 0
+  return v >= 1000 ? '$' + (v / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : '$' + Math.round(v)
+}
 const int = (n) => Math.max(0, Math.ceil(Number(n) || 0)).toLocaleString('en-US')
 const one = (n) => (Number(n) || 0).toFixed(1)
 const numOr = (v, fallback) => {
   if (v === '' || v === null || v === undefined) return fallback
   const n = Number(v)
   return Number.isFinite(n) ? n : fallback
+}
+// Like numOr but also rejects 0 — for rates/amounts where 0 means "no data",
+// so a closer with empty cash/rate fields still gets a usable default.
+const posOr = (v, fallback) => {
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
 export default function CommissionForecast() {
@@ -76,22 +86,23 @@ export default function CommissionForecast() {
     const ascendRevenue = stats.ascendRevenue || 0
     const cash = stats.cash || 0
 
-    const trialRate = numOr(settings?.commission_rate, 10)                       // %
-    const ascComRate = numOr(settings?.ascension_rate, settings?.commission_rate) // %
-    const ascComEff = Number.isFinite(ascComRate) ? ascComRate : 5
+    // Commission rates (reject 0 = "not set" → sensible default).
+    const trialRate = posOr(settings?.commission_rate, 10)                        // %
+    const ascComEff = posOr(settings?.ascension_rate, posOr(settings?.commission_rate, 5)) // %
 
-    // Per-event cash (fall back to sensible defaults for a closer with no
-    // history yet, so the calculator still works).
-    const trialCash = closes > 0 ? Math.max(0, cash - ascendCash) / closes : 2000
-    const ascCash = ascensions > 0 ? ascendCash / ascensions : 1500
-    const pifValue = ascensions > 0 && ascendRevenue > 0 ? ascendRevenue / ascensions : ascCash * 6
+    // Per-event cash. Reject 0 so a closer whose EOD cash fields are empty (or
+    // who has no history yet) still gets usable, editable defaults instead of
+    // a $0 payout that makes the forecast blow up.
+    const trialCash = posOr(closes > 0 ? Math.max(0, cash - ascendCash) / closes : 0, 2000)
+    const ascCash = posOr(ascensions > 0 ? ascendCash / ascensions : 0, 1500)
+    const pifValue = posOr(ascensions > 0 ? ascendRevenue / ascensions : 0, ascCash * 6)
 
     return {
       showRate: ncBooked > 0 ? (liveNC / ncBooked) * 100 : 65,        // live ÷ booked
       closeRate: liveNC > 0 ? (closes / liveNC) * 100 : 25,           // closes ÷ live call
       ascRate: closes > 0 ? (ascensions / closes) * 100 : 30,         // ascensions ÷ closes
       pifRate: 30,                                                     // no per-closer PIF tracking → assumption
-      commClose: trialCash * (numOr(trialRate, 10) / 100),            // $ per trial close
+      commClose: trialCash * (trialRate / 100),                       // $ per trial close
       commAsc: ascCash * (ascComEff / 100),                           // $ per ascension per month
       commPif: pifValue * (ascComEff / 100),                          // $ per PIF
       // raw window snapshot (for the "how it's tracking" strip + on-track calc)
@@ -225,6 +236,13 @@ export default function CommissionForecast() {
     return { rows, topKey: top?.key }
   }, [baseline, pace.booked, commMonths])
 
+  // Inline up/down indicator for a funnel rate, shown next to its input.
+  const rateStatus = (key) => {
+    const r = improve.rows.find((x) => x.key === key)
+    if (!r) return null
+    return <RateStatus row={r} isTop={key === improve.topKey} hasVolume={pace.booked > 0} />
+  }
+
   const loading = rosterLoading || (isAdmin && !selectedId)
 
   return (
@@ -320,10 +338,10 @@ export default function CommissionForecast() {
                       style={resetBtn}><RotateCcw size={11} /> Reset</button>
                   )}
                 </div>
-                <Field label="Show rate" hint="live ÷ booked calls" suffix="%" value={ovr.showRate} baseline={baseline.showRate} onChange={set('showRate')} fmtBase={one} />
-                <Field label="Close rate" hint="closes ÷ live calls" suffix="%" value={ovr.closeRate} baseline={baseline.closeRate} onChange={set('closeRate')} fmtBase={one} />
-                <Field label="Ascension rate" hint="ascensions ÷ closes" suffix="%" value={ovr.ascRate} baseline={baseline.ascRate} onChange={set('ascRate')} fmtBase={one} />
-                <Field label="PIF rate" hint="paid-in-full ÷ ascensions" suffix="%" value={ovr.pifRate} baseline={baseline.pifRate} onChange={set('pifRate')} fmtBase={one} last />
+                <Field label="Show rate" hint="live ÷ booked calls" suffix="%" value={ovr.showRate} baseline={baseline.showRate} onChange={set('showRate')} fmtBase={one} status={rateStatus('showRate')} />
+                <Field label="Close rate" hint="closes ÷ live calls" suffix="%" value={ovr.closeRate} baseline={baseline.closeRate} onChange={set('closeRate')} fmtBase={one} status={rateStatus('closeRate')} />
+                <Field label="Ascension rate" hint="ascensions ÷ closes" suffix="%" value={ovr.ascRate} baseline={baseline.ascRate} onChange={set('ascRate')} fmtBase={one} status={rateStatus('ascRate')} />
+                <Field label="PIF rate" hint="paid-in-full ÷ ascensions" suffix="%" value={ovr.pifRate} baseline={baseline.pifRate} onChange={set('pifRate')} fmtBase={one} status={rateStatus('pifRate')} last />
               </div>
 
               {/* Payout per event */}
@@ -383,21 +401,6 @@ export default function CommissionForecast() {
                     ]} total={projTotal} />
                   </div>
 
-                  {/* Where to improve — weakest lever first */}
-                  <div style={panelStyle}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <span className="eyebrow" style={{ fontSize: 9 }}>Where to improve</span>
-                      <span style={{ fontSize: 9.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>upside at your current volume</span>
-                    </div>
-                    {pace.booked <= 0 ? (
-                      <p style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>No tracked activity yet — once EOD data lands, this shows which rate to lift first.</p>
-                    ) : (
-                      improve.rows.map((m, i) => (
-                        <ImproveRow key={m.key} {...m} isTop={m.key === improve.topKey} last={i === improve.rows.length - 1} />
-                      ))
-                    )}
-                  </div>
-
                   {/* On-track vs current pace */}
                   <div style={panelStyle}>
                     <span className="eyebrow" style={{ fontSize: 9, marginBottom: 12, display: 'inline-flex' }}>Are you on track?</span>
@@ -446,7 +449,7 @@ function Snap({ label, value }) {
   )
 }
 
-function Field({ label, hint, suffix, prefix, value, baseline, onChange, fmtBase = (n) => n, last }) {
+function Field({ label, hint, suffix, prefix, value, baseline, onChange, fmtBase = (n) => n, status, last }) {
   return (
     <div style={{ marginBottom: last ? 0 : 14 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 5 }}>
@@ -460,10 +463,35 @@ function Field({ label, hint, suffix, prefix, value, baseline, onChange, fmtBase
           style={{ ...inputStyle, paddingLeft: prefix ? 22 : 12, paddingRight: suffix ? 26 : 12, fontVariantNumeric: 'tabular-nums' }} />
         {suffix && <span style={{ position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-4)', fontSize: 12 }}>{suffix}</span>}
       </div>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', marginTop: 4, letterSpacing: '0.04em' }}>
-        now: {prefix || ''}{fmtBase(baseline)}{suffix || ''}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 5 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.04em' }}>
+          now: {prefix || ''}{fmtBase(baseline)}{suffix || ''}
+        </span>
+        {status}
       </div>
     </div>
+  )
+}
+
+// Inline "up/down vs target" chip shown next to a funnel rate — this is the
+// per-rate improvement read (Ben 2026-07-01: "I need to see it next to show
+// rate / close rate / ascension rate"). Red ▼ + $/mo upside when below target,
+// green ▲ when at/above, plus a "biggest lever" flag on the weakest one.
+function RateStatus({ row, isTop, hasVolume }) {
+  const { target, upside, below } = row
+  const color = below ? 'var(--down)' : 'var(--up)'
+  const showUpside = below && hasVolume && upside > 0.5
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+      title={`Target ${one(target)}%`}>
+      {isTop && below && (
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 7.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink)', background: 'var(--accent)', padding: '2px 5px', borderRadius: 4 }}>Focus</span>
+      )}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700, color, letterSpacing: '0.03em', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 11, lineHeight: 1 }}>{below ? '▼' : '▴'}</span>
+        {below ? (showUpside ? `+${shortMoney(upside)}/mo` : `↑ ${one(target)}%`) : 'on target'}
+      </span>
+    </span>
   )
 }
 
@@ -498,39 +526,6 @@ function StackBar({ parts, total }) {
             <span style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{money(p.value)}</span>
           </div>
         ))}
-      </div>
-    </div>
-  )
-}
-
-function ImproveRow({ label, cur, target, upside, below, isTop, last }) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '11px 12px', margin: last ? 0 : '0 0 6px',
-      borderRadius: 9,
-      background: isTop ? 'var(--accent-soft)' : 'transparent',
-      border: `1px solid ${isTop ? 'var(--accent)' : 'var(--rule)'}`,
-    }}>
-      <span style={{ fontSize: 15, lineHeight: 1, color: below ? 'var(--down)' : 'var(--up)' }}>{below ? '▾' : '▴'}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)' }}>{label}</span>
-          {isTop && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink)', background: 'var(--accent)', padding: '2px 6px', borderRadius: 5 }}>Biggest lever</span>}
-        </div>
-        <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2 }}>
-          {one(cur)}% now · target {one(target)}%
-        </div>
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        {below && upside > 0.5 ? (
-          <>
-            <div style={{ fontFamily: 'var(--serif)', fontSize: 15, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>+{money(upside)}</div>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-4)', letterSpacing: '0.04em' }}>/ MO IF LIFTED</div>
-          </>
-        ) : (
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: 'var(--up)', letterSpacing: '0.04em' }}>✓ on target</span>
-        )}
       </div>
     </div>
   )
