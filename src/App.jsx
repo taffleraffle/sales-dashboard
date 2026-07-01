@@ -54,6 +54,7 @@ import CallData from './pages/CallData'
 // download when the user actually navigates to them. Biggest wins:
 // EODReview (3.3k lines) and MarketingPerformance (1.3k lines).
 const CloserDetail = lazyWithReload(() => import('./pages/CloserDetail'))
+const CommissionForecast = lazyWithReload(() => import('./pages/CommissionForecast'))
 const SetterDetail = lazyWithReload(() => import('./pages/SetterDetail'))
 const SetterKPIHistory = lazyWithReload(() => import('./pages/SetterKPIHistory'))
 const PipelinePerformance = lazyWithReload(() => import('./pages/PipelinePerformance'))
@@ -320,6 +321,7 @@ export default function App() {
               <Route path="/sales/downsells" element={<Suspense fallback={<PageSkeleton />}><DownsellsListPage /></Suspense>} />
               <Route path="/sales/downsells/new" element={<Suspense fallback={<PageSkeleton />}><DownsellsNewPage /></Suspense>} />
               <Route path="/sales/downsells/:id" element={<Suspense fallback={<PageSkeleton />}><DownsellsSessionPage /></Suspense>} />
+              <Route path="/sales/commission-forecast" element={<Suspense fallback={<PageSkeleton />}><CommissionForecast /></Suspense>} />
               <Route path="/sales/commissions" element={<Suspense fallback={<PageSkeleton />}><CommissionPage /></Suspense>} />
               <Route path="/sales/commissions/:id" element={<Suspense fallback={<PageSkeleton />}><CommissionDetail /></Suspense>} />
               <Route path="/sales/setter-bot" element={<Suspense fallback={<PageSkeleton />}><SetterBot /></Suspense>} />
