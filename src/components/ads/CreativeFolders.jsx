@@ -80,6 +80,8 @@ export const FolderBar = memo(function FolderBar({
   folders, currentFolderId, onNavigate,
   clipCounts,            // Map folder_id → clip count (as shown when opened)
   searching = false,     // true while a search query is active (search is global)
+  showAll = false,       // "Show everything" on — root grid includes filed clips
+  onToggleShowAll,       // () => void — flip the show-everything toggle
   canManage,
   onCreate,              // (name) => Promise — page inserts + syncs state
   onRename,              // (folder, name) => Promise
@@ -204,6 +206,32 @@ export const FolderBar = memo(function FolderBar({
           }}>search covers all folders</span>
         )}
         <span style={{ flex: 1 }} />
+        {/* Show everything — root-only toggle that flattens filed clips into the
+            grid so nothing hides inside folders. Meaningless while searching
+            (search is already global) and while inside a folder (folder scope
+            wins), so it only renders at the root. */}
+        {!currentFolderId && !searching && folders.length > 0 && onToggleShowAll && (
+          <button type="button" onClick={onToggleShowAll}
+            title={showAll
+              ? 'Showing every clip, including those filed in folders. Click to show only un-filed clips.'
+              : 'Show every clip in one grid, including clips filed inside folders.'}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+              marginRight: 8, padding: '5px 11px',
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              cursor: 'pointer', borderRadius: 9,
+              background: showAll ? 'var(--accent)' : 'transparent',
+              color: showAll ? 'var(--ink)' : 'var(--ink-3)',
+              border: `1px solid ${showAll ? 'var(--accent)' : 'var(--rule)'}`,
+            }}>
+            <span aria-hidden style={{
+              width: 8, height: 8, borderRadius: 2,
+              background: showAll ? 'var(--ink)' : 'var(--ink-4)',
+            }} />
+            {showAll ? 'Showing all' : 'Show all clips'}
+          </button>
+        )}
         {canManage && (
           <button type="button" onClick={() => setNameModal({ create: true })}
             style={{

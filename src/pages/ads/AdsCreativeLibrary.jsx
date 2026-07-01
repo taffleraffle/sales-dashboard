@@ -2343,6 +2343,13 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
   // visible and no UI left to hide them.
   const [hideLowQuality] = useState(true)
   const [hideBadTakes] = useState(true)
+  // "Show everything" — flatten filed clips into the root grid so the operator
+  // sees EVERY clip in one place, folder contents included, instead of only
+  // un-filed ones (Ben 2026-07-01: "I need a filter to see every single thing
+  // in here, including what's in the folders"). Folder cards stay visible for
+  // navigation; this only lifts the root's un-filed-only restriction. Root-only
+  // — inside a folder the folder scope still wins.
+  const [showAllClips, setShowAllClips] = useState(false)
   // Column sort for the Matrix view. sortKey = '' means default order
   // (insertion / added_at desc). Clicking a header sets the key; clicking
   // the same key again toggles direction.
@@ -2903,8 +2910,9 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
     if (folderId) {
       // Inside a folder: always scope to that folder's direct clips.
       list = list.filter(r => r.folder_id === folderId)
-    } else if (hasFolders && !rawQueueView && !search && !filtersActive) {
-      // Root browse with no search/filter: show only un-filed clips.
+    } else if (hasFolders && !rawQueueView && !search && !filtersActive && !showAllClips) {
+      // Root browse with no search/filter: show only un-filed clips — UNLESS
+      // "Show everything" is on, which flattens filed clips into the root grid.
       list = list.filter(r => !r.folder_id)
     }
     if (search) list = list.filter(r => {
@@ -2988,7 +2996,7 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
       })
     }
     return list
-  }, [rows, category, deferredQ, typeFilter, offerFilter, runFilter, outcomeFilter, creatorFilter, stageFilter, rawQueueView, filtersActive, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders])
+  }, [rows, category, deferredQ, typeFilter, offerFilter, runFilter, outcomeFilter, creatorFilter, stageFilter, rawQueueView, filtersActive, hideLowQuality, hideBadTakes, sortKey, sortDir, usedRawIds, folderId, hasFolders, showAllClips])
 
   // Header click handler — passed down to the Matrix header row.
   // First click on a column: asc. Second click: desc. Third click: clear.
@@ -3632,6 +3640,8 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
           onNavigate={navigateFolder}
           clipCounts={folderClipCounts}
           searching={Boolean(deferredQ.trim()) || filtersActive}
+          showAll={showAllClips}
+          onToggleShowAll={() => setShowAllClips(v => !v)}
           canManage={scope.canEditCreative}
           onCreate={createFolder}
           onRename={renameFolder}
