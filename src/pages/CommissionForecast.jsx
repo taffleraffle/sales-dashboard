@@ -28,6 +28,10 @@ import Select from '../components/editorial/Select'
 
 const WINDOW_DAYS = 90
 
+// Healthy funnel benchmarks used by the "Where to improve" diagnostic. Rough
+// closer-industry targets — tune to OPT's real benchmarks when we have them.
+const TARGETS = { showRate: 70, closeRate: 30, ascRate: 40, pifRate: 35 }
+
 // ── formatting helpers ──────────────────────────────────────────────────────
 const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('en-US')
 const int = (n) => Math.max(0, Math.ceil(Number(n) || 0)).toLocaleString('en-US')
@@ -62,7 +66,10 @@ export default function CommissionForecast() {
 
   // ── Baselines pulled from real data (all editable via overrides) ──────────
   const baseline = useMemo(() => {
-    const liveCalls = stats.liveCalls || 0
+    // NC-anchored funnel (matches how the tracked close/show rates are defined):
+    // booked new calls → (show rate) → live new calls → (close rate) → closes …
+    const ncBooked = stats.ncBooked || 0
+    const liveNC = stats.liveNC || 0
     const closes = stats.closes || 0
     const ascensions = stats.ascensions || 0          // EOD `deposits`
     const ascendCash = stats.ascendCash || 0
@@ -80,14 +87,15 @@ export default function CommissionForecast() {
     const pifValue = ascensions > 0 && ascendRevenue > 0 ? ascendRevenue / ascensions : ascCash * 6
 
     return {
-      closeRate: liveCalls > 0 ? (closes / liveCalls) * 100 : 25,      // closes ÷ live calls
-      ascRate: closes > 0 ? (ascensions / closes) * 100 : 30,          // ascensions ÷ closes
+      showRate: ncBooked > 0 ? (liveNC / ncBooked) * 100 : 65,        // live ÷ booked
+      closeRate: liveNC > 0 ? (closes / liveNC) * 100 : 25,           // closes ÷ live call
+      ascRate: closes > 0 ? (ascensions / closes) * 100 : 30,         // ascensions ÷ closes
       pifRate: 30,                                                     // no per-closer PIF tracking → assumption
       commClose: trialCash * (numOr(trialRate, 10) / 100),            // $ per trial close
-      commAsc: ascCash * (ascComEff / 100),                           // $ per monthly ascension
+      commAsc: ascCash * (ascComEff / 100),                           // $ per ascension per month
       commPif: pifValue * (ascComEff / 100),                          // $ per PIF
       // raw window snapshot (for the "how it's tracking" strip + on-track calc)
-      _liveCalls: liveCalls, _closes: closes, _ascensions: ascensions,
+      _booked: ncBooked, _liveCalls: liveNC, _closes: closes, _ascensions: ascensions,
     }
   }, [stats, settings])
 
@@ -96,20 +104,32 @@ export default function CommissionForecast() {
   const [ovr, setOvr] = useState({})
   const [goalStr, setGoalStr] = useState('')
   const [workDaysStr, setWorkDaysStr] = useState('22')
+  // Ascension commission is a ROLLING payout: the closer earns on the client's
+  // payments for the first N months (Ben 2026-07-01: "$300/mo for three months
+  // = $900 per ascension"). In steady state that's N overlapping monthly
+  // cohorts, so a monthly ascension is worth N× its monthly commission — which
+  // is why the earlier one-month model overstated the calls needed. PIF is
+  // collected upfront (one lump), so it is NOT multiplied.
+  const [monthsStr, setMonthsStr] = useState('3')
+  // Cost per booked call (marketing spend ÷ booked calls). The closer doesn't
+  // control it, but it turns the activity target into "$ of ad spend required"
+  // and shows what a lead costs. Manual for now — no per-closer spend feed yet.
+  const [cpbcStr, setCpbcStr] = useState('')
   useEffect(() => { setOvr({}) }, [selectedId])
 
   const eff = (key) => numOr(ovr[key], baseline[key])
   const set = (key) => (v) => setOvr((p) => ({ ...p, [key]: v }))
   const touched = Object.keys(ovr).some((k) => ovr[k] !== '' && ovr[k] !== undefined)
+  const commMonths = Math.max(1, numOr(monthsStr, 3))
 
   // Default the goal to a round number above current pace once stats land.
   const monthlyFactor = 30 / WINDOW_DAYS
   const curCommMo = useMemo(() => {
     const ePif = eff('pifRate') / 100
     return (baseline._closes * baseline.commClose +
-            baseline._ascensions * ((1 - ePif) * baseline.commAsc + ePif * baseline.commPif)) * monthlyFactor
+            baseline._ascensions * ((1 - ePif) * baseline.commAsc * commMonths + ePif * baseline.commPif)) * monthlyFactor
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseline, ovr])
+  }, [baseline, ovr, commMonths])
   useEffect(() => {
     if (goalStr === '' && (baseline._closes > 0 || baseline._ascensions > 0)) {
       const seed = Math.max(5000, Math.round((curCommMo * 1.25) / 500) * 500)
@@ -122,20 +142,25 @@ export default function CommissionForecast() {
   const f = useMemo(() => {
     const goal = numOr(goalStr, 0)
     const workDays = Math.max(1, numOr(workDaysStr, 22))
+    const showRate = Math.min(1, Math.max(0.01, eff('showRate') / 100))
     const closeRate = eff('closeRate') / 100
     const ascRate = eff('ascRate') / 100
     const pifRate = eff('pifRate') / 100
+    const cpbc = numOr(cpbcStr, 0)
     const Ct = eff('commClose')
     const Cm = eff('commAsc')
     const Cp = eff('commPif')
 
-    // commission earned per live call, cascading down the funnel
+    // commission earned per live call, cascading down the funnel. A monthly
+    // ascension pays Cm for `commMonths` months, so it counts commMonths×; a
+    // PIF is one upfront lump (Cp), not multiplied.
     const commPerCall =
       closeRate * Ct +
-      closeRate * ascRate * ((1 - pifRate) * Cm + pifRate * Cp)
+      closeRate * ascRate * ((1 - pifRate) * Cm * commMonths + pifRate * Cp)
 
     const solvable = goal > 0 && commPerCall > 0
     const calls = solvable ? goal / commPerCall : 0
+    const booked = calls / showRate
     const closes = calls * closeRate
     const ascensions = closes * ascRate
     const pifs = ascensions * pifRate
@@ -143,13 +168,15 @@ export default function CommissionForecast() {
 
     return {
       goal, workDays, commPerCall, solvable,
-      calls, closes, ascensions, pifs, monthlyAsc,
+      booked, calls, closes, ascensions, pifs, monthlyAsc,
       callsPerDay: calls / workDays,
+      bookedPerDay: booked / workDays,
+      adSpend: cpbc > 0 ? booked * cpbc : 0,
       projClose: closes * Ct,
-      projAsc: monthlyAsc * Cm,
+      projAsc: monthlyAsc * Cm * commMonths,
       projPif: pifs * Cp,
     }
-  }, [goalStr, workDaysStr, ovr, baseline]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [goalStr, workDaysStr, cpbcStr, ovr, baseline, commMonths]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const projTotal = f.projClose + f.projAsc + f.projPif
 
@@ -157,6 +184,7 @@ export default function CommissionForecast() {
   const pace = useMemo(() => {
     const ePif = eff('pifRate') / 100
     return {
+      booked: baseline._booked * monthlyFactor,
       calls: baseline._liveCalls * monthlyFactor,
       closes: baseline._closes * monthlyFactor,
       ascensions: baseline._ascensions * monthlyFactor,
@@ -165,6 +193,37 @@ export default function CommissionForecast() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseline, ovr, curCommMo])
+
+  // "Where to improve" — for each funnel rate, how much monthly commission the
+  // closer would gain by lifting it to a healthy target (holding their current
+  // booked-call volume + other rates fixed). Ranks the weakest lever so they
+  // know what to work on. Uses ACTUAL tracked rates, not the what-if overrides.
+  const improve = useMemo(() => {
+    const b = baseline
+    const bookedMo = pace.booked
+    const calc = (showR, closeR, ascR, pifR) => {
+      const live = bookedMo * (showR / 100)
+      const closes = live * (closeR / 100)
+      const asc = closes * (ascR / 100)
+      const pif = asc * (pifR / 100)
+      const monthlyAsc = asc - pif
+      return closes * b.commClose + monthlyAsc * b.commAsc * commMonths + pif * b.commPif
+    }
+    const cur = calc(b.showRate, b.closeRate, b.ascRate, b.pifRate)
+    const rows = [
+      { key: 'showRate', label: 'Show rate', cur: b.showRate, target: TARGETS.showRate },
+      { key: 'closeRate', label: 'Close rate', cur: b.closeRate, target: TARGETS.closeRate },
+      { key: 'ascRate', label: 'Ascension rate', cur: b.ascRate, target: TARGETS.ascRate },
+      { key: 'pifRate', label: 'PIF rate', cur: b.pifRate, target: TARGETS.pifRate },
+    ].map((m) => {
+      const lifted = { showRate: b.showRate, closeRate: b.closeRate, ascRate: b.ascRate, pifRate: b.pifRate }
+      lifted[m.key] = Math.max(m.cur, m.target)
+      const upside = calc(lifted.showRate, lifted.closeRate, lifted.ascRate, lifted.pifRate) - cur
+      return { ...m, upside, below: m.cur < m.target - 0.05 }
+    })
+    const top = rows.filter((m) => m.below && m.upside > 0).sort((a, b) => b.upside - a.upside)[0]
+    return { rows, topKey: top?.key }
+  }, [baseline, pace.booked, commMonths])
 
   const loading = rosterLoading || (isAdmin && !selectedId)
 
@@ -208,16 +267,23 @@ export default function CommissionForecast() {
         <>
           {/* Tracked snapshot — the "how it's tracking" read */}
           <div style={{ ...panelStyle, marginBottom: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
               <span className="eyebrow" style={{ fontSize: 9 }}>Your last {WINDOW_DAYS} days · tracked</span>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', letterSpacing: '0.06em' }}>
-                {money(pace.commission)}/mo pace
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <label style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Cost / booked call</label>
+                <div style={{ position: 'relative' }}>
+                  <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-4)', fontSize: 11 }}>$</span>
+                  <input type="number" inputMode="decimal" value={cpbcStr} onChange={(e) => setCpbcStr(e.target.value)} placeholder="—"
+                    style={{ ...inputStyle, width: 78, height: 28, padding: '3px 8px 3px 18px', fontSize: 12 }} />
+                </div>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)', letterSpacing: '0.06em' }}>{money(pace.commission)}/mo pace</span>
+              </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 1, background: 'var(--rule)', border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 1, background: 'var(--rule)', border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden' }}>
+              <Snap label="Booked calls" value={int(baseline._booked)} />
               <Snap label="Live calls" value={int(baseline._liveCalls)} />
               <Snap label="Closes" value={int(baseline._closes)} />
-              <Snap label="Ascensions" value={int(baseline._ascensions)} />
+              <Snap label="Show rate" value={one(baseline.showRate) + '%'} />
               <Snap label="Close rate" value={one(baseline.closeRate) + '%'} />
               <Snap label="Ascension rate" value={one(baseline.ascRate) + '%'} />
             </div>
@@ -254,6 +320,7 @@ export default function CommissionForecast() {
                       style={resetBtn}><RotateCcw size={11} /> Reset</button>
                   )}
                 </div>
+                <Field label="Show rate" hint="live ÷ booked calls" suffix="%" value={ovr.showRate} baseline={baseline.showRate} onChange={set('showRate')} fmtBase={one} />
                 <Field label="Close rate" hint="closes ÷ live calls" suffix="%" value={ovr.closeRate} baseline={baseline.closeRate} onChange={set('closeRate')} fmtBase={one} />
                 <Field label="Ascension rate" hint="ascensions ÷ closes" suffix="%" value={ovr.ascRate} baseline={baseline.ascRate} onChange={set('ascRate')} fmtBase={one} />
                 <Field label="PIF rate" hint="paid-in-full ÷ ascensions" suffix="%" value={ovr.pifRate} baseline={baseline.pifRate} onChange={set('pifRate')} fmtBase={one} last />
@@ -262,9 +329,18 @@ export default function CommissionForecast() {
               {/* Payout per event */}
               <div style={panelStyle}>
                 <span className="eyebrow" style={{ fontSize: 9, marginBottom: 12, display: 'inline-flex' }}>Your commission per deal</span>
-                <Field label="Per trial close" prefix="$" value={ovr.commClose} baseline={baseline.commClose} onChange={set('commClose')} fmtBase={(n) => Math.round(n)} />
-                <Field label="Per monthly ascension" prefix="$" value={ovr.commAsc} baseline={baseline.commAsc} onChange={set('commAsc')} fmtBase={(n) => Math.round(n)} />
-                <Field label="Per PIF" hint="ascension paid in full" prefix="$" value={ovr.commPif} baseline={baseline.commPif} onChange={set('commPif')} fmtBase={(n) => Math.round(n)} last />
+                <Field label="Per trial close" hint="one-time" prefix="$" value={ovr.commClose} baseline={baseline.commClose} onChange={set('commClose')} fmtBase={(n) => Math.round(n)} />
+                <Field label="Ascension / month" hint="rolling payout" prefix="$" value={ovr.commAsc} baseline={baseline.commAsc} onChange={set('commAsc')} fmtBase={(n) => Math.round(n)} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '-4px 0 14px', padding: '8px 10px', background: 'var(--paper-2, #f4f1e8)', borderRadius: 8 }}>
+                  <span style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>× paid for</span>
+                  <input type="number" inputMode="numeric" value={monthsStr} onChange={(e) => setMonthsStr(e.target.value)}
+                    style={{ ...inputStyle, width: 50, height: 28, padding: '3px 8px', fontSize: 12, textAlign: 'center' }} />
+                  <span style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>months</span>
+                  <span style={{ marginLeft: 'auto', fontFamily: 'var(--serif)', fontSize: 14, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>
+                    = {money(eff('commAsc') * commMonths)}<span style={{ fontSize: 10, color: 'var(--ink-4)' }}> / ascension</span>
+                  </span>
+                </div>
+                <Field label="Per PIF" hint="paid in full, upfront" prefix="$" value={ovr.commPif} baseline={baseline.commPif} onChange={set('commPif')} fmtBase={(n) => Math.round(n)} last />
               </div>
             </div>
 
@@ -282,14 +358,14 @@ export default function CommissionForecast() {
                 <>
                   {/* Headline: what you need to DO */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
-                    <Out icon={Phone} tone="accent" label="Live calls / month" value={int(f.calls)}
-                      sub={`${one(f.callsPerDay)} per working day`} />
+                    <Out icon={Phone} tone="accent" label="Booked calls / month" value={int(f.booked)}
+                      sub={f.adSpend > 0 ? `${money(f.adSpend)} ad spend · ${one(f.bookedPerDay)}/day` : `${one(f.bookedPerDay)} booked per day`} />
+                    <Out icon={Phone} label="Live calls / month" value={int(f.calls)}
+                      sub={`${one(f.callsPerDay)}/day · at ${one(eff('showRate'))}% show`} />
                     <Out icon={Target} label="Closes / month" value={int(f.closes)}
                       sub={`at ${one(eff('closeRate'))}% close rate`} />
                     <Out icon={TrendingUp} label="Ascensions / month" value={int(f.ascensions)}
                       sub={`${int(f.monthlyAsc)} monthly · ${int(f.pifs)} PIF`} />
-                    <Out icon={Zap} label="PIFs / month" value={int(f.pifs)}
-                      sub={`at ${one(eff('pifRate'))}% of ascensions`} />
                   </div>
 
                   {/* Commission composition */}
@@ -307,6 +383,21 @@ export default function CommissionForecast() {
                     ]} total={projTotal} />
                   </div>
 
+                  {/* Where to improve — weakest lever first */}
+                  <div style={panelStyle}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <span className="eyebrow" style={{ fontSize: 9 }}>Where to improve</span>
+                      <span style={{ fontSize: 9.5, color: 'var(--ink-4)', fontStyle: 'italic' }}>upside at your current volume</span>
+                    </div>
+                    {pace.booked <= 0 ? (
+                      <p style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>No tracked activity yet — once EOD data lands, this shows which rate to lift first.</p>
+                    ) : (
+                      improve.rows.map((m, i) => (
+                        <ImproveRow key={m.key} {...m} isTop={m.key === improve.topKey} last={i === improve.rows.length - 1} />
+                      ))
+                    )}
+                  </div>
+
                   {/* On-track vs current pace */}
                   <div style={panelStyle}>
                     <span className="eyebrow" style={{ fontSize: 9, marginBottom: 12, display: 'inline-flex' }}>Are you on track?</span>
@@ -320,6 +411,7 @@ export default function CommissionForecast() {
                         </tr>
                       </thead>
                       <tbody>
+                        <PaceRow label="Booked calls" now={pace.booked} need={f.booked} />
                         <PaceRow label="Live calls" now={pace.calls} need={f.calls} />
                         <PaceRow label="Closes" now={pace.closes} need={f.closes} />
                         <PaceRow label="Ascensions" now={pace.ascensions} need={f.ascensions} />
@@ -406,6 +498,39 @@ function StackBar({ parts, total }) {
             <span style={{ fontFamily: 'var(--serif)', fontSize: 13, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{money(p.value)}</span>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function ImproveRow({ label, cur, target, upside, below, isTop, last }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '11px 12px', margin: last ? 0 : '0 0 6px',
+      borderRadius: 9,
+      background: isTop ? 'var(--accent-soft)' : 'transparent',
+      border: `1px solid ${isTop ? 'var(--accent)' : 'var(--rule)'}`,
+    }}>
+      <span style={{ fontSize: 15, lineHeight: 1, color: below ? 'var(--down)' : 'var(--up)' }}>{below ? '▾' : '▴'}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)' }}>{label}</span>
+          {isTop && <span style={{ fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink)', background: 'var(--accent)', padding: '2px 6px', borderRadius: 5 }}>Biggest lever</span>}
+        </div>
+        <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2 }}>
+          {one(cur)}% now · target {one(target)}%
+        </div>
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        {below && upside > 0.5 ? (
+          <>
+            <div style={{ fontFamily: 'var(--serif)', fontSize: 15, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>+{money(upside)}</div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, color: 'var(--ink-4)', letterSpacing: '0.04em' }}>/ MO IF LIFTED</div>
+          </>
+        ) : (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, color: 'var(--up)', letterSpacing: '0.04em' }}>✓ on target</span>
+        )}
       </div>
     </div>
   )
