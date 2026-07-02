@@ -43,13 +43,16 @@ function initialsOf(name) {
 }
 
 export default function Layout() {
-  const { profile, signOut, isAdmin } = useAuth()
+  const { profile, signOut, isAdmin, isCreativeOnly } = useAuth()
   const { pathname } = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const profileRef = useRef(null)
 
-  const roleLabel = isAdmin ? 'Admin' : profile?.role === 'closer' ? 'Closer' : profile?.role === 'setter' ? 'Setter' : 'Viewer'
+  // Creative-only collaborators see only the Ads / Creative Library nav.
+  const visibleNav = isCreativeOnly ? navItems.filter((n) => n.to.startsWith('/sales/ads')) : navItems
+
+  const roleLabel = isAdmin ? 'Admin' : isCreativeOnly ? 'Creative' : profile?.role === 'closer' ? 'Closer' : profile?.role === 'setter' ? 'Setter' : 'Viewer'
 
   useEffect(() => {
     if (!profileOpen) return
@@ -134,7 +137,7 @@ export default function Layout() {
 
           {/* Nav icons */}
           <nav className="flex flex-col items-center gap-1 flex-1">
-            {navItems.map(({ to, icon: Icon, label, end, match }) => (
+            {visibleNav.map(({ to, icon: Icon, label, end, match }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -214,7 +217,7 @@ export default function Layout() {
 
               {/* Nav items */}
               <nav className="flex-1 overflow-y-auto px-2 py-3">
-                {navItems.map(({ to, icon: Icon, label, end }) => (
+                {visibleNav.map(({ to, icon: Icon, label, end }) => (
                   <NavLink
                     key={to}
                     to={to}

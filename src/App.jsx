@@ -155,7 +155,7 @@ function PageSkeleton() {
 }
 
 function ProtectedRoute({ children }) {
-  const { isAuthenticated, isLoading, needsPasswordSetup, isEditor } = useAuth()
+  const { isAuthenticated, isLoading, needsPasswordSetup, isEditor, isCreativeOnly } = useAuth()
   const location = useLocation()
 
   if (isLoading) {
@@ -183,6 +183,13 @@ function ProtectedRoute({ children }) {
   // tier='editor'. tier='admin' editors fall under isAdmin and get
   // full access.
   if (isEditor) return <Navigate to="/editor-view" replace />
+
+  // Creative-only collaborators are locked to the Ads / Creative Library
+  // section. Any other /sales/* route (or the "/" → /sales default) bounces
+  // to the creative library so they never reach commissions/financials.
+  if (isCreativeOnly && !location.pathname.startsWith('/sales/ads')) {
+    return <Navigate to="/sales/ads/library" replace />
+  }
   return children
 }
 

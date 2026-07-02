@@ -175,6 +175,11 @@ export function AuthProvider({ children }) {
   const isAuthenticated = !!session
   const isAdmin = profile?.appRole === 'admin' || profile?.appRole === 'manager'
   const isEditor = profile?.appRole === 'editor'
+  // Creative-only accounts (user_profiles.role = 'creative') are locked to the
+  // Ads / Creative Library / Ad Library section — no commissions, closers,
+  // setters or other financials. Used for external creative/media-buying
+  // collaborators who only need the library + ad data.
+  const isCreativeOnly = profile?.appRole === 'creative'
   const isCloser = profile?.role === 'closer'
   const isSetter = profile?.role === 'setter'
 
@@ -214,7 +219,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      session, profile, isLoading, isAuthenticated, isAdmin, isEditor, isCloser, isSetter,
+      session, profile, isLoading, isAuthenticated, isAdmin, isEditor, isCreativeOnly, isCloser, isSetter,
       needsPasswordSetup, signIn, signOut, setPassword, canFileEOD, getEODMemberId,
     }}>
       {children}
