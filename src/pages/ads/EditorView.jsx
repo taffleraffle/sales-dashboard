@@ -78,6 +78,24 @@ export default function EditorView() {
         nav('/editor-login', { replace: true })
         return
       }
+      // Full sales admins/managers are never trapped in the editor portal —
+      // even if they ALSO have a lib_creative_editors row and logged in via
+      // the editor magic-link (which redirects here). The sales dashboard's
+      // creative library is a superset of this portal, so send them there.
+      // (Ben 2026-07-03: Kirill has an editor row + an admin profile and kept
+      // landing in the editor view instead of the full dashboard.)
+      {
+        const { data: prof } = await supabase
+          .from('user_profiles')
+          .select('role')
+          .eq('auth_user_id', session.user.id)
+          .maybeSingle()
+        if (!mounted) return
+        if (prof && ['admin', 'manager'].includes(prof.role)) {
+          nav('/sales', { replace: true })
+          return
+        }
+      }
       const userEmail = session.user.email?.toLowerCase()
       if (!userEmail) {
         setErr('Logged in but your account has no email address. Contact your admin.')
