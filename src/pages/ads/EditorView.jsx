@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import AdsCreativeLibrary from './AdsCreativeLibrary'
+import { TabBtn } from './library/shared'
 import {
   getPreference, setPreference, expiresAt, signOutEditor,
   hasChosenLifetime, markChoiceMade, ensureSignedInAt,
@@ -172,6 +173,26 @@ export default function EditorView() {
   // never got to pick. Show a one-time modal asking them — once they
   // pick, we stamp choice_made + signed_in_at and the lifetime guard
   // in AuthContext starts enforcing the choice.
+  // Category switcher — the admin dashboard splits Ads vs Shorts into two
+  // separate pages, but the editor portal is a single page and used to be
+  // hard-locked to category='ad'. Editors assigned shorts tasks (which carry
+  // content_category='short') saw an empty queue with no way to reach them
+  // (Ben 2026-07-06: Rafid, format='shorts', couldn't see his assignments).
+  // Null until a choice is made; the effective default comes from the
+  // editor's format so shorts specialists land on their own queue.
+  const [category, setCategory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('editorView.category')
+      if (saved === 'ad' || saved === 'short') return saved
+    } catch { /* localStorage unavailable — fall through to format default */ }
+    return null
+  })
+  const effectiveCategory = category ?? (editor?.format === 'shorts' ? 'short' : 'ad')
+  const pickCategory = (c) => {
+    setCategory(c)
+    try { localStorage.setItem('editorView.category', c) } catch { /* non-fatal */ }
+  }
+
   const [needsLifetimeChoice, setNeedsLifetimeChoice] = useState(false)
   useEffect(() => {
     // Only prompt for editors authenticated via the magic-link route.
@@ -396,7 +417,19 @@ export default function EditorView() {
       <div style={{
         maxWidth: 1400, margin: '0 auto', padding: '0 32px',
       }}>
-        <AdsCreativeLibrary editorScope={(() => {
+        {/* Ad creatives ↔ YouTube shorts. Mirrors the admin dashboard's
+            Library/Shorts page split — every editor sees both, regardless
+            of their format specialty (format only picks the default). */}
+        <div style={{ paddingTop: 20 }}>
+          <div style={{ display: 'inline-flex', border: '1px solid var(--rule)', background: 'var(--paper)' }}>
+            <TabBtn active={effectiveCategory === 'ad'} onClick={() => pickCategory('ad')}>Ad creatives</TabBtn>
+            <TabBtn active={effectiveCategory === 'short'} onClick={() => pickCategory('short')}>YouTube shorts</TabBtn>
+          </div>
+        </div>
+        {/* key remounts the library on switch so each category restores its
+            own remembered sub-tab (lib.tab.ad vs lib.tab.short) and none of
+            the filter state bleeds across categories. */}
+        <AdsCreativeLibrary key={effectiveCategory} category={effectiveCategory} editorScope={(() => {
           // tier='admin' editors (e.g. Kirill the assignment coordinator) get
           // full editorial control — they need to set creators, assign offers,
           // and delete bad takes. Regular editors stay read-only on creatives.
