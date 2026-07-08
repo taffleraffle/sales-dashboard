@@ -99,6 +99,8 @@ const ContractDetail    = lazyWithReload(() => import('./pages/contracts/Contrac
 const ContractAdd       = lazyWithReload(() => import('./pages/contracts/ContractAdd'))
 const ContractsPolicy   = lazyWithReload(() => import('./pages/contracts/ContractsPolicy'))
 const ContractsPending  = lazyWithReload(() => import('./pages/contracts/ContractsPending'))
+const Troubleshoot       = lazyWithReload(() => import('./pages/Troubleshoot'))
+const TroubleshootDetail = lazyWithReload(() => import('./pages/TroubleshootDetail'))
 const DownsellsListPage    = lazyWithReload(() => import('./pages/downsells/DownsellsListPage'))
 const DownsellsNewPage     = lazyWithReload(() => import('./pages/downsells/DownsellsNewPage'))
 const DownsellsSessionPage = lazyWithReload(() => import('./pages/downsells/DownsellsSessionPage'))
@@ -325,6 +327,8 @@ export default function App() {
               <Route path="/sales/contracts/policy" element={<AdminRoute><Suspense fallback={<PageSkeleton />}><ContractsPolicy /></Suspense></AdminRoute>} />
               <Route path="/sales/contracts/pending" element={<AdminRoute><Suspense fallback={<PageSkeleton />}><ContractsPending /></Suspense></AdminRoute>} />
               <Route path="/sales/contracts/:id" element={<Suspense fallback={<PageSkeleton />}><ContractDetail /></Suspense>} />
+              <Route path="/sales/troubleshoot" element={<Suspense fallback={<PageSkeleton />}><Troubleshoot /></Suspense>} />
+              <Route path="/sales/troubleshoot/:id" element={<Suspense fallback={<PageSkeleton />}><TroubleshootDetail /></Suspense>} />
               <Route path="/sales/downsells" element={<Suspense fallback={<PageSkeleton />}><DownsellsListPage /></Suspense>} />
               <Route path="/sales/downsells/new" element={<Suspense fallback={<PageSkeleton />}><DownsellsNewPage /></Suspense>} />
               <Route path="/sales/downsells/:id" element={<Suspense fallback={<PageSkeleton />}><DownsellsSessionPage /></Suspense>} />

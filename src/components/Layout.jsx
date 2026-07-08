@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown, Library as LibraryIcon, Smartphone, Target, Calculator } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown, Library as LibraryIcon, Smartphone, Target, Calculator, Wrench } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -33,6 +33,7 @@ const navItems = [
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
   { to: '/sales/contracts', icon: FileText, label: 'Contracts' },
   { to: '/sales/downsells', icon: TrendingDown, label: 'Downsells' },
+  { to: '/sales/troubleshoot', icon: Wrench, label: 'Troubleshoot' },
 ]
 
 function initialsOf(name) {
