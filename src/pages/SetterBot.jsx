@@ -4,7 +4,7 @@ import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import { useEngagementData } from '../hooks/useEngagementData'
 import { useEngagementCadences } from '../hooks/useEngagementCadences'
-import { Bot, Loader2, ChevronDown, ChevronUp, Filter, Zap, Phone, RefreshCw, Check, Save, Power, Clock, AlertTriangle, MessageSquare, Pause, Play } from 'lucide-react'
+import { Bot, Loader2, ChevronDown, ChevronUp, Filter, Zap, Phone, RefreshCw, Check, Save, Power, Clock, AlertTriangle, MessageSquare, Pause, Play, Send } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 const SEQ_COLORS = {
@@ -373,11 +373,17 @@ function CadenceCard({ cadence, conversations, onSave }) {
   )
 }
 
+const AGENT_URL = import.meta.env.VITE_ENGAGEMENT_AGENT_URL
+const AGENT_ADMIN_KEY = import.meta.env.VITE_AGENT_ADMIN_KEY
+
 function ConversationRow({ convo }) {
   const [expanded, setExpanded] = useState(false)
   const [status, setStatus] = useState(convo.status)
   const [saving, setSaving] = useState(false)
-  const messages = convo.messages || []
+  const [messages, setMessages] = useState(convo.messages || [])
+  const [replyText, setReplyText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendErr, setSendErr] = useState('')
   const lastMsg = messages.slice(-1)[0]
 
   // Pause = flip status to handed_off; the bot only touches conversations
@@ -394,6 +400,38 @@ function ConversationRow({ convo }) {
       .eq('id', convo.id)
     if (!error) setStatus(next)
     setSaving(false)
+  }
+
+  // Send a text into this conversation as the setter via the engagement
+  // agent. The agent sends through Linq and flips the convo to handed_off,
+  // so the bot goes quiet — a human has taken over.
+  const sendReply = async () => {
+    const text = replyText.trim()
+    if (!text) return
+    setSendErr('')
+    if (!AGENT_URL || !AGENT_ADMIN_KEY) {
+      setSendErr('Messaging not configured (missing agent URL or key).')
+      return
+    }
+    setSending(true)
+    try {
+      const res = await fetch(`${AGENT_URL}/admin/conversations/${convo.id}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Key': AGENT_ADMIN_KEY },
+        body: JSON.stringify({ message: text }),
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}))
+        throw new Error(detail.detail || `Send failed (${res.status})`)
+      }
+      setMessages(prev => [...prev, { direction: 'outbound', content: text, time: new Date().toISOString() }])
+      setReplyText('')
+      setStatus('handed_off') // agent pauses the bot on takeover
+    } catch (err) {
+      setSendErr(err.message || 'Send failed')
+    } finally {
+      setSending(false)
+    }
   }
 
   return (
@@ -482,6 +520,42 @@ function ConversationRow({ convo }) {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Human takeover reply box \u2014 sending pauses the bot for this lead */}
+              {status === 'stopped' ? (
+                <p className="mt-4 text-[10px] text-text-400 border-t border-border-default/50 pt-3">
+                  Lead opted out \u2014 messaging is locked.
+                </p>
+              ) : (
+                <div className="mt-4 border-t border-border-default/50 pt-3" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-end gap-2">
+                    <textarea
+                      value={replyText}
+                      onChange={e => setReplyText(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendReply() } }}
+                      placeholder={`Message ${convo.prospect_name || 'lead'} as ${convo.setter_name || 'the setter'}\u2026`}
+                      rows={2}
+                      disabled={sending}
+                      className="flex-1 resize-none bg-bg-primary border border-border-default rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-400 focus:outline-none focus:border-opt-yellow/40 transition-colors disabled:opacity-50"
+                    />
+                    <button
+                      onClick={sendReply}
+                      disabled={sending || !replyText.trim()}
+                      className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-opt-yellow text-text-primary rounded-lg hover:bg-opt-yellow/90 disabled:opacity-30 transition-all"
+                    >
+                      {sending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                      {sending ? 'Sending' : 'Send'}
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between mt-1.5">
+                    <p className="text-[9px] text-text-400">
+                      Sending takes over from the bot \u2014 it stops auto-replying to this lead. {' '}
+                      <span className="text-text-400/70">Cmd/Ctrl+Enter to send.</span>
+                    </p>
+                    {sendErr && <span className="text-[10px] text-red-400">{sendErr}</span>}
+                  </div>
                 </div>
               )}
             </div>
