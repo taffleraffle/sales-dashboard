@@ -534,7 +534,7 @@ function ConversationRow({ convo }) {
                     <textarea
                       value={replyText}
                       onChange={e => setReplyText(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendReply() } }}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
                       placeholder={`Message ${convo.prospect_name || 'lead'} as ${convo.setter_name || 'the setter'}\u2026`}
                       rows={2}
                       disabled={sending}
@@ -552,7 +552,7 @@ function ConversationRow({ convo }) {
                   <div className="flex items-center justify-between mt-1.5">
                     <p className="text-[9px] text-text-400">
                       Sending takes over from the bot \u2014 it stops auto-replying to this lead. {' '}
-                      <span className="text-text-400/70">Cmd/Ctrl+Enter to send.</span>
+                      <span className="text-text-400/70">Enter to send · Shift+Enter for a new line.</span>
                     </p>
                     {sendErr && <span className="text-[10px] text-red-400">{sendErr}</span>}
                   </div>
