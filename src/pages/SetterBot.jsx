@@ -4,7 +4,8 @@ import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import { useEngagementData } from '../hooks/useEngagementData'
 import { useEngagementCadences } from '../hooks/useEngagementCadences'
-import { Bot, Loader2, ChevronDown, ChevronUp, Filter, Zap, Phone, RefreshCw, Check, Save, Power, Clock, AlertTriangle, MessageSquare } from 'lucide-react'
+import { Bot, Loader2, ChevronDown, ChevronUp, Filter, Zap, Phone, RefreshCw, Check, Save, Power, Clock, AlertTriangle, MessageSquare, Pause, Play } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 const SEQ_COLORS = {
   pre_call: 'bg-emerald-500/20 text-emerald-400',
@@ -374,8 +375,26 @@ function CadenceCard({ cadence, conversations, onSave }) {
 
 function ConversationRow({ convo }) {
   const [expanded, setExpanded] = useState(false)
+  const [status, setStatus] = useState(convo.status)
+  const [saving, setSaving] = useState(false)
   const messages = convo.messages || []
   const lastMsg = messages.slice(-1)[0]
+
+  // Pause = flip status to handed_off; the bot only touches conversations
+  // whose status is 'active', so this silences it for this lead only.
+  // 'stopped' is never resumable from here — the lead asked out.
+  const setBotStatus = async (next) => {
+    setSaving(true)
+    const { error } = await supabase
+      .from('engagement_conversations')
+      .update({
+        status: next,
+        stop_reason: next === 'handed_off' ? 'paused_from_dashboard' : null,
+      })
+      .eq('id', convo.id)
+    if (!error) setStatus(next)
+    setSaving(false)
+  }
 
   return (
     <>
@@ -393,7 +412,7 @@ function ConversationRow({ convo }) {
           </div>
         </td>
         <td className="py-2.5 px-3"><Badge text={convo.sequence_type} colorMap={SEQ_COLORS} /></td>
-        <td className="py-2.5 px-3"><Badge text={convo.status} colorMap={STATUS_COLORS} /></td>
+        <td className="py-2.5 px-3"><Badge text={status} colorMap={STATUS_COLORS} /></td>
         <td className="py-2.5 px-3 text-sm text-text-primary">{messages.length}</td>
         <td className="py-2.5 px-3">
           {convo.last_prospect_reply_at
@@ -415,9 +434,34 @@ function ConversationRow({ convo }) {
             <div className="bg-bg-primary/50 border-t border-border-default px-6 py-4 max-h-[400px] overflow-y-auto">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-[10px] text-text-primary uppercase tracking-wider font-semibold">Conversation History</p>
-                {convo.appointment_time && (
-                  <p className="text-[10px] text-text-400">Call: {formatTime(convo.appointment_time)}</p>
-                )}
+                <div className="flex items-center gap-3">
+                  {status === 'active' && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setBotStatus('handed_off') }}
+                      disabled={saving}
+                      className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-amber-400 border border-amber-400/40 rounded-sm px-2 py-1 hover:bg-amber-400/10 transition-colors disabled:opacity-50"
+                      title="Bot stops messaging this lead. A human takes over (reply from the Linq app)."
+                    >
+                      {saving ? <Loader2 size={10} className="animate-spin" /> : <Pause size={10} />} Pause bot
+                    </button>
+                  )}
+                  {status === 'handed_off' && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setBotStatus('active') }}
+                      disabled={saving}
+                      className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-emerald-400 border border-emerald-400/40 rounded-sm px-2 py-1 hover:bg-emerald-400/10 transition-colors disabled:opacity-50"
+                      title="Bot resumes handling replies in this conversation."
+                    >
+                      {saving ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} />} Resume bot
+                    </button>
+                  )}
+                  {status === 'stopped' && (
+                    <span className="text-[10px] text-text-400">Lead opted out — bot locked off</span>
+                  )}
+                  {convo.appointment_time && (
+                    <p className="text-[10px] text-text-400">Call: {formatTime(convo.appointment_time)}</p>
+                  )}
+                </div>
               </div>
               {messages.length === 0 ? (
                 <p className="text-text-400 text-sm">No messages yet</p>
