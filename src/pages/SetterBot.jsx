@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
@@ -573,6 +573,16 @@ export default function SetterBot() {
   const { conversations, stats, setterStats, loading } = useEngagementData(range)
   const { cadences, update: updateCadence, loading: cadencesLoading } = useEngagementCadences()
 
+  // Live vs dry-run status pulled from the agent itself (not hardcoded).
+  const [dryRun, setDryRun] = useState(null)
+  useEffect(() => {
+    if (!AGENT_URL) return
+    fetch(`${AGENT_URL}/admin/dry-run`)
+      .then(r => r.json())
+      .then(d => setDryRun(!!d.dry_run))
+      .catch(() => setDryRun(null))
+  }, [])
+
   const filteredLeads = useMemo(() => {
     let filtered = [...conversations]
 
@@ -620,7 +630,12 @@ export default function SetterBot() {
           <span className="eyebrow eyebrow-accent">OPT Sales · Setter bot</span>
           <div className="flex items-center gap-3 mt-2">
             <h1 className="h2">The <em>autonomous</em> setter.</h1>
-            <span className="tag" style={{ background: '#fff4d6', color: '#8a5a00', borderColor: '#d6b876' }}>Dry run</span>
+            {dryRun === false && (
+              <span className="tag" style={{ background: '#d6f5e0', color: '#0a6b39', borderColor: '#8fd6ab' }}>Live</span>
+            )}
+            {dryRun === true && (
+              <span className="tag" style={{ background: '#fff4d6', color: '#8a5a00', borderColor: '#d6b876' }}>Dry run</span>
+            )}
           </div>
           <p
             className="mt-2"
@@ -755,7 +770,7 @@ export default function SetterBot() {
 
         {filteredLeads.length === 0 ? (
           <p className="text-text-400 text-sm py-8 text-center">
-            {conversations.length === 0 ? 'No conversations yet. Bot is in dry run mode.' : 'No leads match this filter.'}
+            {conversations.length === 0 ? 'No conversations yet.' : 'No leads match this filter.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
