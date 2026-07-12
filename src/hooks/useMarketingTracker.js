@@ -352,6 +352,18 @@ export function computeMarketingStats(entries) {
     ar_collected: 0, ar_defaulted: 0, refund_count: 0, refund_amount: 0,
   })
 
+  // Total live calls (NC + follow-up) — the correct denominator for Offer
+  // Rate. `t.live_calls` above uses a `r.live_calls || r.net_live_calls`
+  // fallback that, for some windows, resolves to the NC-only value (e.g. 16)
+  // while offers (17) legitimately include offers made on follow-up calls —
+  // yielding an impossible >100% offer rate. `net_live_calls` is written by
+  // the EOD sync as live_nc + live_fu, so it's the authoritative total-live
+  // count and is always ≥ offers when the closer's EOD is internally
+  // consistent. Summed here (not added to the accumulator) so the returned
+  // stats shape is unchanged.
+  const total_live_calls = entries.reduce(
+    (s, r) => s + (r.net_live_calls ?? r.live_calls ?? 0), 0)
+
   const all_cash = t.trial_cash + t.ascend_cash + t.ar_collected
   const all_revenue = t.trial_revenue + t.ascend_revenue
 
@@ -395,9 +407,18 @@ export function computeMarketingStats(entries) {
     // "Cost per Net New" — NC-only denominator. Matches the renamed
     // "Net New" KPI on the Marketing page (Net Live → Net New, NC only).
     cost_per_new_live_call: t.new_live_calls > 0 ? t.adspend / t.new_live_calls : 0,
+    // Total live calls (NC + follow-up) for the "Total Live" tile. Previously
+    // absent from the output, so the tile rendered "—". Aggregated above as
+    // total_live_calls (NC+FU); expose it here.
+    net_live_calls: total_live_calls,
 
     // Offer & close
-    offer_rate: t.live_calls > 0 ? (t.offers / t.live_calls) * 100 : 0,
+    // Denominator is total live calls (NC + follow-up), not NC-only — an offer
+    // can be made on a follow-up call, so dividing by NC-only produced rates
+    // over 100%. Cap at 100% (same convention as the show-rate tiles): a value
+    // above 100 means the closer logged more offers than live calls that day,
+    // which is a data-entry inconsistency, not a real rate.
+    offer_rate: total_live_calls > 0 ? Math.min(100, (t.offers / total_live_calls) * 100) : 0,
     cost_per_offer: t.offers > 0 ? t.adspend / t.offers : 0,
     // Close rate uses NC-only live calls in the denominator. Including
     // live_fu_calls would deflate the rate every time a closer logs an FU
