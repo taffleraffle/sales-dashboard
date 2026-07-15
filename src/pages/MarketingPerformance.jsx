@@ -1358,6 +1358,7 @@ async function fetchBookings({ from, to, audiences } = {}) {
     return {
       _id: r.id,
       _kind: 'booking',
+      ghl_contact_id: r.ghl_contact_id || null, // for the reconciliation footer's per-prospect dedupe (matches the tile's contact-level count)
       booked: String(r.booked_at).split('T')[0],
       prospect: r.contact_name,
       firstName,
@@ -2010,6 +2011,37 @@ const BOOKING_TYPE_COL = {
   render: r => <span className={`text-[10px] uppercase ${STATUS_STYLE[r.status] || 'text-text-secondary'}`}>{r.status || 'qual'}</span>,
 }
 
+// Reconciliation footer for the booking drilldowns. The row list deliberately
+// KEEPS manually-marked rows (spam / dup / DQ) visible with a status pill and a
+// Restore button so an operator can audit or undo a mark — but the KPI tile
+// only counts what survives: unique prospects (deduped by contact) with no
+// manual mark. The Bookings tile counts those regardless of DQ; the Q.Books
+// tile counts only the qualified ones. Without this line the Bookings drilldown
+// dumped every row under a "13" tile with no explanation, so eyeballing the
+// list landed on the wrong number. (Ben 2026-07-15 — "tile says 13, I count 11":
+// the 2 missing were real qualified bookings scrolled past in a 24-row list.)
+//
+// `tile` = 'all' (Bookings / Cost-Per-Booking) or 'qualified' (Q.Books /
+// Cost-Per-Q.Book). Dedupe is by ghl_contact_id to mirror the tile's
+// contact-level count (a prospect who booked twice counts once, same as bk.*).
+function bookingDrilldownFooter(rows, tile) {
+  const uniq = list => new Set(list.map(r => r.ghl_contact_id || r._id)).size
+  const kept = rows.filter(r => !r.mark)   // survive manual exclusion → feed the tile
+  const marked = rows.filter(r => r.mark)  // shown for audit/undo only, never counted
+  const counted = tile === 'qualified'
+    ? uniq(kept.filter(r => r.status === 'qual'))
+    : uniq(kept)
+  const tileName = tile === 'qualified' ? 'Q.Books' : 'Bookings'
+  const noun = tile === 'qualified' ? 'qualified booking' : 'booking'
+  if (marked.length === 0) {
+    return `${counted} ${noun}${counted === 1 ? '' : 's'} — matches the ${tileName} tile`
+  }
+  const n = action => marked.filter(r => r.mark === action).length
+  const excl = [[n('spam'), 'spam'], [n('duplicate'), 'dup'], [n('dq'), 'DQ']]
+    .filter(([c]) => c > 0).map(([c, l]) => `${c} ${l}`).join(', ')
+  return `${rows.length} shown · ${counted} counted (= ${tileName} tile) · ${marked.length} excluded (${excl}) — click Restore to undo`
+}
+
 // Drilldown `kind` → metric key in MetricTrendPanel. Tiles whose drilldown
 // kind is in this map get a historical trend chart at the top of their
 // drilldown modal with week/month + range filtering.
@@ -2079,6 +2111,7 @@ const DRILLDOWN_CONFIG = {
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No strategy bookings in this window.',
+    footer: rows => bookingDrilldownFooter(rows, 'all'),
   },
   qbookings: {
     title: 'Qualified Bookings',
@@ -2099,12 +2132,7 @@ const DRILLDOWN_CONFIG = {
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No qualified bookings in this window.',
-    footer: rows => {
-      const counted = rows.filter(r => r.status === 'qual').length
-      return counted === rows.length
-        ? `${rows.length} qualified bookings`
-        : `${rows.length} listed · ${counted} qualified (${rows.length - counted} marked — click restore to undo)`
-    },
+    footer: rows => bookingDrilldownFooter(rows, 'qualified'),
   },
   cpl: {
     title: 'Cost Per Lead',
@@ -2146,6 +2174,7 @@ const DRILLDOWN_CONFIG = {
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No bookings in this window.',
+    footer: rows => bookingDrilldownFooter(rows, 'all'),
   },
   cpqb: {
     title: 'Cost Per Qualified Booking',
@@ -2165,12 +2194,7 @@ const DRILLDOWN_CONFIG = {
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No qualified bookings in this window.',
-    footer: rows => {
-      const counted = rows.filter(r => r.status === 'qual').length
-      return counted === rows.length
-        ? `${rows.length} qualified bookings`
-        : `${rows.length} listed · ${counted} qualified (${rows.length - counted} marked — click restore to undo)`
-    },
+    footer: rows => bookingDrilldownFooter(rows, 'qualified'),
   },
   // Close Rate, Show Rate etc. don't have a meaningful row list — the
   // chart IS the drilldown. fetcher returns the close drilldown rows so
