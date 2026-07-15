@@ -4072,8 +4072,29 @@ export default function MarketingPerformance() {
   // both All and audience-filtered states. Equal apples in every tile.
   // The original closer_calls drift-protection that motivated this function
   // is now handled at the view layer (lib_close_resolved, lib_ghl_lives_detail).
-  // Keeping the function signature so call sites don't have to change.
-  const applyProspectMetrics = (statsBundle /* , rangeOrDays */) => statsBundle
+  //
+  // It also carries the booked-count truth to the consumers that DON'T read
+  // `bk` directly — the MTD Funnel's "Booked" step and the Trailing Period
+  // table's Booked / L→B% columns. Left un-patched, those fall back to
+  // computeMarketingStats' `qualified_bookings`, which is the closer-EOD /
+  // marketing_tracker self-report (over-counts: 34 EOD / 30 tracker vs the
+  // calendar's 13 for the same window) — the exact 30/34 that made the cost
+  // math look wrong. Inject the calendar-deduped count (identical to bk.qualified
+  // and the Q.Books tile) for the given window so every surface agrees. Only the
+  // booked-derived fields are touched; show_rate keeps its EOD "calls that
+  // actually happened" denominator by design, everything else passes through.
+  // sumBookings clocks the SAME window/audience filter as the tiles; while
+  // bookingsByDate is still loading it returns 0 and the funnel/table read 0
+  // exactly as the tiles do (consistency over a plausible-but-wrong number).
+  // (Ben 2026-07-15 — kill the 30/34 confusion; calendar is the only truth.)
+  const applyProspectMetrics = (statsBundle, rangeOrDays) => {
+    const qb = sumBookings(rangeOrDays).qualified
+    return {
+      ...statsBundle,
+      qualified_bookings: qb,
+      lead_to_booking_pct: statsBundle.leads > 0 ? (qb / statsBundle.leads) * 100 : 0,
+    }
+  }
 
   // MTD = first-of-month → today (variable day count). For everything else,
   // `range` is already a day count.
@@ -4103,9 +4124,9 @@ export default function MarketingPerformance() {
   // closer_calls-derived counts. The hook now returns this flag; we
   // render a banner above the dashboard when it fires.
   const prospectWindow = useMemo(() => prospectMetricsByRange(range), [range, prospectMetricsByRange])
-  const stats = useMemo(() => applyProspectMetrics(computeMarketingStats(rangeEntries), range), [rangeEntries, range, prospectMetricsByRange])
-  const stats30 = useMemo(() => applyProspectMetrics(computeMarketingStats(filterByDays(entries, 30)), 30), [entries, prospectMetricsByRange])
-  const statsMTD = useMemo(() => applyProspectMetrics(computeMarketingStats(mtdEntries), 'mtd'), [mtdEntries, prospectMetricsByRange])
+  const stats = useMemo(() => applyProspectMetrics(computeMarketingStats(rangeEntries), range), [rangeEntries, range, sumBookings])
+  const stats30 = useMemo(() => applyProspectMetrics(computeMarketingStats(filterByDays(entries, 30)), 30), [entries, sumBookings])
+  const statsMTD = useMemo(() => applyProspectMetrics(computeMarketingStats(mtdEntries), 'mtd'), [mtdEntries, sumBookings])
   // Previous-period stats now ALSO pass through applyProspectMetrics so
   // the per-tile ▲▼ arrows compare like-for-like (deduped current vs
   // deduped prev). The useCloserCallProspectMetrics hook fetches a
@@ -4144,7 +4165,7 @@ export default function MarketingPerformance() {
     const prevFrom = new Date(today.getTime() - 2 * n * 86400000 + 86400000)
     return { from: toDateStr(prevFrom), to: toDateStr(prevTo) }
   }, [range])
-  const statsPrev = useMemo(() => applyProspectMetrics(computeMarketingStats(prevEntries), prevRange), [prevEntries, prevRange, prospectMetricsByRange])
+  const statsPrev = useMemo(() => applyProspectMetrics(computeMarketingStats(prevEntries), prevRange), [prevEntries, prevRange, sumBookings])
   // Hoisted calendar-deduped booking totals — same numbers the live
   // Bookings/Q.Books KPI tiles render. whatIfStats baselines from these so
   // toggling What-If doesn't silently swap data source (EOD self-report
