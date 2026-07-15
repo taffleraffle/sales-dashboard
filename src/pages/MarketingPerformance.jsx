@@ -1247,6 +1247,16 @@ async function fetchAscensions({ from, to, audiences } = {}) {
     })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
+// Test / internal bookings use the agency name as the fake closer half of the
+// GHL calendar title ("<prospect> and OPT Digital" — real titles are
+// "<prospect> and <closer full name>"). They are not prospects and must never
+// enter a booking count or the cost-per-booked/live denominators. Detect by the
+// agency name so a test booking auto-drops instead of needing a manual DQ every
+// time. Verified 2026-07-15: all 44 historical matches were already hand-marked
+// and every one fit this pattern, so this changes no current count — it only
+// stops the manual busywork going forward. (Ben — "auto-exclude test bookings".)
+const isTestBooking = name => /\bopt digital\b/i.test(name || '')
+
 async function fetchBookings({ from, to, audiences } = {}) {
   // Every non-cancelled strategy-call booking in window, audience-resolved
   // via lib_strategy_booking_resolved (migration 130). Resolution ladder:
@@ -1345,10 +1355,16 @@ async function fetchBookings({ from, to, audiences } = {}) {
     // operator can verify or undo the mark (used to silently disappear like
     // 'remove' — bad UX, no way to recover a false-positive dup mark).
     const removed = mark === 'remove'
+    // Auto-exclude test bookings ("… and OPT Digital"). Ranked below the manual
+    // marks so a hand-applied spam/dup/DQ still wins its pill (and stays
+    // restorable); an unmarked test row surfaces its own 'test' pill and is
+    // excluded from every count by the footer + loadBookings.
+    const isTest = !mark && isTestBooking(r.contact_name)
     const status = removed ? 'removed'
       : is_dup ? 'dup'
       : is_spam ? 'spam'
       : is_dq ? 'dq'
+      : isTest ? 'test'
       : 'qual'
     // First name: prefer the real GHL contact, fall back to the leading token of
     // the calendar title ("Anthony and Daniel…" → "Anthony").
@@ -2005,7 +2021,7 @@ const BOOKING_REVENUE_COL = {
   key: 'revenue_tier', label: 'Revenue', cls: 'text-[10px] uppercase text-text-secondary whitespace-nowrap',
   render: r => r.revenue_tier || '—',
 }
-const STATUS_STYLE = { qual: 'text-success', dq: 'text-orange-400', spam: 'text-red-400', dup: 'text-yellow-400', removed: 'text-text-400/60', untracked: 'text-yellow-400' }
+const STATUS_STYLE = { qual: 'text-success', dq: 'text-orange-400', spam: 'text-red-400', dup: 'text-yellow-400', test: 'text-text-400/60', removed: 'text-text-400/60', untracked: 'text-yellow-400' }
 const BOOKING_TYPE_COL = {
   key: 'status', label: 'Status',
   render: r => <span className={`text-[10px] uppercase ${STATUS_STYLE[r.status] || 'text-text-secondary'}`}>{r.status || 'qual'}</span>,
@@ -2026,20 +2042,28 @@ const BOOKING_TYPE_COL = {
 // contact-level count (a prospect who booked twice counts once, same as bk.*).
 function bookingDrilldownFooter(rows, tile) {
   const uniq = list => new Set(list.map(r => r.ghl_contact_id || r._id)).size
-  const kept = rows.filter(r => !r.mark)   // survive manual exclusion → feed the tile
-  const marked = rows.filter(r => r.mark)  // shown for audit/undo only, never counted
+  // A row is out of the count if it carries a manual mark OR is an auto-detected
+  // test booking ('test' status, no mark). Both feed neither tile.
+  const isExcluded = r => !!r.mark || r.status === 'test'
+  const kept = rows.filter(r => !isExcluded(r))   // survive to the KPI tile
+  const excluded = rows.filter(isExcluded)        // shown for audit only, never counted
   const counted = tile === 'qualified'
     ? uniq(kept.filter(r => r.status === 'qual'))
     : uniq(kept)
   const tileName = tile === 'qualified' ? 'Q.Books' : 'Bookings'
   const noun = tile === 'qualified' ? 'qualified booking' : 'booking'
-  if (marked.length === 0) {
+  if (excluded.length === 0) {
     return `${counted} ${noun}${counted === 1 ? '' : 's'} — matches the ${tileName} tile`
   }
-  const n = action => marked.filter(r => r.mark === action).length
-  const excl = [[n('spam'), 'spam'], [n('duplicate'), 'dup'], [n('dq'), 'DQ']]
+  // Classify each excluded row once: manual mark takes precedence over 'test'.
+  const n = action => excluded.filter(r => r.mark === action).length
+  const testN = excluded.filter(r => !r.mark && r.status === 'test').length
+  const excl = [[n('spam'), 'spam'], [n('duplicate'), 'dup'], [n('dq'), 'DQ'], [testN, 'test']]
     .filter(([c]) => c > 0).map(([c, l]) => `${c} ${l}`).join(', ')
-  return `${rows.length} shown · ${counted} counted (= ${tileName} tile) · ${marked.length} excluded (${excl}) — click Restore to undo`
+  // Restore hint only when something was manually marked — a 'test' row is
+  // auto-detected and has nothing to undo.
+  const suffix = excluded.some(r => r.mark) ? ' — click Restore to undo' : ''
+  return `${rows.length} shown · ${counted} counted (= ${tileName} tile) · ${excluded.length} excluded (${excl})${suffix}`
 }
 
 // Drilldown `kind` → metric key in MetricTrendPanel. Tiles whose drilldown
@@ -3442,6 +3466,11 @@ export default function MarketingPerformance() {
         // does this via NOT EXISTS booking_excluded; without this check the
         // tile counted excluded rows while the drilldown filtered them out.
         if (excludedBookingIds.has(a.id)) continue
+        // Auto-exclude test bookings ("… and OPT Digital") so they never inflate
+        // bk.all / bk.qualified (and therefore Cost/Booking, Cost/Q.Book, and the
+        // show-rate denominators) without a manual DQ. Mirrors the 'test' status
+        // fetchBookings assigns, keeping the tile and the drilldown in lockstep.
+        if (isTestBooking(a.contact_name)) continue
         // is_dq comes from the view (calendar-based); also honor revenue-tier
         // overrides so manual revenue_tier flags still work.
         const dqByTier = a.revenue_tier ? isDQRevenueTier(a.revenue_tier) : null
