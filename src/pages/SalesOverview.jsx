@@ -495,6 +495,40 @@ export default function SalesOverview() {
     if (closers.length || setters.length) checkPending()
   }, [closers, setters])
 
+  // ── Calendar-true booked count for the acquisition-cost metrics ──
+  // Cost/Booked, Cost/Q.Booked, CPBC and Lead→Set are acquisition metrics
+  // (ad spend ÷ bookings), so they must divide by the SAME calendar count the
+  // marketing dashboard uses — not the closer-EOD tally (ct.booked, e.g. 34,
+  // which includes follow-ups) or marketing_tracker.qualified_bookings (30).
+  // Same source as the marketing Q.Books tile + trend charts:
+  // lib_marketing_by_audience_daily.qualified_bookings (← b.booked_at, deduped,
+  // booking_excluded honoured). The operational closer metrics (show / reschedule
+  // / close / leaderboard) deliberately stay on EOD — they're per-closer and
+  // about calls actually handled. (Ben 2026-07-15 — align cost-per-booked across pages.)
+  const [calBooked, setCalBooked] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    async function loadCalBooked() {
+      let since
+      if (range && typeof range === 'object' && range.from) since = range.from
+      else if (range === 'mtd') { const n = new Date(); since = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01` }
+      else { const d = new Date(); d.setDate(d.getDate() - (typeof range === 'number' ? range : 30)); since = d.toISOString().split('T')[0] }
+      const to = todayET()
+      let { data, error } = await supabase
+        .from('lib_marketing_by_audience_daily_mv')
+        .select('qualified_bookings, date').gte('date', since).lte('date', to)
+      if (error) {
+        ({ data } = await supabase
+          .from('lib_marketing_by_audience_daily')
+          .select('qualified_bookings, date').gte('date', since).lte('date', to))
+      }
+      if (cancelled) return
+      setCalBooked((data || []).reduce((n, r) => n + (Number(r.qualified_bookings) || 0), 0))
+    }
+    loadCalBooked()
+    return () => { cancelled = true }
+  }, [range])
+
   // ── Celebration: check for today's closes ──
   const [todayCloses, setTodayCloses] = useState(null)
   const [showCelebration, setShowCelebration] = useState(false)
@@ -642,7 +676,10 @@ export default function SalesOverview() {
 
   // Marketing derived
   const cpl = mkt.leads > 0 ? mkt.adspend / mkt.leads : 0
-  const cpbc = ct.booked > 0 ? mkt.adspend / ct.booked : 0
+  // Calendar-basis cost per booked call (matches the marketing dashboard).
+  // Falls back to null while calBooked is still loading so the tile shows '—'
+  // rather than a stale EOD-based figure.
+  const cpbc = calBooked > 0 ? mkt.adspend / calBooked : 0
   const feRoas = mkt.adspend > 0 ? ct.cash / mkt.adspend : 0
   const netRoas = mkt.adspend > 0 ? (ct.cash + ct.ascendCash + mkt.ar_collected) / mkt.adspend : 0
 
@@ -805,8 +842,8 @@ export default function SalesOverview() {
             eyebrow: 'Funnel · cost per…',
             cells: [
               { label: 'Cost / Lead',       value: mkt.adspend > 0 && mkt.leads > 0           ? `$${Math.round(cpl).toLocaleString()}`                                  : '—', sub: mkt.leads > 0           ? `${mkt.leads} leads`               : '—' },
-              { label: 'Cost / Booked',     value: mkt.adspend > 0 && ct.booked > 0           ? `$${Math.round(mkt.adspend / ct.booked).toLocaleString()}`             : '—', sub: ct.booked > 0           ? `${ct.booked} booked`              : '—' },
-              { label: 'Cost / Q. Booked',  value: mkt.adspend > 0 && mkt.qualified_bookings > 0 ? `$${Math.round(mkt.adspend / mkt.qualified_bookings).toLocaleString()}` : '—', sub: mkt.qualified_bookings > 0 ? `${mkt.qualified_bookings} qualified` : '—' },
+              { label: 'Cost / Booked',     value: mkt.adspend > 0 && calBooked > 0 ? `$${Math.round(mkt.adspend / calBooked).toLocaleString()}` : '—', sub: calBooked > 0 ? `${calBooked} booked` : (calBooked == null ? '…' : '—') },
+              { label: 'Cost / Q. Booked',  value: mkt.adspend > 0 && calBooked > 0 ? `$${Math.round(mkt.adspend / calBooked).toLocaleString()}` : '—', sub: calBooked > 0 ? `${calBooked} qualified` : (calBooked == null ? '…' : '—') },
               { label: 'Cost / Live',       value: mkt.adspend > 0 && ct.liveCalls > 0        ? `$${Math.round(mkt.adspend / ct.liveCalls).toLocaleString()}`          : '—', sub: ct.liveCalls > 0        ? `${ct.liveCalls} live`             : '—' },
               { label: 'CAC',               value: mkt.adspend > 0 && ct.closes > 0 ? `$${Math.round(mkt.adspend / ct.closes).toLocaleString()}` : '—',                       sub: ct.closes > 0 ? `${ct.closes} ${ct.closes === 1 ? 'close' : 'closes'}` : 'no closes' },
             ],
@@ -815,7 +852,7 @@ export default function SalesOverview() {
           {
             eyebrow: 'Funnel · conversion & speed',
             cells: [
-              { label: 'Lead → Set',        value: mkt.leads > 0 ? `${((ct.booked / mkt.leads) * 100).toFixed(1)}%`                                                     : '—', sub: mkt.leads > 0 ? `${ct.booked}/${mkt.leads}` : '—' },
+              { label: 'Lead → Set',        value: mkt.leads > 0 && calBooked != null ? `${((calBooked / mkt.leads) * 100).toFixed(1)}%`                            : '—', sub: mkt.leads > 0 && calBooked != null ? `${calBooked}/${mkt.leads}` : '—' },
               { label: 'Answer Rate',       value: mkt.leads > 0 && wt.mcs > 0 ? `${((wt.mcs / mkt.leads) * 100).toFixed(1)}%`                                          : '—', sub: wt.mcs > 0 ? `${wt.mcs} MCs · ${mkt.leads} leads` : (wt.dials > 0 && mkt.leads > 0 ? `${wt.dials} dials · no MCs` : '—') },
               { label: 'Speed to Lead',     value: stl ? stl.avgDisplay : stlLoading ? '…' : '—',                                                                              sub: stl ? `${stl.pctUnder5m}% < 5m` : '—' },
             ],
@@ -1083,7 +1120,7 @@ export default function SalesOverview() {
             <div className="space-y-3">
               {[
                 { label: 'CPL', value: `$${Math.round(cpl).toLocaleString()}`, sub: `${mkt.leads} leads` },
-                { label: 'CPBC', value: cpbc > 0 ? `$${Math.round(cpbc).toLocaleString()}` : '—', sub: `${ct.booked} booked` },
+                { label: 'CPBC', value: cpbc > 0 ? `$${Math.round(cpbc).toLocaleString()}` : '—', sub: calBooked != null ? `${calBooked} booked` : '…' },
               ].map(r => (
                 <div key={r.label} className="flex items-baseline justify-between">
                   <div>
