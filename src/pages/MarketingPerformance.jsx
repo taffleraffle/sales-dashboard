@@ -1288,12 +1288,15 @@ async function fetchBookings({ from, to, audiences } = {}) {
   // Bookings modal. Fold the table in here so a mark sticks and propagates.
   const ids = raw.map(r => r.id).filter(Boolean)
   let exclById = {}
+  let statusById = {}
   if (ids.length) {
-    const { data: excl } = await supabase
-      .from('booking_excluded')
-      .select('booking_id, action, reason')
-      .in('booking_id', ids)
+    const [{ data: excl }, { data: cs }] = await Promise.all([
+      supabase.from('booking_excluded').select('booking_id, action, reason').in('booking_id', ids),
+      // Per-booking call confirmation + attendance marks (migration 159).
+      supabase.from('booking_call_status').select('booking_id, confirmation, attendance').in('booking_id', ids),
+    ])
     exclById = Object.fromEntries((excl || []).map(e => [e.booking_id, e.action || e.reason]))
+    statusById = Object.fromEntries((cs || []).map(s => [s.booking_id, s]))
   }
 
   // Enrich from ghl_contacts so the operator can see the REAL person behind the
@@ -1390,6 +1393,11 @@ async function fetchBookings({ from, to, audiences } = {}) {
       autoDq,        // true = DQ'd by the calendar itself (can't be re-qualified here)
       audience: r.audience,
       audience_source: r.audience_source,
+      // Per-booking call marks (migration 159): 'confirmed'|'unconfirmed'|null
+      // and 'showed'|'no_show'|null. Drive the CallStatusCell + the
+      // Confirmed/Unconfirmed Show% tiles.
+      confirmation: statusById[r.id]?.confirmation || null,
+      attendance: statusById[r.id]?.attendance || null,
     }
   })
     .filter(r => r.status !== 'removed')
@@ -2027,6 +2035,70 @@ const BOOKING_TYPE_COL = {
   render: r => <span className={`text-[10px] uppercase ${STATUS_STYLE[r.status] || 'text-text-secondary'}`}>{r.status || 'qual'}</span>,
 }
 
+// Per-booking call marks (migration 159). Two independent tri-state controls:
+//   Confirmation — did the prospect CONFIRM the call? (confirmed / unconfirmed)
+//   Attendance   — did they SHOW? (showed / no_show)
+// Both default to unset (no booking_call_status row). Clicking an active state
+// clears it back to unset. Green = confirmed/showed, red = unconfirmed/no-show,
+// matching the team's red/green Google-Calendar convention. Show rate is then
+// tracked per confirmation cohort in the Confirmed/Unconfirmed Show% tiles —
+// the whole point: auto-booked (unconfirmed) calls no-show far more.
+function CallStatusCell({ row }) {
+  const [conf, setConf] = useState(row.confirmation || null)
+  const [att, setAtt] = useState(row.attendance || null)
+  const [busy, setBusy] = useState(false)
+  // Re-sync when the row reloads (e.g. after a window/audience change).
+  useEffect(() => { setConf(row.confirmation || null); setAtt(row.attendance || null) }, [row._id, row.confirmation, row.attendance])
+  if (!row?._id) return null
+
+  const write = async (nextConf, nextAtt) => {
+    if (busy) return
+    const prevC = conf, prevA = att
+    setBusy(true); setConf(nextConf); setAtt(nextAtt)
+    let error
+    if (nextConf == null && nextAtt == null) {
+      ;({ error } = await supabase.from('booking_call_status').delete().eq('booking_id', row._id))
+    } else {
+      ;({ error } = await supabase.from('booking_call_status').upsert(
+        { booking_id: row._id, confirmation: nextConf, attendance: nextAtt, updated_at: new Date().toISOString() },
+        { onConflict: 'booking_id' }))
+    }
+    if (error) { setConf(prevC); setAtt(prevA); console.warn('call status save failed:', error.message) }
+    setBusy(false)
+  }
+
+  const btn = (active, tone, label, title, onClick) => (
+    <button
+      onClick={e => { e.stopPropagation(); onClick() }}
+      disabled={busy}
+      title={title}
+      className={`px-1.5 py-0.5 text-[9px] uppercase tracking-wider border transition-colors ${
+        active
+          ? (tone === 'green' ? 'border-success text-success bg-success/10' : 'border-red-400 text-red-400 bg-red-400/10')
+          : 'border-border-default text-text-400/70 hover:text-text-primary hover:border-text-primary'
+      }`}
+    >{label}</button>
+  )
+
+  return (
+    <div className="flex items-center gap-2 justify-end" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center gap-0.5">
+        {btn(conf === 'confirmed', 'green', 'Conf', 'Confirmed the call', () => write(conf === 'confirmed' ? null : 'confirmed', att))}
+        {btn(conf === 'unconfirmed', 'red', 'Unconf', 'Did not confirm (auto-booked)', () => write(conf === 'unconfirmed' ? null : 'unconfirmed', att))}
+      </div>
+      <div className="flex items-center gap-0.5">
+        {btn(att === 'showed', 'green', 'Show', 'Showed up to the call', () => write(conf, att === 'showed' ? null : 'showed'))}
+        {btn(att === 'no_show', 'red', 'No-show', 'No-showed the call', () => write(conf, att === 'no_show' ? null : 'no_show'))}
+      </div>
+    </div>
+  )
+}
+
+const BOOKING_CALL_STATUS_COL = {
+  key: '_callstatus', label: 'Confirm · Show', align: 'right',
+  render: r => <CallStatusCell row={r} />,
+}
+
 // Reconciliation footer for the booking drilldowns. The row list deliberately
 // KEEPS manually-marked rows (spam / dup / DQ) visible with a status pill and a
 // Restore button so an operator can audit or undo a mark — but the KPI tile
@@ -2132,6 +2204,7 @@ const DRILLDOWN_CONFIG = {
       BOOKING_REVENUE_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
       BOOKING_TYPE_COL,
+      BOOKING_CALL_STATUS_COL,
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No strategy bookings in this window.',
@@ -2153,6 +2226,7 @@ const DRILLDOWN_CONFIG = {
       BOOKING_REVENUE_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
       BOOKING_TYPE_COL,
+      BOOKING_CALL_STATUS_COL,
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No qualified bookings in this window.',
@@ -2195,6 +2269,7 @@ const DRILLDOWN_CONFIG = {
       BOOKING_REVENUE_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
       BOOKING_TYPE_COL,
+      BOOKING_CALL_STATUS_COL,
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No bookings in this window.',
@@ -2215,6 +2290,7 @@ const DRILLDOWN_CONFIG = {
       BOOKING_REVENUE_COL,
       { key: 'appt_date', label: 'Call Date', cls: 'tabular-nums text-text-400' },
       BOOKING_TYPE_COL,
+      BOOKING_CALL_STATUS_COL,
       ROW_ACTIONS_COL,
     ],
     emptyMsg: 'No qualified bookings in this window.',
@@ -3279,6 +3355,54 @@ function ResolveDupeModal({ group, onClose, onResolved }) {
         )}
       </div>
     </div>
+  )
+}
+
+// Confirmed vs Unconfirmed Show% tiles (migration 159). Self-contained: fetches
+// lib_booking_confirmation_daily for the active window + audience filter and
+// renders two KPI tiles. Show% = showed / (showed + no_show) within each
+// confirmation cohort. `refetchKey` bumps when the drilldown closes after a
+// mark so the tiles recount without a page reload. Returns a fragment of two
+// <KPI> so it drops straight into the Calls & Show Rates grid.
+function ConfirmationShowTiles({ range, selectedAudiences, refetchKey, onOpen }) {
+  const [d, setD] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const { from, to } = resolveRange(range)
+      const { data, error } = await supabase
+        .from('lib_booking_confirmation_daily')
+        .select('date, audience, confirmed_calls, confirmed_showed, confirmed_noshow, unconfirmed_calls, unconfirmed_showed, unconfirmed_noshow')
+        .gte('date', from).lte('date', `${to} 23:59:59`)
+      if (cancelled) return
+      if (error) { console.warn('confirmation tiles load failed:', error.message); setD(null); return }
+      const want = (selectedAudiences && selectedAudiences.size > 0) ? selectedAudiences : null
+      const rows = (data || []).filter(r => !want || want.has(r.audience))
+      const sum = k => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0)
+      setD({
+        cCalls: sum('confirmed_calls'), cShow: sum('confirmed_showed'), cNo: sum('confirmed_noshow'),
+        uCalls: sum('unconfirmed_calls'), uShow: sum('unconfirmed_showed'), uNo: sum('unconfirmed_noshow'),
+      })
+    })()
+    return () => { cancelled = true }
+  }, [range, selectedAudiences, refetchKey])
+
+  const pct = (s, n) => (s + n) > 0 ? (s / (s + n)) * 100 : null
+  const cPct = d ? pct(d.cShow, d.cNo) : null
+  const uPct = d ? pct(d.uShow, d.uNo) : null
+  const tip = (label, calls, show, no, pctVal) =>
+    `Show rate among ${label} calls = showed ÷ (showed + no-show). ${
+      pctVal == null ? 'No outcomes marked yet' : `${show} showed / ${show + no} with an outcome = ${pctVal.toFixed(1)}%`
+    } · ${calls} ${label.toLowerCase()} call${calls === 1 ? '' : 's'} marked. Mark calls in the Bookings / Q.Book drilldown.`
+  return (
+    <>
+      <KPI label="Conf. Show%" value={cPct == null ? 0 : cPct} format="%"
+           tip={d ? tip('Confirmed', d.cCalls, d.cShow, d.cNo, cPct) : 'Loading…'}
+           onClick={onOpen} />
+      <KPI label="Unconf. Show%" value={uPct == null ? 0 : uPct} format="%"
+           tip={d ? tip('Unconfirmed', d.uCalls, d.uShow, d.uNo, uPct) : 'Loading…'}
+           onClick={onOpen} />
+    </>
   )
 }
 
@@ -4899,6 +5023,11 @@ export default function MarketingPerformance() {
             <KPI label="Gross Show%" value={grossShowRate} format="%" whatIf={gated(upstream.live, wf?.gross_show_rate)} trailing={grossShowRate30} tip={`Live shows ÷ ALL qualified bookings (includes calls that later cancelled or rescheduled). ${W.lives} live ÷ ${W.qb} booked — same audience rollup as the drilldown. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
             <KPI label="Net Show%" value={netShowRate} format="%" whatIf={gated(upstream.live, wf?.net_show_rate)} benchmark={bm.show_rate_new} trailing={netShowRate30} tip={`Live shows ÷ bookings that reached their slot (lives + no-shows, same audience rollup as the drilldown). ${W.lives} live ÷ ${netDenom} reached = ${netShowRate.toFixed(1)}%. Cancels/reschedules are excluded — they have their own tiles. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
             <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={gated(upstream.live, wf?.cost_per_new_live_call)} tip="Adspend ÷ Net New Live calls. Click for daily trend." onClick={() => setDrilldown('cpnew')} />
+            {/* Confirmed vs Unconfirmed show rate (migration 159). Mark each call
+                as confirmed/unconfirmed + showed/no-show in the booking drilldowns;
+                these tiles split the show rate by cohort so the auto-booked
+                (unconfirmed) no-show problem is quantified. */}
+            <ConfirmationShowTiles range={range} selectedAudiences={selectedAudiences} refetchKey={hygieneRefetchKey} onOpen={() => setDrilldown('qbookings')} />
           </Section>
         )
       })()}
