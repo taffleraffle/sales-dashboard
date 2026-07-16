@@ -23,6 +23,12 @@ export const STRATEGY_CALL_CALENDARS = [
                           //   audit — Ben's calendar showed 23 calls, dashboard
                           //   showed 14; the missing 7 were all routing through
                           //   this calendar ID which wasn't in the list)
+  'el8rJciCrMWpWiH1ulGc', // ServiceConnect Strategy Call (found 2026-07-16 —
+                          //   shared calendar spanning Electricians + Restoration
+                          //   funnels; ~30 bookings incl. Abe Kaskas / Mark
+                          //   Thurber were uncounted. Audience resolved
+                          //   funnel-first per prospect, NULL calendar hint. See
+                          //   migration 158.)
 ]
 
 // Subset of strategy calendars that route disqualified prospects. Pending

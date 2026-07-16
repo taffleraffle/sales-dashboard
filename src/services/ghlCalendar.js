@@ -167,9 +167,13 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
       closer_id: closerId,
       ghl_user_id: ghlUserId,
       contact_name: e.title || 'Unknown',
-      // /calendars/events doesn't include contact email/phone. The form falls
-      // back gracefully when these are empty; if we need them we can do a
-      // second-pass /contacts/{id} fetch on a per-row basis.
+      // /calendars/events doesn't include contact email/phone, so these start
+      // empty and are filled by the per-row /contacts/{id} fetch in
+      // enrichRowsWithContact below (same call that pulls the revenue tier).
+      // Email/phone are the primary keys the audience resolver matches on
+      // (lib_strategy_booking_resolved) — without them, bookings on calendars
+      // whose titles carry the prospect's full name (e.g. ServiceConnect)
+      // can't be attributed to a funnel. See migration 158.
       contact_email: '',
       contact_phone: '',
       start_time: startParsed.startTime,
@@ -191,8 +195,10 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
   //
   // Per-contact fetch is sequential to respect GHL's 100req/10s ceiling.
   // Only fetches contacts we don't already have a tier for in this batch
-  // (de-duped by contactId). One miss per contact, then memoized.
-  await enrichRowsWithRevenueTier(rows, onProgress)
+  // (de-duped by contactId). One miss per contact, then memoized. The same
+  // fetch also captures email/phone (the audience resolver's primary match
+  // keys) onto each row.
+  await enrichRowsWithContact(rows, onProgress)
 
   if (rows.length > 0) {
     const { error } = await supabase
@@ -216,20 +222,24 @@ export async function syncGHLAppointments(startDate, endDate, onProgress = () =>
 const REVENUE_TIER_FIELD_ID = 'Tb6fklGYdWcgl9vUS2q9'
 
 /**
- * For each row in `rows`, look up the contact's monthly revenue tier from
- * the GHL contact record and write it onto `row.revenue_tier`. Mutates
+ * For each row in `rows`, look up the contact's monthly revenue tier, email,
+ * and phone from the GHL contact record and write them onto the row. Mutates
  * `rows` in place. De-duped by ghl_contact_id so we don't double-fetch.
  *
- * Failures are silent — a row without a revenue tier just classifies as
- * "unknown" downstream (treated as qualified by default to avoid false DQs).
+ * Email/phone are the audience resolver's primary match keys
+ * (lib_strategy_booking_resolved: email → phone → name). /calendars/events
+ * doesn't return them, so this per-contact fetch is the only place they're
+ * populated. Failures are silent — a row without a tier classifies as
+ * "unknown" (treated as qualified to avoid false DQs); a row without an
+ * email/phone falls back to name matching downstream.
  */
-async function enrichRowsWithRevenueTier(rows, onProgress = () => {}) {
+async function enrichRowsWithContact(rows, onProgress = () => {}) {
   if (!rows || rows.length === 0) return
   const uniqueContactIds = [...new Set(rows.map(r => r.ghl_contact_id).filter(Boolean))]
   if (uniqueContactIds.length === 0) return
 
-  onProgress(`Fetching revenue tiers for ${uniqueContactIds.length} contacts...`)
-  const tierByContactId = {}
+  onProgress(`Fetching contact details for ${uniqueContactIds.length} contacts...`)
+  const byContactId = {}
   for (const id of uniqueContactIds) {
     try {
       const r = await ghlFetch(`${BASE_URL}/contacts/${id}`)
@@ -237,16 +247,22 @@ async function enrichRowsWithRevenueTier(rows, onProgress = () => {}) {
       const j = await r.json()
       const c = j.contact || j
       const field = (c.customFields || []).find(f => f.id === REVENUE_TIER_FIELD_ID)
-      if (field?.value) tierByContactId[id] = field.value
+      byContactId[id] = {
+        tier: field?.value || null,
+        email: c.email || '',
+        phone: c.phone || '',
+      }
     } catch (err) {
-      console.warn(`Revenue tier fetch failed for contact ${id}: ${err.message}`)
+      console.warn(`Contact fetch failed for contact ${id}: ${err.message}`)
     }
   }
 
   for (const row of rows) {
-    if (row.ghl_contact_id && tierByContactId[row.ghl_contact_id]) {
-      row.revenue_tier = tierByContactId[row.ghl_contact_id]
-    }
+    const c = row.ghl_contact_id && byContactId[row.ghl_contact_id]
+    if (!c) continue
+    if (c.tier) row.revenue_tier = c.tier
+    if (c.email) row.contact_email = c.email
+    if (c.phone) row.contact_phone = c.phone
   }
 }
 
