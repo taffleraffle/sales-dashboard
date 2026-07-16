@@ -1575,6 +1575,7 @@ export default function EODReview() {
         return {
           lead_id: matchedLead?.id || evt.lead_id || null,
           ghl_event_id: evt.ghl_event_id || null,
+          ghl_contact_id: evt.ghl_contact_id || null,
           lead_name: evt.contact_name,
           setter_name: matchedLead?.setter?.name || evt.setter_name || '—',
           appointment_date: selectedDate,
@@ -1838,6 +1839,7 @@ export default function EODReview() {
         return {
           lead_id: matchedLead?.id || evt.lead_id || null,
           ghl_event_id: evt.ghl_event_id || null,
+          ghl_contact_id: evt.ghl_contact_id || null,
           lead_name: evt.contact_name,
           setter_name: matchedLead?.setter?.name || evt.setter_name || '—',
           appointment_date: selectedDate,
@@ -1914,6 +1916,51 @@ export default function EODReview() {
       }
       return updated
     }))
+  }
+
+  // Call confirmation (migration 160): the closer marks each call confirmed /
+  // unconfirmed — the SAME prospect-level record the marketing booking
+  // drilldown writes (keyed on ghl_contact_id). Calendar calls carry the
+  // contact id; saved closer_calls carry only ghl_event_id, resolved here via
+  // ghl_appointments. Stored in side maps so the calls array is never mutated.
+  // Attendance for the show-rate split is derived from the call outcome above,
+  // so there's nothing else to mark.
+  const [contactIdByEvent, setContactIdByEvent] = useState({})
+  const [confByContact, setConfByContact] = useState({})
+  const callSig = calls.map(c => `${c.ghl_event_id || ''}|${c.ghl_contact_id || ''}`).join(',')
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const needEvt = [...new Set(calls.filter(c => !c.ghl_contact_id && c.ghl_event_id).map(c => c.ghl_event_id))]
+      let evtMap = {}
+      if (needEvt.length) {
+        const { data } = await supabase.from('ghl_appointments').select('ghl_event_id, ghl_contact_id').in('ghl_event_id', needEvt)
+        evtMap = Object.fromEntries((data || []).map(r => [r.ghl_event_id, r.ghl_contact_id]).filter(([, v]) => v))
+      }
+      const cids = [...new Set(calls.map(c => c.ghl_contact_id || evtMap[c.ghl_event_id]).filter(Boolean))]
+      let confMap = {}
+      if (cids.length) {
+        const { data } = await supabase.from('booking_call_status').select('ghl_contact_id, confirmation').in('ghl_contact_id', cids)
+        confMap = Object.fromEntries((data || []).map(r => [r.ghl_contact_id, r.confirmation]))
+      }
+      if (cancelled) return
+      setContactIdByEvent(evtMap)
+      setConfByContact(confMap)
+    })()
+    return () => { cancelled = true }
+  }, [callSig])
+
+  const callContactId = (call) => call.ghl_contact_id || (call.ghl_event_id && contactIdByEvent[call.ghl_event_id]) || null
+  const toggleConfirmation = async (call, value) => {
+    const cid = callContactId(call)
+    if (!cid) return
+    const next = confByContact[cid] === value ? null : value
+    const prev = confByContact[cid] || null
+    setConfByContact(m => ({ ...m, [cid]: next }))
+    const { error } = next == null
+      ? await supabase.from('booking_call_status').delete().eq('ghl_contact_id', cid)
+      : await supabase.from('booking_call_status').upsert({ ghl_contact_id: cid, confirmation: next, updated_at: new Date().toISOString() }, { onConflict: 'ghl_contact_id' })
+    if (error) { console.warn('confirmation save failed:', error.message); setConfByContact(m => ({ ...m, [cid]: prev })) }
   }
 
   // Remove a call entirely (e.g. duplicate booking, wrong prospect).
@@ -2831,6 +2878,36 @@ export default function EODReview() {
                             </button>
                           ))}
                         </div>
+
+                        {/* Confirmation — did the prospect CONFIRM the call?
+                            Feeds the Confirmed vs Unconfirmed show-rate split on
+                            the Marketing page (migration 160). Attendance is the
+                            outcome above, so this is the only extra mark. Only
+                            shown when the call maps to a prospect record. */}
+                        {(() => {
+                          const cid = callContactId(call)
+                          if (!cid) return null
+                          const conf = confByContact[cid]
+                          return (
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="text-[10px] text-text-400 uppercase">Confirmed?</span>
+                              <button
+                                onClick={() => toggleConfirmation(call, 'confirmed')}
+                                title="Prospect confirmed they'd attend"
+                                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all ${
+                                  conf === 'confirmed' ? 'bg-success text-white' : 'bg-bg-primary text-text-400 border border-border-default hover:text-text-primary'
+                                }`}
+                              >Confirmed</button>
+                              <button
+                                onClick={() => toggleConfirmation(call, 'unconfirmed')}
+                                title="Not confirmed — auto-booked, no confirmation"
+                                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all ${
+                                  conf === 'unconfirmed' ? 'bg-danger text-white' : 'bg-bg-primary text-text-400 border border-border-default hover:text-text-primary'
+                                }`}
+                              >Not confirmed</button>
+                            </div>
+                          )
+                        })()}
 
                         {/* Offered toggle — show for live closing calls */}
                         {!isAscension && ['not_closed', 'closed'].includes(call.outcome) && (

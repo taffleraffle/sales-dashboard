@@ -1287,17 +1287,19 @@ async function fetchBookings({ from, to, audiences } = {}) {
   // a booking spam/DQ vanished on reopen and never reached the Qualified
   // Bookings modal. Fold the table in here so a mark sticks and propagates.
   const ids = raw.map(r => r.id).filter(Boolean)
+  // Call-confirmation marks are keyed on the PROSPECT (ghl_contact_id) so the
+  // marketing drilldown and the closer's EOD write one shared record (migration
+  // 160). Attendance is no longer stored here — it's derived from the EOD
+  // outcome in lib_booking_confirmation_daily.
+  const bkContactIds = [...new Set(raw.map(r => r.ghl_contact_id).filter(Boolean))]
   let exclById = {}
-  let statusById = {}
-  if (ids.length) {
-    const [{ data: excl }, { data: cs }] = await Promise.all([
-      supabase.from('booking_excluded').select('booking_id, action, reason').in('booking_id', ids),
-      // Per-booking call confirmation + attendance marks (migration 159).
-      supabase.from('booking_call_status').select('booking_id, confirmation, attendance').in('booking_id', ids),
-    ])
-    exclById = Object.fromEntries((excl || []).map(e => [e.booking_id, e.action || e.reason]))
-    statusById = Object.fromEntries((cs || []).map(s => [s.booking_id, s]))
-  }
+  let confByContact = {}
+  const [{ data: excl }, { data: cs }] = await Promise.all([
+    ids.length ? supabase.from('booking_excluded').select('booking_id, action, reason').in('booking_id', ids) : Promise.resolve({ data: [] }),
+    bkContactIds.length ? supabase.from('booking_call_status').select('ghl_contact_id, confirmation').in('ghl_contact_id', bkContactIds) : Promise.resolve({ data: [] }),
+  ])
+  exclById = Object.fromEntries((excl || []).map(e => [e.booking_id, e.action || e.reason]))
+  confByContact = Object.fromEntries((cs || []).map(s => [s.ghl_contact_id, s.confirmation]))
 
   // Enrich from ghl_contacts so the operator can see the REAL person behind the
   // calendar event title ("Anthony and Daniel…") — first/last name, email and
@@ -1393,11 +1395,10 @@ async function fetchBookings({ from, to, audiences } = {}) {
       autoDq,        // true = DQ'd by the calendar itself (can't be re-qualified here)
       audience: r.audience,
       audience_source: r.audience_source,
-      // Per-booking call marks (migration 159): 'confirmed'|'unconfirmed'|null
-      // and 'showed'|'no_show'|null. Drive the CallStatusCell + the
-      // Confirmed/Unconfirmed Show% tiles.
-      confirmation: statusById[r.id]?.confirmation || null,
-      attendance: statusById[r.id]?.attendance || null,
+      // Prospect-level call confirmation (migration 160): 'confirmed' |
+      // 'unconfirmed' | null. Drives the CallStatusCell + the Confirmed/
+      // Unconfirmed Show% tiles. Attendance is derived from the EOD outcome.
+      confirmation: (r.ghl_contact_id && confByContact[r.ghl_contact_id]) || null,
     }
   })
     .filter(r => r.status !== 'removed')
@@ -2035,35 +2036,33 @@ const BOOKING_TYPE_COL = {
   render: r => <span className={`text-[10px] uppercase ${STATUS_STYLE[r.status] || 'text-text-secondary'}`}>{r.status || 'qual'}</span>,
 }
 
-// Per-booking call marks (migration 159). Two independent tri-state controls:
-//   Confirmation — did the prospect CONFIRM the call? (confirmed / unconfirmed)
-//   Attendance   — did they SHOW? (showed / no_show)
-// Both default to unset (no booking_call_status row). Clicking an active state
-// clears it back to unset. Green = confirmed/showed, red = unconfirmed/no-show,
-// matching the team's red/green Google-Calendar convention. Show rate is then
-// tracked per confirmation cohort in the Confirmed/Unconfirmed Show% tiles —
-// the whole point: auto-booked (unconfirmed) calls no-show far more.
+// Prospect-level call confirmation mark (migration 160). Tri-state: confirmed /
+// unconfirmed / unset (no row). Keyed on ghl_contact_id so the marketing
+// drilldown and the closer's EOD write ONE shared record. Green = confirmed,
+// red = unconfirmed, matching the team's red/green Google-Calendar convention.
+// Attendance (showed/no-show) is NOT marked here — it's derived from the EOD
+// outcome. Show rate per cohort surfaces in the Confirmed/Unconfirmed Show%
+// tiles: auto-booked (unconfirmed) calls no-show far more.
 function CallStatusCell({ row }) {
   const [conf, setConf] = useState(row.confirmation || null)
-  const [att, setAtt] = useState(row.attendance || null)
   const [busy, setBusy] = useState(false)
-  // Re-sync when the row reloads (e.g. after a window/audience change).
-  useEffect(() => { setConf(row.confirmation || null); setAtt(row.attendance || null) }, [row._id, row.confirmation, row.attendance])
-  if (!row?._id) return null
+  useEffect(() => { setConf(row.confirmation || null) }, [row._id, row.confirmation])
+  const contactId = row.ghl_contact_id
+  if (!contactId) return <span className="text-[9px] text-text-400/50 uppercase">no contact</span>
 
-  const write = async (nextConf, nextAtt) => {
+  const write = async (next) => {
     if (busy) return
-    const prevC = conf, prevA = att
-    setBusy(true); setConf(nextConf); setAtt(nextAtt)
+    const prev = conf
+    setBusy(true); setConf(next)
     let error
-    if (nextConf == null && nextAtt == null) {
-      ;({ error } = await supabase.from('booking_call_status').delete().eq('booking_id', row._id))
+    if (next == null) {
+      ;({ error } = await supabase.from('booking_call_status').delete().eq('ghl_contact_id', contactId))
     } else {
       ;({ error } = await supabase.from('booking_call_status').upsert(
-        { booking_id: row._id, confirmation: nextConf, attendance: nextAtt, updated_at: new Date().toISOString() },
-        { onConflict: 'booking_id' }))
+        { ghl_contact_id: contactId, confirmation: next, updated_at: new Date().toISOString() },
+        { onConflict: 'ghl_contact_id' }))
     }
-    if (error) { setConf(prevC); setAtt(prevA); console.warn('call status save failed:', error.message) }
+    if (error) { setConf(prev); console.warn('confirmation save failed:', error.message) }
     setBusy(false)
   }
 
@@ -2081,21 +2080,15 @@ function CallStatusCell({ row }) {
   )
 
   return (
-    <div className="flex items-center gap-2 justify-end" onClick={e => e.stopPropagation()}>
-      <div className="flex items-center gap-0.5">
-        {btn(conf === 'confirmed', 'green', 'Conf', 'Confirmed the call', () => write(conf === 'confirmed' ? null : 'confirmed', att))}
-        {btn(conf === 'unconfirmed', 'red', 'Unconf', 'Did not confirm (auto-booked)', () => write(conf === 'unconfirmed' ? null : 'unconfirmed', att))}
-      </div>
-      <div className="flex items-center gap-0.5">
-        {btn(att === 'showed', 'green', 'Show', 'Showed up to the call', () => write(conf, att === 'showed' ? null : 'showed'))}
-        {btn(att === 'no_show', 'red', 'No-show', 'No-showed the call', () => write(conf, att === 'no_show' ? null : 'no_show'))}
-      </div>
+    <div className="flex items-center gap-0.5 justify-end" onClick={e => e.stopPropagation()}>
+      {btn(conf === 'confirmed', 'green', 'Conf', 'Prospect confirmed the call', () => write(conf === 'confirmed' ? null : 'confirmed'))}
+      {btn(conf === 'unconfirmed', 'red', 'Unconf', 'Not confirmed (auto-booked)', () => write(conf === 'unconfirmed' ? null : 'unconfirmed'))}
     </div>
   )
 }
 
 const BOOKING_CALL_STATUS_COL = {
-  key: '_callstatus', label: 'Confirm · Show', align: 'right',
+  key: '_callstatus', label: 'Confirmed?', align: 'right',
   render: r => <CallStatusCell row={r} />,
 }
 
@@ -3392,8 +3385,8 @@ function ConfirmationShowTiles({ range, selectedAudiences, refetchKey, onOpen })
   const uPct = d ? pct(d.uShow, d.uNo) : null
   const tip = (label, calls, show, no, pctVal) =>
     `Show rate among ${label} calls = showed ÷ (showed + no-show). ${
-      pctVal == null ? 'No outcomes marked yet' : `${show} showed / ${show + no} with an outcome = ${pctVal.toFixed(1)}%`
-    } · ${calls} ${label.toLowerCase()} call${calls === 1 ? '' : 's'} marked. Mark calls in the Bookings / Q.Book drilldown.`
+      pctVal == null ? 'No call outcomes logged yet' : `${show} showed / ${show + no} with an outcome = ${pctVal.toFixed(1)}%`
+    } · ${calls} ${label.toLowerCase()} call${calls === 1 ? '' : 's'} marked. Mark confirmation in the closer's EOD or the Bookings / Q.Book drilldown; attendance comes from the EOD call outcome.`
   return (
     <>
       <KPI label="Conf. Show%" value={cPct == null ? 0 : cPct} format="%"
