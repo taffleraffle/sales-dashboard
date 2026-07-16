@@ -1962,6 +1962,12 @@ export default function EODReview() {
       : await supabase.from('booking_call_status').upsert({ ghl_contact_id: cid, confirmation: next, updated_at: new Date().toISOString() }, { onConflict: 'ghl_contact_id' })
     if (error) { console.warn('confirmation save failed:', error.message); setConfByContact(m => ({ ...m, [cid]: prev })) }
   }
+  // Confirmation is MANDATORY: every call that maps to a prospect must be marked
+  // confirmed/unconfirmed before the EOD can be filed (migration 160). Calls
+  // that don't resolve to a contact (manual/lead-only, no control shown) are
+  // exempt since there's nowhere to store the mark.
+  const needsConfirmation = (c) => { const cid = callContactId(c); return !!cid && !confByContact[cid] }
+  const callsNeedingConfirmation = calls.filter(needsConfirmation)
 
   // Remove a call entirely (e.g. duplicate booking, wrong prospect).
   // Save persists via delete-all-then-reinsert in useEOD.submitCloserEOD,
@@ -2018,6 +2024,10 @@ export default function EODReview() {
 
   const handleConfirmCloser = async () => {
     if (!selectedMember) return alert('Select a closer first')
+    // Mandatory: block filing until every mappable call has a confirmation mark.
+    if (callsNeedingConfirmation.length > 0) {
+      return alert(`Mark every call as "Confirmed" or "Not confirmed" before filing.\n\n${callsNeedingConfirmation.length} call${callsNeedingConfirmation.length === 1 ? '' : 's'} still ${callsNeedingConfirmation.length === 1 ? 'needs' : 'need'} it:\n${callsNeedingConfirmation.map(c => `• ${c.lead_name}`).join('\n')}`)
+    }
 
     const eodData = {
       nc_booked: summary.newCall,
@@ -2888,9 +2898,10 @@ export default function EODReview() {
                           const cid = callContactId(call)
                           if (!cid) return null
                           const conf = confByContact[cid]
+                          const missing = !conf
                           return (
-                            <div className="flex items-center gap-2 mb-3">
-                              <span className="text-[10px] text-text-400 uppercase">Confirmed?</span>
+                            <div className={`flex items-center gap-2 mb-3 ${missing ? '-mx-1 px-1 py-1 rounded ring-1 ring-amber-400/40 bg-amber-400/[0.06]' : ''}`}>
+                              <span className={`text-[10px] uppercase ${missing ? 'text-amber-300 font-semibold' : 'text-text-400'}`}>Confirmed?{missing && <span className="text-amber-400"> *</span>}</span>
                               <button
                                 onClick={() => toggleConfirmation(call, 'confirmed')}
                                 title="Prospect confirmed they'd attend"
@@ -2905,6 +2916,7 @@ export default function EODReview() {
                                   conf === 'unconfirmed' ? 'bg-danger text-white' : 'bg-bg-primary text-text-400 border border-border-default hover:text-text-primary'
                                 }`}
                               >Not confirmed</button>
+                              {missing && <span className="text-[10px] text-amber-300/80">required</span>}
                             </div>
                           )
                         })()}
@@ -3125,10 +3137,16 @@ export default function EODReview() {
                     {summary.followUp > 0 && <span className="px-1.5 py-0.5 rounded bg-bg-primary">Follow Up: {summary.followUp}</span>}
                   </div>
 
+                  {!confirmed && callsNeedingConfirmation.length > 0 && (
+                    <p className="mt-4 mb-0 text-[11px] text-amber-300 flex items-center gap-1.5">
+                      <span className="px-1.5 py-0.5 rounded bg-amber-400/15 border border-amber-400/30 font-semibold uppercase tracking-wide">Required</span>
+                      Mark {callsNeedingConfirmation.length} call{callsNeedingConfirmation.length === 1 ? '' : 's'} as Confirmed / Not confirmed to file.
+                    </p>
+                  )}
                   <button
                     onClick={handleConfirmCloser}
-                    disabled={confirmed || submitting || (!isAdmin && profile?.teamMemberId && selectedMember !== profile.teamMemberId)}
-                    className={`w-full mt-4 flex items-center justify-center gap-2 px-4 py-2.5 rounded font-medium text-sm transition-colors ${
+                    disabled={confirmed || submitting || callsNeedingConfirmation.length > 0 || (!isAdmin && profile?.teamMemberId && selectedMember !== profile.teamMemberId)}
+                    className={`w-full mt-4 flex items-center justify-center gap-2 px-4 py-2.5 rounded font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       confirmed
                         ? 'bg-success/20 text-success border border-success/30'
                         : 'bg-opt-yellow text-text-primary hover:bg-opt-yellow/90'
