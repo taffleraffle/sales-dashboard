@@ -1,10 +1,11 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs, useCloserCallBreakdown } from '../hooks/useCloserData'
+import { supabase } from '../lib/supabase'
 import { Loader, Plus } from 'lucide-react'
 import { rangeToDays } from '../lib/dateUtils'
 
@@ -15,6 +16,31 @@ export default function CloserOverview() {
   const { members: closers, loading: loadingMembers } = useTeamMembers('closer')
   const { reports, loading: loadingReports } = useCloserEODs(null, days)
   const { breakdown } = useCloserCallBreakdown(null, days)
+
+  // Per-closer confirmed-vs-unconfirmed show rate (migration 161). Confirmation
+  // is the manual mark (booking_call_status); attendance is the call outcome.
+  const [confByCloser, setConfByCloser] = useState({})
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const since = new Date(); since.setDate(since.getDate() - (typeof days === 'number' ? days : 31))
+      const from = since.toISOString().slice(0, 10)
+      const { data, error } = await supabase
+        .from('lib_call_confirmation_by_closer')
+        .select('closer_id, confirmed_calls, confirmed_showed, confirmed_noshow, unconfirmed_calls, unconfirmed_showed, unconfirmed_noshow')
+        .gte('report_date', from)
+      if (cancelled) return
+      if (error) { console.warn('closer confirmation load failed:', error.message); return }
+      const by = {}
+      for (const r of (data || [])) {
+        const b = by[r.closer_id] || (by[r.closer_id] = { cShow: 0, cNo: 0, cCalls: 0, uShow: 0, uNo: 0, uCalls: 0 })
+        b.cShow += +r.confirmed_showed || 0; b.cNo += +r.confirmed_noshow || 0; b.cCalls += +r.confirmed_calls || 0
+        b.uShow += +r.unconfirmed_showed || 0; b.uNo += +r.unconfirmed_noshow || 0; b.uCalls += +r.unconfirmed_calls || 0
+      }
+      setConfByCloser(by)
+    })()
+    return () => { cancelled = true }
+  }, [days])
 
   // Wait for BOTH members and reports before rendering so KPI cards don't flash
   // empty values (0s) while reports are still loading in the background.
@@ -100,10 +126,15 @@ export default function CloserOverview() {
 
     const booked = totals.ncBooked + totals.fuBooked
     const b = breakdown[closer.id] || { liveProspects: 0, closedProspects: 0 }
+    const cf = confByCloser[closer.id] || { cShow: 0, cNo: 0, cCalls: 0, uShow: 0, uNo: 0, uCalls: 0 }
+    const showPct = (s, n) => (s + n) > 0 ? parseFloat(((s / (s + n)) * 100).toFixed(0)) : null
     return {
       ...closer,
       ...totals,
       booked,
+      // Confirmed vs unconfirmed show rate (migration 161).
+      confShowRate: showPct(cf.cShow, cf.cNo), confN: cf.cCalls,
+      unconfShowRate: showPct(cf.uShow, cf.uNo), unconfN: cf.uCalls,
       // Override the EOD-typed totals.closes and totals.liveNC with the
       // prospect-deduped counts so the per-closer card's headline figures
       // and its Close Rate gauge come from the same source (per-call truth).
@@ -310,6 +341,14 @@ function CloserLeaderboardRow({ closer, onClick }) {
         <Pill label="Show" value={`${c.showRate}%`} good={c.showRate >= 70} ok={c.showRate >= 50} />
         <Pill label="Close" value={`${c.closeRate}%`} good={c.closeRate >= 25} ok={c.closeRate >= 15} />
         <Pill label="Offer" value={`${c.offerRate}%`} good={c.offerRate >= 80} ok={c.offerRate >= 60} />
+        {/* Confirmed vs unconfirmed show rate — only when the closer has marked
+            calls in the window (migration 161). */}
+        {c.confN > 0 && (
+          <Pill label={`Conf Show (${c.confN})`} value={c.confShowRate == null ? '—' : `${c.confShowRate}%`} good={c.confShowRate >= 70} ok={c.confShowRate >= 50} />
+        )}
+        {c.unconfN > 0 && (
+          <Pill label={`Unconf Show (${c.unconfN})`} value={c.unconfShowRate == null ? '—' : `${c.unconfShowRate}%`} good={c.unconfShowRate >= 70} ok={c.unconfShowRate >= 50} />
+        )}
       </div>
     </div>
   )

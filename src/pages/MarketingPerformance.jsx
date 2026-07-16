@@ -3399,6 +3399,137 @@ function ConfirmationShowTiles({ range, selectedAudiences, refetchKey, onOpen })
   )
 }
 
+// Monday of the ISO week containing dateStr ('YYYY-MM-DD'), as 'YYYY-MM-DD'.
+function weekStartOf(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00')
+  const dow = (d.getDay() + 6) % 7 // Mon=0 … Sun=6
+  d.setDate(d.getDate() - dow)
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+// Trend of Confirmed vs Unconfirmed show% over the last ~24 weeks. Opened from
+// either Conf./Unconf. Show% tile. Two-series line chart (green = confirmed,
+// red = unconfirmed) + a per-week table, honouring the audience filter.
+function ConfirmationTrendModal({ selectedAudiences, onClose }) {
+  const [weeks, setWeeks] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const since = new Date(); since.setDate(since.getDate() - 24 * 7)
+      const from = since.toISOString().slice(0, 10)
+      const { data, error } = await supabase
+        .from('lib_booking_confirmation_daily')
+        .select('date, audience, confirmed_showed, confirmed_noshow, confirmed_calls, unconfirmed_showed, unconfirmed_noshow, unconfirmed_calls')
+        .gte('date', from)
+      if (cancelled) return
+      if (error) { console.warn('confirmation trend load failed:', error.message); setWeeks([]); return }
+      const want = (selectedAudiences && selectedAudiences.size > 0) ? selectedAudiences : null
+      const byWeek = {}
+      for (const r of (data || [])) {
+        if (want && !want.has(r.audience)) continue
+        const w = weekStartOf(r.date)
+        const b = byWeek[w] || (byWeek[w] = { week: w, cShow: 0, cNo: 0, cCalls: 0, uShow: 0, uNo: 0, uCalls: 0 })
+        b.cShow += +r.confirmed_showed || 0; b.cNo += +r.confirmed_noshow || 0; b.cCalls += +r.confirmed_calls || 0
+        b.uShow += +r.unconfirmed_showed || 0; b.uNo += +r.unconfirmed_noshow || 0; b.uCalls += +r.unconfirmed_calls || 0
+      }
+      const pct = (s, n) => (s + n) > 0 ? (s / (s + n)) * 100 : null
+      const arr = Object.values(byWeek).sort((a, b) => a.week.localeCompare(b.week))
+        .map(b => ({ ...b, cPct: pct(b.cShow, b.cNo), uPct: pct(b.uShow, b.uNo) }))
+      setWeeks(arr)
+    })()
+    return () => { cancelled = true }
+  }, [selectedAudiences])
+
+  // Chart geometry
+  const W = 720, H = 240, PAD = { t: 16, r: 16, b: 28, l: 34 }
+  const plotW = W - PAD.l - PAD.r, plotH = H - PAD.t - PAD.b
+  const pts = weeks || []
+  const x = i => PAD.l + (pts.length <= 1 ? plotW / 2 : (i / (pts.length - 1)) * plotW)
+  const y = v => PAD.t + plotH - (Math.max(0, Math.min(100, v)) / 100) * plotH
+  const line = (key) => pts.filter(p => p[key] != null).map((p) => `${x(pts.indexOf(p))},${y(p[key])}`).join(' ')
+
+  // Overall (all weeks) summary
+  const tot = pts.reduce((a, p) => ({ cS: a.cS + p.cShow, cN: a.cN + p.cNo, uS: a.uS + p.uShow, uN: a.uN + p.uNo }), { cS: 0, cN: 0, uS: 0, uN: 0 })
+  const oPct = (s, n) => (s + n) > 0 ? ((s / (s + n)) * 100).toFixed(1) + '%' : '—'
+  const fmtW = w => new Date(w + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="bg-bg-card border border-border-default rounded-lg w-full max-w-3xl max-h-[88vh] overflow-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between p-5 border-b border-border-default">
+          <div>
+            <h3 className="text-lg font-semibold text-text-primary">Confirmed vs Unconfirmed — Show Rate Trend</h3>
+            <p className="text-xs text-text-400 mt-0.5">Weekly show rate by confirmation status · last 24 weeks{selectedAudiences?.size ? ` · ${[...selectedAudiences].join(', ')}` : ''}</p>
+          </div>
+          <button onClick={onClose} className="text-text-400 hover:text-text-primary text-xl leading-none">×</button>
+        </div>
+
+        <div className="p-5">
+          {weeks == null ? (
+            <div className="h-40 flex items-center justify-center text-text-400 text-sm">Loading…</div>
+          ) : pts.length === 0 ? (
+            <div className="h-40 flex items-center justify-center text-text-400 text-sm text-center">No confirmed/unconfirmed calls with a logged outcome yet.<br />Mark confirmation in the EOD or booking drilldown.</div>
+          ) : (
+            <>
+              <div className="flex items-center gap-5 mb-3 text-xs">
+                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-0.5 bg-success" /> Confirmed <strong className="text-success">{oPct(tot.cS, tot.cN)}</strong></span>
+                <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-0.5 bg-red-400" /> Unconfirmed <strong className="text-red-400">{oPct(tot.uS, tot.uN)}</strong></span>
+                <span className="text-text-400">overall (last 24w)</span>
+              </div>
+              <div className="overflow-x-auto">
+                <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[560px]" style={{ height: 'auto' }}>
+                  {[0, 25, 50, 75, 100].map(g => (
+                    <g key={g}>
+                      <line x1={PAD.l} x2={W - PAD.r} y1={y(g)} y2={y(g)} stroke="currentColor" className="text-border-default" strokeWidth="0.5" strokeDasharray={g === 0 ? '' : '3 3'} />
+                      <text x={PAD.l - 6} y={y(g) + 3} textAnchor="end" className="fill-text-400" fontSize="9">{g}%</text>
+                    </g>
+                  ))}
+                  {pts.length > 1 && <polyline points={line('cPct')} fill="none" className="stroke-success" strokeWidth="2" />}
+                  {pts.length > 1 && <polyline points={line('uPct')} fill="none" className="stroke-red-400" strokeWidth="2" />}
+                  {pts.map((p, i) => (
+                    <g key={p.week}>
+                      {p.cPct != null && <circle cx={x(i)} cy={y(p.cPct)} r="2.5" className="fill-success" />}
+                      {p.uPct != null && <circle cx={x(i)} cy={y(p.uPct)} r="2.5" className="fill-red-400" />}
+                      {(i === 0 || i === pts.length - 1 || i === Math.floor(pts.length / 2)) && (
+                        <text x={x(i)} y={H - 8} textAnchor="middle" className="fill-text-400" fontSize="9">{fmtW(p.week)}</text>
+                      )}
+                    </g>
+                  ))}
+                </svg>
+              </div>
+
+              <table className="w-full mt-4 text-xs">
+                <thead>
+                  <tr className="text-text-400 text-[10px] uppercase border-b border-border-default">
+                    <th className="text-left py-1.5">Week of</th>
+                    <th className="text-right">Conf. Show%</th>
+                    <th className="text-right">Conf. (s/ns)</th>
+                    <th className="text-right">Unconf. Show%</th>
+                    <th className="text-right">Unconf. (s/ns)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...pts].reverse().map(p => (
+                    <tr key={p.week} className="border-b border-border-default/40">
+                      <td className="py-1.5 text-text-secondary tabular-nums">{fmtW(p.week)}</td>
+                      <td className="text-right text-success tabular-nums">{p.cPct == null ? '—' : p.cPct.toFixed(0) + '%'}</td>
+                      <td className="text-right text-text-400 tabular-nums">{p.cShow}/{p.cNo}</td>
+                      <td className="text-right text-red-400 tabular-nums">{p.uPct == null ? '—' : p.uPct.toFixed(0) + '%'}</td>
+                      <td className="text-right text-text-400 tabular-nums">{p.uShow}/{p.uNo}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-[10px] text-text-400 mt-3">Show% = showed ÷ (showed + no-show); s/ns = showed/no-show counts. Attendance derived from the EOD call outcome; confirmation marked in the EOD or booking drilldown.</p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────
 export default function MarketingPerformance() {
   const { entries, benchmarks, loading, upsertEntry, upsertMany, updateBenchmark, deleteEntry, reload } = useMarketingTracker()
@@ -3413,6 +3544,7 @@ export default function MarketingPerformance() {
   const [showAddEntry, setShowAddEntry] = useState(false)
   const [showBenchmarks, setShowBenchmarks] = useState(false)
   const [drilldown, setDrilldown] = useState(null) // 'live' | 'bookings' | 'rc' | 'leads' | 'closes' | 'ascensions' | null
+  const [showConfTrend, setShowConfTrend] = useState(false) // Confirmed vs Unconfirmed show-rate trend modal
   const [importStatus, setImportStatus] = useState(null)
   const [showImportModal, setShowImportModal] = useState(false)
   const fileRef = useRef(null)
@@ -5020,7 +5152,7 @@ export default function MarketingPerformance() {
                 as confirmed/unconfirmed + showed/no-show in the booking drilldowns;
                 these tiles split the show rate by cohort so the auto-booked
                 (unconfirmed) no-show problem is quantified. */}
-            <ConfirmationShowTiles range={range} selectedAudiences={selectedAudiences} refetchKey={hygieneRefetchKey} onOpen={() => setDrilldown('qbookings')} />
+            <ConfirmationShowTiles range={range} selectedAudiences={selectedAudiences} refetchKey={hygieneRefetchKey} onOpen={() => setShowConfTrend(true)} />
           </Section>
         )
       })()}
@@ -5151,6 +5283,7 @@ export default function MarketingPerformance() {
         }
         return <DrilldownModal kind={drilldown} range={range} onClose={(mutated) => { setDrilldown(null); if (mutated) setHygieneRefetchKey(k => k + 1) }} spendByDate={spendByDate} selectedAudiences={selectedAudiences} />
       })()}
+      {showConfTrend && <ConfirmationTrendModal selectedAudiences={selectedAudiences} onClose={() => setShowConfTrend(false)} />}
     </div>
   )
 }
