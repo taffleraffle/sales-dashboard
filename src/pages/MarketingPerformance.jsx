@@ -4469,6 +4469,11 @@ export default function MarketingPerformance() {
     closes:   () => upstream.live() || hasOverride('close_rate', 'closes'),
     trial:    () => upstream.closes() || hasOverride('trial_cash', 'trial_revenue'),
     ascend:   () => upstream.closes() || hasOverride('ascend_rate', 'ascensions', 'ascend_cash', 'ascend_revenue'),
+    // Blended cash/revenue tiles (All Cash, Net FE ROAS, Revenue ROAS, All
+    // Cash ROAS) combine BOTH trial and ascension figures, so they must unlock
+    // when either side is simulated. Gating them on upstream.trial alone meant
+    // a lone Ascension-Cash override never moved them (Ben, 2026-07-20).
+    cash:     () => upstream.trial() || upstream.ascend(),
   }
   // Convenience: wrap a what-if value so it returns null unless the
   // relevant upstream override is set. Use as `gated(upstream.bookings, wf?.qualified_bookings)`.
@@ -5189,10 +5194,10 @@ export default function MarketingPerformance() {
 
       {/* ROAS Overview */}
       <Section title="ROAS Overview" cols={4}>
-        <KPI label="All Cash Collected" value={stats.all_cash} format="$" prev={sp.all_cash} whatIf={gated(upstream.trial, wf?.all_cash)} tip="Trial Cash + Ascend Cash + AR Collected" />
-        <KPI label="Net FE Cash ROAS" value={stats.net_fe_roas} format="x" benchmark={bm.net_fe_roas} trailing={stats30.net_fe_roas} prev={sp.net_fe_roas} whatIf={gated(upstream.trial, wf?.net_fe_roas)} tip="(Trial Cash + Ascend Cash) / Adspend" />
-        <KPI label="Revenue ROAS" value={stats.revenue_roas} format="x" benchmark={bm.revenue_roas} trailing={stats30.revenue_roas} prev={sp.revenue_roas} whatIf={gated(upstream.trial, wf?.revenue_roas)} tip="(Trial Rev + Ascend Rev) / Adspend" />
-        <KPI label="All Cash ROAS" value={stats.all_cash_roas} format="x" benchmark={bm.all_cash_roas} trailing={stats30.all_cash_roas} prev={sp.all_cash_roas} whatIf={gated(upstream.trial, wf?.all_cash_roas)} tip="(Trial + Ascend + AR Cash) / Adspend" />
+        <KPI label="All Cash Collected" value={stats.all_cash} format="$" prev={sp.all_cash} whatIf={gated(upstream.cash, wf?.all_cash)} tip="Trial Cash + Ascend Cash + AR Collected" />
+        <KPI label="Net FE Cash ROAS" value={stats.net_fe_roas} format="x" benchmark={bm.net_fe_roas} trailing={stats30.net_fe_roas} prev={sp.net_fe_roas} whatIf={gated(upstream.cash, wf?.net_fe_roas)} tip="(Trial Cash + Ascend Cash) / Adspend" />
+        <KPI label="Revenue ROAS" value={stats.revenue_roas} format="x" benchmark={bm.revenue_roas} trailing={stats30.revenue_roas} prev={sp.revenue_roas} whatIf={gated(upstream.cash, wf?.revenue_roas)} tip="(Trial Rev + Ascend Rev) / Adspend" />
+        <KPI label="All Cash ROAS" value={stats.all_cash_roas} format="x" benchmark={bm.all_cash_roas} trailing={stats30.all_cash_roas} prev={sp.all_cash_roas} whatIf={gated(upstream.cash, wf?.all_cash_roas)} tip="(Trial + Ascend + AR Cash) / Adspend" />
       </Section>
 
       {/* AR & Refunds */}
