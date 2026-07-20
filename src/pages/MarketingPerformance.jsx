@@ -82,10 +82,13 @@ export function filterByAudience(entries, selectedAudiences, overrideMap) {
 // trailing-Nd selection. Without this, browser-local TZ produced different
 // windows depending on where the user is sitting.
 function filterByDays(entries, days) {
+  // Upper bound = today (ET). Without it, rows dated on a future ET day (which
+  // used to happen when the backend bucketed in UTC) leaked into every window
+  // (audit issue #12). Kept even after the ET-bucketing fix as a guardrail.
+  const endStr = todayET()
   if (days === 'mtd') {
-    const todayStr = todayET()
-    const start = todayStr.slice(0, 7) + '-01'
-    return entries.filter(e => e.date >= start)
+    const start = endStr.slice(0, 7) + '-01'
+    return entries.filter(e => e.date >= start && e.date <= endStr)
   }
   // Custom range: { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }
   if (days && typeof days === 'object' && days.from) {
@@ -95,7 +98,7 @@ function filterByDays(entries, days) {
   // only, "7d" = today and the prior 6 days). Off-by-one on this caused the
   // "Today" preset to include yesterday's data too.
   const sinceStr = etDateOffset(-Math.max(0, days - 1))
-  return entries.filter(e => e.date >= sinceStr)
+  return entries.filter(e => e.date >= sinceStr && e.date <= endStr)
 }
 
 // Get the previous equivalent period for comparison
@@ -4729,6 +4732,22 @@ export default function MarketingPerformance() {
       <div className="mb-4">
         <DataHealthBanner />
       </div>
+      {/* Ad-spend freshness guard (audit issue #1). If the latest day with spend
+          is >1 day old (Meta finalizes ~a day late), the Meta sync/token has
+          likely died and every cost-per / ROAS tile divides by a truncated
+          spend window — so flag it loudly rather than let stale spend silently
+          inflate ROAS. */}
+      {(() => {
+        const spendDates = entries.filter(e => (Number(e.adspend) || 0) > 0).map(e => e.date).sort()
+        const lastSpend = spendDates[spendDates.length - 1]
+        if (!lastSpend || lastSpend >= etDateOffset(-1)) return null
+        return (
+          <div className="mb-4 px-4 py-2.5 rounded-sm border border-danger/40 bg-danger/10 text-danger text-xs flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-semibold uppercase tracking-wide">⚠ Ad spend stale — synced {lastSpend}</span>
+            <span className="text-danger/90">Meta spend hasn't updated since {lastSpend} (token likely expired). Every Cost-per and ROAS tile divides by a truncated spend window — treat all $/cost/ROAS figures as unreliable until spend is refreshed.</span>
+          </div>
+        )
+      })()}
       {/* Header — editorial */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8 pb-6 pt-1" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
