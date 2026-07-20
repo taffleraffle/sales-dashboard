@@ -4076,6 +4076,25 @@ export default function MarketingPerformance() {
     return () => { alive = false }
   }, [hygieneRefetchKey])
 
+  // Held-call cohort show rate (migration 164). One row per (day, audience)
+  // where day = appointment_date (the day the call was HELD), held = qualified
+  // non-spam bookings scheduled that day, showed / no_show = the closer's
+  // logged outcome. Both numerator and denominator are anchored to the held
+  // day, so showed/held (gross) and showed/(showed+no_show) (net) are ≤100%
+  // by construction — this replaces the old lives(call-day) ÷ booked(book-day)
+  // ratio that routinely exceeded 100% and was masked with Math.min(100).
+  const [showByHeld, setShowByHeld] = useState([])
+  useEffect(() => {
+    let alive = true
+    supabase.from('lib_show_by_held_daily').select('*').limit(5000)
+      .then(({ data, error }) => {
+        if (!alive) return
+        if (error) { console.warn('lib_show_by_held_daily fetch failed:', error); return }
+        if (data) setShowByHeld(data)
+      })
+    return () => { alive = false }
+  }, [hygieneRefetchKey])
+
   // All distinct audiences present in the dataset, sorted by total spend
   // so the chip strip shows the heaviest audiences first. Includes
   // "Unknown" so the operator can see misparses.
@@ -5145,23 +5164,41 @@ export default function MarketingPerformance() {
         }
         const W   = sumWin(winFrom, winTo)
         const W30 = sumWin(etDateOffset(-29), todayET())
+        // Held-call cohort (migration 164) — the honest show-rate source.
+        // Denominator = calls HELD in the window (by appointment_date), not
+        // bookings MADE in it, so shows can't outrun the cohort they came from
+        // and both gross and net are ≤100% by construction (no Math.min lie).
+        const sumHeld = (fromD, toD) => {
+          const h = { held: 0, showed: 0, noShow: 0 }
+          for (const r of showByHeld) {
+            if (r.day < fromD || r.day > toD) continue
+            if (selectedAudiences.size > 0 && !selectedAudiences.has(r.audience)) continue
+            h.held   += Number(r.held) || 0
+            h.showed += Number(r.showed) || 0
+            h.noShow += Number(r.no_show) || 0
+          }
+          return h
+        }
+        const H   = sumHeld(winFrom, winTo)
+        const H30 = sumHeld(etDateOffset(-29), todayET())
         const reschedRate    = rate(W.resch, W.qb)
         const reschedRate30  = rate(W30.resch, W30.qb)
         const reschedRatePrev= rate(sp.reschedules || 0, denomPrev)
         const cancelRate     = rate(W.cancels, W.qb)
         const cancelRate30   = rate(W30.cancels, W30.qb)
         const cancelRatePrev = rate(sp.cancels || 0, denomPrev)
-        const grossShowRate   = rate(W.lives, W.qb)
-        const grossShowRate30 = rate(W30.lives, W30.qb)
-        // Net Show = lives ÷ (lives + no-shows): of bookings that reached
-        // their slot, how many showed. The old "qb − cancels − reschedules"
-        // subtracted CALL-level events from BOOKING counts — one prospect
-        // rescheduling repeatedly collapsed the denominator to ≤ lives and
-        // pinned the 30d net at a meaningless 100%.
-        const netDenom    = W.lives + W.noShows
-        const netDenom30  = W30.lives + W30.noShows
-        const netShowRate   = rate(W.lives, netDenom)
-        const netShowRate30 = rate(W30.lives, netDenom30)
+        // Gross Show = showed ÷ calls held that day (appointment_date). Not-
+        // yet-logged calls count against the denominator, so this is an honest
+        // floor — no >100% artifact, no cap.
+        const grossShowRate   = H.held   > 0 ? (H.showed / H.held)   * 100 : 0
+        const grossShowRate30 = H30.held > 0 ? (H30.showed / H30.held) * 100 : 0
+        // Net Show = showed ÷ (showed + no-shows): of held calls with a logged
+        // outcome, how many showed. Both anchored to the held day, so this is
+        // cohort-consistent and can't exceed 100%.
+        const netDenom    = H.showed   + H.noShow
+        const netDenom30  = H30.showed + H30.noShow
+        const netShowRate   = netDenom   > 0 ? (H.showed / netDenom)   * 100 : 0
+        const netShowRate30 = netDenom30 > 0 ? (H30.showed / netDenom30) * 100 : 0
         return (
           <Section title="Calls & Show Rates" cols={8}>
             <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={gated(upstream.live, wf?.new_live_calls)} tip={`NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Denominator for show rates uses Qualified Bookings (${denom}) from the calendar, not the closer's EOD count. Click to view.`} onClick={() => setDrilldown('live')} />
@@ -5169,8 +5206,8 @@ export default function MarketingPerformance() {
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={gated(upstream.live, wf?.no_shows)} tip="NC no-shows from closer EOD. Click for daily trend + prospects." onClick={() => setDrilldown('noshows')} />
             <KPI label="Reschedule%" value={reschedRate} format="%" trailing={reschedRate30} prev={reschedRatePrev} tip={`Reschedules ÷ Qualified Bookings (same audience rollup as the drilldown). ${W.resch} reschedules out of ${W.qb} qualified bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
             <KPI label="Cancel%" value={cancelRate} format="%" trailing={cancelRate30} prev={cancelRatePrev} tip={`Cancellations ÷ Qualified Bookings (same audience rollup as the drilldown). ${W.cancels} cancels out of ${W.qb} qualified bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
-            <KPI label="Gross Show%" value={grossShowRate} format="%" whatIf={gated(upstream.live, wf?.gross_show_rate)} trailing={grossShowRate30} tip={`Live shows ÷ ALL qualified bookings (includes calls that later cancelled or rescheduled). ${W.lives} live ÷ ${W.qb} booked — same audience rollup as the drilldown. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
-            <KPI label="Net Show%" value={netShowRate} format="%" whatIf={gated(upstream.live, wf?.net_show_rate)} benchmark={bm.show_rate_new} trailing={netShowRate30} tip={`Live shows ÷ bookings that reached their slot (lives + no-shows, same audience rollup as the drilldown). ${W.lives} live ÷ ${netDenom} reached = ${netShowRate.toFixed(1)}%. Cancels/reschedules are excluded — they have their own tiles. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
+            <KPI label="Gross Show%" value={grossShowRate} format="%" whatIf={gated(upstream.live, wf?.gross_show_rate)} trailing={grossShowRate30} tip={`Showed ÷ calls HELD in the window (by appointment day, migration 164). ${H.showed} showed ÷ ${H.held} held = ${grossShowRate.toFixed(1)}%. Anchored to the held day so it can't exceed 100%. ${H.held - H.showed - H.noShow} held call(s) have no logged EOD outcome yet and count as not-shown here. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
+            <KPI label="Net Show%" value={netShowRate} format="%" whatIf={gated(upstream.live, wf?.net_show_rate)} benchmark={bm.show_rate_new} trailing={netShowRate30} tip={`Showed ÷ held calls with a logged outcome (showed + no-show). ${H.showed} showed ÷ ${netDenom} logged = ${netShowRate.toFixed(1)}%. Held-day cohort (migration 164) — cancels/reschedules and un-logged calls are excluded. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
             <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={gated(upstream.live, wf?.cost_per_new_live_call)} tip="Adspend ÷ Net New Live calls. Click for daily trend." onClick={() => setDrilldown('cpnew')} />
             {/* Confirmed vs Unconfirmed show rate (migration 159). Mark each call
                 as confirmed/unconfirmed + showed/no-show in the booking drilldowns;
@@ -5202,7 +5239,7 @@ export default function MarketingPerformance() {
       {/* Ascension */}
       <Section title="Ascension" cols={8}>
         <KPI label="Total Ascensions" value={stats.ascensions} format="n" prev={sp.ascensions} whatIf={gated(upstream.ascend, wf?.ascensions)} tip="Trial clients who ascended to full package. Click to view." onClick={() => setDrilldown('ascensions')} />
-        <KPI label="Ascension Rate" value={stats.ascend_rate} format="%" benchmark={bm.ascend_rate} trailing={stats30.ascend_rate} prev={sp.ascend_rate} whatIf={gated(upstream.ascend, wf?.ascend_rate)} tip="Ascensions / Trial Closes" />
+        <KPI label="Asc per Close" value={stats.ascend_rate != null ? stats.ascend_rate / 100 : 0} format="x" benchmark={bm.ascend_rate != null ? bm.ascend_rate / 100 : undefined} trailing={stats30.ascend_rate != null ? stats30.ascend_rate / 100 : undefined} prev={sp.ascend_rate != null ? sp.ascend_rate / 100 : undefined} whatIf={gated(upstream.ascend, wf?.ascend_rate != null ? wf.ascend_rate / 100 : null)} tip="Ascension events ÷ new trial closes, shown as a multiplier — NOT a bounded rate. An ascension is an EXISTING customer upgrading, so it isn't capped by new closes: 2.00x means twice as many upgrades as new deals closed this window." />
         <KPI label="CPA (Ascend)" value={stats.cpa_ascend} format="$" benchmark={bm.cpa_ascend} prev={sp.cpa_ascend} whatIf={gated(upstream.ascend, wf?.cpa_ascend)} tip="Adspend / Ascensions" />
         <KPI label="Ascend Cash" value={stats.ascend_cash} format="$" prev={sp.ascend_cash} whatIf={gated(upstream.ascend, wf?.ascend_cash)} tip="Cash collected from ascension deals" />
         <KPI label="Ascend Revenue" value={stats.ascend_revenue} format="$" prev={sp.ascend_revenue} whatIf={gated(upstream.ascend, wf?.ascend_revenue)} tip="Contracted revenue from ascension deals" />
