@@ -79,16 +79,31 @@ export default function DateRangeSelector({ selected, onChange }) {
     }
   }, [open])
 
+  // Seed the From/To fields from the currently-applied custom range whenever
+  // the popover opens. Without this, a reload (or fresh mount) left both
+  // fields blank even though a range was active — Apply sat disabled until
+  // BOTH ends were re-picked, and the stale local values fed min/max
+  // constraints that invisibly greyed out the days being clicked.
+  useEffect(() => {
+    if (!open) return
+    if (isCustomRange(selected)) {
+      setCustomFrom(selected.from)
+      setCustomTo(selected.to || '')
+    }
+  }, [open, selected])
+
   const isPreset = (days) => {
     if (isCustomRange(selected)) return false
     return selected === days
   }
 
   const applyCustom = () => {
-    if (customFrom && customTo) {
-      onChange({ from: customFrom, to: customTo })
-      setOpen(false)
-    }
+    if (!customFrom || !customTo) return
+    // Swap silently if the user picked them in reverse order — friendlier
+    // than hard-disabling half the calendar via min/max constraints.
+    const [from, to] = customFrom <= customTo ? [customFrom, customTo] : [customTo, customFrom]
+    onChange({ from, to })
+    setOpen(false)
   }
 
   const customLabel = formatRangeLabel(selected)
@@ -182,7 +197,7 @@ export default function DateRangeSelector({ selected, onChange }) {
               >
                 From
               </label>
-              <EditorialDate value={customFrom} onChange={setCustomFrom} max={customTo || undefined} placeholder="Pick start" fullWidth />
+              <EditorialDate value={customFrom} onChange={setCustomFrom} placeholder="Pick start" fullWidth />
             </div>
             <div>
               <label
@@ -198,7 +213,7 @@ export default function DateRangeSelector({ selected, onChange }) {
               >
                 To
               </label>
-              <EditorialDate value={customTo} onChange={setCustomTo} min={customFrom || undefined} placeholder="Pick end" fullWidth />
+              <EditorialDate value={customTo} onChange={setCustomTo} placeholder="Pick end" fullWidth />
             </div>
           </div>
 

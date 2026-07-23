@@ -74,6 +74,22 @@ export default function EditorialDate({ value, onChange, min, max, placeholder =
     if (p) setView({ y: p.y, m: p.m })
   }, [value])
 
+  // On open with no value, land on a month the user can actually pick from.
+  // Defaulting to today's month is wrong when min/max exclude it — e.g. a
+  // "From" picker capped at max=<To date> weeks in the past opened on a grid
+  // where EVERY day was disabled, which read as "the picker is broken".
+  useEffect(() => {
+    if (!open || parse(value)) return
+    const t = parse(todayStr())
+    const mn = parse(min)
+    const mx = parse(max)
+    let target = t
+    if (mx && fmt(t.y, t.m, t.d) > fmt(mx.y, mx.m, mx.d)) target = mx
+    if (mn && fmt(t.y, t.m, t.d) < fmt(mn.y, mn.m, mn.d)) target = mn
+    setView({ y: target.y, m: target.m })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return
     const rect = triggerRef.current.getBoundingClientRect()
@@ -132,11 +148,13 @@ export default function EditorialDate({ value, onChange, min, max, placeholder =
   const monthLen = daysInMonth(view.y, view.m)
   const lead = firstDow(view.y, view.m)
   // Previous-month trailing days for the first row
-  const prevLen = daysInMonth(view.y, view.m === 1 ? view.y - 1 : view.y, view.m === 1 ? 12 : view.m - 1)
+  const prevY = view.m === 1 ? view.y - 1 : view.y
+  const prevM = view.m === 1 ? 12 : view.m - 1
+  const prevLen = daysInMonth(prevY, prevM)
   const cells = []
   for (let i = 0; i < lead; i++) {
     const d = prevLen - lead + 1 + i
-    cells.push({ day: d, mute: true, y: view.m === 1 ? view.y - 1 : view.y, m: view.m === 1 ? 12 : view.m - 1 })
+    cells.push({ day: d, mute: true, y: prevY, m: prevM })
   }
   for (let d = 1; d <= monthLen; d++) {
     cells.push({ day: d, mute: false, y: view.y, m: view.m })
