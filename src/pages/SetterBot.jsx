@@ -505,21 +505,31 @@ function ConversationRow({ convo }) {
                 <p className="text-text-400 text-sm">No messages yet</p>
               ) : (
                 <div className="space-y-2">
-                  {messages.map((msg, i) => (
+                  {messages.map((msg, i) => {
+                    const isBot = msg.source === 'bot'
+                    const senderLabel = msg.direction !== 'outbound'
+                      ? (convo.prospect_name || 'Prospect')
+                      : isBot ? 'Bot' : (convo.setter_name || 'Josh')
+                    return (
                     <div key={i} className={`flex ${msg.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[75%] rounded-sm px-3 py-2 ${
-                        msg.direction === 'outbound'
-                          ? 'bg-bg-card-hover border border-border-default'
-                          : 'bg-bg-card border border-border-default'
+                      <div className={`max-w-[75%] rounded-sm px-3 py-2 border ${
+                        msg.direction !== 'outbound'
+                          ? 'bg-bg-card border-border-default'
+                          : isBot
+                            ? 'bg-red-500/10 border-red-500/30'
+                            : 'bg-bg-card-hover border-border-default'
                       }`}>
                         <p className="text-sm text-text-primary">{msg.content}</p>
-                        <p className="text-[9px] text-text-400 mt-1">
-                          {msg.direction === 'outbound' ? (convo.setter_name || 'Bot') : (convo.prospect_name || 'Prospect')}
-                          {msg.time && ` \u00b7 ${formatTime(msg.time)}`}
+                        <p className="text-[9px] mt-1">
+                          <span className={isBot ? 'text-red-400 font-medium' : 'text-text-400'}>
+                            {senderLabel}{isBot && ' \u00b7 auto'}
+                          </span>
+                          {msg.time && <span className="text-text-400">{` \u00b7 ${formatTime(msg.time)}`}</span>}
                         </p>
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
 
