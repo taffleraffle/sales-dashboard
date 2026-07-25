@@ -10153,7 +10153,7 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
             }}>Source file missing</div>
             <div style={{ fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.55 }}>
               {task.final_cut_url
-                ? 'The raw source for this creative is missing from storage, but a final cut is on file — use the download on the final cut if that is what you need.'
+                ? 'The raw source for this creative is missing from storage, but a final cut is on file — open this creative in the Library to download the final cut.'
                 : 'This creative has no file in storage — the original upload failed partway, so there is nothing to preview, download, or edit. Re-upload the source video (Library → open this creative → Replace original), and the preview + download come back on their own.'}
             </div>
           </div>
