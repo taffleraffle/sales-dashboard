@@ -7531,17 +7531,28 @@ function CreativeDetailModal({ row, isUsed = false, scope = ADMIN_SCOPE, editors
               letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--down)',
             }}>Source file is damaged</div>
             <div style={{ fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-              Only <strong>{row.low_quality_actual_mb ?? '?'} MB</strong> stored on disk
-              {row.duration_seconds ? ` for a ${row.duration_seconds}-second clip` : ''} —
-              this works out to roughly{' '}
-              <strong>{
-                row.duration_seconds && row.low_quality_actual_mb
-                  ? `${((row.low_quality_actual_mb * 1024 * 1024 * 8) / row.duration_seconds / 1000000).toFixed(1)} Mbps`
-                  : 'sub-par bitrate'
-              }</strong>
-              {' '}({row.low_quality_reason === 'placeholder' ? 'truncated during ingest' : 'ingested at low bitrate'}).
-              No Drive backup exists. Re-upload the original from source to fix — the row id stays
-              the same so any editor task assignments are preserved.
+              {row.low_quality_actual_mb == null ? (
+                // No measured size = the flag came from a failed upload
+                // (no bytes in storage at all), not the bitrate audit —
+                // show the recorded reason instead of nonsense "? MB" math.
+                <>{row.low_quality_reason || 'No file found in storage for this creative.'}{' '}
+                Re-upload the original from source to fix — the row id stays
+                the same so any editor task assignments are preserved.</>
+              ) : (
+                <>
+                  Only <strong>{row.low_quality_actual_mb} MB</strong> stored on disk
+                  {row.duration_seconds ? ` for a ${row.duration_seconds}-second clip` : ''} —
+                  this works out to roughly{' '}
+                  <strong>{
+                    row.duration_seconds
+                      ? `${((row.low_quality_actual_mb * 1024 * 1024 * 8) / row.duration_seconds / 1000000).toFixed(1)} Mbps`
+                      : 'sub-par bitrate'
+                  }</strong>
+                  {' '}({row.low_quality_reason === 'placeholder' ? 'truncated during ingest' : 'ingested at low bitrate'}).
+                  No Drive backup exists. Re-upload the original from source to fix — the row id stays
+                  the same so any editor task assignments are preserved.
+                </>
+              )}
             </div>
             {replaceProgress ? (
               <div style={{
