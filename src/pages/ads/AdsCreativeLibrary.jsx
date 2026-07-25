@@ -9308,8 +9308,26 @@ function QueueListView({ tasks, editors, onEdit, onReorder, feedbackTaskIds, sel
               width: 50, height: 32, overflow: 'hidden',
               background: '#000', border: '1px solid var(--rule)',
             }}>
-              {t.thumbnail_url && <img src={t.thumbnail_url} alt="" loading="lazy"
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+              {t.thumbnail_url ? (
+                <img src={t.thumbnail_url} alt="" loading="lazy"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (t.preview_url || t.final_cut_url) ? (
+                // No stored thumbnail but the video exists — paint its
+                // first frame (lazy: mounts on scroll-into-view).
+                <LazyVideoTile src={t.preview_url || t.final_cut_url}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              ) : t.drive_url ? (
+                // Drive-only ingest — page link, not a playable src.
+                <div style={{ width: '100%', height: '100%' }} />
+              ) : (
+                <div title="No file in storage — the original upload failed. Re-upload the source."
+                  style={{
+                    width: '100%', height: '100%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: 'var(--mono)', fontSize: 7.5, fontWeight: 700,
+                    letterSpacing: '0.06em', color: '#e05252',
+                  }}>NO FILE</div>
+              )}
             </div>
             <div style={{ minWidth: 0 }}>
               <div style={{
@@ -10117,6 +10135,29 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
           display: 'grid', gap: 20, alignItems: 'start',
           gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
         }}>
+        {/* No preview + no drive = the media column below won't render (a
+            failed upload leaves the library row behind with every URL
+            NULL). Silently hiding it made these look like a UI bug —
+            "lost its preview and its download" (2026-07-25,
+            RAW-260719-UNK-S01-002). Say what actually happened instead.
+            Condition mirrors the media column's exactly so no URL combo
+            can produce a silent blank. */}
+        {!(task.preview_url || task.drive_url) && (
+          <div style={{
+            padding: '16px 18px', background: '#fdf1f1',
+            border: '1px solid #e0b4b4', borderLeft: '3px solid var(--down)',
+          }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
+              textTransform: 'uppercase', color: 'var(--down)', marginBottom: 6, fontWeight: 700,
+            }}>Source file missing</div>
+            <div style={{ fontFamily: 'var(--sans)', fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.55 }}>
+              {task.final_cut_url
+                ? 'The raw source for this creative is missing from storage, but a final cut is on file — use the download on the final cut if that is what you need.'
+                : 'This creative has no file in storage — the original upload failed partway, so there is nothing to preview, download, or edit. Re-upload the source video (Library → open this creative → Replace original), and the preview + download come back on their own.'}
+            </div>
+          </div>
+        )}
         {/* Left column only when there's media — an empty div would still
             claim an auto-fit track and render a blank half-modal for rows
             with no preview/source URL. */}
@@ -12312,6 +12353,38 @@ function KanbanView({ tasks, editors, onEdit, onMove, onReassignEditor, onAddInC
   )
 }
 
+/* LazyVideoTile — thumbnail stand-in for queue tiles whose creative has a
+   playable file but no stored thumbnail (big moov-at-end files often time
+   out the capture). Renders the <video preload="metadata"> ONLY once the
+   tile scrolls near the viewport: metadata fetches on these files can pull
+   several MB each via range requests, and mounting one per row on a 150+
+   task queue would saturate the browser's per-host connection pool.
+   Playable src only — preview_url / final_cut_url. drive_url is a Google
+   Drive PAGE link on older rows (the app embeds it via iframe, never
+   <video>), so it must not be used as a video src. */
+function LazyVideoTile({ src, style }) {
+  const ref = useRef(null)
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (typeof IntersectionObserver === 'undefined') { setVisible(true); return }
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some(en => en.isIntersecting)) { setVisible(true); io.disconnect() }
+    }, { rootMargin: '200px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+  return (
+    <div ref={ref} style={{ width: '100%', height: '100%', background: '#0a0a0a' }}>
+      {visible && (
+        // '#t=1' nudges the painted frame past a black opening frame.
+        <video src={src + '#t=1'} muted playsInline preload="metadata" style={style} />
+      )}
+    </div>
+  )
+}
+
 /* QueueCard — fixed-shape card used by the Kanban view.
    Layout (locked so every card is the same size regardless of content):
      - 96px thumbnail strip (object-fit: cover, no aspect drift)
@@ -12380,8 +12453,20 @@ function QueueCard({ task, editors, onClick, onReassignEditor, draggable, onDrag
         {task.thumbnail_url ? (
           <img src={task.thumbnail_url} alt="" loading="lazy"
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-        ) : (
+        ) : (task.preview_url || task.final_cut_url) ? (
+          // No stored thumbnail but the video IS on file — paint its first
+          // frame as the tile (lazy: mounts on scroll-into-view).
+          <LazyVideoTile src={task.preview_url || task.final_cut_url}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        ) : task.drive_url ? (
+          // File exists but only as a Drive link (older ingests) — a Drive
+          // page URL can't feed a <video>, so this stays a plain label.
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.08em' }}>NO PREVIEW</span>
+        ) : (
+          // Nothing behind this task at all — the source upload failed.
+          // Say so explicitly instead of the ambiguous NO PREVIEW.
+          <span title="The original upload never reached storage — re-upload the source"
+            style={{ fontFamily: 'var(--mono)', fontSize: 10, color: '#e05252', letterSpacing: '0.08em' }}>NO FILE</span>
         )}
       </div>
       <div title={taskDisplayName(task)} style={{

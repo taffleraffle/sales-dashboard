@@ -1149,13 +1149,20 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
     // Pull status + manually_marked_used too so we can client-side
     // filter to "raw / needs editing" without a second query when the
     // operator flips the toggle.
+    // preview/drive/final_cut URLs ride along so the picker can spot rows
+    // with NO file in storage (a failed upload leaves the row behind) and
+    // block assigning them — an editor can't cut a video that doesn't exist.
     supabase.from('lib_creative_library')
-      .select('id,name,canonical_name,type,creator,thumbnail_url,description,status,manually_marked_used')
+      .select('id,name,canonical_name,type,creator,thumbnail_url,description,status,manually_marked_used,preview_url,drive_url,final_cut_url')
       .eq('exclude_from_library', false)
       .order('canonical_name', { ascending: true })
       .limit(500)
       .then(({ data }) => setCreatives(data || []))
   }, [])
+
+  // A creative with no URL at all has no file behind it — nothing to edit,
+  // preview, or download. These are the orphans a failed upload leaves.
+  const hasFile = (c) => !!(c.final_cut_url || c.drive_url || c.preview_url)
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -1273,6 +1280,26 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
         setUploadProgress(85)
       } else {
         cids = Array.from(creativeIds)
+        // Refuse to create tasks for creatives with no file in storage.
+        // Assigning one hands an editor a task with no preview and no
+        // download (bug report 2026-07-25, RAW-260719-UNK-S01-002 → Enzo).
+        // Re-fetched at submit time — the mount-time snapshot goes stale
+        // when an upload finishes while this modal is open, and blocking
+        // on stale data would false-positive on perfectly good clips.
+        const { data: fresh, error: freshErr } = await supabase
+          .from('lib_creative_library')
+          .select('id,name,canonical_name,display_name,preview_url,drive_url,final_cut_url')
+          .in('id', cids)
+        // Fail open on a fetch hiccup: blocking every assignment because
+        // one status query blipped would be worse than the original bug.
+        if (!freshErr && fresh) {
+          const missing = fresh.filter(c => !hasFile(c))
+          if (missing.length) {
+            setErr(`No file in storage for: ${missing.map(c => rowDisplayName(c) || c.name).join(', ')} — the upload never completed. Re-upload (Library → detail → Replace original) before assigning.`)
+            setBusy(false)
+            return
+          }
+        }
       }
       if (cids.length === 0) { setErr('Pick one or more creatives or upload a new file'); setBusy(false); return }
 
@@ -1530,6 +1557,15 @@ export function AddTaskModal({ editors, onClose, onSaved, prefillEditorId = '', 
                           }}>{c.description}</div>
                         )}
                       </div>
+                      {!hasFile(c) && (
+                        <span title="The original upload never reached storage — re-upload before assigning"
+                          style={{
+                            flexShrink: 0, padding: '2px 7px', borderRadius: 9,
+                            background: 'var(--down)', color: '#fff',
+                            fontFamily: 'var(--mono)', fontSize: 8.5, fontWeight: 700,
+                            letterSpacing: '0.08em', textTransform: 'uppercase',
+                          }}>No file</span>
+                      )}
                       <span style={{ color: 'var(--ink-4)', fontSize: 10 }}>{c.type}</span>
                     </div>
                   )

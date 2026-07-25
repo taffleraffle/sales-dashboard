@@ -420,10 +420,34 @@ export const uploadQueue = {
     try {
       await runUploadPipeline(next, (patch) => this.updateItem(next.id, patch))
     } catch (e) {
-      // Skip the error status if the item was cancelled — cancel() already
-      // dropped it from the queue and updateItem would be a no-op anyway.
-      if (!next.cancelled) {
+      // updateItem() REPLACES items with copies, so `next` can hold stale
+      // flags — read cancellation off the live copy. cancel() also removes
+      // the item entirely (and deletes the row), in which case there is
+      // nothing to update or flag.
+      const live = this.items.find((i) => i.id === next.id)
+      if (live && !live.cancelled && !next.cancelled) {
         this.updateItem(next.id, { status: 'error', message: e?.message || 'failed', error: e?.message || 'failed' })
+        // The library row is inserted BEFORE the upload, so a failure that
+        // lands here can leave a row that looks like a normal clip but has
+        // no file behind it — assignable to an editor, yet no preview and
+        // no download (the 2026-07-19 shorts batch left 3 such rows).
+        // Flag it via the LOW-Q infrastructure so the library hides it by
+        // default and badges WHY, instead of leaving a trap. libraryId /
+        // uploadedUrl / urlWriteFailed are direct mutations on the original
+        // item, so they're readable here. uploadedUrl set = file + URL both
+        // landed and the failure was a later, non-essential step: no flag.
+        if (next.libraryId && !next.uploadedUrl) {
+          const reason = next.urlWriteFailed
+            ? `File reached storage but the row's URL write failed (${e?.message || 'unknown error'}). File is at ${next.urlWriteFailed} — re-link preview_url or re-upload.`
+            : `Upload failed before the file reached storage (${e?.message || 'unknown error'}). Re-upload required — do not assign.`
+          supabase.from('lib_creative_library').update({
+            is_low_quality: true,
+            low_quality_reason: reason,
+            low_quality_detected_at: new Date().toISOString(),
+          }).eq('id', next.libraryId).then(({ error }) => {
+            if (error) console.warn('failed to flag broken upload row', error)
+          })
+        }
       }
     }
     // Yield to event loop so React can paint, then move on.
@@ -569,6 +593,13 @@ async function runUploadPipeline(item, update) {
   const { data: inserted, error: insErr } = insertRes
   if (insErr) throw new Error(insErr.message)
   const libraryId = inserted.id
+  // Direct mutation ON TOP of update(): updateItem replaces the queue's
+  // copy of the item with a new object, so fields set only via update()
+  // never reach the original `item` reference that processNext's error
+  // handler holds. tusHandle/uploadedUrl already rely on direct mutation;
+  // libraryId must too or the orphan-row flagging in processNext can
+  // never fire (it reads item.libraryId after a throw).
+  item.libraryId = libraryId
   update({ libraryId })
   if (item.cancelled) return
 
@@ -610,10 +641,36 @@ async function runUploadPipeline(item, update) {
     }
     if (item.cancelled) return
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${storagePath}`
-    const postPatch = { preview_url: publicUrl }
-    if (isImageFile) {
-      postPatch.thumbnail_url = publicUrl
-    } else {
+    // Record the file's URL on the row IMMEDIATELY after the upload lands —
+    // BEFORE thumbnail capture. This write is what makes the clip playable
+    // and downloadable; deferring it to the end of the block meant any
+    // failure in between left a row that looked uploaded but had every URL
+    // NULL (the 2026-07-19 shorts batch lost 3 of 9 clips this way — see
+    // RAW-260719-UNK-S01-002). Checked + retried once: a silent failure
+    // here recreates exactly that bug.
+    update({ status: 'linking', message: 'recording file URL' })
+    const urlPatch = { preview_url: publicUrl }
+    if (isImageFile) urlPatch.thumbnail_url = publicUrl
+    if (batchStatus === 'edited') {
+      urlPatch.final_cut_url = publicUrl
+      urlPatch.stage_final_cut = 'done'
+    }
+    let urlRes = await supabase.from('lib_creative_library').update(urlPatch).eq('id', libraryId)
+    if (urlRes.error) {
+      urlRes = await supabase.from('lib_creative_library').update(urlPatch).eq('id', libraryId)
+    }
+    if (urlRes.error) {
+      // The bytes ARE in storage — record where, so the error handler can
+      // flag the row with the truth (file exists, row just isn't linked)
+      // instead of claiming the upload itself failed.
+      item.urlWriteFailed = publicUrl
+      throw new Error(`file uploaded but URL write failed: ${urlRes.error.message}`)
+    }
+    // Marks "the bytes are in storage AND the row points at them" — the
+    // error handler in processNext uses this to tell a broken row (flag it)
+    // from a row that's fine but failed a later best-effort step.
+    item.uploadedUrl = publicUrl
+    if (!isImageFile) {
       update({ status: 'thumbnailing', message: 'capturing thumbnail' })
       // Try pre-upload File-based capture first (fast path for files
       // under 500 MB). If it skips because of the size guard OR fails,
@@ -635,15 +692,16 @@ async function runUploadPipeline(item, update) {
             contentType: 'image/jpeg',
             upsert: true,
           })
-          postPatch.thumbnail_url = `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${thumbPath}`
+          // Best-effort: the row already has its file URL (written above),
+          // so a failed thumbnail write only costs the kanban tile image.
+          const { error: thumbPatchErr } = await supabase
+            .from('lib_creative_library')
+            .update({ thumbnail_url: `${SUPABASE_URL}/storage/v1/object/public/creative-uploads/${thumbPath}` })
+            .eq('id', libraryId)
+          if (thumbPatchErr) console.warn('thumbnail_url write failed', thumbPatchErr)
         } catch { /* thumbnail best-effort */ }
       }
     }
-    if (batchStatus === 'edited') {
-      postPatch.final_cut_url = publicUrl
-      postPatch.stage_final_cut = 'done'
-    }
-    await supabase.from('lib_creative_library').update(postPatch).eq('id', libraryId)
   } else {
     update({ status: 'too-large', message: 'file >10GB · row created without upload' })
     return
