@@ -1250,15 +1250,24 @@ async function fetchAscensions({ from, to, audiences } = {}) {
     })).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
-// Test / internal bookings use the agency name as the fake closer half of the
-// GHL calendar title ("<prospect> and OPT Digital" — real titles are
-// "<prospect> and <closer full name>"). They are not prospects and must never
-// enter a booking count or the cost-per-booked/live denominators. Detect by the
-// agency name so a test booking auto-drops instead of needing a manual DQ every
-// time. Verified 2026-07-15: all 44 historical matches were already hand-marked
-// and every one fit this pattern, so this changes no current count — it only
-// stops the manual busywork going forward. (Ben — "auto-exclude test bookings".)
-const isTestBooking = name => /\bopt digital\b/i.test(name || '')
+// Test / internal bookings use the agency name as the closer half of the GHL
+// calendar title ("<prospect> and OPT Digital"). They must never enter a booking
+// count or the cost-per-booked/live denominators.
+//
+// The title ALONE is no longer sufficient. From ~20 Jul 2026 the round-robin
+// calendar started titling REAL prospects that way, and a name-only match was
+// silently discarding 38 of July's 39 matches — every one of them a genuine lead
+// with a GHL contact behind it (Monique Fell, Dan Hobbs, Mike Holmes, Colton
+// Griffin…). That understated the Bookings/Q.Books tiles by ~30% and inflated
+// Cost/Booking + Cost/Q.Book by ~40%.
+//
+// What actually separates the two, verified across all 104 historical matches:
+// a real prospect always carries a contact email; the internal tests never do
+// ("Ben and OPT Digital", "Will O'Test…", "testttttt…", "123…"). So require
+// both signals. Manual marks still outrank this, and a false positive still
+// surfaces a restorable 'test' pill in the drilldown rather than vanishing.
+const isTestBooking = row =>
+  /\bopt digital\b/i.test(row?.contact_name || '') && !String(row?.contact_email || '').trim()
 
 async function fetchBookings({ from, to, audiences } = {}) {
   // Every non-cancelled strategy-call booking in window, audience-resolved
@@ -1367,7 +1376,7 @@ async function fetchBookings({ from, to, audiences } = {}) {
     // marks so a hand-applied spam/dup/DQ still wins its pill (and stays
     // restorable); an unmarked test row surfaces its own 'test' pill and is
     // excluded from every count by the footer + loadBookings.
-    const isTest = !mark && isTestBooking(r.contact_name)
+    const isTest = !mark && isTestBooking(r)
     const status = removed ? 'removed'
       : is_dup ? 'dup'
       : is_spam ? 'spam'
@@ -3722,7 +3731,7 @@ export default function MarketingPerformance() {
         // bk.all / bk.qualified (and therefore Cost/Booking, Cost/Q.Book, and the
         // show-rate denominators) without a manual DQ. Mirrors the 'test' status
         // fetchBookings assigns, keeping the tile and the drilldown in lockstep.
-        if (isTestBooking(a.contact_name)) continue
+        if (isTestBooking(a)) continue
         // is_dq comes from the view (calendar-based); also honor revenue-tier
         // overrides so manual revenue_tier flags still work.
         const dqByTier = a.revenue_tier ? isDQRevenueTier(a.revenue_tier) : null
