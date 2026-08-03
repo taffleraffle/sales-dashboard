@@ -1,9 +1,9 @@
-// sync-typeform — pulls every response from the two OPT funnels and
+// sync-typeform — pulls every response from the OPT funnels and
 // upserts them into public.typeform_responses keyed on response_id.
 //
 //   POST /functions/v1/sync-typeform { days?: number, forms?: string[] }
 //
-// Defaults: 90-day window, both forms (h4il4Sla restoration + WndFLJux electrician).
+// Defaults: 90-day window, all four live funnels (see DEFAULT_FORMS).
 // Idempotent — re-running the same window is a no-op.
 //
 // The hidden field on each response carries the Meta UTM context already
@@ -38,9 +38,16 @@ const TYPEFORM_BASE = 'https://api.typeform.com'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
+// Every live funnel on the Typeform account. This list was stuck at the first
+// two for months, so Roofing and YouTube leads never reached Supabase at all —
+// zero rows, ever — and every attribution view silently under-reported them.
+// Ids verified against GET /forms on 2026-08-03. When Ben launches a new
+// funnel, it has to be added here or its leads are invisible to the dashboard.
 const DEFAULT_FORMS = [
   { id: 'h4il4Sla', name: 'Restoration Funnel' },
   { id: 'WndFLJux', name: 'Electrician Funnel' },
+  { id: 'sn1Dqabn', name: 'Roofing Funnel' },
+  { id: 'IoEk4ND5', name: 'Youtube Funnel' },
 ]
 
 const QUALIFIED_TIERS = new Set([
