@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Loader2, Play, Trash2, ChevronDown, Zap, RefreshCw } from 'lucide-react'
+import { Loader2, Play, Trash2, ChevronDown, Zap, RefreshCw, Flag } from 'lucide-react'
 import {
   FlagPopover, FlaggableText, FlagQueue, loadFlags, saveFlag,
 } from './SandboxFlagging'
@@ -134,15 +134,45 @@ function Bubble({ msg, diagnostics, flags, onSelect }) {
   return (
     <div className={`flex flex-col ${isBot ? 'items-start' : 'items-end'} mb-3`}>
       <div style={{ maxWidth: '85%' }}>
-        {parts.map((p, i) => (
-          <div key={i} className="px-3 py-2 mb-1 rounded-2xl text-sm leading-snug"
-            style={isBot ? { background: '#e9e9eb', color: '#000' } : { background: '#0b93f6', color: '#fff' }}>
-            {isBot
-              ? <FlaggableText text={p} flags={(flags || []).filter(f => f.message === p)}
-                  onSelect={(sel) => onSelect({ ...sel, message: p })} />
-              : p}
-          </div>
-        ))}
+        {parts.map((p, i) => {
+          const mine = (flags || []).filter(f => f.message === p)
+          return (
+            <div key={i} className="mb-1">
+              <div className="px-3 py-2 rounded-2xl text-sm leading-snug"
+                style={isBot ? { background: '#e9e9eb', color: '#000' } : { background: '#0b93f6', color: '#fff' }}>
+                {isBot
+                  ? <FlaggableText text={p} flags={mine}
+                      onSelect={(sel) => onSelect({ ...sel, message: p })} />
+                  : p}
+              </div>
+              {/* A visible way in. Selecting words is more precise and still
+                  works, but a feature whose only affordance is "know to drag
+                  across the text" is a feature nobody finds. */}
+              {isBot && (
+                <div className="flex items-center gap-2 mt-0.5 ml-1">
+                  <button
+                    onClick={(ev) => {
+                      const r = ev.currentTarget.getBoundingClientRect()
+                      onSelect({ text: null, start: null, end: null, message: p,
+                                 anchor: { top: r.bottom, left: r.left } })
+                    }}
+                    className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded"
+                    style={{ border: '1px solid var(--rule)', color: 'var(--ink-3)' }}>
+                    <Flag className="w-2.5 h-2.5" /> flag
+                  </button>
+                  {mine.length > 0 && (
+                    <span className="text-[10px]" style={{ color: '#991b1b' }}>
+                      {mine.length} flagged
+                    </span>
+                  )}
+                  <span className="text-[10px]" style={{ color: 'var(--ink-3)', opacity: 0.7 }}>
+                    or select the exact words
+                  </span>
+                </div>
+              )}
+            </div>
+          )
+        })}
         {isBot && <Diagnostics d={diagnostics} />}
       </div>
     </div>
@@ -340,15 +370,21 @@ export default function SetterBotSandbox() {
 
         {!run && !busy && (
           <p className="text-sm py-8 text-center" style={{ color: 'var(--ink-3)' }}>
-            Pick a lead and hit <strong>Test conversation</strong>. Then <strong>select any words</strong> in
-            what the bot says to flag exactly what is wrong with them.
+            Pick a lead and hit <strong>Test conversation</strong>. Every message the bot sends gets
+            a <strong>flag</strong> button underneath it, and you can select the exact words if you
+            want to be more specific than that.
           </p>
         )}
 
         {run && (
           <>
             <div className="mb-2 text-[11px]" style={{ color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
-              {run.lead.name} · {run.lead.phone} · {run.label} — select any words in a grey bubble to flag them
+              {run.lead.name} · {run.lead.phone} · {run.label}
+            </div>
+            <div className="mb-3 px-3 py-2 rounded text-[12px]"
+              style={{ background: '#fffbe6', border: '1px solid #f0d98c', color: '#6b5200' }}>
+              See something wrong? Hit <strong>flag</strong> under any message the bot sent, or
+              <strong> select the exact words</strong> that bother you. Flags go straight to Claude.
             </div>
             {/* The transcript scrolls inside itself. It used to grow down the
                 page with the newest message scrolled into view, which moved the
