@@ -1,20 +1,21 @@
-import { useState, useEffect, useRef } from 'react'
-import { Loader2, Play, Trash2, Download, ThumbsUp, ThumbsDown, ChevronDown, Zap } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Loader2, Play, Trash2, ChevronDown, Zap, RefreshCw } from 'lucide-react'
+import {
+  FlagPopover, FlaggableText, FlagQueue, loadFlags, saveFlag,
+} from './SandboxFlagging'
 
 const AGENT_URL = import.meta.env.VITE_ENGAGEMENT_AGENT_URL
 const AGENT_ADMIN_KEY = import.meta.env.VITE_AGENT_ADMIN_KEY
 
-// Annotations are the whole point of this panel, so they outlive a refresh.
-// Local to this browser on purpose: they are Will's working notes, not a shared
-// record, and putting them in Supabase would mean a table and a migration for
-// something that is read once and acted on.
-const STORE = 'setterbot-sandbox-runs-v1'
-
+// Transcripts are disposable — they can be regenerated in seconds. The FLAGS are
+// the durable artefact and they live in Supabase (sandbox_feedback), because
+// feedback that only exists in one browser is feedback that goes nowhere.
+const STORE = 'setterbot-sandbox-runs-v2'
 const loadRuns = () => {
   try { return JSON.parse(localStorage.getItem(STORE) || '[]') } catch { return [] }
 }
 const saveRuns = (runs) => {
-  try { localStorage.setItem(STORE, JSON.stringify(runs.slice(-40))) } catch { /* full, ignore */ }
+  try { localStorage.setItem(STORE, JSON.stringify(runs.slice(-30))) } catch { /* full, ignore */ }
 }
 
 // Lead archetypes. The phone number is not cosmetic — the bot infers the lead's
@@ -34,7 +35,7 @@ const LEADS = [
 ]
 
 // Scripted leads for the batch runner. Each is a real failure mode this bot has
-// had, or a normal path that must keep working. Read the transcripts afterwards.
+// had, or a normal path that has to keep working.
 const SCRIPTS = [
   { key: 'price', label: 'Asks price three times',
     turns: ['how much does this cost', 'you can just tell me your prices', 'prices please'] },
@@ -48,8 +49,7 @@ const SCRIPTS = [
     turns: ['yeah sounds good', 'tomorrow at 2pm works'] },
   { key: 'annoyed', label: 'Annoyed / what do you even do',
     turns: ['stop wasting my time, what do you actually do', 'fine, 11am tomorrow'] },
-  { key: 'optout', label: 'Opts out',
-    turns: ['not interested, remove me'] },
+  { key: 'optout', label: 'Opts out', turns: ['not interested, remove me'] },
   { key: 'vague', label: 'Vague, never names a time',
     turns: ['maybe', 'sometime next week idk', 'whenever works for you'] },
   { key: 'injection', label: 'Prompt injection',
@@ -102,19 +102,13 @@ function Diagnostics({ d }) {
             {d.violations.length} rule {d.violations.length === 1 ? 'break' : 'breaks'}
           </span>
         )}
-        {d.promise_guard_fired && (
-          <span className="tag" style={{ background: '#fee2e2', color: '#991b1b', borderColor: '#fca5a5' }}>
-            promise guard fired
-          </span>
-        )}
-        <button onClick={() => setOpen(o => !o)}
-          className="flex items-center gap-0.5 text-[10px]"
+        <button onClick={() => setOpen(o => !o)} className="flex items-center gap-0.5 text-[10px]"
           style={{ fontFamily: 'var(--mono)', color: 'var(--ink-3)', letterSpacing: '0.08em' }}>
           DETAIL <ChevronDown className="w-3 h-3" style={{ transform: open ? 'rotate(180deg)' : 'none' }} />
         </button>
       </div>
       {bad && (
-        <ul className="mt-1 ml-0.5">
+        <ul className="mt-1">
           {d.violations.map((v, i) => (
             <li key={i} className="text-[11px]" style={{ color: '#991b1b' }}>!! {v}</li>
           ))}
@@ -124,13 +118,9 @@ function Diagnostics({ d }) {
         <div className="mt-1.5 p-2 rounded text-[11px] leading-relaxed"
           style={{ background: 'var(--paper-2, #faf9f7)', border: '1px solid var(--rule)', fontFamily: 'var(--mono)' }}>
           {d.outcome && <div><strong>outcome</strong> · {d.outcome}</div>}
-          <div><strong>lead tz</strong> · {d.timezone}{d.timezone_iana ? ` (${d.timezone_iana})` : ''} · their clock {d.lead_local_time}</div>
+          <div><strong>lead tz</strong> · {d.timezone} · their clock {d.lead_local_time}</div>
           {d.requested_time && <div><strong>time asked for</strong> · {d.requested_time}</div>}
           {d.lead_type && <div><strong>lead type</strong> · {d.lead_type} · arm {d.variant} · research {d.research}</div>}
-          {d.research_nugget && <div><strong>nugget</strong> · {d.research_nugget}</div>}
-          {(d.parts || []).length > 1 && (
-            <div><strong>sends as</strong> · {d.parts.length} separate texts</div>
-          )}
           <div><strong>model</strong> · {d.model}</div>
         </div>
       )}
@@ -138,7 +128,7 @@ function Diagnostics({ d }) {
   )
 }
 
-function Bubble({ msg, diagnostics, note, onNote }) {
+function Bubble({ msg, diagnostics, flags, onSelect }) {
   const isBot = msg.direction === 'outbound'
   const parts = isBot && diagnostics?.parts?.length ? diagnostics.parts : [msg.content]
   return (
@@ -146,47 +136,26 @@ function Bubble({ msg, diagnostics, note, onNote }) {
       <div style={{ maxWidth: '85%' }}>
         {parts.map((p, i) => (
           <div key={i} className="px-3 py-2 mb-1 rounded-2xl text-sm leading-snug"
-            style={isBot
-              ? { background: '#e9e9eb', color: '#000' }
-              : { background: '#0b93f6', color: '#fff' }}>
-            {p}
+            style={isBot ? { background: '#e9e9eb', color: '#000' } : { background: '#0b93f6', color: '#fff' }}>
+            {isBot
+              ? <FlaggableText text={p} flags={(flags || []).filter(f => f.message === p)}
+                  onSelect={(sel) => onSelect({ ...sel, message: p })} />
+              : p}
           </div>
         ))}
         {isBot && <Diagnostics d={diagnostics} />}
-        {isBot && onNote && (
-          <div className="flex items-center gap-1 mt-1">
-            <button onClick={() => onNote({ ...note, verdict: note?.verdict === 'good' ? null : 'good' })}
-              title="good" className="p-1 rounded"
-              style={{ background: note?.verdict === 'good' ? '#d6f5e0' : 'transparent' }}>
-              <ThumbsUp className="w-3.5 h-3.5" style={{ color: note?.verdict === 'good' ? '#0a6b39' : 'var(--ink-3)' }} />
-            </button>
-            <button onClick={() => onNote({ ...note, verdict: note?.verdict === 'bad' ? null : 'bad' })}
-              title="bad" className="p-1 rounded"
-              style={{ background: note?.verdict === 'bad' ? '#fee2e2' : 'transparent' }}>
-              <ThumbsDown className="w-3.5 h-3.5" style={{ color: note?.verdict === 'bad' ? '#991b1b' : 'var(--ink-3)' }} />
-            </button>
-            <input
-              value={note?.text || ''}
-              onChange={e => onNote({ ...note, text: e.target.value })}
-              placeholder="why? (this is what I read back)"
-              className="flex-1 px-2 py-1 text-[11px] rounded"
-              style={{ border: '1px solid var(--rule)', background: 'transparent', minWidth: 240 }}
-            />
-          </div>
-        )}
       </div>
     </div>
   )
 }
 
-function Transcript({ run, onNote }) {
+function Transcript({ run, flags, onSelect }) {
   return (
     <div>
       {run.messages.map((m, i) => (
         <Bubble key={i} msg={m}
           diagnostics={m.direction === 'outbound' ? run.diagnostics?.[i] : null}
-          note={run.notes?.[i]}
-          onNote={onNote ? (n) => onNote(i, n) : null} />
+          flags={flags} onSelect={(sel) => onSelect(sel, run, i)} />
       ))}
     </div>
   )
@@ -201,21 +170,28 @@ export default function SetterBotSandbox() {
   const [input, setInput] = useState('')
   const [runs, setRuns] = useState(loadRuns)
   const [batchBusy, setBatchBusy] = useState('')
+  const [flags, setFlags] = useState([])
+  const [pending, setPending] = useState(null)   // the live selection awaiting a reason
   const endRef = useRef(null)
 
+  const refreshFlags = useCallback(async () => {
+    try { setFlags(await loadFlags('open')) } catch (e) { setErr(`Could not load flags: ${e.message}`) }
+  }, [])
+
+  useEffect(() => { refreshFlags() }, [refreshFlags])
   useEffect(() => { saveRuns(runs) }, [runs])
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [run?.messages?.length])
 
   const lead = LEADS.find(l => l.key === leadKey)
-  const leadPayload = { ...lead, id: `sbx-${lead.key}-${Date.now()}` }
 
   const start = async () => {
     setErr(''); setBusy(true); setRun(null)
     try {
+      const leadPayload = { ...lead, id: `sbx-${lead.key}-${Date.now()}` }
       const r = await agent('/admin/sandbox/start', { lead: leadPayload, variant: variant || null })
       setRun({
         id: `run-${Date.now()}`, lead: leadPayload, label: lead.label,
-        messages: r.messages, diagnostics: { 0: r.diagnostics }, notes: {}, ended: false,
+        messages: r.messages, diagnostics: { 0: r.diagnostics }, ended: false,
         startedAt: new Date().toISOString(),
       })
     } catch (e) { setErr(e.message) }
@@ -227,37 +203,49 @@ export default function SetterBotSandbox() {
     if (!text || !run || busy) return
     setErr(''); setBusy(true); setInput('')
     try {
-      const r = await agent('/admin/sandbox/reply', {
-        lead: run.lead, messages: run.messages, message: text,
-      })
+      const r = await agent('/admin/sandbox/reply', { lead: run.lead, messages: run.messages, message: text })
       setRun(prev => {
         const base = prev.messages.length
         const diagnostics = { ...prev.diagnostics }
         r.messages.forEach((m, i) => {
           if (m.direction === 'outbound') diagnostics[base + i] = r.diagnostics
         })
-        // A turn the bot answers with silence (STOP, or a handoff with no
-        // holding text) still has to show WHY, or the panel just looks broken.
-        if (!r.messages.some(m => m.direction === 'outbound')) {
-          diagnostics[`silent-${base}`] = r.diagnostics
-        }
         return { ...prev, messages: [...prev.messages, ...r.messages], diagnostics, ended: !!r.ended }
       })
     } catch (e) { setErr(e.message) }
     setBusy(false)
   }
 
-  const keep = () => {
-    if (!run) return
-    setRuns(prev => [...prev.filter(r => r.id !== run.id), run])
+  // A selection came back from a bot message. Hold it until a reason is picked,
+  // then write the flag with everything needed to reproduce it later without
+  // having to ask Will what he meant.
+  const onSelect = (sel, sourceRun, msgIndex) => {
+    setPending({ ...sel, run: sourceRun, msgIndex })
   }
 
-  const setNote = (i, note) => setRun(prev => ({ ...prev, notes: { ...prev.notes, [i]: note } }))
-  const setSavedNote = (runId, i, note) => setRuns(prev => prev.map(r =>
-    r.id === runId ? { ...r, notes: { ...r.notes, [i]: note } } : r))
+  const commitFlag = async ({ reasons, note }) => {
+    const { run: r, msgIndex, message, text, start: s, end: e } = pending
+    try {
+      await saveFlag({
+        message,
+        highlighted: text,
+        span_start: s,
+        span_end: e,
+        reasons,
+        note: note || null,
+        transcript: r.messages.slice(0, msgIndex + 1),
+        diagnostics: r.diagnostics?.[msgIndex] || null,
+        lead: r.lead,
+        run_label: r.label,
+      })
+      await refreshFlags()
+    } catch (ex) {
+      setErr(`Could not save the flag: ${ex.message}`)
+    }
+    setPending(null)
+    window.getSelection()?.removeAllRanges()
+  }
 
-  // Runs every script against the selected lead, unattended, then files them
-  // all for reading. This is the "fifty conversations at once" mode.
   const runBatch = async () => {
     setErr(''); setBatchBusy('starting')
     const done = []
@@ -281,46 +269,14 @@ export default function SetterBotSandbox() {
         }
         done.push({
           id: `run-${script.key}-${Date.now()}`, lead: leadFor,
-          label: `${lead.label} · ${script.label}`, messages, diagnostics, notes: {}, ended,
+          label: `${lead.label} · ${script.label}`, messages, diagnostics, ended,
           startedAt: new Date().toISOString(),
         })
-      } catch (e) {
-        setErr(`${script.label}: ${e.message}`)
-      }
+      } catch (e) { setErr(`${script.label}: ${e.message}`) }
     }
     setRuns(prev => [...prev, ...done])
     setBatchBusy('')
   }
-
-  // Markdown, because the point of the notes is to hand them to Claude and have
-  // the prompt changed. Copy the file into a chat and say "fix these".
-  const exportRuns = () => {
-    const lines = ['# Setter bot sandbox — annotated runs', '']
-    runs.forEach(r => {
-      lines.push(`## ${r.label}`, `_lead ${r.lead.name} ${r.lead.phone} · ${r.startedAt}_`, '')
-      r.messages.forEach((m, i) => {
-        const who = m.direction === 'outbound' ? 'BOT ' : 'LEAD'
-        lines.push(`- **${who}** ${m.content}`)
-        const d = r.diagnostics?.[i]
-        if (d) {
-          lines.push(`  - _${d.action}${d.outcome ? ' · ' + d.outcome : ''}_`)
-          if ((d.violations || []).length) lines.push(`  - **rule breaks:** ${d.violations.join('; ')}`)
-        }
-        const n = r.notes?.[i]
-        if (n && (n.verdict || n.text)) {
-          lines.push(`  - **WILL SAYS (${n.verdict || 'note'}):** ${n.text || ''}`)
-        }
-      })
-      lines.push('')
-    })
-    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `setterbot-sandbox-${new Date().toISOString().slice(0, 10)}.md`
-    a.click()
-  }
-
-  const annotated = runs.reduce((n, r) => n + Object.values(r.notes || {}).filter(x => x?.verdict || x?.text).length, 0)
 
   return (
     <div className="mb-8">
@@ -332,7 +288,6 @@ export default function SetterBotSandbox() {
       </div>
 
       <div className="p-4 rounded" style={{ border: '1px solid var(--rule)' }}>
-        {/* Controls */}
         <div className="flex flex-wrap items-end gap-3 mb-4 pb-4" style={{ borderBottom: '1px solid var(--rule)' }}>
           <label className="flex flex-col gap-1">
             <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--ink-3)' }}>Lead</span>
@@ -363,9 +318,7 @@ export default function SetterBotSandbox() {
             Run all {SCRIPTS.length} scripts
           </button>
           {batchBusy && (
-            <span className="text-[11px]" style={{ color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
-              {batchBusy}…
-            </span>
+            <span className="text-[11px]" style={{ color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>{batchBusy}…</span>
           )}
         </div>
 
@@ -374,20 +327,19 @@ export default function SetterBotSandbox() {
             style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}>{err}</div>
         )}
 
-        {/* Live conversation */}
         {!run && !busy && (
           <p className="text-sm py-8 text-center" style={{ color: 'var(--ink-3)' }}>
-            Pick a lead and hit <strong>Test conversation</strong>. You'll get the real opener; reply as the
-            lead and it answers exactly as it would at 8pm, including what it would put on Josh's calendar.
+            Pick a lead and hit <strong>Test conversation</strong>. Then <strong>select any words</strong> in
+            what the bot says to flag exactly what is wrong with them.
           </p>
         )}
 
         {run && (
           <>
             <div className="mb-2 text-[11px]" style={{ color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
-              {run.lead.name} · {run.lead.phone} · {run.label}
+              {run.lead.name} · {run.lead.phone} · {run.label} — select any words in a grey bubble to flag them
             </div>
-            <Transcript run={run} onNote={setNote} />
+            <Transcript run={run} flags={flags} onSelect={onSelect} />
             <div ref={endRef} />
             {run.ended && (
               <div className="text-center text-[11px] py-2" style={{ color: 'var(--ink-3)' }}>
@@ -406,33 +358,29 @@ export default function SetterBotSandbox() {
                 style={{ background: 'var(--ink-1, #111)', color: '#fff', opacity: (busy || run.ended) ? 0.5 : 1 }}>
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send'}
               </button>
-              <button onClick={keep} disabled={!run}
-                className="px-3 py-2 text-sm rounded" style={{ border: '1px solid var(--rule)' }}>
-                Keep
-              </button>
             </div>
           </>
         )}
       </div>
 
-      {/* Filed runs */}
+      {pending && (
+        <FlagPopover anchor={pending.anchor} selected={pending.text}
+          onCancel={() => { setPending(null); window.getSelection()?.removeAllRanges() }}
+          onSave={commitFlag} />
+      )}
+
+      {/* Batch transcripts, still flaggable */}
       {runs.length > 0 && (
         <div className="mt-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">
-              Saved runs ({runs.length}) · {annotated} annotated
+              Batch transcripts ({runs.length})
             </h2>
-            <div className="flex gap-2">
-              <button onClick={exportRuns} className="flex items-center gap-1.5 px-2 py-1 text-xs rounded"
-                style={{ border: '1px solid var(--rule)' }}>
-                <Download className="w-3 h-3" /> Export notes
-              </button>
-              <button onClick={() => { setRuns([]); saveRuns([]) }}
-                className="flex items-center gap-1.5 px-2 py-1 text-xs rounded"
-                style={{ border: '1px solid var(--rule)', color: '#991b1b' }}>
-                <Trash2 className="w-3 h-3" /> Clear
-              </button>
-            </div>
+            <button onClick={() => { setRuns([]); saveRuns([]) }}
+              className="flex items-center gap-1.5 px-2 py-1 text-xs rounded"
+              style={{ border: '1px solid var(--rule)', color: '#991b1b' }}>
+              <Trash2 className="w-3 h-3" /> Clear transcripts
+            </button>
           </div>
           {[...runs].reverse().map(r => (
             <details key={r.id} className="mb-2 p-3 rounded" style={{ border: '1px solid var(--rule)' }}>
@@ -443,22 +391,29 @@ export default function SetterBotSandbox() {
                     rule breaks
                   </span>
                 )}
-                {Object.values(r.diagnostics || {}).some(d => d?.booked) && (
-                  <span className="tag" style={{ background: '#d6f5e0', color: '#0a6b39', borderColor: '#8fd6ab' }}>
-                    booked
-                  </span>
-                )}
-                <span className="text-[10px]" style={{ color: 'var(--ink-3)' }}>
-                  {r.messages.length} messages
-                </span>
+                <span className="text-[10px]" style={{ color: 'var(--ink-3)' }}>{r.messages.length} messages</span>
               </summary>
               <div className="mt-3">
-                <Transcript run={r} onNote={(i, n) => setSavedNote(r.id, i, n)} />
+                <Transcript run={r} flags={flags} onSelect={onSelect} />
               </div>
             </details>
           ))}
         </div>
       )}
+
+      {/* The queue Claude reads */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">
+            Flagged for fixing ({flags.length})
+          </h2>
+          <button onClick={refreshFlags} className="flex items-center gap-1.5 px-2 py-1 text-xs rounded"
+            style={{ border: '1px solid var(--rule)' }}>
+            <RefreshCw className="w-3 h-3" /> Refresh
+          </button>
+        </div>
+        <FlagQueue flags={flags} onRefresh={refreshFlags} />
+      </div>
     </div>
   )
 }
