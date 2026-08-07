@@ -172,7 +172,8 @@ export default function SetterBotSandbox() {
   const [batchBusy, setBatchBusy] = useState('')
   const [flags, setFlags] = useState([])
   const [pending, setPending] = useState(null)   // the live selection awaiting a reason
-  const endRef = useRef(null)
+  const scrollRef = useRef(null)
+  const inputRef = useRef(null)
 
   const refreshFlags = useCallback(async () => {
     try { setFlags(await loadFlags('open')) } catch (e) { setErr(`Could not load flags: ${e.message}`) }
@@ -180,7 +181,13 @@ export default function SetterBotSandbox() {
 
   useEffect(() => { refreshFlags() }, [refreshFlags])
   useEffect(() => { saveRuns(runs) }, [runs])
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [run?.messages?.length])
+  // Keep the newest message in view by moving the transcript's OWN scroll
+  // position. scrollIntoView would scroll the nearest scrollable ancestor,
+  // which is the window, and jump the page.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [run?.messages?.length])
 
   const lead = LEADS.find(l => l.key === leadKey)
 
@@ -214,6 +221,10 @@ export default function SetterBotSandbox() {
       })
     } catch (e) { setErr(e.message) }
     setBusy(false)
+    // The field is disabled while the bot thinks, which drops focus. Put it
+    // back so a conversation can be typed straight through without reaching
+    // for the mouse between turns.
+    requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   // A selection came back from a bot message. Hold it until a reason is picked,
@@ -339,15 +350,21 @@ export default function SetterBotSandbox() {
             <div className="mb-2 text-[11px]" style={{ color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
               {run.lead.name} · {run.lead.phone} · {run.label} — select any words in a grey bubble to flag them
             </div>
-            <Transcript run={run} flags={flags} onSelect={onSelect} />
-            <div ref={endRef} />
+            {/* The transcript scrolls inside itself. It used to grow down the
+                page with the newest message scrolled into view, which moved the
+                whole window every time you hit send — the panel sits at the top
+                of a long page, so that reads as being thrown down to the next
+                screen mid-conversation. */}
+            <div ref={scrollRef} style={{ maxHeight: '26rem', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+              <Transcript run={run} flags={flags} onSelect={onSelect} />
+            </div>
             {run.ended && (
               <div className="text-center text-[11px] py-2" style={{ color: 'var(--ink-3)' }}>
                 — conversation ended (the bot goes silent from here) —
               </div>
             )}
             <div className="flex gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--rule)' }}>
-              <input value={input} onChange={e => setInput(e.target.value)}
+              <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && send()}
                 placeholder={run.ended ? 'conversation ended' : 'reply as the lead…'}
                 disabled={busy || run.ended}
