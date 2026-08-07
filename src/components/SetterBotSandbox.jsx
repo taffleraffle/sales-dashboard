@@ -3,6 +3,7 @@ import { Loader2, Play, Trash2, ChevronDown, Zap, RefreshCw, Flag } from 'lucide
 import {
   FlagPopover, FlaggableText, FlagQueue, loadFlags, saveFlag,
 } from './SandboxFlagging'
+import Dropdown from './Dropdown'
 
 const AGENT_URL = import.meta.env.VITE_ENGAGEMENT_AGENT_URL
 const AGENT_ADMIN_KEY = import.meta.env.VITE_AGENT_ADMIN_KEY
@@ -392,22 +393,21 @@ export default function SetterBotSandbox() {
 
       <div className="p-4 rounded" style={{ border: '1px solid var(--rule)' }}>
         <div className="flex flex-wrap items-end gap-3 mb-4 pb-4" style={{ borderBottom: '1px solid var(--rule)' }}>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--ink-3)' }}>Lead</span>
-            <select value={leadKey} onChange={e => setLeadKey(e.target.value)}
-              className="px-2 py-1.5 text-sm rounded" style={{ border: '1px solid var(--rule)', background: 'transparent' }}>
-              {LEADS.map(l => <option key={l.key} value={l.key}>{l.label}</option>)}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--ink-3)' }}>Opener arm</span>
-            <select value={variant} onChange={e => setVariant(e.target.value)}
-              className="px-2 py-1.5 text-sm rounded" style={{ border: '1px solid var(--rule)', background: 'transparent' }}>
-              <option value="">As production would assign</option>
-              <option value="control">Control</option>
-              <option value="challenger">Challenger (researched)</option>
-            </select>
-          </label>
+          {/* The phone number is shown as a hint because it is the input that
+              decides the lead's timezone, which is the whole reason there is
+              more than one archetype. */}
+          <Dropdown
+            label="Lead" width={235} value={leadKey} onChange={setLeadKey}
+            options={LEADS.map(l => ({ value: l.key, label: l.label, hint: `${l.name} · ${l.phone}` }))}
+          />
+          <Dropdown
+            label="Opener arm" width={225} value={variant} onChange={setVariant}
+            options={[
+              { value: '', label: 'As production would assign', hint: 'hashed off the lead id, like live' },
+              { value: 'control', label: 'Control', hint: 'the opener shipping today' },
+              { value: 'challenger', label: 'Challenger', hint: 'researched off their website' },
+            ]}
+          />
           <button onClick={start} disabled={busy || !!batchBusy}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded"
             style={{ background: 'var(--ink-1, #111)', color: '#fff', opacity: busy ? 0.6 : 1 }}>
