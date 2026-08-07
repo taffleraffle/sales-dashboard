@@ -4,6 +4,7 @@ import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import { useEngagementData } from '../hooks/useEngagementData'
 import { useEngagementCadences } from '../hooks/useEngagementCadences'
+import SetterBotSandbox from '../components/SetterBotSandbox'
 import { Bot, Loader2, ChevronDown, ChevronUp, Filter, Zap, Phone, RefreshCw, Check, Save, Power, Clock, AlertTriangle, MessageSquare, Pause, Play, Send } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
@@ -681,6 +682,9 @@ export default function SetterBot() {
         <Gauge label="Booking Rate" value={parseFloat(stats.bookingRate) || 0} target={15} />
         <Gauge label="Handoff Rate" value={stats.total > 0 ? parseFloat(((stats.handedOff / stats.total) * 100).toFixed(1)) : 0} target={10} direction="below" />
       </div>
+
+      {/* Sandbox — talk to the bot without texting anyone */}
+      <SetterBotSandbox />
 
       {/* Cadences */}
       <div className="flex items-center justify-between mb-3">
