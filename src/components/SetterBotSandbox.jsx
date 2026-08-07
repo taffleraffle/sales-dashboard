@@ -3,6 +3,7 @@ import { Loader2, Play, Trash2, ChevronDown, Zap, RefreshCw, Flag } from 'lucide
 import {
   FlagPopover, FlaggableText, FlagQueue, loadFlags, saveFlag,
 } from './SandboxFlagging'
+import Dropdown from './Dropdown'
 
 const AGENT_URL = import.meta.env.VITE_ENGAGEMENT_AGENT_URL
 const AGENT_ADMIN_KEY = import.meta.env.VITE_AGENT_ADMIN_KEY
@@ -128,6 +129,45 @@ function Diagnostics({ d }) {
   )
 }
 
+// iMessage's three dots. Deliberately the same grey bubble as a real bot text
+// and in the same place, so the reply appears to arrive where the dots were
+// rather than somewhere else on the page.
+const TYPING_CSS = `
+@keyframes sbxTyping {
+  0%, 60%, 100% { transform: translateY(0);     opacity: .38 }
+  30%           { transform: translateY(-4px);  opacity: 1 }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sbx-dot { animation: none !important; opacity: .6 !important }
+}`
+
+function TypingBubble() {
+  return (
+    <div className="flex items-start mb-3">
+      <div className="px-3.5 py-2.5 rounded-2xl inline-flex items-center gap-1"
+        style={{ background: '#e9e9eb' }} aria-label="Josh is typing">
+        {[0, 160, 320].map(d => (
+          <span key={d} className="sbx-dot inline-block rounded-full"
+            style={{
+              width: 7, height: 7, background: '#8e8e93',
+              animation: 'sbxTyping 1.3s infinite ease-in-out', animationDelay: `${d}ms`,
+            }} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** A turn where the bot deliberately said nothing, with the reason. */
+function SilentTurn({ d }) {
+  if (!d) return null
+  return (
+    <div className="text-center text-[11px] py-1.5 mb-2" style={{ color: 'var(--ink-3)' }}>
+      — bot stayed silent ({d.action}){d.outcome ? `: ${d.outcome}` : ''} —
+    </div>
+  )
+}
+
 function Bubble({ msg, diagnostics, flags, onSelect }) {
   const isBot = msg.direction === 'outbound'
   const parts = isBot && diagnostics?.parts?.length ? diagnostics.parts : [msg.content]
@@ -179,14 +219,18 @@ function Bubble({ msg, diagnostics, flags, onSelect }) {
   )
 }
 
-function Transcript({ run, flags, onSelect }) {
+function Transcript({ run, flags, onSelect, typing }) {
   return (
     <div>
       {run.messages.map((m, i) => (
-        <Bubble key={i} msg={m}
-          diagnostics={m.direction === 'outbound' ? run.diagnostics?.[i] : null}
-          flags={flags} onSelect={(sel) => onSelect(sel, run, i)} />
+        <div key={i}>
+          <Bubble msg={m}
+            diagnostics={m.direction === 'outbound' ? run.diagnostics?.[i] : null}
+            flags={flags} onSelect={(sel) => onSelect(sel, run, i)} />
+          <SilentTurn d={run.diagnostics?.[`silent-${i + 1}`]} />
+        </div>
       ))}
+      {typing && <TypingBubble />}
     </div>
   )
 }
@@ -217,7 +261,7 @@ export default function SetterBotSandbox() {
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [run?.messages?.length])
+  }, [run?.messages?.length, busy])
 
   const lead = LEADS.find(l => l.key === leadKey)
 
@@ -239,17 +283,35 @@ export default function SetterBotSandbox() {
     const text = input.trim()
     if (!text || !run || busy) return
     setErr(''); setBusy(true); setInput('')
+
+    // The endpoint answers with BOTH the lead's message and the bot's reply, and
+    // appending them together meant your own text sat in limbo for the whole
+    // round trip and then the pair popped in at once. Your message is yours —
+    // it goes up immediately, and the bot gets a typing indicator while it
+    // thinks. The request still carries the transcript from BEFORE this line,
+    // because the server appends it itself and would otherwise see it twice.
+    const priorMessages = run.messages
+    setRun(prev => ({ ...prev, messages: [...prev.messages, { direction: 'inbound', content: text }] }))
+
     try {
-      const r = await agent('/admin/sandbox/reply', { lead: run.lead, messages: run.messages, message: text })
+      const r = await agent('/admin/sandbox/reply', { lead: run.lead, messages: priorMessages, message: text })
+      const replies = (r.messages || []).filter(m => m.direction === 'outbound')
       setRun(prev => {
-        const base = prev.messages.length
         const diagnostics = { ...prev.diagnostics }
-        r.messages.forEach((m, i) => {
-          if (m.direction === 'outbound') diagnostics[base + i] = r.diagnostics
-        })
-        return { ...prev, messages: [...prev.messages, ...r.messages], diagnostics, ended: !!r.ended }
+        replies.forEach((_, i) => { diagnostics[prev.messages.length + i] = r.diagnostics })
+        // A turn the bot answers with silence (an opt-out, or a handoff with no
+        // holding text) still has to explain itself, or the panel just looks
+        // like it broke.
+        if (!replies.length) diagnostics[`silent-${prev.messages.length}`] = r.diagnostics
+        return { ...prev, messages: [...prev.messages, ...replies], diagnostics, ended: !!r.ended }
       })
-    } catch (e) { setErr(e.message) }
+    } catch (e) {
+      setErr(e.message)
+      // Take the failed message back out and hand the text back, so a blip
+      // does not cost you what you typed.
+      setRun(prev => ({ ...prev, messages: prev.messages.slice(0, -1) }))
+      setInput(text)
+    }
     setBusy(false)
     // The field is disabled while the bot thinks, which drops focus. Put it
     // back so a conversation can be typed straight through without reaching
@@ -321,6 +383,7 @@ export default function SetterBotSandbox() {
 
   return (
     <div className="mb-8">
+      <style>{TYPING_CSS}</style>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">Sandbox</h2>
         <span className="text-[10px] text-text-400">
@@ -330,22 +393,21 @@ export default function SetterBotSandbox() {
 
       <div className="p-4 rounded" style={{ border: '1px solid var(--rule)' }}>
         <div className="flex flex-wrap items-end gap-3 mb-4 pb-4" style={{ borderBottom: '1px solid var(--rule)' }}>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--ink-3)' }}>Lead</span>
-            <select value={leadKey} onChange={e => setLeadKey(e.target.value)}
-              className="px-2 py-1.5 text-sm rounded" style={{ border: '1px solid var(--rule)', background: 'transparent' }}>
-              {LEADS.map(l => <option key={l.key} value={l.key}>{l.label}</option>)}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--ink-3)' }}>Opener arm</span>
-            <select value={variant} onChange={e => setVariant(e.target.value)}
-              className="px-2 py-1.5 text-sm rounded" style={{ border: '1px solid var(--rule)', background: 'transparent' }}>
-              <option value="">As production would assign</option>
-              <option value="control">Control</option>
-              <option value="challenger">Challenger (researched)</option>
-            </select>
-          </label>
+          {/* The phone number is shown as a hint because it is the input that
+              decides the lead's timezone, which is the whole reason there is
+              more than one archetype. */}
+          <Dropdown
+            label="Lead" width={235} value={leadKey} onChange={setLeadKey}
+            options={LEADS.map(l => ({ value: l.key, label: l.label, hint: `${l.name} · ${l.phone}` }))}
+          />
+          <Dropdown
+            label="Opener arm" width={225} value={variant} onChange={setVariant}
+            options={[
+              { value: '', label: 'As production would assign', hint: 'hashed off the lead id, like live' },
+              { value: 'control', label: 'Control', hint: 'the opener shipping today' },
+              { value: 'challenger', label: 'Challenger', hint: 'researched off their website' },
+            ]}
+          />
           <button onClick={start} disabled={busy || !!batchBusy}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded"
             style={{ background: 'var(--ink-1, #111)', color: '#fff', opacity: busy ? 0.6 : 1 }}>
@@ -392,7 +454,7 @@ export default function SetterBotSandbox() {
                 of a long page, so that reads as being thrown down to the next
                 screen mid-conversation. */}
             <div ref={scrollRef} style={{ maxHeight: '26rem', overflowY: 'auto', overscrollBehavior: 'contain' }}>
-              <Transcript run={run} flags={flags} onSelect={onSelect} />
+              <Transcript run={run} flags={flags} onSelect={onSelect} typing={busy} />
             </div>
             {run.ended && (
               <div className="text-center text-[11px] py-2" style={{ color: 'var(--ink-3)' }}>
@@ -400,15 +462,21 @@ export default function SetterBotSandbox() {
               </div>
             )}
             <div className="flex gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--rule)' }}>
+              {/* Left enabled while the bot thinks. Locking the field was what
+                  made the whole thing feel frozen — send() already refuses a
+                  second submit, so there is nothing to protect against. */}
               <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && send()}
                 placeholder={run.ended ? 'conversation ended' : 'reply as the lead…'}
-                disabled={busy || run.ended}
+                disabled={run.ended}
                 className="flex-1 px-3 py-2 text-sm rounded"
                 style={{ border: '1px solid var(--rule)', background: 'transparent' }} />
               <button onClick={send} disabled={busy || run.ended || !input.trim()}
-                className="px-3 py-2 text-sm rounded"
-                style={{ background: 'var(--ink-1, #111)', color: '#fff', opacity: (busy || run.ended) ? 0.5 : 1 }}>
+                className="flex items-center justify-center px-3 py-2 text-sm rounded"
+                style={{
+                  background: 'var(--ink-1, #111)', color: '#fff', minWidth: 68,
+                  opacity: (busy || run.ended || !input.trim()) ? 0.5 : 1,
+                }}>
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send'}
               </button>
             </div>
