@@ -70,7 +70,9 @@ export function FlagPopover({ anchor, selected, onCancel, onSave }) {
       }}>
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="text-[11px] leading-snug" style={{ color: 'var(--ink-3)' }}>
-          flagging <span style={{ background: '#fef08a', color: '#000', padding: '0 3px' }}>{selected}</span>
+          {selected
+            ? <>flagging <span style={{ background: '#fef08a', color: '#000', padding: '0 3px' }}>{selected}</span></>
+            : <>flagging <strong>this whole text</strong> — select just part of it if you want to be specific</>}
         </div>
         <button onClick={onCancel}><X className="w-3.5 h-3.5" style={{ color: 'var(--ink-3)' }} /></button>
       </div>
@@ -200,7 +202,7 @@ export function FlagQueue({ flags, onRefresh }) {
     <>
       <p className="text-[11px] mb-3" style={{ color: 'var(--ink-3)' }}>
         {flags.length} open · roughly {byKind.rule} fixable as a hard rule, {byKind.prompt} needing a prompt change.
-        Tell Claude <strong>"fix the flags"</strong> and they get done as one batch.
+        Tell Claude <strong>&ldquo;fix the flags&rdquo;</strong> and they get done as one batch.
       </p>
       {flags.map(f => (
         <div key={f.id} className="p-3 mb-2 rounded" style={{ border: '1px solid var(--rule)' }}>
