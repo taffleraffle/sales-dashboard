@@ -48,13 +48,21 @@ const DEFAULT_FORMS = [
   { id: 'WndFLJux', name: 'Electrician Funnel' },
   { id: 'sn1Dqabn', name: 'Roofing Funnel' },
   { id: 'IoEk4ND5', name: 'Youtube Funnel' },
+  // SEO-AI funnels (Aug 2026) — the offer tagger keys its 'AI' label off
+  // these form ids landing in typeform_responses.
+  { id: 'eOVPoEcz', name: 'Roofing Funnel (SEO AI)' },
+  { id: 'iHmgtOfT', name: 'Restoration Funnel (SEO AI)' },
+  { id: 'LwN93cLn', name: 'Home Services Funnel (SEO AI)' }
 ]
 
 const QUALIFIED_TIERS = new Set([
   '$30-$50,000', '$50k-$75k/m', '$75k-$100k/m', '$100k - $250k/m', '$250,000/m+',
+  // SEO-AI funnels use ANNUAL buckets; only Under $500K DQs (Ben, 9 Aug 2026)
+  '$500K to $1M', '$1M to $3M', '$3M+',
 ])
 const UNQUALIFIED_TIERS = new Set([
   '$0-$30,000',
+  'Under $500K',
 ])
 
 function classifyTier(revenueLabel: string | null, endingScreen: string | null): 'qualified' | 'unqualified' | 'abandoned' {
@@ -140,7 +148,7 @@ async function fetchFormMeta(formId: string): Promise<{ screenMap: Record<string
   const walk = (fields: any[]) => {
     for (const fld of fields || []) {
       const title = (fld.title || '').toLowerCase()
-      if (/monthly revenue/.test(title) && fld.ref) revenueRefs.add(fld.ref)
+      if (/(monthly|annual) revenue/.test(title) && fld.ref) revenueRefs.add(fld.ref)
       if (fld.properties?.fields) walk(fld.properties.fields)
     }
   }
