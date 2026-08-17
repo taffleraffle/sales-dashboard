@@ -29,6 +29,12 @@ export const STRATEGY_CALL_CALENDARS = [
                           //   Thurber were uncounted. Audience resolved
                           //   funnel-first per prospect, NULL calendar hint. See
                           //   migration 158.)
+  'WnXnhT0m3MNezzoFQbcG', // Opt Digital | Strategy Call - IF (Calendly) (found
+                          //   2026-08-17 — the Typeforms were repointed from the
+                          //   plain Strategy Call link to the "- IF" link on
+                          //   2026-08-16, which mirrors into this separate
+                          //   calendar. Every booking taken since that cutover
+                          //   was uncounted.)
 ]
 
 // Subset of strategy calendars that route disqualified prospects. Pending
