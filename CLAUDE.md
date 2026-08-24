@@ -72,10 +72,12 @@ Edge Functions use Supabase-managed secrets (SUPABASE_URL, SUPABASE_SERVICE_ROLE
 - **Setter Bot:** Displays engagement agent conversations, lead status, cadence controls.
 
 ## Critical Gotchas
-1. **closer_calls has ZERO setter_lead_id linkage** — name + date matching is the ONLY way to correlate setter leads to closer outcomes. Do not assume FK joins work.
+1. **closer_calls.setter_lead_id is only ~55% populated** (measured 2026-08-24; this note previously said ZERO, which is out of date). Treat the FK as present-but-partial: join on it, then fall back to name + date matching for the remainder. Do not assume every row links.
 2. **ghl_appointments table is STALE** — endangered leads must fetch LIVE from GHL API, never trust the Supabase table alone.
 3. **INTRO_CALENDARS constant** (`src/utils/constants.js`) — these GHL calendar IDs represent auto-booked intro calls, not setter-set appointments. Filter logic depends on this.
-4. **NZD to USD conversion** — payments come in NZD, dashboard displays USD. The `VITE_NZD_TO_USD` rate must be kept current.
+4. **NZD to USD conversion — convert ONCE, at display time.** Meta bills the OPT account in NZD. Every spend / cpc / cpm / cost_per_result value in `ad_daily_stats`, `marketing_daily` and `marketing_tracker.adspend` is stored **raw NZD**. Conversion happens only at render, via `useNzdToUsd()` (live rate, 12h cache) or `NZD_TO_USD_FALLBACK` from `src/lib/fxRate.js` — which is the **only** module allowed to read `VITE_NZD_TO_USD`.
+   - **Never convert on write.** `metaAdsSync.js` used to, while the `sync-meta-ads-full` Edge Function wrote the same columns raw — so `ad_daily_stats` held two different currencies depending on which sync last touched a row. `marketing_tracker.adspend` was already-converted USD and MarketingPerformance multiplied it by the rate again, understating ad spend by ~44% and flattering every CPL / CPA / ROAS on the page. Fixed 2026-08-24.
+   - Rows written before that fix are still mixed. A backfill is drafted in `docs/audits/` and has not been run.
 5. **RLS + PostgREST visibility** — new tables need explicit GRANT + `NOTIFY pgrst, 'reload schema'` to appear via PostgREST/Supabase client.
 6. **No secrets in code** — all API keys live in Render env vars (frontend) or Supabase secrets (Edge Functions). Never commit credentials.
 

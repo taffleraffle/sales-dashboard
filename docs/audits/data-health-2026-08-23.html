@@ -1,0 +1,252 @@
+<title>OPT Dashboard Health Check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
+
+<style>
+:root{
+  --ground:#F4F6F8; --panel:#FFFFFF; --ink:#16202B; --muted:#5C6773; --faint:#8B95A0;
+  --rule:#DCE1E6; --rule-soft:#E8ECEF; --accent:#0E6357;
+  --good:#2C7A52; --good-wash:#E4F0E9; --watch:#9A6A12; --watch-wash:#F6EEDC;
+  --bad:#A83A2C; --bad-wash:#F7E5E2;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0F141A; --panel:#161D25; --ink:#E7ECF1; --muted:#96A2AE; --faint:#6E7A86;
+    --rule:#28313B; --rule-soft:#1F2831; --accent:#4FB3A3;
+    --good:#63C089; --good-wash:#16302380; --watch:#D9A441; --watch-wash:#33280F80;
+    --bad:#E2735F; --bad-wash:#38201B80;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0F141A; --panel:#161D25; --ink:#E7ECF1; --muted:#96A2AE; --faint:#6E7A86;
+  --rule:#28313B; --rule-soft:#1F2831; --accent:#4FB3A3;
+  --good:#63C089; --good-wash:#16302380; --watch:#D9A441; --watch-wash:#33280F80;
+  --bad:#E2735F; --bad-wash:#38201B80;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Source Sans 3",system-ui,-apple-system,sans-serif;
+  font-size:17px; line-height:1.6; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:760px; margin:0 auto; padding:56px 24px 96px; display:flex; flex-direction:column; gap:44px}
+
+/* ---- masthead ---- */
+.mast{display:flex; flex-direction:column; gap:14px}
+.eyebrow{
+  font-family:"JetBrains Mono",ui-monospace,monospace; font-size:11px; font-weight:600;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--accent);
+}
+h1{
+  font-family:"Instrument Serif",Georgia,serif; font-weight:400;
+  font-size:clamp(38px,7vw,60px); line-height:1.02; margin:0; text-wrap:balance;
+  letter-spacing:-.01em;
+}
+.standfirst{margin:0; color:var(--muted); font-size:19px; max-width:60ch}
+.meta{
+  display:flex; flex-wrap:wrap; gap:8px 20px; padding-top:14px; border-top:1px solid var(--rule);
+  font-family:"JetBrains Mono",ui-monospace,monospace; font-size:12px; color:var(--faint);
+}
+
+/* ---- verdict strip ---- */
+.strip{display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:3px; overflow:hidden}
+.tile{background:var(--panel); padding:18px 18px 20px; display:flex; flex-direction:column; gap:5px}
+.tile .n{font-family:"JetBrains Mono",ui-monospace,monospace; font-size:34px; font-weight:600; line-height:1; font-variant-numeric:tabular-nums}
+.tile .k{font-size:13px; font-weight:600; letter-spacing:.04em; text-transform:uppercase}
+.tile .s{font-size:14px; color:var(--muted); line-height:1.4}
+.t-good .n,.t-good .k{color:var(--good)}
+.t-watch .n,.t-watch .k{color:var(--watch)}
+.t-bad .n,.t-bad .k{color:var(--bad)}
+
+/* ---- sections ---- */
+section{display:flex; flex-direction:column; gap:0}
+.shead{display:flex; align-items:baseline; gap:12px; padding-bottom:12px; border-bottom:2px solid var(--ink)}
+.shead h2{
+  font-family:"Instrument Serif",Georgia,serif; font-weight:400; font-size:31px;
+  margin:0; letter-spacing:-.005em;
+}
+.shead .tag{
+  font-family:"JetBrains Mono",ui-monospace,monospace; font-size:11px; font-weight:600;
+  letter-spacing:.1em; text-transform:uppercase; padding:3px 8px; border-radius:2px;
+}
+.s-good .tag{color:var(--good); background:var(--good-wash)}
+.s-watch .tag{color:var(--watch); background:var(--watch-wash)}
+.s-bad .tag{color:var(--bad); background:var(--bad-wash)}
+.s-good .shead{border-bottom-color:var(--good)}
+.s-watch .shead{border-bottom-color:var(--watch)}
+.s-bad .shead{border-bottom-color:var(--bad)}
+
+.item{padding:20px 0; border-bottom:1px solid var(--rule-soft); display:flex; flex-direction:column; gap:7px}
+.item:last-child{border-bottom:none}
+.item h3{margin:0; font-size:18px; font-weight:600; line-height:1.35; text-wrap:balance}
+.item p{margin:0; color:var(--muted); font-size:16px}
+.item p b{color:var(--ink); font-weight:600}
+.fig{font-family:"JetBrains Mono",ui-monospace,monospace; font-variant-numeric:tabular-nums; font-size:.93em}
+.fix{
+  font-size:14px; color:var(--accent); font-weight:600;
+  display:inline-flex; gap:7px; align-items:baseline;
+}
+.fix::before{content:"Fix"; font-family:"JetBrains Mono",ui-monospace,monospace; font-size:10px;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--faint); font-weight:600}
+
+/* ---- evidence table ---- */
+.tblwrap{overflow-x:auto; margin-top:4px; border:1px solid var(--rule); border-radius:3px}
+table{border-collapse:collapse; width:100%; font-family:"JetBrains Mono",ui-monospace,monospace; font-size:13px}
+th,td{padding:7px 12px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{background:var(--rule-soft); color:var(--faint); font-weight:600; font-size:11px; letter-spacing:.07em; text-transform:uppercase}
+tbody tr+tr td{border-top:1px solid var(--rule-soft)}
+td.hit{color:var(--bad); font-weight:600}
+
+/* ---- closing ---- */
+.next{background:var(--panel); border:1px solid var(--rule); border-radius:3px; padding:26px 28px; display:flex; flex-direction:column; gap:14px}
+.next h2{font-family:"Instrument Serif",Georgia,serif; font-weight:400; font-size:27px; margin:0}
+.next ol{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:10px}
+.next li::marker{font-family:"JetBrains Mono",ui-monospace,monospace; font-weight:600; color:var(--accent)}
+.caveat{font-size:15px; color:var(--muted); border-top:1px solid var(--rule); padding-top:18px}
+.caveat b{color:var(--ink)}
+
+@media (max-width:560px){
+  .strip{grid-template-columns:1fr}
+  body{font-size:16px}
+}
+</style>
+
+<div class="wrap">
+
+  <header class="mast">
+    <div class="eyebrow">Data hygiene check</div>
+    <h1>What the dashboard gets right, and where it lies</h1>
+    <p class="standfirst">Every table behind the sales dashboard, checked for gaps, duplicates, broken links, stale syncs and numbers that contradict each other. No guessing about what's "correct" — these are things that can't both be true.</p>
+    <div class="meta">
+      <span>23 Aug 2026 &middot; rev. 24 Aug</span><span>13 tables</span><span>15,038 rows</span><span>No changes made</span>
+    </div>
+  </header>
+
+  <div class="strip">
+    <div class="tile t-good"><span class="n">4</span><span class="k">Solid</span><span class="s">Trust these without checking</span></div>
+    <div class="tile t-watch"><span class="n">5</span><span class="k">Needs work</span><span class="s">Wrong, but cheap to fix</span></div>
+    <div class="tile t-bad"><span class="n">5</span><span class="k">Broken</span><span class="s">Numbers we're acting on are wrong</span></div>
+  </div>
+
+  <section class="s-good">
+    <div class="shead"><h2>Looking good</h2><span class="tag">Solid</span></div>
+
+    <div class="item">
+      <h3>Money coming in is clean and current</h3>
+      <p><span class="fig">627</span> payments from Stripe and Fanbasis, synced through <b>22 Aug</b>. Zero duplicates, zero negative amounts, zero impossible dates. The raw payment record is trustworthy.</p>
+    </div>
+
+    <div class="item">
+      <h3>Nothing points at a record that doesn't exist</h3>
+      <p>Checked <span class="fig">12</span> different links between tables — commissions to people, payments to clients, appointments to closers, leads to setters. Across <b>3,000+ connections, zero were broken.</b> The plumbing is sound.</p>
+    </div>
+
+    <div class="item">
+      <h3>Ad data is flowing daily</h3>
+      <p><span class="fig">1,919</span> ads and <span class="fig">8,664</span> daily performance rows, last synced <b>22 Aug</b>. The Meta pipeline is healthy.</p>
+    </div>
+
+    <div class="item">
+      <h3>Closers' end-of-day numbers match the tracker</h3>
+      <p>Cash collected agrees between the closer reports and the marketing tracker on <b><span class="fig">204</span> of <span class="fig">235</span> days</b> — <span class="fig">87%</span> exact-to-the-dollar. When both get filled in, they're honest.</p>
+    </div>
+  </section>
+
+  <section class="s-bad">
+    <div class="shead"><h2>Looking bad</h2><span class="tag">Broken</span></div>
+
+    <div class="item">
+      <h3>Show rate has three different answers</h3>
+      <p>The number the whole quarter is judged on doesn't have one value. Call logs say <b><span class="fig">32.6%</span></b>. The marketing tracker says <b><span class="fig">52.4%</span></b>. GHL can't answer at all — <span class="fig">1,885</span> of <span class="fig">1,889</span> appointments have a blank outcome, and <span class="fig">1,875</span> still say "confirmed" long after the call happened.</p>
+      <p>Whichever screen you open decides what you believe. That's the single biggest problem here.</p>
+      <span class="fix">Pick one source, mark outcomes in it every day, delete the other two from the dashboard</span>
+    </div>
+
+    <div class="item">
+      <h3>Ad spend is recorded in two different currencies</h3>
+      <p>Since <b>1 May</b>, the tracker's spend figure has been exactly <span class="fig">0.56×</span> the Meta figure — the same ratio, every single day, for <span class="fig">139</span> days straight. That's a USD/NZD conversion, not a typing error.</p>
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th>Day</th><th>Tracker</th><th>Meta</th><th>Ratio</th></tr></thead>
+          <tbody>
+            <tr><td>18 Aug</td><td>1,314</td><td>2,347</td><td class="hit">1.786</td></tr>
+            <tr><td>19 Aug</td><td>1,297</td><td>2,317</td><td class="hit">1.786</td></tr>
+            <tr><td>20 Aug</td><td>1,039</td><td>1,855</td><td class="hit">1.786</td></tr>
+            <tr><td>21 Aug</td><td>998</td><td>1,782</td><td class="hit">1.786</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Any cost-per-lead or return-on-spend number is <b>off by 79%</b> depending on which table the screen happened to read.</p>
+      <span class="fix">Decide the reporting currency, convert one side at the point of entry</span>
+    </div>
+
+    <div class="item">
+      <h3>We can't tell which ad produced which booking — but the answer is already sitting there</h3>
+      <p>Campaign tracking is blank on <b>100% of appointments</b> (<span class="fig">1,889</span>) and <b>100% of setter leads</b> (<span class="fig">207</span>). Completely empty, so every "which campaign is working" answer today is a guess.</p>
+      <p>The good news: the Typeform records <b>do</b> carry it, on <span class="fig">89%</span> of <span class="fig">784</span> responses, already resolved down to the individual ad. Matching on email or phone connects <b><span class="fig">422</span> of <span class="fig">536</span> bookings since May</b> — <span class="fig">79%</span>. The data was captured. It just never got carried across.</p>
+      <span class="fix">Join bookings to the form records, backfill the history, keep it wired going forward</span>
+    </div>
+
+    <div class="item">
+      <h3>The client list is missing most of our paying customers</h3>
+      <p><span class="fig">225</span> of <span class="fig">627</span> payments — <b>36%</b>, worth <span class="fig">$360,309</span> — aren't linked to a client. Only <span class="fig">5</span> of those are a matching problem. For the other <span class="fig">220</span> (<span class="fig">$356,518</span>) <b>no client record exists at all.</b></p>
+      <p>The client list holds <span class="fig">59</span> accounts while several hundred people are paying us. Revenue-per-client, lifetime value and commission are all computed off that <span class="fig">59</span>.</p>
+      <span class="fix">Decide where client records should be created, then backfill from the payment history</span>
+    </div>
+
+    <div class="item">
+      <h3>Commissions only recalculate when someone opens the page</h3>
+      <p>The ledger has no schedule behind it — it recomputes when a person opens the Commission page and not otherwise. Nobody has opened it since <b>8 Jul</b>, so the numbers there are <span class="fig">47</span> days old.</p>
+      <p>Separately, closer end-of-day reports stopped on <b>14 Aug</b> while setters kept filing through <b>21 Aug</b>. Nothing alerts when either goes quiet, so a stale screen looks identical to a current one.</p>
+      <span class="fix">Put commissions on a nightly schedule, and stamp every panel with when it last updated</span>
+    </div>
+  </section>
+
+  <section class="s-watch">
+    <div class="shead"><h2>Might need some work</h2><span class="tag">Needs work</span></div>
+
+    <div class="item">
+      <h3>Ben's calls aren't credited to Ben</h3>
+      <p><span class="fig">97</span> appointments carry Ben's GHL ID, but his team record has that field empty, so they land nowhere. <b>One field, one paste.</b> Easily the best value fix on this page.</p>
+      <span class="fix">Save gplYy5F8gT8tjz305FY7 onto Ben's team record</span>
+    </div>
+
+    <div class="item">
+      <h3>The closer roster is out of date</h3>
+      <p>Ben, Daniel and Ahmad are all still marked as active closers, and Ben has no login attached. Since Ahmad took over on <b>17 Aug</b>, leaderboards and commission splits are spread across three people doing one job.</p>
+      <span class="fix">Deactivate the two who've handed over</span>
+    </div>
+
+    <div class="item">
+      <h3>Eight clients exist twice</h3>
+      <p>Same person, same GHL contact, two rows — including Mr Electric Medic, DryMedic Charleston and JP Electric. Inflates the client count and risks paying commission twice on one account.</p>
+      <span class="fix">Merge on GHL contact ID, block duplicates at creation</span>
+    </div>
+
+    <div class="item">
+      <h3>279 calls were "booked after they started"</h3>
+      <p>Booking time lands hours after the call began — a timezone mismatch between two fields. Mostly late-2025 history and improving, but <b><span class="fig">14</span> happened this month</b>. It quietly corrupts any speed-to-lead measurement.</p>
+      <span class="fix">Store both timestamps in the same timezone</span>
+    </div>
+
+    <div class="item">
+      <h3>Thirty calls are logged more than once</h3>
+      <p><span class="fig">27</span> calls have duplicate entries, one recorded four separate times. No revenue is double-counted today, but call volume and show rate are both counting the same call twice.</p>
+      <span class="fix">Make the calendar event ID unique on the call log</span>
+    </div>
+  </section>
+
+  <div class="next">
+    <h2>Where I'd start</h2>
+    <ol>
+      <li><b>Agree one show rate.</b> Everything else is noise until the headline metric has a single owner and a single source.</li>
+      <li><b>Fix the currency.</b> One decision, and every cost figure on the dashboard becomes real.</li>
+      <li><b>Turn campaign tracking on.</b> It only gets fixed going forward, so every week we wait is a week we can't measure later.</li>
+    </ol>
+    <p class="caveat"><b>One gap worth naming.</b> This check proves the tables agree or disagree with each other. It can't yet prove they match Stripe and Meta themselves — that needs one CSV export from each, one month, and I can close the loop.</p>
+  </div>
+
+</div>

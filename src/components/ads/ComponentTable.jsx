@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom'
 import { Loader, AlertTriangle, Search, Plus } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import AddComponentModal from './AddComponentModal'
+import { NZD_TO_USD_FALLBACK } from '../../lib/fxRate'
 
-const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+const NZD_TO_USD = NZD_TO_USD_FALLBACK
 
 function fmt$(n) {
   if (n == null || isNaN(n)) return '—'

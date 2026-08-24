@@ -5,8 +5,9 @@ import { supabase } from '../../lib/supabase'
 import VariantPill from '../../components/ads/VariantPill'
 import TagVariantModal from '../../components/ads/TagVariantModal'
 import CreativeAttributesPanel from '../../components/ads/CreativeAttributesPanel'
+import { NZD_TO_USD_FALLBACK } from '../../lib/fxRate'
 
-const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+const NZD_TO_USD = NZD_TO_USD_FALLBACK
 
 function fmt$(n) {
   if (n == null || isNaN(n)) return '—'

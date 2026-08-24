@@ -14,7 +14,7 @@ import { runAutoSync, subscribeSyncStatus } from '../../services/autoSync'
 import { syncMetaAdsAtAdLevel } from '../../services/metaAdsSync'
 import { SectionHead } from '../../components/editorial/atoms'
 import Select from '../../components/editorial/Select'
-import { getNzdToUsd } from '../../lib/fxRate'
+import { getNzdToUsd, NZD_TO_USD_FALLBACK } from '../../lib/fxRate'
 
 // Spend in ad_daily_stats is stored in NZD; we display USD using a live FX rate
 // (Ben 2026-06-29: USD values, but the rate must track reality, not 0.56).
@@ -218,7 +218,7 @@ export default function AdLibrary() {
   const [linkBusy, setLinkBusy] = useState(false)
   // Live NZD->USD rate (cached 12h). Starts at the static fallback so first paint
   // isn't blank, then upgrades to the live rate when it resolves.
-  const [fx, setFx] = useState({ rate: parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56'), ts: null, live: false })
+  const [fx, setFx] = useState({ rate: NZD_TO_USD_FALLBACK, ts: null, live: false })
   useEffect(() => { getNzdToUsd().then(setFx).catch(() => {}) }, [])
   // Optimistic win/loss overrides (ad_id -> 'winner'|'loser'|null) so a click
   // reflects instantly without refetching.

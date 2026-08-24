@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { Loader, ChevronLeft, AlertTriangle, Sparkles, MessageSquare, Camera, Users } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { NZD_TO_USD_FALLBACK } from '../../lib/fxRate'
 
-const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+const NZD_TO_USD = NZD_TO_USD_FALLBACK
 
 function fmt$(n) {
   if (n == null || isNaN(n)) return '—'

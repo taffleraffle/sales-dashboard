@@ -16,6 +16,7 @@ import { isDQRevenueTier } from '../services/ghlCalendar'
 import { BASE_URL, ghlFetch } from '../services/ghlClient'
 
 import { todayET, etDateOffset } from '../lib/dateUtils'
+import { NZD_TO_USD_FALLBACK } from '../lib/fxRate'
 
 const toLocalDateStr = (d) => {
   const y = d.getFullYear()
@@ -34,7 +35,7 @@ const toLocalDateStr = (d) => {
 // closer_calls.revenue / cash_collected are entered by the closer in USD
 // (deals are with US customers, Stripe/Fanbasis denominate USD), so
 // trial_revenue / trial_cash in the audience view do NOT need conversion.
-const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+const NZD_TO_USD = NZD_TO_USD_FALLBACK
 
 // ── Audience parsing + filter (Ben 2026-05-31) ──────────────────────
 // Campaign names follow a "BRAND - VERTICAL - description" convention

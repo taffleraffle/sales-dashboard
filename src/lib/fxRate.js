@@ -5,7 +5,11 @@
 // reporting — intraday FX would need a paid key). Result is cached in
 // localStorage for 12h so we don't refetch on every mount, with graceful
 // fallback: fresh cache -> live fetch -> stale cache -> env/static default.
-const FALLBACK = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+// The static fallback, exported so no other module re-reads the env var.
+// Importing this is what every display site should do; the live rate from
+// getNzdToUsd() / useNzdToUsd() is preferred where a component can await it.
+export const NZD_TO_USD_FALLBACK = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+const FALLBACK = NZD_TO_USD_FALLBACK
 const CACHE_KEY = 'fx.nzdusd.v1'
 const TTL = 12 * 60 * 60 * 1000
 

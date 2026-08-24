@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { NZD_TO_USD_FALLBACK } from '../../lib/fxRate'
 
 /*
   MetricTrendPanel — historical trend chart for any Marketing KPI.
@@ -17,7 +18,7 @@ import { supabase } from '../../lib/supabase'
   switch the metric in-panel (e.g. Show Rate → Gross | Net).
 */
 
-const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+const NZD_TO_USD = NZD_TO_USD_FALLBACK
 
 const METRIC_DEFS = {
   leads:        { title: 'Leads',                    fmt: 'n', numKey: 'leads' },

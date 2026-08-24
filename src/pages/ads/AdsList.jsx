@@ -9,8 +9,9 @@ import { rangeToDays } from '../../lib/dateUtils'
 import { syncMetaAdsAtAdLevel } from '../../services/metaAdsSync'
 import { runAutoSync, getLastSyncTime, subscribeSyncStatus } from '../../services/autoSync'
 import { SectionHead } from '../../components/editorial/atoms'
+import { NZD_TO_USD_FALLBACK } from '../../lib/fxRate'
 
-const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+const NZD_TO_USD = NZD_TO_USD_FALLBACK
 
 function fmt$(n) {
   if (n == null || isNaN(n)) return '—'
