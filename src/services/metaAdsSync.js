@@ -5,8 +5,18 @@ const ACCOUNT_ID = import.meta.env.VITE_META_ADS_ACCOUNT_ID
 const ACCESS_TOKEN = import.meta.env.VITE_META_ADS_ACCESS_TOKEN
 const BASE_URL = 'https://graph.facebook.com/v21.0'
 
-// NZD → USD conversion rate (Meta reports in account currency which is NZD)
-const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+// CURRENCY CONTRACT: Meta bills the OPT account in NZD and we store the raw
+// NZD figure. Every spend / cpc / cpm / cost_per_result column this file
+// writes — marketing_daily, marketing_tracker, ad_daily_stats — is NZD.
+// Conversion to USD happens once, at display time, via hooks/useNzdToUsd.
+//
+// This file used to multiply by the rate on write while the sync-meta-ads-full
+// Edge Function wrote the same columns raw, so ad_daily_stats held two
+// different currencies depending on which sync touched the row last. Worse,
+// marketing_tracker.adspend was already-converted USD and MarketingPerformance
+// multiplied it by the rate a second time — the Marketing page understated ad
+// spend by ~44%, which flattered every CPL / CPA / ROAS figure on it.
+// Do not reintroduce a conversion on write.
 
 /**
  * Fetch ad insights from Meta Ads API and store in Supabase marketing_daily.
@@ -61,7 +71,7 @@ export async function syncMetaAds(days = 30) {
 
     // Extract CPL from cost_per_action_type
     const cplAction = (row.cost_per_action_type || []).find(a => a.action_type === 'lead' || a.action_type === 'offsite_conversion.fb_pixel_lead')
-    const cpl = cplAction ? parseFloat(cplAction.value) * NZD_TO_USD : (leads > 0 ? (parseFloat(row.spend) * NZD_TO_USD) / leads : null)
+    const cpl = cplAction ? parseFloat(cplAction.value) : (leads > 0 ? parseFloat(row.spend) / leads : null)
 
     const record = {
       date: row.date_start,
@@ -69,11 +79,11 @@ export async function syncMetaAds(days = 30) {
       campaign_name: row.campaign_name,
       adset_id: row.adset_id,
       adset_name: row.adset_name,
-      spend: parseFloat(row.spend || 0) * NZD_TO_USD,
+      spend: parseFloat(row.spend || 0),
       impressions: parseInt(row.impressions || 0),
       clicks: parseInt(row.clicks || 0),
       leads: leads,
-      cpc: row.cpc ? parseFloat(row.cpc) * NZD_TO_USD : null,
+      cpc: row.cpc ? parseFloat(row.cpc) : null,
       cpl: cpl,
       ctr: row.ctr ? parseFloat(row.ctr) : null,
     }
@@ -117,7 +127,7 @@ export async function syncMetaAds(days = 30) {
       const leadAction = (row.actions || []).find(a => a.action_type === 'lead' || a.action_type === 'offsite_conversion.fb_pixel_lead')
       const leads = leadAction ? parseInt(leadAction.value) : 0
       const cplAction = (row.cost_per_action_type || []).find(a => a.action_type === 'lead' || a.action_type === 'offsite_conversion.fb_pixel_lead')
-      const cpl = cplAction ? parseFloat(cplAction.value) * NZD_TO_USD : (leads > 0 ? (parseFloat(row.spend) * NZD_TO_USD) / leads : null)
+      const cpl = cplAction ? parseFloat(cplAction.value) : (leads > 0 ? parseFloat(row.spend) / leads : null)
 
       const record = {
         date: row.date_start,
@@ -125,11 +135,11 @@ export async function syncMetaAds(days = 30) {
         campaign_name: row.campaign_name,
         adset_id: row.adset_id,
         adset_name: row.adset_name,
-        spend: parseFloat(row.spend || 0) * NZD_TO_USD,
+        spend: parseFloat(row.spend || 0),
         impressions: parseInt(row.impressions || 0),
         clicks: parseInt(row.clicks || 0),
         leads: leads,
-        cpc: row.cpc ? parseFloat(row.cpc) * NZD_TO_USD : null,
+        cpc: row.cpc ? parseFloat(row.cpc) : null,
         cpl: cpl,
         ctr: row.ctr ? parseFloat(row.ctr) : null,
       }
@@ -640,23 +650,22 @@ async function fetchAdLevelInsights(days = 90) {
       batch.push({
         ad_id: row.ad_id,
         date: row.date_start,
-        // The OPT ad account bills in NZD. Convert at sync time so the
-        // dashboard never has to know about the currency mismatch — every
-        // spend / cpc / cpm value in ad_daily_stats is USD.
-        spend: parseFloat(row.spend || 0) * NZD_TO_USD,
+        // NZD, raw — matches what sync-meta-ads-full writes. See the
+        // currency contract at the top of this file.
+        spend: parseFloat(row.spend || 0),
         impressions: parseInt(row.impressions || 0),
         reach: parseInt(row.reach || 0),
         frequency: parseFloat(row.frequency || 0),
         clicks: parseInt(row.clicks || 0),
         unique_clicks: parseInt(row.unique_clicks || 0),
         ctr: row.ctr != null ? parseFloat(row.ctr) : null,
-        cpc: row.cpc != null ? parseFloat(row.cpc) * NZD_TO_USD : null,
-        cpm: row.cpm != null ? parseFloat(row.cpm) * NZD_TO_USD : null,
+        cpc: row.cpc != null ? parseFloat(row.cpc) : null,
+        cpm: row.cpm != null ? parseFloat(row.cpm) : null,
         video_3s_views: v3sAction ? parseInt(v3sAction.value) : 0,
         video_thruplays: thruAction ? parseInt(thruAction.value) : 0,
         video_avg_time_watched: avgTimeAction ? parseFloat(avgTimeAction.value) : null,
         results: resultAction ? parseInt(resultAction.value) : 0,
-        cost_per_result: costPerResult ? parseFloat(costPerResult.value) * NZD_TO_USD : null,
+        cost_per_result: costPerResult ? parseFloat(costPerResult.value) : null,
         raw_payload: row,
         synced_at: new Date().toISOString(),
       })

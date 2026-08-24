@@ -6,6 +6,7 @@ import {
   fmtMoneyFull, fmtNum, fmtPct, PALETTE, WinnerBadge, PodiumRank,
 } from '../components/editorial/atoms'
 import { useAudiences } from '../hooks/useAudiences'
+import { NZD_TO_USD_FALLBACK } from '../lib/fxRate'
 
 // ad_daily_stats.spend is NZD (Meta bills the OPT account in NZD; the
 // sync-meta-ads-full Edge Function writes raw spend without conversion).
@@ -15,7 +16,7 @@ import { useAudiences } from '../hooks/useAudiences'
 //
 // The coverage / gap / attribution stage values (counts, percentages)
 // are currency-agnostic so they don't need conversion.
-const NZD_TO_USD = parseFloat(import.meta.env.VITE_NZD_TO_USD || '0.56')
+const NZD_TO_USD = NZD_TO_USD_FALLBACK
 const toUsd = (n) => (Number(n) || 0) * NZD_TO_USD
 
 /*
