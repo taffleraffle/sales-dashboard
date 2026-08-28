@@ -588,7 +588,7 @@ export default function SetterBot() {
   const [dryRun, setDryRun] = useState(null)
   useEffect(() => {
     if (!AGENT_URL) return
-    fetch(`${AGENT_URL}/admin/dry-run`)
+    fetch(`${AGENT_URL}/admin/dry-run`, { headers: { 'X-Admin-Key': AGENT_ADMIN_KEY } })
       .then(r => r.json())
       .then(d => setDryRun(!!d.dry_run))
       .catch(() => setDryRun(null))
