@@ -1,6 +1,28 @@
 import { supabase } from '../lib/supabase'
 import { BASE_URL, GHL_LOCATION_ID, ghlFetch } from './ghlClient'
 
+// PostgREST caps an unbounded select() at 1,000 rows and gives no hint that it
+// truncated, so any "everything we already have" lookup has to page explicitly.
+const PAGE_ROWS = 1000
+async function selectAllPages(buildQuery) {
+  const out = []
+  for (let from = 0; ; from += PAGE_ROWS) {
+    const { data, error } = await buildQuery().range(from, from + PAGE_ROWS - 1)
+    if (error) throw error
+    if (!data?.length) break
+    out.push(...data)
+    if (data.length < PAGE_ROWS) break
+  }
+  return out
+}
+
+// Matches what autoSync's own isRateLimitErr looks for, so a rate limit thrown
+// from here reaches it intact and trips the sync's cooldown.
+function isRateLimit(err) {
+  const msg = (err?.message || String(err || '')).toLowerCase()
+  return msg.includes('429') || msg.includes('too many requests') || msg.includes('rate limit')
+}
+
 /**
  * Fetch all GHL workflows and cache them in ghl_workflows table.
  */
@@ -27,14 +49,31 @@ export async function fetchWorkflows() {
  *
  * @param {number} daysBack - How many days to look back (default 30)
  * @param {function} onProgress - Progress callback (current, total)
- * @returns {{ synced: number, skipped: number, total: number }}
+ * @returns {{ synced: number, skipped: number, skippedConvos: number, total: number }}
  */
 export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
-  // Get IDs we already have to skip
-  const { data: cached } = await supabase.from('email_message_cache').select('id')
-  const cachedIds = new Set((cached || []).map(r => r.id))
+  // Read the whole cache, a page at a time. PostgREST caps an unbounded
+  // select() at 1,000 rows, so the previous single select('id') saw 1,000 of
+  // 9,000+ cached emails and treated the rest as new — ~4,100 redundant GHL
+  // fetches every run, which on a 30-minute timer was the whole 200k/day
+  // location quota on its own.
+  const cachedRows = await selectAllPages(() =>
+    supabase.from('email_message_cache').select('id, conversation_id, date_added')
+  )
 
-  let synced = 0, skipped = 0
+  // Newest email we already hold per conversation. A conversation whose
+  // lastMessageDate is not past this has nothing we don't already have, so
+  // listing its messages again is a wasted call.
+  const cachedIds = new Set()
+  const convoWatermark = new Map()
+  for (const r of cachedRows) {
+    cachedIds.add(r.id)
+    const t = r.date_added ? Date.parse(r.date_added) : NaN
+    if (!r.conversation_id || Number.isNaN(t)) continue
+    if (t > (convoWatermark.get(r.conversation_id) ?? 0)) convoWatermark.set(r.conversation_id, t)
+  }
+
+  let synced = 0, skipped = 0, skippedConvos = 0
 
   // Fetch ALL email conversations — GHL /conversations/search returns up to
   // ~2000 results for lastMessageType=TYPE_EMAIL. No cursor pagination available,
@@ -65,15 +104,26 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
   // For each conversation, fetch messages and find email IDs
   // Rate limit: pause briefly every 50 requests to avoid GHL 429s
   const emailDetailJobs = []
-  let convIdx = 0
+  let convIdx = 0, fetchedConvos = 0
   for (const convo of allConvos) {
     convIdx++
     onProgress(convIdx, allConvos.length)
-    if (convIdx % 50 === 0) await new Promise(r => setTimeout(r, 1000))
+
+    // Nothing newer than what we already cached for this conversation.
+    const seenUpTo = convoWatermark.get(convo.id)
+    const lastMsg = Number(convo.lastMessageDate)
+    if (seenUpTo && Number.isFinite(lastMsg) && lastMsg <= seenUpTo) { skippedConvos++; continue }
+
+    fetchedConvos++
+    if (fetchedConvos % 50 === 0) await new Promise(r => setTimeout(r, 1000))
 
     try {
       const msgRes = await ghlFetch(`${BASE_URL}/conversations/${convo.id}/messages`)
-      if (msgRes.status === 429) { await new Promise(r => setTimeout(r, 5000)); continue }
+      // Abort rather than grind on through the remaining conversations against
+      // a dead quota. Throwing is what lets autoSync's isRateLimitErr see this
+      // and set the emailFlows cooldown; swallowing it here meant the cooldown
+      // could never fire.
+      if (msgRes.status === 429) throw new Error('GHL 429 Too Many Requests — aborting email sync')
       if (!msgRes.ok) continue
       const msgData = await msgRes.json()
       const messages = msgData.messages?.messages || []
@@ -87,7 +137,9 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
         }
       }
     } catch (e) {
-      // skip and continue
+      // One unreadable conversation shouldn't kill the run, but a rate limit
+      // means every remaining call would fail too — let that one out.
+      if (isRateLimit(e)) throw e
     }
   }
 
@@ -99,6 +151,7 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
     const results = await Promise.all(batch.map(async ({ innerId, convoId }) => {
       try {
         const r = await ghlFetch(`${BASE_URL}/conversations/messages/email/${innerId}`)
+        if (r.status === 429) throw new Error('GHL 429 Too Many Requests — aborting email sync')
         if (!r.ok) return null
         const d = await r.json()
         const em = d.emailMessage
@@ -116,7 +169,10 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
           provider: em.provider || null,
           synced_at: new Date().toISOString(),
         }
-      } catch { return null }
+      } catch (e) {
+        if (isRateLimit(e)) throw e
+        return null
+      }
     }))
     for (const row of results) if (row) rowsToUpsert.push(row)
   }
@@ -129,7 +185,7 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
     else synced += chunk.length
   }
 
-  return { synced, skipped, total: allConvos.length }
+  return { synced, skipped, skippedConvos, total: allConvos.length }
 }
 
 /**
@@ -154,10 +210,14 @@ export async function refreshRecentEmailStatuses(daysBack = 7) {
     const results = await Promise.all(batch.map(async (id) => {
       try {
         const r = await ghlFetch(`${BASE_URL}/conversations/messages/email/${id}`)
+        if (r.status === 429) throw new Error('GHL 429 Too Many Requests — aborting status refresh')
         if (!r.ok) return null
         const d = await r.json()
         return d.emailMessage ? { id, status: d.emailMessage.status } : null
-      } catch { return null }
+      } catch (e) {
+        if (isRateLimit(e)) throw e
+        return null
+      }
     }))
     for (const row of results) {
       if (row) {
