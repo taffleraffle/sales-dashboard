@@ -145,45 +145,58 @@ export async function syncEmailMessages(daysBack = 30, onProgress = () => {}) {
 
   // Fetch full email details in batches of 5 with rate limit pauses
   const rowsToUpsert = []
-  for (let i = 0; i < emailDetailJobs.length; i += 5) {
-    if (i > 0 && i % 50 === 0) await new Promise(r => setTimeout(r, 1000))
-    const batch = emailDetailJobs.slice(i, i + 5)
-    const results = await Promise.all(batch.map(async ({ innerId, convoId }) => {
-      try {
-        const r = await ghlFetch(`${BASE_URL}/conversations/messages/email/${innerId}`)
-        if (r.status === 429) throw new Error('GHL 429 Too Many Requests — aborting email sync')
-        if (!r.ok) return null
-        const d = await r.json()
-        const em = d.emailMessage
-        if (!em) return null
-        return {
-          id: em.id,
-          conversation_id: em.conversationId || convoId,
-          contact_id: em.contactId || null,
-          subject: em.subject || '(no subject)',
-          status: em.status || null,
-          source: em.source || null,
-          direction: em.direction || null,
-          date_added: em.dateAdded || null,
-          date_updated: em.dateUpdated || null,
-          provider: em.provider || null,
-          synced_at: new Date().toISOString(),
-        }
-      } catch (e) {
-        if (isRateLimit(e)) throw e
-        return null
-      }
-    }))
-    for (const row of results) if (row) rowsToUpsert.push(row)
+
+  // Upsert in batches of 100. Called on the way out of an aborted run too:
+  // details we already spent GHL calls on should reach the cache even if the
+  // run then hits a 429, or the next run pays for them all over again.
+  const flush = async () => {
+    for (let i = 0; i < rowsToUpsert.length; i += 100) {
+      const chunk = rowsToUpsert.slice(i, i + 100)
+      const { error } = await supabase.from('email_message_cache').upsert(chunk, { onConflict: 'id' })
+      if (error) console.error('Email cache upsert failed:', error)
+      else synced += chunk.length
+    }
+    rowsToUpsert.length = 0
   }
 
-  // Upsert in batches of 100
-  for (let i = 0; i < rowsToUpsert.length; i += 100) {
-    const chunk = rowsToUpsert.slice(i, i + 100)
-    const { error } = await supabase.from('email_message_cache').upsert(chunk, { onConflict: 'id' })
-    if (error) console.error('Email cache upsert failed:', error)
-    else synced += chunk.length
+  try {
+    for (let i = 0; i < emailDetailJobs.length; i += 5) {
+      if (i > 0 && i % 50 === 0) await new Promise(r => setTimeout(r, 1000))
+      const batch = emailDetailJobs.slice(i, i + 5)
+      const results = await Promise.all(batch.map(async ({ innerId, convoId }) => {
+        try {
+          const r = await ghlFetch(`${BASE_URL}/conversations/messages/email/${innerId}`)
+          if (r.status === 429) throw new Error('GHL 429 Too Many Requests — aborting email sync')
+          if (!r.ok) return null
+          const d = await r.json()
+          const em = d.emailMessage
+          if (!em) return null
+          return {
+            id: em.id,
+            conversation_id: em.conversationId || convoId,
+            contact_id: em.contactId || null,
+            subject: em.subject || '(no subject)',
+            status: em.status || null,
+            source: em.source || null,
+            direction: em.direction || null,
+            date_added: em.dateAdded || null,
+            date_updated: em.dateUpdated || null,
+            provider: em.provider || null,
+            synced_at: new Date().toISOString(),
+          }
+        } catch (e) {
+          if (isRateLimit(e)) throw e
+          return null
+        }
+      }))
+      for (const row of results) if (row) rowsToUpsert.push(row)
+    }
+  } catch (e) {
+    await flush()
+    throw e
   }
+
+  await flush()
 
   return { synced, skipped, skippedConvos, total: allConvos.length }
 }
