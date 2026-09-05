@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, FileText, TrendingDown, Library as LibraryIcon, Smartphone, Target, Calculator, Bot } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, Library as LibraryIcon, Smartphone, Target, Bot } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -19,10 +19,13 @@ import { ICON } from '../utils/constants'
 // there). Keeping the routes registered in App.jsx so deep links survive.
 // Setter Bot restored (2026-07-10): the engagement agent is live again and
 // this tab is the team's window into its conversations.
+// Ben (2026-09-06) also hid Forecast (/sales/commission-forecast), Contracts
+// (/sales/contracts) and Downsells (/sales/downsells). Routes and page code
+// are deliberately left registered in App.jsx so existing links still open;
+// they are simply no longer surfaced in the sidebar.
 const navItems = [
   { to: '/sales', icon: BarChart3, label: 'Overview', end: true },
   { to: '/sales/closers', icon: UserCheck, label: 'Closers' },
-  { to: '/sales/commission-forecast', icon: Calculator, label: 'Forecast' },
   { to: '/sales/setters', icon: Users, label: 'Setters' },
   { to: '/sales/setter-bot', icon: Bot, label: 'Setter Bot' },
   { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
@@ -34,8 +37,6 @@ const navItems = [
   { to: '/sales/ads/shorts', icon: Smartphone, label: 'Shorts' },
   { to: '/sales/ads/ad-library', icon: Target, label: 'Ad Library' },
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
-  { to: '/sales/contracts', icon: FileText, label: 'Contracts' },
-  { to: '/sales/downsells', icon: TrendingDown, label: 'Downsells' },
 ]
 
 function initialsOf(name) {

@@ -273,7 +273,10 @@ export default function App() {
               <Route path="/sales/marketing" element={<Suspense fallback={<PageSkeleton />}><MarketingPerformance /></Suspense>} />
               <Route path="/sales/marketing/coverage" element={<Suspense fallback={<PageSkeleton />}><AttributionCoverage /></Suspense>} />
               <Route path="/sales/ads" element={<Suspense fallback={<PageSkeleton />}><AdsLayout /></Suspense>}>
-                <Route index element={<Navigate to="/sales/ads/performance" replace />} />
+                {/* Performance hidden from the tab bar 2026-09-06 (Ben); the
+                    route stays so direct links keep working. Ads now defaults
+                    to Creative testing. */}
+                <Route index element={<Navigate to="/sales/ads/creative" replace />} />
                 <Route path="performance" element={<Suspense fallback={<PageSkeleton />}><AdsPerformance /></Suspense>} />
                 {/* Library — promoted to its own top-level Ads page 2026-06-26 (was a Creative-testing sub-tab) */}
                 <Route path="library" element={<Suspense fallback={<PageSkeleton />}><AdsCreativeLibrary category="ad" /></Suspense>} />

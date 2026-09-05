@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { TrendingUp, FlaskConical, AlertCircle, Archive, MoreHorizontal } from 'lucide-react'
+import { FlaskConical, AlertCircle, Archive, MoreHorizontal } from 'lucide-react'
 
 // Messaging hidden 2026-06-11 — Ben wants it rebuilt before it's shown
 // again (route still resolves at /sales/ads/messaging for direct access).
 // Library promoted to its own left-sidebar nav item 2026-06-26 (was a
 // Creative-testing sub-tab) — see Layout.jsx navItems. Kept off this tab
 // bar to avoid a redundant entry.
+// Performance hidden 2026-09-06 (Ben) — the tab is gone and /sales/ads now
+// lands on Creative testing. The route still resolves at
+// /sales/ads/performance for anyone with a direct link or bookmark.
 const PRIMARY = [
-  { to: '/sales/ads/performance', label: 'Performance',      icon: TrendingUp },
   { to: '/sales/ads/creative',    label: 'Creative testing', icon: FlaskConical },
 ]
 
