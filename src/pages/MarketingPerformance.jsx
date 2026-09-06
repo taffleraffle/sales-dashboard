@@ -1724,6 +1724,37 @@ async function fetchLeads({ from, to, audiences } = {}) {
         status,        // 'qual' | 'spam' | 'dup' | 'removed' | 'untracked'
       }
     })
+  // Australian leads arrive as Facebook lead forms in GoHighLevel, tagged
+  // "fb lead (aus)", and never touch Typeform. Migration 176 added them to the
+  // Leads TILE; without them here the Australia view showed a count of 31 with
+  // an empty list (Ben, 6 Sep 2026). Same de-dupe rule as the view: anyone who
+  // also filled in a Typeform is already above.
+  if (!wanted || wanted.has('Australia')) {
+    const { data: auRows } = await supabase
+      .from('ghl_contacts')
+      .select('ghl_contact_id, full_name, first_name, last_name, email, phone, date_added, last_form_name, last_utm_campaign')
+      .ilike('tags', '%fb lead (aus)%')
+      .gte('date_added', sinceTs).lte('date_added', untilTs)
+    const seen = new Set(rows.map(r => (r.email || '').toLowerCase()).filter(e => e && e !== '—'))
+    for (const c of (auRows || [])) {
+      const em = (c.email || '').toLowerCase()
+      if (em && seen.has(em)) continue
+      rows.push({
+        _id: c.ghl_contact_id,
+        _kind: 'ghl_lead',
+        created: (c.date_added || '').split('T')[0],
+        name: c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '—',
+        email: c.email || '—',
+        phone: c.phone || '—',
+        source: c.last_form_name || c.last_utm_campaign || 'Facebook lead form',
+        audience: 'Australia',
+        revenue_tier: null,
+        flag: null,
+        mark: null,
+        status: 'qual',
+      })
+    }
+  }
   if (wanted) rows = rows.filter(r => wanted.has(r.audience))
   return rows.sort((a, b) => (b.created || '').localeCompare(a.created || ''))
 }
