@@ -18,6 +18,11 @@ const WEBHOOK_SECRET = Deno.env.get('TYPEFORM_WEBHOOK_SECRET') || ''
 // 06 Sep 2026: the Australian form's webhook was created later with its own secret
 // (the original one is not retrievable), so either secret is accepted.
 const WEBHOOK_SECRET_AU = Deno.env.get('TYPEFORM_WEBHOOK_SECRET_AU') || ''
+// Per-form channel override. Ben (06 Sep 2026): "AUS leads need to go to the
+// marketing-aus channel" -> AU_LEADS_CHANNEL (#marketing-aus-leads).
+const FORM_CHANNEL: Record<string, string> = {
+  zlPORl53: Deno.env.get('AU_LEADS_CHANNEL') || CHANNEL,
+}
 
 // The SEO-AI funnels. Anything else that hits this endpoint is ignored.
 const AI_FORMS: Record<string, string> = {
@@ -91,7 +96,7 @@ Deno.serve(async (req) => {
   const resp = await fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SLACK_TOKEN}` },
-    body: JSON.stringify({ channel: CHANNEL, text: lines.join('\n'), unfurl_links: false }),
+    body: JSON.stringify({ channel: FORM_CHANNEL[formId] || CHANNEL, text: lines.join('\n'), unfurl_links: false }),
   })
   const out = await resp.json()
   if (!out.ok) {

@@ -15,6 +15,8 @@
 
 const SLACK_TOKEN = Deno.env.get('SLACK_BOT_TOKEN')!
 const CHANNEL = Deno.env.get('SALES_NEW_LEADS_CHANNEL')!
+// Australian bookings go to their own channel (Ben, 06 Sep 2026): #marketing-aus-autobookings.
+const AU_CHANNEL = Deno.env.get('AU_BOOKINGS_CHANNEL') || CHANNEL
 const SIGNING_KEY = Deno.env.get('CALENDLY_WEBHOOK_SIGNING_KEY') || ''
 const EVENT_FILTER = (Deno.env.get('CALENDLY_EVENT_FILTER') || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
 
@@ -77,7 +79,7 @@ Deno.serve(async (req) => {
   const resp = await fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SLACK_TOKEN}` },
-    body: JSON.stringify({ channel: CHANNEL, text: lines.join('\n'), unfurl_links: false }),
+    body: JSON.stringify({ channel: isAU ? AU_CHANNEL : CHANNEL, text: lines.join('\n'), unfurl_links: false }),
   })
   const out = await resp.json()
   if (!out.ok) { console.error('slack post failed', out); return new Response('slack error', { status: 500 }) }
