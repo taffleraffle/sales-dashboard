@@ -95,7 +95,12 @@ main .bg-bg-card:not(td):not(th):not(tr):not(table):not(input):not(select):not(b
   border-left: 4px solid var(--accent);
   border-radius: 14px;
   background: #fffdf0;
+  padding: 14px 18px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
 }
+.callout b { color: var(--ink); }
 
 /* Yellow-tinted aggregate rows (team total etc.) */
 main .bg-opt-yellow\/\[0\.06\], main .bg-opt-yellow-subtle {

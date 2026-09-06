@@ -13,7 +13,7 @@ function trendPill(trend) {
   const dir = trend.direction
   const cls = dir === 'up' ? 'pill-up' : dir === 'down' ? 'pill-down' : 'pill-flat'
   const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '·'
-  if (trend.label) return <span className={`pill ${cls}`}>{trend.label}</span>
+  if (trend.label) return <span className={`pill ${cls}`} title={trend.title} style={{ whiteSpace: 'nowrap' }}>{trend.label}</span>
   return (
     <span className={`pill ${cls}`}>
       <span className="arrow">{arrow}</span>

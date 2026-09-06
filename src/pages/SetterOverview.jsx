@@ -6,6 +6,7 @@ import Gauge from '../components/Gauge'
 import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
 import SetterDrilldown from '../components/house/SetterDrilldown'
 import { useBenchmarks } from '../hooks/useBenchmarks'
+import { useSalesMetrics } from '../hooks/useSalesMetrics'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { supabase } from '../lib/supabase'
@@ -20,6 +21,8 @@ export default function SetterOverview() {
   const { bm } = useBenchmarks()
   const navigate = useNavigate()
   const [range, setRange] = useState(30)
+  // Company show rate = live new calls over qualified bookings, the one number every page uses
+  const sm = useSalesMetrics(range)
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const { members: setters, loading: loadingMembers } = useTeamMembers('setter')
   const { reports, loading: loadingReports } = useSetterEODs(null, days)
@@ -142,8 +145,7 @@ export default function SetterOverview() {
   const closedLeads = allLeads.filter(l => l.status === 'closed')
   const noShowLeads = allLeads.filter(l => l.status === 'no_show')
   const totalRevenue = allLeads.reduce((s, l) => s + parseFloat(l.revenue_attributed || 0), 0)
-  const { showRate: showRateVal } = computeShowRate(allLeads, dateStats)
-  const showRate = showRateVal
+  const showRate = sm.r.showRate
   const closeRate = showedLeads.length > 0 ? ((closedLeads.length / showedLeads.length) * 100).toFixed(1) : 0
 
   // Company-level activity — prefer WAVV data for dials/pickups/MCs, EOD for leads/sets/reschedules
@@ -298,7 +300,7 @@ export default function SetterOverview() {
       {/* Company conversion gauges */}
       <div className="kpi-grid mb-6">
         <Gauge label="Pickup Rate" value={parseFloat(pickupRate)} target={30} />
-        <Gauge label="Show Rate" value={parseFloat(showRate)} target={bm('show_rate_new', 70)} />
+        <Gauge label="Show Rate" value={parseFloat(showRate)} target={bm('show_rate_new', 70)} hint="Live new calls over qualified bookings, the same number as the Overview and Closers pages. Per-setter rows below use the leads each setter logged." />
         {/* Close rate here is SCOPED to setter-booked leads only (subset of
             closer universe). The company close rate on /sales/closers and
             /sales/marketing measures all live new-calls, not just
