@@ -202,7 +202,7 @@ export const FolderBar = memo(function FolderBar({
             fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 600,
             letterSpacing: '0.08em', textTransform: 'uppercase',
             background: 'var(--paper-2)', border: '1px solid var(--rule)',
-            color: 'var(--ink-3)', borderRadius: 9,
+            color: 'var(--ink-3)', borderRadius: 999,
           }}>search covers all folders</span>
         )}
         <span style={{ flex: 1 }} />
@@ -220,7 +220,7 @@ export const FolderBar = memo(function FolderBar({
               marginRight: 8, padding: '5px 11px',
               fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
               letterSpacing: '0.08em', textTransform: 'uppercase',
-              cursor: 'pointer', borderRadius: 9,
+              cursor: 'pointer', borderRadius: 999,
               background: showAll ? 'var(--accent)' : 'transparent',
               color: showAll ? 'var(--ink)' : 'var(--ink-3)',
               border: `1px solid ${showAll ? 'var(--accent)' : 'var(--rule)'}`,
@@ -238,7 +238,7 @@ export const FolderBar = memo(function FolderBar({
               padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
               letterSpacing: '0.08em', textTransform: 'uppercase',
               background: 'var(--paper)', color: 'var(--ink)',
-              border: '1px solid var(--rule)', borderRadius: 9, cursor: 'pointer',
+              border: '1px solid var(--rule)', borderRadius: 999, cursor: 'pointer',
             }}>+ New folder</button>
         )}
       </div>
@@ -280,7 +280,7 @@ export const FolderBar = memo(function FolderBar({
                   position: 'relative',
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '10px 12px',
-                  background: 'var(--paper-2)', border: '1px solid var(--rule)',
+                  background: '#ffffff', border: '1px solid var(--rule)', borderRadius: 14, boxShadow: 'var(--house-shadow-tile)',
                   cursor: 'pointer',
                   ...dropTargetStyle(f.id),
                 }}>

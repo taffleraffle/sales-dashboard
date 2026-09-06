@@ -4311,10 +4311,10 @@ function ListRow({ row: r, isLast, gridCols, isUsed, onClick, onDelete, selectab
               title="Copy a shareable link to this video" />
             {onDelete && (
               <button onClick={e => { e.stopPropagation(); onDelete() }} style={{
-                padding: '4px 9px', fontFamily: 'var(--mono)', fontSize: 10,
-                letterSpacing: '0.06em', textTransform: 'uppercase',
-                background: 'transparent', color: 'var(--down)',
-                border: '1px solid var(--down)', cursor: 'pointer',
+                padding: '4px 10px', fontFamily: 'var(--sans)', fontSize: 11.5, fontWeight: 600,
+                letterSpacing: 0, textTransform: 'none', borderRadius: 999, whiteSpace: 'nowrap',
+                background: '#ffffff', color: 'var(--house-bad)',
+                border: '1px solid rgba(224,86,30,.45)', cursor: 'pointer',
               }}>Delete</button>
             )}
           </div>
