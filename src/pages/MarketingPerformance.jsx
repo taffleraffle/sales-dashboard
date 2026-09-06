@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition, Children } from 'react'
 import KPICard from '../components/KPICard'
+import { useSalesMetrics } from '../hooks/useSalesMetrics'
 import { Link } from 'react-router-dom'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { useCloserCallProspectMetrics } from '../hooks/useCloserCallProspectMetrics'
@@ -201,7 +202,7 @@ function Section({ title, children, cols = 6 }) {
       </div>
     )
   }
-  const grid = cols >= 8 ? 'kpi-grid kpi-grid-8' : cols >= 6 ? 'kpi-grid kpi-grid-6' : 'kpi-grid'
+  const grid = cols === 8 ? 'kpi-grid kpi-grid-8' : cols === 6 ? 'kpi-grid kpi-grid-6' : 'kpi-grid'
   return (
     <div className="mb-4">
       <div className="flex items-center gap-3 mb-2">
@@ -3367,46 +3368,23 @@ function ResolveDupeModal({ group, onClose, onResolved }) {
 // confirmation cohort. `refetchKey` bumps when the drilldown closes after a
 // mark so the tiles recount without a page reload. Returns a fragment of two
 // <KPI> so it drops straight into the Calls & Show Rates grid.
-function ConfirmationShowTiles({ range, selectedAudiences, refetchKey, onOpen, bm }) {
-  const [d, setD] = useState(null)
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      const { from, to } = resolveRange(range)
-      const { data, error } = await supabase
-        .from('lib_booking_confirmation_daily')
-        .select('date, audience, confirmed_calls, confirmed_showed, confirmed_noshow, unconfirmed_calls, unconfirmed_showed, unconfirmed_noshow')
-        .gte('date', from).lte('date', `${to} 23:59:59`)
-      if (cancelled) return
-      if (error) { console.warn('confirmation tiles load failed:', error.message); setD(null); return }
-      const want = (selectedAudiences && selectedAudiences.size > 0) ? selectedAudiences : null
-      const rows = (data || []).filter(r => !want || want.has(r.audience))
-      const sum = k => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0)
-      setD({
-        cCalls: sum('confirmed_calls'), cShow: sum('confirmed_showed'), cNo: sum('confirmed_noshow'),
-        uCalls: sum('unconfirmed_calls'), uShow: sum('unconfirmed_showed'), uNo: sum('unconfirmed_noshow'),
-      })
-    })()
-    return () => { cancelled = true }
-  }, [range, selectedAudiences, refetchKey])
-
-  const pct = (s, n) => (s + n) > 0 ? (s / (s + n)) * 100 : null
-  const cPct = d ? pct(d.cShow, d.cNo) : null
-  const uPct = d ? pct(d.uShow, d.uNo) : null
-  const tip = (label, calls, show, no, pctVal) =>
-    `Show rate among ${label} calls = showed ÷ (showed + no-show). ${
-      pctVal == null ? 'No call outcomes logged yet' : `${show} showed / ${show + no} with an outcome = ${pctVal.toFixed(1)}%`
-    } · ${calls} ${label.toLowerCase()} call${calls === 1 ? '' : 's'} marked. Mark confirmation in the closer's EOD or the Bookings / Q.Book drilldown; attendance comes from the EOD call outcome.`
+function ConfirmationShowTiles({ range, onOpen, bm }) {
+  // Same source and window as the Overview and Closers pages
+  // (lib_call_confirmation_by_closer by report date) so all three agree.
+  // Company-wide: not split by the audience chips.
+  const { totals: T, r: R } = useSalesMetrics(range)
+  const confN = T.confShowed + T.confNoShow
+  const unconfN = T.unconfShowed + T.unconfNoShow
   return (
     <>
-      <KPI label="Conf. Show%" value={cPct == null ? 0 : cPct} format="%"
-           tip={d ? tip('Confirmed', d.cCalls, d.cShow, d.cNo, cPct) : 'Loading…'}
+      <KPI label="Conf. Show%" value={R.confShowRate ?? 0} format="%" benchmark={bm?.show_rate_new}
+           tip={`${T.confShowed} showed of ${confN} confirmed calls with an outcome. Company-wide, same as the Overview.`}
            onClick={onOpen} />
-      <KPI label="Unconf. Show%" value={uPct == null ? 0 : uPct} format="%"
-           tip={d ? tip('Unconfirmed', d.uCalls, d.uShow, d.uNo, uPct) : 'Loading…'}
+      <KPI label="Unconf. Show%" value={R.unconfShowRate ?? 0} format="%" benchmark={bm?.show_rate_new}
+           tip={`${T.unconfShowed} showed of ${unconfN} unconfirmed calls with an outcome. Company-wide, same as the Overview.`}
            onClick={onOpen} />
-      <KPI label="Calls Confirmed%" value={d && (d.cCalls + d.uCalls) > 0 ? (d.cCalls / (d.cCalls + d.uCalls)) * 100 : 0} format="%" benchmark={bm?.confirmed_share}
-           tip={d ? `${d.cCalls} confirmed vs ${d.uCalls} unconfirmed of ${d.cCalls + d.uCalls} marked calls (${d.cCalls + d.uCalls > 0 ? (100 - (d.cCalls / (d.cCalls + d.uCalls)) * 100).toFixed(1) : '0.0'}% unconfirmed)` : 'Loading…'}
+      <KPI label="Calls Confirmed%" value={R.confirmedShare ?? 0} format="%" benchmark={bm?.confirmed_share}
+           tip={`${T.confCalls} confirmed vs ${T.unconfCalls} unconfirmed of ${T.confCalls + T.unconfCalls} marked calls.`}
            onClick={onOpen} />
     </>
   )
@@ -3604,7 +3582,7 @@ export default function MarketingPerformance() {
   // (via ghl_opportunities mirror — see migration 055). Makes Q.Book ≤ Leads
   // by definition, so L→Q% becomes a real conversion rate. Falls back to
   // booked_at when no opportunity is found for the contact.
-  const [leadCohortBookingsByDate, setLeadCohortBookingsByDate] = useState({})
+  const [leadCohortBookingsByDate, setLeadCohortBookingsByDate] = useState({}) // eslint-disable-line no-unused-vars -- setter still fed by the mirror sync; cohort tiles retired 2026-09-06
 
   // Audience filter (multi-select). Hoisted above sumBookings et al because
   // those useCallbacks include selectedAudiences in their dependency arrays —
@@ -3983,46 +3961,6 @@ export default function MarketingPerformance() {
     return { all, qualified, dq }
   }, [cohortBookingsByDate, canonicalKey, selectedAudiences])
 
-  // Lead-cohort booking sum: count unique prospects whose LEAD's createdAt
-  // fell in the window, regardless of when they booked. Pairs with stats.leads
-  // (also bucketed by lead createdAt) so L→Q% = qualified / stats.leads is a
-  // true conversion rate where Q.Book is always ≤ Leads.
-  //
-  // When migration 055 hasn't been applied yet, leadCohortBookingsByDate is
-  // empty and this returns { all:0, qualified:0, dq:0 } — the callsite then
-  // falls back to bk.qualified (booked_at-bucketed) and caps the ratio at
-  // 100%, preserving prior behavior.
-  const sumLeadCohortBookings = useCallback((days) => {
-    const filterDate = (() => {
-      if (days === 'mtd') {
-        const todayStr = todayET()
-        const start = todayStr.slice(0, 7) + '-01'
-        return d => d >= start
-      }
-      if (days && typeof days === 'object' && days.from) return d => d >= days.from && d <= days.to
-      const sinceStr = etDateOffset(-Math.max(0, days - 1))
-      return d => d >= sinceStr
-    })()
-    const wantedAud = (selectedAudiences && selectedAudiences.size > 0) ? selectedAudiences : null
-    const seen = new Map()
-    for (const [d, list] of Object.entries(leadCohortBookingsByDate)) {
-      if (!filterDate(d)) continue
-      for (const b of list) {
-        if (wantedAud && !wantedAud.has(b.audience)) continue
-        const key = canonicalKey(b.contactKey)
-        const existing = seen.get(key)
-        if (!existing) seen.set(key, { isDq: b.isDq })
-        else if (existing.isDq && !b.isDq) seen.set(key, { isDq: false })
-      }
-    }
-    let all = 0, qualified = 0, dq = 0
-    for (const v of seen.values()) {
-      all++
-      if (v.isDq) dq++
-      else qualified++
-    }
-    return { all, qualified, dq }
-  }, [leadCohortBookingsByDate, canonicalKey, selectedAudiences])
 
   // Audience filter (Ben 2026-05-31). Multiselect via chips next to the
   // date range. Empty Set = show all. Overrides loaded from
@@ -4455,13 +4393,6 @@ export default function MarketingPerformance() {
   // bookings "fell" purely from activating the panel).
   const bk = useMemo(() => sumBookings(range), [sumBookings, range])
   const bk30 = useMemo(() => sumBookings(30), [sumBookings])
-  // Lead-cohort booking counts — bookings attributed to the date their
-  // LEAD was created. Used for the L→Q% conversion tile so numerator and
-  // denominator share a cohort (leads created in window → of those, how
-  // many booked). When migration 055 hasn't been applied yet, these
-  // collapse to 0 and the L→Q% tile falls back to the booked_at numbers.
-  const bkLeadCohort = useMemo(() => sumLeadCohortBookings(range), [sumLeadCohortBookings, range])
-  const bkLeadCohort30 = useMemo(() => sumLeadCohortBookings(30), [sumLeadCohortBookings])
   // Possible duplicate prospects in the current window (same person
   // booked under multiple ghl_contact_ids — e.g. "Mike White" + "Michael").
   // Surfaced as a banner above the bookings tiles so Ben can merge in GHL.
@@ -5086,8 +5017,6 @@ export default function MarketingPerformance() {
         // Cost/Booking) and wf.cpb (matches Cost/Q.Book).
         const cpb = bk.all > 0 ? stats.adspend / bk.all : 0
         const cpb30 = bk30.all > 0 ? stats30.adspend / bk30.all : 0
-        const cpqb = bk.qualified > 0 ? stats.adspend / bk.qualified : 0
-        const cpqb30 = bk30.qualified > 0 ? stats30.adspend / bk30.qualified : 0
         // L→Q% — cohort-true conversion rate.
         //
         // Numerator + denominator both bucketed by LEAD createdAt: of the
@@ -5102,30 +5031,14 @@ export default function MarketingPerformance() {
         // back to the legacy booked_at-bucketed bk.qualified with a
         // hard 100% cap. The tooltip surfaces which path is active so
         // operators can tell when the mirror needs to sync.
-        const cohortAvailable = bkLeadCohort.qualified > 0 || bkLeadCohort.all > 0
-        const numerator = cohortAvailable ? bkLeadCohort.qualified : bk.qualified
-        const rawLeadToQ = stats.leads > 0 ? (numerator / stats.leads) * 100 : 0
-        const leadToQDrift = !cohortAvailable && rawLeadToQ > 100
-        const leadToQ = leadToQDrift ? 100 : Math.min(100, rawLeadToQ)
-        const numerator30 = bkLeadCohort30.qualified > 0 ? bkLeadCohort30.qualified : bk30.qualified
-        const rawLeadToQ30 = stats30.leads > 0 ? (numerator30 / stats30.leads) * 100 : 0
-        const leadToQ30 = Math.min(100, rawLeadToQ30)
         return (
-          <Section title="Spend & Lead Acquisition" cols={8}>
+          <Section title="Spend & Lead Acquisition" cols={6}>
             <KPI label="Adspend" value={stats.adspend} format="$" trailing={stats30.adspend} prev={sp.adspend} whatIf={hasOverride('adspend') ? wf?.adspend : null} tip="Total Meta Ads spend (converted to USD). Click for daily breakdown." onClick={() => setDrilldown('adspend')} />
             <KPI label="Leads" value={stats.leads} format="n" trailing={stats30.leads} prev={sp.leads} whatIf={gated(upstream.leads, wf?.leads)} tip="New opportunities created in SCIO USA pipeline. Click to view." onClick={() => setDrilldown('leads')} />
             <KPI label="CPL" value={stats.cpl} format="$" benchmark={bm.cpl} trailing={stats30.cpl} prev={sp.cpl} whatIf={gated(upstream.leads, wf?.cpl)} tip="Cost Per Lead = Adspend / Leads. Click to see daily CPL trend." onClick={() => setDrilldown('cpl')} />
             <KPI label="Bookings" value={bk.all} format="n" trailing={bk30.all} whatIf={gated(upstream.bookings, wf?.bookings_all)} tip="All strategy-calendar bookings (qualified + DQ Calendly), bucketed by booked_at. Click to view." onClick={() => setDrilldown('bookings')} />
             <KPI label="Cost/Booking" value={cpb} format="$" trailing={cpb30} whatIf={gated(upstream.bookings, wf?.cpb_all)} tip="Adspend ÷ Bookings (all). Click to see daily cost-per-booking trend." onClick={() => setDrilldown('cpb')} />
-            <KPI label="Q.Books" value={cohortAvailable ? bkLeadCohort.qualified : bk.qualified} format="n" trailing={bkLeadCohort30.qualified > 0 ? bkLeadCohort30.qualified : bk30.qualified} whatIf={gated(upstream.bookings, wf?.qualified_bookings)} tip={cohortAvailable
-              ? `Of the ${stats.leads} leads created in this window, ${bkLeadCohort.qualified} have booked a qualified strategy call (cohort-true conversion). Click to view bookings activity (booked_at-bucketed: ${bk.qualified} unique prospects).`
-              : `Unique prospects who BOOKED a strategy call (excl. DQ Calendly) in this window, bucketed by booked_at. Cohort-true math will activate after ghl_opportunities mirror first syncs (migration 055). ${bk.dq ? `${bk.dq} routed to DQ in this window. ` : ''}Click to view.`} onClick={() => setDrilldown('qbookings')} />
-            <KPI label="L→Q%" value={leadToQ} format="%" benchmark={bm.lead_to_booking} trailing={leadToQ30} whatIf={gated(upstream.bookings, wf?.lead_to_booking_pct)} tip={cohortAvailable
-              ? `True conversion rate: of the ${stats.leads} leads created in window, ${bkLeadCohort.qualified} booked a qualified strategy call. Cohort-aligned — denominator and numerator share the same lead-create window.`
-              : leadToQDrift
-                ? `Capped at 100%. Raw ratio = ${rawLeadToQ.toFixed(0)}% because Q.Book counts prospects who booked in this window — some of those leads were created BEFORE the window. Cohort-true math will activate once the ghl_opportunities mirror first syncs.`
-                : 'Qualified Bookings ÷ Leads (cohort-true math will activate once the ghl_opportunities mirror syncs).'} onClick={() => setDrilldown('qbookings')} />
-            <KPI label="Cost/Q.Book" value={cpqb} format="$" benchmark={bm.cpb} trailing={cpqb30} whatIf={gated(upstream.bookings, wf?.cpb)} tip="Adspend ÷ Qualified Bookings (excludes DQ). Click to see daily trend." onClick={() => setDrilldown('cpqb')} />
+            <KPI label="Lead→Booked%" value={stats.leads > 0 ? (bk.all / stats.leads) * 100 : 0} format="%" benchmark={bm.lead_to_booking} trailing={stats30.leads > 0 ? (bk30.all / stats30.leads) * 100 : 0} whatIf={gated(upstream.bookings, wf?.lead_to_booking_pct)} tip="Bookings ÷ leads in the window. Same number as the Overview conversion line. Click to view bookings." onClick={() => setDrilldown('bookings')} />
           </Section>
         )
       })()}
@@ -5190,7 +5103,6 @@ export default function MarketingPerformance() {
           return h
         }
         const H   = sumHeld(winFrom, winTo)
-        const H30 = sumHeld(etDateOffset(-29), todayET())
         const reschedRate    = rate(W.resch, W.qb)
         const reschedRate30  = rate(W30.resch, W30.qb)
         const reschedRatePrev= rate(sp.reschedules || 0, denomPrev)
@@ -5200,24 +5112,17 @@ export default function MarketingPerformance() {
         // Gross Show = showed ÷ calls held that day (appointment_date). Not-
         // yet-logged calls count against the denominator, so this is an honest
         // floor — no >100% artifact, no cap.
-        const grossShowRate   = H.held   > 0 ? (H.showed / H.held)   * 100 : 0
-        const grossShowRate30 = H30.held > 0 ? (H30.showed / H30.held) * 100 : 0
         // Net Show = showed ÷ (showed + no-shows): of held calls with a logged
         // outcome, how many showed. Both anchored to the held day, so this is
         // cohort-consistent and can't exceed 100%.
-        const netDenom    = H.showed   + H.noShow
-        const netDenom30  = H30.showed + H30.noShow
-        const netShowRate   = netDenom   > 0 ? (H.showed / netDenom)   * 100 : 0
-        const netShowRate30 = netDenom30 > 0 ? (H30.showed / netDenom30) * 100 : 0
         return (
-          <Section title="Calls & Show Rates" cols={8}>
+          <Section title="Calls & Show Rates" cols={7}>
             <KPI label="Net New Live" value={stats.new_live_calls} format="n" prev={sp.new_live_calls} whatIf={gated(upstream.live, wf?.new_live_calls)} tip={`NEW calls that showed up live — excludes follow-ups, no-shows, ascensions. Denominator for show rates uses Qualified Bookings (${denom}) from the calendar, not the closer's EOD count. Click to view.`} onClick={() => setDrilldown('live')} />
             <KPI label="Total Live" value={stats.net_live_calls} format="n" prev={sp.net_live_calls} tip={`ALL calls that showed up live — new customers (${stats.new_live_calls}) PLUS follow-ups. This is the number that should be ≥ closes, since closes include follow-up/ascension calls. 'Net New Live' to the left is new-customer-only.`} onClick={() => setDrilldown('live')} />
             <KPI label="No Shows" value={stats.no_shows} format="n" prev={sp.no_shows} whatIf={gated(upstream.live, wf?.no_shows)} tip="NC no-shows from closer EOD. Click for daily trend + prospects." onClick={() => setDrilldown('noshows')} />
             <KPI label="Reschedule%" value={reschedRate} format="%" trailing={reschedRate30} prev={reschedRatePrev} tip={`Reschedules ÷ Qualified Bookings (same audience rollup as the drilldown). ${W.resch} reschedules out of ${W.qb} qualified bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
             <KPI label="Cancel%" value={cancelRate} format="%" trailing={cancelRate30} prev={cancelRatePrev} tip={`Cancellations ÷ Qualified Bookings (same audience rollup as the drilldown). ${W.cancels} cancels out of ${W.qb} qualified bookings. Click to view.`} onClick={() => setDrilldown('rc')} />
-            <KPI label="Gross Show%" value={grossShowRate} format="%" whatIf={gated(upstream.live, wf?.gross_show_rate)} trailing={grossShowRate30} tip={`Showed ÷ calls HELD in the window (by appointment day, migration 164). ${H.showed} showed ÷ ${H.held} held = ${grossShowRate.toFixed(1)}%. Anchored to the held day so it can't exceed 100%. ${H.held - H.showed - H.noShow} held call(s) have no logged EOD outcome yet and count as not-shown here. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
-            <KPI label="Net Show%" value={netShowRate} format="%" whatIf={gated(upstream.live, wf?.net_show_rate)} benchmark={bm.show_rate_new} trailing={netShowRate30} tip={`Showed ÷ held calls with a logged outcome (showed + no-show). ${H.showed} showed ÷ ${netDenom} logged = ${netShowRate.toFixed(1)}%. Held-day cohort (migration 164) — cancels/reschedules and un-logged calls are excluded. Click for daily show-rate trend.`} onClick={() => setDrilldown('showrate')} />
+            <KPI label="Show Rate" value={W.qb > 0 ? (W.lives / W.qb) * 100 : 0} format="%" benchmark={bm.show_rate_new} trailing={W30.qb > 0 ? (W30.lives / W30.qb) * 100 : 0} whatIf={gated(upstream.live, wf?.gross_show_rate)} tip={`Live new calls ÷ qualified bookings in the window: ${W.lives} of ${W.qb}. The same number as the Overview, Closers and Setters pages. Held-day view for reference: ${H.showed} showed of ${H.held} calls held in the window. Click for the daily trend.`} onClick={() => setDrilldown('showrate')} />
             <KPI label="Cost/New" value={stats.cost_per_new_live_call} format="$" benchmark={bm.cost_per_live_call} trailing={stats30.cost_per_new_live_call} prev={sp.cost_per_new_live_call} whatIf={gated(upstream.live, wf?.cost_per_new_live_call)} tip="Adspend ÷ Net New Live calls. Click for daily trend." onClick={() => setDrilldown('cpnew')} />
           </Section>
         )
@@ -5229,7 +5134,7 @@ export default function MarketingPerformance() {
           (unconfirmed) no-show problem is quantified. Own row so the
           Calls section stays a flush 8-up grid. */}
       <Section title="Call confirmation" cols={3}>
-        <ConfirmationShowTiles range={range} selectedAudiences={selectedAudiences} refetchKey={hygieneRefetchKey} onOpen={() => setShowConfTrend(true)} bm={bm} />
+        <ConfirmationShowTiles range={range} onOpen={() => setShowConfTrend(true)} bm={bm} />
       </Section>
 
       {/* Offers & Closes */}

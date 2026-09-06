@@ -11,6 +11,7 @@ import { supabase } from '../lib/supabase'
 import { pagedFetch } from '../lib/pagedFetch'
 import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { useSetterStats, useSetterEODs } from '../hooks/useSetterData'
+import { useSalesMetrics } from '../hooks/useSalesMetrics'
 import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
 import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
 
@@ -18,6 +19,8 @@ export default function SetterDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [range, setRange] = useState(30)
+  // Company show rate = live new calls over qualified bookings, the one number every page uses
+  const sm = useSalesMetrics(range)
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const [member, setMember] = useState(null)
   const [leads, setLeads] = useState([])
@@ -217,9 +220,6 @@ export default function SetterDetail() {
   // it answer a subtly different question than closeRate's per-lead
   // status filter — close-rate denominator could be 12 while show-rate
   // denominator was 18.7 for the same window.
-  const companyShowRateVal = companyShowedLeads.length + allLeads.filter(l => l.status === 'no_show').length > 0
-    ? parseFloat(((companyShowedLeads.length / (companyShowedLeads.length + allLeads.filter(l => l.status === 'no_show').length)) * 100).toFixed(1))
-    : 0
   const companyRates = {
     leadToSet: companyActivity.leads > 0 ? parseFloat(((totalCompanySets / companyActivity.leads) * 100).toFixed(1)) : 0,
     callToSet: companyActivity.dials > 0 ? parseFloat(((totalCompanySets / companyActivity.dials) * 100).toFixed(1)) : 0,
@@ -227,7 +227,7 @@ export default function SetterDetail() {
     mcToSet: companyActivity.mcs > 0 ? parseFloat(((totalCompanySets / companyActivity.mcs) * 100).toFixed(1)) : 0,
     pickupRate: companyActivity.dials > 0 ? parseFloat(((companyActivity.pickups / companyActivity.dials) * 100).toFixed(1)) : 0,
     closeRate: companyShowedLeads.length > 0 ? parseFloat(((companyClosedLeads.length / companyShowedLeads.length) * 100).toFixed(1)) : 0,
-    showRate: companyShowRateVal,
+    showRate: sm.r.showRate,
     leadToClose: companyActivity.leads > 0 ? parseFloat(((companyClosedLeads.length / companyActivity.leads) * 100).toFixed(1)) : 0,
   }
 

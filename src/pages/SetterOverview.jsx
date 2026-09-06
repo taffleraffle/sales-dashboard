@@ -5,6 +5,7 @@ import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
 import SetterDrilldown from '../components/house/SetterDrilldown'
+import MetricDrilldown from '../components/house/MetricDrilldown'
 import { useBenchmarks } from '../hooks/useBenchmarks'
 import { useSalesMetrics } from '../hooks/useSalesMetrics'
 import { useTeamMembers } from '../hooks/useTeamMembers'
@@ -14,7 +15,6 @@ import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { syncGHLAppointments } from '../services/ghlCalendar'
 import { fetchWavvAggregates } from '../services/wavvService'
 import { Plus } from 'lucide-react'
-import { computeShowRate } from '../utils/metricCalculations'
 import { INTRO_CALENDARS } from '../utils/constants'
 
 export default function SetterOverview() {
@@ -27,7 +27,8 @@ export default function SetterOverview() {
   const { members: setters, loading: loadingMembers } = useTeamMembers('setter')
   const { reports, loading: loadingReports } = useSetterEODs(null, days)
   const [allLeads, setAllLeads] = useState([])
-  const [drill, setDrill] = useState(null) // 'dials' | 'pickups' | 'mcs' | 'sets' | 'shows' | 'no_shows' | 'revenue'
+  const [drill, setDrill] = useState(null) // 'dials' | 'pickups' | 'mcs' | 'sets'
+  const [mdrill, setMdrill] = useState(null) // 'show' | 'close' (shared Overview pop-ups)
   // Confirmed vs unconfirmed show rate (booking_call_status marks, closer outcomes)
   const [conf, setConf] = useState({ cShow: 0, cNo: 0, uShow: 0, uNo: 0 })
   useEffect(() => {
@@ -46,7 +47,6 @@ export default function SetterOverview() {
   const [loadingLeads, setLoadingLeads] = useState(true)
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
   const [autoBookings, setAutoBookings] = useState([])
-  const [dateStats, setDateStats] = useState({})
 
   // Fetch auto-booking appointments (INTRO_CALENDARS only) — auto-sync if stale
   useEffect(() => {
@@ -101,26 +101,6 @@ export default function SetterOverview() {
     fetchLeads()
   }, [range])
 
-  // Fetch closer EOD aggregates for show rate calculation
-  useEffect(() => {
-    supabase
-      .from('closer_eod_reports')
-      .select('report_date, nc_booked, nc_no_shows, live_nc_calls')
-      .gte('report_date', sinceDate(range))
-      .then(({ data }) => {
-        // New-call only: setter leads are always new/qualified calls, so the
-        // show-rate denominator should exclude follow-up calls (which no longer
-        // belong to the setter funnel anyway).
-        const stats = {}
-        for (const e of (data || [])) {
-          if (!stats[e.report_date]) stats[e.report_date] = { booked: 0, noShows: 0, live: 0 }
-          stats[e.report_date].booked += (e.nc_booked || 0)
-          stats[e.report_date].noShows += (e.nc_no_shows || 0)
-          stats[e.report_date].live += (e.live_nc_calls || 0)
-        }
-        setDateStats(stats)
-      })
-  }, [range])
 
   if (loadingMembers || loadingLeads || loadingReports) {
     return (
@@ -143,8 +123,6 @@ export default function SetterOverview() {
   const totalSets = allLeads.length
   const showedLeads = allLeads.filter(l => ['showed', 'not_closed', 'closed'].includes(l.status))
   const closedLeads = allLeads.filter(l => l.status === 'closed')
-  const noShowLeads = allLeads.filter(l => l.status === 'no_show')
-  const totalRevenue = allLeads.reduce((s, l) => s + parseFloat(l.revenue_attributed || 0), 0)
   const showRate = sm.r.showRate
   const closeRate = showedLeads.length > 0 ? ((closedLeads.length / showedLeads.length) * 100).toFixed(1) : 0
 
@@ -217,7 +195,6 @@ export default function SetterOverview() {
     const myShowed = myLeads.filter(l => ['showed', 'not_closed', 'closed'].includes(l.status))
     const myClosed = myLeads.filter(l => l.status === 'closed')
     const myNoShow = myLeads.filter(l => l.status === 'no_show')
-    const myShowResult = computeShowRate(myLeads, dateStats)
     const myRevenue = myLeads.reduce((s, l) => s + parseFloat(l.revenue_attributed || 0), 0)
 
     // Use EOD sets total (more accurate than setter_leads count for historical data)
@@ -253,7 +230,7 @@ export default function SetterOverview() {
       closed: myClosed.length,
       noShows: myNoShow.length,
       revenue: myRevenue,
-      showRate: myShowResult.showRate,
+      showRate: (myShowed.length + myNoShow.length) > 0 ? parseFloat(((myShowed.length / (myShowed.length + myNoShow.length)) * 100).toFixed(1)) : 0,
       closeRate: myShowed.length > 0 ? parseFloat(((myClosed.length / myShowed.length) * 100).toFixed(1)) : 0,
       dialsPerSet: (eodSets || myLeads.length) > 0 ? parseFloat((dials / (eodSets || myLeads.length)).toFixed(1)) : 0,
       topPipelines,
@@ -292,9 +269,9 @@ export default function SetterOverview() {
         <KPICard label="Leads worked" value={companyActivity.leads.toLocaleString()} subtitle="unique numbers dialled" onClick={() => setDrill('dials')} />
         <KPICard label="Meaningful conversations" value={companyActivity.mcs} subtitle="60 seconds or more" onClick={() => setDrill('mcs')} />
         <KPICard label="Sets" value={totalSets} subtitle={totalSets > 0 ? `${dialsPerSet} dials per set` : ''} onClick={() => setDrill('sets')} />
-        <KPICard label="Shows" value={showedLeads.length} subtitle={`${showRate}% show rate`} onClick={() => setDrill('shows')} />
-        <KPICard label="No shows" value={noShowLeads.length} onClick={() => setDrill('no_shows')} />
-        <KPICard label="Revenue" value={`$${totalRevenue.toLocaleString()}`} subtitle="attributed to logged leads" onClick={() => setDrill('revenue')} />
+        <KPICard label="Shows" value={sm.totals.lives} subtitle={`${showRate}% show rate · live new calls`} onClick={() => setMdrill('show')} />
+        <KPICard label="No shows" value={sm.totals.noShows} subtitle={`${sm.r.noShowRate}% of booked`} onClick={() => setMdrill('show')} />
+        <KPICard label="Revenue" value={`$${Math.round(sm.r.revenue || 0).toLocaleString()}`} subtitle="trial + ascension, same as the Overview" onClick={() => setMdrill('close')} />
       </div>
 
       {/* Company conversion gauges */}
@@ -349,6 +326,7 @@ export default function SetterOverview() {
         )
       })()}
 
+      <MetricDrilldown kind={mdrill} onClose={() => setMdrill(null)} metrics={sm} closers={[]} />
       <SetterDrilldown kind={drill} onClose={() => setDrill(null)} range={range} leads={allLeads} setters={setters} windowLabel={typeof range === 'number' ? `Last ${range} days` : range === 'mtd' ? 'Month to date' : 'Custom range'} />
 
 

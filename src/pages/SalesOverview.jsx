@@ -201,8 +201,8 @@ export default function SalesOverview() {
     const t = m.totals
     const conf = t.confCalls, unconf = t.unconfCalls, total = conf + unconf
     if (!total) return null
-    const confPct = Math.round((conf / total) * 100)
-    return { conf, unconf, total, confPct, unconfPct: 100 - confPct }
+    const confPct = parseFloat(((conf / total) * 100).toFixed(1))
+    return { conf, unconf, total, confPct, unconfPct: parseFloat((100 - confPct).toFixed(1)) }
   }, [m.totals])
   const [revenueDeals, setRevenueDeals] = useState(null)
 
