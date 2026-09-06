@@ -40,7 +40,7 @@ export default function TeamPage() {
   const inactiveCount = members.filter(m => m.is_active === false).length
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div>
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
           <span className="eyebrow eyebrow-accent">OPT Sales · Team</span>

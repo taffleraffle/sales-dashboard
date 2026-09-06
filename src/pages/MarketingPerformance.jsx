@@ -3131,10 +3131,10 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
               height={320}
             />
           )}
-          {rows == null && <div className="p-6 text-center text-text-400 text-xs">{config.slowFirstLoad ? 'Fetching from GHL — may take a few seconds…' : 'Loading…'}</div>}
+          {rows == null && <div className="flex items-center justify-center gap-3 py-10" style={{ fontSize: 13.5, color: 'var(--ink-4)' }}><Loader size={18} className="animate-spin" />{config.slowFirstLoad ? 'Fetching from GoHighLevel, this can take a few seconds' : 'Loading'}</div>}
           {rows != null && rows.length === 0 && (fetchErr
-            ? <div className="p-6 text-center text-xs text-red-400">Failed to load this drilldown: {fetchErr}<div className="mt-1 text-text-400">This is an error, not an empty result — screenshot this message.</div></div>
-            : <div className="p-6 text-center text-text-400 text-xs">{config.emptyMsg}</div>)}
+            ? <div className="callout" style={{ margin: 20 }}><b>Could not load this drilldown.</b> {fetchErr}. This is an error, not an empty result.</div>
+            : <p style={{ margin: 0, padding: '28px 20px', fontSize: 13.5, color: 'var(--ink-4)', textAlign: 'center' }}>{config.emptyMsg}</p>)}
           {rows != null && rows.length > 0 && config.chart && (
             <DailyTrendChart
               rows={rows}
@@ -3150,19 +3150,19 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
             />
           )}
           {rows != null && rows.length > 0 && (
-            <table className="w-full text-[11px]">
-              <thead className="sticky top-0 bg-bg-card border-b border-border-default text-[9px] uppercase tracking-wider text-text-400">
+            <table className="house-table">
+              <thead className="sticky top-0" style={{ background: '#fff', zIndex: 1 }}>
                 <tr>
                   {config.columns.map(c => (
-                    <th key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.cls || ''}`}>{c.label}</th>
+                    <th key={c.key} className={c.align === 'right' ? 'num' : ''} style={{ textAlign: c.align === 'right' ? 'right' : 'left' }}>{c.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, i) => (
-                  <tr key={row._id || i} className="border-b border-border-default/30 hover:bg-white/[0.02]">
+                  <tr key={row._id || i}>
                     {config.columns.map(c => (
-                      <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.cls || ''}`}>
+                      <td key={c.key} className={c.align === 'right' ? 'num' : ''} style={{ textAlign: c.align === 'right' ? 'right' : 'left', fontWeight: 500 }}>
                         {c.render ? c.render(row, { onActioned: (id) => { mutatedRef.current = true; setRows(prev => (prev || []).filter(r => r._id !== id)) }, onReload: () => reload({ silent: true }) }) : (row[c.key] ?? '—')}
                       </td>
                     ))}
@@ -3172,7 +3172,7 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
             </table>
           )}
         </div>
-        <div className="px-5 py-2 text-[10px] text-text-400/80 border-t border-border-default">
+        <div className="px-5 py-3" style={{ borderTop: '1px solid var(--rule)', fontSize: 12.5, fontWeight: 500, color: 'var(--ink-4)', background: '#fbfbf9' }}>
           <span>{rows != null && (config.footer ? config.footer(rows) : `${rows.length} row${rows.length === 1 ? '' : 's'} shown`)}</span>
         </div>
       </div>
@@ -4754,7 +4754,7 @@ export default function MarketingPerformance() {
   if (loading) return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div>
       {/* Data Health — first thing on the page so accuracy regressions
           surface before the operator counts rows by hand. Polls every 60s. */}
       <div className="mb-4">

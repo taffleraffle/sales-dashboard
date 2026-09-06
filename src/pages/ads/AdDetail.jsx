@@ -146,7 +146,7 @@ export default function AdDetail() {
   }
 
   return (
-    <div className="max-w-[1400px] mx-auto">
+    <div>
       <Link to="/sales/ads/list" className="text-xs text-text-400 hover:text-text-primary flex items-center gap-1 mb-3">
         <ChevronLeft size={14} /> Back to Ad Performance
       </Link>

@@ -62,7 +62,7 @@ export default function AdsLayout() {
   const onSecondary = SECONDARY.some(s => location.pathname.startsWith(s.to))
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div>
       {/* Tab bar — the only chrome the user needs at this layer.
           Per-page SectionHead provides the page identity. */}
       <div

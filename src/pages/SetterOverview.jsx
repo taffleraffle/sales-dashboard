@@ -4,6 +4,7 @@ import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
+import SetterDrilldown from '../components/house/SetterDrilldown'
 import { useBenchmarks } from '../hooks/useBenchmarks'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useSetterEODs } from '../hooks/useSetterData'
@@ -25,6 +26,7 @@ export default function SetterOverview() {
   const { members: setters, loading: loadingMembers } = useTeamMembers('setter')
   const { reports, loading: loadingReports } = useSetterEODs(null, days)
   const [allLeads, setAllLeads] = useState([])
+  const [drill, setDrill] = useState(null) // 'dials' | 'pickups' | 'mcs' | 'sets' | 'shows' | 'no_shows' | 'revenue'
   const [loadingLeads, setLoadingLeads] = useState(true)
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
   const [autoBookings, setAutoBookings] = useState([])
@@ -315,18 +317,18 @@ export default function SetterOverview() {
         </div>
       </div>
 
-      <div className="max-w-[1600px] mx-auto">
+      <div>
 
       {/* Company-Level KPIs - two rows */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3 mb-6">
-        <KPICard label="Total Dials" value={companyActivity.dials.toLocaleString()} />
-        <KPICard label="Pickups" value={companyActivity.pickups.toLocaleString()} subtitle={`${pickupRate}% pickup`} />
-        <KPICard label="Leads Worked" value={companyActivity.leads.toLocaleString()} />
-        <KPICard label="MCs" value={companyActivity.mcs} />
-        <KPICard label="Sets" value={totalSets} subtitle={totalSets > 0 ? `${dialsPerSet} dials/set` : ''} />
-        <KPICard label="Shows" value={showedLeads.length} subtitle={`${showRate}% show rate`} />
-        <KPICard label="No Shows" value={noShowLeads.length} />
-        <KPICard label="Revenue" value={`$${totalRevenue.toLocaleString()}`} />
+        <KPICard label="Total dials" value={companyActivity.dials.toLocaleString()} onClick={() => setDrill('dials')} />
+        <KPICard label="Pickups" value={companyActivity.pickups.toLocaleString()} subtitle={`${pickupRate}% pickup`} onClick={() => setDrill('pickups')} />
+        <KPICard label="Leads worked" value={companyActivity.leads.toLocaleString()} subtitle="unique numbers dialled" onClick={() => setDrill('dials')} />
+        <KPICard label="Meaningful conversations" value={companyActivity.mcs} subtitle="60 seconds or more" onClick={() => setDrill('mcs')} />
+        <KPICard label="Sets" value={totalSets} subtitle={totalSets > 0 ? `${dialsPerSet} dials per set` : ''} onClick={() => setDrill('sets')} />
+        <KPICard label="Shows" value={showedLeads.length} subtitle={`${showRate}% show rate`} onClick={() => setDrill('shows')} />
+        <KPICard label="No shows" value={noShowLeads.length} onClick={() => setDrill('no_shows')} />
+        <KPICard label="Revenue" value={`$${totalRevenue.toLocaleString()}`} subtitle="attributed to logged leads" onClick={() => setDrill('revenue')} />
       </div>
 
       {/* Company conversion gauges */}
@@ -448,6 +450,8 @@ export default function SetterOverview() {
         )
       })()}
 
+      <SetterDrilldown kind={drill} onClose={() => setDrill(null)} range={range} leads={allLeads} setters={setters} windowLabel={typeof range === 'number' ? `Last ${range} days` : range === 'mtd' ? 'Month to date' : 'Custom range'} />
+
       {/* Recent Leads (from setter_leads) + Upcoming Strategy Calls — side-by-side.
           Both cards flex to equal height; inner scroll keeps them visually balanced
           regardless of row count. */}
@@ -518,7 +522,7 @@ export default function SetterOverview() {
 
       </div>
 
-      </div> {/* end max-w-[1600px] mx-auto */}
+      </div>
     </div>
   )
 }

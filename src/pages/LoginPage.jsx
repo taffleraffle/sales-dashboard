@@ -4,75 +4,48 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { Loader, LogIn, Eye, EyeOff, ArrowLeft, Mail } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
-// Split-screen sign-in (Ben, 6 Sep 2026): dark brand panel on the left with
-// the headline and an illustrative sales mock, the sign-in card on the right.
-// Same auth flow as before (sign in, forgot password, deep-link bounce); only
-// the layout changed. The figures on the mock cards are placeholders.
-
-const BARS = [30, 38, 34, 46, 42, 58, 54, 66, 62, 74, 86, 100]
-const GLASS = 'absolute rounded-[18px] border border-white/10 bg-white/[.07] shadow-[0_18px_50px_rgba(0,0,0,.35)] backdrop-blur'
-const KICKER = 'text-[10.5px] font-bold uppercase tracking-[0.1em] text-white/60'
+// Split-screen sign-in: dark brand panel on the left, the sign-in card on the
+// right. Ben (6 Sep 2026): no headline copy and no dashboard mock on the left,
+// just the logo, a tagline and a graphic that does not look like the product.
 
 function BrandPanel() {
+  // A quiet piece of line art: a rising path through a field of points, with
+  // one yellow node where it turns. Nothing here is a chart from the app.
+  const dots = []
+  for (let r = 0; r < 9; r++) for (let c = 0; c < 13; c++) dots.push({ x: 40 + c * 42, y: 40 + r * 42, k: `${r}-${c}` })
   return (
     <aside
       aria-hidden="true"
-      className="relative hidden lg:flex flex-col overflow-hidden bg-ink text-white px-16 pt-14 pb-11"
-      style={{
-        backgroundImage:
-          'linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px)',
-        backgroundSize: '56px 56px',
-      }}
+      className="relative hidden lg:flex flex-col overflow-hidden bg-ink text-white px-16 pt-14 pb-12"
     >
       <div
         className="pointer-events-none absolute rounded-full"
-        style={{ right: -180, bottom: -220, width: 560, height: 560, background: 'radial-gradient(closest-side, rgba(244,225,74,.22), rgba(244,225,74,0))' }}
+        style={{ left: -220, top: -260, width: 640, height: 640, background: 'radial-gradient(closest-side, rgba(244,225,74,.16), rgba(244,225,74,0))' }}
       />
 
-      <div className="relative flex items-center gap-3 mb-14">
+      <div className="relative flex items-center gap-3">
         <img src="/opt-logo-white.png" alt="" className="w-[72px] h-auto block" />
         <span className="text-[12.5px] text-white/60 pl-3 border-l border-white/20">Sales dashboard</span>
       </div>
 
-      <h1 className="relative font-serif font-medium text-white leading-[1.02] tracking-[-0.01em] mb-6" style={{ fontSize: 'clamp(40px, 4.2vw, 62px)' }}>
-        Every lead.<br />
-        <span className="text-accent">Every call.</span><br />
-        Every dollar.
-      </h1>
-      <p className="relative text-[16px] leading-[1.6] text-white/70 max-w-[52ch] mb-10">
-        The sales dashboard for OPT Digital: follow every booking from lead to close, see how each setter and closer is tracking, and keep commissions and cash collected in one place.
-      </p>
-
-      <div className="relative h-[330px] max-w-[560px] mb-auto">
-        <div className={`${GLASS} left-0 top-[26px] w-[370px] p-[18px_22px]`}>
-          <div className={`flex justify-between ${KICKER}`}>
-            <span>Booked calls</span><span className="text-[#4ade80] tracking-normal">&uarr; 34%</span>
-          </div>
-          <div className="font-serif text-[40px] leading-none text-white my-3">1,247</div>
-          <div className="flex items-end gap-[7px] h-[84px]">
-            {BARS.map((h, i) => (
-              <i key={i} className={`flex-1 rounded-t ${i >= 9 ? 'bg-accent' : 'bg-white/20'}`} style={{ height: `${h}%` }} />
-            ))}
-          </div>
-        </div>
-        <div className={`${GLASS} right-0 top-0 w-[190px] p-[18px_22px]`}>
-          <div className={KICKER}>Show rate</div>
-          <div className="font-serif text-[40px] leading-none text-accent my-3">73%</div>
-          <div className="h-[6px] rounded-full bg-white/15 overflow-hidden">
-            <b className="block h-full w-[73%] rounded-full" style={{ background: 'linear-gradient(90deg, #f4e14a, #4ade80)' }} />
-          </div>
-        </div>
-        <div className={`${GLASS} right-6 bottom-0 w-[210px] p-[18px_22px]`}>
-          <div className={KICKER}>Closes this month</div>
-          <div className="font-serif text-[34px] leading-none text-[#4ade80] my-3">42</div>
-          <div className="text-[12px] text-white/60">From 249 qualified calls</div>
-        </div>
+      <div className="relative flex-1 flex items-center justify-center py-10">
+        <svg viewBox="0 0 590 420" className="w-full max-w-[560px] h-auto" fill="none">
+          {dots.map(d => <circle key={d.k} cx={d.x} cy={d.y} r="1.6" fill="rgba(255,255,255,.18)" />)}
+          <path d="M 40 330 C 150 330, 190 290, 250 250 S 360 190, 420 140 S 500 80, 550 60" stroke="rgba(255,255,255,.35)" strokeWidth="2" strokeLinecap="round" />
+          <path d="M 40 330 C 150 330, 190 290, 250 250 S 360 190, 420 140" stroke="#f4e14a" strokeWidth="3" strokeLinecap="round" />
+          <circle cx="420" cy="140" r="9" fill="#f4e14a" />
+          <circle cx="420" cy="140" r="20" stroke="rgba(244,225,74,.35)" strokeWidth="2" />
+          <circle cx="420" cy="140" r="34" stroke="rgba(244,225,74,.14)" strokeWidth="2" />
+          <circle cx="40" cy="330" r="5" fill="rgba(255,255,255,.6)" />
+          <circle cx="550" cy="60" r="5" fill="rgba(255,255,255,.35)" />
+        </svg>
       </div>
 
-      <div className="relative grid grid-cols-3 gap-5 pt-7 mt-8 border-t border-white/10">
-        <div><b className="block text-[15px] font-bold mb-1">Bookings and closes</b><span className="text-[12.5px] text-white/60 leading-snug">Every call from the calendar to the contract</span></div>
-        <div><b className="block text-[15px] font-bold mb-1">Commissions</b><span className="text-[12.5px] text-white/60 leading-snug">Setter and closer pay worked out as deals land</span></div>
-        <div><b className="block text-[15px] font-bold mb-1">Ad performance</b><span className="text-[12.5px] text-white/60 leading-snug">Cost per call and per close by creative</span></div>
+      <div className="relative">
+        <p className="font-serif font-medium text-white leading-[1.05]" style={{ fontSize: 'clamp(30px, 3vw, 44px)', margin: 0 }}>
+          OPT Digital <span className="text-accent">Sales</span>
+        </p>
+        <p className="text-[15px] text-white/60 mt-3" style={{ margin: '12px 0 0' }}>Where the floor stands, every day.</p>
       </div>
     </aside>
   )

@@ -69,9 +69,9 @@ export default function TeamMemberPage() {
     return true
   }
 
-  if (loading) return <div className="max-w-[1100px] mx-auto animate-pulse"><div className="tile h-24 mb-4" /><div className="tile h-48" /></div>
+  if (loading) return <div className="animate-pulse"><div className="tile h-24 mb-4" /><div className="tile h-48" /></div>
   if (!m) return (
-    <div className="max-w-[1100px] mx-auto">
+    <div className="max-w-[1400px]">
       <div className="placeholder-card">That person is not on the roster. <Link to="/sales/team" style={{ textDecoration: 'underline' }}>Back to the team</Link>.</div>
     </div>
   )
@@ -79,7 +79,7 @@ export default function TeamMemberPage() {
   const inactive = m.is_active === false
 
   return (
-    <div className="max-w-[1100px] mx-auto">
+    <div className="max-w-[1400px]">
       <Link to="/sales/team" className="editorial-btn-ghost" style={{ height: 34, fontSize: 12.5, marginBottom: 18 }}>
         <ArrowLeft size={ICON.sm} /> Team
       </Link>

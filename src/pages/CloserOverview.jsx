@@ -29,7 +29,7 @@ export default function CloserOverview() {
 
   if (loadingMembers || m.loading) {
     return (
-      <div className="max-w-[1600px] mx-auto space-y-4 animate-pulse">
+      <div className="space-y-4 animate-pulse">
         <div className="flex items-center justify-between gap-3 mb-6"><div className="h-8 w-48 tile" /><div className="h-9 w-36 tile" /></div>
         <div className="kpi-grid">{Array.from({ length: 8 }, (_, i) => <div key={i} className="tile h-24" />)}</div>
         <div className="kpi-grid">{Array.from({ length: 4 }, (_, i) => <div key={i} className="tile h-32" />)}</div>
@@ -64,7 +64,7 @@ export default function CloserOverview() {
         </div>
       </div>
 
-      <div className="max-w-[1600px] mx-auto">
+      <div>
         {m.error && <div className="callout" style={{ marginBottom: 18 }}><b>Could not load the numbers.</b> {m.error}</div>}
 
         <div className="kpi-grid mb-6">

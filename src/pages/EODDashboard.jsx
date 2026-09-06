@@ -194,7 +194,7 @@ export default function EODDashboard() {
   }
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div>
       {/* Header — editorial */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
