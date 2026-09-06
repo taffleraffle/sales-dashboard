@@ -34,8 +34,9 @@ export default function DataTable({ columns, data, onRowClick, emptyMessage = 'N
       className="overflow-x-auto"
       style={{
         border: '1px solid var(--rule)',
-        borderRadius: 10,
-        background: 'var(--paper)',
+        borderRadius: 'var(--house-radius-card)',
+        background: '#ffffff',
+        boxShadow: 'var(--house-shadow-card)',
       }}
     >
       <table className="data" style={{ minWidth: '100%' }}>

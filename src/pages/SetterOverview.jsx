@@ -433,7 +433,7 @@ export default function SetterOverview() {
             >
               <div className="flex items-center justify-between mb-3 sm:mb-4">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-base sm:text-lg font-bold">{s.name}</h3>
+                  <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, margin: 0 }}>{s.name}</h3>
                   {s.dataSource === 'wavv' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/15 text-success">WAVV</span>}
                 </div>
                 <div className="flex gap-2 sm:gap-3 text-[10px] sm:text-xs text-text-400">

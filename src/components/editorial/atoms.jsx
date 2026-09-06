@@ -80,32 +80,34 @@ export function SectionHead({ eyebrow, title, italicWord, tagline, right, gap = 
 
 // ─── Buttons ───────────────────────────────────────────────────────────
 const btnBase = {
-  fontFamily: 'var(--sans)',
-  fontSize: 13, fontWeight: 600, letterSpacing: '-0.005em',
-  padding: '9px 16px',
-  border: '1px solid transparent',
-  borderRadius: 999,   // pill — matches onboarding .cc-btn / .cta
-  display: 'inline-flex', alignItems: 'center', gap: 8,
-  transition: 'background 0.12s cubic-bezier(0.2,0.7,0.2,1), border 0.12s cubic-bezier(0.2,0.7,0.2,1)',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+  height: 40, padding: '0 18px',
+  fontFamily: 'var(--sans)', fontSize: 13.5, fontWeight: 600, lineHeight: 1,
+  border: '1px solid transparent', borderRadius: 999,
+  transition: 'background .15s, border-color .15s, box-shadow .15s',
   whiteSpace: 'nowrap',
   cursor: 'pointer',
 }
 
 export function Button({ children, variant = 'secondary', onClick, leftIcon, rightIcon, size = 'md', disabled, style, type = 'button' }) {
-  const sizeStyle = size === 'sm' ? { padding: '6px 10px', fontSize: 12 } : {}
+  const sizeStyle = size === 'sm' ? { height: 32, padding: '0 13px', fontSize: 12.5 } : {}
+  // House pills: primary and accent both fill yellow (one accent colour),
+  // secondary is a white pill with the strong hairline, ghost is borderless.
   const variants = {
-    primary:   { background: 'var(--ink)', color: 'var(--paper)', borderColor: 'var(--ink)' },
-    accent:    { background: 'var(--accent)', color: 'var(--ink)', borderColor: 'var(--accent-2)' },
-    secondary: { background: 'transparent', color: 'var(--ink)', borderColor: 'var(--ink-3)' },
+    primary:   { background: 'var(--accent)', color: '#1a1700', borderColor: 'var(--accent)', boxShadow: '0 8px 20px -10px rgba(244,197,24,.9)' },
+    accent:    { background: 'var(--accent)', color: '#1a1700', borderColor: 'var(--accent)', boxShadow: '0 8px 20px -10px rgba(244,197,24,.9)' },
+    dark:      { background: 'var(--ink)', color: '#ffffff', borderColor: 'var(--ink)' },
+    secondary: { background: '#ffffff', color: 'var(--ink)', borderColor: 'var(--house-line-strong)', boxShadow: 'var(--house-shadow-input)' },
     ghost:     { background: 'transparent', color: 'var(--ink-2)', borderColor: 'transparent' },
-    danger:    { background: 'transparent', color: 'var(--down)', borderColor: 'var(--down)' },
+    danger:    { background: '#ffffff', color: 'var(--house-bad)', borderColor: 'rgba(224,86,30,.4)' },
   }
   const hover = {
-    primary:   { background: 'var(--ink-2)' },
-    accent:    { background: 'var(--accent-2)' },
-    secondary: { background: 'var(--paper-2)' },
+    primary:   { background: 'var(--accent-dk)' },
+    accent:    { background: 'var(--accent-dk)' },
+    dark:      { background: '#000000' },
+    secondary: { background: '#fdfcf6', borderColor: 'var(--house-line-hover)' },
     ghost:     { background: 'var(--paper-2)' },
-    danger:    { background: 'rgba(181,62,62,0.06)' },
+    danger:    { background: 'rgba(224,86,30,0.06)' },
   }
   const [h, setH] = useState(false)
   return (
@@ -142,19 +144,19 @@ export function Pill({ children, tone = 'default', size = 'sm', uppercase = fals
   }
   const t = tones[tone] || tones.default
   const sizes = {
-    xs: { padding: '1px 6px', fontSize: 9.5 },
-    sm: { padding: '2px 8px', fontSize: 10.5 },
-    md: { padding: '4px 10px', fontSize: 11.5 },
+    xs: { padding: '2px 8px', fontSize: 10.5 },
+    sm: { padding: '3px 9px', fontSize: 11.5 },
+    md: { padding: '4px 10px', fontSize: 12.5 },
   }
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 5,
       background: t.bg, color: t.fg, border: `1px solid ${t.bd}`,
-      borderRadius: 9, fontWeight: 500,
-      letterSpacing: uppercase ? '0.06em' : '0.02em',
+      borderRadius: 999, fontWeight: 600,
+      letterSpacing: uppercase ? '0.06em' : '0',
       textTransform: uppercase ? 'uppercase' : 'none',
       whiteSpace: 'nowrap',
-      fontFamily: 'var(--mono)',
+      fontFamily: 'var(--sans)',
       fontVariantNumeric: 'tabular-nums',
       ...sizes[size], ...style,
     }}>
@@ -180,11 +182,12 @@ export function Card({ children, accent, accentSide = 'top', padding = 20, style
       onMouseEnter={() => hoverable && setH(true)}
       onMouseLeave={() => hoverable && setH(false)}
       style={{
-        background: 'white',
+        background: '#ffffff',
         border: '1px solid var(--rule)',
+        borderRadius: 'var(--house-radius-card)',
         padding,
         transition: 'box-shadow 0.16s cubic-bezier(0.2,0.7,0.2,1), border 0.16s cubic-bezier(0.2,0.7,0.2,1)',
-        boxShadow: h ? '0 2px 4px rgba(10,10,10,0.05), 0 8px 24px rgba(10,10,10,0.06)' : '0 1px 0 rgba(10,10,10,0.02), 0 1px 2px rgba(10,10,10,0.03)',
+        boxShadow: h ? '0 1px 2px rgba(20,22,30,.03), 0 42px 90px -46px rgba(20,22,30,.42)' : 'var(--house-shadow-card)',
         cursor: onClick ? 'pointer' : 'default',
         ...accentStyle, ...style,
       }}>

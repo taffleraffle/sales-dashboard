@@ -38,21 +38,20 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
       <div
         className="w-full max-w-sm mx-4"
         style={{
-          background: 'var(--paper)',
+          background: '#ffffff',
           border: '1px solid var(--rule)',
-          borderTop: `3px solid ${accent}`,
-          borderRadius: '0 0 4px 4px',
-          padding: '20px 22px 18px',
-          boxShadow: '0 24px 60px rgba(10,10,10,0.18)',
+          borderRadius: 22,
+          padding: '24px 26px 22px',
+          boxShadow: '0 40px 90px -30px rgba(21,22,26,0.45)',
         }}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-start gap-3 mb-3">
           <div
             style={{
-              width: 36,
-              height: 36,
-              borderRadius: 9,
+              width: 42,
+              height: 42,
+              borderRadius: 12,
               background: variant === 'danger' ? 'var(--down-soft)' : 'var(--accent-soft)',
               color: iconColor,
               display: 'flex',
@@ -64,7 +63,7 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
             {variant === 'danger' ? <Trash2 size={16} /> : <AlertTriangle size={16} />}
           </div>
           <div>
-            <span className="eyebrow" style={{ fontSize: 9 }}>{variant === 'danger' ? 'Confirm action' : 'Heads up'}</span>
+            <span className="eyebrow">{variant === 'danger' ? 'Confirm action' : 'Heads up'}</span>
             <h3
               style={{
                 fontFamily: 'var(--serif)',
@@ -95,15 +94,15 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
             onClick={onClose}
             disabled={loading}
             style={{
-              padding: '8px 14px',
-              borderRadius: 9,
-              fontSize: 12,
-              fontFamily: 'var(--mono)',
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'var(--ink-3)',
-              background: 'transparent',
-              border: '1px solid var(--rule)',
+              height: 40,
+              padding: '0 18px',
+              borderRadius: 999,
+              fontSize: 13.5,
+              fontFamily: 'var(--sans)',
+              fontWeight: 600,
+              color: 'var(--ink)',
+              background: '#ffffff',
+              border: '1px solid var(--house-line-strong)',
               cursor: loading ? 'not-allowed' : 'pointer',
               opacity: loading ? 0.5 : 1,
               transition: 'color 160ms ease, border-color 160ms ease',
@@ -118,16 +117,15 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
             onClick={onConfirm}
             disabled={loading}
             style={{
-              padding: '8px 14px',
-              borderRadius: 9,
-              fontSize: 12,
-              fontFamily: 'var(--mono)',
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
+              height: 40,
+              padding: '0 18px',
+              borderRadius: 999,
+              fontSize: 13.5,
+              fontFamily: 'var(--sans)',
               fontWeight: 600,
-              color: variant === 'danger' ? 'var(--paper)' : 'var(--ink)',
-              background: variant === 'danger' ? 'var(--down)' : 'var(--accent)',
-              border: `1px solid ${variant === 'danger' ? 'var(--down)' : 'var(--accent)'}`,
+              color: variant === 'danger' ? '#ffffff' : '#1a1700',
+              background: variant === 'danger' ? 'var(--house-bad)' : 'var(--accent)',
+              border: `1px solid ${variant === 'danger' ? 'var(--house-bad)' : 'var(--accent)'}`,
               cursor: loading ? 'wait' : 'pointer',
               opacity: loading ? 0.7 : 1,
               display: 'inline-flex',

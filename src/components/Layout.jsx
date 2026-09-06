@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, Library as LibraryIcon, Smartphone, Target, Bot } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, Library as LibraryIcon, Smartphone, Target, Bot, UsersRound } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -37,6 +37,7 @@ const navItems = [
   { to: '/sales/ads/shorts', icon: Smartphone, label: 'Shorts' },
   { to: '/sales/ads/ad-library', icon: Target, label: 'Ad Library' },
   { to: '/sales/eod', icon: ClipboardCheck, label: 'EOD' },
+  { to: '/sales/team', icon: UsersRound, label: 'Team' },
 ]
 
 function initialsOf(name) {
@@ -341,14 +342,20 @@ export default function Layout() {
                         <span className="eyebrow eyebrow-accent" style={{ marginTop: 8, fontSize: 9 }}>{roleLabel}</span>
                       </div>
                       {isAdmin && (
-                        <NavLink
-                          to="/sales/settings"
-                          onClick={() => setProfileOpen(false)}
-                          className="editorial-menu-row"
-                        >
-                          <Settings size={ICON.md} />
-                          <span>Settings</span>
-                        </NavLink>
+                        <>
+                          <NavLink to="/sales/team" onClick={() => setProfileOpen(false)} className="editorial-menu-row">
+                            <UsersRound size={ICON.md} />
+                            <span>Team and onboarding</span>
+                          </NavLink>
+                          <NavLink
+                            to="/sales/settings"
+                            onClick={() => setProfileOpen(false)}
+                            className="editorial-menu-row"
+                          >
+                            <Settings size={ICON.md} />
+                            <span>Settings</span>
+                          </NavLink>
+                        </>
                       )}
                       <button
                         onClick={() => { setProfileOpen(false); signOut() }}

@@ -22,8 +22,9 @@ function formatRangeLabel(selected) {
   return null
 }
 
-const segActive = { background: 'var(--ink)', color: 'var(--paper)', borderRadius: 9 }
-const segIdle   = { background: 'transparent', color: 'var(--ink-3)', borderRadius: 9 }
+// House segmented control: white pill track, yellow pill for the active preset.
+const segActive = { background: 'var(--accent)', color: '#1a1700', borderRadius: 999, boxShadow: '0 8px 20px -10px rgba(244,197,24,.9)' }
+const segIdle   = { background: 'transparent', color: 'var(--ink-2)', borderRadius: 999 }
 
 export default function DateRangeSelector({ selected, onChange }) {
   const [open, setOpen] = useState(false)
@@ -113,23 +114,24 @@ export default function DateRangeSelector({ selected, onChange }) {
       <div
         className="flex gap-1 overflow-x-auto no-scrollbar"
         style={{
-          background: 'var(--paper)',
-          border: '1px solid var(--rule)',
-          borderRadius: 9,
-          padding: 3,
+          background: '#ffffff',
+          border: '1px solid var(--house-line-strong)',
+          borderRadius: 999,
+          padding: 4,
+          boxShadow: 'var(--house-shadow-input)',
         }}
       >
         {presets.map(({ label, days }) => (
           <button
             key={label}
             onClick={() => { onChange(days); setOpen(false) }}
+            className="house-plain"
             style={{
-              padding: '5px 10px',
-              fontFamily: 'var(--mono)',
-              fontSize: 10.5,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              fontWeight: 500,
+              height: 32,
+              padding: '0 14px',
+              fontFamily: 'var(--sans)',
+              fontSize: 13,
+              fontWeight: 600,
               whiteSpace: 'nowrap',
               transition: 'background 160ms ease, color 160ms ease',
               ...(isPreset(days) ? segActive : segIdle),
@@ -142,16 +144,16 @@ export default function DateRangeSelector({ selected, onChange }) {
         <button
           ref={triggerRef}
           onClick={() => setOpen(!open)}
+          className="house-plain"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 5,
-            padding: '5px 10px',
-            fontFamily: 'var(--mono)',
-            fontSize: 10.5,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            fontWeight: 500,
+            gap: 6,
+            height: 32,
+            padding: '0 14px',
+            fontFamily: 'var(--sans)',
+            fontSize: 13,
+            fontWeight: 600,
             whiteSpace: 'nowrap',
             ...(isCustomRange(selected) ? segActive : segIdle),
           }}
@@ -171,29 +173,22 @@ export default function DateRangeSelector({ selected, onChange }) {
             top: popover.top,
             left: popover.left,
             width: popover.maxWidth,
-            background: 'var(--paper)',
+            background: '#ffffff',
             border: '1px solid var(--rule)',
-            borderRadius: 10,
-            padding: 18,
-            boxShadow: '0 16px 40px rgba(10,10,10,0.12)',
+            borderRadius: 22,
+            padding: 22,
+            boxShadow: '0 30px 70px -30px rgba(20,22,30,.45)',
           }}
           role="dialog"
           aria-label="Custom date range"
         >
-          <span className="eyebrow eyebrow-accent" style={{ fontSize: 9, marginBottom: 14, display: 'inline-flex' }}>Custom range</span>
+          <span className="eyebrow" style={{ marginBottom: 14, display: 'inline-flex' }}>Custom range</span>
 
           <div className="space-y-3 mt-3">
             <div>
               <label
-                style={{
-                  fontFamily: 'var(--mono)',
-                  fontSize: 9,
-                  letterSpacing: '0.14em',
-                  textTransform: 'uppercase',
-                  color: 'var(--ink-3)',
-                  display: 'block',
-                  marginBottom: 4,
-                }}
+                className="eyebrow"
+                style={{ display: 'block', marginBottom: 6 }}
               >
                 From
               </label>
@@ -201,15 +196,8 @@ export default function DateRangeSelector({ selected, onChange }) {
             </div>
             <div>
               <label
-                style={{
-                  fontFamily: 'var(--mono)',
-                  fontSize: 9,
-                  letterSpacing: '0.14em',
-                  textTransform: 'uppercase',
-                  color: 'var(--ink-3)',
-                  display: 'block',
-                  marginBottom: 4,
-                }}
+                className="eyebrow"
+                style={{ display: 'block', marginBottom: 6 }}
               >
                 To
               </label>
@@ -246,16 +234,14 @@ export default function DateRangeSelector({ selected, onChange }) {
                   key={preset.label}
                   onClick={handleClick}
                   style={{
-                    padding: '4px 9px',
-                    border: '1px solid var(--rule)',
-                    background: 'var(--paper)',
-                    color: 'var(--ink-3)',
-                    fontFamily: 'var(--mono)',
-                    fontSize: 9.5,
-                    letterSpacing: '0.1em',
-                    textTransform: 'uppercase',
-                    fontWeight: 500,
-                    borderRadius: 9,
+                    padding: '6px 12px',
+                    border: '1px solid var(--house-line-strong)',
+                    background: '#ffffff',
+                    color: 'var(--ink-2)',
+                    fontFamily: 'var(--sans)',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    borderRadius: 999,
                     transition: 'color 160ms ease, border-color 160ms ease',
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.borderColor = 'var(--ink-3)' }}
@@ -271,18 +257,17 @@ export default function DateRangeSelector({ selected, onChange }) {
             onClick={applyCustom}
             disabled={!customFrom || !customTo}
             style={{
-              marginTop: 16,
+              marginTop: 18,
               width: '100%',
-              padding: '8px 12px',
-              borderRadius: 9,
-              fontFamily: 'var(--mono)',
-              fontSize: 11,
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
+              height: 40,
+              borderRadius: 999,
+              fontFamily: 'var(--sans)',
+              fontSize: 13.5,
               fontWeight: 600,
               background: 'var(--accent)',
-              color: 'var(--ink)',
+              color: '#1a1700',
               border: '1px solid var(--accent)',
+              boxShadow: '0 8px 20px -10px rgba(244,197,24,.9)',
               cursor: (!customFrom || !customTo) ? 'not-allowed' : 'pointer',
               opacity: (!customFrom || !customTo) ? 0.4 : 1,
             }}

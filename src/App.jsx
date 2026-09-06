@@ -89,6 +89,8 @@ const VariantDetail = lazyWithReload(() => import('./pages/ads/VariantDetail'))
 const AdDetail = lazyWithReload(() => import('./pages/ads/AdDetail'))
 const EODReview = lazyWithReload(() => import('./pages/EODReview'))
 const SettingsPage = lazyWithReload(() => import('./pages/SettingsPage'))
+const TeamPage = lazyWithReload(() => import('./pages/TeamPage'))
+const TeamMemberPage = lazyWithReload(() => import('./pages/TeamMemberPage'))
 const CommissionPage = lazyWithReload(() => import('./pages/CommissionPage'))
 const CommissionDetail = lazyWithReload(() => import('./pages/CommissionDetail'))
 const SetterBot = lazyWithReload(() => import('./pages/SetterBot'))
@@ -337,6 +339,10 @@ export default function App() {
               <Route path="/sales/setter-bot" element={<Suspense fallback={<PageSkeleton />}><SetterBot /></Suspense>} />
               <Route path="/sales/email-flows" element={<Suspense fallback={<PageSkeleton />}><EmailFlows /></Suspense>} />
               <Route path="/sales/email-flows/:flowId" element={<Suspense fallback={<PageSkeleton />}><EmailFlowDetail /></Suspense>} />
+              {/* Team: onboarding + account connections (2026-09-06). Roster is
+                  visible to everyone; edits are gated by isAdmin inside the pages. */}
+              <Route path="/sales/team" element={<Suspense fallback={<PageSkeleton />}><TeamPage /></Suspense>} />
+              <Route path="/sales/team/:id" element={<Suspense fallback={<PageSkeleton />}><TeamMemberPage /></Suspense>} />
               <Route path="/sales/settings" element={<AdminRoute><Suspense fallback={<PageSkeleton />}><SettingsPage /></Suspense></AdminRoute>} />
             </Route>
           </Routes>

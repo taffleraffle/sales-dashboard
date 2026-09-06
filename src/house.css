@@ -1,0 +1,391 @@
+/*
+  ─────────────────────────────────────────────────────────────────
+  OPT HOUSE LAYER — onboard.optdigital.io shapes for the sales dashboard
+  ─────────────────────────────────────────────────────────────────
+  index.css repointed the tokens (palette, fonts, radius scale) in June
+  2026 but left the component SHAPES on the older editorial system: 4px
+  tiles, 2px scorecards, 3px buttons and inputs, mono uppercase table
+  headers with an ink underline. This file is loaded LAST and retunes
+  every one of those primitives to the house rules in
+  C:\Users\Ben\opt-command-centre\OPT-UI-STYLE-GUIDE.md:
+
+    1. page bg #fbfbf9, never pure white behind cards
+    2. cards white, 22px radius, 1px --line, long soft shadow; tiles 18px
+    3. headlines and big numbers in the serif display face
+    4. labels 11.5px uppercase letter-spaced --ink-mute
+    5. buttons are pills; primary/active fills yellow
+    6. inputs 14px radius with a 4px yellow focus ring
+    7. checkboxes 21px rounded box that turns green
+    11. one accent colour; green/amber/red are status only
+
+  Plain (unlayered) CSS here outranks every Tailwind utility because
+  Tailwind v4 puts utilities in @layer. Inline styles still win, so the
+  handful of components that set borderRadius inline were edited directly
+  (KPICard, Gauge, KpiTable, DateRangeSelector, DataTable, atoms, Select).
+*/
+
+:root {
+  --house-radius-card: 22px;
+  --house-radius-tile: 18px;
+  --house-radius-input: 14px;
+  --house-radius-pill: 999px;
+  --house-shadow-card: 0 1px 2px rgba(20,22,30,.03), 0 36px 80px -46px rgba(20,22,30,.34);
+  --house-shadow-tile: 0 1px 2px rgba(20,22,30,.03), 0 24px 54px -38px rgba(20,22,30,.30);
+  --house-shadow-input: 0 1px 2px rgba(20,22,30,.04);
+  --house-ring: rgba(244,225,74,.28);
+  --house-line-strong: #e7e1cc;
+  --house-line-hover: #d9d2b4;
+  --house-good: #16a34a;
+  --house-warn: #b8860b;
+  --house-bad: #e0561e;
+}
+
+/* ── Labels: one convention everywhere ───────────────────────────── */
+.eyebrow, .kicker, .sc-label, .sc-foot, .ss-foot, .wim-tag,
+main h2.text-sm, main h3.text-sm.font-medium,
+main label:not(.choice):not([class*="flex"]),
+.editorial-kpi-card .eyebrow,
+main span.text-\[10px\].uppercase, main span.text-\[11px\].uppercase {
+  font-family: var(--sans);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+.eyebrow { gap: 8px; }
+.eyebrow-accent { color: var(--ink-2); }
+main h2.text-sm, main h3.text-sm.font-medium {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ── Cards and tiles ─────────────────────────────────────────────── */
+.tile, .panel, .dropdown-panel, .placeholder-card,
+main .bg-bg-card:not(td):not(th):not(tr):not(table):not(input):not(select):not(button) {
+  background: #ffffff;
+  border: 1px solid var(--rule);
+  border-radius: var(--house-radius-card);
+  box-shadow: var(--house-shadow-card);
+}
+.tile.overflow-hidden, .panel.overflow-hidden { overflow: hidden; }
+.tile-hover:hover, .tile-feedback:hover, .glow-hover:hover {
+  background: #ffffff;
+  border-color: var(--house-line-hover);
+  box-shadow: 0 1px 2px rgba(20,22,30,.03), 0 42px 90px -46px rgba(20,22,30,.42);
+}
+.panel-alt { background: var(--paper-2); }
+.panel-ink { background: var(--ink); border-color: var(--ink); }
+.panel-accent { background: var(--accent); border-color: var(--accent); }
+.panel-flat { border: 0; box-shadow: none; background: transparent; border-radius: 0; }
+.dropdown-panel { border-radius: 16px; box-shadow: 0 18px 44px -20px rgba(20,22,30,.35); }
+.placeholder-card { border-style: dashed; box-shadow: none; background: var(--paper-2); }
+
+/* Scorecards: outlined ink boxes become soft tiles */
+.scorecard, .simple-scorecard {
+  border: 1px solid var(--rule);
+  border-radius: var(--house-radius-tile);
+  background: #ffffff;
+  box-shadow: var(--house-shadow-tile);
+}
+.what-it-means, .callout {
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--accent);
+  border-radius: 14px;
+  background: #fffdf0;
+}
+
+/* Yellow-tinted aggregate rows (team total etc.) */
+main .bg-opt-yellow\/\[0\.06\], main .bg-opt-yellow-subtle {
+  background: rgba(244,225,74,.10);
+}
+
+/* ── Buttons: pills ──────────────────────────────────────────────── */
+.editorial-btn-primary, .editorial-btn-ghost,
+main button:where(:not(.editorial-nav-item):not(.editorial-nav-row):not(.editorial-menu-row):not([class*="rounded-full"]):not(.house-plain)),
+main a.bg-opt-yellow, main a[class*="rounded-"][class*="bg-"],
+main a.editorial-btn-primary, main a.editorial-btn-ghost {
+  border-radius: var(--house-radius-pill);
+  font-family: var(--sans);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.editorial-btn-primary, .editorial-btn-ghost, main a.editorial-btn-primary, main a.editorial-btn-ghost {
+  height: 40px;
+  padding: 0 18px;
+  font-size: 13.5px;
+  box-shadow: var(--house-shadow-input);
+}
+.editorial-btn-ghost, main a.editorial-btn-ghost {
+  background: #ffffff;
+  border-color: var(--house-line-strong);
+  color: var(--ink);
+}
+.editorial-btn-ghost:hover, main a.editorial-btn-ghost:hover { background: #fdfcf6; border-color: var(--house-line-hover); }
+.editorial-btn-primary, main a.editorial-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1700;
+  box-shadow: 0 8px 20px -10px rgba(244,197,24,.9);
+}
+.editorial-btn-primary:hover, main a.editorial-btn-primary:hover { background: var(--accent-dk); border-color: var(--accent-dk); }
+.editorial-btn-primary:disabled { background: var(--paper-3); border-color: var(--paper-3); color: var(--ink-4); box-shadow: none; }
+
+/* Yellow CTA links/buttons written with Tailwind (New EOD etc.) */
+main a.bg-opt-yellow, main button.bg-opt-yellow {
+  background: var(--accent);
+  color: #1a1700;
+  height: 40px;
+  padding: 0 18px;
+  font-size: 13.5px;
+  box-shadow: 0 8px 20px -10px rgba(244,197,24,.9);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+main a.bg-opt-yellow:hover, main button.bg-opt-yellow:hover { background: var(--accent-dk); }
+
+/* Icon-only buttons stay round, controls inside tables stay compact */
+main button[class*="w-8"], main button[class*="w-9"], main button[class*="w-10"], main button[class*="w-11"],
+main button[aria-label][class*="h-"] { border-radius: 999px; }
+main table button { min-height: 32px; }
+
+/* Kill the "shine sweep" on nav/menu rows (index.css applies it to every button) */
+.editorial-nav-item::after, .editorial-nav-row::after, .editorial-menu-row::after { display: none; }
+
+/* ── Inputs ──────────────────────────────────────────────────────── */
+.editorial-input, .select-input,
+main input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"])),
+main select, main textarea {
+  font-family: var(--sans);
+  font-size: 14px;
+  color: var(--ink);
+  background: #ffffff;
+  border: 1px solid var(--house-line-strong);
+  border-radius: var(--house-radius-input);
+  padding: 10px 14px;
+  box-shadow: var(--house-shadow-input);
+  transition: border-color .18s, box-shadow .18s;
+}
+main input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"]))::placeholder,
+main textarea::placeholder { color: #b7b3a6; }
+.editorial-input:hover, .select-input:hover, main input:hover, main select:hover, main textarea:hover { border-color: #d8cfac; }
+.editorial-input:focus, .select-input:focus, main input:focus, main select:focus, main textarea:focus, [contenteditable]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--house-ring);
+}
+main table input, main table select { padding: 6px 10px; font-size: 13px; border-radius: 10px; }
+main input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 21px; height: 21px; flex: none;
+  border-radius: 7px;
+  border: 1.5px solid #d6cdaf;
+  background: #ffffff;
+  display: inline-grid; place-content: center;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+main input[type="checkbox"]::before {
+  content: '';
+  width: 11px; height: 6px;
+  border-left: 2.5px solid #ffffff; border-bottom: 2.5px solid #ffffff;
+  transform: rotate(-45deg) scale(.4) translate(1px, -1px);
+  opacity: 0;
+  transition: opacity .15s, transform .15s;
+}
+main input[type="checkbox"]:checked { background: var(--house-good); border-color: var(--house-good); }
+main input[type="checkbox"]:checked::before { opacity: 1; transform: rotate(-45deg) scale(1) translate(1px, -1px); }
+main input[type="checkbox"]:focus-visible { box-shadow: 0 0 0 4px var(--house-ring); outline: none; }
+
+/* ── Tables: the house data table, applied to every table on every page ── */
+main table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--sans);
+  font-size: 13.5px;
+}
+main table thead th,
+table.data thead th {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  background: #ffffff;
+  border-bottom: 1px solid var(--rule);
+  padding: 13px 16px;
+  white-space: nowrap;
+}
+main table thead tr { background: transparent; }
+main table tbody td,
+table.data tbody td {
+  padding: 13px 16px;
+  color: var(--ink);
+  border-top: 1px solid var(--rule);
+  border-bottom: 0;
+  vertical-align: middle;
+}
+main table tbody tr:first-child td { border-top: 0; }
+main table tbody tr:hover, table.data tbody tr:hover { background: #fdfcf6; }
+main table tbody tr.bg-opt-yellow-subtle, main table tbody tr.bg-opt-yellow-subtle:hover { background: rgba(244,225,74,.14); }
+main table tfoot td {
+  padding: 13px 16px;
+  border-top: 2px solid var(--house-line-strong);
+  background: var(--paper);
+  font-weight: 600;
+}
+main table .tabular-nums, table.data .num {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--sans);
+}
+main table td.font-bold, main table td.font-semibold { font-weight: 700; }
+table.data.data-compare thead th { background: #ffffff; color: var(--ink-4); }
+
+/* Table title strips inside tiles */
+.tile > .border-b { border-color: var(--rule); }
+
+/* ── Pills and tags ──────────────────────────────────────────────── */
+.pill {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  padding: 4px 10px;
+  border-radius: var(--house-radius-pill);
+  border: 1px solid var(--rule);
+  background: #ffffff;
+  color: var(--ink-2);
+  line-height: 1.3;
+}
+.pill-up    { background: #ffffff; color: var(--house-good); border-color: rgba(22,163,74,.35); }
+.pill-down  { background: #ffffff; color: var(--house-bad); border-color: rgba(224,86,30,.35); }
+.pill-flat  { background: #ffffff; color: var(--ink-3); }
+.pill-accent{ background: var(--accent); color: #1a1700; border-color: var(--accent); }
+.pill-ink   { background: var(--ink); color: #ffffff; border-color: var(--ink); }
+.pill-soft  { background: #ffffff; color: var(--ink-2); }
+.tag {
+  border-radius: var(--house-radius-pill);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  padding: 3px 9px;
+}
+main span.rounded-full[class*="border"], main span[class*="rounded-full"][class*="px-"] {
+  font-family: var(--sans);
+  font-weight: 600;
+  background: #ffffff;
+}
+
+/* Status pills written with Tailwind utility classes */
+main span[class*="rounded"][class*="bg-success"] { background: #ffffff; color: var(--house-good); border: 1px solid rgba(22,163,74,.35); border-radius: 999px; font-weight: 600; }
+main span[class*="rounded"][class*="bg-danger"], main span[class*="rounded"][class*="bg-red"] { background: #ffffff; color: var(--house-bad); border: 1px solid rgba(224,86,30,.35); border-radius: 999px; font-weight: 600; }
+main span[class*="rounded"][class*="bg-warning"] { background: #ffffff; color: var(--house-warn); border: 1px solid rgba(184,134,11,.35); border-radius: 999px; font-weight: 600; }
+main span[class*="rounded"][class*="bg-bg-card-hover"], main span[class*="rounded"][class*="bg-bg-primary"] { background: #ffffff; border: 1px solid var(--rule); border-radius: 999px; font-weight: 600; color: var(--ink-2); }
+
+/* ── Shell: sidebar and top bar ──────────────────────────────────── */
+.editorial-nav-item {
+  width: 42px; height: 42px;
+  border-radius: 14px;
+  color: var(--ink-3);
+}
+.editorial-nav-item:hover { background: var(--paper-2); color: var(--ink); }
+.editorial-nav-item.is-active { background: var(--accent); color: #1a1700; }
+.editorial-nav-item.is-active::before { display: none; }
+.editorial-nav-tip {
+  border-radius: 999px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 6px 12px;
+}
+.editorial-nav-row { border-radius: 14px; }
+.editorial-nav-row.is-active { background: var(--accent); color: #1a1700; }
+.editorial-nav-row.is-active::before { display: none; }
+.editorial-menu-row { font-size: 14px; }
+
+/* ── Heatbar (gauges) ────────────────────────────────────────────── */
+.heatbar { height: 8px; background: #f1efe3; }
+
+/* ── Display type ────────────────────────────────────────────────── */
+.h2 { font-size: clamp(30px, 3.2vw, 42px); }
+.editorial-panel-title { font-size: 21px; font-weight: 500; }
+
+/* ── Skeletons keep the tile shape ───────────────────────────────── */
+.animate-pulse .tile { box-shadow: none; }
+
+/* ── Toasts, popovers ────────────────────────────────────────────── */
+.toast-stack > * { border-radius: 16px; }
+
+/* ── Misc legacy square corners ──────────────────────────────────── */
+main .rounded-sm:where(:not(button):not(a):not(input):not(select):not(span):not(td):not(th)) { border-radius: var(--house-radius-tile); }
+main .rounded:where(:not(button):not(a):not(input):not(select):not(span):not(td):not(th)) { border-radius: 14px; }
+main .rounded-lg:where(:not(button):not(a):not(input):not(select):not(span):not(td):not(th)) { border-radius: 16px; }
+main .rounded-xl:where(:not(button):not(a):not(input):not(select):not(span):not(td):not(th)) { border-radius: 20px; }
+
+/* ── Tile-shaped buttons and links (clickable metric cards, KPI cells) ──
+   A <button> that is really a card keeps the tile radius, a normal weight
+   shadow, left-aligned text and no yellow fill. Marketing's MetricCard,
+   the KpiTable cells and the "tile tile-hover" rows all go through here. */
+main button.bg-bg-card, main button.tile:where(:not(.flex):not(.inline-flex)), main a.tile, main [role="button"].tile,
+main button[class*="rounded-sm"][class*="p-3"], main button[class*="rounded-sm"][class*="p-4"],
+main button.relative.group, main button.text-left[class*="border"] {
+  border-radius: var(--house-radius-tile);
+  background: #ffffff;
+  border: 1px solid var(--rule);
+  box-shadow: var(--house-shadow-tile);
+  font-weight: 400;
+  text-align: left;
+  height: auto;
+  padding: 16px 18px;
+  display: block;
+}
+main button.bg-bg-card:hover, main button.tile:hover, main a.tile:hover,
+main button[class*="rounded-sm"][class*="p-3"]:hover, main button.relative.group:hover {
+  background: #ffffff;
+  border-color: var(--house-line-hover);
+  box-shadow: 0 1px 2px rgba(20,22,30,.03), 0 32px 64px -40px rgba(20,22,30,.42);
+  filter: none;
+}
+main button.bg-bg-card::after, main button.tile::after, main button.relative.group::after { display: none; }
+/* Non-clickable siblings of those metric cards */
+main div.bg-bg-card.rounded-sm.p-3, main div.bg-bg-card.rounded-sm.p-4 {
+  border-radius: var(--house-radius-tile);
+  box-shadow: var(--house-shadow-tile);
+  padding: 16px 18px;
+}
+/* Their label / value / footnote */
+main .bg-bg-card > div > p.uppercase, main .bg-bg-card > p.uppercase,
+main p.uppercase[class*="text-[9px]"], main p.uppercase[class*="text-[10px]"] {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--ink-4);
+  text-transform: uppercase; line-height: 1.3;
+}
+main .bg-bg-card > p.text-lg.font-bold, main .bg-bg-card > p.text-xl.font-bold, main .bg-bg-card > p.text-2xl.font-bold {
+  font-family: var(--serif); font-size: 30px; font-weight: 500; line-height: 1.05; margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+main .bg-bg-card span[class*="text-[9px]"] { font-size: 11px; font-weight: 500; color: var(--ink-4); white-space: nowrap; }
+/* A .tile that is laid out as a flex row is a control, not a card: ghost pill */
+main button.tile.flex, main button.tile.inline-flex, main a.tile.flex.items-center[class*="px-"] {
+  border-radius: 999px;
+  height: 40px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  box-shadow: var(--house-shadow-input);
+  border: 1px solid var(--house-line-strong);
+  background: #ffffff;
+}
+main button.tile.flex span, main button.tile.inline-flex span { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+main button.tile.flex svg { color: var(--ink); }
+main .bg-bg-card > div.mt-0\.5 { margin-top: 8px; }
+
+/* ── Mobile: pill buttons must still be tappable, not 44px squares ── */
+@media (max-width: 768px) {
+  main button, main a[role="button"] { min-height: 40px; }
+}

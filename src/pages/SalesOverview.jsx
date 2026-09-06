@@ -308,9 +308,10 @@ function KpiTable({ sections }) {
   return (
     <div
       style={{
-        background: 'var(--paper)',
+        background: '#ffffff',
         border: '1px solid var(--rule)',
-        borderRadius: 10,
+        borderRadius: 'var(--house-radius-card)',
+        boxShadow: 'var(--house-shadow-card)',
         overflow: 'hidden',
       }}
     >
@@ -338,12 +339,12 @@ function KpiSection({ section, isLast }) {
       {/* Section eyebrow header */}
       <div
         style={{
-          padding: '10px 18px',
-          background: 'var(--paper-2)',
+          padding: '12px 20px',
+          background: '#fbfbf9',
           borderBottom: '1px solid var(--rule)',
         }}
       >
-        <span className="eyebrow eyebrow-accent" style={{ fontSize: 9 }}>{section.eyebrow}</span>
+        <span className="eyebrow">{section.eyebrow}</span>
       </div>
       {/* Cells */}
       <div className={gridClass}>
@@ -360,8 +361,8 @@ function KpiCell({ cell, isLastCol }) {
   // Right border between cells; bottom dividers come from section borderBottom
   // at the parent level so we don't double up rules at the last cell row.
   const baseStyle = {
-    padding: '14px 18px',
-    background: cell.accent ? 'var(--accent-soft)' : 'transparent',
+    padding: '18px 20px',
+    background: cell.accent ? 'rgba(244,225,74,.10)' : 'transparent',
     borderRight: isLastCol ? 'none' : '1px solid var(--rule)',
     cursor: interactive ? 'pointer' : 'default',
     transition: 'background 160ms ease',
@@ -378,18 +379,15 @@ function KpiCell({ cell, isLastCol }) {
   return (
     <Wrapper
       onClick={cell.onClick}
-      style={baseStyle}
-      onMouseEnter={interactive ? (e) => { e.currentTarget.style.background = cell.accent ? 'var(--accent-soft)' : 'var(--paper-2)' } : undefined}
-      onMouseLeave={interactive ? (e) => { e.currentTarget.style.background = cell.accent ? 'var(--accent-soft)' : 'transparent' } : undefined}
+      className="house-plain"
+      style={{ ...baseStyle, borderRadius: 0 }}
+      onMouseEnter={interactive ? (e) => { e.currentTarget.style.background = cell.accent ? 'rgba(244,225,74,.16)' : '#fdfcf6' } : undefined}
+      onMouseLeave={interactive ? (e) => { e.currentTarget.style.background = cell.accent ? 'rgba(244,225,74,.10)' : 'transparent' } : undefined}
     >
       <span
+        className="eyebrow"
         style={{
-          fontFamily: 'var(--mono)',
-          fontSize: 9,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--ink-3)',
-          fontWeight: 500,
+          fontSize: 11,
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -403,12 +401,11 @@ function KpiCell({ cell, isLastCol }) {
         style={{
           fontFamily: 'var(--serif)',
           fontVariantNumeric: 'tabular-nums',
-          fontSize: 'clamp(20px, 2.4vw, 28px)',
+          fontSize: 'clamp(24px, 2.6vw, 34px)',
           lineHeight: 1.05,
-          letterSpacing: '-0.02em',
           color: 'var(--ink)',
-          fontWeight: 400,
-          marginTop: 6,
+          fontWeight: 500,
+          marginTop: 8,
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -797,7 +794,7 @@ export default function SalesOverview() {
 
       {/* Pending EOD */}
       {(pendingEOD.closers.length > 0 || pendingEOD.setters.length > 0) && (
-        <div className="bg-bg-card border border-opt-yellow/20 rounded-sm px-4 py-3 flex flex-wrap items-center gap-3">
+        <div className="tile px-5 py-3 flex flex-wrap items-center gap-3" style={{ borderColor: 'rgba(244,225,74,.6)', background: 'rgba(244,225,74,.08)' }}>
           <div className="flex items-center gap-2">
             <Clock size={14} className="text-text-primary" />
             <span className="text-xs font-medium text-text-primary">Pending EOD Today</span>
@@ -1270,14 +1267,14 @@ export default function SalesOverview() {
           <h2 className="editorial-panel-title flex items-center gap-2">
             <Award size={16} className="text-text-primary" /> Closer Leaderboard
           </h2>
-          <Link to="/sales/closers" className="text-xs text-text-primary hover:underline flex items-center gap-1">
+          <Link to="/sales/closers" className="editorial-btn-ghost" style={{ height: 34, padding: '0 14px', fontSize: 12.5 }}>
             View all <ArrowUpRight size={12} />
           </Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs sm:text-sm">
             <thead>
-              <tr className="bg-bg-primary/30 text-[10px] text-text-400 uppercase tracking-wider">
+              <tr>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-left w-8 sm:w-10"></th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-left">Closer</th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-right" title="Net New (NC live calls only — follow-ups + ascensions excluded)">Net New</th>
@@ -1295,7 +1292,7 @@ export default function SalesOverview() {
                 <tr
                   key={c.id}
                   onClick={() => navigate(`/sales/closers/${c.id}`)}
-                  className={`border-t border-border-default/40 hover:bg-bg-card-hover cursor-pointer transition-colors ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}
+                  className={`cursor-pointer ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}
                 >
                   <td className="py-2 sm:py-3 px-2 sm:px-4"><RankBadge rank={i + 1} /></td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-text-primary whitespace-nowrap">{c.name}</td>
@@ -1312,7 +1309,7 @@ export default function SalesOverview() {
             </tbody>
             {closerBoard.length > 1 && (
               <tfoot>
-                <tr className="border-t-2 border-border-default bg-bg-primary/20 font-medium">
+                <tr>
                   <td className="py-2 sm:py-3 px-2 sm:px-4" colSpan={2}>Team</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{ct.liveNC}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{ct.closes}</td>
@@ -1335,14 +1332,14 @@ export default function SalesOverview() {
           <h2 className="editorial-panel-title flex items-center gap-2">
             <Phone size={16} className="text-text-primary" /> Setter Leaderboard
           </h2>
-          <Link to="/sales/setters" className="text-xs text-text-primary hover:underline flex items-center gap-1">
+          <Link to="/sales/setters" className="editorial-btn-ghost" style={{ height: 34, padding: '0 14px', fontSize: 12.5 }}>
             View all <ArrowUpRight size={12} />
           </Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs sm:text-sm">
             <thead>
-              <tr className="bg-bg-primary/30 text-[10px] text-text-400 uppercase tracking-wider">
+              <tr>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-left w-8 sm:w-10"></th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-left">Setter</th>
                 <th className="py-2 sm:py-3 px-2 sm:px-4 text-right">Dials</th>
@@ -1360,7 +1357,7 @@ export default function SalesOverview() {
                 <tr
                   key={s.id}
                   onClick={() => navigate(`/sales/setters/${s.id}`)}
-                  className={`border-t border-border-default/40 hover:bg-bg-card-hover cursor-pointer transition-colors ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}
+                  className={`cursor-pointer ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}
                 >
                   <td className="py-2 sm:py-3 px-2 sm:px-4"><RankBadge rank={i + 1} /></td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-text-primary whitespace-nowrap">{s.name}</td>
@@ -1377,7 +1374,7 @@ export default function SalesOverview() {
             </tbody>
             {setterBoard.length > 1 && (
               <tfoot>
-                <tr className="border-t-2 border-border-default bg-bg-primary/20 font-medium">
+                <tr>
                   <td className="py-2 sm:py-3 px-2 sm:px-4" colSpan={2}>Team</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{wt.dials.toLocaleString()}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right tabular-nums">{wt.pickups.toLocaleString()}</td>
@@ -1404,7 +1401,7 @@ export default function SalesOverview() {
         <div className="overflow-x-auto">
           <table className="w-full text-xs sm:text-sm">
             <thead>
-              <tr className="text-[10px] sm:text-[11px] text-text-400 uppercase tracking-wider">
+              <tr>
                 <th className="py-2 px-2 sm:px-4 text-left">Lead</th>
                 <th className="py-2 px-2 sm:px-4 text-left">Source</th>
                 <th className="py-2 px-2 sm:px-4 text-left">Setter</th>
@@ -1415,7 +1412,7 @@ export default function SalesOverview() {
             </thead>
             <tbody>
               {recentLeads.slice(0, showAllRecentLeads ? 15 : 5).map(lead => (
-                <tr key={lead.id} className="border-t border-border-default/40 hover:bg-bg-card-hover transition-colors">
+                <tr key={lead.id}>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 font-medium text-text-primary whitespace-nowrap">{lead.lead_name || '—'}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-text-secondary text-xs whitespace-nowrap">{lead.lead_source || '—'}</td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-text-secondary text-xs whitespace-nowrap">{lead.setter_name}</td>

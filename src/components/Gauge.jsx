@@ -1,40 +1,40 @@
 import { getColor } from '../utils/metricCalculations'
 
 /*
-  Editorial gauge: eyebrow label + serif percentage + heatbar strip.
-  Bar fill colour follows the metric's directional health (up/warning/down).
+  House gauge tile: uppercase label, serif percentage, 8px pill progress bar.
+  The bar colour is status only (green / amber / orange-red), never the accent.
 */
 
 export default function Gauge({ label, value, target, direction = 'above', max = 100, delta, avgLabel }) {
   const pct = Math.min((value / max) * 100, 100)
   const colorClass = getColor(value, target, direction)
   const barColor =
-    colorClass === 'text-success' ? 'var(--up)' :
-    colorClass === 'text-warning' ? '#b88200' :
-    colorClass === 'text-danger'  ? 'var(--down)' :
+    colorClass === 'text-success' ? 'var(--house-good)' :
+    colorClass === 'text-warning' ? 'var(--house-warn)' :
+    colorClass === 'text-danger'  ? 'var(--house-bad)' :
     'var(--ink)'
-  const valueColor = barColor
 
   return (
     <div
       style={{
-        background: 'var(--paper)',
+        background: '#ffffff',
         border: '1px solid var(--rule)',
-        borderRadius: 10,
-        padding: '16px 18px',
+        borderRadius: 'var(--house-radius-tile)',
+        boxShadow: 'var(--house-shadow-tile)',
+        padding: '18px 20px',
       }}
     >
-      <span className="eyebrow" style={{ fontSize: 9, marginBottom: 12, display: 'inline-flex' }}>{label}</span>
+      <span className="eyebrow" style={{ fontSize: 11, display: 'block' }}>{label}</span>
 
       <div className="flex items-baseline gap-3 mt-3">
         <span
           style={{
             fontFamily: 'var(--serif)',
-            fontSize: 28,
+            fontSize: 32,
             lineHeight: 1,
-            color: valueColor,
+            fontWeight: 500,
+            color: barColor,
             fontVariantNumeric: 'tabular-nums',
-            letterSpacing: '-0.02em',
           }}
         >
           {value != null ? `${value}%` : '—'}
@@ -47,22 +47,13 @@ export default function Gauge({ label, value, target, direction = 'above', max =
         )}
       </div>
 
-      <div className="heatbar mt-3">
+      <div className="heatbar mt-4">
         <span style={{ width: `${pct}%`, background: barColor }} />
       </div>
 
       {(avgLabel != null || target != null) && (
-        <p
-          style={{
-            fontFamily: 'var(--mono)',
-            fontSize: 9,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: 'var(--ink-3)',
-            margin: '10px 0 0',
-          }}
-        >
-          {avgLabel != null ? `Avg · ${avgLabel}%` : `Target · ${target}%`}
+        <p style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ink-4)', margin: '10px 0 0' }}>
+          {avgLabel != null ? `Average ${avgLabel}%` : `Target ${target}%`}
         </p>
       )}
     </div>

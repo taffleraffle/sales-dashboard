@@ -28,17 +28,16 @@ export default function ToastStack() {
             role={t.kind === 'error' ? 'alert' : 'status'}
             className="toast-in"
             style={{
-              background: 'var(--paper)',
-              borderLeft: `3px solid ${style.accent}`,
+              background: '#ffffff',
               border: '1px solid var(--rule)',
-              borderLeftWidth: 3,
+              borderLeftWidth: 4,
               borderLeftColor: style.accent,
-              borderRadius: '0 3px 3px 0',
-              padding: '12px 14px',
+              borderRadius: 16,
+              padding: '14px 16px',
               display: 'flex',
               alignItems: 'flex-start',
               gap: 12,
-              boxShadow: '0 4px 16px rgba(10,10,10,0.08)',
+              boxShadow: '0 24px 54px -30px rgba(20,22,30,.4)',
             }}
           >
             <Icon size={ICON.lg} style={{ color: style.accent, flexShrink: 0, marginTop: 2 }} />
