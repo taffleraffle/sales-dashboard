@@ -9,8 +9,9 @@ import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs, useCloserCallBreakdown } from '../hooks/useCloserData'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { useFunnelData } from '../hooks/useFunnelData'
-import { fetchWavvAggregates, fetchWavvCallsForSTL } from '../services/wavvService'
-import { fetchAllPipelineSummaries, computeSpeedToLead, buildSetterSchedules } from '../services/ghlPipeline'
+import { fetchWavvAggregates } from '../services/wavvService'
+import { buildSetterSchedules } from '../services/ghlPipeline'
+import { fetchSpeedToLeadFromDb } from '../services/speedToLeadDb'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { useLeadAttribution } from '../hooks/useLeadAttribution'
 import { supabase } from '../lib/supabase'
@@ -181,6 +182,7 @@ export default function SalesOverview() {
   const [wavvLoading, setWavvLoading] = useState(true)
   const [stl, setStl] = useState(null)
   const [stlLoading, setStlLoading] = useState(true)
+  const [stlError, setStlError] = useState(null)
 
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const { loading: loadingFunnel } = useFunnelData(days)
@@ -189,7 +191,7 @@ export default function SalesOverview() {
   const { reports: closerReports } = useCloserEODs(null, days)
   const { breakdown: callBreakdown } = useCloserCallBreakdown(null, days)
   const { reports: setterReports } = useSetterEODs(null, days)
-  const { entries: marketingEntries } = useMarketingTracker()
+  const { entries: marketingEntries, benchmarks } = useMarketingTracker()
   const { leads: recentLeads } = useLeadAttribution(days)
 
   const [endangeredLeads, setEndangeredLeads] = useState([])
@@ -324,21 +326,15 @@ export default function SalesOverview() {
 
   // Speed to Lead (selected range, with per-setter working-hour filter)
   const stlSchedules = buildSetterSchedules(setters)
+  const scheduleKey = JSON.stringify(stlSchedules)
   useEffect(() => {
-    setStlLoading(true)
-    Promise.all([
-      fetchAllPipelineSummaries(() => {}),
-      fetchWavvCallsForSTL(days),
-    ]).then(([pipelines, calls]) => {
-      const opps = pipelines.flatMap(p => p.summary?.opportunities || [])
-      if (opps.length > 0 && calls.length > 0) {
-        setStl(computeSpeedToLead(opps, calls, [], stlSchedules))
-      } else {
-        setStl(null)
-      }
-      setStlLoading(false)
-    }).catch(() => setStlLoading(false))
-  }, [days])
+    let alive = true
+    setStlLoading(true); setStlError(null)
+    fetchSpeedToLeadFromDb(range, stlSchedules)
+      .then(res => { if (alive) { setStl(res); setStlLoading(false) } })
+      .catch(err => { console.warn('speed to lead failed:', err); if (alive) { setStl(null); setStlError(err?.message || 'failed'); setStlLoading(false) } })
+    return () => { alive = false }
+  }, [range, scheduleKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filter marketing entries by range
   const sinceStr = dateRangeBoundsET(range).startStr
@@ -439,6 +435,7 @@ export default function SalesOverview() {
   const costPerLive = mkt.adspend > 0 && ct.liveCalls > 0 ? mkt.adspend / ct.liveCalls : null
   const revPerLead = mkt.leads > 0 ? totalRevenue / mkt.leads : null
   const revPerBooked = calBooked > 0 ? totalRevenue / calBooked : null
+  const bm = (k) => { const v = benchmarks?.[k]; const n = v != null && typeof v === 'object' ? parseFloat(v.value) : parseFloat(v); return Number.isFinite(n) ? n : null }
   const money = (n) => n == null ? '—' : `$${Math.round(n).toLocaleString()}`
   const money2 = (n) => n == null ? '—' : `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 
@@ -494,8 +491,8 @@ export default function SalesOverview() {
           <SectionLabel>The money</SectionLabel>
           <div className="kpi-grid">
             <KPICard highlight label="Ad spend" value={money2(mkt.adspend)} subtitle={mkt.adspend > 0 ? 'tracked marketing spend' : 'no spend logged'} />
-            <KPICard label="Front-end cash ROAS" value={mkt.adspend > 0 ? `${feRoas.toFixed(2)}x` : '—'} subtitle={`$${Math.round(ct.cash).toLocaleString()} trial cash`} />
-            <KPICard label="CAC" value={money(cac)} subtitle={closes > 0 ? `${closes} ${closes === 1 ? 'close' : 'closes'}` : 'no closes yet'} onClick={openRevenueBreakdown} />
+            <KPICard label="Front-end cash ROAS" value={mkt.adspend > 0 ? `${feRoas.toFixed(2)}x` : '—'} subtitle={`$${Math.round(ct.cash).toLocaleString()} trial cash`} target={bm('trial_fe_roas')} direction="above" />
+            <KPICard label="CAC" value={money(cac)} subtitle={closes > 0 ? `${closes} ${closes === 1 ? 'close' : 'closes'}` : 'no closes yet'} target={bm('cpa_trial')} direction="below" onClick={openRevenueBreakdown} />
             <KPICard label="Revenue per lead" value={money(revPerLead)} subtitle={mkt.leads > 0 ? `$${Math.round(totalRevenue).toLocaleString()} over ${mkt.leads} leads` : 'no leads logged'} onClick={openRevenueBreakdown} />
             <KPICard label="Revenue per booked call" value={money(revPerBooked)} subtitle={calBooked > 0 ? `${calBooked} booked` : calBooked == null ? 'loading…' : 'no bookings'} onClick={openRevenueBreakdown} />
           </div>
@@ -505,22 +502,22 @@ export default function SalesOverview() {
         <section>
           <SectionLabel>Cost and conversion</SectionLabel>
           <div className="kpi-grid">
-            <KPICard label="Cost per lead" value={mkt.leads > 0 && mkt.adspend > 0 ? money(cpl) : '—'} subtitle={mkt.leads > 0 ? `${mkt.leads} leads` : 'no leads'} />
-            <KPICard label="Cost per booked call" value={calBooked > 0 && mkt.adspend > 0 ? money(cpbc) : '—'} subtitle={calBooked > 0 ? `${calBooked} booked on the calendar` : 'no bookings'} />
-            <KPICard label="Cost per live call" value={money(costPerLive)} subtitle={ct.liveCalls > 0 ? `${ct.liveCalls} live calls` : 'no live calls'} />
-            <KPICard label="Show rate" value={`${showRate}%`} subtitle={`${ct.liveNC} of ${ct.ncBooked} new calls showed`} target={70} direction="above" />
-            <KPICard label="Close rate" value={`${closeRate}%`} subtitle={`${prospectSum.closed} of ${prospectSum.live} live prospects`} target={25} direction="above" />
+            <KPICard label="Cost per lead" value={mkt.leads > 0 && mkt.adspend > 0 ? money(cpl) : '—'} subtitle={mkt.leads > 0 ? `${mkt.leads} leads` : 'no leads'} target={bm('cpl')} direction="below" />
+            <KPICard label="Cost per booked call" value={calBooked > 0 && mkt.adspend > 0 ? money(cpbc) : '—'} subtitle={calBooked > 0 ? `${calBooked} booked` : 'no bookings'} target={bm('cpb')} direction="below" />
+            <KPICard label="Cost per live call" value={money(costPerLive)} subtitle={ct.liveCalls > 0 ? `${ct.liveCalls} live calls` : 'no live calls'} target={bm('cost_per_live_call')} direction="below" />
+            <KPICard label="Show rate" value={`${showRate}%`} subtitle={`${ct.liveNC} of ${ct.ncBooked} showed`} target={bm('show_rate_new') ?? 70} direction="above" />
+            <KPICard label="Close rate" value={`${closeRate}%`} subtitle={`${prospectSum.closed} of ${prospectSum.live} live`} target={bm('close_rate') ?? 25} direction="above" />
           </div>
         </section>
 
         {/* ── 3. Speed to lead ── */}
         <section>
-          <SectionLabel hint="From a lead landing in GHL to the first WAVV dial. Operating hours are each setter's dial window from the Team page (9am to 5pm ET when none is set).">Speed to lead</SectionLabel>
+          <SectionLabel hint="Typeform opt-in to first WAVV dial. Operating hours are each setter's dial window from the Team page (9am to 5pm ET if none set).">Speed to lead</SectionLabel>
           <div className="kpi-grid">
-            <KPICard highlight label="Average" value={stl ? stl.avgDisplay : stlLoading ? '…' : '—'} subtitle={stl ? `${stl.pctUnder5m}% under 5 minutes · ${stl.worked} leads` : stlLoading ? 'matching leads to dials' : 'no data'} />
-            <KPICard label="This week" value={stlSplit?.week != null ? fmtSecs(stlSplit.week) : '—'} subtitle={stlSplit ? `${stlSplit.nWeek} leads in the last 7 days` : '—'} />
-            <KPICard label="In operating hours" value={stlSplit?.inHours != null ? fmtSecs(stlSplit.inHours) : '—'} subtitle={stlSplit ? `${stlSplit.nIn} leads` : '—'} />
-            <KPICard label="Outside operating hours" value={stlSplit?.outHours != null ? fmtSecs(stlSplit.outHours) : '—'} subtitle={stlSplit ? `${stlSplit.nOut} leads` : '—'} />
+            <KPICard highlight label="Average" value={stl ? stl.avgDisplay : stlLoading ? '…' : '—'} subtitle={stl ? `${stl.pctUnder5m}% under 5 min · ${stl.worked} dialled, ${stl.notCalled} never dialled` : stlLoading ? 'matching leads to dials' : stlError ? `could not load: ${stlError}` : 'no leads with a phone number in this range'} score={stl?.avgSecs} target={300} direction="below" targetLabel="Target under 5 min" />
+            <KPICard label="This week" value={stlSplit?.week != null ? fmtSecs(stlSplit.week) : '—'} subtitle={stlSplit ? `${stlSplit.nWeek} leads in the last 7 days` : undefined} score={stlSplit?.week} target={300} direction="below" targetLabel="Target under 5 min" />
+            <KPICard label="In operating hours" value={stlSplit?.inHours != null ? fmtSecs(stlSplit.inHours) : '—'} subtitle={stlSplit ? `${stlSplit.nIn} leads` : undefined} score={stlSplit?.inHours} target={300} direction="below" targetLabel="Target under 5 min" />
+            <KPICard label="Outside operating hours" value={stlSplit?.outHours != null ? fmtSecs(stlSplit.outHours) : '—'} subtitle={stlSplit ? `${stlSplit.nOut} leads` : undefined} score={stlSplit?.outHours} target={3600} direction="below" targetLabel="Target under 1 hour" />
           </div>
         </section>
 

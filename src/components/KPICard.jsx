@@ -31,13 +31,26 @@ export default function KPICard({
   className = '',
   highlight = false,
   onClick,
+  targetLabel,
+  score,
 }) {
-  const colorClass = target != null ? getColor(parseFloat(value), target, direction) : null
+  // Numeric value for the target test: strip $, commas, %, x. A dash means
+  // "no data" and gets no status at all.
+  // `score` is an explicit number to test against the target (e.g. seconds
+  // behind a "20h" display); otherwise the display value is parsed.
+  const numeric = score != null ? score : typeof value === 'number' ? value : parseFloat(String(value ?? '').replace(/[$,%x\s]/g, ''))
+  const hasNumber = Number.isFinite(numeric) && String(value ?? '').trim() !== '—'
+  const colorClass = target != null && hasNumber ? getColor(numeric, target, direction) : null
   const valueColor =
     colorClass === 'text-success' ? 'var(--house-good)' :
     colorClass === 'text-warning' ? 'var(--house-warn)' :
     colorClass === 'text-danger'  ? 'var(--house-bad)' :
     'var(--ink)'
+  const status = colorClass === 'text-success' ? { label: 'On target', color: 'var(--house-good)', border: 'rgba(22,163,74,.35)', bg: 'rgba(22,163,74,.06)' }
+    : colorClass === 'text-warning' ? { label: 'Near target', color: 'var(--house-warn)', border: 'rgba(184,134,11,.35)', bg: 'rgba(184,134,11,.06)' }
+    : colorClass === 'text-danger' ? { label: 'Below target', color: 'var(--house-bad)', border: 'rgba(224,86,30,.35)', bg: 'rgba(224,86,30,.06)' }
+    : null
+  const targetText = target != null ? (targetLabel || `Target ${direction === 'below' ? 'under ' : ''}${typeof target === 'number' && String(value ?? '').trim().startsWith('$') ? '$' + target.toLocaleString() : target}${String(value ?? '').trim().endsWith('%') ? '%' : String(value ?? '').trim().endsWith('x') ? 'x' : ''}`) : null
 
   const interactive = !!onClick
 
@@ -57,7 +70,7 @@ export default function KPICard({
         transition: 'border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease',
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
+        overflow: 'visible',
       }}
       onMouseEnter={(e) => {
         if (interactive) { e.currentTarget.style.borderColor = 'var(--house-line-hover)'; e.currentTarget.style.transform = 'translateY(-1px)' }
@@ -84,8 +97,9 @@ export default function KPICard({
         style={{
           fontFamily: 'var(--serif)',
           fontVariantNumeric: 'tabular-nums',
-          fontSize: 'clamp(24px, 2.8vw, 34px)',
-          lineHeight: 1,
+          fontSize: 'clamp(24px, 2.6vw, 34px)',
+          lineHeight: 1.15,
+          padding: '2px 0 1px',
           fontWeight: 500,
           color: valueColor,
           whiteSpace: 'nowrap',
@@ -98,9 +112,18 @@ export default function KPICard({
         {value ?? '—'}
       </div>
 
-      {(subtitle || trend) && (
-        <div className="mt-auto pt-3 flex items-center gap-2 flex-wrap" style={{ color: 'var(--ink-4)', fontSize: 12.5, fontWeight: 500 }}>
-          {subtitle && <span>{subtitle}</span>}
+      {(subtitle || trend || status || targetText) && (
+        <div className="mt-auto pt-3 flex items-center justify-between gap-2 flex-wrap" style={{ color: 'var(--ink-4)', fontSize: 12.5, fontWeight: 500 }}>
+          <span style={{ minWidth: 0 }}>
+            {subtitle && <span>{subtitle}</span>}
+            {subtitle && targetText && <span> · </span>}
+            {targetText && <span>{targetText}</span>}
+          </span>
+          {status && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, color: status.color, border: `1px solid ${status.border}`, background: status.bg, whiteSpace: 'nowrap' }}>
+              <span style={{ width: 7, height: 7, borderRadius: 999, background: status.color }} />{status.label}
+            </span>
+          )}
           {trendPill(trend)}
         </div>
       )}

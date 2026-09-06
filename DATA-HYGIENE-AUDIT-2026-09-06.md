@@ -281,8 +281,13 @@ the app itself. But anyone who reads the key out of the JS bundle can query thes
 directly with `curl`. That is the same class of hole closed on the SEO dashboard in
 migration 166.
 
-**Fix:** RLS policies on those tables (and the matview's underlying tables) that require
-`auth.role() = 'authenticated'`. Worth a pass over every table the front end reads.
+Checked the policies directly: `team_members` carries a policy literally named **"Allow all"**
+(`public ALL`), which is the hole. The `_authsvc` policies on the other tables are fine, and
+`typeform_responses` is correctly authenticated-only.
+
+**Fix:** drop "Allow all" on `team_members` and keep only `team_members_auth`
+(authenticated SELECT) plus a service-role write policy. Then check the matviews, which have
+no RLS at all.
 
 ---
 
