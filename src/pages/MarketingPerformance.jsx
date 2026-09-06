@@ -3107,14 +3107,14 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
       : `Last ${range}d`
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={handleClose}>
-      <div className="bg-bg-card border border-border-default rounded-sm max-w-4xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ background: 'rgba(251,251,249,.6)', backdropFilter: 'blur(6px)' }} onClick={handleClose}>
+      <div className="tile max-w-4xl w-full max-h-[80vh] flex flex-col overflow-hidden" style={{ boxShadow: '0 40px 90px -30px rgba(21,22,26,.45)' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border-default">
           <div>
-            <h2 className="text-sm font-semibold">{config.title}</h2>
-            <p className="text-[10px] text-text-400">{rangeLabel} &middot; {config.subtitle}</p>
+            <h2 className="editorial-panel-title" style={{ margin: 0 }}>{config.title}</h2>
+            <p style={{ fontSize: 13, color: 'var(--ink-4)', margin: '2px 0 0' }}>{rangeLabel} &middot; {config.subtitle}</p>
           </div>
-          <button onClick={handleClose} className="text-text-400 hover:text-text-primary"><X size={18} /></button>
+          <button onClick={handleClose} aria-label="Close" className="w-9 h-9 flex items-center justify-center" style={{ borderRadius: 999, border: '1px solid var(--house-line-strong)', background: '#fff' }}><X size={16} /></button>
         </div>
         {/* overflow-auto (both axes) so narrow modals scroll horizontally
             when the column count exceeds available width — combined with

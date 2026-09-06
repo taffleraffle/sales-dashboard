@@ -3,10 +3,11 @@ import { useState, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
+import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs, useCloserCallBreakdown } from '../hooks/useCloserData'
 import { supabase } from '../lib/supabase'
-import { Loader, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { rangeToDays } from '../lib/dateUtils'
 
 export default function CloserOverview() {
@@ -202,154 +203,36 @@ export default function CloserOverview() {
         <Gauge label="Cash Collect %" value={cashCollectionRate} target={50} />
       </div>
 
-      {/* Per-Closer Cards */}
-      <h2 className="eyebrow" style={{ marginBottom: 14, display: 'block' }}>Individual performance</h2>
-      {closerStats.length === 0 ? (
-        <div className="tile tile-feedback p-8 text-center text-text-400">
-          No closers found. Add team members in Supabase.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {closerStats.map(c => (
-            <Link
-              key={c.id}
-              to={`/sales/closers/${c.id}`}
-              className="tile tile-feedback p-3 sm:p-6 hover:bg-bg-card-hover transition-all block"
-            >
-              <div className="flex items-center justify-between mb-3 sm:mb-4">
-                <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, margin: 0 }}>{c.name}</h3>
-                <div className="flex gap-2 sm:gap-3 text-[10px] sm:text-xs text-text-400">
-                  <span>{c.closes} closes</span>
-                  <span className="text-success">${c.revenue.toLocaleString()}</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3 sm:mb-4">
-                <Gauge label="Show Rate" value={c.showRate} target={70} />
-                <Gauge label="Close Rate" value={c.closeRate} target={25} />
-                <Gauge label="Offer Rate" value={c.offerRate} target={80} />
-              </div>
-
-              <div className="flex flex-wrap gap-4 text-xs">
-                <span className="text-text-400">Booked: <strong className="text-text-primary">{c.booked}</strong></span>
-                <span className="text-text-400">Net New: <strong className="text-text-primary">{c.liveNC}</strong></span>
-                <span className="text-text-400">Offers: <strong className="text-text-primary">{c.offers}</strong></span>
-                <span className="text-text-400">Cash: <strong className="text-text-primary">${c.cash.toLocaleString()}</strong></span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
-
-      {/* Closer Comparison — leaderboard cards (replaces blocky 13-col table) */}
-      {closerStats.length > 0 && (
-        <>
-          <h2 className="eyebrow" style={{ marginBottom: 14, display: 'block' }}>Closer comparison</h2>
-          <div className="space-y-2 mb-6">
-            {closerStats.map(c => (
-              <CloserLeaderboardRow
-                key={c.id}
-                closer={c}
-                onClick={() => navigate(`/sales/closers/${c.id}`)}
-              />
-            ))}
-            {/* Team total — summary row styled as a yellow-tinted card so it
-                reads as an aggregate, not a clickable team-member row. */}
-            <div className="tile px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5" style={{ background: 'rgba(244,225,74,.10)', borderColor: 'var(--accent)' }}>
-              <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
-                <div className="w-9 h-9 rounded-full bg-opt-yellow/25 border border-opt-yellow/50 flex items-center justify-center">
-                  <span className="text-[11px] font-bold text-text-primary">∑</span>
-                </div>
-                <span className="text-sm font-semibold text-text-primary">Team Total</span>
-              </div>
-              <div className="flex items-baseline gap-4 sm:gap-6">
-                <StatBlock label="Closes" value={closesDeduped} />
-                <StatBlock label="Revenue" value={`$${companyTotals.revenue.toLocaleString()}`} accent="success" />
-                <StatBlock label="Cash" value={`$${companyTotals.cash.toLocaleString()}`} accent="opt-yellow" />
-              </div>
-              <div className="flex flex-wrap gap-2 sm:ml-auto">
-                <Pill label="Show" value={`${companyShowRate}%`} good={parseFloat(companyShowRate) >= 70} ok={parseFloat(companyShowRate) >= 50} />
-                <Pill label="Close" value={`${companyCloseRate}%`} good={parseFloat(companyCloseRate) >= 25} ok={parseFloat(companyCloseRate) >= 15} />
-                <Pill label="Offer" value={`${companyOfferRate}%`} good={parseFloat(companyOfferRate) >= 80} ok={parseFloat(companyOfferRate) >= 60} />
-              </div>
-            </div>
-          </div>
-        </>
-      )}
+      {/* One table per closer: replaces the card grid + comparison rows that
+          showed the same closerStats twice (DUPLICATE-METRICS doc, item 5). */}
+      <Card title="Closers" count={closerStats.length}>
+        <LeaderTable
+          rows={[...closerStats].sort((a, b) => (b.cash + 0) - (a.cash + 0))}
+          onRowClick={(r) => navigate(`/sales/closers/${r.id}`)}
+          empty="No closers found. Add people on the Team page."
+          footer={{ name: 'Team', booked: totalBooked, liveNC: companyProspects.live, offers: companyTotals.offers, closes: closesDeduped, showRate: companyShowRate, closeRate: companyCloseRate, offerRate: companyOfferRate, revenue: companyTotals.revenue, cash: companyTotals.cash }}
+          columns={[
+            { key: 'name', label: 'Closer', render: (r, f) => f ? <span style={{ fontWeight: 700 }}>Team</span> : <Person name={r.name} rank={r._rank} sub={r.confN > 0 ? `${r.confShowRate ?? '—'}% confirmed show (${r.confN})` : undefined} /> },
+            { key: 'booked', label: 'Booked', align: 'right' },
+            { key: 'liveNC', label: 'Net new', align: 'right' },
+            { key: 'offers', label: 'Offers', align: 'right' },
+            { key: 'closes', label: 'Closes', align: 'right', strong: true },
+            { key: 'showRate', label: 'Show', align: 'right', render: r => `${r.showRate}%`, tone: r => toneOf(r.showRate, 70) },
+            { key: 'closeRate', label: 'Close', align: 'right', render: r => `${r.closeRate}%`, tone: r => toneOf(r.closeRate, 25) },
+            { key: 'offerRate', label: 'Offer', align: 'right', render: r => `${r.offerRate}%`, tone: r => toneOf(r.offerRate, 80) },
+            { key: 'revenue', label: 'Revenue', align: 'right', render: r => `$${Math.round(r.revenue).toLocaleString()}` },
+            { key: 'cash', label: 'Cash', align: 'right', strong: true, render: r => `$${Math.round(r.cash).toLocaleString()}` },
+          ]}
+        />
+      </Card>
 
       </div> {/* end max-w-[1600px] mx-auto */}
     </div>
   )
 }
 
-function initialsOf(name) {
-  if (!name) return '?'
-  const parts = name.trim().split(/\s+/)
-  if (parts.length === 1) return parts[0][0].toUpperCase()
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-}
-
-function Pill({ label, value, good, ok }) {
-  const color = good ? 'bg-success/15 text-success border-success/30'
-    : ok ? 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30'
-    : 'bg-danger/15 text-danger border-danger/30'
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium ${color}`}>
-      <span className="text-text-400 font-normal">{label}</span>
-      <span>{value}</span>
-    </span>
-  )
-}
-
-function StatBlock({ label, value, accent }) {
-  const color = accent === 'success' ? 'text-success' : accent === 'opt-yellow' ? 'text-text-primary' : 'text-text-primary'
-  return (
-    <div className="flex flex-col">
-      <span className="text-[10px] uppercase tracking-wider text-text-400">{label}</span>
-      <span className={`text-base sm:text-lg font-bold leading-tight ${color} tabular-nums`}>{value}</span>
-    </div>
-  )
-}
-
-function CloserLeaderboardRow({ closer, onClick }) {
-  const c = closer
-  return (
-    <div
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
-      className="tile tile-hover px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5"
-    >
-      {/* Name block */}
-      <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
-        <div className="w-9 h-9 rounded-full bg-opt-yellow/15 border border-opt-yellow/30 flex items-center justify-center shrink-0 text-[11px] font-bold text-text-primary">
-          {initialsOf(c.name)}
-        </div>
-        <span className="text-sm font-semibold text-text-primary truncate">{c.name}</span>
-      </div>
-
-      {/* Primary stats */}
-      <div className="flex items-baseline gap-4 sm:gap-6">
-        <StatBlock label="Closes" value={c.closes} />
-        <StatBlock label="Revenue" value={`$${c.revenue.toLocaleString()}`} accent="success" />
-        <StatBlock label="Cash" value={`$${c.cash.toLocaleString()}`} accent="opt-yellow" />
-      </div>
-
-      {/* Rate pills */}
-      <div className="flex flex-wrap gap-2 sm:ml-auto">
-        <Pill label="Show" value={`${c.showRate}%`} good={c.showRate >= 70} ok={c.showRate >= 50} />
-        <Pill label="Close" value={`${c.closeRate}%`} good={c.closeRate >= 25} ok={c.closeRate >= 15} />
-        <Pill label="Offer" value={`${c.offerRate}%`} good={c.offerRate >= 80} ok={c.offerRate >= 60} />
-        {/* Confirmed vs unconfirmed show rate — only when the closer has marked
-            calls in the window (migration 161). */}
-        {c.confN > 0 && (
-          <Pill label={`Conf Show (${c.confN})`} value={c.confShowRate == null ? '—' : `${c.confShowRate}%`} good={c.confShowRate >= 70} ok={c.confShowRate >= 50} />
-        )}
-        {c.unconfN > 0 && (
-          <Pill label={`Unconf Show (${c.unconfN})`} value={c.unconfShowRate == null ? '—' : `${c.unconfShowRate}%`} good={c.unconfShowRate >= 70} ok={c.unconfShowRate >= 50} />
-        )}
-      </div>
-    </div>
-  )
+function toneOf(value, target) {
+  const v = parseFloat(value)
+  if (!Number.isFinite(v)) return null
+  return v >= target ? 'good' : v >= target * 0.8 ? 'warn' : 'bad'
 }

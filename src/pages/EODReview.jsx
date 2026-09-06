@@ -131,7 +131,7 @@ function LeadPicker({ onSelect, onClose }) {
   }, [search])
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ background: 'rgba(251,251,249,.6)', backdropFilter: 'blur(6px)' }} onClick={onClose}>
       <div className="tile tile-feedback w-96 max-h-[400px] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-3 py-2 border-b border-border-default">
           <Search size={14} className="text-text-400" />
@@ -450,7 +450,7 @@ function DealUpdater({ closerId, onClose, onSaved }) {
   const outcomeColor = (o) => o === 'closed' ? 'text-success' : o === 'not_closed' ? 'text-text-400' : o === 'no_show' ? 'text-danger' : o === 'rescheduled' ? 'text-text-secondary' : o === 'canceled' ? 'text-orange-400' : 'text-text-400'
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ background: 'rgba(251,251,249,.6)', backdropFilter: 'blur(6px)' }} onClick={onClose}>
       <div className="tile tile-feedback w-[480px] max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">

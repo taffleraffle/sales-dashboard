@@ -95,12 +95,14 @@ export default function KPICard({
       <div
         className="mt-2"
         style={{
-          fontFamily: 'var(--serif)',
+          fontFamily: 'var(--sans)',
           fontVariantNumeric: 'tabular-nums',
-          fontSize: 'clamp(24px, 2.6vw, 34px)',
+          fontFeatureSettings: '"tnum" 1',
+          fontSize: 'clamp(22px, 2.2vw, 30px)',
           lineHeight: 1.15,
+          letterSpacing: '-0.02em',
           padding: '2px 0 1px',
-          fontWeight: 500,
+          fontWeight: 600,
           color: valueColor,
           whiteSpace: 'nowrap',
           overflow: 'hidden',

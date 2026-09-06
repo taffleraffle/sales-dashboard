@@ -3,7 +3,9 @@ import { todayET, dateRangeBoundsET, rangeToDays } from '../lib/dateUtils'
 import KPICard from '../components/KPICard'
 import DateRangeSelector from '../components/DateRangeSelector'
 import LeadStatusBadge from '../components/LeadStatusBadge'
-import { Loader, Clock, ArrowUpRight, X, Trophy, Check, AlertTriangle } from 'lucide-react'
+import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
+import Modal from '../components/editorial/Modal'
+import { Loader, Clock, Check, AlertTriangle } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs, useCloserCallBreakdown } from '../hooks/useCloserData'
@@ -486,27 +488,29 @@ export default function SalesOverview() {
       )}
 
       {dataReady && <>
-        {/* ── 1. The money ── */}
+        {/* ── 1. Headline: the six numbers Ben runs the floor on, one row ── */}
         <section>
-          <SectionLabel>The money</SectionLabel>
-          <div className="kpi-grid">
-            <KPICard highlight label="Ad spend" value={money2(mkt.adspend)} subtitle={mkt.adspend > 0 ? 'tracked marketing spend' : 'no spend logged'} />
-            <KPICard label="Front-end cash ROAS" value={mkt.adspend > 0 ? `${feRoas.toFixed(2)}x` : '—'} subtitle={`$${Math.round(ct.cash).toLocaleString()} trial cash`} target={bm('trial_fe_roas')} direction="above" />
-            <KPICard label="CAC" value={money(cac)} subtitle={closes > 0 ? `${closes} ${closes === 1 ? 'close' : 'closes'}` : 'no closes yet'} target={bm('cpa_trial')} direction="below" onClick={openRevenueBreakdown} />
-            <KPICard label="Revenue per lead" value={money(revPerLead)} subtitle={mkt.leads > 0 ? `$${Math.round(totalRevenue).toLocaleString()} over ${mkt.leads} leads` : 'no leads logged'} onClick={openRevenueBreakdown} />
-            <KPICard label="Revenue per booked call" value={money(revPerBooked)} subtitle={calBooked > 0 ? `${calBooked} booked` : calBooked == null ? 'loading…' : 'no bookings'} onClick={openRevenueBreakdown} />
-          </div>
-        </section>
-
-        {/* ── 2. Cost and conversion ── */}
-        <section>
-          <SectionLabel>Cost and conversion</SectionLabel>
-          <div className="kpi-grid">
+          <SectionLabel>Headline</SectionLabel>
+          <div className="kpi-grid kpi-grid-6">
             <KPICard label="Cost per lead" value={mkt.leads > 0 && mkt.adspend > 0 ? money(cpl) : '—'} subtitle={mkt.leads > 0 ? `${mkt.leads} leads` : 'no leads'} target={bm('cpl')} direction="below" />
             <KPICard label="Cost per booked call" value={calBooked > 0 && mkt.adspend > 0 ? money(cpbc) : '—'} subtitle={calBooked > 0 ? `${calBooked} booked` : 'no bookings'} target={bm('cpb')} direction="below" />
             <KPICard label="Cost per live call" value={money(costPerLive)} subtitle={ct.liveCalls > 0 ? `${ct.liveCalls} live calls` : 'no live calls'} target={bm('cost_per_live_call')} direction="below" />
             <KPICard label="Show rate" value={`${showRate}%`} subtitle={`${ct.liveNC} of ${ct.ncBooked} showed`} target={bm('show_rate_new') ?? 70} direction="above" />
             <KPICard label="Close rate" value={`${closeRate}%`} subtitle={`${prospectSum.closed} of ${prospectSum.live} live`} target={bm('close_rate') ?? 25} direction="above" />
+            <KPICard label="CAC" value={money(cac)} subtitle={closes > 0 ? `${closes} ${closes === 1 ? 'close' : 'closes'}` : 'no closes yet'} target={bm('cpa_trial')} direction="below" onClick={openRevenueBreakdown} />
+          </div>
+        </section>
+
+        {/* ── 2. Revenue ── */}
+        <section>
+          <SectionLabel>Revenue</SectionLabel>
+          <div className="kpi-grid kpi-grid-6">
+            <KPICard highlight label="Revenue" value={money2(totalRevenue)} subtitle={`${closes} ${closes === 1 ? 'close' : 'closes'} · trial + ascension`} onClick={openRevenueBreakdown} />
+            <KPICard label="Cash collected" value={money2(totalCash)} subtitle={totalRevenue > 0 ? `${Math.round((totalCash / totalRevenue) * 100)}% of revenue` : 'no revenue yet'} onClick={openRevenueBreakdown} />
+            <KPICard label="Ad spend" value={money2(mkt.adspend)} subtitle={mkt.adspend > 0 ? 'tracked marketing spend' : 'no spend logged'} />
+            <KPICard label="Front-end cash ROAS" value={mkt.adspend > 0 ? `${feRoas.toFixed(2)}x` : '—'} subtitle={`$${Math.round(ct.cash).toLocaleString()} trial cash`} target={bm('trial_fe_roas')} direction="above" />
+            <KPICard label="Revenue per lead" value={money(revPerLead)} subtitle={mkt.leads > 0 ? `over ${mkt.leads} leads` : 'no leads logged'} />
+            <KPICard label="Revenue per booked call" value={money(revPerBooked)} subtitle={calBooked > 0 ? `over ${calBooked} booked` : calBooked == null ? 'loading…' : 'no bookings'} />
           </div>
         </section>
 
@@ -523,77 +527,48 @@ export default function SalesOverview() {
 
         {/* ── 4. Boards ── */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          <Board title="Closer leaderboard" to="/sales/closers">
-            <table>
-              <thead><tr>
-                <th style={{ width: 36 }}></th><th>Closer</th>
-                <th className="num">Net new</th><th className="num">Closes</th><th className="num">Show</th><th className="num">Close</th><th className="num">Cash</th>
-              </tr></thead>
-              <tbody>
-                {closerBoard.map((c, i) => (
-                  <tr key={c.id} onClick={() => navigate(`/sales/closers/${c.id}`)} className={`cursor-pointer ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}>
-                    <td><Rank n={i + 1} /></td>
-                    <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{c.name}</td>
-                    <td className="num">{c.liveNC}</td>
-                    <td className="num" style={{ fontWeight: 700 }}>{c.closes}</td>
-                    <td className="num">{c.showPct}%</td>
-                    <td className="num">{c.closePct}%</td>
-                    <td className="num" style={{ fontWeight: 700 }}>${c.totalCash.toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-              {closerBoard.length > 1 && (
-                <tfoot><tr>
-                  <td colSpan={2}>Team</td>
-                  <td className="num">{ct.liveNC}</td><td className="num">{closes}</td>
-                  <td className="num">{showRate}%</td><td className="num">{closeRate}%</td>
-                  <td className="num">${totalCash.toLocaleString()}</td>
-                </tr></tfoot>
-              )}
-            </table>
-          </Board>
+          <Card title="Closer leaderboard" to="/sales/closers">
+            <LeaderTable
+              rows={closerBoard}
+              onRowClick={(r) => navigate(`/sales/closers/${r.id}`)}
+              footer={{ name: 'Team', liveNC: ct.liveNC, closes, showPct: showRate, closePct: closeRate, totalCash }}
+              columns={[
+                { key: 'name', label: 'Closer', render: (r, f) => f ? <span style={{ fontWeight: 700 }}>Team</span> : <Person name={r.name} rank={r._rank} /> },
+                { key: 'liveNC', label: 'Net new', align: 'right' },
+                { key: 'closes', label: 'Closes', align: 'right', strong: true },
+                { key: 'showPct', label: 'Show', align: 'right', render: r => `${r.showPct}%`, tone: r => tone(parseFloat(r.showPct), bm('show_rate_new') ?? 70, 'above') },
+                { key: 'closePct', label: 'Close', align: 'right', render: r => `${r.closePct}%`, tone: r => tone(parseFloat(r.closePct), bm('close_rate') ?? 25, 'above') },
+                { key: 'totalCash', label: 'Cash', align: 'right', strong: true, render: r => `$${Math.round(r.totalCash).toLocaleString()}` },
+              ]}
+            />
+          </Card>
 
-          <Board title="Setter leaderboard" to="/sales/setters">
-            <table>
-              <thead><tr>
-                <th style={{ width: 36 }}></th><th>Setter</th>
-                <th className="num">Dials</th><th className="num">Pickups</th><th className="num">Pickup</th><th className="num">Sets</th><th className="num">Speed to lead</th>
-              </tr></thead>
-              <tbody>
-                {setterBoard.map((s, i) => {
-                  const member = setters.find(m => m.id === s.id)
-                  const arr = member?.wavv_user_id ? stl?.perSetter?.[member.wavv_user_id] : null
-                  const mine = arr && arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null
-                  return (
-                    <tr key={s.id} onClick={() => navigate(`/sales/setters/${s.id}`)} className={`cursor-pointer ${i === 0 ? 'bg-opt-yellow-subtle' : ''}`}>
-                      <td><Rank n={i + 1} /></td>
-                      <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{s.name}</td>
-                      <td className="num" style={{ fontWeight: 700 }}>{s.dials.toLocaleString()}</td>
-                      <td className="num">{s.pickups.toLocaleString()}</td>
-                      <td className="num">{s.pickupPct}%</td>
-                      <td className="num" style={{ fontWeight: 700 }}>{s.sets}</td>
-                      <td className="num">{mine != null ? fmtSecs(mine) : '—'}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-              {setterBoard.length > 1 && (
-                <tfoot><tr>
-                  <td colSpan={2}>Team</td>
-                  <td className="num">{wt.dials.toLocaleString()}</td><td className="num">{wt.pickups.toLocaleString()}</td>
-                  <td className="num">{wt.dials ? ((wt.pickups / wt.dials) * 100).toFixed(1) : 0}%</td>
-                  <td className="num">{setterBoard.reduce((a, s) => a + s.sets, 0)}</td>
-                  <td className="num">{stl ? stl.avgDisplay : '—'}</td>
-                </tr></tfoot>
-              )}
-            </table>
-          </Board>
+          <Card title="Setter leaderboard" to="/sales/setters">
+            <LeaderTable
+              rows={setterBoard.map(s => {
+                const member = setters.find(m => m.id === s.id)
+                const arr = member?.wavv_user_id ? stl?.perSetter?.[member.wavv_user_id] : null
+                return { ...s, stlSecs: arr && arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null }
+              })}
+              onRowClick={(r) => navigate(`/sales/setters/${r.id}`)}
+              footer={{ name: 'Team', dials: wt.dials, pickups: wt.pickups, pickupPct: wt.dials ? ((wt.pickups / wt.dials) * 100).toFixed(1) : '0.0', sets: setterBoard.reduce((a, s) => a + s.sets, 0), stlSecs: stl?.avgSecs ?? null }}
+              columns={[
+                { key: 'name', label: 'Setter', render: (r, f) => f ? <span style={{ fontWeight: 700 }}>Team</span> : <Person name={r.name} rank={r._rank} /> },
+                { key: 'dials', label: 'Dials', align: 'right', strong: true, render: r => r.dials.toLocaleString() },
+                { key: 'pickups', label: 'Pickups', align: 'right', render: r => r.pickups.toLocaleString() },
+                { key: 'pickupPct', label: 'Pickup', align: 'right', render: r => `${r.pickupPct}%`, tone: r => tone(parseFloat(r.pickupPct), 20, 'above') },
+                { key: 'sets', label: 'Sets', align: 'right', strong: true },
+                { key: 'stlSecs', label: 'Speed to lead', align: 'right', render: r => r.stlSecs != null ? fmtSecs(r.stlSecs) : '—', tone: r => r.stlSecs == null ? null : tone(r.stlSecs, 300, 'below') },
+              ]}
+            />
+          </Card>
         </div>
 
         {/* ── 5. Lists ── */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          <Board
+          <Card
             title="Upcoming strategy calls"
+            count={upcoming.length}
             right={
               <div className="flex gap-2 flex-wrap justify-end">
                 {tierCounts.cancel_risk > 0 && <span className="pill" style={{ color: 'var(--house-bad)', borderColor: 'rgba(224,86,30,.35)' }}><AlertTriangle size={11} /> {tierCounts.cancel_risk} cancel risk</span>}
@@ -602,149 +577,79 @@ export default function SalesOverview() {
               </div>
             }
           >
-            {loadingEndangered ? (
-              <Empty>Checking the calendar…</Empty>
-            ) : upcoming.length === 0 ? (
-              <Empty>No strategy calls in the next 7 days.</Empty>
-            ) : (
-              <table>
-                <thead><tr><th>Prospect</th><th>When</th><th className="num">In</th><th>Status</th></tr></thead>
-                <tbody>
-                  {upcoming.slice(0, 8).map((l, i) => (
-                    <tr key={l.ghl_event_id || i}>
-                      <td style={{ fontWeight: 600 }}>{(l.contact_name || 'Unknown').split(' - ')[0]}</td>
-                      <td style={{ color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>{l.startTime ? new Date(l.startTime).toLocaleString('en-US', { timeZone: 'America/Indiana/Indianapolis', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : l.appointment_date}</td>
-                      <td className="num" style={{ color: 'var(--ink-4)' }}>{fmtHours(l.hoursUntil)}</td>
-                      <td><TierPill tier={l.tier} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Board>
+            <LeaderTable
+              rows={loadingEndangered ? [] : upcoming.slice(0, 8)}
+              rowKey={(r) => r.ghl_event_id || r.contact_name}
+              highlightFirst={false}
+              empty={loadingEndangered ? 'Checking the calendar…' : 'No strategy calls in the next 7 days.'}
+              columns={[
+                { key: 'contact_name', label: 'Prospect', render: r => <Person name={(r.contact_name || 'Unknown').split(' - ')[0]} sub={r.contact_phone || undefined} /> },
+                { key: 'startTime', label: 'When', render: r => r.startTime ? new Date(r.startTime).toLocaleString('en-US', { timeZone: 'America/Indiana/Indianapolis', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : r.appointment_date },
+                { key: 'hoursUntil', label: 'In', align: 'right', render: r => fmtHours(r.hoursUntil) },
+                { key: 'tier', label: 'Status', align: 'right', render: r => <TierPill tier={r.tier} /> },
+              ]}
+            />
+          </Card>
 
-          <Board title="Recent leads" to="/sales/setters" count={recentLeads.length}>
-            {recentLeads.length === 0 ? (
-              <Empty>No leads logged in this period.</Empty>
-            ) : (
-              <table>
-                <thead><tr><th>Lead</th><th>Source</th><th>Setter</th><th>Set</th><th>Status</th></tr></thead>
-                <tbody>
-                  {recentLeads.slice(0, 8).map(lead => (
-                    <tr key={lead.id}>
-                      <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{lead.lead_name || '—'}</td>
-                      <td style={{ color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>{lead.lead_source || '—'}</td>
-                      <td style={{ color: 'var(--ink-2)' }}>{lead.setter_name}</td>
-                      <td style={{ color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>{lead.date_set ? new Date(lead.date_set + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</td>
-                      <td><LeadStatusBadge status={lead.status} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Board>
+          <Card title="Recent leads" count={recentLeads.length} to="/sales/setters">
+            <LeaderTable
+              rows={recentLeads.slice(0, 8)}
+              highlightFirst={false}
+              empty="No leads logged in this period."
+              columns={[
+                { key: 'lead_name', label: 'Lead', render: r => <Person name={r.lead_name || '—'} sub={r.lead_source || undefined} /> },
+                { key: 'setter_name', label: 'Setter' },
+                { key: 'date_set', label: 'Set', render: r => r.date_set ? new Date(r.date_set + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—' },
+                { key: 'status', label: 'Status', align: 'right', render: r => <LeadStatusBadge status={r.status} /> },
+              ]}
+            />
+          </Card>
         </div>
       </>}
 
-      {/* Revenue Breakdown Modal */}
-      {showRevenueBreakdown && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ background: 'rgba(251,251,249,.55)', backdropFilter: 'blur(6px)' }} onClick={() => setShowRevenueBreakdown(false)}>
-          <div className="tile tile-feedback shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-border-default flex items-center justify-between">
-              <div>
-                <h2 className="editorial-panel-title" style={{ margin: 0 }}>Revenue breakdown</h2>
-                <p style={{ fontSize: 13, color: 'var(--ink-4)', margin: '2px 0 0' }}>Every closed and ascended deal in this period</p>
-              </div>
-              <button onClick={() => setShowRevenueBreakdown(false)} className="w-9 h-9 flex items-center justify-center" style={{ borderRadius: 999, border: '1px solid var(--house-line-strong)', background: '#fff' }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Summary */}
-            <div className="px-5 py-3 border-b border-border-default grid grid-cols-4 gap-3">
-              <div>
-                <p className="eyebrow">Trial Revenue</p>
-                <p className="text-sm font-bold">${ct.revenue.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="eyebrow">Trial Cash</p>
-                <p className="text-sm font-bold text-success">${ct.cash.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="eyebrow">Ascend Revenue</p>
-                <p className="text-sm font-bold">${ct.ascendRevenue.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="eyebrow">Ascend Cash</p>
-                <p className="text-sm font-bold text-success">${ct.ascendCash.toLocaleString()}</p>
-              </div>
-            </div>
-
-            {/* Deal list */}
-            <div className="overflow-y-auto max-h-[50vh]">
-              {!revenueDeals ? (
-                <div className="flex items-center justify-center py-8"><Loader className="animate-spin text-text-primary" size={20} /></div>
-              ) : revenueDeals.length === 0 ? (
-                <p className="text-text-400 text-sm text-center py-8">No closed deals in this period.</p>
-              ) : (
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="sticky top-0" style={{ background: '#fff' }}>
-                      <th className="text-left px-4 py-2 font-medium">Date</th>
-                      <th className="text-left px-3 py-2 font-medium">Prospect</th>
-                      <th className="text-center px-3 py-2 font-medium">Type</th>
-                      <th className="text-right px-3 py-2 font-medium">Revenue</th>
-                      <th className="text-right px-4 py-2 font-medium">Cash</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {revenueDeals.map((d, i) => (
-                      <tr key={i}>
-                        <td className="px-4 py-2 text-text-400 whitespace-nowrap">{d.date}</td>
-                        <td className="px-3 py-2 text-text-primary font-medium">{d.prospect_name}</td>
-                        <td className="px-3 py-2 text-center">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                            d.call_type === 'ascension' ? 'bg-purple-500/20 text-purple-400' : 'bg-success/20 text-success'
-                          }`}>
-                            {d.call_type === 'ascension' ? 'Ascension' : 'Trial'}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right">${parseFloat(d.revenue || 0).toLocaleString()}</td>
-                        <td className="px-4 py-2 text-right text-success font-medium">${parseFloat(d.cash_collected || 0).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    {(() => {
-                      // Footer totals come from the SAME closer_calls rows
-                      // shown in the table body, so the modal reconciles
-                      // top-to-bottom. Previously the footer used the EOD
-                      // aggregate (ct.revenue + ct.ascendRevenue) which
-                      // could differ from the sum of visible rows by
-                      // whatever drift the closer introduced between their
-                      // per-call entries and their summary counters.
-                      const rowRevenue = (revenueDeals || []).reduce((s, d) => s + parseFloat(d.revenue || 0), 0)
-                      const rowCash    = (revenueDeals || []).reduce((s, d) => s + parseFloat(d.cash_collected || 0), 0)
-                      const eodDiffs = []
-                      if (rowRevenue !== totalRevenue) eodDiffs.push(`EOD: $${totalRevenue.toLocaleString()} rev`)
-                      if (rowCash    !== totalCash)    eodDiffs.push(`$${totalCash.toLocaleString()} cash`)
-                      return (
-                        <tr>
-                          <td className="px-4 py-2" colSpan={3}>
-                            Total {eodDiffs.length > 0 && <span className="text-[10px] font-normal text-text-400 ml-2">({eodDiffs.join(' · ')})</span>}
-                          </td>
-                          <td className="px-3 py-2 text-right">${rowRevenue.toLocaleString()}</td>
-                          <td className="px-4 py-2 text-right text-success">${rowCash.toLocaleString()}</td>
-                        </tr>
-                      )
-                    })()}
-                  </tfoot>
-                </table>
-              )}
-            </div>
-          </div>
+      {/* Revenue breakdown: every closed and ascended deal in the period */}
+      <Modal
+        open={showRevenueBreakdown}
+        onClose={() => setShowRevenueBreakdown(false)}
+        eyebrow="Revenue"
+        title="Revenue breakdown"
+        subtitle="Every closed and ascended deal in this period, from the closers' call rows"
+        size="md"
+      >
+        <div className="kpi-grid" style={{ padding: '18px 24px 6px' }}>
+          <KPICard label="Trial revenue" value={money2(ct.revenue)} />
+          <KPICard label="Trial cash" value={money2(ct.cash)} />
+          <KPICard label="Ascend revenue" value={money2(ct.ascendRevenue)} />
+          <KPICard label="Ascend cash" value={money2(ct.ascendCash)} />
         </div>
-      )}
+        <div style={{ padding: '6px 0 0' }}>
+          {!revenueDeals ? (
+            <div className="flex items-center justify-center py-8"><Loader className="animate-spin" size={20} /></div>
+          ) : (
+            <LeaderTable
+              rows={revenueDeals}
+              rowKey={(r, i) => `${r.date}-${r.prospect_name}-${i}`}
+              highlightFirst={false}
+              empty="No closed deals in this period."
+              footer={(() => {
+                const rowRevenue = revenueDeals.reduce((t, d) => t + parseFloat(d.revenue || 0), 0)
+                const rowCash = revenueDeals.reduce((t, d) => t + parseFloat(d.cash_collected || 0), 0)
+                const diff = []
+                if (Math.round(rowRevenue) !== Math.round(totalRevenue)) diff.push(`EOD says $${Math.round(totalRevenue).toLocaleString()} revenue`)
+                if (Math.round(rowCash) !== Math.round(totalCash)) diff.push(`$${Math.round(totalCash).toLocaleString()} cash`)
+                return { date: 'Total', prospect_name: diff.length ? diff.join(', ') : '', call_type: '', revenue: rowRevenue, cash_collected: rowCash }
+              })()}
+              columns={[
+                { key: 'date', label: 'Date' },
+                { key: 'prospect_name', label: 'Prospect', render: (r, f) => f ? <span style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 500 }}>{r.prospect_name}</span> : r.prospect_name },
+                { key: 'call_type', label: 'Type', render: (r, f) => f ? '' : <span className="pill">{r.call_type === 'ascension' ? 'Ascension' : 'Trial'}</span> },
+                { key: 'revenue', label: 'Revenue', align: 'right', render: r => `$${Math.round(parseFloat(r.revenue || 0)).toLocaleString()}` },
+                { key: 'cash_collected', label: 'Cash', align: 'right', strong: true, render: r => `$${Math.round(parseFloat(r.cash_collected || 0)).toLocaleString()}` },
+              ]}
+            />
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -781,6 +686,13 @@ function fmtSecs(secs) {
   return `${Math.floor(secs / 86400)}d ${Math.round((secs % 86400) / 3600)}h`
 }
 
+// Same thresholds as getColor: within 20% of target is 'warn'
+function tone(value, target, direction = 'above') {
+  if (value == null || target == null || !Number.isFinite(value)) return null
+  if (direction === 'above') return value >= target ? 'good' : value >= target * 0.8 ? 'warn' : 'bad'
+  return value <= target ? 'good' : value <= target * 1.2 ? 'warn' : 'bad'
+}
+
 function fmtHours(hours) {
   if (hours == null) return '—'
   if (hours < 1) return '<1h'
@@ -795,42 +707,6 @@ function SectionLabel({ children, hint }) {
       <h2 className="eyebrow" style={{ margin: 0 }}>{children}</h2>
       {hint && <span style={{ fontSize: 12.5, color: 'var(--ink-4)', textAlign: 'right' }}>{hint}</span>}
     </div>
-  )
-}
-
-function Board({ title, to, count, right, children }) {
-  return (
-    <div className="tile overflow-hidden" style={{ display: 'flex', flexDirection: 'column' }}>
-      <div className="flex items-center justify-between gap-3 px-5 py-4" style={{ borderBottom: '1px solid var(--rule)' }}>
-        <h2 className="editorial-panel-title" style={{ margin: 0 }}>
-          {title}{count != null && <span style={{ fontFamily: 'var(--sans)', fontSize: 12.5, fontWeight: 600, color: 'var(--ink-4)', marginLeft: 10 }}>{count}</span>}
-        </h2>
-        {right}
-        {to && !right && (
-          <Link to={to} className="editorial-btn-ghost" style={{ height: 34, padding: '0 14px', fontSize: 12.5 }}>
-            View all <ArrowUpRight size={12} />
-          </Link>
-        )}
-      </div>
-      <div className="overflow-x-auto">{children}</div>
-    </div>
-  )
-}
-
-function Empty({ children }) {
-  return <p style={{ margin: 0, padding: '28px 20px', fontSize: 13.5, color: 'var(--ink-4)', textAlign: 'center' }}>{children}</p>
-}
-
-function Rank({ n }) {
-  const first = n === 1
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      width: 26, height: 26, borderRadius: 999,
-      background: first ? 'var(--accent)' : '#fff',
-      border: `1px solid ${first ? 'var(--accent)' : 'var(--rule)'}`,
-      fontFamily: 'var(--serif)', fontSize: 14, fontWeight: 500, color: 'var(--ink)',
-    }}>{first ? <Trophy size={12} /> : n}</span>
   )
 }
 

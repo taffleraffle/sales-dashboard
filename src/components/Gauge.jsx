@@ -29,10 +29,12 @@ export default function Gauge({ label, value, target, direction = 'above', max =
       <div className="flex items-baseline gap-3 mt-3">
         <span
           style={{
-            fontFamily: 'var(--serif)',
-            fontSize: 32,
-            lineHeight: 1,
-            fontWeight: 500,
+            fontFamily: 'var(--sans)',
+            fontSize: 28,
+            lineHeight: 1.1,
+            fontWeight: 600,
+            letterSpacing: '-0.02em',
+            fontFeatureSettings: '"tnum" 1',
             color: barColor,
             fontVariantNumeric: 'tabular-nums',
           }}

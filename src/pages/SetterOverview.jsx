@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
+import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { supabase } from '../lib/supabase'
@@ -348,7 +349,6 @@ export default function SetterOverview() {
         <Gauge label="Lead → Close" value={companyRates.leadToClose} target={2} max={20} />
         <Gauge label="Call → Set" value={companyRates.callToSet} target={3} max={20} />
         <Gauge label="Pickup → Set" value={companyRates.pickupToSet} target={10} max={50} />
-        <Gauge label="MC → Set" value={companyRates.mcToSet} target={30} max={100} />
         {leadsPerClose > 0 && <Gauge label="Leads / Close" value={leadsPerClose} target={10} max={50} />}
       </div>
 
@@ -417,114 +417,34 @@ export default function SetterOverview() {
         </Link>
       </div>
 
-      {/* Per-Setter Cards */}
-      <h2 className="text-sm font-medium text-text-secondary mb-4">Individual Performance</h2>
-      {setterCards.length === 0 ? (
-        <div className="tile tile-feedback p-8 text-center text-text-400">
-          No setters found. Add team members in Supabase.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {setterCards.map(s => (
-            <Link
-              key={s.id}
-              to={`/sales/setters/${s.id}`}
-              className="tile tile-feedback p-3 sm:p-5 hover:bg-bg-card-hover transition-colors block"
-            >
-              <div className="flex items-center justify-between mb-3 sm:mb-4">
-                <div className="flex items-center gap-2">
-                  <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 500, margin: 0 }}>{s.name}</h3>
-                  {s.dataSource === 'wavv' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/15 text-success">WAVV</span>}
-                </div>
-                <div className="flex gap-2 sm:gap-3 text-[10px] sm:text-xs text-text-400">
-                  <span>{s.totalSets} sets</span>
-                  <span className="text-success">{s.closed} closed</span>
-                  <span className="text-danger">{s.noShows} NS</span>
-                </div>
-              </div>
-
-              {/* Gauges — Close rate label notes the setter-booked scope */}
-              <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-3 sm:mb-4">
-                <Gauge label="Show Rate" value={s.showRate} target={70} />
-                <div title="Of YOUR booked leads that showed, what % closed. Subset of company close rate.">
-                  <Gauge label="Close · Booked" value={s.closeRate} target={25} />
-                </div>
-                <Gauge label="Pickup %" value={s.pickupRate} target={30} />
-              </div>
-
-              {/* Bottom stats */}
-              <div className="flex flex-wrap gap-4 text-xs">
-                <span className="text-text-400">Dials: <strong className="text-text-primary">{s.dials}</strong></span>
-                <span className="text-text-400">MCs: <strong className="text-text-primary">{s.mcs}</strong></span>
-                <span className="text-text-400">Dials/Set: <strong className="text-text-primary">{s.dialsPerSet}</strong></span>
-                <span className="text-text-400">Avg Dur: <strong className="text-text-primary">{s.avgDuration < 60 ? `${s.avgDuration}s` : `${Math.round(s.avgDuration / 60)}m`}</strong></span>
-                <span className="text-text-400">Calls/Contact: <strong className="text-text-primary">{s.avgCallsPerContact}x</strong></span>
-                <span className="text-text-400">Revenue: <strong className="text-success">${s.revenue.toLocaleString()}</strong></span>
-                <span className="text-text-400">Auto Books: <strong className="text-cyan-400">{s.autoBookingCount}</strong> <span className="text-[10px]">({s.autoBookingPct}%)</span></span>
-              </div>
-
-              {/* Pipeline source tags */}
-              {s.topPipelines.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-border-default/30">
-                  {s.topPipelines.map(p => (
-                    <span key={p.source} className="text-[10px] px-2 py-0.5 rounded bg-bg-card-hover text-text-400 capitalize">
-                      {p.source}: <strong className="text-text-primary">{p.count}</strong>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </Link>
-          ))}
-        </div>
-      )}
-
-      {/* Setter Conversion — leaderboard cards (matches Closer Performance style) */}
-      <h2 className="text-sm font-medium text-text-secondary mb-4">Setter Conversion</h2>
-      {setterCards.length === 0 ? (
-        <div className="tile tile-feedback p-8 text-center text-text-400 mb-6">No setter data</div>
-      ) : (
-        <div className="space-y-2 mb-6">
-          {setterCards.map(s => (
-            <SetterLeaderboardRow
-              key={s.id}
-              setter={s}
-              onClick={() => navigate(`/sales/setters/${s.id}`)}
+      {/* One table per setter: replaces the card grid + conversion rows that
+          showed the same setterCards twice (DUPLICATE-METRICS doc, item 4). */}
+      {(() => {
+        const rows = [...setterCards].sort((a, b) => b.totalSets - a.totalSets)
+        const tot = rows.reduce((a, c) => ({ dials: a.dials + c.dials, pickups: a.pickups + c.pickups, mcs: a.mcs + c.mcs, totalSets: a.totalSets + c.totalSets, autoBookingCount: a.autoBookingCount + (c.autoBookingCount || 0), revenue: a.revenue + c.revenue }), { dials: 0, pickups: 0, mcs: 0, totalSets: 0, autoBookingCount: 0, revenue: 0 })
+        return (
+          <Card title="Setters" count={rows.length}>
+            <LeaderTable
+              rows={rows}
+              onRowClick={(r) => navigate(`/sales/setters/${r.id}`)}
+              empty="No setters found. Add people on the Team page."
+              footer={{ name: 'Team', ...tot, pickupRate: tot.dials ? parseFloat(((tot.pickups / tot.dials) * 100).toFixed(1)) : 0, showRate: parseFloat(showRate) || 0, closeRate: parseFloat(closeRate) || 0 }}
+              columns={[
+                { key: 'name', label: 'Setter', render: (r, f) => f ? <span style={{ fontWeight: 700 }}>Team</span> : <Person name={r.name} rank={r._rank} sub={r.dataSource === 'eod' ? 'EOD only, no WAVV link' : undefined} /> },
+                { key: 'dials', label: 'Dials', align: 'right', strong: true, render: r => (r.dials || 0).toLocaleString() },
+                { key: 'pickups', label: 'Pickups', align: 'right', render: r => (r.pickups || 0).toLocaleString() },
+                { key: 'pickupRate', label: 'Pickup', align: 'right', render: r => `${r.pickupRate ?? 0}%`, tone: r => toneOf(r.pickupRate, 20) },
+                { key: 'mcs', label: 'MCs', align: 'right' },
+                { key: 'totalSets', label: 'Sets', align: 'right', strong: true },
+                { key: 'autoBookingCount', label: 'Auto', align: 'right' },
+                { key: 'showRate', label: 'Show', align: 'right', render: r => `${r.showRate ?? 0}%`, tone: r => toneOf(r.showRate, 70) },
+                { key: 'closeRate', label: 'Close · booked', align: 'right', render: r => `${r.closeRate ?? 0}%`, tone: r => toneOf(r.closeRate, 25) },
+                { key: 'revenue', label: 'Revenue', align: 'right', strong: true, render: r => `$${Math.round(r.revenue || 0).toLocaleString()}` },
+              ]}
             />
-          ))}
-          {/* Team total */}
-          {(() => {
-            const totDials = setterCards.reduce((a, c) => a + c.dials, 0)
-            const totPickups = setterCards.reduce((a, c) => a + c.pickups, 0)
-            const totMcs = setterCards.reduce((a, c) => a + c.mcs, 0)
-            const totSets = setterCards.reduce((a, c) => a + c.totalSets, 0)
-            const totRev = setterCards.reduce((a, c) => a + c.revenue, 0)
-            const tPickup = totDials > 0 ? ((totPickups / totDials) * 100).toFixed(1) : 0
-            const tMcSet = totMcs > 0 ? ((totSets / totMcs) * 100).toFixed(1) : 0
-            const tCallSet = totDials > 0 ? ((totSets / totDials) * 100).toFixed(1) : 0
-            return (
-              <div className="bg-opt-yellow/[0.06] border border-opt-yellow/30 rounded-sm px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
-                <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
-                  <div className="w-9 h-9 rounded-full bg-opt-yellow/25 border border-opt-yellow/50 flex items-center justify-center">
-                    <span className="text-[11px] font-bold text-text-primary">∑</span>
-                  </div>
-                  <span className="text-sm font-semibold text-text-primary">Team Total</span>
-                </div>
-                <div className="flex items-baseline gap-4 sm:gap-6">
-                  <SetterStatBlock label="Sets" value={totSets} />
-                  <SetterStatBlock label="Dials" value={totDials.toLocaleString()} accent="muted" />
-                  <SetterStatBlock label="Revenue" value={`$${totRev.toLocaleString()}`} accent="success" />
-                </div>
-                <div className="flex flex-wrap gap-2 sm:ml-auto">
-                  <SetterPill label="Show" value={`${showRate}%`} good={parseFloat(showRate) >= 70} ok={parseFloat(showRate) >= 50} />
-                  <SetterPill label="Pickup" value={`${tPickup}%`} good={parseFloat(tPickup) >= 20} ok={parseFloat(tPickup) >= 10} />
-                  <SetterPill label="Call→Set" value={`${tCallSet}%`} good={parseFloat(tCallSet) >= 3} ok={parseFloat(tCallSet) >= 1} />
-                  <SetterPill label="MC→Set" value={`${tMcSet}%`} good={parseFloat(tMcSet) >= 30} ok={parseFloat(tMcSet) >= 15} />
-                </div>
-              </div>
-            )
-          })()}
-        </div>
-      )}
+          </Card>
+        )
+      })()}
 
       {/* Recent Leads (from setter_leads) + Upcoming Strategy Calls — side-by-side.
           Both cards flex to equal height; inner scroll keeps them visually balanced
@@ -601,82 +521,8 @@ export default function SetterOverview() {
   )
 }
 
-function setterInitials(name) {
-  if (!name) return '?'
-  const parts = name.trim().split(/\s+/)
-  if (parts.length === 1) return parts[0][0].toUpperCase()
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-}
-
-function SetterPill({ label, value, good, ok }) {
-  const color = good ? 'bg-success/15 text-success border-success/30'
-    : ok ? 'bg-opt-yellow/15 text-text-primary border-opt-yellow/30'
-    : 'bg-danger/15 text-danger border-danger/30'
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium ${color}`}>
-      <span className="text-text-400 font-normal">{label}</span>
-      <span>{value}</span>
-    </span>
-  )
-}
-
-function SetterStatBlock({ label, value, accent }) {
-  const color = accent === 'success' ? 'text-success'
-    : accent === 'opt-yellow' ? 'text-text-primary'
-    : accent === 'muted' ? 'text-text-secondary'
-    : 'text-text-primary'
-  return (
-    <div className="flex flex-col">
-      <span className="text-[10px] uppercase tracking-wider text-text-400">{label}</span>
-      <span className={`text-base sm:text-lg font-bold leading-tight ${color} tabular-nums`}>{value}</span>
-    </div>
-  )
-}
-
-function SetterLeaderboardRow({ setter, onClick }) {
-  const s = setter
-  const pickupPct = s.dials > 0 ? ((s.pickups / s.dials) * 100).toFixed(1) : 0
-  const callToSet = s.dials > 0 ? ((s.totalSets / s.dials) * 100).toFixed(1) : 0
-  const mcToSet = s.mcs > 0 ? ((s.totalSets / s.mcs) * 100).toFixed(1) : 0
-
-  return (
-    <div
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
-      className="tile tile-hover px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5"
-    >
-      {/* Name + initials */}
-      <div className="flex items-center gap-3 min-w-0 sm:min-w-[180px]">
-        <div className="w-9 h-9 rounded-full bg-opt-yellow/15 border border-opt-yellow/30 flex items-center justify-center shrink-0 text-[11px] font-bold text-text-primary">
-          {setterInitials(s.name)}
-        </div>
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-text-primary truncate">{s.name}</div>
-          {s.dataSource === 'wavv' && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-success/15 text-success">WAVV</span>
-          )}
-        </div>
-      </div>
-
-      {/* Primary stats */}
-      <div className="flex items-baseline gap-4 sm:gap-6">
-        <SetterStatBlock label="Sets" value={s.totalSets} />
-        <SetterStatBlock label="Dials" value={s.dials.toLocaleString()} accent="muted" />
-        <SetterStatBlock label="Revenue" value={`$${s.revenue.toLocaleString()}`} accent="success" />
-      </div>
-
-      {/* Rate pills */}
-      <div className="flex flex-wrap gap-2 sm:ml-auto">
-        <SetterPill label="Show" value={`${s.showRate}%`} good={s.showRate >= 70} ok={s.showRate >= 50} />
-        <SetterPill label="Pickup" value={`${pickupPct}%`} good={parseFloat(pickupPct) >= 20} ok={parseFloat(pickupPct) >= 10} />
-        <SetterPill label="Call→Set" value={`${callToSet}%`} good={parseFloat(callToSet) >= 3} ok={parseFloat(callToSet) >= 1} />
-        <SetterPill label="MC→Set" value={`${mcToSet}%`} good={parseFloat(mcToSet) >= 30} ok={parseFloat(mcToSet) >= 15} />
-        {s.autoBookingCount > 0 && (
-          <SetterPill label="Auto" value={s.autoBookingCount} good={true} ok={true} />
-        )}
-      </div>
-    </div>
-  )
+function toneOf(value, target) {
+  const v = parseFloat(value)
+  if (!Number.isFinite(v)) return null
+  return v >= target ? 'good' : v >= target * 0.8 ? 'warn' : 'bad'
 }
