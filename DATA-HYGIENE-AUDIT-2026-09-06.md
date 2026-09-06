@@ -267,6 +267,25 @@ tile. Your call.
 
 ---
 
+## 11. The public anon key can read team and marketing data (MEDIUM, security)
+
+Found while building the UI test harness: with only the **public anon key** (the one shipped
+in the browser bundle, no user login), the following return rows:
+
+- `team_members` (names, emails, GHL and WAVV user IDs)
+- `lib_marketing_by_audience_daily_mv` (spend, bookings, closes by day)
+- the closer and setter leaderboard sources behind the Overview
+
+The dashboard front end always sends a logged-in user's JWT, so nothing is exposed through
+the app itself. But anyone who reads the key out of the JS bundle can query these tables
+directly with `curl`. That is the same class of hole closed on the SEO dashboard in
+migration 166.
+
+**Fix:** RLS policies on those tables (and the matview's underlying tables) that require
+`auth.role() = 'authenticated'`. Worth a pass over every table the front end reads.
+
+---
+
 ## Things that are healthy
 
 Checked and found clean, so they can be ruled out:

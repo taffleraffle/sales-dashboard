@@ -5,7 +5,7 @@ OPT Digital's internal sales performance dashboard. Tracks closer/setter metrics
 
 ## Tech Stack
 - **Frontend:** React 18 + Vite 5 (JSX, not TypeScript)
-- **Styling:** Tailwind CSS v4 (via @tailwindcss/vite plugin)
+- **Styling:** Tailwind CSS v4 (via @tailwindcss/vite plugin). House look lives in `src/house.css`, loaded LAST after `index.css`; it reshapes every primitive to the onboard.optdigital.io system (see `C:/Users/Ben/opt-command-centre/OPT-UI-STYLE-GUIDE.md`). Buttons are pills; a `<button>` that is really a card gets `className=\"house-plain\"` or a `.tile` class so it keeps the tile radius. `qa/house-audit.mjs` is the static check.
 - **Routing:** react-router-dom v7
 - **Charts:** Recharts v3
 - **Icons:** lucide-react
@@ -73,7 +73,7 @@ Edge Functions use Supabase-managed secrets (SUPABASE_URL, SUPABASE_SERVICE_ROLE
 
 ## Critical Gotchas
 1. **closer_calls has ZERO setter_lead_id linkage** — name + date matching is the ONLY way to correlate setter leads to closer outcomes. Do not assume FK joins work.
-2. **ghl_appointments table is STALE** — endangered leads must fetch LIVE from GHL API, never trust the Supabase table alone.
+2. **ghl_appointments is written continuously** (checked 2026-09-06: 2 to 19 rows a day, last write same day). The old "STALE" warning is out of date. Endangered leads still fetch live from GHL for freshness within the hour. Note `booked_at` is a TEXT column in two formats; see DATA-HYGIENE-AUDIT-2026-09-06.md finding 8.
 3. **INTRO_CALENDARS constant** (`src/utils/constants.js`) — these GHL calendar IDs represent auto-booked intro calls, not setter-set appointments. Filter logic depends on this.
 4. **NZD to USD conversion** — payments come in NZD, dashboard displays USD. The `VITE_NZD_TO_USD` rate must be kept current.
 5. **RLS + PostgREST visibility** — new tables need explicit GRANT + `NOTIFY pgrst, 'reload schema'` to appear via PostgREST/Supabase client.
@@ -95,6 +95,8 @@ Edge Functions use Supabase-managed secrets (SUPABASE_URL, SUPABASE_SERVICE_ROLE
 | `/sales/commissions/:id` | Individual commission detail |
 | `/sales/setter-bot` | Setter bot conversations |
 | `/sales/email-flows` | Email flow management |
+| `/sales/team` | Team roster: login, GHL, calendar, WAVV connection status |
+| `/sales/team/:id` | One person: send login invite, link GHL user, check calendar, WAVV |
 | `/sales/settings` | Admin settings |
 
 ## Related Projects

@@ -250,7 +250,12 @@ function CalendarCard({ m }) {
       const end = Date.now() + 30 * 86400000
       const url = `${BASE_URL}/calendars/events?locationId=${GHL_LOCATION_ID}&userId=${encodeURIComponent(m.ghl_user_id)}&startTime=${start}&endTime=${end}`
       const res = await ghlFetch(url)
-      if (!res.ok) throw new Error(`GHL replied ${res.status}. Check the GHL user ID.`)
+      if (!res.ok) {
+        const why = res.status === 429 ? 'GoHighLevel is rate-limiting this dashboard right now. Wait a minute and check again.'
+          : res.status === 401 || res.status === 403 ? 'GoHighLevel rejected the API key on this dashboard (not this person). Check VITE_GHL_API_KEY.'
+          : `GoHighLevel replied ${res.status}. The GHL user ID above is probably wrong.`
+        throw new Error(why)
+      }
       const j = await res.json()
       const events = (j.events || []).sort((a, b) => new Date(a.startTime) - new Date(b.startTime))
       setState({ status: 'done', events, error: null })
