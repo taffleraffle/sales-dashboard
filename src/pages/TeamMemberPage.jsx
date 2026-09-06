@@ -8,7 +8,7 @@ import { BASE_URL, GHL_LOCATION_ID, ghlFetch } from '../services/ghlClient'
 import Dropdown from '../components/Dropdown'
 import ConfirmModal from '../components/ConfirmModal'
 import { ICON } from '../utils/constants'
-import { ROLE_OPTIONS, initialsOf, ConnectionPill, RolePill, sendDashboardInvite, resolveSlackUser } from '../lib/teamShared'
+import { ROLE_OPTIONS, initialsOf, ConnectionPill, RolePill, sendDashboardInvite, resolveSlackUser, offboardTeamMember } from '../lib/teamShared'
 
 /*
   One person, four connections, each its own card with its own Save:
@@ -52,6 +52,9 @@ export default function TeamMemberPage() {
   const [m, setM] = useState(null)
   const [loading, setLoading] = useState(true)
   const [confirmDeactivate, setConfirmDeactivate] = useState(false)
+  const [confirmOffboard, setConfirmOffboard] = useState(false)
+  const [offboardReason, setOffboardReason] = useState('')
+  const [offboarding, setOffboarding] = useState(false)
 
   const load = async () => {
     const { data, error } = await supabase.from('team_members').select('*').eq('id', id).single()
@@ -77,6 +80,7 @@ export default function TeamMemberPage() {
   )
 
   const inactive = m.is_active === false
+  const former = !!m.offboarded_at
 
   return (
     <div className="w-full">
@@ -94,7 +98,9 @@ export default function TeamMemberPage() {
             <h1 className="h2 mt-1" style={{ fontSize: 'clamp(28px, 3vw, 38px)' }}>{m.name}</h1>
             <div className="flex items-center gap-2 mt-2 flex-wrap">
               <RolePill role={m.role} />
-              {inactive && <span className="pill">Inactive</span>}
+              {former
+              ? <span className="pill" style={{ borderColor: 'var(--house-line-strong)', color: 'var(--ink-2)' }}>Former team member</span>
+              : inactive && <span className="pill">Paused</span>}
               {m.email && <span style={{ fontSize: 13, color: 'var(--ink-4)' }}>{m.email}</span>}
             </div>
           </div>
@@ -104,14 +110,36 @@ export default function TeamMemberPage() {
             {(m.role === 'closer' || m.role === 'setter') && (
               <Link to={`/sales/${m.role}s/${m.id}`} className="editorial-btn-ghost">Performance <ArrowLeft size={ICON.sm} style={{ transform: 'rotate(135deg)' }} /></Link>
             )}
-            {inactive
-              ? <button type="button" className="editorial-btn-primary" onClick={() => save({ is_active: true }, `${m.name} is active again.`)}>Reactivate</button>
-              : <button type="button" className="editorial-btn-ghost" style={{ color: 'var(--house-bad)' }} onClick={() => setConfirmDeactivate(true)}>Deactivate</button>}
+            {former ? (
+              <button type="button" className="editorial-btn-primary" disabled={offboarding} onClick={async () => {
+                setOffboarding(true)
+                try {
+                  await offboardTeamMember(m.id, null, true)
+                  toast({ kind: 'success', title: `${m.name} is back`, message: 'Their login works again and they are back on the rosters.' })
+                  await load()
+                } catch (err) { toast({ kind: 'error', title: 'Could not reinstate them', message: err.message }) }
+                setOffboarding(false)
+              }}>Reinstate</button>
+            ) : (
+              <>
+                {inactive
+                  ? <button type="button" className="editorial-btn-ghost" onClick={() => save({ is_active: true }, `${m.name} is active again.`)}>Unpause</button>
+                  : <button type="button" className="editorial-btn-ghost" onClick={() => setConfirmDeactivate(true)}>Pause</button>}
+                <button type="button" className="editorial-btn-ghost" style={{ color: 'var(--house-bad)' }} onClick={() => { setOffboardReason(''); setConfirmOffboard(true) }}>Offboard</button>
+              </>
+            )}
           </div>
         )}
       </div>
 
-      <OnboardingStrip m={m} />
+      {former && (
+        <div className="callout" style={{ marginBottom: 16, borderLeftColor: 'var(--house-bad)' }}>
+          <b>{m.name} has left.</b> Offboarded {new Date(m.offboarded_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' })}
+          {m.offboard_reason ? ` — ${m.offboard_reason}` : ''}. Their login is blocked and they are off every roster and rotation.
+          Everything they logged is kept and still counts on the historical pages.
+        </div>
+      )}
+      {!former && <OnboardingStrip m={m} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ProfileCard m={m} save={save} canEdit={isAdmin} />
@@ -123,12 +151,42 @@ export default function TeamMemberPage() {
       </div>
 
       <ConfirmModal
+        open={confirmOffboard}
+        onClose={() => !offboarding && setConfirmOffboard(false)}
+        loading={offboarding}
+        confirmLabel="Offboard"
+        title={`Offboard ${m.name}?`}
+        message="They will be signed out now and will not be able to sign in again. They come off the leaderboards, the rotations and the EOD chase list. Every EOD, call and booking they logged is kept, and their history still shows on the closer and setter pages."
+        onConfirm={async () => {
+          setOffboarding(true)
+          try {
+            const res = await offboardTeamMember(m.id, offboardReason, false)
+            const bits = []
+            if (res?.sessions_ended) bits.push(`signed out of ${res.sessions_ended} session${res.sessions_ended === 1 ? '' : 's'}`)
+            if (res?.future_appointments) bits.push(`${res.future_appointments} upcoming call${res.future_appointments === 1 ? '' : 's'} still assigned to them`)
+            if (res?.unconfirmed_eods) bits.push(`${res.unconfirmed_eods} unconfirmed EOD${res.unconfirmed_eods === 1 ? '' : 's'}`)
+            toast({ kind: 'success', title: `${m.name} is offboarded`, message: bits.length ? bits.join(' · ') : 'Login blocked. Their history is kept.' })
+            setConfirmOffboard(false)
+            await load()
+          } catch (err) {
+            toast({ kind: 'error', title: 'Could not offboard them', message: err.message })
+          }
+          setOffboarding(false)
+        }}
+      >
+        <label className="flex flex-col gap-2">
+          <span className="eyebrow">Reason (optional)</span>
+          <input type="text" value={offboardReason} onChange={e => setOffboardReason(e.target.value)} placeholder="e.g. left the business, 6 Sep 2026" disabled={offboarding} />
+        </label>
+      </ConfirmModal>
+
+      <ConfirmModal
         open={confirmDeactivate}
         onClose={() => setConfirmDeactivate(false)}
-        onConfirm={async () => { const ok = await save({ is_active: false }, `${m.name} is now inactive. Their history stays.`); setConfirmDeactivate(false); if (ok) navigate('/sales/team') }}
-        title={`Deactivate ${m.name}?`}
-        message="They drop off the leaderboards and rotations. Nothing is deleted and you can reactivate them any time."
-        confirmLabel="Deactivate"
+        onConfirm={async () => { const ok = await save({ is_active: false }, `${m.name} is paused. Their history stays.`); setConfirmDeactivate(false); if (ok) navigate('/sales/team') }}
+        title={`Pause ${m.name}?`}
+        message="They drop off the leaderboards and rotations, but their login still works. Use this for a break, not for someone leaving. Nothing is deleted."
+        confirmLabel="Pause"
         variant="danger"
       />
     </div>

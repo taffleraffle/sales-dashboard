@@ -7,7 +7,7 @@ import { AlertTriangle, Trash2, Loader } from 'lucide-react'
   Title: serif italic emphasis. Action buttons in editorial style.
 */
 
-export default function ConfirmModal({ open, onClose, onConfirm, title, message, confirmLabel = 'Confirm', variant = 'danger', loading = false }) {
+export default function ConfirmModal({ open, onClose, onConfirm, title, message, confirmLabel = 'Confirm', variant = 'danger', loading = false, confirmDisabled = false, children }) {
   const confirmRef = useRef(null)
 
   useEffect(() => {
@@ -87,6 +87,7 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
             >
               {message}
             </p>
+            {children && <div className="mt-3">{children}</div>}
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 mt-5">
@@ -115,7 +116,7 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
           <button
             ref={confirmRef}
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             style={{
               height: 40,
               padding: '0 18px',
@@ -126,8 +127,8 @@ export default function ConfirmModal({ open, onClose, onConfirm, title, message,
               color: variant === 'danger' ? '#ffffff' : '#1a1700',
               background: variant === 'danger' ? 'var(--house-bad)' : 'var(--accent)',
               border: `1px solid ${variant === 'danger' ? 'var(--house-bad)' : 'var(--accent)'}`,
-              cursor: loading ? 'wait' : 'pointer',
-              opacity: loading ? 0.7 : 1,
+              cursor: loading ? 'wait' : confirmDisabled ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.7 : confirmDisabled ? 0.45 : 1,
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,

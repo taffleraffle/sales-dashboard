@@ -25,7 +25,8 @@ export default function SetterOverview() {
   // Company show rate = live new calls over qualified bookings, the one number every page uses
   const sm = useSalesMetrics(range)
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
-  const { members: setters, loading: loadingMembers } = useTeamMembers('setter')
+  // Former setters stay on the board while they still have numbers in the window
+  const { members: setters, loading: loadingMembers } = useTeamMembers('setter', { includeFormer: true })
   const { reports, loading: loadingReports } = useSetterEODs(null, days)
   const [allLeadsRaw, setAllLeads] = useState([])
   const region = useRegion()
@@ -163,7 +164,7 @@ export default function SetterOverview() {
     }
   }
   // Per-setter breakdown — uses pre-aggregated WAVV data (no raw call filtering)
-  const setterCards = setters.map(setter => {
+  const setterCards = setters.filter(s => s.status !== 'former' || allLeads.some(l => l.setter_id === s.id)).map(setter => {
     // Look up pre-aggregated WAVV stats for this setter
     const wavvUser = setter.wavv_user_id ? wavvAgg.byUser[setter.wavv_user_id] : null
     const setterHasWavv = wavvUser && wavvUser.dials > 0

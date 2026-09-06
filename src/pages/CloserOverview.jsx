@@ -21,7 +21,9 @@ const money = (n) => `$${Math.round(n || 0).toLocaleString()}`
 export default function CloserOverview() {
   const navigate = useNavigate()
   const [range, setRange] = useState(30)
-  const { members: closers, loading: loadingMembers } = useTeamMembers('closer')
+  // Include people who have left: their calls are still in the team total,
+  // so their row has to stay or the board stops adding up.
+  const { members: closers, loading: loadingMembers } = useTeamMembers('closer', { includeFormer: true })
   const { bm } = useBenchmarks()
   const m = useSalesMetrics(range)
   const T = m.totals
@@ -38,10 +40,10 @@ export default function CloserOverview() {
     )
   }
 
-  const rows = closers.map(c => {
+  const rows = closers.filter(c => c.status !== 'former' || m.byCloser[c.id]).map(c => {
     const t = m.byCloser[c.id] || { ...EMPTY_TOTALS }
     const r = rates(t)
-    return { id: c.id, name: c.name, booked: t.qualifiedBookings, live: t.lives, offers: t.offers, closes: t.closes,
+    return { id: c.id, name: c.name, former: c.status === 'former', booked: t.qualifiedBookings, live: t.lives, offers: t.offers, closes: t.closes,
       showRate: r.showRate, closeRate: r.closeRate, offerRate: r.offerRate, revenue: r.revenue, cash: r.cash }
   }).sort((a, b) => b.cash - a.cash)
 

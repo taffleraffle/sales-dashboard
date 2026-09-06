@@ -72,3 +72,15 @@ export async function resolveSlackUser(teamMemberId) {
   if (!resp.ok) throw new Error(data.error || 'Slack lookup failed')
   return data
 }
+
+/* Offboard someone: blocks their login, ends their open sessions and marks
+   them former, keeping every EOD and call they logged. Pass undo to reinstate. */
+export async function offboardTeamMember(teamMemberId, reason, undo = false) {
+  const { data, error } = await supabase.rpc('offboard_team_member', {
+    p_member_id: teamMemberId,
+    p_reason: reason || null,
+    p_undo: undo,
+  })
+  if (error) throw new Error(error.message)
+  return data
+}

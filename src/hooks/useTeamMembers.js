@@ -5,19 +5,24 @@ import { supabase } from '../lib/supabase'
 // Sales / Closers / Setters / EOD / Commissions pages doesn't need to refetch.
 // First page load: fetches and caches per-role. Subsequent loads: return cached
 // list instantly + kick a background refresh to stay fresh.
-const cache = new Map() // key: role || '__all' → { members, ts }
+const cache = new Map() // key: role|scope → { members, ts }
 const CACHE_TTL_MS = 5 * 60 * 1000 // 5 min — long enough to feel instant across a session
 
-async function fetchMembers(role) {
-  let query = supabase.from('team_members').select('*').eq('is_active', true)
+async function fetchMembers(role, includeFormer = false) {
+  // Historical pages pass includeFormer so someone who has left still appears
+  // against the calls and EODs they logged. Without it their rows vanish while
+  // their numbers stay in the team total, and the board stops adding up.
+  let query = includeFormer
+    ? supabase.from('lib_team_members_all').select('*')
+    : supabase.from('team_members').select('*').eq('is_active', true)
   if (role) query = query.eq('role', role)
   const { data, error } = await query.order('name')
   if (error) console.error('Failed to fetch team members:', error)
   return data || []
 }
 
-export function useTeamMembers(role = null) {
-  const key = role || '__all'
+export function useTeamMembers(role = null, { includeFormer = false } = {}) {
+  const key = `${role || '__all'}|${includeFormer ? 'all' : 'active'}`
   const cached = cache.get(key)
   const hasFreshCache = cached && (Date.now() - cached.ts) < CACHE_TTL_MS
 
@@ -27,7 +32,7 @@ export function useTeamMembers(role = null) {
   useEffect(() => {
     let active = true
     async function go() {
-      const data = await fetchMembers(role)
+      const data = await fetchMembers(role, includeFormer)
       if (!active) return
       cache.set(key, { members: data, ts: Date.now() })
       setMembers(data)
@@ -43,7 +48,7 @@ export function useTeamMembers(role = null) {
       go()
     }
     return () => { active = false }
-  }, [role, key, hasFreshCache])
+  }, [role, key, hasFreshCache, includeFormer])
 
   return { members, loading }
 }

@@ -59,7 +59,7 @@ export default function TeamPage() {
         </h2>
         {inactiveCount > 0 && (
           <button type="button" className="editorial-btn-ghost" style={{ height: 34, fontSize: 12.5 }} onClick={() => setShowInactive(v => !v)}>
-            {showInactive ? 'Hide inactive' : `Show ${inactiveCount} inactive`}
+            {showInactive ? 'Hide past members' : `Show ${inactiveCount} past member${inactiveCount === 1 ? '' : 's'}`}
           </button>
         )}
       </div>
@@ -105,7 +105,9 @@ function PersonTile({ member: m }) {
           </div>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <RolePill role={m.role} />
-            {inactive && <span className="pill">Inactive</span>}
+            {m.offboarded_at
+              ? <span className="pill" style={{ borderColor: 'var(--house-line-strong)', color: 'var(--ink-2)' }}>Former</span>
+              : inactive && <span className="pill">Paused</span>}
             {m.email && <span style={{ fontSize: 12.5, color: 'var(--ink-4)' }} className="truncate">{m.email}</span>}
           </div>
         </div>
