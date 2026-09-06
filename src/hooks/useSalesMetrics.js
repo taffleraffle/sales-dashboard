@@ -89,7 +89,7 @@ async function load(range) {
     safe('marketing view', () => fetchAll(() => supabase.from('lib_marketing_by_audience_daily_mv').select('*').gte('date', startStr).lte('date', endStr).order('date'))),
     safe('EOD reports', () => fetchAll(() => supabase.from('closer_eod_reports').select('id, closer_id, report_date, is_confirmed, offers').gte('report_date', startStr).lte('report_date', endStr).order('report_date'))),
     safe('call exclusions', () => fetchAll(() => supabase.from('closer_call_excluded').select('closer_call_id').order('closer_call_id'))),
-    safe('calendar bookings', () => fetchAll(() => supabase.from('lib_strategy_booking_resolved').select('id, ghl_event_id, booked_at, is_dq, is_spam, contact_name').gte('booked_at', startStr).lte('booked_at', endStr).order('booked_at'))),
+    safe('calendar bookings', () => fetchAll(() => supabase.from('lib_strategy_booking_resolved').select('id, ghl_event_id, ghl_contact_id, contact_name, contact_email, booked_at, appointment_date, appointment_status, audience, revenue_tier, is_dq, is_spam').gte('booked_at', startStr).lte('booked_at', endStr).order('booked_at'))),
     safe('booking exclusions', () => fetchAll(() => supabase.from('booking_excluded').select('booking_id').order('booking_id'))),
   ])
 
@@ -137,9 +137,9 @@ async function load(range) {
   // ── Per-closer calendar bookings (booking -> appointment -> closer) ──
   const bookingExcludedIds = new Set(bookingExcluded.map(b => b.booking_id))
   // Belt and braces: migration 172 marks test bookings as spam in the view; keep the name guard here too
-  const goodBookings = bookings.filter(b => !b.is_dq && !b.is_spam && !bookingExcludedIds.has(b.id) && b.ghl_event_id && !/opt digital/i.test(b.contact_name || ''))
+  const goodBookings = bookings.filter(b => !b.is_dq && !b.is_spam && !bookingExcludedIds.has(b.id) && !/opt digital/i.test(b.contact_name || ''))
   const bookingsByCloser = {}
-  const eventIds = goodBookings.map(b => b.ghl_event_id)
+  const eventIds = goodBookings.map(b => b.ghl_event_id).filter(Boolean)
   for (let i = 0; i < eventIds.length; i += 200) {
     const slice = eventIds.slice(i, i + 200)
     const { data, error } = await supabase.from('ghl_appointments').select('ghl_event_id, closer_id').in('ghl_event_id', slice)
@@ -174,7 +174,7 @@ async function load(range) {
     t.qualifiedBookings = t.calendarBookings > 0 ? t.calendarBookings : t.ncRows
   }
 
-  return { totals, byCloser, calls, window: { startStr, endStr }, mvRows, problems }
+  return { totals, byCloser, calls, bookings: goodBookings, window: { startStr, endStr }, mvRows, problems }
 }
 
 export function useSalesMetrics(range) {
@@ -197,7 +197,7 @@ export function useSalesMetrics(range) {
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const totals = data?.totals || EMPTY_TOTALS
-  return { loading, error, totals, r: rates(totals), byCloser: data?.byCloser || {}, calls: data?.calls || [], window: data?.window }
+  return { loading, error, totals, r: rates(totals), byCloser: data?.byCloser || {}, calls: data?.calls || [], bookings: data?.bookings || [], window: data?.window }
 }
 
 export function invalidateSalesMetrics() { cache.clear() }

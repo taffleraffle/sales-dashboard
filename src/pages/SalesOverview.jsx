@@ -5,6 +5,7 @@ import DateRangeSelector from '../components/DateRangeSelector'
 import LeadStatusBadge from '../components/LeadStatusBadge'
 import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
 import Modal from '../components/editorial/Modal'
+import MetricDrilldown from '../components/house/MetricDrilldown'
 import { Loader, Clock, Check, AlertTriangle, Trophy, X } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
@@ -194,6 +195,7 @@ export default function SalesOverview() {
   const [endangeredLeads, setEndangeredLeads] = useState([])
   const [loadingEndangered, setLoadingEndangered] = useState(false)
   const [showRevenueBreakdown, setShowRevenueBreakdown] = useState(false)
+  const [drill, setDrill] = useState(null) // 'leads' | 'booked' | 'live' | 'show' | 'close' | 'cac'
   const [revenueDeals, setRevenueDeals] = useState(null)
 
   // ── Pending EOD: check who hasn't submitted today ──
@@ -395,12 +397,12 @@ export default function SalesOverview() {
         <section>
           <SectionLabel>Headline</SectionLabel>
           <div className="kpi-grid kpi-grid-6">
-            <KPICard label="Cost per lead" value={mkt.leads > 0 && mkt.adspend > 0 ? money(cpl) : '—'} subtitle={mkt.leads > 0 ? `${mkt.leads} leads` : 'no leads'} target={bm('cpl')} direction="below" />
-            <KPICard label="Cost per booked call" value={calBooked > 0 && mkt.adspend > 0 ? money(cpbc) : '—'} subtitle={calBooked > 0 ? `${calBooked} booked` : 'no bookings'} target={bm('cpb')} direction="below" />
-            <KPICard label="Cost per live call" value={money(costPerLive)} subtitle={T.lives > 0 ? `${T.lives} live calls` : 'no live calls'} target={bm('cost_per_live_call')} direction="below" />
-            <KPICard label="Show rate" value={`${showRate}%`} subtitle={`${T.lives} live of ${T.qualifiedBookings} booked`} target={bm('show_rate_new') ?? 70} direction="above" />
-            <KPICard label="Close rate" value={`${closeRate}%`} subtitle={`${T.closes} of ${T.lives} live calls`} target={bm('close_rate') ?? 25} direction="above" />
-            <KPICard label="CAC" value={money(cac)} subtitle={closes > 0 ? `${closes} ${closes === 1 ? 'close' : 'closes'}` : 'no closes yet'} target={bm('cpa_trial')} direction="below" onClick={openRevenueBreakdown} />
+            <KPICard label="Cost per lead" value={mkt.leads > 0 && mkt.adspend > 0 ? money(cpl) : '—'} subtitle={mkt.leads > 0 ? `${mkt.leads} leads` : 'no leads'} target={bm('cpl')} direction="below" onClick={() => setDrill('leads')} />
+            <KPICard label="Cost per booked call" value={calBooked > 0 && mkt.adspend > 0 ? money(cpbc) : '—'} subtitle={calBooked > 0 ? `${calBooked} booked` : 'no bookings'} target={bm('cpb')} direction="below" onClick={() => setDrill('booked')} />
+            <KPICard label="Cost per live call" value={money(costPerLive)} subtitle={T.lives > 0 ? `${T.lives} live calls` : 'no live calls'} target={bm('cost_per_live_call')} direction="below" onClick={() => setDrill('live')} />
+            <KPICard label="Show rate" value={`${showRate}%`} subtitle={`${T.lives} live of ${T.qualifiedBookings} booked`} target={bm('show_rate_new') ?? 70} direction="above" onClick={() => setDrill('show')} />
+            <KPICard label="Close rate" value={`${closeRate}%`} subtitle={`${T.closes} of ${T.lives} live calls`} target={bm('close_rate') ?? 25} direction="above" onClick={() => setDrill('close')} />
+            <KPICard label="CAC" value={money(cac)} subtitle={closes > 0 ? `${closes} ${closes === 1 ? 'close' : 'closes'}` : 'no closes yet'} target={bm('cpa_trial')} direction="below" onClick={() => setDrill('cac')} />
           </div>
         </section>
 
@@ -510,6 +512,8 @@ export default function SalesOverview() {
           </Card>
         </div>
       </>}
+
+      <MetricDrilldown kind={drill} onClose={() => setDrill(null)} metrics={m} closers={closers} />
 
       {/* Revenue breakdown: every closed and ascended deal in the period */}
       <Modal

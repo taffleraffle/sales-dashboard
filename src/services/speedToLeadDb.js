@@ -37,7 +37,7 @@ const digits = (p) => (p || '').replace(/\D/g, '').slice(-10)
 
 // UTC offset for America/New_York on a given calendar day ('-04:00' in summer,
 // '-05:00' in winter), so the window edges fall on ET midnight all year.
-function etOffset(dateStr) {
+export function etOffset(dateStr) {
   const probe = new Date(`${dateStr}T12:00:00Z`)
   const part = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'longOffset' }).formatToParts(probe).find(p => p.type === 'timeZoneName')?.value || 'GMT-04:00'
   const m = part.match(/([+-])(\d{2}):?(\d{2})/)
