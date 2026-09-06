@@ -276,7 +276,7 @@ export default function SetterOverview() {
       mcs,
       pickupRate: dials ? parseFloat(((pickups / dials) * 100).toFixed(1)) : 0,
       // Use whichever sets count is higher — EOD totals or setter_leads records
-      totalSets: eodSets > myLeads.length ? eodSets : myLeads.length,
+      totalSets: myLeads.length,   // logged leads only: same number as the Overview and Marketing
       leadsPerSet: (eodSets || myLeads.length) > 0 ? parseFloat((eod.leads / (eodSets || myLeads.length)).toFixed(1)) : 0,
       callsPerSet: (eodSets || myLeads.length) > 0 ? parseFloat((dials / (eodSets || myLeads.length)).toFixed(1)) : 0,
       pickupsPerSet: (eodSets || myLeads.length) > 0 ? parseFloat((pickups / (eodSets || myLeads.length)).toFixed(1)) : 0,

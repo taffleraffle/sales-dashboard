@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { todayET, dateRangeBoundsET, rangeToDays } from '../lib/dateUtils'
+import { todayET, rangeToDays } from '../lib/dateUtils'
 import KPICard from '../components/KPICard'
 import DateRangeSelector from '../components/DateRangeSelector'
 import LeadStatusBadge from '../components/LeadStatusBadge'
@@ -8,13 +8,10 @@ import Modal from '../components/editorial/Modal'
 import { Loader, Clock, Check, AlertTriangle, Trophy, X } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
-import { useCloserEODs, useCloserCallBreakdown } from '../hooks/useCloserData'
-import { useSetterEODs } from '../hooks/useSetterData'
-import { useFunnelData } from '../hooks/useFunnelData'
 import { fetchWavvAggregates } from '../services/wavvService'
 import { buildSetterSchedules } from '../services/ghlPipeline'
 import { fetchSpeedToLeadFromDb } from '../services/speedToLeadDb'
-import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
+import { useSalesMetrics, rates, EMPTY_TOTALS } from '../hooks/useSalesMetrics'
 import { useLeadAttribution } from '../hooks/useLeadAttribution'
 import { useBenchmarks } from '../hooks/useBenchmarks'
 import { supabase } from '../lib/supabase'
@@ -188,13 +185,9 @@ export default function SalesOverview() {
   const [stlError, setStlError] = useState(null)
 
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
-  const { loading: loadingFunnel } = useFunnelData(days)
+  const m = useSalesMetrics(range)
   const { members: closers } = useTeamMembers('closer')
   const { members: setters } = useTeamMembers('setter')
-  const { reports: closerReports } = useCloserEODs(null, days)
-  const { breakdown: callBreakdown } = useCloserCallBreakdown(null, days)
-  const { reports: setterReports } = useSetterEODs(null, days)
-  const { entries: marketingEntries } = useMarketingTracker()
   const { bm } = useBenchmarks()
   const { leads: recentLeads } = useLeadAttribution(days)
 
@@ -222,38 +215,6 @@ export default function SalesOverview() {
     }
     if (closers.length || setters.length) checkPending()
   }, [closers, setters])
-
-  // ── Calendar-true booked count for the acquisition-cost metrics ──
-  // Cost/Booked, Cost/Q.Booked, CPBC and Lead→Set are acquisition metrics
-  // (ad spend ÷ bookings), so they must divide by the SAME calendar count the
-  // marketing dashboard uses — not the closer-EOD tally (ct.booked, e.g. 34,
-  // which includes follow-ups) or marketing_tracker.qualified_bookings (30).
-  // Same source as the marketing Q.Books tile + trend charts:
-  // lib_marketing_by_audience_daily.qualified_bookings (← b.booked_at, deduped,
-  // booking_excluded honoured). The operational closer metrics (show / reschedule
-  // / close / leaderboard) deliberately stay on EOD — they're per-closer and
-  // about calls actually handled. (Ben 2026-07-15 — align cost-per-booked across pages.)
-  const [calBooked, setCalBooked] = useState(null)
-  useEffect(() => {
-    let cancelled = false
-    async function loadCalBooked() {
-      // Same ET window the Marketing page uses (dateRangeBoundsET), so the
-      // Cost / Booked figure here and the Q.Books tile there agree.
-      const { startStr: since, endStr: to } = dateRangeBoundsET(range)
-      let { data, error } = await supabase
-        .from('lib_marketing_by_audience_daily_mv')
-        .select('qualified_bookings, date').gte('date', since).lte('date', to)
-      if (error) {
-        ({ data } = await supabase
-          .from('lib_marketing_by_audience_daily')
-          .select('qualified_bookings, date').gte('date', since).lte('date', to))
-      }
-      if (cancelled) return
-      setCalBooked((data || []).reduce((n, r) => n + (Number(r.qualified_bookings) || 0), 0))
-    }
-    loadCalBooked()
-    return () => { cancelled = true }
-  }, [range])
 
   // ── Celebration: check for today's closes ──
   const [todayCloses, setTodayCloses] = useState(null)
@@ -287,24 +248,16 @@ export default function SalesOverview() {
     checkTodayCloses()
   }, [])
 
-  const openRevenueBreakdown = async () => {
+  const openRevenueBreakdown = () => {
     setShowRevenueBreakdown(true)
-    if (revenueDeals) return // already loaded
-    const reportIds = closerReports.map(r => r.id)
-    if (!reportIds.length) { setRevenueDeals([]); return }
-    const { data: calls } = await supabase
-      .from('closer_calls')
-      .select('prospect_name, call_type, outcome, revenue, cash_collected, eod_report_id')
-      .in('eod_report_id', reportIds)
-      .in('outcome', ['closed', 'ascended'])
-    // Map report_id to date
-    const reportDateMap = {}
-    for (const r of closerReports) reportDateMap[r.id] = r.report_date
-    setRevenueDeals((calls || []).map(c => ({
-      ...c,
-      date: reportDateMap[c.eod_report_id] || '',
-    })).sort((a, b) => b.date.localeCompare(a.date)))
+    setRevenueDeals(
+      m.calls
+        .filter(c => ['closed', 'ascended'].includes(c.outcome))
+        .sort((x, y) => (y.report_date || '').localeCompare(x.report_date || ''))
+        .map(c => ({ date: c.report_date, prospect_name: (c.prospect_name || '—').split(' - ')[0], call_type: c.call_type, revenue: c.revenue, cash_collected: c.cash_collected }))
+    )
   }
+
 
   // Fetch WAVV calls and check endangered leads (live from GHL)
   useEffect(() => {
@@ -340,105 +293,52 @@ export default function SalesOverview() {
     return () => { alive = false }
   }, [range, scheduleKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Filter marketing entries by range
-  const sinceStr = dateRangeBoundsET(range).startStr
-  const filteredMarketing = marketingEntries.filter(e => e.date >= sinceStr)
-  const mkt = computeMarketingStats(filteredMarketing)
-
-  // Closer totals
-  const ct = closerReports.reduce((a, r) => ({
-    booked: a.booked + (r.nc_booked || 0) + (r.fu_booked || 0),
-    ncBooked: a.ncBooked + (r.nc_booked || 0),
-    liveCalls: a.liveCalls + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
-    liveNC: a.liveNC + (r.live_nc_calls || 0),
-    noShows: a.noShows + (r.nc_no_shows || 0) + (r.fu_no_shows || 0),
-    ncNoShows: a.ncNoShows + (r.nc_no_shows || 0),
-    offers: a.offers + (r.offers || 0),
-    closes: a.closes + (r.closes || 0),
-    revenue: a.revenue + parseFloat(r.total_revenue || 0),
-    cash: a.cash + parseFloat(r.total_cash_collected || 0),
-    ascensions: a.ascensions + (r.deposits || 0),
-    ascendCash: a.ascendCash + parseFloat(r.ascend_cash || 0),
-    ascendRevenue: a.ascendRevenue + parseFloat(r.ascend_revenue || 0),
-    reschedules: a.reschedules + (r.reschedules || 0),
-  }), { booked: 0, ncBooked: 0, liveCalls: 0, liveNC: 0, noShows: 0, ncNoShows: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascensions: 0, ascendCash: 0, ascendRevenue: 0, reschedules: 0 })
-
-  const totalRevenue = ct.revenue + ct.ascendRevenue
-  const totalCash = ct.cash + ct.ascendCash
-  // Close rate is computed at the PROSPECT level: unique prospects who
-  // closed / unique prospects who had a live NC or FU call. Multiple
-  // follow-ups on the same prospect collapse to one — closing on a FU
-  // still counts as a close. See useCloserCallBreakdown for the full
-  // rationale and the audit script at scripts/close-rate-audit.mjs.
-  const prospectSum = Object.values(callBreakdown || {}).reduce((a, b) => ({
-    live:   a.live   + (b.liveProspects   || 0),
-    closed: a.closed + (b.closedProspects || 0),
-  }), { live: 0, closed: 0 })
-  const showRate = ct.ncBooked ? ((ct.liveNC / ct.ncBooked) * 100).toFixed(1) : 0
-  const closeRate = prospectSum.live > 0 ? ((prospectSum.closed / prospectSum.live) * 100).toFixed(1) : 0
-
-  // Marketing derived
-  const cpl = mkt.leads > 0 ? mkt.adspend / mkt.leads : 0
-  // Calendar-basis cost per booked call (matches the marketing dashboard).
-  // Falls back to null while calBooked is still loading so the tile shows '—'
-  // rather than a stale EOD-based figure.
-  const cpbc = calBooked > 0 ? mkt.adspend / calBooked : 0
-  const feRoas = mkt.adspend > 0 ? ct.cash / mkt.adspend : 0
+  // ── Everything below reads the unified layer (useSalesMetrics) ──
+  const T = m.totals
+  const R = m.r
+  const mkt = { adspend: T.adspend, leads: T.leads }
+  const calBooked = m.loading ? null : T.qualifiedBookings
+  const ct = { liveCalls: T.lives, liveNC: T.lives, ncBooked: T.qualifiedBookings, cash: T.trialCash, ascendCash: T.ascendCash, revenue: T.trialRevenue, ascendRevenue: T.ascendRevenue, closes: T.closes }
+  const totalRevenue = R.revenue
+  const totalCash = R.cash
+  const showRate = R.showRate
+  const closeRate = R.closeRate
+  const cpl = R.cpl ?? 0
+  const cpbc = R.costPerBooked ?? 0
+  const feRoas = R.feRoas ?? 0
 
   // WAVV totals
   const wt = wavvAgg?.totals || { dials: 0, pickups: 0, mcs: 0 }
 
-  // Per-closer leaderboard
+  // Per-closer leaderboard: same call rows as the company totals
   const closerBoard = closers.map(c => {
-    const my = closerReports.filter(r => r.closer_id === c.id)
-    const t = my.reduce((a, r) => ({
-      booked: a.booked + (r.nc_booked || 0) + (r.fu_booked || 0),
-      ncBooked: a.ncBooked + (r.nc_booked || 0),
-      live: a.live + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
-      liveNC: a.liveNC + (r.live_nc_calls || 0),
-      offers: a.offers + (r.offers || 0),
-      closes: a.closes + (r.closes || 0),
-      revenue: a.revenue + parseFloat(r.total_revenue || 0),
-      cash: a.cash + parseFloat(r.total_cash_collected || 0),
-      ascendCash: a.ascendCash + parseFloat(r.ascend_cash || 0),
-    }), { booked: 0, ncBooked: 0, live: 0, liveNC: 0, offers: 0, closes: 0, revenue: 0, cash: 0, ascendCash: 0 })
-    // Close rate is prospect-level: unique closed prospects / unique live
-    // prospects. Pulls from useCloserCallBreakdown so multiple FUs on the
-    // same prospect dedup to one. See the audit script at
-    // scripts/close-rate-audit.mjs.
-    const cb = (callBreakdown || {})[c.id] || { liveProspects: 0, closedProspects: 0 }
-    return { id: c.id, name: c.name, ...t, totalCash: t.cash + t.ascendCash,
-      showPct: t.ncBooked ? ((t.liveNC / t.ncBooked) * 100).toFixed(1) : '0.0',
-      closePct: cb.liveProspects > 0 ? ((cb.closedProspects / cb.liveProspects) * 100).toFixed(1) : '0.0',
-      offerPct: t.live ? ((t.offers / t.live) * 100).toFixed(1) : '0.0',
-    }
+    const t = m.byCloser[c.id] || { ...EMPTY_TOTALS }
+    const r = rates(t)
+    return { id: c.id, name: c.name, liveNC: t.lives, closes: t.closes, booked: t.qualifiedBookings, offers: t.offers, revenue: r.revenue, cash: t.trialCash, ascendCash: t.ascendCash, totalCash: r.cash,
+      showPct: r.showRate.toFixed(1), closePct: r.closeRate.toFixed(1), offerPct: r.offerRate.toFixed(1) }
   }).sort((a, b) => b.totalCash - a.totalCash)
 
-  // Per-setter leaderboard
+  // Per-setter leaderboard: dials from WAVV, sets = leads they logged
   const setterBoard = setters.map(s => {
     const w = wavvAgg?.byUser?.[s.wavv_user_id] || { dials: 0, pickups: 0, mcs: 0, uniqueContacts: 0, avgDuration: 0 }
-    const eodSets = setterReports.filter(r => r.setter_id === s.id).reduce((a, r) => a + (r.sets || 0), 0)
+    const sets = recentLeads.filter(l => l.setter_id === s.id).length
     return { id: s.id, name: s.name, dials: w.dials, pickups: w.pickups, mcs: w.mcs,
-      contacts: w.uniqueContacts, avgDur: w.avgDuration, sets: eodSets,
+      contacts: w.uniqueContacts, avgDur: w.avgDuration, sets,
       pickupPct: w.dials ? ((w.pickups / w.dials) * 100).toFixed(1) : '0.0',
       mcPct: w.dials ? ((w.mcs / w.dials) * 100).toFixed(1) : '0.0',
     }
   }).sort((a, b) => b.dials - a.dials)
 
-  const isLoading = loadingFunnel || wavvLoading
-  // Wait for all above-the-fold data before revealing. Previous gate flipped as
-  // soon as funnel loaded, then other sections popped in one-by-one as their
-  // independent hooks resolved. Now we block until the critical set is ready
-  // so content appears in one coordinated paint.
-  const dataReady = !loadingFunnel && !wavvLoading && closers.length > 0 && setters.length > 0
+  const isLoading = m.loading || wavvLoading
+  const dataReady = !m.loading && !wavvLoading && closers.length > 0 && setters.length > 0
 
   // ── Speed to lead splits (this week / in hours / out of hours) ──
   const stlSplit = splitSpeedToLead(stl, stlSchedules)
-  const closes = prospectSum.closed
-  const cac = mkt.adspend > 0 && closes > 0 ? mkt.adspend / closes : null
-  const costPerLive = mkt.adspend > 0 && ct.liveCalls > 0 ? mkt.adspend / ct.liveCalls : null
-  const revPerLead = mkt.leads > 0 ? totalRevenue / mkt.leads : null
-  const revPerBooked = calBooked > 0 ? totalRevenue / calBooked : null
+  const closes = T.closes
+  const cac = R.cac
+  const costPerLive = R.costPerLive
+  const revPerLead = R.revPerLead
+  const revPerBooked = R.revPerBooked
   const money = (n) => n == null ? '—' : `$${Math.round(n).toLocaleString()}`
   const money2 = (n) => n == null ? '—' : `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 
@@ -488,6 +388,8 @@ export default function SalesOverview() {
         </div>
       )}
 
+      {m.error && <div className="callout"><b>Some numbers could not be loaded.</b> {m.error}</div>}
+
       {dataReady && <>
         {/* ── 1. Headline: the six numbers Ben runs the floor on, one row ── */}
         <section>
@@ -495,9 +397,9 @@ export default function SalesOverview() {
           <div className="kpi-grid kpi-grid-6">
             <KPICard label="Cost per lead" value={mkt.leads > 0 && mkt.adspend > 0 ? money(cpl) : '—'} subtitle={mkt.leads > 0 ? `${mkt.leads} leads` : 'no leads'} target={bm('cpl')} direction="below" />
             <KPICard label="Cost per booked call" value={calBooked > 0 && mkt.adspend > 0 ? money(cpbc) : '—'} subtitle={calBooked > 0 ? `${calBooked} booked` : 'no bookings'} target={bm('cpb')} direction="below" />
-            <KPICard label="Cost per live call" value={money(costPerLive)} subtitle={ct.liveCalls > 0 ? `${ct.liveCalls} live calls` : 'no live calls'} target={bm('cost_per_live_call')} direction="below" />
-            <KPICard label="Show rate" value={`${showRate}%`} subtitle={`${ct.liveNC} of ${ct.ncBooked} showed`} target={bm('show_rate_new') ?? 70} direction="above" />
-            <KPICard label="Close rate" value={`${closeRate}%`} subtitle={`${prospectSum.closed} of ${prospectSum.live} live`} target={bm('close_rate') ?? 25} direction="above" />
+            <KPICard label="Cost per live call" value={money(costPerLive)} subtitle={T.lives > 0 ? `${T.lives} live calls` : 'no live calls'} target={bm('cost_per_live_call')} direction="below" />
+            <KPICard label="Show rate" value={`${showRate}%`} subtitle={`${T.lives} live of ${T.qualifiedBookings} booked`} target={bm('show_rate_new') ?? 70} direction="above" />
+            <KPICard label="Close rate" value={`${closeRate}%`} subtitle={`${T.closes} of ${T.lives} live calls`} target={bm('close_rate') ?? 25} direction="above" />
             <KPICard label="CAC" value={money(cac)} subtitle={closes > 0 ? `${closes} ${closes === 1 ? 'close' : 'closes'}` : 'no closes yet'} target={bm('cpa_trial')} direction="below" onClick={openRevenueBreakdown} />
           </div>
         </section>
@@ -535,7 +437,8 @@ export default function SalesOverview() {
               footer={{ name: 'Team', liveNC: ct.liveNC, closes, showPct: showRate, closePct: closeRate, totalCash }}
               columns={[
                 { key: 'name', label: 'Closer', render: (r, f) => f ? <span style={{ fontWeight: 700 }}>Team</span> : <Person name={r.name} rank={r._rank} /> },
-                { key: 'liveNC', label: 'Net new', align: 'right' },
+                { key: 'booked', label: 'Booked', align: 'right' },
+                { key: 'liveNC', label: 'Live', align: 'right' },
                 { key: 'closes', label: 'Closes', align: 'right', strong: true },
                 { key: 'showPct', label: 'Show', align: 'right', render: r => `${r.showPct}%`, tone: r => tone(parseFloat(r.showPct), bm('show_rate_new') ?? 70, 'above') },
                 { key: 'closePct', label: 'Close', align: 'right', render: r => `${r.closePct}%`, tone: r => tone(parseFloat(r.closePct), bm('close_rate') ?? 25, 'above') },

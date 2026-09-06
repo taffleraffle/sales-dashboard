@@ -1,268 +1,93 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
-import { AlertTriangle, Loader, ExternalLink, Edit3 } from 'lucide-react'
+import { Loader, Edit3 } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 import LeaderTable, { Card } from '../components/house/LeaderTable'
 import Modal from '../components/editorial/Modal'
 import { useBenchmarks } from '../hooks/useBenchmarks'
-import { supabase } from '../lib/supabase'
-import { useCloserStats, useCloserEODs, useCloserTranscripts, useObjectionAnalysis, useCloserCallBreakdown } from '../hooks/useCloserData'
-import { analyzeObjections } from '../services/objectionAnalysis'
-import { syncFathomTranscripts } from '../services/fathomSync'
-import { rangeToDays } from '../lib/dateUtils'
+import { useSalesMetrics, rates, EMPTY_TOTALS } from '../hooks/useSalesMetrics'
+
+/*
+  One closer. Reads the same unified layer as the Overview and Closers
+  pages (useSalesMetrics), filtered to this closer, so the numbers here are
+  the closer's share of exactly what the company pages show. The Fathom
+  sync and objection analysis that used to run on every visit are gone:
+  they were the reason the page took seconds to paint.
+*/
+
+const money = (n) => `$${Math.round(n || 0).toLocaleString()}`
 
 export default function CloserDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [range, setRange] = useState(30)
-  const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const [member, setMember] = useState(null)
-  const [freshObjections, setFreshObjections] = useState(null)
-  const [allCalls, setAllCalls] = useState([])
   const [selectedDate, setSelectedDate] = useState(null)
   const [showCalls, setShowCalls] = useState(null) // 'show' | 'close' | null
   const { bm } = useBenchmarks()
-  const syncedRef = useRef(false)
-  const stats = useCloserStats(id, days)
-  const { reports: myReports } = useCloserEODs(id, days)
-  const { reports: allReports } = useCloserEODs(null, days)
-  const { breakdown: myBreak } = useCloserCallBreakdown(id, days)
-  const { breakdown: allBreak } = useCloserCallBreakdown(null, days)
-  const { transcripts, loading: loadingTranscripts } = useCloserTranscripts(id)
-  const { objections: storedObjections, loading: loadingObjections } = useObjectionAnalysis(id, days)
+  const m = useSalesMetrics(range)
+  const days = typeof range === 'number' ? range : 30
 
-  const rawObjections = freshObjections || storedObjections
-  const [objections, setObjections] = useState([])
-  // Map of lowercased prospect name → outcome ('closed' | 'ascended' | 'not_closed' | 'no_show' | ...)
-  // Used both to recompute the aggregate win_rate AND to color individual
-  // call-reference chips green/red per prospect in the render.
-  const [callOutcomes, setCallOutcomes] = useState({})
-
-  // Fetch full closer_calls once — used both by the Calls Calendar (everything)
-  // and by the objection win-rate recalculation (prospect_name → outcome map).
   useEffect(() => {
-    if (!myReports.length) { setAllCalls([]); setCallOutcomes({}); return }
-    let active = true
-    async function fetchCalls() {
-      const reportToDate = {}
-      for (const r of myReports) reportToDate[r.id] = r.report_date
-      const { data } = await supabase
-        .from('closer_calls')
-        .select('id, prospect_name, outcome, call_type, revenue, cash_collected, notes, ghl_event_id, created_at, eod_report_id')
-        .in('eod_report_id', myReports.map(r => r.id))
-        .order('created_at', { ascending: true })
-      if (!active) return
-      const enriched = (data || []).map(c => ({ ...c, report_date: reportToDate[c.eod_report_id] }))
-      setAllCalls(enriched)
-      const map = {}
-      for (const c of enriched) {
-        if (c.prospect_name) map[c.prospect_name.toLowerCase().trim()] = c.outcome
-      }
-      setCallOutcomes(map)
-    }
-    fetchCalls()
-    return () => { active = false }
-  }, [myReports])
+    supabase.from('team_members').select('*').eq('id', id).single().then(({ data }) => setMember(data))
+  }, [id])
 
-  // Default-select the most recent date that has calls so the day-detail
-  // panel is populated on first paint. Also auto-corrects when the date range
-  // changes and the previously-selected date falls outside the new window.
+  const allCalls = m.calls.filter(c => c.closer_id === id)
+  const mine = m.byCloser[id] || { ...EMPTY_TOTALS }
+  const my = rates(mine)
+  const company = m.r
+
+  // Default-select the most recent day with calls
   useEffect(() => {
     if (allCalls.length === 0) return
     const dates = [...new Set(allCalls.map(c => c.report_date).filter(Boolean))].sort()
     if (!dates.length) return
-    if (!selectedDate || !dates.includes(selectedDate)) {
-      setSelectedDate(dates[dates.length - 1])
-    }
-  }, [allCalls, selectedDate])
-
-  // Recalculate win rates from actual closer_calls outcomes
-  useEffect(() => {
-    if (!rawObjections.length) { setObjections([]); return }
-    async function recalcWinRates() {
-      const callMap = callOutcomes
-      const resolveOutcome = (ref) => {
-        const name = (ref.prospect || '').toLowerCase().trim()
-        if (callMap[name] !== undefined) return callMap[name]
-        const firstName = name.split(' ')[0]
-        const match = Object.entries(callMap).find(([k]) => k.split(' ')[0] === firstName)
-        return match ? match[1] : undefined
-      }
-      // Recalculate win rate for each objection + dedupe refs by prospect:date.
-      // The same Adam Burrell appearing twice in one objection comes from the
-      // AI returning duplicate call_numbers or legacy data that wasn't deduped
-      // at write time — strip on read so legacy rows look clean too.
-      const enriched = rawObjections.map(obj => {
-        const rawRefs = Array.isArray(obj.call_references) ? obj.call_references : []
-        const seen = new Set()
-        const dedupedRefs = []
-        for (const ref of rawRefs) {
-          const key = `${(ref.prospect || '').toLowerCase().trim()}|${ref.date || ''}`
-          if (seen.has(key)) continue
-          seen.add(key)
-          dedupedRefs.push(ref)
-        }
-
-        let wins = 0, total = 0
-        for (const ref of dedupedRefs) {
-          const outcome = resolveOutcome(ref)
-          if (outcome !== undefined) {
-            total++
-            if (outcome === 'closed' || outcome === 'ascended') wins++
-          }
-        }
-        return {
-          ...obj,
-          call_references: dedupedRefs,
-          occurrence_count: dedupedRefs.length || obj.occurrence_count,
-          win_rate: total > 0 ? Math.round((wins / total) * 100) : obj.win_rate,
-        }
-      })
-      setObjections(enriched)
-    }
-    recalcWinRates()
-  }, [rawObjections, callOutcomes])
-
-  useEffect(() => {
-    supabase.from('team_members').select('*').eq('id', id).single()
-      .then(({ data }) => setMember(data))
-  }, [id])
-
-  // Auto-sync Fathom transcripts on mount (once)
-  useEffect(() => {
-    if (syncedRef.current) return
-    syncedRef.current = true
-    syncFathomTranscripts().catch(() => {})
-  }, [])
-
-  // Auto-analyze objections when transcripts exist but objections don't
-  useEffect(() => {
-    if (loadingObjections || loadingTranscripts) return
-    if (transcripts.length > 0 && storedObjections.length === 0) {
-      analyzeObjections(id, days)
-        .then(() => {
-          supabase
-            .from('objection_analysis')
-            .select('*')
-            .eq('closer_id', id)
-            .order('occurrence_count', { ascending: false })
-            .then(({ data }) => { if (data?.length) setFreshObjections(data) })
-        })
-        .catch(() => {})
-    }
-  }, [id, days, loadingObjections, loadingTranscripts, transcripts.length, storedObjections.length])
-
-  // Company-wide averages from all closer EODs
-  const companyTotals = allReports.reduce((acc, r) => ({
-    booked: acc.booked + (r.nc_booked || 0) + (r.fu_booked || 0),
-    ncBooked: acc.ncBooked + (r.nc_booked || 0),
-    liveCalls: acc.liveCalls + (r.live_nc_calls || 0) + (r.live_fu_calls || 0),
-    liveNC: acc.liveNC + (r.live_nc_calls || 0),
-    offers: acc.offers + (r.offers || 0),
-    closes: acc.closes + (r.closes || 0),
-    reschedules: acc.reschedules + (r.reschedules || 0),
-  }), { booked: 0, ncBooked: 0, liveCalls: 0, liveNC: 0, offers: 0, closes: 0, reschedules: 0 })
-
-  // Company-wide and per-closer close rates are prospect-level: unique
-  // closed prospects / unique live prospects, dedup-by prospect_name.
-  // See useCloserCallBreakdown and scripts/close-rate-audit.mjs.
-  const companyProspects = Object.values(allBreak || {}).reduce((a, b) => ({
-    live:   a.live   + (b.liveProspects   || 0),
-    closed: a.closed + (b.closedProspects || 0),
-  }), { live: 0, closed: 0 })
-  const companyCloseRate = companyProspects.live > 0
-    ? parseFloat(((companyProspects.closed / companyProspects.live) * 100).toFixed(1))
-    : 0
-
-  const mb = myBreak?.[id] || { liveProspects: 0, closedProspects: 0 }
-  const myCloseRate = mb.liveProspects > 0
-    ? parseFloat(((mb.closedProspects / mb.liveProspects) * 100).toFixed(1))
-    : 0
-  // Closes + Net New tiles use the prospect-deduped per-call truth (same
-  // source as the Close Rate gauge below). Surfaces EOD self-reported
-  // count in the subtitle for reconciliation when the closer logged a
-  // different number than the prospect rows they entered.
-  const myClosesDeduped = mb.closedProspects || 0
-  const myLiveDeduped   = mb.liveProspects   || 0
-
-  const companyRates = {
-    // Show rate: new-call only (denominator = nc_booked, numerator = live_nc_calls)
-    showRate: companyTotals.ncBooked > 0 ? parseFloat(((companyTotals.liveNC / companyTotals.ncBooked) * 100).toFixed(1)) : 0,
-    closeRate: companyCloseRate,
-    offerRate: companyTotals.liveCalls > 0 ? parseFloat(((companyTotals.offers / companyTotals.liveCalls) * 100).toFixed(1)) : 0,
-    offerCloseRate: companyTotals.offers > 0 ? parseFloat(((companyTotals.closes / companyTotals.offers) * 100).toFixed(1)) : 0,
-    rescheduleRate: companyTotals.booked > 0 ? parseFloat(((companyTotals.reschedules / companyTotals.booked) * 100).toFixed(1)) : 0,
-  }
-
-  const myShowRate = parseFloat(stats.showRate) || 0
-  const myOfferRate = parseFloat(stats.offerRate) || 0
-  const myOfferCloseRate = stats.offers > 0 ? parseFloat(((myClosesDeduped / stats.offers) * 100).toFixed(1)) : 0
-  const myRescheduleRate = parseFloat(stats.rescheduleRate) || 0
-  const avgDealSize = myClosesDeduped > 0 ? parseFloat((stats.revenue / myClosesDeduped).toFixed(0)) : 0
-  const totalCash = stats.cash + stats.ascendCash
-  const totalRevenue = stats.revenue + stats.ascendRevenue
-  const cashCollRate = totalRevenue > 0 ? parseFloat(((totalCash / totalRevenue) * 100).toFixed(1)) : 0
-  const companyCashCollRate = (() => { const t = allReports.reduce((a, r) => ({ rev: a.rev + parseFloat(r.total_revenue || 0) + parseFloat(r.ascend_revenue || 0), cash: a.cash + parseFloat(r.total_cash_collected || 0) + parseFloat(r.ascend_cash || 0) }), { rev: 0, cash: 0 }); return t.rev > 0 ? parseFloat(((t.cash / t.rev) * 100).toFixed(1)) : 0 })()
-  const avgFathomDuration = transcripts.length > 0 ? Math.round(transcripts.reduce((s, t) => s + (t.duration_seconds || 0), 0) / transcripts.length) : 0
+    if (!selectedDate || !dates.includes(selectedDate)) setSelectedDate(dates[dates.length - 1])
+  }, [allCalls, selectedDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!member) {
-    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin text-text-primary" /></div>
+    return <div className="flex items-center justify-center h-64"><Loader className="animate-spin" /></div>
   }
+
+  const delta = (a, b) => parseFloat(((a || 0) - (b || 0)).toFixed(1))
 
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <div>
-          <span className="eyebrow eyebrow-accent">OPT Sales · Closer detail</span>
+          <span className="eyebrow eyebrow-accent">OPT Sales · Closer</span>
           <h1 className="h2 mt-2">{member.name}</h1>
-          <p
-            className="mt-2"
-            style={{
-              fontFamily: 'var(--mono)',
-              fontSize: 10,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--ink-3)',
-            }}
-          >
-            Closer · performance
-          </p>
         </div>
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
-        <KPICard label="Booked" value={stats.totalBooked} subtitle={`${stats.ncBooked} NC / ${stats.fuBooked} FU`} />
-        <KPICard label="Net New" value={myLiveDeduped} subtitle={`${stats.liveNC} EOD-reported · ${stats.liveCalls - stats.liveNC} FU separately`} />
-        <KPICard label="No Shows" value={stats.noShows} />
-        <KPICard label="Offers" value={stats.offers} />
-        <KPICard label="Closes" value={myClosesDeduped} subtitle={myClosesDeduped !== stats.closes ? `${stats.closes} EOD-reported` : null} />
-        <KPICard label="Trial Cash" value={`$${stats.cash.toLocaleString()}`} subtitle={`$${stats.revenue.toLocaleString()} rev`} />
-        <KPICard label="Ascension Cash" value={`$${stats.ascendCash.toLocaleString()}`} subtitle={`${stats.ascensions} ascensions`} />
-        <KPICard label="Total Cash" value={`$${totalCash.toLocaleString()}`} subtitle={`$${totalRevenue.toLocaleString()} total rev`} />
-        <KPICard label="Avg Deal" value={`$${avgDealSize.toLocaleString()}`} />
-        {avgFathomDuration > 0 && <KPICard label="Avg Talk Time" value={`${Math.round(avgFathomDuration / 60)}m`} subtitle={`${transcripts.length} calls`} />}
+      {m.error && <div className="callout" style={{ marginBottom: 18 }}><b>Could not load the numbers.</b> {m.error}</div>}
+
+      <div className="kpi-grid mb-6">
+        <KPICard label="Booked" value={mine.qualifiedBookings} subtitle={mine.calendarBookings > 0 ? 'calendar bookings assigned to them' : 'new-call rows on their EODs'} />
+        <KPICard label="Live" value={mine.lives} subtitle={`${mine.fuLives} follow-up lives separately`} />
+        <KPICard label="No shows" value={mine.noShows} subtitle={`${mine.reschedules} rescheduled · ${mine.cancels} cancelled`} />
+        <KPICard label="Offers" value={mine.offers} />
+        <KPICard label="Closes" value={mine.closes} subtitle={mine.ascensions > 0 ? `${mine.ascensions} ascensions separately` : undefined} />
+        <KPICard label="Trial cash" value={money(mine.trialCash)} subtitle={`${money(mine.trialRevenue)} revenue`} />
+        <KPICard label="Ascension cash" value={money(mine.ascendCash)} subtitle={`${money(mine.ascendRevenue)} revenue`} />
+        <KPICard label="Total cash" value={money(my.cash)} subtitle={`${money(my.revenue)} total revenue`} />
+        <KPICard label="Avg deal" value={my.avgDeal != null ? money(my.avgDeal) : '—'} />
       </div>
 
-      {/* Conversion Gauges — Net Close removed; close rate is prospect-level
-          so a separate "net" version (NC denominator + FU closes counted)
-          no longer represents anything meaningful. */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <Gauge label="Show Rate" value={myShowRate} target={bm('show_rate_new', 70)} onClick={() => setShowCalls('show')} hint="See which booked calls showed and which did not" delta={parseFloat((myShowRate - companyRates.showRate).toFixed(1))} avgLabel={companyRates.showRate} />
-        <Gauge label="Close Rate" value={myCloseRate} target={bm('close_rate', 25)} onClick={() => setShowCalls('close')} hint="See which live calls closed" delta={parseFloat((myCloseRate - companyRates.closeRate).toFixed(1))} avgLabel={companyRates.closeRate} />
-        <Gauge label="Offer Rate" value={myOfferRate} target={bm('offer_rate', 80)} delta={parseFloat((myOfferRate - companyRates.offerRate).toFixed(1))} avgLabel={companyRates.offerRate} />
-        <Gauge label="Offer → Close" value={myOfferCloseRate} target={30} max={100} delta={parseFloat((myOfferCloseRate - companyRates.offerCloseRate).toFixed(1))} avgLabel={companyRates.offerCloseRate} />
-        <Gauge label="Reschedule %" value={myRescheduleRate} target={15} max={50} delta={parseFloat((myRescheduleRate - companyRates.rescheduleRate).toFixed(1))} avgLabel={companyRates.rescheduleRate} />
-        <Gauge label="Cash Collect %" value={cashCollRate} target={50} delta={parseFloat((cashCollRate - companyCashCollRate).toFixed(1))} avgLabel={companyCashCollRate} />
-        <Gauge label="No Show %" value={stats.totalBooked > 0 ? parseFloat(((stats.noShows / stats.totalBooked) * 100).toFixed(1)) : 0} target={20} max={50} />
-        <Gauge label="Avg call length" value={avgFathomDuration > 0 ? Math.round(avgFathomDuration / 60) : 0} target={30} max={90} suffix=" min" />
+      <div className="kpi-grid mb-6">
+        <Gauge label="Show rate" value={my.showRate} target={bm('show_rate_new', 50)} delta={delta(my.showRate, company.showRate)} avgLabel={company.showRate} onClick={() => setShowCalls('show')} hint="See which booked calls showed and which did not" />
+        <Gauge label="Close rate" value={my.closeRate} target={bm('close_rate', 30)} delta={delta(my.closeRate, company.closeRate)} avgLabel={company.closeRate} onClick={() => setShowCalls('close')} hint="See which live calls closed" />
+        <Gauge label="Offer rate" value={my.offerRate} target={bm('offer_rate', 80)} delta={delta(my.offerRate, company.offerRate)} avgLabel={company.offerRate} />
+        <Gauge label="Offer to close" value={my.offerCloseRate} target={30} delta={delta(my.offerCloseRate, company.offerCloseRate)} avgLabel={company.offerCloseRate} />
+        <Gauge label="Reschedule rate" value={my.rescheduleRate} target={10} max={50} direction="below" delta={delta(my.rescheduleRate, company.rescheduleRate)} avgLabel={company.rescheduleRate} />
+        <Gauge label="No-show rate" value={my.noShowRate} target={20} max={50} direction="below" delta={delta(my.noShowRate, company.noShowRate)} avgLabel={company.noShowRate} />
+        <Gauge label="Cash collected" value={my.cashCollectRate} target={50} delta={delta(my.cashCollectRate, company.cashCollectRate)} avgLabel={company.cashCollectRate} />
       </div>
 
-      {/* Calls Calendar — replaces the old EOD-aggregate table.
-          Day strip across the top, click a day to see that day's calls below. */}
       <CallsCalendar
         calls={allCalls}
         selectedDate={selectedDate}
@@ -271,99 +96,7 @@ export default function CloserDetail() {
         days={days}
       />
 
-      {/* Show rate / close rate drilldown: the calls behind the number */}
       <CallsModal kind={showCalls} onClose={() => setShowCalls(null)} calls={allCalls} days={days} name={member?.name} />
-
-      {/* Objection Analysis */}
-      <div className="tile tile-feedback p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <AlertTriangle size={16} className="text-warning" />
-          <h2 className="text-sm font-medium">Most Common Objections</h2>
-          <span className="text-xs text-text-400 ml-auto">Last {days} days &middot; Auto-analyzed from Fathom</span>
-        </div>
-        {loadingObjections ? (
-          <p className="text-text-400 text-sm py-4 text-center">Loading...</p>
-        ) : objections.length > 0 ? (
-          <div className="space-y-3">
-            {objections.map((obj, i) => {
-              const refs = Array.isArray(obj.call_references) ? obj.call_references : []
-              const legacyQuotes = Array.isArray(obj.example_quotes) ? obj.example_quotes : []
-              // Resolve per-ref outcome — same first-name fallback the win-rate
-              // reducer uses, so the chip color agrees with the badge.
-              const outcomeFor = (ref) => {
-                const name = (ref.prospect || '').toLowerCase().trim()
-                if (callOutcomes[name] !== undefined) return callOutcomes[name]
-                const firstName = name.split(' ')[0]
-                const match = Object.entries(callOutcomes).find(([k]) => k.split(' ')[0] === firstName)
-                return match ? match[1] : undefined
-              }
-              const refClass = (outcome) => {
-                if (outcome === 'closed' || outcome === 'ascended') return 'bg-success/15 text-success border border-success/40 hover:bg-success/25'
-                if (outcome === 'no_show' || outcome === 'not_closed') return 'bg-danger/15 text-danger border border-danger/40 hover:bg-danger/25'
-                return 'bg-bg-card-hover border border-border-default hover:bg-opt-yellow/10 hover:text-text-primary'
-              }
-              return (
-                <div key={i} className="border border-border-default rounded-sm p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <span className="font-medium text-sm">{obj.objection_category}</span>
-                      <span className="text-xs bg-text-400/15 text-text-400 px-2 py-0.5 rounded">
-                        {obj.occurrence_count}x
-                      </span>
-                    </div>
-                    {obj.win_rate != null && (
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                        obj.win_rate >= 50 ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'
-                      }`}>
-                        {obj.win_rate}% win rate
-                      </span>
-                    )}
-                  </div>
-
-                  {refs.length > 0 ? (
-                    <div className="space-y-1.5">
-                      {refs.map((ref, j) => {
-                        const outcome = outcomeFor(ref)
-                        const quote = ref.quote || legacyQuotes[j] || legacyQuotes[0]
-                        return (
-                          <div key={j} className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
-                            <a
-                              href={ref.url || '#'}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors shrink-0 ${refClass(outcome)}`}
-                              title={outcome === 'closed' || outcome === 'ascended' ? 'Closed / won'
-                                : outcome === 'no_show' ? 'No-show'
-                                : outcome === 'not_closed' ? 'Not closed'
-                                : outcome ? `Outcome: ${outcome}` : 'Outcome unknown'}
-                            >
-                              <span className="font-medium">{ref.prospect}</span>
-                              <span className="opacity-70">({ref.date})</span>
-                              {ref.url && <ExternalLink size={10} />}
-                            </a>
-                            {quote && (
-                              <p className="text-xs text-text-400 italic min-w-0 flex-1">&ldquo;{quote}&rdquo;</p>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ) : legacyQuotes.length > 0 ? (
-                    <p className="text-xs text-text-400 italic">&ldquo;{legacyQuotes[0]}&rdquo;</p>
-                  ) : null}
-                </div>
-              )
-            })}
-          </div>
-        ) : transcripts.length > 0 ? (
-          <div className="flex items-center justify-center gap-2 py-6">
-            <Loader size={14} className="animate-spin text-text-primary" />
-            <span className="text-text-400 text-sm">Analyzing {transcripts.length} transcripts...</span>
-          </div>
-        ) : (
-          <p className="text-text-400 text-sm py-4 text-center">No transcripts available yet — Fathom meetings sync automatically.</p>
-        )}
-      </div>
     </div>
   )
 }
