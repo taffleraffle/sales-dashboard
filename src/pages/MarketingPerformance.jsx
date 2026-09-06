@@ -4594,9 +4594,11 @@ export default function MarketingPerformance() {
         const net = showDenom - cancels - reschedules
         return net > 0 ? Math.min(100, (new_live_calls / net) * 100) : 0
       })(),
-      no_shows: (stats.no_shows > 0 && new_live_calls === stats.new_live_calls && showDenom === showDenomCur)
-        ? stats.no_shows
-        : Math.max(0, showDenom - new_live_calls - cancels - reschedules),
+      // Logged no-shows only (closer EOD outcome), the same count as the
+      // Overview. The old fallback (booked minus live minus cancels minus
+      // reschedules) counted every call nobody has logged yet as a no-show,
+      // which made Australia read 10 no-shows on 0 logged calls.
+      no_shows: stats.no_shows,
       reschedule_rate: qualified_bookings > 0 ? (reschedules / qualified_bookings) * 100 : 0,
       cost_per_live_call: live_calls > 0 ? adspend / live_calls : 0,
       cost_per_new_live_call: new_live_calls > 0 ? adspend / new_live_calls : 0,
