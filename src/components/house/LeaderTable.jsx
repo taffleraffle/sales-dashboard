@@ -96,7 +96,7 @@ export default function LeaderTable({ columns, rows, footer, rowKey = (r) => r.i
         fontWeight: col.strong ? 700 : (isFooter ? 600 : 500),
         color: tone ? TONE[tone] : 'var(--ink)',
         whiteSpace: 'nowrap',
-        width: col.width,
+        width: col.width ?? (col.align === 'right' ? 112 : undefined),
       }}>{raw ?? '—'}</td>
     )
   }
@@ -104,7 +104,7 @@ export default function LeaderTable({ columns, rows, footer, rowKey = (r) => r.i
     <table className="house-table">
       <thead>
         <tr>{columns.map(c => (
-          <th key={c.key} className={c.align === 'right' ? 'num' : ''} style={{ textAlign: c.align === 'right' ? 'right' : 'left', width: c.width }}>{c.label}</th>
+          <th key={c.key} className={c.align === 'right' ? 'num' : ''} style={{ textAlign: c.align === 'right' ? 'right' : 'left', width: c.width ?? (c.align === 'right' ? 112 : undefined) }}>{c.label}</th>
         ))}</tr>
       </thead>
       <tbody>

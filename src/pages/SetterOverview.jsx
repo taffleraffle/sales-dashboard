@@ -307,18 +307,15 @@ export default function SetterOverview() {
         <div title="Of the leads setters booked that showed (showed + not_closed + closed), what % closed. This is a SUBSET of company close rate — setter-booked leads typically convert higher than the full lead universe seen on /sales/closers and /sales/marketing.">
           <Gauge label="Close · Setter-booked" value={parseFloat(closeRate)} target={bm('close_rate', 25)} />
         </div>
-        <Gauge label="MC → Set %" value={companyRates.mcToSet} target={30} max={100} />
         <Gauge label="Confirmed show rate" value={confShowRate} target={bm('show_rate_new', 50)} hint={`${conf.cShow} showed of ${conf.cShow + conf.cNo} confirmed calls`} />
         <Gauge label="Unconfirmed show rate" value={unconfShowRate} target={bm('show_rate_new', 50)} hint={`${conf.uShow} showed of ${conf.uShow + conf.uNo} unconfirmed calls`} />
       </div>
 
-      {/* Blanket Conversion Rates — 6 gauges including Leads/Close (moved from isolated full-width tile) */}
-      <h2 className="text-sm font-medium text-text-secondary mb-4">Conversion Rates</h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3 mb-6">
-        <Gauge label="Lead → Set" value={companyRates.leadToSet} target={5} max={50} />
-        <Gauge label="Lead → Close" value={companyRates.leadToClose} target={2} max={20} />
-        <Gauge label="Call → Set" value={companyRates.callToSet} target={3} max={20} />
-        <Gauge label="Pickup → Set" value={companyRates.pickupToSet} target={10} max={50} />
+      <h2 className="eyebrow" style={{ marginBottom: 14, display: 'block' }}>Conversion</h2>
+      <div className="kpi-grid mb-6">
+        <Gauge label="Lead → Set" value={companyRates.leadToSet} target={5} max={50} hint="Sets over leads worked" />
+        <Gauge label="MC → Set" value={companyRates.mcToSet} target={30} max={100} hint="Sets over meaningful conversations" />
+        <Gauge label="Lead → Close" value={companyRates.leadToClose} target={2} max={20} hint="Closes over leads worked" />
       </div>
 
       {/* One table per setter: replaces the card grid + conversion rows that

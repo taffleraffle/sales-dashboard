@@ -410,23 +410,23 @@ export default function SalesOverview() {
         <section>
           <SectionLabel>Revenue</SectionLabel>
           <div className="kpi-grid kpi-grid-6">
-            <KPICard highlight label="Revenue" value={money2(totalRevenue)} subtitle={`${closes} ${closes === 1 ? 'close' : 'closes'} · trial + ascension`} onClick={openRevenueBreakdown} />
+            <KPICard highlight label="Revenue" value={money2(totalRevenue)} subtitle={`${closes} ${closes === 1 ? 'close' : 'closes'} · ${money(revPerLead)} per lead · ${money(revPerBooked)} per booked call`} onClick={openRevenueBreakdown} />
             <KPICard label="Cash collected" value={money2(totalCash)} subtitle={totalRevenue > 0 ? `${Math.round((totalCash / totalRevenue) * 100)}% of revenue` : 'no revenue yet'} onClick={openRevenueBreakdown} />
             <KPICard label="Ad spend" value={money2(mkt.adspend)} subtitle={mkt.adspend > 0 ? 'tracked marketing spend' : 'no spend logged'} />
             <KPICard label="Front-end cash ROAS" value={mkt.adspend > 0 ? `${feRoas.toFixed(2)}x` : '—'} subtitle={`$${Math.round(ct.cash).toLocaleString()} trial cash`} target={bm('trial_fe_roas')} direction="above" />
-            <KPICard label="Revenue per lead" value={money(revPerLead)} subtitle={mkt.leads > 0 ? `over ${mkt.leads} leads` : 'no leads logged'} />
-            <KPICard label="Revenue per booked call" value={money(revPerBooked)} subtitle={calBooked > 0 ? `over ${calBooked} booked` : calBooked == null ? 'loading…' : 'no bookings'} />
+            <KPICard label="Revenue rate" value={R.revenueRoas != null ? `${R.revenueRoas.toFixed(2)}x` : '—'} subtitle="revenue ÷ ad spend" target={bm('revenue_roas') ?? 5} direction="above" onClick={openRevenueBreakdown} />
+            <KPICard label="Conversion rate" value={T.leads > 0 ? `${R.leadToClose}%` : '—'} subtitle={`lead → booked ${R.leadToBooked}% · booked → live ${R.bookedToLive}% · live → close ${R.closeRate}%`} target={bm('lead_to_close') ?? 1} direction="above" onClick={() => setDrill('close')} />
           </div>
         </section>
 
-        {/* ── 3. Speed to lead ── */}
+        {/* ── 3. Calls: did they turn up, and how fast did we dial ── */}
         <section>
-          <SectionLabel hint="Typeform opt-in to first WAVV dial. Operating hours are each setter's dial window from the Team page (9am to 5pm ET if none set).">Speed to lead</SectionLabel>
+          <SectionLabel>Calls</SectionLabel>
           <div className="kpi-grid">
-            <KPICard highlight label="Average" value={stl ? stl.avgDisplay : stlLoading ? '…' : '—'} subtitle={stl ? `${stl.pctUnder5m}% under 5 min · ${stl.worked} dialled, ${stl.notCalled} never dialled` : stlLoading ? 'matching leads to dials' : stlError ? `could not load: ${stlError}` : 'no leads with a phone number in this range'} score={stl?.avgSecs} target={300} direction="below" targetLabel="Target under 5 min" />
-            <KPICard label="This week" value={stlSplit?.week != null ? fmtSecs(stlSplit.week) : '—'} subtitle={stlSplit ? `${stlSplit.nWeek} leads in the last 7 days` : undefined} score={stlSplit?.week} target={300} direction="below" targetLabel="Target under 5 min" />
-            <KPICard label="In operating hours" value={stlSplit?.inHours != null ? fmtSecs(stlSplit.inHours) : '—'} subtitle={stlSplit ? `${stlSplit.nIn} leads` : undefined} score={stlSplit?.inHours} target={300} direction="below" targetLabel="Target under 5 min" />
-            <KPICard label="Outside operating hours" value={stlSplit?.outHours != null ? fmtSecs(stlSplit.outHours) : '—'} subtitle={stlSplit ? `${stlSplit.nOut} leads` : undefined} score={stlSplit?.outHours} target={3600} direction="below" targetLabel="Target under 1 hour" />
+            <KPICard label="Confirmed show rate" value={R.confShowRate != null ? `${R.confShowRate}%` : '—'} subtitle={`${T.confShowed} of ${T.confShowed + T.confNoShow} confirmed calls showed`} target={bm('show_rate_new') ?? 50} direction="above" onClick={() => setDrill('show')} />
+            <KPICard label="Unconfirmed show rate" value={R.unconfShowRate != null ? `${R.unconfShowRate}%` : '—'} subtitle={`${T.unconfShowed} of ${T.unconfShowed + T.unconfNoShow} unconfirmed calls showed`} target={bm('show_rate_new') ?? 50} direction="above" onClick={() => setDrill('show')} />
+            <KPICard label="Speed to lead" value={stl ? stl.avgDisplay : stlLoading ? '…' : '—'} subtitle={stlSplit ? `in hours ${fmtSecs(stlSplit.inHours)} · out of hours ${fmtSecs(stlSplit.outHours)} · this week ${fmtSecs(stlSplit.week)}` : stlLoading ? 'matching leads to dials' : stlError ? `could not load: ${stlError}` : 'no leads with a phone number'} score={stl?.avgSecs} target={300} direction="below" targetLabel="Target under 5 min" />
+            <KPICard label="Dialled within 5 minutes" value={stl ? `${stl.pctUnder5m}%` : stlLoading ? '…' : '—'} subtitle={stl ? `${stl.under5m} of ${stl.worked} dialled leads · ${stl.notCalled} never dialled` : undefined} target={80} direction="above" targetLabel="Target 80%" />
           </div>
         </section>
 

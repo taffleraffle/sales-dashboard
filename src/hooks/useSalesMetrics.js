@@ -52,6 +52,7 @@ export const EMPTY_TOTALS = {
   adspend: 0, leads: 0, qualifiedBookings: 0, lives: 0, fuLives: 0, closes: 0,
   trialCash: 0, trialRevenue: 0, ascendCash: 0, ascendRevenue: 0, ascensions: 0,
   noShows: 0, reschedules: 0, cancels: 0, offers: 0, ncRows: 0,
+  confShowed: 0, confNoShow: 0, unconfShowed: 0, unconfNoShow: 0,
 }
 
 export function rates(t) {
@@ -67,11 +68,18 @@ export function rates(t) {
     noShowRate: pct(t.noShows, t.qualifiedBookings || t.ncRows),
     rescheduleRate: pct(t.reschedules, t.qualifiedBookings || t.ncRows),
     cashCollectRate: pct(cash, revenue),
+    // Confirmed vs unconfirmed show rate (booking_call_status marks x closer outcomes)
+    confShowRate: (t.confShowed + t.confNoShow) > 0 ? pct(t.confShowed, t.confShowed + t.confNoShow) : null,
+    unconfShowRate: (t.unconfShowed + t.unconfNoShow) > 0 ? pct(t.unconfShowed, t.unconfShowed + t.unconfNoShow) : null,
     cpl: t.leads > 0 && t.adspend > 0 ? t.adspend / t.leads : null,
     costPerBooked: t.qualifiedBookings > 0 && t.adspend > 0 ? t.adspend / t.qualifiedBookings : null,
     costPerLive: t.lives > 0 && t.adspend > 0 ? t.adspend / t.lives : null,
     cac: t.closes > 0 && t.adspend > 0 ? t.adspend / t.closes : null,
     feRoas: t.adspend > 0 ? t.trialCash / t.adspend : null,
+    revenueRoas: t.adspend > 0 ? revenue / t.adspend : null,
+    leadToClose: pct(t.closes, t.leads),
+    leadToBooked: pct(t.qualifiedBookings, t.leads),
+    bookedToLive: pct(t.lives, t.qualifiedBookings),
     revPerLead: t.leads > 0 ? revenue / t.leads : null,
     revPerBooked: t.qualifiedBookings > 0 ? revenue / t.qualifiedBookings : null,
     avgDeal: t.closes > 0 ? t.trialRevenue / t.closes : null,
@@ -85,12 +93,13 @@ async function load(range) {
   // the page still gets its numbers, and the failure is reported, not hidden.
   const problems = []
   const safe = (label, fn) => fn().catch(err => { problems.push(`${label}: ${err?.message || err}`); return [] })
-  const [mvRows, reports, excluded, bookings, bookingExcluded] = await Promise.all([
+  const [mvRows, reports, excluded, bookings, bookingExcluded, confRows] = await Promise.all([
     safe('marketing view', () => fetchAll(() => supabase.from('lib_marketing_by_audience_daily_mv').select('*').gte('date', startStr).lte('date', endStr).order('date'))),
     safe('EOD reports', () => fetchAll(() => supabase.from('closer_eod_reports').select('id, closer_id, report_date, is_confirmed, offers').gte('report_date', startStr).lte('report_date', endStr).order('report_date'))),
     safe('call exclusions', () => fetchAll(() => supabase.from('closer_call_excluded').select('closer_call_id').order('closer_call_id'))),
     safe('calendar bookings', () => fetchAll(() => supabase.from('lib_strategy_booking_resolved').select('id, ghl_event_id, ghl_contact_id, contact_name, contact_email, booked_at, appointment_date, appointment_status, audience, revenue_tier, is_dq, is_spam').gte('booked_at', startStr).lte('booked_at', endStr).order('booked_at'))),
     safe('booking exclusions', () => fetchAll(() => supabase.from('booking_excluded').select('booking_id').order('booking_id'))),
+    safe('call confirmations', () => fetchAll(() => supabase.from('lib_call_confirmation_by_closer').select('closer_id, report_date, confirmed_showed, confirmed_noshow, unconfirmed_showed, unconfirmed_noshow').gte('report_date', startStr).lte('report_date', endStr).order('report_date'))),
   ])
 
   // ── Company totals from the matview ──
@@ -147,6 +156,15 @@ async function load(range) {
     for (const a of (data || [])) if (a.closer_id) bookingsByCloser[a.closer_id] = (bookingsByCloser[a.closer_id] || 0) + 1
   }
 
+  // ── Confirmed / unconfirmed show marks, company and per closer ──
+  const confByCloser = {}
+  for (const r of confRows) {
+    totals.confShowed += num(r.confirmed_showed); totals.confNoShow += num(r.confirmed_noshow)
+    totals.unconfShowed += num(r.unconfirmed_showed); totals.unconfNoShow += num(r.unconfirmed_noshow)
+    const c = confByCloser[r.closer_id] || (confByCloser[r.closer_id] = { confShowed: 0, confNoShow: 0, unconfShowed: 0, unconfNoShow: 0 })
+    c.confShowed += num(r.confirmed_showed); c.confNoShow += num(r.confirmed_noshow); c.unconfShowed += num(r.unconfirmed_showed); c.unconfNoShow += num(r.unconfirmed_noshow)
+  }
+
   // ── Per-closer roll-up from the same rows ──
   const byCloser = {}
   for (const c of calls) {
@@ -168,6 +186,10 @@ async function load(range) {
   for (const [id, n] of Object.entries(offersByCloser)) {
     if (!byCloser[id]) byCloser[id] = { ...EMPTY_TOTALS, calendarBookings: bookingsByCloser[id] || 0 }
     byCloser[id].offers = n
+  }
+  for (const [id, c] of Object.entries(confByCloser)) {
+    if (!byCloser[id]) byCloser[id] = { ...EMPTY_TOTALS, calendarBookings: bookingsByCloser[id] || 0 }
+    Object.assign(byCloser[id], c)
   }
   for (const t of Object.values(byCloser)) {
     // Booked = calendar when the appointment carries a closer, else the closer's own new-call rows

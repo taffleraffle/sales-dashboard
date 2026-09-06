@@ -86,6 +86,8 @@ export default function CloserOverview() {
           <Gauge label="Reschedule rate" value={R.rescheduleRate} target={10} max={50} direction="below" />
           <Gauge label="No-show rate" value={R.noShowRate} target={20} max={50} direction="below" />
           <Gauge label="Cash collected" value={R.cashCollectRate} target={50} />
+          <Gauge label="Confirmed show rate" value={R.confShowRate} target={bm('show_rate_new', 50)} hint={`${T.confShowed} showed of ${T.confShowed + T.confNoShow} confirmed`} />
+          <Gauge label="Unconfirmed show rate" value={R.unconfShowRate} target={bm('show_rate_new', 50)} hint={`${T.unconfShowed} showed of ${T.unconfShowed + T.unconfNoShow} unconfirmed`} />
         </div>
 
         <Card title="Closers" count={rows.length}>
