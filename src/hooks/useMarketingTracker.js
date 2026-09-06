@@ -398,9 +398,12 @@ export function computeMarketingStats(entries) {
     })(),
     show_rate: t.nc_booked > 0 ? Math.min(100, (t.new_live_calls / t.nc_booked) * 100) : 0,
     // No-show rate uses the same NC-only numerator and EOD denominator.
-    no_shows: t.no_shows > 0 ? t.no_shows : Math.max(0, t.nc_booked - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules),
+    // Logged no-shows only (closer EOD outcome), the same count as the Overview.
+    // The old fallback (booked minus live minus cancels minus reschedules) turned
+    // every call nobody has logged yet into a no-show (Australia read 10 on 0 logged calls).
+    no_shows: t.no_shows,
     no_show_rate: (() => {
-      const ns = t.no_shows > 0 ? t.no_shows : Math.max(0, t.nc_booked - t.new_live_calls - (t.cancelled_dtf + t.cancelled_by_prospect) - t.reschedules)
+      const ns = t.no_shows
       return t.nc_booked > 0 ? (ns / t.nc_booked) * 100 : 0
     })(),
     reschedules: t.reschedules,
