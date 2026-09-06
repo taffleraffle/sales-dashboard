@@ -42,3 +42,14 @@ export function audienceInRegion(audience, region) {
   const isAu = (audience || 'Unknown') === AU_AUDIENCE
   return region === 'au' ? isAu : !isAu
 }
+
+/* Setter-logged leads carry no resolved audience. Australian if the source
+   or any UTM names an AU funnel, or the phone is +61. */
+const AU_HINT = /austral|tradie|facebook[- ]?oz|facebook-au|au-tradie|\bau\b|\(au\)/i
+export function setterLeadInRegion(lead, region) {
+  if (!region || region === 'all') return true
+  const text = [lead?.lead_source, lead?.utm_source, lead?.utm_campaign, lead?.utm_content, lead?.notes].filter(Boolean).join(' ')
+  const phone = String(lead?.phone || lead?.lead_phone || '').replace(/\D/g, '')
+  const isAu = AU_HINT.test(text) || /^61/.test(phone)
+  return region === 'au' ? isAu : !isAu
+}

@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { sinceDate } from '../lib/dateUtils'
+import { useRegion, setterLeadInRegion } from '../lib/region'
 
 export function useLeadAttribution(range = 30) {
   const [leads, setLeads] = useState([])
   const [loading, setLoading] = useState(true)
   const rangeKey = typeof range === 'object' ? JSON.stringify(range) : range
+  const region = useRegion()
 
   const fetchLeads = useCallback(async () => {
     setLoading(true)
@@ -19,13 +21,13 @@ export function useLeadAttribution(range = 30) {
       .order('date_set', { ascending: false })
 
     if (error) console.error('Failed to fetch leads:', error)
-    setLeads((data || []).map(l => ({
+    setLeads((data || []).filter(l => setterLeadInRegion(l, region)).map(l => ({
       ...l,
       setter_name: l.setter?.name || '—',
       closer_name: l.closer?.name || '—',
     })))
     setLoading(false)
-  }, [rangeKey])
+  }, [rangeKey, region])
 
   useEffect(() => { fetchLeads() }, [fetchLeads])
 

@@ -5,6 +5,7 @@ import KPICard from '../KPICard'
 import LeaderTable, { Person } from './LeaderTable'
 import { supabase } from '../../lib/supabase'
 import { etOffset } from '../../services/speedToLeadDb'
+import { audienceInRegion } from '../../lib/region'
 
 /*
   The rows behind a headline tile on the Overview.
@@ -91,10 +92,22 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
       }
       const { data: excl } = await supabase.from('lead_excluded').select('response_id')
       const ex = new Set((excl || []).map(e => e.response_id))
-      if (alive) setLeads(rows.filter(r => !ex.has(r.response_id)))
+      let kept = rows.filter(r => !ex.has(r.response_id))
+      // Region: the same resolver the tiles use (audience per response)
+      const region = metrics.region || 'all'
+      if (region !== 'all' && kept.length) {
+        const aud = new Map()
+        for (let i = 0; i < kept.length; i += 300) {
+          const ids = kept.slice(i, i + 300).map(r => r.response_id)
+          const { data: res } = await supabase.from('lib_typeform_audience_resolved').select('response_id, audience_slug').in('response_id', ids)
+          for (const x of (res || [])) aud.set(x.response_id, x.audience_slug === 'australia' ? 'Australia' : (x.audience_slug || 'Unknown'))
+        }
+        kept = kept.filter(r => audienceInRegion(aud.get(r.response_id) || 'Unknown', region))
+      }
+      if (alive) setLeads(kept)
     })()
     return () => { alive = false }
-  }, [kind, win])
+  }, [kind, win, metrics.region])
 
   if (!kind) return null
 

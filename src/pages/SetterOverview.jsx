@@ -8,6 +8,7 @@ import SetterDrilldown from '../components/house/SetterDrilldown'
 import MetricDrilldown from '../components/house/MetricDrilldown'
 import { useBenchmarks } from '../hooks/useBenchmarks'
 import { useSalesMetrics } from '../hooks/useSalesMetrics'
+import { setterLeadInRegion, useRegion } from '../lib/region'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { supabase } from '../lib/supabase'
@@ -26,7 +27,10 @@ export default function SetterOverview() {
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const { members: setters, loading: loadingMembers } = useTeamMembers('setter')
   const { reports, loading: loadingReports } = useSetterEODs(null, days)
-  const [allLeads, setAllLeads] = useState([])
+  const [allLeadsRaw, setAllLeads] = useState([])
+  const region = useRegion()
+  // Setter-logged leads follow the top-bar region (source, UTMs, +61 phone)
+  const allLeads = allLeadsRaw.filter(l => setterLeadInRegion(l, region))
   const [drill, setDrill] = useState(null) // 'dials' | 'pickups' | 'mcs' | 'sets'
   const [mdrill, setMdrill] = useState(null) // 'show' | 'close' (shared Overview pop-ups)
   // Confirmed vs unconfirmed show rate (booking_call_status marks, closer outcomes)
