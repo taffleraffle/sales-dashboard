@@ -109,7 +109,7 @@ export default function LeaderTable({ columns, rows, footer, rowKey = (r) => r.i
       </thead>
       <tbody>
         {rows.map((row, i) => (
-          <tr key={rowKey(row) ?? i}
+          <tr key={rowKey(row, i) ?? i}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               className={`${onRowClick ? 'cursor-pointer' : ''} ${highlightFirst && i === 0 ? 'bg-opt-yellow-subtle' : ''}`}>
             {columns.map(c => cell(c, { ...row, _rank: i + 1 }, false))}

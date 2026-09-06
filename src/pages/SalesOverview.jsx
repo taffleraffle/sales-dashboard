@@ -186,8 +186,8 @@ export default function SalesOverview() {
 
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const m = useSalesMetrics(range)
-  const { members: closers } = useTeamMembers('closer')
-  const { members: setters } = useTeamMembers('setter')
+  const { members: closers, loading: loadingClosers } = useTeamMembers('closer')
+  const { members: setters, loading: loadingSetters } = useTeamMembers('setter')
   const { bm } = useBenchmarks()
   const { leads: recentLeads } = useLeadAttribution(days)
 
@@ -330,7 +330,7 @@ export default function SalesOverview() {
   }).sort((a, b) => b.dials - a.dials)
 
   const isLoading = m.loading || wavvLoading
-  const dataReady = !m.loading && !wavvLoading && closers.length > 0 && setters.length > 0
+  const dataReady = !m.loading && !wavvLoading && !loadingClosers && !loadingSetters
 
   // ── Speed to lead splits (this week / in hours / out of hours) ──
   const stlSplit = splitSpeedToLead(stl, stlSchedules)

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { invalidateBenchmarks } from './useBenchmarks'
 import { INTRO_CALENDARS } from '../utils/constants'
 
 export function useMarketingTracker({ autoSync = false } = {}) {
@@ -99,6 +100,7 @@ export function useMarketingTracker({ autoSync = false } = {}) {
   }
 
   async function updateBenchmark(metric, value) {
+    invalidateBenchmarks()
     const { error } = await supabase
       .from('marketing_benchmarks')
       .upsert({ metric, value, updated_at: new Date().toISOString() }, { onConflict: 'metric' })

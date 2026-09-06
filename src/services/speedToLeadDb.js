@@ -35,10 +35,19 @@ async function fetchAll(build) {
 
 const digits = (p) => (p || '').replace(/\D/g, '').slice(-10)
 
+// UTC offset for America/New_York on a given calendar day ('-04:00' in summer,
+// '-05:00' in winter), so the window edges fall on ET midnight all year.
+function etOffset(dateStr) {
+  const probe = new Date(`${dateStr}T12:00:00Z`)
+  const part = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'longOffset' }).formatToParts(probe).find(p => p.type === 'timeZoneName')?.value || 'GMT-04:00'
+  const m = part.match(/([+-])(\d{2}):?(\d{2})/)
+  return m ? `${m[1]}${m[2]}:${m[3]}` : '-04:00'
+}
+
 export async function fetchSpeedToLeadFromDb(range, setterSchedules = {}) {
   const { startStr, endStr } = dateRangeBoundsET(range)
-  const startIso = `${startStr}T00:00:00-04:00`
-  const endIso = `${endStr}T23:59:59-04:00`
+  const startIso = `${startStr}T00:00:00${etOffset(startStr)}`
+  const endIso = `${endStr}T23:59:59${etOffset(endStr)}`
 
   const [responses, calls] = await Promise.all([
     fetchAll(() => supabase
