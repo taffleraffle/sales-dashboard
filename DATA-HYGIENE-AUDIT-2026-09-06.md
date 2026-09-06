@@ -322,3 +322,26 @@ Checked and found clean, so they can be ruled out:
 
 Findings 1, 2, 3 and 6 are mechanical and low risk. Finding 4 is the only one that changes
 numbers you have already reported on.
+
+---
+
+## Update, 6 September 2026 (evening): the unified layer is live
+
+Ben: "I want all pages to have the same unified data. This is super, super important."
+
+`src/hooks/useSalesMetrics.js` is now the only source for the Overview, Closers and Closer
+detail pages. Company totals are summed from `lib_marketing_by_audience_daily_mv`, the view
+the Marketing page is built on. Per-closer figures are the same confirmed, non-excluded
+`closer_calls` rows grouped by closer. Nothing reads the hand-typed EOD header fields or
+`marketing_tracker` any more.
+
+What that resolves from the list above:
+
+- **Finding 3** (UTC vs ET windows): every page now goes through `dateRangeBoundsET`.
+- **Finding 4** (EOD headers vs rows): the headers are no longer read anywhere.
+- **Finding 10** (close rate methods): closes over live new calls, everywhere.
+- The leads split that was not in the original list: the Overview counted the marketing
+  tracker ledger (223 leads, CPL $120) while Marketing counted Typeform opt-ins (372, CPL
+  $72). Both pages now say 372 and $72.
+
+Still open: findings 1, 2 (qualified floor and matview `revenue_tier`), 5, 6, 7, 8, 11.
