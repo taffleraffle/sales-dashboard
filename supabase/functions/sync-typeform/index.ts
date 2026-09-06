@@ -52,7 +52,9 @@ const DEFAULT_FORMS = [
   // these form ids landing in typeform_responses.
   { id: 'eOVPoEcz', name: 'Roofing Funnel (SEO AI)' },
   { id: 'iHmgtOfT', name: 'Restoration Funnel (SEO AI)' },
-  { id: 'LwN93cLn', name: 'Home Services Funnel (SEO AI)' }
+  { id: 'LwN93cLn', name: 'Home Services Funnel (SEO AI)' },
+  // Australian trades funnel (Sep 2026): /facebook-au and /au-tradie-gmb.
+  { id: 'zlPORl53', name: 'Facebook Oz (AU)' }
 ]
 
 const QUALIFIED_TIERS = new Set([

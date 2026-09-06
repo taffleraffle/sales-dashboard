@@ -15,23 +15,32 @@
 const SLACK_TOKEN = Deno.env.get('SLACK_BOT_TOKEN')!
 const CHANNEL = Deno.env.get('SALES_NEW_LEADS_CHANNEL')!
 const WEBHOOK_SECRET = Deno.env.get('TYPEFORM_WEBHOOK_SECRET') || ''
+// 06 Sep 2026: the Australian form's webhook was created later with its own secret
+// (the original one is not retrievable), so either secret is accepted.
+const WEBHOOK_SECRET_AU = Deno.env.get('TYPEFORM_WEBHOOK_SECRET_AU') || ''
 
 // The SEO-AI funnels. Anything else that hits this endpoint is ignored.
 const AI_FORMS: Record<string, string> = {
   eOVPoEcz: 'Roofing SEO AI',
   iHmgtOfT: 'Restoration SEO AI',
   LwN93cLn: 'Home Services SEO AI',
+  zlPORl53: 'Facebook Oz (AU)',   // Australian trades funnel, 06 Sep 2026 (webhook opt-lead-slack)
 }
 
-async function validSignature(body: string, sig: string | null): Promise<boolean> {
-  if (!WEBHOOK_SECRET) return true // secret unset: accept (form-id filter still applies)
-  if (!sig) return false
+async function hmacOk(secret: string, body: string, sig: string): Promise<boolean> {
   const key = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(WEBHOOK_SECRET),
+    'raw', new TextEncoder().encode(secret),
     { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body))
   const b64 = btoa(String.fromCharCode(...new Uint8Array(mac)))
   return sig === `sha256=${b64}`
+}
+async function validSignature(body: string, sig: string | null): Promise<boolean> {
+  const secrets = [WEBHOOK_SECRET, WEBHOOK_SECRET_AU].filter(Boolean)
+  if (!secrets.length) return true // no secret set: accept (form-id filter still applies)
+  if (!sig) return false
+  for (const s of secrets) if (await hmacOk(s, body, sig)) return true
+  return false
 }
 
 function extract(answers: any[]): { name: string; email: string; phone: string } {
