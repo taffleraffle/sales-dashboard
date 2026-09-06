@@ -9,35 +9,76 @@ import { supabase } from '../lib/supabase'
 // just the logo, a tagline and a graphic that does not look like the product.
 
 function BrandPanel() {
-  // A quiet piece of line art: a rising path through a field of points, with
-  // one yellow node where it turns. Nothing here is a chart from the app.
+  // "Orbits": a yellow sun, three tilted rings with nodes travelling on them,
+  // a fine dot field behind. The outer ring turns slowly. None of it is a
+  // chart from the app; it is a brand piece.
   const dots = []
-  for (let r = 0; r < 9; r++) for (let c = 0; c < 13; c++) dots.push({ x: 40 + c * 42, y: 40 + r * 42, k: `${r}-${c}` })
+  for (let r = 0; r < 14; r++) for (let c = 0; c < 16; c++) dots.push({ x: 20 + c * 40, y: 20 + r * 40, k: `${r}-${c}` })
   return (
     <aside
       aria-hidden="true"
       className="relative hidden lg:flex flex-col overflow-hidden bg-ink text-white px-16 pt-14 pb-12"
     >
-      <div
-        className="pointer-events-none absolute rounded-full"
-        style={{ left: -220, top: -260, width: 640, height: 640, background: 'radial-gradient(closest-side, rgba(244,225,74,.16), rgba(244,225,74,0))' }}
-      />
+      <style>{`
+        @keyframes optOrbit { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+        @keyframes optOrbitBack { from { transform: rotate(0deg) } to { transform: rotate(-360deg) } }
+        .opt-ring-1 { transform-origin: 330px 300px; animation: optOrbit 90s linear infinite; }
+        .opt-ring-2 { transform-origin: 330px 300px; animation: optOrbitBack 140s linear infinite; }
+        @media (prefers-reduced-motion: reduce) { .opt-ring-1, .opt-ring-2 { animation: none } }
+      `}</style>
+
+      <div className="pointer-events-none absolute rounded-full" style={{ left: -160, top: -200, width: 620, height: 620, background: 'radial-gradient(closest-side, rgba(244,225,74,.14), rgba(244,225,74,0))' }} />
+      <div className="pointer-events-none absolute rounded-full" style={{ right: -240, bottom: -260, width: 700, height: 700, background: 'radial-gradient(closest-side, rgba(244,225,74,.10), rgba(244,225,74,0))' }} />
 
       <div className="relative flex items-center gap-3">
         <img src="/opt-logo-white.png" alt="" className="w-[72px] h-auto block" />
         <span className="text-[12.5px] text-white/60 pl-3 border-l border-white/20">Sales dashboard</span>
       </div>
 
-      <div className="relative flex-1 flex items-center justify-center py-10">
-        <svg viewBox="0 0 590 420" className="w-full max-w-[560px] h-auto" fill="none">
-          {dots.map(d => <circle key={d.k} cx={d.x} cy={d.y} r="1.6" fill="rgba(255,255,255,.18)" />)}
-          <path d="M 40 330 C 150 330, 190 290, 250 250 S 360 190, 420 140 S 500 80, 550 60" stroke="rgba(255,255,255,.35)" strokeWidth="2" strokeLinecap="round" />
-          <path d="M 40 330 C 150 330, 190 290, 250 250 S 360 190, 420 140" stroke="#f4e14a" strokeWidth="3" strokeLinecap="round" />
-          <circle cx="420" cy="140" r="9" fill="#f4e14a" />
-          <circle cx="420" cy="140" r="20" stroke="rgba(244,225,74,.35)" strokeWidth="2" />
-          <circle cx="420" cy="140" r="34" stroke="rgba(244,225,74,.14)" strokeWidth="2" />
-          <circle cx="40" cy="330" r="5" fill="rgba(255,255,255,.6)" />
-          <circle cx="550" cy="60" r="5" fill="rgba(255,255,255,.35)" />
+      <div className="relative flex-1 flex items-center justify-center py-8">
+        <svg viewBox="0 0 660 600" className="w-full max-w-[640px] h-auto" fill="none">
+          <defs>
+            <radialGradient id="optSun" cx="38%" cy="32%" r="70%">
+              <stop offset="0%" stopColor="#fff6a8" />
+              <stop offset="45%" stopColor="#f4e14a" />
+              <stop offset="100%" stopColor="#d9b21a" />
+            </radialGradient>
+            <radialGradient id="optHalo" cx="50%" cy="50%" r="50%">
+              <stop offset="60%" stopColor="rgba(244,225,74,0)" />
+              <stop offset="100%" stopColor="rgba(244,225,74,.12)" />
+            </radialGradient>
+            <linearGradient id="optTrail" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="rgba(244,225,74,0)" />
+              <stop offset="100%" stopColor="#f4e14a" />
+            </linearGradient>
+          </defs>
+
+          {dots.map(d => <circle key={d.k} cx={d.x} cy={d.y} r="1.4" fill="rgba(255,255,255,.14)" />)}
+
+          {/* halo */}
+          <circle cx="330" cy="300" r="250" fill="url(#optHalo)" />
+
+          {/* rings */}
+          <g className="opt-ring-2">
+            <ellipse cx="330" cy="300" rx="285" ry="118" transform="rotate(-24 330 300)" stroke="rgba(255,255,255,.10)" strokeWidth="1.5" />
+            <circle cx="60" cy="380" r="4" fill="rgba(255,255,255,.55)" />
+            <circle cx="585" cy="205" r="6" fill="#f4e14a" />
+          </g>
+          <ellipse cx="330" cy="300" rx="225" ry="92" transform="rotate(18 330 300)" stroke="rgba(255,255,255,.16)" strokeWidth="1.5" />
+          <circle cx="120" cy="240" r="5" fill="rgba(255,255,255,.7)" />
+          <circle cx="536" cy="372" r="8" fill="#f4e14a" />
+          <circle cx="536" cy="372" r="16" stroke="rgba(244,225,74,.35)" strokeWidth="1.5" />
+          <g className="opt-ring-1">
+            <ellipse cx="330" cy="300" rx="165" ry="165" stroke="rgba(255,255,255,.22)" strokeWidth="1.5" strokeDasharray="2 8" />
+            <path d="M 330 135 A 165 165 0 0 1 495 300" stroke="url(#optTrail)" strokeWidth="4" strokeLinecap="round" />
+            <circle cx="495" cy="300" r="7" fill="#f4e14a" />
+            <circle cx="330" cy="465" r="4" fill="rgba(255,255,255,.6)" />
+          </g>
+
+          {/* sun */}
+          <circle cx="330" cy="300" r="96" fill="url(#optSun)" />
+          <circle cx="330" cy="300" r="96" stroke="rgba(255,255,255,.25)" strokeWidth="1" />
+          <ellipse cx="300" cy="262" rx="42" ry="22" fill="rgba(255,255,255,.28)" transform="rotate(-30 300 262)" />
         </svg>
       </div>
 
@@ -45,7 +86,7 @@ function BrandPanel() {
         <p className="font-serif font-medium text-white leading-[1.05]" style={{ fontSize: 'clamp(30px, 3vw, 44px)', margin: 0 }}>
           OPT Digital <span className="text-accent">Sales</span>
         </p>
-        <p className="text-[15px] text-white/60 mt-3" style={{ margin: '12px 0 0' }}>Where the floor stands, every day.</p>
+        <p className="text-[15px] text-white/60" style={{ margin: '12px 0 0' }}>Where the floor stands, every day.</p>
       </div>
     </aside>
   )

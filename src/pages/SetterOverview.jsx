@@ -15,8 +15,6 @@ import { fetchWavvAggregates } from '../services/wavvService'
 import { Plus } from 'lucide-react'
 import { computeShowRate } from '../utils/metricCalculations'
 import { INTRO_CALENDARS } from '../utils/constants'
-import { checkEndangeredLeads } from '../services/engagementCheck'
-import EndangeredLeadsTable from '../components/EndangeredLeadsTable'
 
 export default function SetterOverview() {
   const { bm } = useBenchmarks()
@@ -27,12 +25,24 @@ export default function SetterOverview() {
   const { reports, loading: loadingReports } = useSetterEODs(null, days)
   const [allLeads, setAllLeads] = useState([])
   const [drill, setDrill] = useState(null) // 'dials' | 'pickups' | 'mcs' | 'sets' | 'shows' | 'no_shows' | 'revenue'
+  // Confirmed vs unconfirmed show rate (booking_call_status marks, closer outcomes)
+  const [conf, setConf] = useState({ cShow: 0, cNo: 0, uShow: 0, uNo: 0 })
+  useEffect(() => {
+    let alive = true
+    supabase.from('lib_call_confirmation_by_closer')
+      .select('confirmed_showed, confirmed_noshow, unconfirmed_showed, unconfirmed_noshow')
+      .gte('report_date', sinceDate(range))
+      .then(({ data, error }) => {
+        if (!alive || error) return
+        setConf((data || []).reduce((a, r) => ({ cShow: a.cShow + (+r.confirmed_showed || 0), cNo: a.cNo + (+r.confirmed_noshow || 0), uShow: a.uShow + (+r.unconfirmed_showed || 0), uNo: a.uNo + (+r.unconfirmed_noshow || 0) }), { cShow: 0, cNo: 0, uShow: 0, uNo: 0 }))
+      })
+    return () => { alive = false }
+  }, [range])
+  const confShowRate = (conf.cShow + conf.cNo) > 0 ? parseFloat(((conf.cShow / (conf.cShow + conf.cNo)) * 100).toFixed(1)) : null
+  const unconfShowRate = (conf.uShow + conf.uNo) > 0 ? parseFloat(((conf.uShow / (conf.uShow + conf.uNo)) * 100).toFixed(1)) : null
   const [loadingLeads, setLoadingLeads] = useState(true)
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
   const [autoBookings, setAutoBookings] = useState([])
-  const [showAllRecent, setShowAllRecent] = useState(false)
-  const [endangeredLeads, setEndangeredLeads] = useState([])
-  const [loadingEndangered, setLoadingEndangered] = useState(false)
   const [dateStats, setDateStats] = useState({})
 
   // Fetch auto-booking appointments (INTRO_CALENDARS only) — auto-sync if stale
@@ -109,28 +119,6 @@ export default function SetterOverview() {
       })
   }, [range])
 
-  // Fetch recent WAVV calls and check endangered leads (live from GHL)
-  useEffect(() => {
-    // Defer the endangered-leads fetch to AFTER first paint. checkEndangeredLeads
-    // chains Supabase → GHL API and is non-critical (sits at bottom of page).
-    // Running it inline blocks the main render by ~400ms on slow networks.
-    const timer = setTimeout(() => {
-      setLoadingEndangered(true)
-      const since = new Date()
-      since.setDate(since.getDate() - 7)
-      supabase
-        .from('wavv_calls')
-        .select('phone_number, call_duration')
-        .gte('started_at', since.toISOString())
-        .then(({ data }) => {
-          checkEndangeredLeads(data || [])
-            .then(setEndangeredLeads)
-            .finally(() => setLoadingEndangered(false))
-        })
-    }, 400)
-    return () => clearTimeout(timer)
-  }, [])
-
   if (loadingMembers || loadingLeads || loadingReports) {
     return (
       <div className="space-y-6 animate-pulse">
@@ -189,30 +177,6 @@ export default function SetterOverview() {
     mcToSet: companyActivity.mcs > 0 ? parseFloat(((totalSets / companyActivity.mcs) * 100).toFixed(1)) : 0,
     leadToClose: companyActivity.leads > 0 ? parseFloat(((closedLeads.length / companyActivity.leads) * 100).toFixed(1)) : 0,
     pickupRate: parseFloat(pickupRate),
-  }
-  const leadsPerClose = closedLeads.length > 0 ? parseFloat((companyActivity.leads / closedLeads.length).toFixed(1)) : 0
-
-  // Auto vs Manual booking breakdown
-  // lead_source can be 'auto' (new records) or a raw calendar ID (legacy records)
-  const isAutoLead = l => l.lead_source === 'auto' || INTRO_CALENDARS.includes(l.lead_source)
-  const autoLeads = allLeads.filter(isAutoLead)
-  const manualLeads = allLeads.filter(l => !isAutoLead(l))
-  const showStatuses = ['showed', 'closed', 'not_closed']
-  const autoShowResult = computeShowRate(autoLeads, dateStats)
-  const manualShowResult = computeShowRate(manualLeads, dateStats)
-  const booking = {
-    autoTotal: autoLeads.length,
-    autoShows: autoLeads.filter(l => showStatuses.includes(l.status)).length,
-    autoNoShows: autoLeads.filter(l => l.status === 'no_show').length,
-    autoCloses: autoLeads.filter(l => l.status === 'closed').length,
-    autoShowRate: autoShowResult.showRate,
-    autoCloseRate: autoLeads.filter(l => showStatuses.includes(l.status)).length > 0 ? parseFloat(((autoLeads.filter(l => l.status === 'closed').length / autoLeads.filter(l => showStatuses.includes(l.status)).length) * 100).toFixed(1)) : 0,
-    manualTotal: manualLeads.length,
-    manualShows: manualLeads.filter(l => showStatuses.includes(l.status)).length,
-    manualNoShows: manualLeads.filter(l => l.status === 'no_show').length,
-    manualCloses: manualLeads.filter(l => l.status === 'closed').length,
-    manualShowRate: manualShowResult.showRate,
-    manualCloseRate: manualLeads.filter(l => showStatuses.includes(l.status)).length > 0 ? parseFloat(((manualLeads.filter(l => l.status === 'closed').length / manualLeads.filter(l => showStatuses.includes(l.status)).length) * 100).toFixed(1)) : 0,
   }
 
   // Auto-booking distribution per setter (matched by ghl_user_id)
@@ -332,7 +296,7 @@ export default function SetterOverview() {
       </div>
 
       {/* Company conversion gauges */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 mb-6">
+      <div className="kpi-grid mb-6">
         <Gauge label="Pickup Rate" value={parseFloat(pickupRate)} target={30} />
         <Gauge label="Show Rate" value={parseFloat(showRate)} target={bm('show_rate_new', 70)} />
         {/* Close rate here is SCOPED to setter-booked leads only (subset of
@@ -344,6 +308,8 @@ export default function SetterOverview() {
           <Gauge label="Close · Setter-booked" value={parseFloat(closeRate)} target={bm('close_rate', 25)} />
         </div>
         <Gauge label="MC → Set %" value={companyRates.mcToSet} target={30} max={100} />
+        <Gauge label="Confirmed show rate" value={confShowRate} target={bm('show_rate_new', 50)} hint={`${conf.cShow} showed of ${conf.cShow + conf.cNo} confirmed calls`} />
+        <Gauge label="Unconfirmed show rate" value={unconfShowRate} target={bm('show_rate_new', 50)} hint={`${conf.uShow} showed of ${conf.uShow + conf.uNo} unconfirmed calls`} />
       </div>
 
       {/* Blanket Conversion Rates — 6 gauges including Leads/Close (moved from isolated full-width tile) */}
@@ -353,72 +319,6 @@ export default function SetterOverview() {
         <Gauge label="Lead → Close" value={companyRates.leadToClose} target={2} max={20} />
         <Gauge label="Call → Set" value={companyRates.callToSet} target={3} max={20} />
         <Gauge label="Pickup → Set" value={companyRates.pickupToSet} target={10} max={50} />
-        {leadsPerClose > 0 && <Gauge label="Leads / Close" value={leadsPerClose} target={10} max={50} />}
-      </div>
-
-      {/* Auto vs Manual Booking Breakdown */}
-      {(booking.autoTotal > 0 || booking.manualTotal > 0) && (
-        <>
-          <h2 className="text-sm font-medium text-text-secondary mb-3">Auto Booking vs Manual Sets</h2>
-          <div className="tile tile-feedback overflow-hidden mb-6">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
-                    <th className="px-3 py-2 text-left">Type</th>
-                    <th className="px-3 py-2 text-right">Total</th>
-                    <th className="px-3 py-2 text-right">Shows</th>
-                    <th className="px-3 py-2 text-right">No Shows</th>
-                    <th className="px-3 py-2 text-right">Closes</th>
-                    <th className="px-3 py-2 text-right">Show Rate</th>
-                    <th className="px-3 py-2 text-right">Close Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-border-default/30">
-                    <td className="px-3 py-2 font-medium text-cyan-400">Auto Bookings</td>
-                    <td className="px-3 py-2 text-right font-medium">{booking.autoTotal}</td>
-                    <td className="px-3 py-2 text-right text-success">{booking.autoShows}</td>
-                    <td className="px-3 py-2 text-right text-danger">{booking.autoNoShows}</td>
-                    <td className="px-3 py-2 text-right font-medium text-text-primary">{booking.autoCloses}</td>
-                    <td className={`px-3 py-2 text-right font-medium ${booking.autoShowRate >= 70 ? 'text-success' : booking.autoShowRate >= 50 ? 'text-text-primary' : 'text-danger'}`}>{booking.autoShowRate}%</td>
-                    <td className={`px-3 py-2 text-right font-medium ${booking.autoCloseRate >= 25 ? 'text-success' : booking.autoCloseRate >= 15 ? 'text-text-primary' : 'text-danger'}`}>{booking.autoCloseRate}%</td>
-                  </tr>
-                  <tr className="border-b border-border-default/30">
-                    <td className="px-3 py-2 font-medium text-text-primary">Manual Sets</td>
-                    <td className="px-3 py-2 text-right font-medium">{booking.manualTotal}</td>
-                    <td className="px-3 py-2 text-right text-success">{booking.manualShows}</td>
-                    <td className="px-3 py-2 text-right text-danger">{booking.manualNoShows}</td>
-                    <td className="px-3 py-2 text-right font-medium text-text-primary">{booking.manualCloses}</td>
-                    <td className={`px-3 py-2 text-right font-medium ${booking.manualShowRate >= 70 ? 'text-success' : booking.manualShowRate >= 50 ? 'text-text-primary' : 'text-danger'}`}>{booking.manualShowRate}%</td>
-                    <td className={`px-3 py-2 text-right font-medium ${booking.manualCloseRate >= 25 ? 'text-success' : booking.manualCloseRate >= 15 ? 'text-text-primary' : 'text-danger'}`}>{booking.manualCloseRate}%</td>
-                  </tr>
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-border-default bg-bg-card-hover/30 font-medium">
-                    <td className="px-3 py-2">Combined</td>
-                    <td className="px-3 py-2 text-right">{totalSets}</td>
-                    <td className="px-3 py-2 text-right">{showedLeads.length}</td>
-                    <td className="px-3 py-2 text-right">{noShowLeads.length}</td>
-                    <td className="px-3 py-2 text-right">{closedLeads.length}</td>
-                    <td className="px-3 py-2 text-right">{showRate}%</td>
-                    <td className="px-3 py-2 text-right">{closeRate}%</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Pipeline-specific metrics — moved to /sales/pipeline */}
-      <div className="mb-6 tile tile-feedback px-4 py-3 flex items-center justify-between gap-3 text-xs">
-        <span className="text-text-secondary">
-          Looking for Speed to Lead, GHL Pipeline Performance, or the live leads table?
-        </span>
-        <Link to="/sales/pipeline" className="text-text-primary font-medium hover:underline whitespace-nowrap">
-          Open Pipeline Performance →
-        </Link>
       </div>
 
       {/* One table per setter: replaces the card grid + conversion rows that
@@ -452,75 +352,6 @@ export default function SetterOverview() {
 
       <SetterDrilldown kind={drill} onClose={() => setDrill(null)} range={range} leads={allLeads} setters={setters} windowLabel={typeof range === 'number' ? `Last ${range} days` : range === 'mtd' ? 'Month to date' : 'Custom range'} />
 
-      {/* Recent Leads (from setter_leads) + Upcoming Strategy Calls — side-by-side.
-          Both cards flex to equal height; inner scroll keeps them visually balanced
-          regardless of row count. */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6 items-stretch">
-        <div className="tile tile-feedback overflow-hidden flex flex-col h-full">
-          <div className="px-4 py-3 border-b border-border-default flex items-center justify-between shrink-0">
-            <h2 className="text-sm font-medium text-text-secondary">Recent Leads Set ({allLeads.length})</h2>
-          </div>
-          <div className="flex-1 overflow-auto min-h-0">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-bg-card z-10">
-                <tr className="border-b border-border-default text-text-400 uppercase text-[10px]">
-                  <th className="px-3 py-2 text-left">Lead</th>
-                  <th className="px-3 py-2 text-left">Setter</th>
-                  <th className="px-3 py-2 text-left">Source</th>
-                  <th className="px-3 py-2 text-left">Status</th>
-                  <th className="px-3 py-2 text-right">Revenue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allLeads.slice(0, showAllRecent ? 50 : 10).map(l => {
-                  const setterName = setters.find(s => s.id === l.setter_id)?.name || '—'
-                  const statusStyle = (status) => {
-                    if (status === 'closed') return 'bg-success/15 text-success'
-                    if (status === 'showed' || status === 'not_closed') return 'bg-cyan-400/15 text-cyan-400'
-                    if (status === 'no_show') return 'bg-danger/15 text-danger'
-                    if (status === 'rescheduled') return 'bg-orange-400/15 text-orange-400'
-                    return 'bg-text-400/15 text-text-400'
-                  }
-                  const isAuto = l.lead_source === 'auto' || INTRO_CALENDARS.includes(l.lead_source)
-                  const sourceLabel = isAuto ? 'auto' : (l.lead_source || 'manual')
-                  return (
-                    <tr key={l.id} className="border-b border-border-default/30 hover:bg-bg-card-hover/50">
-                      <td className="px-3 py-1.5 font-medium text-text-primary truncate max-w-[160px]">{l.lead_name || '—'}</td>
-                      <td className="px-3 py-1.5 text-text-primary">{setterName}</td>
-                      <td className="px-3 py-1.5 text-text-400 capitalize truncate max-w-[100px]" title={l.lead_source || ''}>{sourceLabel}</td>
-                      <td className="px-3 py-1.5">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded capitalize ${statusStyle(l.status)}`}>
-                          {(l.status || 'pending').replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="px-3 py-1.5 text-right">
-                        {parseFloat(l.revenue_attributed || 0) > 0 ? (
-                          <span className="text-success">${parseFloat(l.revenue_attributed).toLocaleString()}</span>
-                        ) : '—'}
-                      </td>
-                    </tr>
-                  )
-                })}
-                {allLeads.length === 0 && (
-                  <tr><td colSpan={5} className="px-3 py-8 text-center text-text-400">No leads in this range</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          {allLeads.length > 10 && (
-            <button
-              onClick={() => setShowAllRecent(v => !v)}
-              className="w-full py-3 text-xs font-medium text-text-primary hover:bg-bg-card-hover transition-colors flex items-center justify-center gap-1.5 border-t border-border-default shrink-0"
-            >
-              {showAllRecent ? 'Show less' : `Show all ${Math.min(allLeads.length, 50)} leads`}
-            </button>
-          )}
-        </div>
-
-        {/* Endangered Leads — upcoming appointments with no engagement */}
-        <EndangeredLeadsTable leads={endangeredLeads} loading={loadingEndangered} fillHeight />
-
-      </div>
 
       </div>
     </div>
