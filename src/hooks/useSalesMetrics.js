@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { useRegion, audienceInRegion } from '../lib/region'
 import { dateRangeBoundsET } from '../lib/dateUtils'
 
 /*
@@ -88,23 +89,28 @@ export function rates(t) {
   }
 }
 
-async function load(range) {
+async function load(range, region = 'all') {
   const { startStr, endStr } = dateRangeBoundsET(range)
+  const inRegion = (aud) => audienceInRegion(aud, region)
 
   // Each source loads independently: if one table is unreadable the rest of
   // the page still gets its numbers, and the failure is reported, not hidden.
   const problems = []
   const safe = (label, fn) => fn().catch(err => { problems.push(`${label}: ${err?.message || err}`); return [] })
-  const [mvRows, reports, excluded, bookings, bookingExcluded, confRows] = await Promise.all([
+  const [mvRowsAll, reports, excluded, bookings, bookingExcluded, confRowsAll, callAudiences] = await Promise.all([
     safe('marketing view', () => fetchAll(() => supabase.from('lib_marketing_by_audience_daily_mv').select('*').gte('date', startStr).lte('date', endStr).order('date'))),
     safe('EOD reports', () => fetchAll(() => supabase.from('closer_eod_reports').select('id, closer_id, report_date, is_confirmed, offers').gte('report_date', startStr).lte('report_date', endStr).order('report_date'))),
     safe('call exclusions', () => fetchAll(() => supabase.from('closer_call_excluded').select('closer_call_id').order('closer_call_id'))),
     safe('calendar bookings', () => fetchAll(() => supabase.from('lib_strategy_booking_resolved').select('id, ghl_event_id, ghl_contact_id, contact_name, contact_email, booked_at, appointment_date, appointment_status, audience, revenue_tier, is_dq, is_spam').gte('booked_at', startStr).lte('booked_at', endStr).order('booked_at'))),
     safe('booking exclusions', () => fetchAll(() => supabase.from('booking_excluded').select('booking_id').order('booking_id'))),
-    safe('call confirmations', () => fetchAll(() => supabase.from('lib_call_confirmation_by_closer').select('closer_id, report_date, confirmed_calls, unconfirmed_calls, confirmed_showed, confirmed_noshow, unconfirmed_showed, unconfirmed_noshow').gte('report_date', startStr).lte('report_date', endStr).order('report_date'))),
+    safe('call confirmations', () => fetchAll(() => supabase.from('lib_call_confirmation_by_closer_audience').select('closer_id, report_date, audience, confirmed_calls, unconfirmed_calls, confirmed_showed, confirmed_noshow, unconfirmed_showed, unconfirmed_noshow').gte('report_date', startStr).lte('report_date', endStr).order('report_date'))),
+    // Audience per logged call, only needed to split by region
+    region === 'all' ? Promise.resolve([]) : safe('call audiences', () => fetchAll(() => supabase.from('lib_closer_call_audience').select('closer_call_id, audience').gte('report_date', startStr).lte('report_date', endStr).order('closer_call_id'))),
   ])
 
-  // ── Company totals from the matview ──
+  // ── Company totals from the matview (region = a set of audiences) ──
+  const mvRows = mvRowsAll.filter(r => inRegion(r.audience))
+  const confRows = confRowsAll.filter(r => inRegion(r.audience))
   const totals = { ...EMPTY_TOTALS }
   for (const r of mvRows) {
     totals.adspend += num(r.adspend) * NZD_TO_USD
@@ -135,20 +141,25 @@ async function load(range) {
       .in('eod_report_id', slice).order('created_at')))
     calls.push(...rows)
   }
-  calls = calls.filter(c => !excludedIds.has(c.id)).map(c => ({
+  calls = calls.filter(c => !excludedIds.has(c.id))
+  if (region !== 'all') {
+    const audOf = new Map(callAudiences.map(a => [a.closer_call_id, a.audience]))
+    calls = calls.filter(c => inRegion(audOf.get(c.id)))
+  }
+  calls = calls.map(c => ({
     ...c, closer_id: reportById[c.eod_report_id]?.closer_id, report_date: reportById[c.eod_report_id]?.report_date,
   }))
   // Offers: the per-call `offered` flag is never set by the EOD form, so the
   // only record is the count each closer types on the report header.
   const offersByCloser = {}
   for (const r of reports) if (r.is_confirmed) offersByCloser[r.closer_id] = (offersByCloser[r.closer_id] || 0) + num(r.offers)
-  totals.offers = Object.values(offersByCloser).reduce((a, b) => a + b, 0)
+  totals.offers = region === 'all' ? Object.values(offersByCloser).reduce((a, b) => a + b, 0) : 0
   totals.ncRows = calls.filter(c => c.call_type === 'new_call').length
 
   // ── Per-closer calendar bookings (booking -> appointment -> closer) ──
   const bookingExcludedIds = new Set(bookingExcluded.map(b => b.booking_id))
   // Belt and braces: migration 172 marks test bookings as spam in the view; keep the name guard here too
-  const goodBookings = bookings.filter(b => !b.is_dq && !b.is_spam && !bookingExcludedIds.has(b.id) && !/opt digital/i.test(b.contact_name || ''))
+  const goodBookings = bookings.filter(b => !b.is_dq && !b.is_spam && !bookingExcludedIds.has(b.id) && !/opt digital/i.test(b.contact_name || '') && inRegion(b.audience))
   const bookingsByCloser = {}
   const eventIds = goodBookings.map(b => b.ghl_event_id).filter(Boolean)
   for (let i = 0; i < eventIds.length; i += 200) {
@@ -199,11 +210,12 @@ async function load(range) {
     t.qualifiedBookings = t.calendarBookings > 0 ? t.calendarBookings : t.ncRows
   }
 
-  return { totals, byCloser, calls, bookings: goodBookings, window: { startStr, endStr }, mvRows, problems }
+  return { totals, byCloser, calls, bookings: goodBookings, window: { startStr, endStr }, mvRows, problems, region }
 }
 
 export function useSalesMetrics(range) {
-  const key = typeof range === 'object' ? JSON.stringify(range) : String(range)
+  const region = useRegion()
+  const key = (typeof range === 'object' ? JSON.stringify(range) : String(range)) + '|' + region
   const cached = cache.get(key)
   const fresh = cached && Date.now() - cached.ts < TTL
   const [data, setData] = useState(fresh ? cached.data : null)
@@ -215,14 +227,14 @@ export function useSalesMetrics(range) {
     const c = cache.get(key)
     if (c && Date.now() - c.ts < TTL) { setData(c.data); setLoading(false); return }
     setLoading(true); setError(null)
-    load(range)
+    load(range, region)
       .then(d => { cache.set(key, { data: d, ts: Date.now() }); if (alive) { setData(d); setError(d.problems.length ? d.problems.join(' · ') : null); setLoading(false) } })
       .catch(err => { console.warn('sales metrics failed:', err); if (alive) { setError(err?.message || 'failed'); setLoading(false) } })
     return () => { alive = false }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const totals = data?.totals || EMPTY_TOTALS
-  return { loading, error, totals, r: rates(totals), byCloser: data?.byCloser || {}, calls: data?.calls || [], bookings: data?.bookings || [], window: data?.window }
+  return { loading, error, totals, r: rates(totals), byCloser: data?.byCloser || {}, calls: data?.calls || [], bookings: data?.bookings || [], window: data?.window, region }
 }
 
 export function invalidateSalesMetrics() { cache.clear() }

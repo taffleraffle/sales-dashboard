@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition, Children } from 'react'
 import KPICard from '../components/KPICard'
 import { useSalesMetrics } from '../hooks/useSalesMetrics'
+import { useRegion, AU_AUDIENCE, regionLabel } from '../lib/region'
 import { Link } from 'react-router-dom'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { useCloserCallProspectMetrics } from '../hooks/useCloserCallProspectMetrics'
@@ -3590,7 +3591,15 @@ export default function MarketingPerformance() {
   // setSelectedAudiences UI binds further down where the rest of the audience
   // panel state lives. The two declarations stay in sync because they are
   // the same `useState` call.
-  const [selectedAudiences, setSelectedAudiences] = useState(() => new Set())
+  const [pickedAudiences, setSelectedAudiences] = useState(() => new Set())
+  // Region (top bar) beats the chips: Australia = the Australia audience, US =
+  // every other audience including Unknown. All = whatever chips are picked.
+  const region = useRegion()
+  const selectedAudiences = useMemo(() => {
+    if (region === 'au') return new Set([AU_AUDIENCE])
+    if (region === 'us') return new Set([...(audienceDefs || []).map(a => a.display_name).filter(n => n !== AU_AUDIENCE), 'Unknown'])
+    return pickedAudiences
+  }, [region, pickedAudiences, audienceDefs])
 
   // Duplicate-pair resolutions (migration 057). Ben clicks a "possible
   // duplicate" pair and either merges them (secondary contact_id starts
@@ -4757,6 +4766,11 @@ export default function MarketingPerformance() {
             fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 600,
             letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--ink-3)',
           }}>Audience</span>
+          {region !== 'all' && (
+            <span className="pill" style={{ background: 'var(--accent)', border: 0, fontWeight: 600 }} title="Change it in the top bar">
+              Region: {regionLabel(region)} · chips off
+            </span>
+          )}
           <button onClick={() => setSelectedAudiences(new Set())}
             style={{
               padding: '6px 12px',

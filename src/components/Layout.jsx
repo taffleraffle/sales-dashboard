@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { REGIONS, useRegion, setRegion } from '../lib/region'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Library as LibraryIcon, Smartphone, Target, Bot, UsersRound } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -285,6 +286,7 @@ export default function Layout() {
               <div className="hidden md:flex items-center gap-3">
                 <span className="eyebrow eyebrow-accent">OPT Digital · Sales</span>
               </div>
+              <RegionSwitch />
             </div>
 
             {/* Profile */}
@@ -389,5 +391,25 @@ export default function Layout() {
       </div>
       </UploadProvider>
     </ToastProvider>
+  )
+}
+
+/* Region filter: All / US / Australia. One setting for every page; the
+   metrics hook and the Marketing audience filter read it. */
+function RegionSwitch() {
+  const region = useRegion()
+  return (
+    <div role="group" aria-label="Region" className="flex items-center" style={{ marginLeft: 6, padding: 3, borderRadius: 999, border: '1px solid var(--house-line-strong)', background: '#fff', gap: 2 }}>
+      {REGIONS.map(r => {
+        const on = r.value === region
+        return (
+          <button key={r.value} type="button" className="house-plain" onClick={() => setRegion(r.value)} aria-pressed={on} title={r.label}
+            style={{ height: 30, padding: '0 12px', borderRadius: 999, border: 0, fontSize: 12.5, fontWeight: 600, letterSpacing: '.01em', cursor: 'pointer',
+              background: on ? 'var(--accent)' : 'transparent', color: 'var(--ink)', transition: 'background 140ms ease' }}>
+            {r.short}
+          </button>
+        )
+      })}
+    </div>
   )
 }
