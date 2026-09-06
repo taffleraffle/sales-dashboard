@@ -13,6 +13,8 @@ import { dateRangeBoundsET } from '../lib/dateUtils'
     bookings  strategy calendar, not DQ, not spam, not booking_excluded
     lives     closer_calls new calls with outcome closed / not_closed on a
               CONFIRMED EOD, minus closer_call_excluded
+    offers    the count typed on each confirmed EOD header (the per-call flag
+              is never set by the form)
     closes, cash, revenue   the resolved close rows
     no_shows, reschedules, cancels, fu_lives, ascensions
 
@@ -85,9 +87,9 @@ async function load(range) {
   const safe = (label, fn) => fn().catch(err => { problems.push(`${label}: ${err?.message || err}`); return [] })
   const [mvRows, reports, excluded, bookings, bookingExcluded] = await Promise.all([
     safe('marketing view', () => fetchAll(() => supabase.from('lib_marketing_by_audience_daily_mv').select('*').gte('date', startStr).lte('date', endStr).order('date'))),
-    safe('EOD reports', () => fetchAll(() => supabase.from('closer_eod_reports').select('id, closer_id, report_date, is_confirmed').gte('report_date', startStr).lte('report_date', endStr).order('report_date'))),
+    safe('EOD reports', () => fetchAll(() => supabase.from('closer_eod_reports').select('id, closer_id, report_date, is_confirmed, offers').gte('report_date', startStr).lte('report_date', endStr).order('report_date'))),
     safe('call exclusions', () => fetchAll(() => supabase.from('closer_call_excluded').select('closer_call_id').order('closer_call_id'))),
-    safe('calendar bookings', () => fetchAll(() => supabase.from('lib_strategy_booking_resolved').select('id, ghl_event_id, booked_at, is_dq, is_spam').gte('booked_at', startStr).lte('booked_at', endStr).order('booked_at'))),
+    safe('calendar bookings', () => fetchAll(() => supabase.from('lib_strategy_booking_resolved').select('id, ghl_event_id, booked_at, is_dq, is_spam, contact_name').gte('booked_at', startStr).lte('booked_at', endStr).order('booked_at'))),
     safe('booking exclusions', () => fetchAll(() => supabase.from('booking_excluded').select('booking_id').order('booking_id'))),
   ])
 
@@ -125,12 +127,17 @@ async function load(range) {
   calls = calls.filter(c => !excludedIds.has(c.id)).map(c => ({
     ...c, closer_id: reportById[c.eod_report_id]?.closer_id, report_date: reportById[c.eod_report_id]?.report_date,
   }))
-  totals.offers = calls.filter(c => c.offered && c.call_type !== 'ascension').length
+  // Offers: the per-call `offered` flag is never set by the EOD form, so the
+  // only record is the count each closer types on the report header.
+  const offersByCloser = {}
+  for (const r of reports) if (r.is_confirmed) offersByCloser[r.closer_id] = (offersByCloser[r.closer_id] || 0) + num(r.offers)
+  totals.offers = Object.values(offersByCloser).reduce((a, b) => a + b, 0)
   totals.ncRows = calls.filter(c => c.call_type === 'new_call').length
 
   // ── Per-closer calendar bookings (booking -> appointment -> closer) ──
   const bookingExcludedIds = new Set(bookingExcluded.map(b => b.booking_id))
-  const goodBookings = bookings.filter(b => !b.is_dq && !b.is_spam && !bookingExcludedIds.has(b.id) && b.ghl_event_id)
+  // Belt and braces: migration 172 marks test bookings as spam in the view; keep the name guard here too
+  const goodBookings = bookings.filter(b => !b.is_dq && !b.is_spam && !bookingExcludedIds.has(b.id) && b.ghl_event_id && !/opt digital/i.test(b.contact_name || ''))
   const bookingsByCloser = {}
   const eventIds = goodBookings.map(b => b.ghl_event_id)
   for (let i = 0; i < eventIds.length; i += 200) {
@@ -145,19 +152,22 @@ async function load(range) {
   for (const c of calls) {
     if (!c.closer_id) continue
     const t = byCloser[c.closer_id] || (byCloser[c.closer_id] = { ...EMPTY_TOTALS, calendarBookings: bookingsByCloser[c.closer_id] || 0 })
-    const isNC = c.call_type === 'new_call', isFU = c.call_type === 'follow_up', isAsc = c.call_type === 'ascension'
+    const isNC = c.call_type === 'new_call', isFU = c.call_type === 'follow_up'
     if (isNC) t.ncRows++
     if (isNC && LIVE.has(c.outcome)) t.lives++
     if (isFU && LIVE.has(c.outcome)) t.fuLives++
     if (isNC && c.outcome === 'no_show') t.noShows++
     if (isNC && c.outcome === 'rescheduled') t.reschedules++
     if (isNC && ['canceled', 'cancelled'].includes(c.outcome)) t.cancels++
-    if (c.offered && !isAsc) t.offers++
     if (c.outcome === 'closed') { t.closes++; t.trialCash += num(c.cash_collected); t.trialRevenue += num(c.revenue) }
     if (c.outcome === 'ascended') { t.ascensions++; t.ascendCash += num(c.cash_collected); t.ascendRevenue += num(c.revenue) }
   }
   for (const id of Object.keys(bookingsByCloser)) {
     if (!byCloser[id]) byCloser[id] = { ...EMPTY_TOTALS, calendarBookings: bookingsByCloser[id] }
+  }
+  for (const [id, n] of Object.entries(offersByCloser)) {
+    if (!byCloser[id]) byCloser[id] = { ...EMPTY_TOTALS, calendarBookings: bookingsByCloser[id] || 0 }
+    byCloser[id].offers = n
   }
   for (const t of Object.values(byCloser)) {
     // Booked = calendar when the appointment carries a closer, else the closer's own new-call rows
