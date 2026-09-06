@@ -13,6 +13,7 @@ function trendPill(trend) {
   const dir = trend.direction
   const cls = dir === 'up' ? 'pill-up' : dir === 'down' ? 'pill-down' : 'pill-flat'
   const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '·'
+  if (trend.label) return <span className={`pill ${cls}`}>{trend.label}</span>
   return (
     <span className={`pill ${cls}`}>
       <span className="arrow">{arrow}</span>
@@ -33,6 +34,7 @@ export default function KPICard({
   onClick,
   targetLabel,
   score,
+  title,
 }) {
   // Numeric value for the target test: strip $, commas, %, x. A dash means
   // "no data" and gets no status at all.
@@ -61,6 +63,7 @@ export default function KPICard({
       tabIndex={interactive ? 0 : undefined}
       onKeyDown={interactive ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(e) } }) : undefined}
       className={`relative editorial-kpi-card ${className}`}
+      title={title}
       style={{
         background: highlight ? 'rgba(244,225,74,.10)' : '#ffffff',
         border: `1px solid ${highlight ? 'var(--accent)' : 'var(--rule)'}`,

@@ -14,7 +14,9 @@ import { etOffset } from '../../services/speedToLeadDb'
   'booked'    every qualified strategy booking (from useSalesMetrics)
   'live'      new calls that went live (closed / not closed)
   'show'      every booked new call with a Showed / No show / Rescheduled filter
-  'close'     the closes, with revenue and cash (CAC uses this too)
+  'close'     every live new call with a Closed / Not closed filter (the rate's numerator and denominator)
+  'conversion' the funnel lead -> booked -> live -> closed, one stage at a time
+  'cac'       the closes, with revenue and cash (ad spend divided by these)
 
   All of it is the same data the tiles were computed from, so the counts in
   the pop-up always equal the number on the tile.
@@ -72,7 +74,7 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
 
   // Leads are not part of the metrics hook (nothing else needs the rows), so fetch on open
   useEffect(() => {
-    if (kind !== 'leads' || !win) return
+    if ((kind !== 'leads' && kind !== 'conversion') || !win) return
     let alive = true
     setLeads(null)
     ;(async () => {
@@ -181,12 +183,75 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
       <Filter options={opts} value={filter} onChange={setFilter} />
       <LeaderTable rows={[...rows].sort(byDate)} highlightFirst={false} empty="Nothing in this bucket." columns={callCols('Showed?')} />
     </>
+  } else if (kind === 'close') {
+    title = 'Close rate: every live new call'
+    subtitle = 'Closes divided by new calls that went live. Every live call is listed, closed or not.'
+    const ncCloses = live.filter(c => c.outcome === 'closed')
+    const notClosed = live.filter(c => c.outcome === 'not_closed')
+    const opts = [
+      { value: 'all', label: 'All live', count: live.length },
+      { value: 'closed', label: 'Closed', count: ncCloses.length },
+      { value: 'not_closed', label: 'Not closed', count: notClosed.length },
+    ]
+    const rows = filter === 'closed' ? ncCloses : filter === 'not_closed' ? notClosed : live
+    tiles = <>
+      <KPICard label="Live new calls" value={live.length} subtitle="the denominator" />
+      <KPICard label="Closed" value={ncCloses.length} subtitle="on the call" />
+      <KPICard label="Not closed" value={notClosed.length} />
+      <KPICard label="Close rate" value={`${R.closeRate}%`} subtitle={closes.length > ncCloses.length ? `+${closes.length - ncCloses.length} closed on follow-ups (not in the rate)` : 'closes over live new calls'} />
+    </>
+    table = <>
+      <Filter options={opts} value={filter} onChange={setFilter} />
+      <LeaderTable rows={[...rows].sort(byDate)} highlightFirst={false} empty="Nothing in this bucket." columns={callCols('Result')} />
+    </>
+  } else if (kind === 'conversion') {
+    title = 'Conversion rate: lead to close'
+    subtitle = 'Each stage of the funnel in this window. Pick a stage to see who is in it.'
+    const opts = [
+      { value: 'all', label: 'Leads', count: leads ? leads.length : T.leads },
+      { value: 'booked', label: 'Booked', count: bookings.length },
+      { value: 'live', label: 'Live', count: live.length },
+      { value: 'closed', label: 'Closed', count: closes.length },
+    ]
+    tiles = <>
+      <KPICard label="Leads" value={T.leads} subtitle="Typeform opt-ins" />
+      <KPICard label="Booked" value={T.qualifiedBookings} subtitle={`${R.leadToBooked}% of leads`} />
+      <KPICard label="Live" value={T.lives} subtitle={`${R.bookedToLive}% of booked`} />
+      <KPICard label="Closed" value={T.closes} subtitle={`${R.closeRate}% of live · ${R.leadToClose}% of leads`} />
+    </>
+    const leadTable = leads == null ? <div className="flex items-center justify-center py-8"><Loader className="animate-spin" size={20} /></div> : (
+      <LeaderTable rows={leads} rowKey={r => r.response_id} highlightFirst={false} empty="No leads in this window."
+        columns={[
+          { key: 'submitted_at', label: 'When', width: 150, render: r => fmtStamp(r.submitted_at) },
+          { key: 'name', label: 'Lead', render: r => <Person name={[r.first_name, r.last_name].filter(Boolean).join(' ') || r.email || 'Unknown'} sub={r.email || undefined} /> },
+          { key: 'form_name', label: 'Funnel', render: r => <span style={{ color: 'var(--ink-2)', fontWeight: 400 }}>{r.form_name || r.utm_campaign || '—'}</span> },
+          { key: 'qualified', label: 'Qualified', align: 'right', render: r => r.qualified ? <Pill label="Qualified" color="var(--house-good)" /> : <Pill label="DQ" color="var(--ink-4)" /> },
+        ]} />
+    )
+    const bookedTable = <LeaderTable rows={[...bookings].sort((a, b) => (b.booked_at || '').localeCompare(a.booked_at || ''))} highlightFirst={false} empty="No bookings in this window."
+      columns={[
+        { key: 'booked_at', label: 'Booked', width: 120, render: r => fmtDay(r.booked_at) },
+        { key: 'contact_name', label: 'Prospect', render: r => <Person name={clean(r.contact_name)} sub={r.contact_email || undefined} /> },
+        { key: 'appointment_date', label: 'Call date', width: 130, render: r => fmtDay(r.appointment_date) },
+        { key: 'appointment_status', label: 'Status', align: 'right', render: r => <Pill label={r.appointment_status || 'booked'} color={r.appointment_status === 'confirmed' ? 'var(--house-good)' : 'var(--ink-2)'} /> },
+      ]} />
+    const closedTable = <LeaderTable rows={[...closes].sort(byDate)} highlightFirst={false} empty="No closes on confirmed EODs in this window."
+      columns={[
+        { key: 'report_date', label: 'Date', width: 120, render: r => fmtDay(r.report_date) },
+        { key: 'prospect_name', label: 'Prospect', render: r => <Person name={clean(r.prospect_name)} sub={closerName[r.closer_id] ? `closed by ${closerName[r.closer_id]}` : undefined} /> },
+        { key: 'call_type', label: 'Type', width: 110, render: r => <span className="pill">{r.call_type === 'follow_up' ? 'Follow-up' : 'New call'}</span> },
+        { key: 'cash_collected', label: 'Cash', align: 'right', strong: true, render: r => money(r.cash_collected) },
+      ]} />
+    table = <>
+      <Filter options={opts} value={filter} onChange={setFilter} />
+      {filter === 'booked' ? bookedTable : filter === 'live' ? <LeaderTable rows={[...live].sort(byDate)} highlightFirst={false} empty="No live calls in this window." columns={callCols('Result')} /> : filter === 'closed' ? closedTable : leadTable}
+    </>
   } else {
-    title = kind === 'cac' ? 'CAC: every close' : 'Close rate: every close'
-    subtitle = kind === 'cac' ? 'Ad spend divided by closes. These are the closes.' : 'Closes over live new calls. These are the closes.'
+    title = 'CAC: every close'
+    subtitle = 'Ad spend divided by closes. These are the closes, follow-ups included.'
     tiles = <>
       <KPICard label="Closes" value={closes.length} subtitle={`${R.closeRate}% of ${T.lives} live`} />
-      <KPICard label={kind === 'cac' ? 'CAC' : 'Ad spend'} value={kind === 'cac' ? (R.cac != null ? money(R.cac) : '—') : money(T.adspend)} />
+      <KPICard label="CAC" value={R.cac != null ? money(R.cac) : '—'} subtitle={`${money(T.adspend)} ad spend`} />
       <KPICard label="Revenue" value={money(closes.reduce((t, c) => t + parseFloat(c.revenue || 0), 0))} subtitle="trial revenue on these closes" />
       <KPICard label="Cash collected" value={money(closes.reduce((t, c) => t + parseFloat(c.cash_collected || 0), 0))} />
     </>

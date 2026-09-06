@@ -52,7 +52,7 @@ export const EMPTY_TOTALS = {
   adspend: 0, leads: 0, qualifiedBookings: 0, lives: 0, fuLives: 0, closes: 0,
   trialCash: 0, trialRevenue: 0, ascendCash: 0, ascendRevenue: 0, ascensions: 0,
   noShows: 0, reschedules: 0, cancels: 0, offers: 0, ncRows: 0,
-  confShowed: 0, confNoShow: 0, unconfShowed: 0, unconfNoShow: 0,
+  confShowed: 0, confNoShow: 0, unconfShowed: 0, unconfNoShow: 0, confCalls: 0, unconfCalls: 0,
 }
 
 export function rates(t) {
@@ -71,6 +71,8 @@ export function rates(t) {
     // Confirmed vs unconfirmed show rate (booking_call_status marks x closer outcomes)
     confShowRate: (t.confShowed + t.confNoShow) > 0 ? pct(t.confShowed, t.confShowed + t.confNoShow) : null,
     unconfShowRate: (t.unconfShowed + t.unconfNoShow) > 0 ? pct(t.unconfShowed, t.unconfShowed + t.unconfNoShow) : null,
+    // Share of marked calls that were confirmed before the call (same definition as the Marketing page)
+    confirmedShare: (t.confCalls + t.unconfCalls) > 0 ? pct(t.confCalls, t.confCalls + t.unconfCalls) : null,
     cpl: t.leads > 0 && t.adspend > 0 ? t.adspend / t.leads : null,
     costPerBooked: t.qualifiedBookings > 0 && t.adspend > 0 ? t.adspend / t.qualifiedBookings : null,
     costPerLive: t.lives > 0 && t.adspend > 0 ? t.adspend / t.lives : null,
@@ -99,7 +101,7 @@ async function load(range) {
     safe('call exclusions', () => fetchAll(() => supabase.from('closer_call_excluded').select('closer_call_id').order('closer_call_id'))),
     safe('calendar bookings', () => fetchAll(() => supabase.from('lib_strategy_booking_resolved').select('id, ghl_event_id, ghl_contact_id, contact_name, contact_email, booked_at, appointment_date, appointment_status, audience, revenue_tier, is_dq, is_spam').gte('booked_at', startStr).lte('booked_at', endStr).order('booked_at'))),
     safe('booking exclusions', () => fetchAll(() => supabase.from('booking_excluded').select('booking_id').order('booking_id'))),
-    safe('call confirmations', () => fetchAll(() => supabase.from('lib_call_confirmation_by_closer').select('closer_id, report_date, confirmed_showed, confirmed_noshow, unconfirmed_showed, unconfirmed_noshow').gte('report_date', startStr).lte('report_date', endStr).order('report_date'))),
+    safe('call confirmations', () => fetchAll(() => supabase.from('lib_call_confirmation_by_closer').select('closer_id, report_date, confirmed_calls, unconfirmed_calls, confirmed_showed, confirmed_noshow, unconfirmed_showed, unconfirmed_noshow').gte('report_date', startStr).lte('report_date', endStr).order('report_date'))),
   ])
 
   // ── Company totals from the matview ──
@@ -161,6 +163,7 @@ async function load(range) {
   for (const r of confRows) {
     totals.confShowed += num(r.confirmed_showed); totals.confNoShow += num(r.confirmed_noshow)
     totals.unconfShowed += num(r.unconfirmed_showed); totals.unconfNoShow += num(r.unconfirmed_noshow)
+    totals.confCalls += num(r.confirmed_calls); totals.unconfCalls += num(r.unconfirmed_calls)
     const c = confByCloser[r.closer_id] || (confByCloser[r.closer_id] = { confShowed: 0, confNoShow: 0, unconfShowed: 0, unconfNoShow: 0 })
     c.confShowed += num(r.confirmed_showed); c.confNoShow += num(r.confirmed_noshow); c.unconfShowed += num(r.unconfirmed_showed); c.unconfNoShow += num(r.unconfirmed_noshow)
   }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { todayET, rangeToDays } from '../lib/dateUtils'
 import KPICard from '../components/KPICard'
 import DateRangeSelector from '../components/DateRangeSelector'
@@ -195,7 +195,15 @@ export default function SalesOverview() {
   const [endangeredLeads, setEndangeredLeads] = useState([])
   const [loadingEndangered, setLoadingEndangered] = useState(false)
   const [showRevenueBreakdown, setShowRevenueBreakdown] = useState(false)
-  const [drill, setDrill] = useState(null) // 'leads' | 'booked' | 'live' | 'show' | 'close' | 'cac'
+  const [drill, setDrill] = useState(null) // 'leads' | 'booked' | 'live' | 'show' | 'close' | 'conversion' | 'cac'
+  // Share of marked calls that were confirmed before the call vs not (lib_call_confirmation_by_closer)
+  const confSplit = useMemo(() => {
+    const t = m.totals
+    const conf = t.confCalls, unconf = t.unconfCalls, total = conf + unconf
+    if (!total) return null
+    const confPct = Math.round((conf / total) * 100)
+    return { conf, unconf, total, confPct, unconfPct: 100 - confPct }
+  }, [m.totals])
   const [revenueDeals, setRevenueDeals] = useState(null)
 
   // ── Pending EOD: check who hasn't submitted today ──
@@ -415,7 +423,7 @@ export default function SalesOverview() {
             <KPICard label="Ad spend" value={money2(mkt.adspend)} subtitle={mkt.adspend > 0 ? 'tracked marketing spend' : 'no spend logged'} />
             <KPICard label="Front-end cash ROAS" value={mkt.adspend > 0 ? `${feRoas.toFixed(2)}x` : '—'} subtitle={`$${Math.round(ct.cash).toLocaleString()} trial cash`} target={bm('trial_fe_roas')} direction="above" />
             <KPICard label="Revenue rate" value={R.revenueRoas != null ? `${R.revenueRoas.toFixed(2)}x` : '—'} subtitle="revenue ÷ ad spend" target={bm('revenue_roas') ?? 5} direction="above" onClick={openRevenueBreakdown} />
-            <KPICard label="Conversion rate" value={T.leads > 0 ? `${R.leadToClose}%` : '—'} subtitle={`lead → booked ${R.leadToBooked}% · booked → live ${R.bookedToLive}% · live → close ${R.closeRate}%`} target={bm('lead_to_close') ?? 1} direction="above" onClick={() => setDrill('close')} />
+            <KPICard label="Conversion rate" value={T.leads > 0 ? `${R.leadToClose}%` : '—'} subtitle={`lead → booked ${R.leadToBooked}% · booked → live ${R.bookedToLive}% · live → close ${R.closeRate}%`} target={bm('lead_to_close') ?? 1} direction="above" onClick={() => setDrill('conversion')} />
           </div>
         </section>
 
@@ -425,6 +433,7 @@ export default function SalesOverview() {
           <div className="kpi-grid">
             <KPICard label="Confirmed show rate" value={R.confShowRate != null ? `${R.confShowRate}%` : '—'} subtitle={`${T.confShowed} of ${T.confShowed + T.confNoShow} confirmed calls showed`} target={bm('show_rate_new') ?? 50} direction="above" onClick={() => setDrill('show')} />
             <KPICard label="Unconfirmed show rate" value={R.unconfShowRate != null ? `${R.unconfShowRate}%` : '—'} subtitle={`${T.unconfShowed} of ${T.unconfShowed + T.unconfNoShow} unconfirmed calls showed`} target={bm('show_rate_new') ?? 50} direction="above" onClick={() => setDrill('show')} />
+            <KPICard label="Calls confirmed" value={confSplit ? `${confSplit.confPct}%` : '—'} subtitle={confSplit ? `${confSplit.unconfPct}% unconfirmed · ${confSplit.conf} of ${confSplit.total} marked calls` : 'no confirmation marks in this window'} target={bm('confirmed_share')} direction="above" onClick={() => setDrill('show')} />
             <KPICard label="Speed to lead" value={stl ? stl.avgDisplay : stlLoading ? '…' : '—'} subtitle={stlSplit ? `in hours ${fmtSecs(stlSplit.inHours)} · out of hours ${fmtSecs(stlSplit.outHours)} · this week ${fmtSecs(stlSplit.week)}` : stlLoading ? 'matching leads to dials' : stlError ? `could not load: ${stlError}` : 'no leads with a phone number'} score={stl?.avgSecs} target={300} direction="below" targetLabel="Target under 5 min" />
             <KPICard label="Dialled within 5 minutes" value={stl ? `${stl.pctUnder5m}%` : stlLoading ? '…' : '—'} subtitle={stl ? `${stl.under5m} of ${stl.worked} dialled leads · ${stl.notCalled} never dialled` : undefined} target={80} direction="above" targetLabel="Target 80%" />
           </div>

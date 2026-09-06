@@ -451,3 +451,12 @@ main table.house-table tbody td:first-child > span > span:last-child > span:firs
 /* Eight tiles on one row on wide screens, four beneath that */
 @media (min-width: 1400px) { .kpi-grid.kpi-grid-8 { grid-template-columns: repeat(8, 1fr); } }
 @media (min-width: 900px) and (max-width: 1399px) { .kpi-grid.kpi-grid-8 { grid-template-columns: repeat(4, 1fr); } }
+
+/* Status colours inside tables (Tailwind utilities sit in @layer and lose to the td rule above) */
+main table tbody td.text-success, main table tbody td .text-success { color: var(--house-good); }
+main table tbody td.text-warning, main table tbody td .text-warning { color: var(--house-warn); }
+main table tbody td.text-danger, main table tbody td .text-danger { color: var(--house-bad); }
+main table tbody td.text-text-400, main table tbody td.text-text-secondary { color: var(--ink-4); }
+main table tbody td.text-cyan-400, main table tbody td.text-purple-400 { color: var(--ink); font-weight: 600; }
+main .house-colbtn { height: 30px; padding: 0 12px; font-size: 12px; font-weight: 600; border: 1px solid var(--house-line-strong); background: #fff; color: var(--ink-2); border-radius: 999px; }
+main .house-colbtn:hover { border-color: var(--ink-3); color: var(--ink); }

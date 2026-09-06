@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition } from 'react'
+import { useState, useRef, useEffect, useMemo, memo, useCallback, startTransition, Children } from 'react'
+import KPICard from '../components/KPICard'
 import { Link } from 'react-router-dom'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { useCloserCallProspectMetrics } from '../hooks/useCloserCallProspectMetrics'
@@ -140,101 +141,74 @@ const fmt = (v, format) => format === '$' ? f$(v) : format === '%' ? fP(v) : for
 // ── KPI Card with benchmark + info tooltip + period arrow ─────────
 // Pass `onClick` to make a KPI clickable (used for drill-down modals).
 const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev, tip, whatIf, onClick }) {
-  // Cost metrics where lower = better (CPL, CPB, CPA, Cost/Live, Cost Per Offer)
-  const costLabels = ['CPL', 'Cost/', 'CPA', 'Resch%']
+  // Cost metrics where lower = better (CPL, CPB, CPA, Cost/Live, Cost Per Offer, reschedule and cancel rates)
+  const costLabels = ['CPL', 'Cost/', 'CPA', 'Resch%', 'Reschedule%', 'Cancel%']
   const lowerIsBetter = costLabels.some(c => label.includes(c))
-  // Only color red/green if there's a benchmark to compare against
-  const isGood = benchmark != null && value !== 0 && (lowerIsBetter ? value <= benchmark : value >= benchmark)
-  const isBad = benchmark != null && value !== 0 && !isGood
-
-  // What-if delta (computed first because it overrides the prev arrow —
-  // when what-if is active, the displayed big number is the simulated value,
-  // so the inline arrow should describe Δ vs CURRENT actual, not Δ vs prev
-  // period. Otherwise the arrow describes a baseline that isn't visible
-  // anywhere on the tile, which is what burned Ben on 2026-05-14.)
+  // When a what-if is active the big number is the simulated value; the
+  // pill then describes the change vs CURRENT actual, not vs the prior
+  // period (the baseline has to be visible on the tile; Ben 2026-05-14).
   const displayValue = whatIf != null ? whatIf : value
   const hasWhatIfDelta = whatIf != null && Math.abs(whatIf - value) > 0.01
+  const isZero = !(Math.abs(parseFloat(displayValue)) > 0)
 
-  let arrow = null
+  let trend = null
   if (hasWhatIfDelta && value !== 0) {
-    const pctChange = ((whatIf - value) / value) * 100
+    const pct = ((whatIf - value) / value) * 100
     const improved = lowerIsBetter ? whatIf < value : whatIf > value
-    arrow = (
-      <span className={`inline-flex items-center gap-0.5 text-[9px] font-medium ${improved ? 'text-success' : 'text-danger'}`} title="What-if change vs current actual">
-        {improved ? '▲' : '▼'}{Math.abs(pctChange).toFixed(0)}%
-      </span>
-    )
+    trend = { direction: improved ? 'up' : 'down', label: `what-if ${pct > 0 ? '+' : ''}${pct.toFixed(0)}%` }
   } else if (prev != null && prev !== 0 && value !== 0) {
-    // Period-over-period arrow (only shown when no what-if is active)
-    const pctChange = ((value - prev) / prev) * 100
-    const improved = lowerIsBetter ? value < prev : value > prev
-    const worsened = lowerIsBetter ? value > prev : value < prev
-    if (Math.abs(pctChange) >= 0.5) {
-      arrow = (
-        <span className={`inline-flex items-center gap-0.5 text-[9px] font-medium ${improved ? 'text-success' : worsened ? 'text-danger' : 'text-text-400'}`} title="vs previous period">
-          {improved ? '▲' : worsened ? '▼' : '—'}
-          {Math.abs(pctChange).toFixed(0)}%
-        </span>
-      )
+    const pct = ((value - prev) / prev) * 100
+    if (Math.abs(pct) >= 0.5) {
+      const improved = lowerIsBetter ? value < prev : value > prev
+      trend = { direction: improved ? 'up' : 'down', label: `${pct > 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(0)}% vs prior` }
     }
   }
+  const bits = []
+  if (hasWhatIfDelta) bits.push(`now ${fmt(value, format)}`)
+  if (trailing != null && Math.abs(parseFloat(trailing)) > 0) bits.push(`30d ${fmt(trailing, format)}`)
 
-  const Wrapper = onClick ? 'button' : 'div'
-  const interactiveCls = onClick ? 'text-left cursor-pointer hover:border-opt-yellow/40 hover:bg-bg-card-hover transition-colors w-full' : ''
   return (
-    <Wrapper
+    <KPICard
+      label={label}
+      value={fmt(displayValue, format)}
+      subtitle={bits.join(' · ') || undefined}
+      target={!isZero && benchmark != null ? benchmark : undefined}
+      direction={lowerIsBetter ? 'below' : 'above'}
+      score={isZero ? undefined : parseFloat(displayValue)}
+      trend={trend}
+      highlight={hasWhatIfDelta}
       onClick={onClick}
-      className={`bg-bg-card border rounded-sm p-3 relative group ${hasWhatIfDelta ? 'border-opt-yellow/40' : 'border-border-default'} ${interactiveCls}`}
-    >
-      <div className="flex items-center gap-1">
-        <p className="text-[9px] uppercase tracking-wider text-text-400 mb-0.5 leading-tight truncate">{label}</p>
-        {arrow}
-        {tip && (
-          <div className="relative">
-            <span className="text-[8px] text-text-400/50 cursor-help mb-0.5">&#9432;</span>
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] border border-white/10 text-[10px] text-white/90 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl">
-              {tip}
-              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-[#1a1a1a]" />
-            </div>
-          </div>
-        )}
-      </div>
-      <p className={`text-lg font-bold leading-tight ${displayValue === 0 ? 'text-text-400' : isGood ? 'text-success' : isBad ? 'text-danger' : 'text-text-primary'}`}>
-        {fmt(displayValue, format)}
-        {hasWhatIfDelta && (
-          <span className={`text-[10px] font-normal ml-1.5 ${(whatIf > value) === !lowerIsBetter ? 'text-success' : 'text-danger'}`}>
-            ({whatIf > value ? '+' : ''}{fmt(whatIf - value, format === '%' ? '%' : format === 'x' ? 'x' : '$')})
-          </span>
-        )}
-      </p>
-      <div className="flex items-center gap-2 mt-0.5">
-        {hasWhatIfDelta && <span className="text-[9px] text-text-400">now: {fmt(value, format)}</span>}
-        {trailing != null && <span className="text-[9px] text-text-400">30d: {fmt(trailing, format)}</span>}
-        {benchmark != null && <span className="text-[9px] text-text-400">BM: {fmt(benchmark, format)}</span>}
-        {onClick && <span className="text-[9px] text-text-400/60 ml-auto">click to view</span>}
-      </div>
-    </Wrapper>
+      title={tip}
+    />
   )
 })
 
 // ── Section Header ─────────────────────────────────────────────────
-// Keep one-row-per-section at lg: — the outer page wrapper now caps content
-// width so cards don't stretch to 300px+ on ultrawide.
-const colsMap = {
-  3: 'lg:grid-cols-3',
-  4: 'lg:grid-cols-4',
-  5: 'lg:grid-cols-5',
-  6: 'lg:grid-cols-6',
-  7: 'lg:grid-cols-7',
-  8: 'lg:grid-cols-8',
-  9: 'lg:grid-cols-9',
-}
-
+// A section whose tiles are all zero (no ascensions, no AR, no refunds in
+// the window) folds to a single line so the page is not a wall of $0 tiles.
 function Section({ title, children, cols = 6 }) {
+  const [open, setOpen] = useState(false)
+  const kids = Children.toArray(children)
+  const isKpi = k => !!k?.props && ('value' in k.props)
+  const hasNumber = k => Math.abs(parseFloat(k.props.value)) > 0 || k.props.whatIf != null
+  const allEmpty = kids.length > 0 && kids.every(k => isKpi(k) && !hasNumber(k))
+  if (allEmpty && !open) {
+    return (
+      <div className="mb-4 flex flex-wrap items-center gap-3" style={{ padding: '12px 18px', border: '1px dashed var(--house-line-strong)', borderRadius: 16, background: '#fff' }}>
+        <h3 className="eyebrow" style={{ margin: 0 }}>{title}</h3>
+        <span style={{ fontSize: 13, color: 'var(--ink-4)' }}>Nothing recorded in this window.</span>
+        <button type="button" className="house-colbtn" style={{ marginLeft: 'auto' }} onClick={() => setOpen(true)}>Show tiles</button>
+      </div>
+    )
+  }
+  const grid = cols >= 8 ? 'kpi-grid kpi-grid-8' : cols >= 6 ? 'kpi-grid kpi-grid-6' : 'kpi-grid'
   return (
     <div className="mb-4">
-      <h3 className="text-[10px] uppercase tracking-widest text-text-400 font-medium mb-2 pl-1">{title}</h3>
-      <div className={`grid grid-cols-2 md:grid-cols-3 ${colsMap[cols] || 'lg:grid-cols-6'} gap-2`}>
+      <div className="flex items-center gap-3 mb-2">
+        <h3 className="eyebrow" style={{ margin: 0 }}>{title}</h3>
+        {allEmpty && <button type="button" className="house-colbtn" onClick={() => setOpen(false)}>Hide empty section</button>}
+      </div>
+      <div className={grid}>
         {children}
       </div>
     </div>
@@ -289,7 +263,8 @@ function MTDFunnel({ stats }) {
 // same deduped numbers the top tiles use. Without this, the table
 // silently showed legacy EOD self-report counts while the rest of the
 // page used per-call truth — same drift class as everything else.
-function TrailingTable({ entries, applyProspectMetrics }) {
+function TrailingTable({ entries, applyProspectMetrics, bm }) {
+  const [showAllCols, setShowAllCols] = useState(false)
   const periods = [
     { label: '4 Days', days: 4 },
     { label: '7 Days', days: 7 },
@@ -325,33 +300,48 @@ function TrailingTable({ entries, applyProspectMetrics }) {
     { label: 'NET ROAS', k: 'all_cash_roas', f: fX },
   ]
 
+  // Same benchmarks as the tiles (marketing_benchmarks), same three-step colour
   const rateColor = (k, v) => {
-    if (v === 0) return ''
-    if (k === 'show_rate') return v >= 70 ? 'text-success' : v >= 50 ? 'text-text-primary' : 'text-danger'
-    if (k === 'close_rate') return v >= 25 ? 'text-success' : v >= 15 ? 'text-text-primary' : 'text-danger'
-    if (k === 'offer_rate') return v >= 80 ? 'text-success' : v >= 60 ? 'text-text-primary' : 'text-danger'
-    if (k.includes('roas')) return v >= 2 ? 'text-success' : v >= 1 ? 'text-text-primary' : 'text-danger'
+    if (!(Math.abs(v) > 0)) return 'text-text-400'
+    const vs = (t, lower) => t == null ? '' : lower
+      ? (v <= t ? 'text-success' : v <= t * 1.2 ? 'text-warning' : 'text-danger')
+      : (v >= t ? 'text-success' : v >= t * 0.8 ? 'text-warning' : 'text-danger')
+    if (k === 'show_rate') return vs(bm?.show_rate_new ?? 50)
+    if (k === 'close_rate') return vs(bm?.close_rate ?? 30)
+    if (k === 'lead_to_booking_pct') return vs(bm?.lead_to_booking ?? 15)
+    if (k === 'offer_rate') return vs(bm?.offer_rate ?? 80)
+    if (k === 'cpl') return vs(bm?.cpl ?? 150, true)
+    if (k === 'cpa_trial') return vs(bm?.cpa_trial ?? 2000, true)
+    if (k === 'trial_fe_roas') return vs(bm?.trial_fe_roas ?? 1.5)
+    if (k === 'all_cash_roas') return vs(bm?.all_cash_roas ?? 2)
     return ''
   }
+  const hidden = new Set(cols.filter(c => rows.every(r => !(Math.abs(parseFloat(r.s[c.k])) > 0))).map(c => c.k))
+  const visCols = showAllCols ? cols : cols.filter(c => !hidden.has(c.k))
 
   return (
     <div className="tile tile-feedback overflow-hidden">
-      <div className="px-4 py-3 border-b border-border-default">
+      <div className="px-4 py-3 border-b border-border-default flex items-center gap-3">
         <h2 className="text-sm font-medium">Trailing Period Summary</h2>
+        {hidden.size > 0 && (
+          <button type="button" className="house-colbtn" style={{ marginLeft: 'auto' }} onClick={() => setShowAllCols(v => !v)}>
+            {showAllCols ? 'Hide empty columns' : `${hidden.size} empty ${hidden.size === 1 ? 'column' : 'columns'} hidden`}
+          </button>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="border-b border-border-default text-text-400 uppercase text-[9px]">
               <th className="px-2 py-1.5 text-left sticky left-0 bg-bg-card z-10">Period</th>
-              {cols.map(c => <th key={c.k} className="px-2 py-1.5 text-right whitespace-nowrap">{c.label}</th>)}
+              {visCols.map(c => <th key={c.k} className="px-2 py-1.5 text-right whitespace-nowrap">{c.label}</th>)}
             </tr>
           </thead>
           <tbody>
             {rows.map(r => (
               <tr key={r.label} className="border-b border-border-default/30">
                 <td className="px-2 py-1.5 font-medium text-text-primary sticky left-0 bg-bg-card z-10">{r.label}</td>
-                {cols.map(c => (
+                {visCols.map(c => (
                   <td key={c.k} className={`px-2 py-1.5 text-right ${rateColor(c.k, r.s[c.k])}`}>
                     {c.f(r.s[c.k])}
                   </td>
@@ -366,7 +356,8 @@ function TrailingTable({ entries, applyProspectMetrics }) {
 }
 
 // ── Daily Tracker ──────────────────────────────────────────────────
-const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
+const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave, bm }) {
+  const [showAllCols, setShowAllCols] = useState(false)
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [sortKey, setSortKey] = useState('date')
@@ -441,32 +432,35 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
   const getNetLive  = e => e.live_calls || e.net_live_calls || 0  // NC + FU, for offer-rate denominator
 
   // Color helpers for table cells
-  const clrRate = (v, good, ok) => v >= good ? 'text-success' : v >= ok ? 'text-text-primary' : 'text-danger'
-  const clrRoas = v => v >= 2 ? 'text-success' : v >= 1 ? 'text-text-primary' : 'text-danger'
+  // Same benchmarks as the tiles (marketing_benchmarks), same three-step colour
+  const t = (k, d) => bm?.[k] ?? d
+  const clrRate = (v, good) => v >= good ? 'text-success' : v >= good * 0.8 ? 'text-warning' : 'text-danger'
+  const clrRoas = v => { if (!(v > 0)) return ''; const g = t('trial_fe_roas', 1.5); return v >= g ? 'text-success' : v >= g * 0.8 ? 'text-warning' : 'text-danger' }
   const clrCash = v => v > 0 ? 'text-success' : ''
 
   const dataCols = [
     { k: 'adspend', label: 'Spend', fmt: f$ },
     { k: 'leads', label: 'Leads', fmt: fN },
-    { k: null, label: 'CPL', calc: e => e.leads > 0 ? f$(parseFloat(e.adspend || 0) / e.leads) : '-' },
+    { k: null, label: 'CPL', calc: e => e.leads > 0 ? f$(parseFloat(e.adspend || 0) / e.leads) : '-',
+      color: e => { if (!(e.leads > 0)) return ''; const v = parseFloat(e.adspend || 0) / e.leads; const g = t('cpl', 150); return v <= g ? 'text-success' : v <= g * 1.2 ? 'text-warning' : 'text-danger' } },
     { k: 'auto_bookings', label: 'A.Book', fmt: fN },
     { k: 'qualified_bookings', label: 'Q.Book', fmt: fN },
     { k: null, label: 'L→Q%', calc: e => fmtP(e.qualified_bookings, e.leads),
-      color: e => e.leads > 0 ? clrRate((e.qualified_bookings || 0) / e.leads * 100, 15, 8) : '' },
+      color: e => e.leads > 0 ? clrRate((e.qualified_bookings || 0) / e.leads * 100, t('lead_to_booking', 15)) : '' },
     { k: 'live_calls', label: 'Net Live', fmt: fN },
     { k: null, label: 'Gr.Show%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(getLive(e), cal) : '-' },
-      color: e => { const cal = getCalls(e); return cal > 0 ? clrRate(getLive(e) / cal * 100, 70, 50) : '' } },
+      color: e => { const cal = getCalls(e); return cal > 0 ? clrRate(getLive(e) / cal * 100, t('show_rate_new', 50)) : '' } },
     { k: null, label: 'Net Show%', calc: e => { const net = getCalls(e) - (e.cancelled_dtf || 0) - (e.cancelled_by_prospect || 0) - (e.reschedules || 0); return net > 0 ? fmtP(getLive(e), net) : '-' },
-      color: e => { const net = getCalls(e) - (e.cancelled_dtf || 0) - (e.cancelled_by_prospect || 0) - (e.reschedules || 0); return net > 0 ? clrRate(getLive(e) / net * 100, 80, 60) : '' } },
+      color: e => { const net = getCalls(e) - (e.cancelled_dtf || 0) - (e.cancelled_by_prospect || 0) - (e.reschedules || 0); return net > 0 ? clrRate(getLive(e) / net * 100, t('show_rate_net', t('show_rate_new', 50))) : '' } },
     { k: 'reschedules', label: 'Resch', fmt: fN, color: e => (e.reschedules || 0) > 0 ? 'text-text-secondary' : '' },
     { k: null, label: 'R%', calc: e => { const cal = getCalls(e); return cal > 0 ? fmtP(e.reschedules, cal) : '-' },
       color: e => { const cal = getCalls(e); return cal > 0 && (e.reschedules || 0) > 0 ? 'text-text-secondary' : '' } },
     { k: 'offers', label: 'Offer', fmt: fN },
     { k: null, label: 'Ofr%', calc: e => getNetLive(e) > 0 ? fmtP(e.offers, getNetLive(e)) : '-',
-      color: e => getNetLive(e) > 0 ? clrRate((e.offers || 0) / getNetLive(e) * 100, 80, 60) : '' },
+      color: e => getNetLive(e) > 0 ? clrRate((e.offers || 0) / getNetLive(e) * 100, t('offer_rate', 80)) : '' },
     { k: 'closes', label: 'Close', fmt: fN, color: e => (e.closes || 0) > 0 ? 'text-success font-medium' : '' },
     { k: null, label: 'Cl%', calc: e => fmtP(e.closes, getLive(e)),
-      color: e => getLive(e) > 0 ? clrRate((e.closes || 0) / getLive(e) * 100, 25, 15) : '' },
+      color: e => getLive(e) > 0 ? clrRate((e.closes || 0) / getLive(e) * 100, t('close_rate', 30)) : '' },
     { k: 'trial_cash', label: 'T$', fmt: f$, color: e => clrCash(parseFloat(e.trial_cash || 0)) },
     { k: null, label: 'FE ROAS', calc: e => { const spend = parseFloat(e.adspend || 0); const cash = parseFloat(e.trial_cash || 0); return spend > 0 ? fX(cash / spend) : '-' },
       color: e => { const spend = parseFloat(e.adspend || 0); const cash = parseFloat(e.trial_cash || 0); return spend > 0 ? clrRoas(cash / spend) : '' } },
@@ -478,6 +472,12 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
     { k: null, label: 'NET ROAS', calc: e => { const spend = parseFloat(e.adspend || 0); const cash = parseFloat(e.trial_cash || 0) + parseFloat(e.ascend_cash || 0) + parseFloat(e.ar_collected || 0); return spend > 0 ? fX(cash / spend) : '-' },
       color: e => { const spend = parseFloat(e.adspend || 0); const cash = parseFloat(e.trial_cash || 0) + parseFloat(e.ascend_cash || 0) + parseFloat(e.ar_collected || 0); return spend > 0 ? clrRoas(cash / spend) : '' } },
   ]
+
+  // Columns that are blank on every visible day are hidden until asked for
+  const cellText = (c, e) => c.calc ? c.calc(e) : c.get ? c.fmt(c.get(e)) : c.fmt(c.k ? (typeof e[c.k] === 'string' ? parseFloat(e[c.k] || 0) : e[c.k]) : 0)
+  const isBlank = v => v == null || ['', '-', '—', '0', '$0', '0%', '0.0%', '0.00x'].includes(String(v))
+  const hidden = new Set(dataCols.map((c, i) => filtered.every(e => isBlank(cellText(c, e))) ? i : -1).filter(i => i >= 0))
+  const visCols = dataCols.map((c, i) => ({ ...c, i })).filter(c => showAllCols || !hidden.has(c.i))
 
   const editableFields = ['adspend', 'leads', 'auto_bookings', 'qualified_bookings',
     'calls_on_calendar', 'live_calls', 'no_shows', 'cancelled_dtf', 'cancelled_by_prospect', 'offers', 'closes', 'reschedules',
@@ -495,6 +495,11 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
           <EditorialDate value={toDate} onChange={setToDate} min={fromDate || undefined} placeholder="To" compact />
           <button onClick={() => { setFromDate(''); setToDate('') }} className="px-3 py-1 rounded text-xs font-medium bg-opt-yellow text-text-primary">FILTER</button>
           <span className="text-xs text-text-400">{filtered.length} days</span>
+          {hidden.size > 0 && (
+            <button type="button" className="house-colbtn" onClick={() => setShowAllCols(v => !v)}>
+              {showAllCols ? 'Hide empty columns' : `${hidden.size} empty ${hidden.size === 1 ? 'column' : 'columns'} hidden`}
+            </button>
+          )}
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -504,7 +509,7 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
               <th className="px-2 py-1.5 text-left sticky left-0 bg-bg-card z-10 cursor-pointer" onClick={() => toggleSort('date')}>
                 Date{sortKey === 'date' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
               </th>
-              {dataCols.map((c, i) => c.k ? <TH key={i} k={c.k} label={c.label} /> : <th key={i} className="px-2 py-1.5 text-right whitespace-nowrap">{c.label}</th>)}
+              {visCols.map((c) => c.k ? <TH key={c.i} k={c.k} label={c.label} /> : <th key={c.i} className="px-2 py-1.5 text-right whitespace-nowrap">{c.label}</th>)}
               <th className="px-2 py-1.5 w-14"></th>
             </tr>
           </thead>
@@ -514,17 +519,10 @@ const DailyTracker = memo(function DailyTracker({ entries, onDelete, onSave }) {
               return (
                 <tr key={e.date} className={`border-b border-border-default/30 hover:bg-bg-card-hover/50 group ${isEd ? 'bg-opt-yellow/5 border-opt-yellow/20' : ''}`}>
                   <td className={`px-2 py-1 font-medium whitespace-nowrap sticky left-0 z-10 ${isEd ? 'text-text-primary bg-opt-yellow/5' : 'text-text-primary bg-bg-card group-hover:bg-bg-card-hover/50'}`}>{e.date}</td>
-                  {dataCols.map((c, i) => {
-                    let val
-                    if (c.calc) {
-                      val = c.calc(e)
-                    } else if (c.get) {
-                      val = c.fmt(c.get(e))
-                    } else {
-                      val = c.fmt(c.k ? (typeof e[c.k] === 'string' ? parseFloat(e[c.k] || 0) : e[c.k]) : 0)
-                    }
+                  {visCols.map((c) => {
+                    const val = cellText(c, e)
                     const clr = c.color ? c.color(e) : ''
-                    return <td key={i} className={`px-2 py-1 text-right ${clr || 'text-text-400'}`}>{val}</td>
+                    return <td key={c.i} className={`px-2 py-1 text-right ${clr || (isBlank(val) ? 'text-text-400' : 'text-text-primary')}`}>{val}</td>
                   })}
                   <td className="px-2 py-1.5">
                     <div className="row-actions-touch flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -3369,7 +3367,7 @@ function ResolveDupeModal({ group, onClose, onResolved }) {
 // confirmation cohort. `refetchKey` bumps when the drilldown closes after a
 // mark so the tiles recount without a page reload. Returns a fragment of two
 // <KPI> so it drops straight into the Calls & Show Rates grid.
-function ConfirmationShowTiles({ range, selectedAudiences, refetchKey, onOpen }) {
+function ConfirmationShowTiles({ range, selectedAudiences, refetchKey, onOpen, bm }) {
   const [d, setD] = useState(null)
   useEffect(() => {
     let cancelled = false
@@ -3406,6 +3404,9 @@ function ConfirmationShowTiles({ range, selectedAudiences, refetchKey, onOpen })
            onClick={onOpen} />
       <KPI label="Unconf. Show%" value={uPct == null ? 0 : uPct} format="%"
            tip={d ? tip('Unconfirmed', d.uCalls, d.uShow, d.uNo, uPct) : 'Loading…'}
+           onClick={onOpen} />
+      <KPI label="Calls Confirmed%" value={d && (d.cCalls + d.uCalls) > 0 ? (d.cCalls / (d.cCalls + d.uCalls)) * 100 : 0} format="%" benchmark={bm?.confirmed_share}
+           tip={d ? `${d.cCalls} confirmed vs ${d.uCalls} unconfirmed of ${d.cCalls + d.uCalls} marked calls (${d.cCalls + d.uCalls > 0 ? (100 - (d.cCalls / (d.cCalls + d.uCalls)) * 100).toFixed(1) : '0.0'}% unconfirmed)` : 'Loading…'}
            onClick={onOpen} />
     </>
   )
@@ -5222,7 +5223,7 @@ export default function MarketingPerformance() {
                 as confirmed/unconfirmed + showed/no-show in the booking drilldowns;
                 these tiles split the show rate by cohort so the auto-booked
                 (unconfirmed) no-show problem is quantified. */}
-            <ConfirmationShowTiles range={range} selectedAudiences={selectedAudiences} refetchKey={hygieneRefetchKey} onOpen={() => setShowConfTrend(true)} />
+            <ConfirmationShowTiles range={range} selectedAudiences={selectedAudiences} refetchKey={hygieneRefetchKey} onOpen={() => setShowConfTrend(true)} bm={bm} />
           </Section>
         )
       })()}
@@ -5308,12 +5309,12 @@ export default function MarketingPerformance() {
           so trailing periods reflect the chip selection too. Empty
           selection (default) = same behavior as before. */}
       <div className="mb-5">
-        <TrailingTable entries={audienceFilteredEntries} applyProspectMetrics={applyProspectMetrics} />
+        <TrailingTable entries={audienceFilteredEntries} applyProspectMetrics={applyProspectMetrics} bm={bm} />
       </div>
 
       {/* Daily Tracker — audience-filtered too. */}
       <div className="mb-5">
-        <DailyTracker entries={audienceFilteredEntries} onDelete={handleDelete} onSave={upsertEntry} />
+        <DailyTracker entries={audienceFilteredEntries} onDelete={handleDelete} onSave={upsertEntry} bm={bm} />
       </div>
 
       {/* Audience override modal */}
