@@ -5,7 +5,7 @@ import DateRangeSelector from '../components/DateRangeSelector'
 import LeadStatusBadge from '../components/LeadStatusBadge'
 import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
 import Modal from '../components/editorial/Modal'
-import { Loader, Clock, Check, AlertTriangle } from 'lucide-react'
+import { Loader, Clock, Check, AlertTriangle, Trophy, X } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs, useCloserCallBreakdown } from '../hooks/useCloserData'
@@ -16,6 +16,7 @@ import { buildSetterSchedules } from '../services/ghlPipeline'
 import { fetchSpeedToLeadFromDb } from '../services/speedToLeadDb'
 import { useMarketingTracker, computeMarketingStats } from '../hooks/useMarketingTracker'
 import { useLeadAttribution } from '../hooks/useLeadAttribution'
+import { useBenchmarks } from '../hooks/useBenchmarks'
 import { supabase } from '../lib/supabase'
 import { checkEndangeredLeads } from '../services/engagementCheck'
 
@@ -193,7 +194,8 @@ export default function SalesOverview() {
   const { reports: closerReports } = useCloserEODs(null, days)
   const { breakdown: callBreakdown } = useCloserCallBreakdown(null, days)
   const { reports: setterReports } = useSetterEODs(null, days)
-  const { entries: marketingEntries, benchmarks } = useMarketingTracker()
+  const { entries: marketingEntries } = useMarketingTracker()
+  const { bm } = useBenchmarks()
   const { leads: recentLeads } = useLeadAttribution(days)
 
   const [endangeredLeads, setEndangeredLeads] = useState([])
@@ -437,7 +439,6 @@ export default function SalesOverview() {
   const costPerLive = mkt.adspend > 0 && ct.liveCalls > 0 ? mkt.adspend / ct.liveCalls : null
   const revPerLead = mkt.leads > 0 ? totalRevenue / mkt.leads : null
   const revPerBooked = calBooked > 0 ? totalRevenue / calBooked : null
-  const bm = (k) => { const v = benchmarks?.[k]; const n = v != null && typeof v === 'object' ? parseFloat(v.value) : parseFloat(v); return Number.isFinite(n) ? n : null }
   const money = (n) => n == null ? '—' : `$${Math.round(n).toLocaleString()}`
   const money2 = (n) => n == null ? '—' : `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 

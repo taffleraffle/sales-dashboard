@@ -4,6 +4,7 @@ import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
+import { useBenchmarks } from '../hooks/useBenchmarks'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { supabase } from '../lib/supabase'
@@ -17,6 +18,7 @@ import { checkEndangeredLeads } from '../services/engagementCheck'
 import EndangeredLeadsTable from '../components/EndangeredLeadsTable'
 
 export default function SetterOverview() {
+  const { bm } = useBenchmarks()
   const navigate = useNavigate()
   const [range, setRange] = useState(30)
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
@@ -330,14 +332,14 @@ export default function SetterOverview() {
       {/* Company conversion gauges */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 mb-6">
         <Gauge label="Pickup Rate" value={parseFloat(pickupRate)} target={30} />
-        <Gauge label="Show Rate" value={parseFloat(showRate)} target={70} />
+        <Gauge label="Show Rate" value={parseFloat(showRate)} target={bm('show_rate_new', 70)} />
         {/* Close rate here is SCOPED to setter-booked leads only (subset of
             closer universe). The company close rate on /sales/closers and
             /sales/marketing measures all live new-calls, not just
             setter-booked. Labelling explicitly so the difference doesn't
             read as a bug. */}
         <div title="Of the leads setters booked that showed (showed + not_closed + closed), what % closed. This is a SUBSET of company close rate — setter-booked leads typically convert higher than the full lead universe seen on /sales/closers and /sales/marketing.">
-          <Gauge label="Close · Setter-booked" value={parseFloat(closeRate)} target={25} />
+          <Gauge label="Close · Setter-booked" value={parseFloat(closeRate)} target={bm('close_rate', 25)} />
         </div>
         <Gauge label="MC → Set %" value={companyRates.mcToSet} target={30} max={100} />
       </div>
@@ -437,8 +439,8 @@ export default function SetterOverview() {
                 { key: 'mcs', label: 'MCs', align: 'right' },
                 { key: 'totalSets', label: 'Sets', align: 'right', strong: true },
                 { key: 'autoBookingCount', label: 'Auto', align: 'right' },
-                { key: 'showRate', label: 'Show', align: 'right', render: r => `${r.showRate ?? 0}%`, tone: r => toneOf(r.showRate, 70) },
-                { key: 'closeRate', label: 'Close · booked', align: 'right', render: r => `${r.closeRate ?? 0}%`, tone: r => toneOf(r.closeRate, 25) },
+                { key: 'showRate', label: 'Show', align: 'right', render: r => `${r.showRate ?? 0}%`, tone: r => toneOf(r.showRate, bm('show_rate_new', 70)) },
+                { key: 'closeRate', label: 'Close · booked', align: 'right', render: r => `${r.closeRate ?? 0}%`, tone: r => toneOf(r.closeRate, bm('close_rate', 25)) },
                 { key: 'revenue', label: 'Revenue', align: 'right', strong: true, render: r => `$${Math.round(r.revenue || 0).toLocaleString()}` },
               ]}
             />

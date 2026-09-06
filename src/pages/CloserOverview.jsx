@@ -4,6 +4,7 @@ import DateRangeSelector from '../components/DateRangeSelector'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
+import { useBenchmarks } from '../hooks/useBenchmarks'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useCloserEODs, useCloserCallBreakdown } from '../hooks/useCloserData'
 import { supabase } from '../lib/supabase'
@@ -17,6 +18,7 @@ export default function CloserOverview() {
   const { members: closers, loading: loadingMembers } = useTeamMembers('closer')
   const { reports, loading: loadingReports } = useCloserEODs(null, days)
   const { breakdown } = useCloserCallBreakdown(null, days)
+  const { bm } = useBenchmarks()
 
   // Per-closer confirmed-vs-unconfirmed show rate (migration 161). Confirmation
   // is the manual mark (booking_call_status); attendance is the call outcome.
@@ -194,10 +196,10 @@ export default function CloserOverview() {
       {/* Company Conversion Gauges — 7 items (Net Close removed; close rate
           is now prospect-level, so a separate "net" version is meaningless) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-2 sm:gap-3 mb-6">
-        <Gauge label="Show Rate" value={companyShowRate} target={70} />
+        <Gauge label="Show Rate" value={companyShowRate} target={bm('show_rate_new', 70)} />
         <Gauge label="Resched Rate" value={companyRescheduleRate} target={10} max={100} />
-        <Gauge label="Offer Rate" value={companyOfferRate} target={80} />
-        <Gauge label="Close Rate" value={companyCloseRate} target={25} />
+        <Gauge label="Offer Rate" value={companyOfferRate} target={bm('offer_rate', 80)} />
+        <Gauge label="Close Rate" value={companyCloseRate} target={bm('close_rate', 25)} />
         <Gauge label="Offer → Close" value={companyOfferCloseRate} target={30} max={100} />
         <Gauge label="Calls/Close" value={callsPerClose} target={4} max={20} />
         <Gauge label="Cash Collect %" value={cashCollectionRate} target={50} />
@@ -217,9 +219,9 @@ export default function CloserOverview() {
             { key: 'liveNC', label: 'Net new', align: 'right' },
             { key: 'offers', label: 'Offers', align: 'right' },
             { key: 'closes', label: 'Closes', align: 'right', strong: true },
-            { key: 'showRate', label: 'Show', align: 'right', render: r => `${r.showRate}%`, tone: r => toneOf(r.showRate, 70) },
-            { key: 'closeRate', label: 'Close', align: 'right', render: r => `${r.closeRate}%`, tone: r => toneOf(r.closeRate, 25) },
-            { key: 'offerRate', label: 'Offer', align: 'right', render: r => `${r.offerRate}%`, tone: r => toneOf(r.offerRate, 80) },
+            { key: 'showRate', label: 'Show', align: 'right', render: r => `${r.showRate}%`, tone: r => toneOf(r.showRate, bm('show_rate_new', 70)) },
+            { key: 'closeRate', label: 'Close', align: 'right', render: r => `${r.closeRate}%`, tone: r => toneOf(r.closeRate, bm('close_rate', 25)) },
+            { key: 'offerRate', label: 'Offer', align: 'right', render: r => `${r.offerRate}%`, tone: r => toneOf(r.offerRate, bm('offer_rate', 80)) },
             { key: 'revenue', label: 'Revenue', align: 'right', render: r => `$${Math.round(r.revenue).toLocaleString()}` },
             { key: 'cash', label: 'Cash', align: 'right', strong: true, render: r => `$${Math.round(r.cash).toLocaleString()}` },
           ]}
