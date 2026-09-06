@@ -1,11 +1,13 @@
 import { useState, useMemo, useEffect } from 'react'
 import DateRangeSelector from '../components/DateRangeSelector'
+import LeaderTable, { Card, Person } from '../components/house/LeaderTable'
+import Dropdown from '../components/Dropdown'
 import KPICard from '../components/KPICard'
 import Gauge from '../components/Gauge'
 import { useEngagementData } from '../hooks/useEngagementData'
 import { useEngagementCadences } from '../hooks/useEngagementCadences'
 import SetterBotSandbox from '../components/SetterBotSandbox'
-import { Bot, Loader2, ChevronDown, ChevronUp, Filter, Zap, Phone, RefreshCw, Check, Save, Power, Clock, AlertTriangle, MessageSquare, Pause, Play, Send } from 'lucide-react'
+import { Bot, Loader2, ChevronDown, ChevronUp, Zap, Phone, RefreshCw, Check, Save, Power, Clock, AlertTriangle, MessageSquare, Pause, Play, Send } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 const SEQ_COLORS = {
@@ -191,27 +193,24 @@ function CadenceCard({ cadence, conversations, onSave }) {
   const ruleCls = 'w-full py-2 px-3 bg-bg-primary border border-border-default rounded-lg text-sm text-text-primary text-center focus:outline-none focus:border-opt-yellow/40 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 
   return (
-    <div className={`bg-bg-card border rounded-sm overflow-hidden transition-all hover:border-opt-yellow/20 ${enabled ? 'border-border-default' : 'border-border-default/40'}`}>
+    <div className="tile overflow-hidden" style={{ opacity: enabled ? 1 : .7 }}>
       {/* Header */}
       <div className="p-5">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2.5">
-            <div className={`w-9 h-9 rounded-sm flex items-center justify-center transition-colors ${enabled ? 'bg-opt-yellow/10' : 'bg-text-400/10'}`}>
-              <Icon size={18} className={enabled ? 'text-text-primary' : 'text-text-400'} />
+            <div style={{ width: 40, height: 40, borderRadius: 12, background: enabled ? 'rgba(244,225,74,.55)' : 'var(--paper-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon size={18} style={{ color: enabled ? 'var(--ink)' : 'var(--ink-4)' }} />
             </div>
             <div>
-              <p className="text-text-primary font-bold text-sm">{cadence.display_name}</p>
-              <p className="text-text-400 text-[10px]">{description}</p>
+              <p style={{ margin: 0, fontFamily: 'var(--serif)', fontSize: 20, fontWeight: 500, lineHeight: 1.1 }}>{cadence.display_name}</p>
+              <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--ink-4)' }}>{description}</p>
             </div>
           </div>
           {/* ON/OFF Toggle */}
           <button
             onClick={toggleEnabled}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              enabled
-                ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30'
-                : 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20'
-            }`}
+            className="house-plain"
+            style={{ height: 32, padding: '0 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff', color: enabled ? 'var(--house-good)' : 'var(--house-bad)', border: `1px solid ${enabled ? 'rgba(22,163,74,.35)' : 'rgba(224,86,30,.35)'}`, boxShadow: 'var(--house-shadow-input)' }}
           >
             <Power size={12} />
             {enabled ? 'Active' : 'Disabled'}
@@ -219,10 +218,10 @@ function CadenceCard({ cadence, conversations, onSave }) {
         </div>
 
         {/* Stats bar */}
-        <div className="flex items-center gap-4 text-[10px] text-text-400">
-          <span className="flex items-center gap-1"><MessageSquare size={10} /> {cadenceConvos.length} leads</span>
-          <span className="flex items-center gap-1"><Check size={10} className="text-emerald-400" /> {replyRate}% reply rate</span>
-          {lastFired && <span className="flex items-center gap-1"><Clock size={10} /> Last: {timeAgo(lastFired)}</span>}
+        <div className="flex items-center gap-4 flex-wrap" style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ink-4)' }}>
+          <span className="flex items-center gap-1"><MessageSquare size={12} /> {cadenceConvos.length} leads</span>
+          <span className="flex items-center gap-1"><Check size={12} style={{ color: 'var(--house-good)' }} /> {replyRate}% replied</span>
+          {lastFired && <span className="flex items-center gap-1"><Clock size={12} /> last fired {timeAgo(lastFired)}</span>}
         </div>
       </div>
 
@@ -230,18 +229,16 @@ function CadenceCard({ cadence, conversations, onSave }) {
       <div className="flex border-t border-border-default/50">
         <button
           onClick={() => { setShowDoc(!showDoc); if (!showDoc) setExpanded(false) }}
-          className={`flex-1 px-5 py-2.5 flex items-center justify-center gap-1.5 text-[10px] transition-colors border-r border-border-default/50 ${
-            showDoc ? 'text-text-primary bg-opt-yellow-subtle' : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
-          }`}
+          className="house-plain flex-1 px-5 py-3 flex items-center justify-center gap-1.5"
+          style={{ fontSize: 12.5, fontWeight: 600, borderRadius: 0, borderRight: '1px solid var(--rule)', background: showDoc ? 'rgba(244,225,74,.14)' : 'transparent', color: showDoc ? 'var(--ink)' : 'var(--ink-2)' }}
         >
           <AlertTriangle size={11} />
           {showDoc ? 'Hide docs' : 'How it works'}
         </button>
         <button
           onClick={() => { setExpanded(!expanded); if (!expanded) setShowDoc(false) }}
-          className={`flex-1 px-5 py-2.5 flex items-center justify-center gap-1.5 text-[10px] transition-colors ${
-            expanded ? 'text-text-primary bg-opt-yellow-subtle' : 'text-text-400 hover:text-text-primary hover:bg-bg-card-hover'
-          }`}
+          className="house-plain flex-1 px-5 py-3 flex items-center justify-center gap-1.5"
+          style={{ fontSize: 12.5, fontWeight: 600, borderRadius: 0, background: expanded ? 'rgba(244,225,74,.14)' : 'transparent', color: expanded ? 'var(--ink)' : 'var(--ink-2)' }}
         >
           {expanded ? <><ChevronUp size={12} /> Hide settings</> : <><ChevronDown size={12} /> Configure</>}
         </button>
@@ -648,27 +645,16 @@ export default function SetterBot() {
               <span className="tag" style={{ background: '#fff4d6', color: '#8a5a00', borderColor: '#d6b876' }}>Dry run</span>
             )}
           </div>
-          <p
-            className="mt-2"
-            style={{
-              fontFamily: 'var(--mono)',
-              fontSize: 10,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--ink-3)',
-            }}
-          >
-            Automated lead engagement · follow-up
-          </p>
+          <p className="mt-2" style={{ fontSize: 14, color: 'var(--ink-2)', margin: '8px 0 0' }}>Texts every new lead, follows up, and books the call. Humans take over from the thread.</p>
         </div>
         <DateRangeSelector selected={range} onChange={setRange} />
       </div>
 
       {/* KPI Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
+      <div className="kpi-grid kpi-grid-8 mb-6">
         <KPICard label="Conversations" value={stats.total} />
         <KPICard label="Active" value={stats.active} />
-        <KPICard label="Reply Rate" value={`${stats.replyRate}%`} />
+        <KPICard label="Reply rate" value={`${stats.replyRate}%`} target={40} direction="above" />
         <KPICard label="Sent" value={stats.outbound} />
         <KPICard label="Received" value={stats.inbound} />
         <KPICard label="Booked" value={stats.booked} />
@@ -677,10 +663,10 @@ export default function SetterBot() {
       </div>
 
       {/* Gauge Row */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        <Gauge label="Reply Rate" value={parseFloat(stats.replyRate) || 0} target={40} />
-        <Gauge label="Booking Rate" value={parseFloat(stats.bookingRate) || 0} target={15} />
-        <Gauge label="Handoff Rate" value={stats.total > 0 ? parseFloat(((stats.handedOff / stats.total) * 100).toFixed(1)) : 0} target={10} direction="below" />
+      <div className="kpi-grid mb-6">
+        <Gauge label="Reply rate" value={parseFloat(stats.replyRate) || 0} target={40} />
+        <Gauge label="Booking rate" value={parseFloat(stats.bookingRate) || 0} target={15} />
+        <Gauge label="Handoff rate" value={stats.total > 0 ? parseFloat(((stats.handedOff / stats.total) * 100).toFixed(1)) : 0} target={10} direction="below" />
       </div>
 
       {/* Sandbox — talk to the bot without texting anyone */}
@@ -688,8 +674,8 @@ export default function SetterBot() {
 
       {/* Cadences */}
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">Cadences</h2>
-        <span className="text-[10px] text-text-400">Click a cadence to configure trigger rules</span>
+        <h2 className="eyebrow" style={{ margin: 0 }}>Cadences</h2>
+        <span style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>Open a cadence to change its trigger rules</span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         {cadences.map(c => (
@@ -700,85 +686,62 @@ export default function SetterBot() {
         )}
       </div>
 
-      {/* Sequence Breakdown + Setter Cards Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
-        <div className="tile tile-feedback p-5 hover:border-opt-yellow/10 transition-colors">
-          <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">By Sequence</h2>
-          <div className="space-y-2">
-            {Object.entries(stats.bySequence).map(([seq, count]) => (
-              <div key={seq} className="flex items-center justify-between py-1 hover:bg-bg-card-hover/30 rounded px-1 transition-colors">
-                <Badge text={seq} colorMap={SEQ_COLORS} />
-                <span className="text-text-primary font-bold">{count}</span>
-              </div>
-            ))}
-            {Object.keys(stats.bySequence).length === 0 && (
-              <p className="text-text-400 text-sm">No data yet</p>
-            )}
-          </div>
-        </div>
-
-        {setterStats.map(s => (
-          <div key={s.id} className="tile tile-feedback p-5 hover:border-opt-yellow/10 transition-colors">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-8 h-8 rounded-full bg-opt-yellow/10 flex items-center justify-center">
-                <span className="text-text-primary font-bold text-sm">{s.name?.[0]}</span>
-              </div>
-              <div>
-                <p className="text-text-primary font-semibold">{s.name}</p>
-                <p className="text-text-400 text-[10px] uppercase tracking-wider">{s.role}</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="py-1">
-                <p className="text-text-400 text-[10px] uppercase tracking-wider">Convos</p>
-                <p className="text-text-primary font-bold text-lg">{s.convos}</p>
-              </div>
-              <div className="py-1">
-                <p className="text-text-400 text-[10px] uppercase tracking-wider">Replies</p>
-                <p className="text-text-primary font-bold text-lg">{s.replies}</p>
-              </div>
-              <div className="py-1">
-                <p className="text-text-400 text-[10px] uppercase tracking-wider">Reply Rate</p>
-                <p className={`font-bold text-lg ${parseFloat(s.replyRate) >= 40 ? 'text-success' : 'text-text-primary'}`}>{s.replyRate}%</p>
-              </div>
-              <div className="py-1">
-                <p className="text-text-400 text-[10px] uppercase tracking-wider">Booked</p>
-                <p className="text-text-primary font-bold text-lg">{s.booked}</p>
-              </div>
-            </div>
-          </div>
-        ))}
+      {/* Setters and sequences */}
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-5 mb-6">
+        <Card title="Setters" count={setterStats.length}>
+          <LeaderTable
+            rows={[...setterStats].sort((a, b) => (b.booked || 0) - (a.booked || 0))}
+            highlightFirst={setterStats.length > 1}
+            empty="No setter activity in this range."
+            columns={[
+              { key: 'name', label: 'Setter', render: r => <Person name={r.name} sub={r.role} rank={r._rank} /> },
+              { key: 'convos', label: 'Conversations', align: 'right' },
+              { key: 'replies', label: 'Replies', align: 'right' },
+              { key: 'replyRate', label: 'Reply rate', align: 'right', render: r => `${r.replyRate}%`, tone: r => parseFloat(r.replyRate) >= 40 ? 'good' : parseFloat(r.replyRate) >= 32 ? 'warn' : 'bad' },
+              { key: 'booked', label: 'Booked', align: 'right', strong: true },
+            ]}
+          />
+        </Card>
+        <Card title="By sequence">
+          <LeaderTable
+            rows={Object.entries(stats.bySequence).map(([seq, count]) => ({ id: seq, seq, count })).sort((a, b) => b.count - a.count)}
+            highlightFirst={false}
+            empty="No data yet."
+            columns={[
+              { key: 'seq', label: 'Sequence', render: r => <Badge text={r.seq} colorMap={SEQ_COLORS} /> },
+              { key: 'count', label: 'Conversations', align: 'right', strong: true },
+            ]}
+          />
+        </Card>
       </div>
 
       {/* Leads Table */}
-      <div className="tile tile-feedback overflow-hidden">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-5 border-b border-border-default">
-          <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">All Leads</h2>
-          <div className="flex items-center gap-2">
+      <div className="tile overflow-hidden">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-5 py-4" style={{ borderBottom: '1px solid var(--rule)' }}>
+          <h2 className="editorial-panel-title" style={{ margin: 0 }}>Conversations <span style={{ fontFamily: 'var(--sans)', fontSize: 12.5, fontWeight: 600, color: 'var(--ink-4)', marginLeft: 10 }}>{filteredLeads.length} of {conversations.length}</span></h2>
+          <div className="flex items-center gap-2 flex-wrap">
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search name or phone..."
-              className="bg-bg-primary border border-border-default rounded-lg px-3 py-1.5 text-xs text-text-primary placeholder:text-text-400 w-48 focus:outline-none focus:border-opt-yellow/40 transition-colors"
+              placeholder="Search name or phone"
+              style={{ width: 240, height: 40 }}
             />
-            <div className="relative">
-              <select
-                value={leadFilter}
-                onChange={e => setLeadFilter(e.target.value)}
-                className="appearance-none bg-bg-primary border border-border-default rounded-lg px-3 py-1.5 pr-8 text-xs text-text-primary focus:outline-none focus:border-opt-yellow/40 cursor-pointer transition-colors"
-              >
-                <option value="all">All ({conversations.length})</option>
-                <option value="contacted">Contacted ({conversations.filter(c => (c.messages || []).some(m => m.direction === 'outbound')).length})</option>
-                <option value="replied">Replied ({conversations.filter(c => c.last_prospect_reply_at).length})</option>
-                <option value="no_reply">No Reply ({conversations.filter(c => !c.last_prospect_reply_at && (c.messages || []).some(m => m.direction === 'outbound')).length})</option>
-                <option value="booked">Booked ({conversations.filter(c => c.booking_state === 'confirmed').length})</option>
-                <option value="active">Active ({conversations.filter(c => c.status === 'active').length})</option>
-                <option value="handed_off">Handed Off ({conversations.filter(c => c.status === 'handed_off').length})</option>
-                <option value="stopped">Stopped ({conversations.filter(c => c.status === 'stopped').length})</option>
-              </select>
-              <Filter size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-400 pointer-events-none" />
-            </div>
+            <Dropdown
+              value={leadFilter}
+              onChange={setLeadFilter}
+              width={220}
+              options={[
+                { value: 'all', label: `All · ${conversations.length}` },
+                { value: 'contacted', label: `Contacted · ${conversations.filter(c => (c.messages || []).some(m => m.direction === 'outbound')).length}` },
+                { value: 'replied', label: `Replied · ${conversations.filter(c => c.last_prospect_reply_at).length}` },
+                { value: 'no_reply', label: `No reply · ${conversations.filter(c => !c.last_prospect_reply_at && (c.messages || []).some(m => m.direction === 'outbound')).length}` },
+                { value: 'booked', label: `Booked · ${conversations.filter(c => c.booking_state === 'confirmed').length}` },
+                { value: 'active', label: `Active · ${conversations.filter(c => c.status === 'active').length}` },
+                { value: 'handed_off', label: `Handed off · ${conversations.filter(c => c.status === 'handed_off').length}` },
+                { value: 'stopped', label: `Stopped · ${conversations.filter(c => c.status === 'stopped').length}` },
+              ]}
+            />
           </div>
         </div>
 
@@ -788,17 +751,17 @@ export default function SetterBot() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="house-table">
               <thead>
-                <tr className="border-b border-border-default bg-bg-card">
-                  <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Prospect</th>
-                  <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Sequence</th>
-                  <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Status</th>
-                  <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Msgs</th>
-                  <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Reply</th>
-                  <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Setter</th>
-                  <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Last Activity</th>
-                  <th className="text-left text-[10px] text-text-400 uppercase tracking-wider py-2 px-3">Last Message</th>
+                <tr>
+                  <th>Prospect</th>
+                  <th>Sequence</th>
+                  <th>Status</th>
+                  <th className="num">Msgs</th>
+                  <th>Reply</th>
+                  <th>Setter</th>
+                  <th>Last activity</th>
+                  <th>Last message</th>
                 </tr>
               </thead>
               <tbody>
@@ -809,8 +772,8 @@ export default function SetterBot() {
             </table>
           </div>
         )}
-        <div className="px-5 py-2 border-t border-border-default text-[10px] text-text-400">
-          Showing {filteredLeads.length} of {conversations.length} leads
+        <div className="px-5 py-3" style={{ borderTop: '1px solid var(--rule)', fontSize: 12.5, fontWeight: 500, color: 'var(--ink-4)', background: '#fbfbf9' }}>
+          Showing {filteredLeads.length} of {conversations.length} conversations
         </div>
       </div>
     </div>

@@ -24,7 +24,7 @@ import { ROLE_OPTIONS, initialsOf, ConnectionPill, RolePill, sendDashboardInvite
   Every card explains, in one line, what the connection is used for.
 */
 
-function Card({ icon: Icon, title, sub, ok, children }) {
+function Card({ icon: Icon, title, sub, ok, step, children }) {
   return (
     <section className="tile" style={{ padding: '22px 24px' }}>
       <div className="flex items-start gap-3 mb-4">
@@ -33,7 +33,7 @@ function Card({ icon: Icon, title, sub, ok, children }) {
         </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="eyebrow" style={{ margin: 0 }}>{title}</h2>
+            <h2 className="eyebrow" style={{ margin: 0 }}>{step ? `Step ${step} · ` : ''}{title}</h2>
             <ConnectionPill ok={ok} label={ok ? 'Connected' : 'Not connected'} />
           </div>
           <p style={{ margin: '4px 0 0', fontSize: 13.5, color: 'var(--ink-2)' }}>{sub}</p>
@@ -111,6 +111,8 @@ export default function TeamMemberPage() {
         )}
       </div>
 
+      <OnboardingStrip m={m} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ProfileCard m={m} save={save} canEdit={isAdmin} />
         <LoginCard m={m} canEdit={isAdmin} reload={load} />
@@ -138,7 +140,7 @@ function ProfileCard({ m, save, canEdit }) {
   const [role, setRole] = useState(m.role || 'closer')
   const dirty = name !== (m.name || '') || email !== (m.email || '') || role !== (m.role || '')
   return (
-    <Card icon={Check} title="Profile" sub="Name shows on leaderboards and EODs. Email is also how Fathom recordings are matched to them." ok={!!m.email}>
+    <Card step={1} icon={Check} title="Profile" sub="Name shows on leaderboards and EODs. Email is also how Fathom recordings are matched to them." ok={!!m.email}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <label className="flex flex-col gap-2"><span className="eyebrow">Full name</span><input type="text" value={name} onChange={e => setName(e.target.value)} disabled={!canEdit} /></label>
         <label className="flex flex-col gap-2"><span className="eyebrow">Email</span><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@optdigital.io" disabled={!canEdit} /></label>
@@ -172,7 +174,7 @@ function LoginCard({ m, canEdit, reload }) {
     setBusy(false)
   }
   return (
-    <Card icon={KeyRound} title="Dashboard login" sub={linked ? 'They can sign in at sales-dashboard-ftct.onrender.com with their email.' : 'They cannot sign in yet. Send the invite and they choose a password from the email.'} ok={linked}>
+    <Card step={2} icon={KeyRound} title="Dashboard login" sub={linked ? 'They can sign in at sales-dashboard-ftct.onrender.com with their email.' : 'They cannot sign in yet. Send the invite and they choose a password from the email.'} ok={linked}>
       {canEdit && (
         <div className="flex items-center gap-3 flex-wrap">
           <button type="button" className={linked ? 'editorial-btn-ghost' : 'editorial-btn-primary'} onClick={invite} disabled={busy}>
@@ -217,7 +219,7 @@ function GhlCard({ m, save, canEdit }) {
     : null
 
   return (
-    <Card icon={Link2} title="GoHighLevel" sub="Links this person to their GHL user, so calls assigned to them in GHL land on their EOD and their calendar syncs." ok={!!m.ghl_user_id}>
+    <Card step={3} icon={Link2} title="GoHighLevel" sub="Links this person to their GHL user, so calls assigned to them in GHL land on their EOD and their calendar syncs." ok={!!m.ghl_user_id}>
       {loadingUsers ? (
         <p style={{ fontSize: 13.5, color: 'var(--ink-4)', margin: 0 }}>Loading GHL users…</p>
       ) : options ? (
@@ -265,7 +267,7 @@ function CalendarCard({ m }) {
   }
   const fmt = (iso) => new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   return (
-    <Card icon={CalendarCheck} title="Calendar" sub="Bookings reach this dashboard through the GHL user above. Checking pulls the last week and next 30 days of their GHL calendar to prove it works." ok={!!m.ghl_user_id}>
+    <Card step={4} icon={CalendarCheck} title="Calendar" sub="Bookings reach this dashboard through the GHL user above. Checking pulls the last week and next 30 days of their GHL calendar to prove it works." ok={!!m.ghl_user_id}>
       {!m.ghl_user_id ? (
         <p style={{ fontSize: 13.5, color: 'var(--ink-4)', margin: 0 }}>Link their GoHighLevel user first, then come back and check the calendar.</p>
       ) : (
@@ -304,7 +306,7 @@ function WavvCard({ m, save, canEdit }) {
   }, [])
   const dirty = value !== (m.wavv_user_id || '') || String(start) !== String(m.stl_start_hour ?? '') || String(end) !== String(m.stl_end_hour ?? '')
   return (
-    <Card icon={PhoneCall} title="WAVV dialer" sub="Dials, pickups and speed-to-lead come from WAVV. The user ID is the one WAVV stamps on their calls." ok={!!m.wavv_user_id}>
+    <Card step={4} icon={PhoneCall} title="WAVV dialer" sub="Dials, pickups and speed-to-lead come from WAVV. The user ID is the one WAVV stamps on their calls." ok={!!m.wavv_user_id}>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <label className="flex flex-col gap-2 sm:col-span-3">
           <span className="eyebrow">WAVV user ID</span>
@@ -323,5 +325,33 @@ function WavvCard({ m, save, canEdit }) {
         </div>
       )}
     </Card>
+  )
+}
+
+/* Where they are in onboarding, and what to do next. */
+function OnboardingStrip({ m }) {
+  const steps = [
+    { label: 'Profile', done: !!m.name && !!m.email, hint: 'add their email' },
+    { label: 'Login', done: !!m.auth_user_id, hint: 'send the login invite' },
+    { label: 'GoHighLevel', done: !!m.ghl_user_id, hint: 'link their GHL user' },
+    { label: m.role === 'setter' ? 'Calendar and WAVV' : 'Calendar', done: !!m.ghl_user_id && (m.role !== 'setter' || !!m.wavv_user_id), hint: m.role === 'setter' ? 'check the calendar and link WAVV' : 'check the calendar' },
+  ]
+  const next = steps.find(s => !s.done)
+  const done = steps.filter(s => s.done).length
+  return (
+    <div className="tile mb-4" style={{ padding: '16px 22px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 18, background: next ? 'rgba(244,225,74,.08)' : '#fff', borderColor: next ? 'rgba(244,225,74,.6)' : 'var(--rule)' }}>
+      <div className="flex items-center gap-3 flex-wrap">
+        {steps.map((s, i) => (
+          <span key={s.label} className="flex items-center gap-2" style={{ fontSize: 13.5, fontWeight: 600, color: s.done ? 'var(--ink)' : 'var(--ink-4)' }}>
+            <span style={{ width: 26, height: 26, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: s.done ? 'var(--house-good)' : '#fff', border: `1px solid ${s.done ? 'var(--house-good)' : 'var(--house-line-strong)'}`, color: s.done ? '#fff' : 'var(--ink-4)', fontSize: 12, fontWeight: 700 }}>{s.done ? '✓' : i + 1}</span>
+            {s.label}
+            {i < steps.length - 1 && <span style={{ width: 22, height: 1, background: 'var(--house-line-strong)', display: 'inline-block', marginLeft: 6 }} />}
+          </span>
+        ))}
+      </div>
+      <span style={{ marginLeft: 'auto', fontSize: 13.5, fontWeight: 600, color: next ? 'var(--ink)' : 'var(--house-good)' }}>
+        {next ? `${done} of 4 done · next: ${next.hint}` : 'Fully connected'}
+      </span>
+    </div>
   )
 }

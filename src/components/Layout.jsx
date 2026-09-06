@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Megaphone, Library as LibraryIcon, Smartphone, Target, Bot, UsersRound } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Library as LibraryIcon, Smartphone, Target, Bot, UsersRound } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -31,8 +31,7 @@ const navItems = [
   { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
   // Ads owns /sales/ads/* EXCEPT Library, Shorts, and Ad Library, which are
   // their own nav items — so being on those doesn't also light up Ads.
-  { to: '/sales/ads', icon: Megaphone, label: 'Ads',
-    match: (p) => p.startsWith('/sales/ads') && !p.startsWith('/sales/ads/library') && !p.startsWith('/sales/ads/shorts') && !p.startsWith('/sales/ads/ad-library') },
+  // Ads (creative testing) hidden from the sidebar 2026-09-06 (Ben); /sales/ads/* still routes.
   { to: '/sales/ads/library', icon: LibraryIcon, label: 'Library' },
   { to: '/sales/ads/shorts', icon: Smartphone, label: 'Shorts' },
   { to: '/sales/ads/ad-library', icon: Target, label: 'Ad Library' },
