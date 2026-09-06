@@ -683,19 +683,18 @@ const EditorNotificationBell = forwardRef(function EditorNotificationBell(
       <button onClick={handleOpen} title="Notifications"
         style={{
           position: 'relative',
-          height: 38, padding: '0 14px', borderRadius: 9,
-          background: 'var(--paper)', border: '1px solid var(--rule)',
-          cursor: 'pointer', boxShadow: '0 2px 6px rgba(10,10,10,0.10)',
+          height: 36, padding: '0 16px', borderRadius: 999,
+          background: '#ffffff', border: '1px solid var(--house-line-strong)',
+          cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
         <span style={{
-          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
-          letterSpacing: '0.12em', textTransform: 'uppercase',
-          color: 'var(--ink-2)', lineHeight: 1,
+          fontFamily: 'var(--sans)', fontSize: 12.5, fontWeight: 600,
+          color: 'var(--ink)', lineHeight: 1,
         }}>Inbox</span>
         {unseenCount > 0 && (
           <span style={{
-            position: 'absolute', top: -2, right: -2,
+            marginLeft: 8,
             minWidth: 18, height: 18, borderRadius: 999,
             background: 'var(--down)', color: 'var(--paper)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -903,19 +902,18 @@ const NotificationBell = forwardRef(function NotificationBell(
       <button onClick={handleOpen} title="Recent activity"
         style={{
           position: 'relative',
-          height: 38, padding: '0 14px', borderRadius: 9,
-          background: 'var(--paper)', border: '1px solid var(--rule)',
-          cursor: 'pointer', boxShadow: '0 2px 6px rgba(10,10,10,0.10)',
+          height: 36, padding: '0 16px', borderRadius: 999,
+          background: '#ffffff', border: '1px solid var(--house-line-strong)',
+          cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
         <span style={{
-          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700,
-          letterSpacing: '0.12em', textTransform: 'uppercase',
-          color: 'var(--ink-2)', lineHeight: 1,
+          fontFamily: 'var(--sans)', fontSize: 12.5, fontWeight: 600,
+          color: 'var(--ink)', lineHeight: 1,
         }}>Activity</span>
         {unseenCount > 0 && (
           <span style={{
-            position: 'absolute', top: -2, right: -2,
+            marginLeft: 8,
             minWidth: 18, height: 18, borderRadius: 999,
             background: 'var(--down)', color: 'var(--paper)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -3375,12 +3373,11 @@ function LibraryTab({ scope = ADMIN_SCOPE, pendingOpen = null, category = 'ad' }
           row means multiple bells stack horizontally with a small gap
           instead of piling on top of each other. */}
       <div style={{
-        position: 'fixed', top: 76, right: 12, zIndex: 90,
-        display: 'flex', gap: 8, alignItems: 'center',
-        // Narrow windows: the tray must never push past the viewport edge
-        // (Ben 2026-06-11 — Inbox/Activity buttons were clipping). Wrap
-        // right-aligned instead of overflowing.
-        maxWidth: 'calc(100vw - 24px)', flexWrap: 'wrap', justifyContent: 'flex-end',
+        // In the page flow, right-aligned above the toolbar. It used to be
+        // position:fixed at the viewport edge, which clipped the Activity
+        // bell and floated over the header (Ben 2026-09-06).
+        display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+        justifyContent: 'flex-end', marginBottom: 12,
       }}>
         {!scope.isEditorView && coordinatorEditorId && (
           <EditorNotificationBell
@@ -4055,8 +4052,8 @@ const CreativeListView = memo(function CreativeListView({ rows, usedRawIds, onCl
   // Added an "Uploaded" column between Status and Actions so the operator
   // can scan upload dates at a glance and combine with the date filter.
   const gridCols = selectable
-    ? '26px 52px minmax(220px, 1.6fr) 90px 90px 130px 70px 80px 90px 80px'
-    : '52px minmax(220px, 1.6fr) 90px 90px 130px 70px 80px 90px 80px'
+    ? '26px 52px minmax(220px, 1.6fr) 90px 90px 130px 70px 80px 100px 150px'
+    : '52px minmax(220px, 1.6fr) 90px 90px 130px 70px 80px 100px 150px'
 
   // Header "select all visible" handler. Toggles all rows currently in
   // this group's list — caller passes group.rows so the meaning matches

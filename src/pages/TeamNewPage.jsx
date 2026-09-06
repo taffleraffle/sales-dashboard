@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, UserPlus, KeyRound, Link2, CalendarCheck, PhoneCall, Check } from 'lucide-react'
+import { ArrowLeft, UserPlus, KeyRound, Link2, CalendarCheck, MessageSquare, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../hooks/useToast'
@@ -21,6 +21,7 @@ const STEPS = [
   { icon: KeyRound, title: 'Dashboard login', text: 'One email with a link to set a password. Sent now if you tick the box.' },
   { icon: Link2, title: 'GoHighLevel', text: 'Pick their GHL user so calls assigned to them land on their EOD.' },
   { icon: CalendarCheck, title: 'Calendar and dialer', text: 'Check their calendar syncs, and link WAVV for setters.' },
+  { icon: MessageSquare, title: 'Slack', text: 'Their Slack member ID, so Optimus can mention them on speed to lead and hand-offs.' },
 ]
 
 export default function TeamNewPage() {
@@ -60,7 +61,7 @@ export default function TeamNewPage() {
   }
 
   return (
-    <div className="max-w-[1400px]">
+    <div className="w-full">
       <Link to="/sales/team" className="editorial-btn-ghost" style={{ height: 34, fontSize: 12.5, marginBottom: 18 }}>
         <ArrowLeft size={ICON.sm} /> Team
       </Link>
@@ -71,12 +72,12 @@ export default function TeamNewPage() {
 
       {!isAdmin && <div className="callout" style={{ marginBottom: 18 }}><b>Admins only.</b> Ask Ben or a manager to add people.</div>}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-5 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-5 items-start">
         <form onSubmit={submit} className="tile" style={{ padding: '26px 28px' }}>
           <div className="flex items-center gap-3 mb-5">
             <span style={{ width: 42, height: 42, borderRadius: 12, background: 'rgba(244,225,74,.55)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><UserPlus size={ICON.md} /></span>
             <div>
-              <h2 className="eyebrow" style={{ margin: 0 }}>Step 1 of 4 · Profile</h2>
+              <h2 className="eyebrow" style={{ margin: 0 }}>Step 1 of 5 · Profile</h2>
               <p style={{ margin: '2px 0 0', fontSize: 13.5, color: 'var(--ink-2)' }}>Two fields and a role. Accounts come on the next screen.</p>
             </div>
           </div>
@@ -109,7 +110,7 @@ export default function TeamNewPage() {
             ))}
           </ol>
           <div className="callout" style={{ marginTop: 18 }}>
-            <b>You do the GoHighLevel and WAVV accounts in those tools.</b> This page links them to the person so their calls, calendar and dials show up here.
+            <b>You create the GoHighLevel, WAVV and Slack accounts in those tools.</b> Their page links each account to the person so their calls, calendar, dials and Slack mentions all line up.
           </div>
         </div>
       </div>

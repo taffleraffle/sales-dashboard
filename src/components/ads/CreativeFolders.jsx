@@ -260,7 +260,7 @@ export const FolderBar = memo(function FolderBar({
           // 160px min = two folder columns on a 375px phone; desktop still
           // packs 5-6 across. Inline styles can't media-query, so the
           // responsive behaviour all comes from auto-fill.
-          gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
         }}>
           {children.map(f => {
             const clips = clipCounts.get(f.id) || 0
@@ -286,9 +286,9 @@ export const FolderBar = memo(function FolderBar({
                 }}>
                 <Folder size={18} style={{ color: 'var(--ink-3)', flexShrink: 0 }} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{
-                    fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600, color: 'var(--ink)',
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  <div title={f.name} style={{
+                    fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25,
+                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
                   }}>{f.name}</div>
                   <div style={{
                     fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--ink-4)',

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, KeyRound, Link2, CalendarCheck, PhoneCall, Save, RefreshCw, Check } from 'lucide-react'
+import { ArrowLeft, KeyRound, Link2, CalendarCheck, PhoneCall, MessageSquare, Save, RefreshCw, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../hooks/useToast'
@@ -71,7 +71,7 @@ export default function TeamMemberPage() {
 
   if (loading) return <div className="animate-pulse"><div className="tile h-24 mb-4" /><div className="tile h-48" /></div>
   if (!m) return (
-    <div className="max-w-[1400px]">
+    <div className="w-full">
       <div className="placeholder-card">That person is not on the roster. <Link to="/sales/team" style={{ textDecoration: 'underline' }}>Back to the team</Link>.</div>
     </div>
   )
@@ -79,7 +79,7 @@ export default function TeamMemberPage() {
   const inactive = m.is_active === false
 
   return (
-    <div className="max-w-[1400px]">
+    <div className="w-full">
       <Link to="/sales/team" className="editorial-btn-ghost" style={{ height: 34, fontSize: 12.5, marginBottom: 18 }}>
         <ArrowLeft size={ICON.sm} /> Team
       </Link>
@@ -119,6 +119,7 @@ export default function TeamMemberPage() {
         <GhlCard m={m} save={save} canEdit={isAdmin} />
         <CalendarCard m={m} />
         {m.role === 'setter' && <WavvCard m={m} save={save} canEdit={isAdmin} />}
+        <SlackCard m={m} save={save} canEdit={isAdmin} />
       </div>
 
       <ConfirmModal
@@ -328,6 +329,34 @@ function WavvCard({ m, save, canEdit }) {
   )
 }
 
+/* Slack member ID: Optimus mentions people by this on speed-to-lead stamps
+   and hand-offs. Without it Optimus guesses from the first name, which
+   breaks as soon as two people share one. */
+function SlackCard({ m, save, canEdit }) {
+  const [value, setValue] = useState(m.slack_user_id || '')
+  const clean = value.trim().toUpperCase()
+  const valid = clean === '' || /^[UW][A-Z0-9]{7,}$/.test(clean)
+  const dirty = clean !== (m.slack_user_id || '')
+  return (
+    <Card step={5} icon={MessageSquare} title="Slack" sub="Optimus replies in the new-leads channel when they dial a lead and mentions them by this ID. It is also how hand-offs and assignments find them." ok={!!m.slack_user_id}>
+      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-4 items-end">
+        <label className="flex flex-col gap-2">
+          <span className="eyebrow">Slack member ID</span>
+          <input type="text" value={value} onChange={e => setValue(e.target.value)} placeholder="e.g. U09JBF3PNE4" disabled={!canEdit} style={!valid ? { borderColor: 'var(--house-bad)' } : undefined} />
+          <span style={{ fontSize: 12.5, color: valid ? 'var(--ink-4)' : 'var(--house-bad)' }}>
+            {valid ? 'In Slack: open their profile, click the three dots, then Copy member ID. It starts with U.' : 'That does not look like a Slack member ID. It starts with U and has no spaces.'}
+          </span>
+        </label>
+        {canEdit && (
+          <button type="button" className="editorial-btn-primary" disabled={!dirty || !valid} onClick={() => save({ slack_user_id: clean || null }, clean ? 'Slack ID saved. Optimus will mention them from the next dial.' : 'Slack ID cleared.')}>
+            <Save size={ICON.sm} /> Save Slack
+          </button>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 /* Where they are in onboarding, and what to do next. */
 function OnboardingStrip({ m }) {
   const steps = [
@@ -335,6 +364,7 @@ function OnboardingStrip({ m }) {
     { label: 'Login', done: !!m.auth_user_id, hint: 'send the login invite' },
     { label: 'GoHighLevel', done: !!m.ghl_user_id, hint: 'link their GHL user' },
     { label: m.role === 'setter' ? 'Calendar and WAVV' : 'Calendar', done: !!m.ghl_user_id && (m.role !== 'setter' || !!m.wavv_user_id), hint: m.role === 'setter' ? 'check the calendar and link WAVV' : 'check the calendar' },
+    { label: 'Slack', done: !!m.slack_user_id, hint: 'add their Slack member ID so Optimus can mention them' },
   ]
   const next = steps.find(s => !s.done)
   const done = steps.filter(s => s.done).length
@@ -350,7 +380,7 @@ function OnboardingStrip({ m }) {
         ))}
       </div>
       <span style={{ marginLeft: 'auto', fontSize: 13.5, fontWeight: 600, color: next ? 'var(--ink)' : 'var(--house-good)' }}>
-        {next ? `${done} of 4 done · next: ${next.hint}` : 'Fully connected'}
+        {next ? `${done} of ${steps.length} done · next: ${next.hint}` : 'Fully connected'}
       </span>
     </div>
   )

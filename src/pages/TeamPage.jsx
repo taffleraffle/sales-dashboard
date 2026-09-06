@@ -111,7 +111,7 @@ function PersonTile({ member: m }) {
         </div>
       </div>
       {(() => {
-        const todo = [!m.auth_user_id && 'login', !m.ghl_user_id && 'GoHighLevel', m.role === 'setter' && !m.wavv_user_id && 'WAVV'].filter(Boolean)
+        const todo = [!m.auth_user_id && 'login', !m.ghl_user_id && 'GoHighLevel', m.role === 'setter' && !m.wavv_user_id && 'WAVV', !m.slack_user_id && 'Slack'].filter(Boolean)
         return todo.length > 0 && !inactive ? (
           <p style={{ margin: '12px 0 0', fontSize: 12.5, fontWeight: 600, color: 'var(--house-warn)' }}>Still to connect: {todo.join(', ')}</p>
         ) : null
