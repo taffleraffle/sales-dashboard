@@ -33,21 +33,10 @@ export default function SetterOverview() {
   const allLeads = allLeadsRaw.filter(l => setterLeadInRegion(l, region))
   const [drill, setDrill] = useState(null) // 'dials' | 'pickups' | 'mcs' | 'sets'
   const [mdrill, setMdrill] = useState(null) // 'show' | 'close' (shared Overview pop-ups)
-  // Confirmed vs unconfirmed show rate (booking_call_status marks, closer outcomes)
-  const [conf, setConf] = useState({ cShow: 0, cNo: 0, uShow: 0, uNo: 0 })
-  useEffect(() => {
-    let alive = true
-    supabase.from('lib_call_confirmation_by_closer')
-      .select('confirmed_showed, confirmed_noshow, unconfirmed_showed, unconfirmed_noshow')
-      .gte('report_date', sinceDate(range))
-      .then(({ data, error }) => {
-        if (!alive || error) return
-        setConf((data || []).reduce((a, r) => ({ cShow: a.cShow + (+r.confirmed_showed || 0), cNo: a.cNo + (+r.confirmed_noshow || 0), uShow: a.uShow + (+r.unconfirmed_showed || 0), uNo: a.uNo + (+r.unconfirmed_noshow || 0) }), { cShow: 0, cNo: 0, uShow: 0, uNo: 0 }))
-      })
-    return () => { alive = false }
-  }, [range])
-  const confShowRate = (conf.cShow + conf.cNo) > 0 ? parseFloat(((conf.cShow / (conf.cShow + conf.cNo)) * 100).toFixed(1)) : null
-  const unconfShowRate = (conf.uShow + conf.uNo) > 0 ? parseFloat(((conf.uShow / (conf.uShow + conf.uNo)) * 100).toFixed(1)) : null
+  // Confirmed vs unconfirmed show rate from the shared hook (same source as the Overview, follows the region)
+  const conf = { cShow: sm.totals.confShowed, cNo: sm.totals.confNoShow, uShow: sm.totals.unconfShowed, uNo: sm.totals.unconfNoShow }
+  const confShowRate = sm.r.confShowRate
+  const unconfShowRate = sm.r.unconfShowRate
   const [loadingLeads, setLoadingLeads] = useState(true)
   const [wavvAgg, setWavvAgg] = useState({ totals: { dials: 0, pickups: 0, mcs: 0 }, byUser: {}, uniqueContacts: 0 })
   const [autoBookings, setAutoBookings] = useState([])
