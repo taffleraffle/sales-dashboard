@@ -55,3 +55,20 @@ export async function sendDashboardInvite({ name, email, role, team_member_id })
   return data
 }
 
+/* Ask the backend to find this person's Slack member id and store it, so
+   Optimus can @mention them without anyone pasting an id in by hand. */
+export async function resolveSlackUser(teamMemberId) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/resolve-slack-user`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+      'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify({ team_member_id: teamMemberId }),
+  })
+  const data = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new Error(data.error || 'Slack lookup failed')
+  return data
+}

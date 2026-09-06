@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { backfillSlackUserId } from '../_shared/slackLookup.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://sales-dashboard-ftct.onrender.com',
@@ -74,6 +75,7 @@ serve(async (req) => {
     const authUserId = inviteData.user.id
 
     // If team_member_id provided, link the auth user to existing team member
+    let memberId = team_member_id || null
     if (team_member_id) {
       await adminClient
         .from('team_members')
@@ -81,7 +83,7 @@ serve(async (req) => {
         .eq('id', team_member_id)
     } else {
       // Create a new team member record
-      await adminClient
+      const { data: created } = await adminClient
         .from('team_members')
         .insert({
           name,
@@ -90,6 +92,18 @@ serve(async (req) => {
           auth_user_id: authUserId,
           is_active: true,
         })
+        .select('id')
+        .single()
+      memberId = created?.id || null
+    }
+
+    // Find their Slack member id now, so Optimus can @mention them on
+    // speed-to-lead stamps and hand-offs without anyone pasting it in
+    // (Ben, 6 Sep 2026: onboarding must wire itself up). Best effort — a
+    // miss never blocks the invite, and the Team page has a retry button.
+    let slackUserId: string | null = null
+    if (memberId) {
+      slackUserId = await backfillSlackUserId(adminClient, memberId, name, email)
     }
 
     // If role is admin/manager, also create user_profiles entry
@@ -112,6 +126,8 @@ serve(async (req) => {
       success: true,
       message: `Invite sent to ${email}`,
       user_id: authUserId,
+      team_member_id: memberId,
+      slack_user_id: slackUserId,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

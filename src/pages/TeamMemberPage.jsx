@@ -8,7 +8,7 @@ import { BASE_URL, GHL_LOCATION_ID, ghlFetch } from '../services/ghlClient'
 import Dropdown from '../components/Dropdown'
 import ConfirmModal from '../components/ConfirmModal'
 import { ICON } from '../utils/constants'
-import { ROLE_OPTIONS, initialsOf, ConnectionPill, RolePill, sendDashboardInvite } from '../lib/teamShared'
+import { ROLE_OPTIONS, initialsOf, ConnectionPill, RolePill, sendDashboardInvite, resolveSlackUser } from '../lib/teamShared'
 
 /*
   One person, four connections, each its own card with its own Save:
@@ -119,7 +119,7 @@ export default function TeamMemberPage() {
         <GhlCard m={m} save={save} canEdit={isAdmin} />
         <CalendarCard m={m} />
         {m.role === 'setter' && <WavvCard m={m} save={save} canEdit={isAdmin} />}
-        <SlackCard m={m} save={save} canEdit={isAdmin} />
+        <SlackCard m={m} save={save} canEdit={isAdmin} reload={load} />
       </div>
 
       <ConfirmModal
@@ -220,7 +220,7 @@ function GhlCard({ m, save, canEdit }) {
     : null
 
   return (
-    <Card step={3} icon={Link2} title="GoHighLevel" sub="Links this person to their GHL user, so calls assigned to them in GHL land on their EOD and their calendar syncs." ok={!!m.ghl_user_id}>
+    <Card step={3} icon={Link2} title="GoHighLevel" sub="Links this person to their GHL user, so calls assigned to them in GHL land on their EOD and their calendar syncs. This also sets their dialler ID, so a setter’s dials, pickups and speed to lead start counting straight away." ok={!!m.ghl_user_id}>
       {loadingUsers ? (
         <p style={{ fontSize: 13.5, color: 'var(--ink-4)', margin: 0 }}>Loading GHL users…</p>
       ) : options ? (
@@ -332,25 +332,48 @@ function WavvCard({ m, save, canEdit }) {
 /* Slack member ID: Optimus mentions people by this on speed-to-lead stamps
    and hand-offs. Without it Optimus guesses from the first name, which
    breaks as soon as two people share one. */
-function SlackCard({ m, save, canEdit }) {
+function SlackCard({ m, save, canEdit, reload }) {
+  const { push: toast } = useToast()
   const [value, setValue] = useState(m.slack_user_id || '')
+  const [finding, setFinding] = useState(false)
+  const find = async () => {
+    setFinding(true)
+    try {
+      const res = await resolveSlackUser(m.id)
+      if (res.slack_user_id) {
+        setValue(res.slack_user_id)
+        toast({ kind: 'success', title: 'Found them', message: `Matched on their ${res.source === 'email' ? 'work email' : 'name'}. Optimus will mention them from the next dial.` })
+        reload?.()
+      } else {
+        toast({ kind: 'error', title: 'No match in Slack', message: res.error || 'Paste the member ID in by hand.' })
+      }
+    } catch (err) {
+      toast({ kind: 'error', title: 'Lookup failed', message: err.message })
+    }
+    setFinding(false)
+  }
   const clean = value.trim().toUpperCase()
   const valid = clean === '' || /^[UW][A-Z0-9]{7,}$/.test(clean)
   const dirty = clean !== (m.slack_user_id || '')
   return (
-    <Card step={5} icon={MessageSquare} title="Slack" sub="Optimus replies in the new-leads channel when they dial a lead and mentions them by this ID. It is also how hand-offs and assignments find them." ok={!!m.slack_user_id}>
+    <Card step={5} icon={MessageSquare} title="Slack" sub="Optimus replies in the new-leads channel when they dial a lead and mentions them by this ID. Found automatically when they are invited; use Find it for me if their Slack sits on a different email." ok={!!m.slack_user_id}>
       <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-4 items-end">
         <label className="flex flex-col gap-2">
           <span className="eyebrow">Slack member ID</span>
           <input type="text" value={value} onChange={e => setValue(e.target.value)} placeholder="e.g. U09JBF3PNE4" disabled={!canEdit} style={!valid ? { borderColor: 'var(--house-bad)' } : undefined} />
           <span style={{ fontSize: 12.5, color: valid ? 'var(--ink-4)' : 'var(--house-bad)' }}>
-            {valid ? 'In Slack: open their profile, click the three dots, then Copy member ID. It starts with U.' : 'That does not look like a Slack member ID. It starts with U and has no spaces.'}
+            {valid ? 'Usually filled in automatically. Otherwise: open their Slack profile, click the three dots, then Copy member ID.' : 'That does not look like a Slack member ID. It starts with U and has no spaces.'}
           </span>
         </label>
         {canEdit && (
-          <button type="button" className="editorial-btn-primary" disabled={!dirty || !valid} onClick={() => save({ slack_user_id: clean || null }, clean ? 'Slack ID saved. Optimus will mention them from the next dial.' : 'Slack ID cleared.')}>
-            <Save size={ICON.sm} /> Save Slack
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" className="editorial-btn-ghost" disabled={finding} onClick={find}>
+              <RefreshCw size={ICON.sm} className={finding ? 'animate-spin' : undefined} /> {finding ? 'Looking…' : 'Find it for me'}
+            </button>
+            <button type="button" className="editorial-btn-primary" disabled={!dirty || !valid} onClick={() => save({ slack_user_id: clean || null }, clean ? 'Slack ID saved. Optimus will mention them from the next dial.' : 'Slack ID cleared.')}>
+              <Save size={ICON.sm} /> Save Slack
+            </button>
+          </div>
         )}
       </div>
     </Card>
@@ -364,7 +387,7 @@ function OnboardingStrip({ m }) {
     { label: 'Login', done: !!m.auth_user_id, hint: 'send the login invite' },
     { label: 'GoHighLevel', done: !!m.ghl_user_id, hint: 'link their GHL user' },
     { label: m.role === 'setter' ? 'Calendar and WAVV' : 'Calendar', done: !!m.ghl_user_id && (m.role !== 'setter' || !!m.wavv_user_id), hint: m.role === 'setter' ? 'check the calendar and link WAVV' : 'check the calendar' },
-    { label: 'Slack', done: !!m.slack_user_id, hint: 'add their Slack member ID so Optimus can mention them' },
+    { label: 'Slack', done: !!m.slack_user_id, hint: 'click Find it for me on the Slack card' },
   ]
   const next = steps.find(s => !s.done)
   const done = steps.filter(s => s.done).length

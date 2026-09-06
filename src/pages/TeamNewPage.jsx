@@ -20,8 +20,8 @@ const STEPS = [
   { icon: Check, title: 'Profile', text: 'Name, email and role. Their name goes on leaderboards and EODs.' },
   { icon: KeyRound, title: 'Dashboard login', text: 'One email with a link to set a password. Sent now if you tick the box.' },
   { icon: Link2, title: 'GoHighLevel', text: 'Pick their GHL user so calls assigned to them land on their EOD.' },
-  { icon: CalendarCheck, title: 'Calendar and dialer', text: 'Check their calendar syncs, and link WAVV for setters.' },
-  { icon: MessageSquare, title: 'Slack', text: 'Their Slack member ID, so Optimus can mention them on speed to lead and hand-offs.' },
+  { icon: CalendarCheck, title: 'Calendar and dialer', text: 'Check their calendar syncs. The dialer comes with their GoHighLevel user, nothing else to set.' },
+  { icon: MessageSquare, title: 'Slack', text: 'Found automatically when you invite them, so Optimus can mention them on speed to lead and hand-offs.' },
 ]
 
 export default function TeamNewPage() {
@@ -110,7 +110,7 @@ export default function TeamNewPage() {
             ))}
           </ol>
           <div className="callout" style={{ marginTop: 18 }}>
-            <b>You create the GoHighLevel, WAVV and Slack accounts in those tools.</b> Their page links each account to the person so their calls, calendar, dials and Slack mentions all line up.
+            <b>You only create their GoHighLevel and Slack accounts in those tools.</b> Linking their GoHighLevel user on the next screen sets their dialler too, and their Slack is found automatically, so dials, speed to lead and mentions all start working on their own.
           </div>
         </div>
       </div>
