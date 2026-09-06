@@ -120,7 +120,9 @@ export default function Modal({
           // re-rasterise the entire viewport behind it, which on the heavy library
           // page (200+ matrix rows + inline styles) added 150-300ms of paint cost
           // per open/close. Visual difference is minimal; perf difference is huge.
-          background: depth > 1 ? 'rgba(10,10,10,0.55)' : 'rgba(10,10,10,0.40)',
+          // House scrim: cream frost, not a grey wash (grey turns the yellow olive)
+          background: depth > 1 ? 'rgba(251,251,249,0.72)' : 'rgba(251,251,249,0.62)',
+          backdropFilter: 'blur(6px)',
           zIndex: zBackdrop,
           animation: 'modalFadeIn 80ms ease-out',
         }} />

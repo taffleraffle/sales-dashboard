@@ -201,7 +201,7 @@ export default function CloserOverview() {
         <Gauge label="Offer Rate" value={companyOfferRate} target={bm('offer_rate', 80)} />
         <Gauge label="Close Rate" value={companyCloseRate} target={bm('close_rate', 25)} />
         <Gauge label="Offer → Close" value={companyOfferCloseRate} target={30} max={100} />
-        <Gauge label="Calls/Close" value={callsPerClose} target={4} max={20} />
+        <Gauge label="Calls per close" value={callsPerClose} target={4} max={20} suffix="" />
         <Gauge label="Cash Collect %" value={cashCollectionRate} target={50} />
       </div>
 

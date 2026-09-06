@@ -2388,8 +2388,8 @@ export default function EODReview() {
           {/* Quick action cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {[
-              { t: 'closer', label: 'Closer EOD', desc: 'Log calls, outcomes, revenue and cash collected', icon: '📊' },
-              { t: 'setter', label: 'Setter EOD', desc: 'Log dials, pickups, MCs, sets and reschedules', icon: '📞' },
+              { t: 'closer', label: 'Closer EOD', desc: 'Log calls, outcomes, revenue and cash collected', icon: 'closer' },
+              { t: 'setter', label: 'Setter EOD', desc: 'Log dials, pickups, MCs, sets and reschedules', icon: 'setter' },
             ].map(card => {
               const allowed = canFileEOD(card.t)
               return (
@@ -2402,7 +2402,7 @@ export default function EODReview() {
                   }`}
                 >
                   <div className="flex items-center gap-3 mb-3">
-                    <span className="text-2xl">{card.icon}</span>
+                    <span style={{ width: 42, height: 42, borderRadius: 12, background: 'rgba(244,225,74,.55)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink)' }}>{card.icon === 'closer' ? <Calendar size={20} /> : <MessageSquare size={20} />}</span>
                     <div>
                       <p className="text-sm font-semibold text-text-primary">{card.label}</p>
                       <p className="text-xs text-text-400">{card.desc}</p>
@@ -2464,7 +2464,8 @@ export default function EODReview() {
       <div className="flex items-center gap-3 mb-2 flex-wrap">
         <button
           onClick={() => { setEodStarted(false) }}
-          className="text-xs text-text-400 hover:text-text-primary transition-colors mr-1"
+          className="editorial-btn-ghost"
+          style={{ height: 34, padding: '0 14px', fontSize: 12.5 }}
         >
           ← Back
         </button>
@@ -2481,11 +2482,10 @@ export default function EODReview() {
                   // keep current selection so user can view across tabs
                 }}
                 disabled={!allowed}
-                className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 transition-all ${
-                  tab === t ? 'bg-opt-yellow text-text-primary font-semibold'
-                    : allowed ? 'bg-bg-card text-text-secondary border border-border-default hover:bg-bg-card-hover'
-                    : 'bg-bg-card text-text-400/50 border border-border-default cursor-not-allowed'
-                }`}
+                className="house-plain"
+                style={{ height: 34, padding: '0 14px', borderRadius: 999, fontSize: 13, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: tab === t ? 'var(--accent)' : '#fff', color: tab === t ? '#1a1700' : allowed ? 'var(--ink)' : 'var(--ink-5)',
+                  border: `1px solid ${tab === t ? 'var(--accent)' : 'var(--house-line-strong)'}`, cursor: allowed ? 'pointer' : 'not-allowed', boxShadow: 'var(--house-shadow-input)' }}
               >
                 {!allowed && <Lock size={10} />}
                 {t === 'closer' ? 'Closer' : 'Setter'}
@@ -2496,7 +2496,7 @@ export default function EODReview() {
         <select
           value={selectedMember}
           onChange={e => { setSelectedMember(e.target.value); setConfirmed(false) }}
-          className="bg-bg-card border border-border-default rounded-sm px-3 py-1.5 text-sm text-text-primary"
+          style={{ width: 'auto', minWidth: 200, height: 40, padding: '0 36px 0 14px' }}
         >
           <option value="">Select {tab}...</option>
           {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -2507,28 +2507,19 @@ export default function EODReview() {
       </div>
 
       {/* Date selector */}
-      <div className="flex items-center gap-2 mb-5">
-        <Calendar size={14} className="text-text-400" />
-        <button
-          onClick={() => shiftDate(-1)}
-          className="p-1 rounded-lg hover:bg-bg-card-hover text-text-400 hover:text-text-primary"
-        >
-          <ChevronLeft size={16} />
-        </button>
-        <EditorialDate value={selectedDate} onChange={setSelectedDate} max={today} fullWidth />
-        <button
-          onClick={() => shiftDate(1)}
-          disabled={selectedDate >= today}
-          className="p-1 rounded-lg hover:bg-bg-card-hover text-text-400 hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed"
-        >
-          <ChevronRight size={16} />
-        </button>
-        <span className="text-xs text-text-400">{formatDateLabel(selectedDate)}</span>
+      <div className="flex items-center gap-3 mb-5 flex-wrap">
+        <div className="flex items-center gap-1" style={{ background: '#fff', border: '1px solid var(--house-line-strong)', borderRadius: 999, padding: '3px 6px', minHeight: 40, boxShadow: 'var(--house-shadow-input)' }}>
+          <button type="button" onClick={() => shiftDate(-1)} aria-label="Previous day" className="house-plain w-8 h-8 flex items-center justify-center" style={{ borderRadius: 999, background: 'transparent', border: 'none', color: 'var(--ink-3)' }}>
+            <ChevronLeft size={16} />
+          </button>
+          <EditorialDate value={selectedDate} onChange={setSelectedDate} max={today} />
+          <button type="button" onClick={() => shiftDate(1)} disabled={selectedDate >= today} aria-label="Next day" className="house-plain w-8 h-8 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed" style={{ borderRadius: 999, background: 'transparent', border: 'none', color: 'var(--ink-3)' }}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-2)' }}>{formatDateLabel(selectedDate)}</span>
         {selectedDate !== today && (
-          <button
-            onClick={() => setSelectedDate(today)}
-            className="text-[10px] text-text-primary hover:underline ml-1"
-          >
+          <button type="button" onClick={() => setSelectedDate(today)} className="editorial-btn-ghost" style={{ height: 34, padding: '0 14px', fontSize: 12.5 }}>
             Jump to today
           </button>
         )}
@@ -2536,7 +2527,8 @@ export default function EODReview() {
           <button
             onClick={tab === 'closer' ? handleRefreshCloser : handleRefreshSetter}
             disabled={syncing}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-text-400 hover:text-text-primary border border-border-default hover:border-opt-yellow/30 ml-auto disabled:opacity-50"
+            className="editorial-btn-ghost ml-auto"
+            style={{ height: 34, padding: '0 14px', fontSize: 12.5 }}
             title={tab === 'closer' ? 'Refresh calendar, Fathom transcripts & leads' : 'Refresh WAVV dials & stats'}
           >
             <RefreshCw size={10} className={syncing ? 'animate-spin' : ''} />
@@ -2602,35 +2594,35 @@ export default function EODReview() {
                 })()}
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-                  <div className="text-center p-3 bg-bg-primary rounded-sm">
+                  <div className="house-mini-kpi">
                     <p className="text-xl font-bold">{summary.booked}</p>
                     <p className="text-[10px] text-text-400 uppercase">Booked</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-sm" title={`${summary.liveNc} new (counted) · ${summary.liveFu} follow-up (separate)`}>
+                  <div className="house-mini-kpi" title={`${summary.liveNc} new (counted) · ${summary.liveFu} follow-up (separate)`}>
                     <p className="text-xl font-bold">{summary.liveNc}</p>
                     <p className="text-[10px] text-text-400 uppercase">Net New</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-sm">
+                  <div className="house-mini-kpi">
                     <p className="text-xl font-bold text-danger">{summary.noShows}</p>
                     <p className="text-[10px] text-text-400 uppercase">No Shows</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-sm">
+                  <div className="house-mini-kpi">
                     <p className="text-xl font-bold text-text-secondary">{summary.rescheduled}</p>
                     <p className="text-[10px] text-text-400 uppercase">Rescheduled</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-sm">
+                  <div className="house-mini-kpi">
                     <p className="text-xl font-bold">{summary.offers}</p>
                     <p className="text-[10px] text-text-400 uppercase">Offers</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-sm">
+                  <div className="house-mini-kpi">
                     <p className="text-xl font-bold text-success">{summary.closes}</p>
                     <p className="text-[10px] text-text-400 uppercase">Closes</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-sm">
+                  <div className="house-mini-kpi">
                     <p className="text-xl font-bold text-text-primary">${summary.cash.toLocaleString()}</p>
                     <p className="text-[10px] text-text-400 uppercase">Cash</p>
                   </div>
-                  <div className="text-center p-3 bg-bg-primary rounded-sm">
+                  <div className="house-mini-kpi">
                     <p className="text-xl font-bold text-success">${summary.revenue.toLocaleString()}</p>
                     <p className="text-[10px] text-text-400 uppercase">Revenue</p>
                   </div>
@@ -2808,7 +2800,6 @@ export default function EODReview() {
                     const isAscension = call.call_type === 'ascension'
                     const isClosedOrAscended = call.outcome === 'closed' || call.outcome === 'ascended'
                     const isNoShow = call.outcome === 'no_show'
-                    const isRescheduled = call.outcome === 'rescheduled'
                     const isCanceled = call.outcome === 'canceled'
                     const isPending = call.outcome == null
                     const showInputs = isClosedOrAscended
@@ -2818,14 +2809,8 @@ export default function EODReview() {
 
                     return (
                     <div key={call.ghl_event_id || call.lead_id || `manual-${i}`}
-                      className={`bg-bg-card border rounded-sm overflow-hidden transition-colors ${
-                        isPending ? 'border-amber-400/50 ring-1 ring-amber-400/20'
-                        : isClosedOrAscended ? 'border-success/30'
-                        : isNoShow ? 'border-danger/30'
-                        : isCanceled ? 'border-orange-400/30'
-                        : isRescheduled ? 'border-border-default'
-                        : 'border-border-default'
-                      }`}
+                      className="house-call-card"
+                      style={{ borderLeftColor: isPending ? 'var(--house-warn)' : isClosedOrAscended ? 'var(--house-good)' : isNoShow ? 'var(--house-bad)' : isCanceled ? 'var(--house-warn)' : 'var(--house-line-strong)' }}
                     >
                       {/* Card header */}
                       <div className="px-4 py-3">
@@ -2873,16 +2858,17 @@ export default function EODReview() {
                                 updateCall(i, 'outcome', o.value)
                                 if (o.value === 'closed') updateCall(i, 'offered', true)
                               }}
-                              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                                call.outcome === o.value
-                                  ? o.value === 'closed' || o.value === 'ascended' ? 'bg-success text-white'
-                                    : o.value === 'no_show' ? 'bg-danger text-white'
-                                    : o.value === 'canceled' ? 'bg-orange-400 text-white'
-                                    : o.value === 'rescheduled' ? 'bg-text-secondary text-white'
-                                    : o.value === 'not_ascended' ? 'bg-text-400/80 text-white'
-                                    : 'bg-text-400/60 text-white'
-                                  : 'bg-bg-primary text-text-400 hover:text-text-primary hover:bg-bg-primary/80 border border-border-default'
-                              }`}
+                              className="house-plain"
+                              style={(() => {
+                                const on = call.outcome === o.value
+                                const color = o.value === 'closed' || o.value === 'ascended' ? 'var(--house-good)'
+                                  : o.value === 'no_show' ? 'var(--house-bad)'
+                                  : o.value === 'canceled' || o.value === 'rescheduled' ? 'var(--house-warn)'
+                                  : 'var(--ink-2)'
+                                return { height: 32, padding: '0 13px', borderRadius: 999, fontSize: 12.5, fontWeight: 600,
+                                  background: on ? color : '#fff', color: on ? '#fff' : color,
+                                  border: `1px solid ${on ? color : 'var(--house-line-strong)'}`, boxShadow: on ? 'none' : 'var(--house-shadow-input)' }
+                              })()}
                             >
                               {o.label}
                             </button>
@@ -3146,11 +3132,8 @@ export default function EODReview() {
                   <button
                     onClick={handleConfirmCloser}
                     disabled={confirmed || submitting || callsNeedingConfirmation.length > 0 || (!isAdmin && profile?.teamMemberId && selectedMember !== profile.teamMemberId)}
-                    className={`w-full mt-4 flex items-center justify-center gap-2 px-4 py-2.5 rounded font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                      confirmed
-                        ? 'bg-success/20 text-success border border-success/30'
-                        : 'bg-opt-yellow text-text-primary hover:bg-opt-yellow/90'
-                    }`}
+                    className="editorial-btn-primary w-full mt-4"
+                    style={confirmed ? { background: '#fff', borderColor: 'rgba(22,163,74,.4)', color: 'var(--house-good)', boxShadow: 'none' } : undefined}
                   >
                     {submitting ? <Loader size={14} className="animate-spin" /> : <Check size={14} />}
                     {confirmed ? 'Confirmed' : submitting ? 'Saving...' : 'Confirm EOD'}
