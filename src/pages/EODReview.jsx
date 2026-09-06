@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Check, Edit3, Loader, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, Calendar, RefreshCw, Plus, Search, X, Zap, Lock, Trash2 } from 'lucide-react'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useEODSubmit } from '../hooks/useEOD'
+import { useToast } from '../hooks/useToast'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { fetchCloserCalendar, syncGHLAppointments } from '../services/ghlCalendar'
@@ -1432,6 +1433,11 @@ export default function EODReview() {
   // surfaced as a banner so the closer knows new bookings landed after submit.
   const [newCallsSinceSubmit, setNewCallsSinceSubmit] = useState([])
   const { members: closers } = useTeamMembers('closer')
+  // Moving a logged call onto the closer who actually took it (Ben, 6 Sep 2026):
+  // handovers and reschedules mean the call is sometimes filed under the wrong person.
+  const [movingCall, setMovingCall] = useState(null)   // call_id whose picker is open
+  const [moveBusy, setMoveBusy] = useState(false)
+  const { push: toast } = useToast()
   const { members: setters } = useTeamMembers('setter')
   const { submitCloserEOD, submitSetterEOD, submitting } = useEODSubmit()
 
@@ -1726,6 +1732,7 @@ export default function EODReview() {
           if (cancelled) return
           setCloserNotes(eodData?.notes || '')
           setCalls(savedCalls.map(c => ({
+            call_id: c.id,
             lead_id: c.setter_lead_id || null,
             ghl_event_id: c.ghl_event_id || null,
             lead_name: c.prospect_name || 'Unknown',
@@ -2676,6 +2683,54 @@ export default function EODReview() {
                               <span className="text-[10px] text-text-400 bg-bg-primary px-1.5 py-0.5 rounded">{call.setter_name}</span>
                             )}
                             <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${outcomeBadge.cls}`}>{outcomeBadge.label}</span>
+                            {isAdmin && call.call_id && (
+                              <span className="relative" onClick={e => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={() => setMovingCall(movingCall === call.call_id ? null : call.call_id)}
+                                  title="This call was taken by a different closer"
+                                  style={{ height: 26, padding: '0 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 600,
+                                    border: '1px solid var(--house-line-strong)', background: '#fff', color: 'var(--ink-2)', cursor: 'pointer' }}
+                                >
+                                  Move
+                                </button>
+                                {movingCall === call.call_id && (
+                                  <>
+                                    <span onClick={() => setMovingCall(null)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+                                    <span style={{ position: 'absolute', top: '110%', left: 0, zIndex: 50, minWidth: 210, background: '#fff',
+                                      border: '1px solid var(--rule)', borderRadius: 14, boxShadow: '0 20px 50px -20px rgba(20,22,30,.45)', padding: 6, display: 'block' }}>
+                                      <span style={{ display: 'block', padding: '6px 10px 4px', fontSize: 11, fontWeight: 700, letterSpacing: '.08em',
+                                        textTransform: 'uppercase', color: 'var(--ink-4)' }}>Taken by</span>
+                                      {closers.filter(c => c.id !== selectedMember).map(c => (
+                                        <button key={c.id} type="button" disabled={moveBusy}
+                                          onClick={async () => {
+                                            setMoveBusy(true)
+                                            try {
+                                              const { data, error } = await supabase.rpc('reassign_closer_call', { p_call_id: call.call_id, p_to_closer_id: c.id })
+                                              if (error) throw new Error(error.message)
+                                              if (data?.moved) {
+                                                toast({ kind: 'success', title: 'Call moved', message: `${call.lead_name} is now on ${data.to}'s report${data.created_report ? '. An EOD was created for them that day.' : '.'}` })
+                                                setMovingCall(null)
+                                                setCalls(prev => prev.filter(x => x.call_id !== call.call_id))
+                                              } else {
+                                                toast({ kind: 'info', title: 'Nothing to move', message: data?.reason || '' })
+                                              }
+                                            } catch (err) {
+                                              toast({ kind: 'error', title: 'Could not move the call', message: err.message })
+                                            }
+                                            setMoveBusy(false)
+                                          }}
+                                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 10,
+                                            border: 0, background: 'transparent', fontSize: 13.5, cursor: moveBusy ? 'wait' : 'pointer', color: 'var(--ink)' }}
+                                        >
+                                          {c.name}{c.status === 'former' ? ' (former)' : ''}
+                                        </button>
+                                      ))}
+                                    </span>
+                                  </>
+                                )}
+                              </span>
+                            )}
                             <div className="ml-auto flex items-center gap-3 text-xs">
                               {call.cash_collected > 0 && <span className="text-text-primary font-medium">${parseFloat(call.cash_collected).toLocaleString()} cash</span>}
                               {call.revenue > 0 && <span className="text-success">${parseFloat(call.revenue).toLocaleString()} rev</span>}
