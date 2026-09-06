@@ -33,16 +33,15 @@ export default function LeadStatusBadge({ status }) {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        padding: '2px 8px',
+        padding: '3px 9px',
         border: `1px solid ${s.bd}`,
-        borderRadius: 9,
-        background: s.bg,
+        borderRadius: 999,
+        background: '#ffffff',
         color: s.fg,
-        fontFamily: 'var(--mono)',
-        fontSize: 9,
-        letterSpacing: '0.12em',
-        textTransform: 'uppercase',
-        fontWeight: 500,
+        fontFamily: 'var(--sans)',
+        fontSize: 11.5,
+        letterSpacing: 0,
+        fontWeight: 600,
         whiteSpace: 'nowrap',
       }}
     >
