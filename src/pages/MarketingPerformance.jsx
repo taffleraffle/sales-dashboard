@@ -11,7 +11,7 @@ import MetricTrendPanel from '../components/marketing/MetricTrendPanel'
 import DataHealthBanner from '../components/marketing/DataHealthBanner'
 import DateRangeSelector from '../components/DateRangeSelector'
 import SyncStatusIndicator from '../components/SyncStatusIndicator'
-import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check } from 'lucide-react'
+import { Loader, Upload, Plus, SlidersHorizontal, Trash2, X, Edit3, Check, ChevronDown } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../hooks/useToast'
 import { STRATEGY_CALL_CALENDARS, DQ_BOOKING_CALENDARS } from '../utils/constants'
@@ -188,8 +188,25 @@ const KPI = memo(function KPI({ label, value, format, benchmark, trailing, prev,
 // ── Section Header ─────────────────────────────────────────────────
 // A section whose tiles are all zero (no ascensions, no AR, no refunds in
 // the window) folds to a single line so the page is not a wall of $0 tiles.
+const SECTION_KEY = (t) => `opt.mkt.section.${t}`
+// Ben (6 Sep 2026): "I like this data, it's just a lot to look at." Every
+// section folds, the heavy ones start folded, and the choice is remembered.
+const SECTIONS_CLOSED_BY_DEFAULT = new Set([
+  'Call confirmation', 'Trial Financials', 'Ascension', 'ROAS Overview', 'AR & Refunds',
+])
 function Section({ title, children, cols = 6 }) {
   const [open, setOpen] = useState(false)
+  const [shown, setShown] = useState(() => {
+    try {
+      const v = localStorage.getItem(SECTION_KEY(title))
+      if (v !== null) return v === '1'
+    } catch { /* no storage */ }
+    return !SECTIONS_CLOSED_BY_DEFAULT.has(title)
+  })
+  const toggle = () => setShown(v => {
+    try { localStorage.setItem(SECTION_KEY(title), v ? '0' : '1') } catch { /* no storage */ }
+    return !v
+  })
   const kids = Children.toArray(children)
   const isKpi = k => !!k?.props && ('value' in k.props)
   const hasNumber = k => Math.abs(parseFloat(k.props.value)) > 0 || k.props.whatIf != null
@@ -207,12 +224,20 @@ function Section({ title, children, cols = 6 }) {
   return (
     <div className="mb-4">
       <div className="flex items-center gap-3 mb-2">
-        <h3 className="eyebrow" style={{ margin: 0 }}>{title}</h3>
-        {allEmpty && <button type="button" className="house-colbtn" onClick={() => setOpen(false)}>Hide empty section</button>}
+        <button type="button" onClick={toggle} aria-expanded={shown}
+          className="flex items-center gap-2"
+          style={{ border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }}>
+          <ChevronDown size={13} style={{ color: 'var(--ink-4)', transform: shown ? 'none' : 'rotate(-90deg)', transition: 'transform 140ms ease' }} />
+          <h3 className="eyebrow" style={{ margin: 0 }}>{title}</h3>
+          {!shown && <span style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 500 }}>{kids.length} tile{kids.length === 1 ? '' : 's'}</span>}
+        </button>
+        {shown && allEmpty && <button type="button" className="house-colbtn" onClick={() => setOpen(false)}>Hide empty section</button>}
       </div>
-      <div className={grid}>
-        {children}
-      </div>
+      {shown && (
+        <div className={grid}>
+          {children}
+        </div>
+      )}
     </div>
   )
 }
@@ -3054,6 +3079,10 @@ function DailyTrendChart({ rows, dateKey, range, mode = 'count', spendByDate = n
 
 function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }) {
   const [fetchErr, setFetchErr] = useState(null)
+  // Ben (6 Sep 2026): "these pop-ups are very slow to click around." The
+  // year-long trend was rendering on every open above the rows he actually
+  // came for. It now folds, closed by default, and the choice is remembered.
+  const [trendOpen, setTrendOpen] = useState(() => { try { return localStorage.getItem('opt.mkt.drilltrend') === '1' } catch { return false } })
   const config = DRILLDOWN_CONFIG[kind]
   const [rows, setRows] = useState(null)
   // True once the operator has performed at least one RowActions write.
@@ -3125,11 +3154,23 @@ function DrilldownModal({ kind, range, onClose, spendByDate, selectedAudiences }
               every kind that maps to a metric in MetricTrendPanel. Pulls
               lib_marketing_by_audience_daily once, aggregates client-side. */}
           {TREND_METRIC_BY_KIND[kind] && (
-            <MetricTrendPanel
-              metric={TREND_METRIC_BY_KIND[kind]}
-              selectedAudiences={selectedAudiences}
-              height={320}
-            />
+            <div style={{ borderBottom: '1px solid var(--rule)' }}>
+              <button type="button" aria-expanded={trendOpen}
+                onClick={() => setTrendOpen(v => { try { localStorage.setItem('opt.mkt.drilltrend', v ? '0' : '1') } catch { /* no storage */ } return !v })}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '10px 20px',
+                  border: 0, background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+                <ChevronDown size={13} style={{ color: 'var(--ink-4)', transform: trendOpen ? 'none' : 'rotate(-90deg)', transition: 'transform 140ms ease' }} />
+                <span className="eyebrow" style={{ margin: 0 }}>History</span>
+                {!trendOpen && <span style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>week and month trend</span>}
+              </button>
+              {trendOpen && (
+                <MetricTrendPanel
+                  metric={TREND_METRIC_BY_KIND[kind]}
+                  selectedAudiences={selectedAudiences}
+                  height={280}
+                />
+              )}
+            </div>
           )}
           {rows == null && <div className="flex items-center justify-center gap-3 py-10" style={{ fontSize: 13.5, color: 'var(--ink-4)' }}><Loader size={18} className="animate-spin" />{config.slowFirstLoad ? 'Fetching from GoHighLevel, this can take a few seconds' : 'Loading'}</div>}
           {rows != null && rows.length === 0 && (fetchErr
@@ -3611,7 +3652,9 @@ export default function MarketingPerformance() {
   // mergeMap: { secondaryContactId -> primaryContactId } — used by
   //   sumBookings et al. to collapse secondary into primary at count time.
   const [dupeResolutions, setDupeResolutions] = useState({})
-  const [resolvingDupe, setResolvingDupe] = useState(null) // pair object or null
+  const [resolvingDupe, setResolvingDupe] = useState(null)
+  // Ben (6 Sep 2026): the duplicates list folds away; the choice is remembered.
+  const [dupesOpen, setDupesOpen] = useState(() => { try { return localStorage.getItem('opt.mkt.dupes') === '1' } catch { return false } }) // pair object or null
   const reloadDupeResolutions = useCallback(async () => {
     const { data, error } = await supabase
       .from('prospect_dupe_resolutions')
@@ -4967,7 +5010,7 @@ export default function MarketingPerformance() {
       {possibleDupes.length > 0 && (
         <div style={{
           marginBottom: 16,
-          padding: '12px 16px',
+          padding: dupesOpen ? '12px 16px' : '10px 16px',
           background: 'var(--paper-2)',
           border: '1px solid var(--rule)',
           borderLeft: '3px solid #c08a3a',
@@ -4976,15 +5019,20 @@ export default function MarketingPerformance() {
           fontSize: 13,
           color: 'var(--ink-2)',
         }}>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#c08a3a', marginBottom: 6 }}>
-            Possible duplicate bookings — {possibleDupes.length} pair{possibleDupes.length === 1 ? '' : 's'} in this window
-          </div>
-          <div style={{ color: 'var(--ink-3)', fontSize: 12, marginBottom: 8 }}>
+          <button type="button" onClick={() => setDupesOpen(v => { try { localStorage.setItem('opt.mkt.dupes', v ? '0' : '1') } catch { /* no storage */ } return !v })}
+            aria-expanded={dupesOpen}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', border: 0, background: 'transparent', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
+            <ChevronDown size={13} style={{ color: '#c08a3a', transform: dupesOpen ? 'none' : 'rotate(-90deg)', transition: 'transform 140ms ease' }} />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#c08a3a' }}>
+              Possible duplicate bookings — {possibleDupes.length} pair{possibleDupes.length === 1 ? '' : 's'} in this window
+            </span>
+          </button>
+          {dupesOpen && <div style={{ color: 'var(--ink-3)', fontSize: 12, margin: '8px 0' }}>
             Same person may have booked under multiple GHL contact records (e.g. via webhook AND Calendly).
             The Q.Books count below treats each contact_id as a separate prospect.
             Merging these in GHL will collapse them on the next sync.
-          </div>
-          <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--ink-2)' }}>
+          </div>}
+          {dupesOpen && <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--ink-2)' }}>
             {possibleDupes.map((g) => (
               <li key={g.key} style={{ marginBottom: 4 }}>
                 <button
@@ -5008,7 +5056,7 @@ export default function MarketingPerformance() {
                 </button>
               </li>
             ))}
-          </ul>
+          </ul>}
         </div>
       )}
       {resolvingDupe && (
