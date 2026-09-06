@@ -5442,9 +5442,15 @@ function TaskWorkPanel({ task, scope = ADMIN_SCOPE, onChanged }) {
   }, [task?.task_id, task?.creative_id, task?.started_at, task?.editor_id, task?.editor_name, submissions.length, reloadSubmissions, onChanged])
 
   const approveSubmission = useCallback(async (sub) => {
+    // Hard gate: editors never approve work — theirs or anyone else's. The button
+    // is already admin-only, this stops any other path (stale UI, direct call)
+    // from signing off a cut that pay is calculated from.
+    if (scope.isEditorView) { setErr('Only an admin can approve a submission.'); return }
     setBusy(true); setErr(null)
     try {
-      const { error: e1 } = await supabase.from('lib_task_submissions').update({ approved_at: new Date().toISOString(), approved_by_name: 'admin' }).eq('id', sub.id)
+      // Record WHO approved it — this used to hardcode 'admin', so the audit
+      // trail couldn't tell an admin sign-off from anyone else's.
+      const { error: e1 } = await supabase.from('lib_task_submissions').update({ approved_at: new Date().toISOString(), approved_by_name: reviewIdentity?.name || 'admin' }).eq('id', sub.id)
       if (e1) throw e1
       // Always flip the creative to 'edited' on approval — even for review-link /
       // external submissions with no hosted file_url. Guarding the whole status
@@ -5464,7 +5470,7 @@ function TaskWorkPanel({ task, scope = ADMIN_SCOPE, onChanged }) {
       }
       await reloadSubmissions(); onChanged?.()
     } catch (e) { setErr(e.message || 'approve failed') } finally { setBusy(false) }
-  }, [task?.task_id, task?.creative_id, task?.editor_id, reloadSubmissions, onChanged])
+  }, [task?.task_id, task?.creative_id, task?.editor_id, scope.isEditorView, reviewIdentity, reloadSubmissions, onChanged])
 
   const deleteSubmission = useCallback(async (sub) => {
     setBusy(true); setErr(null)
@@ -5499,7 +5505,8 @@ function TaskWorkPanel({ task, scope = ADMIN_SCOPE, onChanged }) {
       <SubmissionsPanel
         submissions={submissions}
         commentsBySubId={commentsBySubId}
-        canApprove={scope.canEditTask}
+        // Approval is ADMIN-ONLY — see note on the other SubmissionsPanel.
+        canApprove={!scope.isEditorView && scope.canEditTask}
         canDelete={scope.canEditTask}
         canFeedback={true}
         onOpenReview={(sub) => setReviewingSub(sub)}
@@ -10420,7 +10427,9 @@ function EditTaskModal({ task, editors, scope = ADMIN_SCOPE, onClose, onSaved, o
         <SubmissionsPanel
           submissions={submissions}
           commentsBySubId={commentsBySubId}
-          canApprove={scope.canEditTask}
+          // Approval is ADMIN-ONLY. Editors must never sign off their own work —
+          // canEditTask (status/notes/due) is deliberately NOT approval rights.
+          canApprove={!scope.isEditorView && scope.canEditTask}
           canDelete={scope.canEditTask}
           // Anyone with access to the task modal can leave feedback —
           // admins comment, editors reply. Tracking who-by-role keeps
