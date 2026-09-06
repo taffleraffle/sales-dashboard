@@ -194,6 +194,32 @@ const SECTION_KEY = (t) => `opt.mkt.section.${t}`
 const SECTIONS_CLOSED_BY_DEFAULT = new Set([
   'Call confirmation', 'Trial Financials', 'Ascension', 'ROAS Overview', 'AR & Refunds',
 ])
+/* Heavy blocks below the tiles. Folded away they cost nothing to render,
+   which is most of why switching dates felt slow: the daily tracker was
+   re-rendering ~400 rows on every change (Ben, 6 Sep 2026). */
+function FoldableBlock({ title, note, storageKey, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(() => {
+    try { const v = localStorage.getItem(storageKey); if (v !== null) return v === '1' } catch { /* no storage */ }
+    return defaultOpen
+  })
+  const toggle = () => setOpen(v => {
+    try { localStorage.setItem(storageKey, v ? '0' : '1') } catch { /* no storage */ }
+    return !v
+  })
+  return (
+    <div className="mb-5">
+      <button type="button" onClick={toggle} aria-expanded={open}
+        className="flex items-center gap-2 mb-2"
+        style={{ border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }}>
+        <ChevronDown size={13} style={{ color: 'var(--ink-4)', transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform 140ms ease' }} />
+        <span className="eyebrow" style={{ margin: 0 }}>{title}</span>
+        {!open && note && <span style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 500 }}>{note}</span>}
+      </button>
+      {open && children}
+    </div>
+  )
+}
+
 function Section({ title, children, cols = 6 }) {
   const [open, setOpen] = useState(false)
   const [shown, setShown] = useState(() => {
@@ -5281,9 +5307,9 @@ export default function MarketingPerformance() {
       </Section>
 
       {/* MTD Funnel */}
-      <div className="mb-5">
+      <FoldableBlock title="Month to date funnel" storageKey="opt.mkt.funnel" defaultOpen note="leads through to ascensions">
         <MTDFunnel stats={statsMTD} />
-      </div>
+      </FoldableBlock>
 
       {/* Audience comparison table — answers "is there a losing
           audience?" by rolling up the current date range per audience
@@ -5312,14 +5338,14 @@ export default function MarketingPerformance() {
       {/* Trailing Period Summary — uses the AUDIENCE-FILTERED entries
           so trailing periods reflect the chip selection too. Empty
           selection (default) = same behavior as before. */}
-      <div className="mb-5">
+      <FoldableBlock title="Trailing period summary" storageKey="opt.mkt.trailing" defaultOpen note="4 days, 7 days, 30 days, month to date">
         <TrailingTable entries={audienceFilteredEntries} applyProspectMetrics={applyProspectMetrics} bm={bm} />
-      </div>
+      </FoldableBlock>
 
       {/* Daily Tracker — audience-filtered too. */}
-      <div className="mb-5">
+      <FoldableBlock title="Daily tracker" storageKey="opt.mkt.daily" note={`${audienceFilteredEntries.length} days, every metric by day`}>
         <DailyTracker entries={audienceFilteredEntries} onDelete={handleDelete} onSave={upsertEntry} bm={bm} />
-      </div>
+      </FoldableBlock>
 
       {/* Audience override modal */}
       {overrideModal && (
