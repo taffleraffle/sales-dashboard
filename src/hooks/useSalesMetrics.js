@@ -206,8 +206,12 @@ async function load(range, region = 'all') {
     Object.assign(byCloser[id], c)
   }
   for (const t of Object.values(byCloser)) {
-    // Booked = calendar when the appointment carries a closer, else the closer's own new-call rows
-    t.qualifiedBookings = t.calendarBookings > 0 ? t.calendarBookings : t.ncRows
+    // Booked has to cover every new call they actually took, or the show rate
+    // divides a held-day count by a booked-day count and can exceed 100% (Ben,
+    // 6 Sep 2026: his row read 800% off 8 live calls against 1 booking made in
+    // the window; the other 7 were booked earlier). Taking the larger of the
+    // two keeps the cohorts honest and makes live <= booked by construction.
+    t.qualifiedBookings = Math.max(t.calendarBookings, t.ncRows)
   }
 
   return { totals, byCloser, calls, bookings: goodBookings, window: { startStr, endStr }, mvRows, problems, region }
