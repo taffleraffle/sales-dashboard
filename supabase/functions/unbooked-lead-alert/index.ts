@@ -66,6 +66,30 @@ function parseLead(text: string) {
 
 const isLeadPost = (t: string) => /new Lead\b/i.test(t || '')
 
+// Our own addresses, partners, and disposable-mail domains used by spam
+// signups. Chasing these would page a human about themselves.
+const INTERNAL = [
+  'optdigital.io', 'opt.co.nz', 'flows.co.nz', 'scaleclients.io',
+  'eyeto-ai.com', 'hilostar.com', 'mailinator.com', 'guerrillamail.com',
+]
+
+function isRealLead(name?: string, email?: string): boolean {
+  const e = (email || '').toLowerCase()
+  if (INTERNAL.some(d => e.endsWith('@' + d) || e.endsWith('.' + d))) return false
+  if (/\btest\b|ignore/i.test(name || '')) return false
+  if (/\btest\b/i.test(e)) return false
+  return true
+}
+
+/** "4 minutes", "3 hours", "2 days" - a backfill should not say 6444 minutes. */
+function humanAge(min: number): string {
+  if (min < 90) return `${Math.round(min)} minute${Math.round(min) === 1 ? '' : 's'}`
+  const h = min / 60
+  if (h < 36) return `${Math.round(h)} hour${Math.round(h) === 1 ? '' : 's'}`
+  const d = Math.round(h / 24)
+  return `${d} day${d === 1 ? '' : 's'}`
+}
+
 /** Has this person booked anything? Email first, then phone. */
 async function hasBooking(email?: string, phone?: string): Promise<boolean> {
   if (email) {
@@ -113,7 +137,8 @@ Deno.serve(async (req) => {
   const done = await sb('lead_unbooked_alerts?select=message_ts')
   if (done.ok) for (const r of await done.json()) seen.add(r.message_ts)
 
-  let chased = 0, waiting = 0, booked = 0
+  let chased = 0, waiting = 0, booked = 0, skipped = 0
+  const chasedKeys = new Set<string>()
   for (const msg of hist.messages || []) {
     const text: string = msg.text || ''
     if (!isLeadPost(text) || msg.thread_ts && msg.thread_ts !== msg.ts) continue
@@ -124,6 +149,11 @@ Deno.serve(async (req) => {
 
     const { name, email, phone } = parseLead(text)
     if (!email && !phone) continue
+    if (!isRealLead(name, email)) { skipped++; continue }
+
+    // The same person can post twice (a resubmitted form). Chase them once.
+    const who_key = (email || phone || '').toLowerCase()
+    if (chasedKeys.has(who_key)) { skipped++; continue }
 
     const row = {
       message_ts: msg.ts, channel_id: CHANNEL, lead_email: email || null,
@@ -140,27 +170,43 @@ Deno.serve(async (req) => {
       continue
     }
 
+    // Claim the lead BEFORE posting. A run can take longer than the one minute
+    // between runs, so two overlapping runs both read an empty ledger and both
+    // posted: 19 leads produced 29 alerts. ignore-duplicates returns no row
+    // when someone else already claimed it, so only one run posts.
+    const claim = await sb('lead_unbooked_alerts?on_conflict=message_ts', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+      body: JSON.stringify({ ...row, outcome: 'chased' }),
+    })
+    if (!claim.ok || !(await claim.json()).length) { skipped++; continue }
+
     const who = name || email || phone
     const mention = MENTION ? `<@${MENTION}> ` : ''
     const post = await slack('chat.postMessage', {
       channel: CHANNEL,
       thread_ts: msg.ts,
-      reply_broadcast: true,
+      // Thread only. reply_broadcast also drops a copy into the channel, which
+      // buries the channel under alerts (Ben, 7 Sep 2026: "reply in the thread
+      // of their original lead").
+      reply_broadcast: false,
       text: `${mention}:warning: no call booked for *${who}* ` +
-            `${Math.round(ageMin)} minutes after this lead came through.` +
+            `${humanAge(ageMin)} after this lead came through.` +
             (phone ? `\nPhone: ${phone}` : '') + (email ? `\nEmail: ${email}` : ''),
       unfurl_links: false,
     })
-    if (!post.ok) { console.error('slack reply failed', post); continue }
+    if (!post.ok) {
+      // Release the claim so the next run can retry this lead.
+      console.error('slack reply failed', post)
+      await sb(`lead_unbooked_alerts?message_ts=eq.${msg.ts}`, { method: 'DELETE' })
+      continue
+    }
 
     chased++
-    await sb('lead_unbooked_alerts?on_conflict=message_ts', {
-      method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({ ...row, outcome: 'chased' }),
-    })
+    chasedKeys.add(who_key)
   }
 
-  return new Response(JSON.stringify({ chased, booked, waiting }), {
+  return new Response(JSON.stringify({ chased, booked, waiting, skipped }), {
     headers: { 'Content-Type': 'application/json' },
   })
 })
