@@ -258,13 +258,40 @@ export default function SalesOverview() {
     checkTodayCloses()
   }, [])
 
-  const openRevenueBreakdown = () => {
+  // The Revenue tile counts every EOD in the window, confirmed or not, because
+  // that is what the matview behind it does. m.calls deliberately holds only
+  // CONFIRMED reports, so building this list from it hid every deal whose EOD
+  // had not been ticked off yet and left the headline unexplainable: the tile
+  // said $27,097 while the list it opened showed $8,100. Read the window
+  // directly instead, and mark the rows still awaiting an EOD so the reason is
+  // visible rather than silent.
+  const openRevenueBreakdown = async () => {
     setShowRevenueBreakdown(true)
+    setRevenueDeals(null)
+    if (!m.window) { setRevenueDeals([]); return }
+    const { data: reps } = await supabase
+      .from('closer_eod_reports')
+      .select('id, report_date, is_confirmed')
+      .gte('report_date', m.window.startStr)
+      .lte('report_date', m.window.endStr)
+    if (!reps?.length) { setRevenueDeals([]); return }
+    const meta = Object.fromEntries(reps.map(r => [r.id, r]))
+    const { data: rows } = await supabase
+      .from('closer_calls')
+      .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected')
+      .in('eod_report_id', reps.map(r => r.id))
+      .in('outcome', ['closed', 'ascended'])
     setRevenueDeals(
-      m.calls
-        .filter(c => ['closed', 'ascended'].includes(c.outcome))
-        .sort((x, y) => (y.report_date || '').localeCompare(x.report_date || ''))
-        .map(c => ({ date: c.report_date, prospect_name: (c.prospect_name || '—').split(' - ')[0], call_type: c.call_type, revenue: c.revenue, cash_collected: c.cash_collected }))
+      (rows || [])
+        .map(c => ({
+          date: meta[c.eod_report_id]?.report_date,
+          prospect_name: (c.prospect_name || '—').split(' - ')[0],
+          call_type: c.call_type,
+          revenue: c.revenue,
+          cash_collected: c.cash_collected,
+          pending: !meta[c.eod_report_id]?.is_confirmed,
+        }))
+        .sort((x, y) => (y.date || '').localeCompare(x.date || ''))
     )
   }
 
@@ -559,7 +586,12 @@ export default function SalesOverview() {
               columns={[
                 { key: 'date', label: 'Date' },
                 { key: 'prospect_name', label: 'Prospect', render: (r, f) => f ? <span style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 500 }}>{r.prospect_name}</span> : r.prospect_name },
-                { key: 'call_type', label: 'Type', render: (r, f) => f ? '' : <span className="pill">{r.call_type === 'ascension' ? 'Ascension' : 'Trial'}</span> },
+                { key: 'call_type', label: 'Type', render: (r, f) => f ? '' : (
+                  <>
+                    <span className="pill">{r.call_type === 'ascension' ? 'Ascension' : 'Trial'}</span>
+                    {r.pending && <span className="pill" style={{ marginLeft: 6, background: 'var(--mid-soft)', color: 'var(--mid-ink)' }} title="Counted in the totals, but this closer has not confirmed their EOD yet">EOD pending</span>}
+                  </>
+                ) },
                 { key: 'revenue', label: 'Revenue', align: 'right', render: r => `$${Math.round(parseFloat(r.revenue || 0)).toLocaleString()}` },
                 { key: 'cash_collected', label: 'Cash', align: 'right', strong: true, render: r => `$${Math.round(parseFloat(r.cash_collected || 0)).toLocaleString()}` },
               ]}
