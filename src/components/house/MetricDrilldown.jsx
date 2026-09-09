@@ -168,17 +168,17 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
       ]} />
   } else if (kind === 'live') {
     title = 'Cost per live call: every live call'
-    subtitle = 'New calls where the prospect turned up (closed or not closed), on confirmed EODs.'
+    subtitle = 'New calls where the prospect turned up (closed or not closed).'
     tiles = <>
       <KPICard label="Live calls" value={live.length} subtitle={`${money(T.adspend)} ad spend`} />
       <KPICard label="Cost per live call" value={R.costPerLive != null ? money(R.costPerLive) : '—'} />
       <KPICard label="Closed" value={closes.filter(c => c.call_type === 'new_call').length} subtitle={`${R.closeRate}% close rate`} />
       <KPICard label="Not closed" value={live.filter(c => c.outcome === 'not_closed').length} />
     </>
-    table = <LeaderTable rows={[...live].sort(byDate)} highlightFirst={false} empty="No live calls on confirmed EODs in this window." columns={callCols('Result')} />
+    table = <LeaderTable rows={[...live].sort(byDate)} highlightFirst={false} empty="No live calls in this window." columns={callCols('Result')} />
   } else if (kind === 'show') {
     title = 'Show rate: every booked new call'
-    subtitle = 'Each new call on a confirmed EOD and what happened to it. Live means the prospect showed.'
+    subtitle = 'Each new call and what happened to it. Live means the prospect showed.'
     const opts = [
       { value: 'all', label: 'All', count: nc.length },
       { value: 'live', label: 'Showed', count: live.length },
@@ -248,11 +248,16 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
         { key: 'appointment_date', label: 'Call date', width: 130, render: r => fmtDay(r.appointment_date) },
         { key: 'appointment_status', label: 'Status', align: 'right', render: r => <Pill label={r.appointment_status || 'booked'} color={r.appointment_status === 'confirmed' ? 'var(--house-good)' : 'var(--ink-2)'} /> },
       ]} />
-    const closedTable = <LeaderTable rows={[...closes].sort(byDate)} highlightFirst={false} empty="No closes on confirmed EODs in this window."
+    const closedTable = <LeaderTable rows={[...closes].sort(byDate)} highlightFirst={false} empty="No closes in this window."
       columns={[
         { key: 'report_date', label: 'Date', width: 120, render: r => fmtDay(r.report_date) },
         { key: 'prospect_name', label: 'Prospect', render: r => <Person name={clean(r.prospect_name)} sub={closerName[r.closer_id] ? `closed by ${closerName[r.closer_id]}` : undefined} /> },
-        { key: 'call_type', label: 'Type', width: 110, render: r => <span className="pill">{r.call_type === 'follow_up' ? 'Follow-up' : 'New call'}</span> },
+        { key: 'call_type', label: 'Type', width: 110, render: r => (
+          <>
+            <span className="pill">{r.call_type === 'follow_up' ? 'Follow-up' : 'New call'}</span>
+            {r.pending && <span className="pill" style={{ marginLeft: 6, background: 'var(--mid-soft)', color: 'var(--mid-ink)' }} title="Counted in the totals, but this closer has not confirmed their EOD yet">EOD pending</span>}
+          </>
+        ) },
         { key: 'cash_collected', label: 'Cash', align: 'right', strong: true, render: r => money(r.cash_collected) },
       ]} />
     table = <>
@@ -268,11 +273,16 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
       <KPICard label="Revenue" value={money(closes.reduce((t, c) => t + parseFloat(c.revenue || 0), 0))} subtitle="trial revenue on these closes" />
       <KPICard label="Cash collected" value={money(closes.reduce((t, c) => t + parseFloat(c.cash_collected || 0), 0))} />
     </>
-    table = <LeaderTable rows={[...closes].sort(byDate)} highlightFirst={false} empty="No closes on confirmed EODs in this window."
+    table = <LeaderTable rows={[...closes].sort(byDate)} highlightFirst={false} empty="No closes in this window."
       columns={[
         { key: 'report_date', label: 'Date', width: 120, render: r => fmtDay(r.report_date) },
         { key: 'prospect_name', label: 'Prospect', render: r => <Person name={clean(r.prospect_name)} sub={closerName[r.closer_id] ? `closed by ${closerName[r.closer_id]}` : undefined} /> },
-        { key: 'call_type', label: 'Type', width: 110, render: r => <span className="pill">{r.call_type === 'follow_up' ? 'Follow-up' : 'New call'}</span> },
+        { key: 'call_type', label: 'Type', width: 110, render: r => (
+          <>
+            <span className="pill">{r.call_type === 'follow_up' ? 'Follow-up' : 'New call'}</span>
+            {r.pending && <span className="pill" style={{ marginLeft: 6, background: 'var(--mid-soft)', color: 'var(--mid-ink)' }} title="Counted in the totals, but this closer has not confirmed their EOD yet">EOD pending</span>}
+          </>
+        ) },
         { key: 'revenue', label: 'Revenue', align: 'right', render: r => money(r.revenue) },
         { key: 'cash_collected', label: 'Cash', align: 'right', strong: true, render: r => money(r.cash_collected) },
       ]} />

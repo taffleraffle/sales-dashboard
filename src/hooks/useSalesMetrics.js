@@ -19,11 +19,20 @@ import { dateRangeBoundsET } from '../lib/dateUtils'
     closes, cash, revenue   the resolved close rows
     no_shows, reschedules, cancels, fu_lives, ascensions
 
-  Per-closer numbers come from the same closer_calls rows (confirmed, not
-  excluded) grouped by the closer who filed them, so the per-closer table
-  sums to the company total. Per-closer bookings come from the calendar
-  too: strategy bookings joined to ghl_appointments.closer_id, falling back
-  to the closer's new-call rows when the appointment has no closer.
+  Per-closer numbers come from the same closer_calls rows (not excluded)
+  grouped by the closer who filed them, so the per-closer table sums to the
+  company total. Per-closer bookings come from the calendar too: strategy
+  bookings joined to ghl_appointments.closer_id, falling back to the
+  closer's new-call rows when the appointment has no closer.
+
+  These rows used to be taken from CONFIRMED reports only, while the matview
+  above counts every report. That split was the single cause of the pages
+  disagreeing with themselves: the CAC tile said 6 closes and the list it
+  opened showed 1, the leaderboard credited a closer with 1 close while the
+  headline said 5, and the revenue breakdown totalled $8,100 under a $27,097
+  tile. Whatever the totals count, these rows now list. Each row carries
+  `pending` when its EOD has not been confirmed yet, so a page can say which
+  numbers are still awaiting sign-off rather than quietly dropping them.
 
   Nothing here reads the hand-typed EOD header fields (nc_booked, closes,
   total_cash_collected...) or marketing_tracker. That is deliberate: those
@@ -129,13 +138,15 @@ async function load(range, region = 'all') {
     totals.cancels += num(r.cancels)
   }
 
-  // ── Call rows on confirmed, non-excluded EOD reports ──
+  // ── Call rows on every non-excluded EOD report in the window ──
+  // Every report, not only the confirmed ones: see the note at the top of this
+  // file. The matview totals count them all, so these rows have to as well.
   const reportById = Object.fromEntries(reports.map(r => [r.id, r]))
-  const confirmedIds = reports.filter(r => r.is_confirmed).map(r => r.id)
+  const reportIds = reports.map(r => r.id)
   const excludedIds = new Set(excluded.map(e => e.closer_call_id))
   let calls = []
-  for (let i = 0; i < confirmedIds.length; i += 200) {
-    const slice = confirmedIds.slice(i, i + 200)
+  for (let i = 0; i < reportIds.length; i += 200) {
+    const slice = reportIds.slice(i, i + 200)
     const rows = await safe('call rows', () => fetchAll(() => supabase.from('closer_calls')
       .select('id, eod_report_id, call_type, prospect_name, outcome, revenue, cash_collected, offered, offered_finance, notes, ghl_event_id, created_at')
       .in('eod_report_id', slice).order('created_at')))
@@ -148,11 +159,15 @@ async function load(range, region = 'all') {
   }
   calls = calls.map(c => ({
     ...c, closer_id: reportById[c.eod_report_id]?.closer_id, report_date: reportById[c.eod_report_id]?.report_date,
+    pending: !reportById[c.eod_report_id]?.is_confirmed,
   }))
   // Offers: the per-call `offered` flag is never set by the EOD form, so the
-  // only record is the count each closer types on the report header.
+  // only record is the count each closer types on the report header. Counted
+  // across every report for the same reason as the call rows above: leaving
+  // offers on confirmed reports only, while closes counted all of them, gave
+  // closers more closes than offers.
   const offersByCloser = {}
-  for (const r of reports) if (r.is_confirmed) offersByCloser[r.closer_id] = (offersByCloser[r.closer_id] || 0) + num(r.offers)
+  for (const r of reports) offersByCloser[r.closer_id] = (offersByCloser[r.closer_id] || 0) + num(r.offers)
   totals.offers = region === 'all' ? Object.values(offersByCloser).reduce((a, b) => a + b, 0) : 0
   totals.ncRows = calls.filter(c => c.call_type === 'new_call').length
 
