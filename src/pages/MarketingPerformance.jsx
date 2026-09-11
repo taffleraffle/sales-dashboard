@@ -1124,7 +1124,7 @@ async function fetchLiveCalls({ from, to, audiences } = {}) {
     // non-existent new_live_calls 400s the whole query and the drilldown
     // rendered 0 rows while the tile showed 3 (bug found 2026-06-10).
     .select('id, report_date, live_nc_calls, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
-    .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
+    .gte('report_date', from).lte('report_date', to)
   const reportIds = (reports || []).map(r => r.id)
   const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
   if (reportIds.length === 0) return []
@@ -1138,7 +1138,6 @@ async function fetchLiveCalls({ from, to, audiences } = {}) {
     .from('lib_closer_call_audience')
     .select('closer_call_id, eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected, audience')
     .gte('report_date', from).lte('report_date', to)
-    .eq('is_confirmed', true)
     .in('outcome', ['not_closed', 'closed'])
     .eq('call_type', 'new_call') // "Net New" = NEW CALLS only (no follow-ups, no ascensions)
   if (audienceFilterActive) q = q.in('audience', [...audiences])
@@ -1277,14 +1276,13 @@ async function fetchAscensions({ from, to, audiences } = {}) {
   const { data: reports } = await supabase
     .from('closer_eod_reports')
     .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
-    .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
+    .gte('report_date', from).lte('report_date', to)
   const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
   if ((reports || []).length === 0) return []
   let q = supabase
     .from('lib_closer_call_audience')
     .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected, offered_finance, audience')
     .gte('report_date', from).lte('report_date', to)
-    .eq('is_confirmed', true)
     .eq('call_type', 'ascension')
   if (audiences && audiences.size > 0) q = q.in('audience', [...audiences])
   const { data: callRows } = await q
@@ -1480,14 +1478,13 @@ async function fetchNoShows({ from, to, audiences } = {}) {
   const { data: reports } = await supabase
     .from('closer_eod_reports')
     .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
-    .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
+    .gte('report_date', from).lte('report_date', to)
   const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
   if ((reports || []).length === 0) return []
   let q = supabase
     .from('lib_closer_call_audience')
     .select('eod_report_id, prospect_name, call_type, outcome, audience')
     .gte('report_date', from).lte('report_date', to)
-    .eq('is_confirmed', true)
     .eq('outcome', 'no_show')
     .eq('call_type', 'new_call')
   if (audiences && audiences.size > 0) q = q.in('audience', [...audiences])
@@ -1640,14 +1637,13 @@ async function fetchReschCancel({ from, to, audiences } = {}) {
   const { data: reports } = await supabase
     .from('closer_eod_reports')
     .select('id, report_date, closer:team_members!closer_eod_reports_closer_id_fkey(name)')
-    .gte('report_date', from).lte('report_date', to).eq('is_confirmed', true)
+    .gte('report_date', from).lte('report_date', to)
   const reportMap = Object.fromEntries((reports || []).map(r => [r.id, r]))
   if ((reports || []).length === 0) return []
   let q = supabase
     .from('lib_closer_call_audience')
     .select('eod_report_id, prospect_name, call_type, outcome, audience')
     .gte('report_date', from).lte('report_date', to)
-    .eq('is_confirmed', true)
     .in('outcome', ['rescheduled', 'canceled'])
     // Tile numerators never include ascension-call resch/cancels (NC-only when
     // audience-filtered, NC+FU on the All view) — keep the drilldown aligned.
@@ -4163,8 +4159,34 @@ export default function MarketingPerformance() {
   // Audience list = every active row in audience_definitions, sorted by
   // spend desc within the current window. Any audience added via Settings
   // → Audiences appears here on next render — no hardcoded list to maintain.
+  // Audiences with any spend, leads, bookings or closes in the last 90 days.
+  // A fixed lookback, not the current window, so chips do not flicker as the
+  // date range changes. Ben, 11 Sep 2026: the row carried Accounting, HVAC and
+  // Real Estate (never any data) and Plumbing and Pool Builders (none since
+  // March and last November). Definitions stay active so attribution is
+  // unchanged; the chip just hides until the audience has something to show.
+  const [activeAudiences, setActiveAudiences] = useState(null)
+  useEffect(() => {
+    let alive = true
+    const since = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)
+    supabase.from('lib_marketing_by_audience_daily_mv')
+      .select('audience, adspend, leads, qualified_bookings, closes')
+      .gte('date', since)
+      .then(({ data }) => {
+        if (!alive) return
+        const live = new Set()
+        for (const r of data || []) {
+          if (Number(r.adspend || 0) > 0 || Number(r.leads || 0) > 0 ||
+              Number(r.qualified_bookings || 0) > 0 || Number(r.closes || 0) > 0) live.add(r.audience)
+        }
+        setActiveAudiences(live)
+      })
+    return () => { alive = false }
+  }, [])
+
   const audienceList = useMemo(() => {
     const fromTable = (audienceDefs || []).filter(a => a.is_active !== false).map(a => a.display_name)
+      .filter(n => !activeAudiences || activeAudiences.has(n) || pickedAudiences.has(n))
     const totals = {}
     for (const name of fromTable) totals[name] = 0
     for (const e of entries || []) {
@@ -4173,7 +4195,7 @@ export default function MarketingPerformance() {
       else totals[a] = Number(e.adspend || 0)  // catch any audience that exists in data but not in table
     }
     return Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([a]) => a)
-  }, [entries, audienceOverrides, audienceDefs])
+  }, [entries, audienceOverrides, audienceDefs, activeAudiences, pickedAudiences])
 
   // Single source of truth: audienceDaily (= lib_marketing_by_audience_daily
   // aggregating ad_daily_stats truth + typeform attribution chain). Used
