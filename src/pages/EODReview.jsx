@@ -1899,8 +1899,69 @@ export default function EODReview() {
           }
         })
 
-      // Merge: calendar entries first (sorted by time), then unmatched leads
-      const allRows = [...calendarRows, ...leadOnlyRows]
+      // Calls already saved on an UNCONFIRMED report. Submitting deletes every
+      // call on the report and writes back only what this form shows, so any
+      // saved call the form leaves out is destroyed. It used to leave them all
+      // out: this branch built the list from the calendar and setter leads
+      // alone. Ash has no GHL calendar, so on 10 Sep his form opened empty,
+      // he typed a test entry, submitted, and five logged calls were wiped.
+      // Saved calls now come into the form, and a calendar row that already
+      // has a saved outcome shows it instead of a blank to be lost or retyped.
+      let savedRows = []
+      if (existingEOD?.[0]?.id) {
+        const { data: savedOnDraft } = await supabase
+          .from('closer_calls')
+          .select('*')
+          .eq('eod_report_id', existingEOD[0].id)
+        if (cancelled) return
+        const saved = savedOnDraft || []
+        const byEvent = new Map(saved.filter(c => c.ghl_event_id).map(c => [c.ghl_event_id, c]))
+        for (const row of calendarRows) {
+          const s = row.ghl_event_id && byEvent.get(row.ghl_event_id)
+          if (s) Object.assign(row, {
+            call_id: s.id,
+            call_type: s.call_type || row.call_type,
+            outcome: s.outcome ?? row.outcome,
+            revenue: parseFloat(s.revenue || 0),
+            cash_collected: parseFloat(s.cash_collected || 0),
+            offered: s.offered ?? row.offered,
+            notes: s.notes || row.notes,
+          })
+        }
+        const shownEvents = new Set(calendarRows.map(r => r.ghl_event_id).filter(Boolean))
+        const shownNames = new Set([...calendarRows, ...leadOnlyRows].map(r => (r.lead_name || '').trim().toLowerCase()))
+        savedRows = saved
+          .filter(c => !(c.ghl_event_id && shownEvents.has(c.ghl_event_id)))
+          .filter(c => !shownNames.has((c.prospect_name || '').trim().toLowerCase()))
+          .map(c => ({
+            call_id: c.id,
+            lead_id: c.setter_lead_id || null,
+            ghl_event_id: c.ghl_event_id || null,
+            lead_name: c.prospect_name || 'Unknown',
+            setter_name: '—',
+            appointment_date: selectedDate,
+            start_time: null,
+            calendar_name: '',
+            lead_source: '',
+            call_type: c.call_type || 'new_call',
+            outcome: c.outcome || null,
+            revenue: parseFloat(c.revenue || 0),
+            cash_collected: parseFloat(c.cash_collected || 0),
+            offered: c.offered ?? ['closed', 'not_closed'].includes(c.outcome),
+            ascended: c.outcome === 'ascended',
+            offered_finance: c.offered_finance || false,
+            notes: c.notes || '',
+            fathom_summary: null,
+            fathom_duration: null,
+            contact_email: '',
+            contact_phone: '',
+            _rowSource: 'saved',
+          }))
+      }
+
+      // Merge: calendar entries first (sorted by time), then unmatched leads,
+      // then calls saved on this report that neither of those accounts for
+      const allRows = [...calendarRows, ...leadOnlyRows, ...savedRows]
       setCalls(allRows)
       } catch (err) {
         console.error('Failed to load calls:', err)
