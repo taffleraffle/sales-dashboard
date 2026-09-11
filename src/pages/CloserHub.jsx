@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ExternalLink, Eye, EyeOff, Copy, Check, Hash, FileSignature, Send, Settings2, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -124,7 +124,7 @@ function ToolTile({ tool }) {
 
 /* ── Make Channel ──────────────────────────────────────────────────────── */
 
-function ChannelPanel() {
+function ChannelPanel({ onDone }) {
   const toast = useToast()
   const [form, setForm] = useState({ company: '', email: '', prospect_name: '' })
   const [busy, setBusy] = useState(false)
@@ -139,6 +139,7 @@ function ChannelPanel() {
       const r = await callCloserHub('make_channel', form)
       setResult(r)
       toast.success(`#${r.channel?.name} ${r.channel?.created ? 'created' : 'was already there'}.`)
+      onDone?.()
     } catch (err) {
       toast.error(err.message)
       setResult({ ok: false, error: err.message, ...(err.data || {}) })
@@ -187,7 +188,7 @@ function ChannelPanel() {
 
 /* ── Contract ──────────────────────────────────────────────────────────── */
 
-function ContractPanel({ settings }) {
+function ContractPanel({ settings, onDone }) {
   const toast = useToast()
   const [form, setForm] = useState({ company: '', email: '', signer_name: '', offer: 'retainer', fee: '', extra_conditions: '' })
   const [busy, setBusy] = useState(false)
@@ -208,6 +209,7 @@ function ContractPanel({ settings }) {
       const r = await callCloserHub('create_contract', { ...form, fee })
       setDoc(r)
       toast.success('Contract drafted in PandaDoc.')
+      onDone?.()
     } catch (err) { toast.error(err.message) } finally { setBusy(false) }
   }
 
@@ -218,6 +220,7 @@ function ContractPanel({ settings }) {
       setDoc(d => ({ ...d, status: r.status, sent: true }))
       setConfirmSend(false)
       toast.success(`Sent to ${form.email}.`)
+      onDone?.()
     } catch (err) { toast.error(err.message) } finally { setSending(false) }
   }
 
@@ -252,7 +255,7 @@ function ContractPanel({ settings }) {
         <div className="callout" style={{ marginTop: 16, fontSize: 13 }}>
           <b>{doc.name}</b> is drafted{doc.sent ? ' and sent' : ''}. Status <code>{doc.status}</code>.
           {' '}<a href={doc.url} target="_blank" rel="noopener">Open in PandaDoc</a>.
-          {!doc.renamed && !doc.sent && <span style={{ display: 'block', color: 'var(--house-warn)', marginTop: 4 }}>Check the name for a "[DEV]" prefix before sending.</span>}
+          {!doc.renamed && !doc.sent && <span style={{ display: 'block', color: 'var(--house-warn)', marginTop: 4 }}>Check the name for a &quot;[DEV]&quot; prefix before sending.</span>}
           {!doc.sent && (
             <div style={{ marginTop: 10 }}>
               <button type="button" className="editorial-btn-primary" style={{ height: 34, fontSize: 12.5 }} onClick={() => setConfirmSend(true)}>
@@ -356,26 +359,26 @@ export default function CloserHub() {
   const toast = useToast()
   const [settings, setSettings] = useState({})
   const [refreshKey, setRefreshKey] = useState(0)
+  const bump = () => setRefreshKey(k => k + 1)
 
   useEffect(() => {
     loadCloserHubSettings().then(setSettings).catch((e) => toast.error(`Settings did not load: ${e.message}`))
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const tools = useMemo(() => CLOSER_TOOLS, [])
 
   return (
     <div className="space-y-6">
       <SectionHead level="page" eyebrow="Sales" title="Closer Hub" tagline={`Everything for the call and the close, in the order you use it${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}.`} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" onClickCapture={() => setRefreshKey(k => k + 1)}>
-        <ChannelPanel />
-        <ContractPanel settings={settings} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ChannelPanel onDone={bump} />
+        <ContractPanel settings={settings} onDone={bump} />
       </div>
 
       <div>
         <h2 style={{ fontFamily: 'var(--serif)', fontSize: 24, fontWeight: 500, margin: '0 0 12px' }}>Tools</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {tools.map(t => <ToolTile key={t.key} tool={t} />)}
+          {CLOSER_TOOLS.map(t => <ToolTile key={t.key} tool={t} />)}
         </div>
       </div>
 
