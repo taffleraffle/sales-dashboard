@@ -62,7 +62,7 @@ function Result({ tone = 'ok', children }) {
 
 /* ── Side panel: apps ──────────────────────────────────────────────────── */
 
-function SharedLogin() {
+function SharedLogin({ tool }) {
   const toast = useToast()
   const [creds, setCreds] = useState(null)
   const [show, setShow] = useState(false)
@@ -77,7 +77,7 @@ function SharedLogin() {
 
   const reveal = async () => {
     setBusy(true)
-    try { setCreds(await callCloserHub('semrush')); setShow(false); setMissing(false) }
+    try { setCreds(await callCloserHub('login', { tool })); setShow(false); setMissing(false) }
     catch (e) { if (e.status === 404) setMissing(true); else toast.error(e.message) }
     finally { setBusy(false) }
   }
@@ -123,7 +123,7 @@ function AppLink({ tool, first }) {
         </div>
         {view}
       </div>
-      {tool.shared && <div style={{ paddingLeft: 42 }}><SharedLogin /></div>}
+      {tool.shared && <div style={{ paddingLeft: 42 }}><SharedLogin tool={tool.shared} /></div>}
     </div>
   )
 }
