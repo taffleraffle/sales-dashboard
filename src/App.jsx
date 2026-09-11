@@ -90,6 +90,7 @@ const AdDetail = lazyWithReload(() => import('./pages/ads/AdDetail'))
 const EODReview = lazyWithReload(() => import('./pages/EODReview'))
 const SettingsPage = lazyWithReload(() => import('./pages/SettingsPage'))
 const TeamPage = lazyWithReload(() => import('./pages/TeamPage'))
+const CloserHub = lazyWithReload(() => import('./pages/CloserHub'))
 const TeamMemberPage = lazyWithReload(() => import('./pages/TeamMemberPage'))
 const TeamNewPage = lazyWithReload(() => import('./pages/TeamNewPage'))
 const CommissionPage = lazyWithReload(() => import('./pages/CommissionPage'))
@@ -202,6 +203,14 @@ function AdminRoute({ children }) {
   return children
 }
 
+// Closer Hub (Ben, 12 Sep 2026): closers and admins. Setters have no use for
+// the contract form or the shared logins, so they are sent back to Overview.
+function CloserRoute({ children }) {
+  const { isAdmin, isCloser } = useAuth()
+  if (!isAdmin && !isCloser) return <Navigate to="/sales" replace />
+  return children
+}
+
 // Polls /version.json (emitted per build) and prompts a reload when the
 // running bundle is older than the deployed one. Checks every 3 minutes and
 // whenever the tab regains focus — long-lived tabs were silently running
@@ -269,6 +278,7 @@ export default function App() {
               <Route path="/sales" element={<SalesOverview />} />
               <Route path="/sales/closers" element={<CloserOverview />} />
               <Route path="/sales/closers/:id" element={<Suspense fallback={<PageSkeleton />}><CloserDetail /></Suspense>} />
+              <Route path="/sales/closer-hub" element={<CloserRoute><Suspense fallback={<PageSkeleton />}><CloserHub /></Suspense></CloserRoute>} />
               <Route path="/sales/setters" element={<SetterOverview />} />
               <Route path="/sales/setters/:id" element={<Suspense fallback={<PageSkeleton />}><SetterDetail /></Suspense>} />
               <Route path="/sales/setters/:id/kpi-history" element={<Suspense fallback={<PageSkeleton />}><SetterKPIHistory /></Suspense>} />
