@@ -26,7 +26,7 @@ export default function CloserDetail() {
   const [range, setRange] = useState(30)
   const [member, setMember] = useState(null)
   const [selectedDate, setSelectedDate] = useState(null)
-  const [showCalls, setShowCalls] = useState(null) // 'show' | 'close' | null
+  const [showCalls, setShowCalls] = useState(null) // 'show' | 'close' | 'live' | 'no_show' | 'offers' | 'closes' | null
   const { bm } = useBenchmarks()
   const m = useSalesMetrics(range)
   const days = typeof range === 'number' ? range : 30
@@ -68,10 +68,10 @@ export default function CloserDetail() {
 
       <div className="kpi-grid mb-6">
         <KPICard label="Booked" value={mine.qualifiedBookings} subtitle={mine.calendarBookings > 0 ? 'calendar bookings assigned to them' : 'new-call rows on their EODs'} />
-        <KPICard label="Live" value={mine.lives} subtitle={`${mine.fuLives} follow-up lives separately`} />
-        <KPICard label="No shows" value={mine.noShows} subtitle={`${mine.reschedules} rescheduled · ${mine.cancels} cancelled`} />
-        <KPICard label="Offers" value={mine.offers} />
-        <KPICard label="Closes" value={mine.closes} subtitle={mine.ascensions > 0 ? `${mine.ascensions} ascensions separately` : undefined} />
+        <KPICard label="Live" value={mine.lives} subtitle={`${mine.fuLives} follow-up lives separately`} onClick={() => setShowCalls('live')} />
+        <KPICard label="No shows" value={mine.noShows} subtitle={`${mine.reschedules} rescheduled · ${mine.cancels} cancelled`} onClick={() => setShowCalls('no_show')} />
+        <KPICard label="Offers" value={mine.offers} onClick={() => setShowCalls('offers')} />
+        <KPICard label="Closes" value={mine.closes} subtitle={mine.ascensions > 0 ? `${mine.ascensions} ascensions separately` : undefined} onClick={() => setShowCalls('closes')} />
         <KPICard label="Trial cash" value={money(mine.trialCash)} subtitle={`${money(mine.trialRevenue)} revenue`} />
         <KPICard label="Ascension cash" value={money(mine.ascendCash)} subtitle={`${money(mine.ascendRevenue)} revenue`} />
         <KPICard label="Total cash" value={money(my.cash)} subtitle={`${money(my.revenue)} total revenue`} />
@@ -95,7 +95,7 @@ export default function CloserDetail() {
         days={days}
       />
 
-      <CallsModal kind={showCalls} onClose={() => setShowCalls(null)} calls={allCalls} days={days} name={member?.name} />
+      <CallsModal kind={showCalls} onClose={() => setShowCalls(null)} calls={allCalls} days={days} name={member?.name} offersTyped={mine.offers} />
     </div>
   )
 }
@@ -269,38 +269,88 @@ function OutcomePill({ outcome }) {
   new calls booked, so the modal lists every NEW call in the window with what
   happened to it. Close rate is closed prospects over live prospects.
 */
-function CallsModal({ kind, onClose, calls, days, name }) {
+function CallsModal({ kind, onClose, calls, days, name, offersTyped }) {
   if (!kind) return null
-  const isShow = kind === 'show'
   const nc = calls.filter(c => c.call_type === 'new_call')
   const live = nc.filter(c => ['closed', 'not_closed'].includes(c.outcome))
   const noShow = nc.filter(c => c.outcome === 'no_show')
-  const moved = nc.filter(c => ['rescheduled', 'cancelled', 'canceled'].includes(c.outcome))
+  const resched = nc.filter(c => c.outcome === 'rescheduled')
+  const cancelled = nc.filter(c => ['cancelled', 'canceled'].includes(c.outcome))
+  const moved = [...resched, ...cancelled]
   const liveAll = calls.filter(c => ['new_call', 'follow_up'].includes(c.call_type) && ['closed', 'not_closed'].includes(c.outcome))
+  const fuLive = liveAll.filter(c => c.call_type === 'follow_up')
   const closed = liveAll.filter(c => c.outcome === 'closed')
-  const rows = (isShow ? nc : liveAll).slice().sort((a, b) => (b.report_date || '').localeCompare(a.report_date || ''))
+  const wins = calls.filter(c => ['closed', 'ascended'].includes(c.outcome))
+  const offered = calls.filter(c => c.offered)
+  const offeredClosed = offered.filter(c => c.outcome === 'closed')
   const pct = (n, d) => d > 0 ? `${((n / d) * 100).toFixed(1)}%` : '—'
+  const sum = (list, key) => `$${Math.round(list.reduce((t, c) => t + parseFloat(c[key] || 0), 0)).toLocaleString()}`
+
+  // One pop-up, one view per card or gauge. Each lists the calls behind the
+  // number it was opened from, so every figure on the page can be checked.
+  const VIEWS = {
+    show: {
+      title: 'Show rate: every new call booked',
+      subtitle: 'Booked new calls and what happened to each one. Live means the prospect turned up.',
+      rows: nc,
+      tiles: [['New calls booked', nc.length], ['Showed', live.length, pct(live.length, nc.length)],
+              ['No show', noShow.length, pct(noShow.length, nc.length)], ['Rescheduled / cancelled', moved.length, pct(moved.length, nc.length)]],
+    },
+    close: {
+      title: 'Close rate: every live call',
+      subtitle: 'Live calls (new and follow-up) and which ones closed.',
+      rows: liveAll,
+      tiles: [['Live calls', liveAll.length], ['Closed', closed.length, pct(closed.length, liveAll.length)],
+              ['Not closed', liveAll.length - closed.length, pct(liveAll.length - closed.length, liveAll.length)], ['Cash', sum(closed, 'cash_collected')]],
+    },
+    live: {
+      title: 'Live calls',
+      subtitle: 'Every call where the prospect turned up, new calls and follow-ups.',
+      rows: liveAll,
+      tiles: [['Live new calls', live.length], ['Follow-up lives', fuLive.length],
+              ['Closed', closed.length, pct(closed.length, liveAll.length)], ['Not closed', liveAll.length - closed.length]],
+    },
+    no_show: {
+      title: 'No shows, reschedules and cancellations',
+      subtitle: 'New calls that were booked and did not happen.',
+      rows: [...noShow, ...moved],
+      tiles: [['No show', noShow.length], ['Rescheduled', resched.length], ['Cancelled', cancelled.length],
+              ['Of new calls booked', pct(noShow.length + moved.length, nc.length)]],
+    },
+    offers: {
+      title: 'Offers',
+      // The card counts offers typed on the EOD header; this lists calls carrying
+      // the per-call offer mark. Say so when they differ, rather than quietly
+      // showing a list that does not match the card it was opened from.
+      subtitle: offered.length === (offersTyped || 0)
+        ? 'Every call where an offer was made.'
+        : `Calls marked as offered. The card shows ${offersTyped || 0}, the count typed on the EOD headers, and ${offered.length} calls carry the offer mark, so the two can differ.`,
+      rows: offered,
+      tiles: [['Offers', offered.length], ['Closed', offeredClosed.length, pct(offeredClosed.length, offered.length)],
+              ['Not closed', offered.length - offeredClosed.length], ['Cash', sum(offeredClosed, 'cash_collected')]],
+    },
+    closes: {
+      title: 'Closes',
+      subtitle: 'Every deal won in the window, and what was collected on it.',
+      rows: wins,
+      tiles: [['Closes', wins.length], ['Cash collected', sum(wins, 'cash_collected')],
+              ['Contract revenue', sum(wins, 'revenue')], ['Of live calls', pct(closed.length, liveAll.length)]],
+    },
+  }
+  const v = VIEWS[kind] || VIEWS.show
+  const rows = v.rows.slice().sort((a, b) => (b.report_date || '').localeCompare(a.report_date || ''))
+  const showRevenue = ['closes', 'close', 'offers'].includes(kind)
   return (
     <Modal
       open
       onClose={onClose}
       eyebrow={name ? `${name} · last ${days} days` : `Last ${days} days`}
-      title={isShow ? 'Show rate: every new call booked' : 'Close rate: every live call'}
-      subtitle={isShow ? 'Booked new calls and what happened to each one. Live means the prospect turned up.' : 'Live calls (new and follow-up) and which ones closed.'}
+      title={v.title}
+      subtitle={v.subtitle}
       size="lg"
     >
       <div className="kpi-grid" style={{ padding: '18px 24px 6px' }}>
-        {isShow ? (<>
-          <KPICard label="New calls booked" value={nc.length} />
-          <KPICard label="Showed" value={live.length} subtitle={pct(live.length, nc.length)} />
-          <KPICard label="No show" value={noShow.length} subtitle={pct(noShow.length, nc.length)} />
-          <KPICard label="Rescheduled / cancelled" value={moved.length} subtitle={pct(moved.length, nc.length)} />
-        </>) : (<>
-          <KPICard label="Live calls" value={liveAll.length} />
-          <KPICard label="Closed" value={closed.length} subtitle={pct(closed.length, liveAll.length)} />
-          <KPICard label="Not closed" value={liveAll.length - closed.length} subtitle={pct(liveAll.length - closed.length, liveAll.length)} />
-          <KPICard label="Cash" value={`$${Math.round(closed.reduce((t, c) => t + parseFloat(c.cash_collected || 0), 0)).toLocaleString()}`} />
-        </>)}
+        {v.tiles.map(([label, value, sub]) => <KPICard key={label} label={label} value={value} subtitle={sub} />)}
       </div>
       <LeaderTable
         rows={rows}
@@ -308,9 +358,15 @@ function CallsModal({ kind, onClose, calls, days, name }) {
         empty="No calls in this window."
         columns={[
           { key: 'report_date', label: 'Date', width: 120, render: r => fmtDayShort(r.report_date) },
-          { key: 'prospect_name', label: 'Prospect', render: r => <span style={{ fontWeight: 600 }}>{(r.prospect_name || '—').split(' - ')[0]}</span> },
+          { key: 'prospect_name', label: 'Prospect', render: r => (
+            <span style={{ fontWeight: 600 }}>
+              {(r.prospect_name || '—').split(' - ')[0]}
+              {r.pending && <span className="pill" style={{ marginLeft: 6, fontWeight: 500, background: 'var(--mid-soft, #fbf5e4)', color: 'var(--mid-ink, #8f6800)' }} title="Counted, but this EOD has not been confirmed yet">EOD pending</span>}
+            </span>
+          ) },
           { key: 'call_type', label: 'Type', width: 80, render: r => <span className="pill">{TYPE_META[r.call_type]?.label || 'NC'}</span> },
-          { key: 'outcome', label: isShow ? 'Showed?' : 'Result', width: 150, render: r => <OutcomePill outcome={r.outcome} /> },
+          { key: 'outcome', label: kind === 'show' ? 'Showed?' : 'Result', width: 150, render: r => <OutcomePill outcome={r.outcome} /> },
+          ...(showRevenue ? [{ key: 'revenue', label: 'Revenue', align: 'right', render: r => parseFloat(r.revenue || 0) > 0 ? `$${parseFloat(r.revenue).toLocaleString()}` : '—' }] : []),
           { key: 'cash_collected', label: 'Cash', align: 'right', strong: true, render: r => parseFloat(r.cash_collected || 0) > 0 ? `$${parseFloat(r.cash_collected).toLocaleString()}` : '—' },
         ]}
       />
