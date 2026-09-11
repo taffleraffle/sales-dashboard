@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { REGIONS, useRegion, setRegion } from '../lib/region'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Library as LibraryIcon, Smartphone, Target, Bot, UsersRound } from 'lucide-react'
+import { BarChart3, Users, UserCheck, ClipboardCheck, Settings, TrendingUp, LogOut, Menu, X, ChevronDown, Library as LibraryIcon, Smartphone, Target, Bot, UsersRound, Briefcase } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SalesChatWidget from './SalesChatWidget'
 import ToastStack from './Toast'
@@ -27,6 +27,8 @@ import { ICON } from '../utils/constants'
 const navItems = [
   { to: '/sales', icon: BarChart3, label: 'Overview', end: true },
   { to: '/sales/closers', icon: UserCheck, label: 'Closers' },
+  // Closer Hub (Ben, 12 Sep 2026): tools, shared logins, Make Channel, contracts. Closers + admins only.
+  { to: '/sales/closer-hub', icon: Briefcase, label: 'Closer Hub', closerOnly: true },
   { to: '/sales/setters', icon: Users, label: 'Setters' },
   { to: '/sales/setter-bot', icon: Bot, label: 'Setter Bot' },
   { to: '/sales/marketing', icon: TrendingUp, label: 'Marketing' },
@@ -55,7 +57,9 @@ export default function Layout() {
   const profileRef = useRef(null)
 
   // Creative-only collaborators see only the Ads / Creative Library nav.
-  const visibleNav = isCreativeOnly ? navItems.filter((n) => n.to.startsWith('/sales/ads')) : navItems
+  const visibleNav = isCreativeOnly
+    ? navItems.filter((n) => n.to.startsWith('/sales/ads'))
+    : navItems.filter((n) => !n.closerOnly || isAdmin || profile?.role === 'closer')
 
   const roleLabel = isAdmin ? 'Admin' : isCreativeOnly ? 'Creative' : profile?.role === 'closer' ? 'Closer' : profile?.role === 'setter' ? 'Setter' : 'Viewer'
 
