@@ -5,7 +5,7 @@
 // dashboard's onboarding flow), and PandaDoc contracts. Callers must be a
 // logged-in closer or an admin; every write is logged to closer_hub_actions.
 //
-// Secrets: PANDADOC_API_KEY, SEMRUSH_USERNAME, SEMRUSH_PASSWORD,
+// Secrets: PANDADOC_API_KEY, SEMRUSH_USERNAME/PASSWORD, LBM_USERNAME/PASSWORD,
 // AGENT_WEBHOOK_KEY, DASHBOARD_BASE (default https://dashboard.optdigital.io).
 // Everything editable (conditions, signer, templates, fees) is in
 // closer_hub_settings, not here.
@@ -71,10 +71,19 @@ function splitName(full: string, fallbackFirst: string): [string, string] {
 
 // ── actions ─────────────────────────────────────────────────────────────────
 
-function semrush() {
-  const username = Deno.env.get('SEMRUSH_USERNAME') || ''
-  const password = Deno.env.get('SEMRUSH_PASSWORD') || ''
-  if (!username || !password) return { status: 404, body: { error: 'not_set' } }
+// Shared logins, one secret pair per app. Ben, 12 Sep 2026: "a login for
+// Local Brand Manager and a login for Semrush".
+const SHARED_LOGINS: Record<string, [string, string]> = {
+  semrush: ['SEMRUSH_USERNAME', 'SEMRUSH_PASSWORD'],
+  lbm: ['LBM_USERNAME', 'LBM_PASSWORD'],
+}
+
+function login(tool: string) {
+  const pair = SHARED_LOGINS[tool]
+  if (!pair) return { status: 400, body: { error: `no shared login called "${tool}"` } }
+  const username = Deno.env.get(pair[0]) || ''
+  const password = Deno.env.get(pair[1]) || ''
+  if (!username || !password) return { status: 404, body: { error: 'not_set', needs: pair } }
   return { status: 200, body: { username, password } }
 }
 
@@ -203,7 +212,8 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     let out: { status: number; body: any }
     switch (body.action) {
-      case 'semrush': out = semrush(); break
+      case 'login': out = login(String(body.tool || '')); break
+      case 'semrush': out = login('semrush'); break
       case 'make_channel': out = await makeChannel(admin, who, body); break
       case 'create_contract': out = await createContract(admin, who, body); break
       case 'send_contract': out = await sendContract(admin, who, body); break
