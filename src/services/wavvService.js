@@ -28,14 +28,14 @@ const AGG_TTL = 5 * 60 * 1000
  * Fetch per-user WAVV aggregates directly from Supabase.
  * Returns: { totals: {dials,pickups,mcs}, byUser: {[userId]: {dials,pickups,mcs,uniqueContacts,avgDuration}}, uniqueContacts }
  */
-export async function fetchWavvAggregates(days = 30) {
-  const key = String(days)
+export async function fetchWavvAggregates(days = 30, region = 'all') {
+  const key = String(days) + '|' + region
   const cached = aggregateCache.get(key)
   if (cached && Date.now() < cached.expiresAt) return cached.data
   if (aggregateInflight.has(key)) return aggregateInflight.get(key)
 
   const promise = (async () => {
-    const result = await fetchWavvAggregatesUncached(days)
+    const result = await fetchWavvAggregatesUncached(days, region)
     aggregateCache.set(key, { data: result, expiresAt: Date.now() + AGG_TTL })
     aggregateInflight.delete(key)
     return result
@@ -49,7 +49,16 @@ export function clearWavvAggregatesCache() {
   aggregateInflight.clear()
 }
 
-async function fetchWavvAggregatesUncached(days = 30) {
+/* WAVV stores bare numbers: US as ten digits, Australian as 61... or a local
+   04 mobile. Dials were never filtered by region while sets were, so the
+   Australian view showed a setter's US dials against Australian sets: 213
+   dials and 0 sets for Josh, a pickup and set rate that meant nothing. */
+export function isAuPhone(phone) {
+  const d = String(phone || '').replace(/\D/g, '')
+  return d.startsWith('61') || /^04\d{8}$/.test(d)
+}
+
+async function fetchWavvAggregatesUncached(days = 30, region = 'all') {
   const since = sinceDate(days)
 
   const rows = []
@@ -78,7 +87,8 @@ async function fetchWavvAggregatesUncached(days = 30) {
   const byUser = {}
   const allPhones = new Set()
 
-  for (const r of rows) {
+  const scoped = region === 'all' ? rows : rows.filter(r => (region === 'au') === isAuPhone(r.phone_number))
+  for (const r of scoped) {
     const uid = r.user_id || 'unknown'
     if (!byUser[uid]) byUser[uid] = { dials: 0, pickups: 0, mcs: 0, totalDuration: 0, phones: new Set() }
     const u = byUser[uid]

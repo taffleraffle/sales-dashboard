@@ -189,7 +189,7 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
     tiles = <>
       <KPICard label="Booked" value={T.qualifiedBookings} subtitle="qualified calls on the calendar" />
       <KPICard label="Showed" value={live.length} subtitle={`${R.showRate}% show rate`} />
-      <KPICard label="No show" value={noShow.length} subtitle={`${R.noShowRate}% of booked`} />
+      <KPICard label="No show" value={noShow.length} subtitle="booked, did not turn up" />
       <KPICard label="Rescheduled / cancelled" value={moved.length} />
     </>
     table = <>

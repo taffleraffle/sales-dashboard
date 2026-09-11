@@ -84,7 +84,6 @@ export default function CloserDetail() {
         <Gauge label="Offer rate" value={my.offerRate} target={bm('offer_rate', 80)} delta={delta(my.offerRate, company.offerRate)} avgLabel={company.offerRate} />
         <Gauge label="Offer to close" value={my.offerCloseRate} target={30} delta={delta(my.offerCloseRate, company.offerCloseRate)} avgLabel={company.offerCloseRate} />
         <Gauge label="Reschedule rate" value={my.rescheduleRate} target={10} max={50} direction="below" delta={delta(my.rescheduleRate, company.rescheduleRate)} avgLabel={company.rescheduleRate} />
-        <Gauge label="No-show rate" value={my.noShowRate} target={20} max={50} direction="below" delta={delta(my.noShowRate, company.noShowRate)} avgLabel={company.noShowRate} />
         <Gauge label="Cash collected" value={my.cashCollectRate} target={50} delta={delta(my.cashCollectRate, company.cashCollectRate)} avgLabel={company.cashCollectRate} />
       </div>
 

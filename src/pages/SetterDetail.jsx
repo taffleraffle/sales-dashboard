@@ -8,6 +8,7 @@ import DataTable from '../components/DataTable'
 import LeadStatusBadge from '../components/LeadStatusBadge'
 import { Loader, ChevronDown, Edit3, Clock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useRegion } from '../lib/region'
 import { pagedFetch } from '../lib/pagedFetch'
 import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { useSetterStats, useSetterEODs } from '../hooks/useSetterData'
@@ -22,6 +23,7 @@ export default function SetterDetail() {
   // Company show rate = live new calls over qualified bookings, the one number every page uses
   const sm = useSalesMetrics(range)
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
+  const region = useRegion()
   const [member, setMember] = useState(null)
   const [leads, setLeads] = useState([])
   const stats = useSetterStats(id, days)
@@ -138,8 +140,8 @@ export default function SetterDetail() {
 
   // Fetch WAVV aggregates (fast)
   useEffect(() => {
-    fetchWavvAggregates(days).then(setWavvAgg)
-  }, [range])
+    fetchWavvAggregates(days, region).then(setWavvAgg)
+  }, [range, region])
 
   // Fetch recent calls for this setter using date range
   useEffect(() => {

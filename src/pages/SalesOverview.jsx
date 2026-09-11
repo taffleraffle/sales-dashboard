@@ -16,6 +16,7 @@ import { useSalesMetrics, rates, EMPTY_TOTALS } from '../hooks/useSalesMetrics'
 import { useLeadAttribution } from '../hooks/useLeadAttribution'
 import { useBenchmarks } from '../hooks/useBenchmarks'
 import { supabase } from '../lib/supabase'
+import { useRegion } from '../lib/region'
 import { checkEndangeredLeads } from '../services/engagementCheck'
 
 /*
@@ -187,6 +188,7 @@ export default function SalesOverview() {
 
   const days = typeof range === 'number' || range === 'mtd' ? range : rangeToDays(range)
   const m = useSalesMetrics(range)
+  const region = useRegion()
   const { members: closers, loading: loadingClosers } = useTeamMembers('closer')
   const { members: setters, loading: loadingSetters } = useTeamMembers('setter')
   const { bm } = useBenchmarks()
@@ -315,8 +317,8 @@ export default function SalesOverview() {
   // WAVV aggregates
   useEffect(() => {
     setWavvLoading(true)
-    fetchWavvAggregates(days).then(data => { setWavvAgg(data); setWavvLoading(false) })
-  }, [days])
+    fetchWavvAggregates(days, region).then(data => { setWavvAgg(data); setWavvLoading(false) })
+  }, [days, region])
 
   // Speed to Lead (selected range, with per-setter working-hour filter)
   const stlSchedules = buildSetterSchedules(setters)

@@ -76,8 +76,8 @@ export default function SetterOverview() {
 
   // Fetch WAVV aggregates (fast — only 3 columns, no pagination needed)
   useEffect(() => {
-    fetchWavvAggregates(days).then(setWavvAgg).catch(() => {})
-  }, [range])
+    fetchWavvAggregates(days, region).then(setWavvAgg).catch(() => {})
+  }, [range, region])
 
   // Fetch all setter_leads for the date range
   useEffect(() => {
@@ -264,7 +264,6 @@ export default function SetterOverview() {
         <KPICard label="Meaningful conversations" value={companyActivity.mcs} subtitle="60 seconds or more" onClick={() => setDrill('mcs')} />
         <KPICard label="Sets" value={totalSets} subtitle={totalSets > 0 ? `${dialsPerSet} dials per set` : ''} onClick={() => setDrill('sets')} />
         <KPICard label="Shows" value={sm.totals.lives} subtitle={`${showRate}% show rate · live new calls`} onClick={() => setMdrill('show')} />
-        <KPICard label="No shows" value={sm.totals.noShows} subtitle={`${sm.r.noShowRate}% of booked`} onClick={() => setMdrill('show')} />
         <KPICard label="Revenue" value={`$${Math.round(sm.r.revenue || 0).toLocaleString()}`} subtitle="trial + ascension, same as the Overview" onClick={() => setMdrill('close')} />
       </div>
 
