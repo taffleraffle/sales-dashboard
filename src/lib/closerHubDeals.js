@@ -22,3 +22,10 @@ export async function updateDeal(id, patch) {
   if (error) throw error
   return data
 }
+
+export async function listFinishedDeals(limit = 8) {
+  const { data, error } = await supabase.from('closer_hub_deals').select('*')
+    .eq('status', 'done').order('updated_at', { ascending: false }).limit(limit)
+  if (error) throw error
+  return data || []
+}
