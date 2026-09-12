@@ -103,13 +103,26 @@ function SharedLogin({ tool }) {
   )
 }
 
-function AppLink({ tool, first }) {
-  const badge = (
-    <span style={{
-      width: 30, height: 30, borderRadius: 9, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(244,225,74,.55)', color: 'var(--ink)', fontFamily: 'var(--serif)', fontSize: tool.chip.length > 2 ? 10 : 14, fontWeight: 500,
-    }}>{tool.chip}</span>
+/* The app's own logo, pulled once into public/app-icons (Ben, 12 Sep 2026:
+   "the icons of each of those apps rather than the letters"). Falls back to
+   the letters only if the file is missing. */
+function Badge({ tool }) {
+  const [broken, setBroken] = useState(false)
+  const box = { width: 30, height: 30, borderRadius: 9, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }
+  if (tool.icon && !broken) {
+    return (
+      <span style={{ ...box, background: '#fff', border: '1px solid var(--rule)' }}>
+        <img src={tool.icon} alt="" width={22} height={22} style={{ width: 22, height: 22, objectFit: 'contain', display: 'block' }} onError={() => setBroken(true)} />
+      </span>
+    )
+  }
+  return (
+    <span style={{ ...box, background: 'rgba(244,225,74,.55)', color: 'var(--ink)', fontFamily: 'var(--serif)', fontSize: tool.chip.length > 2 ? 10 : 14, fontWeight: 500 }}>{tool.chip}</span>
   )
+}
+
+function AppLink({ tool, first }) {
+  const badge = <Badge tool={tool} />
   const view = tool.internal
     ? <Link to={tool.url} className="editorial-btn-ghost" style={{ height: 28, fontSize: 12, padding: '0 10px' }}>View <ArrowUpRight size={ICON.sm} /></Link>
     : <a href={tool.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 28, fontSize: 12, padding: '0 10px' }}>View <ArrowUpRight size={ICON.sm} /></a>
