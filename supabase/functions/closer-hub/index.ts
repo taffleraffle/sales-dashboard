@@ -105,42 +105,70 @@ async function makeChannel(admin: any, who: Caller, body: any) {
   return { status: r.ok ? 200 : (r.status || 502), body: out }
 }
 
+// The templates in the account, for the picker. Names only; the hub shows
+// them and remembers nothing.
+async function templates() {
+  const t = await pd('GET', '/templates?count=50')
+  const list = (t.results || []).map((x: any) => ({ id: x.id, name: x.name }))
+    .sort((a: any, b: any) => a.name.localeCompare(b.name))
+  return { status: 200, body: { templates: list } }
+}
+
+// Which role signs for OPT and which for the client, and which merge fields
+// the template actually has. The account's templates disagree with each
+// other ("Role 1"/"Client", "Role 1"/"Role 2", "Client"/"Opt", "Client"/
+// "Creator", or "Client" alone), and the trial ones carry only generic
+// Text/Date fields, so nothing is assumed: the template is asked.
+async function templateShape(templateId: string) {
+  const d = await pd('GET', `/templates/${templateId}/details`)
+  const roles: string[] = (d.roles || []).map((r: any) => r.name).filter(Boolean)
+  const clientRole = roles.find((r) => r.toLowerCase() === 'client') || roles.find((r) => r === 'Role 2') || roles[roles.length - 1] || ''
+  const optRole = roles.find((r) => r !== clientRole) || ''
+  const fields = new Set<string>((d.fields || []).map((f: any) => f.merge_field || f.name).filter(Boolean))
+  return { roles, clientRole, optRole, fields, name: d.name || '' }
+}
+
 async function createContract(admin: any, who: Caller, body: any) {
   const s = await settings(admin)
   const offer = body.offer === 'trial' ? 'trial' : 'retainer'
-  const template = (s[`template_${offer}`] || '').trim()
-  if (!template) return { status: 400, body: { error: `No PandaDoc template is set for the ${offer} agreement. An admin sets it on the hub.` } }
+  const template = (body.template || s[`template_${offer}`] || '').trim()
+  if (!template) return { status: 400, body: { error: `Pick a contract template. No default is set for the ${offer} agreement.` } }
   const company = (body.company || '').trim()
   const email = (body.email || '').trim().toLowerCase()
   if (!company || !email || !email.includes('@')) return { status: 400, body: { error: 'company and a valid client email are required' } }
   const fee = String(body.fee || s[`fee_${offer}`] || '').replace(/[^0-9.]/g, '')
-  if (!fee) return { status: 400, body: { error: 'fee is required' } }
 
+  // Conditions go in only when someone wrote some. Ben, 12 Sep 2026: "It's
+  // adding special conditions when there aren't any special conditions."
   const standard = (s[`conditions_${offer}`] || '').trim()
   const extra = (body.extra_conditions || '').trim()
   const conditions = [standard, extra].filter(Boolean).join('\n')
-  const optRep = s.opt_rep_name || 'Daniel Gomez'
-  const optEmail = s.opt_rep_email || 'daniel@optdigital.io'
+
+  // Who signs for OPT: the person the closer picked, else the settings default.
+  const optRep = (body.opt_rep_name || '').trim() || s.opt_rep_name || 'Daniel Gomez'
+  const optEmail = (body.opt_rep_email || '').trim().toLowerCase() || s.opt_rep_email || 'daniel@optdigital.io'
   const [optFirst, optLast] = splitName(optRep, 'Opt')
   const [cFirst, cLast] = splitName(body.signer_name || '', 'Client')
   const docName = `${company} - Opt Digital Client Agreement`
 
-  const fields: Record<string, { value: string }> = {
+  const shape = await templateShape(template)
+  const wanted: Record<string, { value: string }> = {
     ClientName: { value: company },
     MonthlyFee: { value: fee },
     ExecutionDate: { value: new Date().toISOString().slice(0, 10) },
     OptRepName: { value: optRep },
   }
-  if (conditions) fields.SpecialConditions = { value: conditions }
-  const payload = {
-    name: docName, template_uuid: template,
-    recipients: [
-      { email: optEmail, first_name: optFirst, last_name: optLast, role: s.role_opt || 'Role 1' },
-      { email, first_name: cFirst, last_name: cLast, role: s.role_client || 'Client' },
-    ],
-    fields,
+  if (conditions) wanted.SpecialConditions = { value: conditions }
+  const fields: Record<string, { value: string }> = {}
+  for (const [k, v] of Object.entries(wanted)) {
+    if (shape.fields.size === 0 || shape.fields.has(k)) { if (v.value) fields[k] = v }
   }
-  if (body.dry_run) return { status: 200, body: { dry_run: true, offer, template, payload } }
+  if (shape.fields.has('MonthlyFee') && !fee) return { status: 400, body: { error: 'This template needs a monthly fee.' } }
+
+  const recipients: any[] = [{ email, first_name: cFirst, last_name: cLast, role: shape.clientRole || 'Client' }]
+  if (shape.optRole) recipients.unshift({ email: optEmail, first_name: optFirst, last_name: optLast, role: shape.optRole })
+  const payload = { name: docName, template_uuid: template, recipients, fields }
+  if (body.dry_run) return { status: 200, body: { dry_run: true, offer, template, template_name: shape.name, roles: shape.roles, payload } }
 
   const created = await pd('POST', '/documents', payload)
   const id = created.id
@@ -158,7 +186,9 @@ async function createContract(admin: any, who: Caller, body: any) {
     try { await pd('PATCH', `/documents/${id}`, { name: docName }); renamed = true } catch { renamed = false }
   }
   const out = { ok: true, doc_id: id, status, renamed, offer, fee, conditions, name: docName,
-    url: `https://app.pandadoc.com/a/#/documents/${id}`, client_email: email, opt_signer: optEmail }
+    template, template_name: shape.name, fields_sent: Object.keys(fields),
+    url: `https://app.pandadoc.com/a/#/documents/${id}`, client_email: email,
+    opt_signer: shape.optRole ? optEmail : null, opt_signer_name: shape.optRole ? optRep : null }
   await log(admin, who, 'create_contract', body, true, out)
   return { status: 200, body: out }
 }
@@ -215,6 +245,7 @@ serve(async (req) => {
       case 'login': out = login(String(body.tool || '')); break
       case 'semrush': out = login('semrush'); break
       case 'make_channel': out = await makeChannel(admin, who, body); break
+      case 'templates': out = await templates(); break
       case 'create_contract': out = await createContract(admin, who, body); break
       case 'send_contract': out = await sendContract(admin, who, body); break
       case 'contract_status': out = await contractStatus(body); break
