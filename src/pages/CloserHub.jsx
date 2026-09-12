@@ -329,20 +329,25 @@ function Deal({ settings, onDone, profile, user }) {
     supabase.from('team_members').select('id, name, email, role, is_active').eq('role', 'closer').order('name')
       .then(({ data }) => {
         const list = (data || []).filter(m => m.email)
-        if (profile?.email && !list.some(m => (m.email || '').toLowerCase() === profile.email.toLowerCase())) {
-          list.unshift({ id: 'me', name: profile.name || profile.email, email: profile.email, role: 'admin', is_active: true })
+        const mine = (user?.email || profile?.email || '').toLowerCase()
+        if (mine && !list.some(m => (m.email || '').toLowerCase() === mine)) {
+          list.unshift({ id: 'me', name: profile?.name || user?.name || mine, email: mine, role: 'admin', is_active: true })
         }
         setSigners(list)
       })
     listOpenDeals().then(setOpenDeals).catch(() => setOpenDeals([]))
   }, [profile?.email])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Whoever is logged in signs for OPT unless they pick someone else. Admin
+  // profiles carry no email in the app, so the login email is the key
+  // (12 Sep 2026: Ben's deals defaulted to Ahmad, first alphabetically).
+  const meEmail = (user?.email || profile?.email || '').toLowerCase()
   useEffect(() => {
     if (!form.signer && signers.length) {
-      const me = signers.find(m => (m.email || '').toLowerCase() === (profile?.email || '').toLowerCase())
+      const me = signers.find(m => (m.email || '').toLowerCase() === meEmail)
       setForm(f => ({ ...f, signer: (me || signers[0]).email }))
     }
-  }, [signers, profile?.email])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [signers, meEmail])  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (deal) return
     setForm(f => ({ ...f, template: settings[`template_${f.offer}`] || '', fee: '' }))
@@ -420,6 +425,8 @@ function Deal({ settings, onDone, profile, user }) {
   const say = (text) => setNote(n => ({ ...n, contract: { info: text } }))
   const makeDraft = async () => {
     if (!form.template) throw new Error('Pick a contract template first.')
+    if (!form.name.trim()) throw new Error('Client name is needed: it goes on the agreement as the person signing.')
+    if (!signer) throw new Error('Pick who signs for OPT.')
     say('Drafting in PandaDoc. It fills the template and settles the draft, usually 10 to 30 seconds.')
     const r = await callCloserHub('create_contract', { company: form.company, email: form.email, signer_name: form.name, offer: form.offer, template: form.template,
       fee, extra_conditions: form.extra, opt_rep_name: signer?.name || '', opt_rep_email: signer?.email || '' })
@@ -523,7 +530,7 @@ function Deal({ settings, onDone, profile, user }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Company"><input value={form.company} onChange={set('company')} onBlur={() => deal && filled && save().catch(e => toast.error(e.message))} placeholder="Kings Roofing LLC" /></Field>
           <Field label="Client email"><input type="email" value={form.email} onChange={set('email')} onBlur={() => deal && filled && save().catch(e => toast.error(e.message))} placeholder="owner@kingsroofing.com" /></Field>
-          <Field label="Client name" hint="Optional. They can type it when signing."><input value={form.name} onChange={set('name')} placeholder="Jane Smith" /></Field>
+          <Field label="Client name" hint="The person who signs. Goes on the agreement."><input value={form.name} onChange={set('name')} onBlur={() => deal && filled && save().catch(e => toast.error(e.message))} placeholder="Jane Smith" /></Field>
           <Field label="Deal type">
             <select value={form.offer} onChange={(e) => setForm(f => ({ ...f, offer: e.target.value, template: settings[`template_${e.target.value}`] || '', fee: '' }))}>
               <option value="trial">Trial</option>
@@ -542,7 +549,7 @@ function Deal({ settings, onDone, profile, user }) {
             </select>
           </Field>
           <Field label="Signing for OPT">
-            <select value={form.signer} onChange={set('signer')}>
+            <select value={form.signer} onChange={(e) => { const v = e.target.value; setForm(f => ({ ...f, signer: v })); if (deal) updateDeal(deal.id, { signer_email: v }).then(setDeal).catch(err => toast.error(err.message)) }}>
               {signers.map(m => <option key={m.id} value={m.email}>{m.name}{m.is_active === false ? ' (inactive)' : ''}</option>)}
             </select>
           </Field>
@@ -597,7 +604,7 @@ function Deal({ settings, onDone, profile, user }) {
                       {!d.contract?.sent && !confirmSend && <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(true)} disabled={busy === 'send' || busy === 'contract'}>{busy === 'send' ? 'Working' : 'Send contract'}</button>}
                       {confirmSend && !d.contract?.sent && (
                         <>
-                          <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>Drafts it and emails the signing links now. Sure?</span>
+                          <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{d.contract?.doc_id ? 'Emails' : 'Drafts it and emails'} the signing links now: <b>{signer?.name || 'nobody picked'}</b> signs for OPT, the client is <b>{form.name || 'no name yet'}</b> at <b>{form.email}</b>. Sure?</span>
                           <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={d.contract?.doc_id ? send : sendContract} disabled={busy === 'send'}>{busy === 'send' ? 'Sending' : 'Yes, send'}</button>
                           <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(false)}>Not yet</button>
                         </>
