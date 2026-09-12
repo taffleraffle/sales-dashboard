@@ -350,7 +350,8 @@ function Deal({ settings, onDone, profile, user }) {
 
   const fee = form.fee || settings[`fee_${form.offer}`] || ''
   const signer = signers.find(m => m.email === form.signer)
-  const ready = form.company.trim().length > 0 && form.email.includes('@')
+  const filled = form.company.trim().length > 0 && form.email.includes('@')
+  const ready = !!deal   // Ben, 12 Sep 2026: the checklist opens once the deal is saved
 
   // Save: the deal row is created the first time the checklist is used and
   // updated on every change after that.
@@ -381,7 +382,7 @@ function Deal({ settings, onDone, profile, user }) {
 
   const run = async (key, fn) => {
     setBusy(key)
-    try { await fn() } catch (e) { toast.error(e.message); setNote(n => ({ ...n, [key]: { bad: e.message } })) }
+    try { await fn() } catch (e) { toast.error(e.message); if (!['send', 'contract'].includes(key)) setNote(n => ({ ...n, [key]: { bad: e.message } })); else if (key === 'contract') setNote(n => ({ ...n, contract: { bad: e.message } })) }
     finally { setBusy('') }
   }
 
@@ -414,27 +415,43 @@ function Deal({ settings, onDone, profile, user }) {
     else setNote(n => ({ ...n, payment: { warn: 'No payment from that email yet.' } }))
   })
   // "Send and sign contract in one": draft, then send the signing links, one click.
-  const sendContract = () => run('send', async () => {
+  // The draft is saved on the deal the moment PandaDoc returns it, so a failed
+  // send never loses the link (12 Sep 2026: a 403 on send did exactly that).
+  const say = (text) => setNote(n => ({ ...n, contract: { info: text } }))
+  const makeDraft = async () => {
     if (!form.template) throw new Error('Pick a contract template first.')
+    say('Drafting in PandaDoc. It fills the template and settles the draft, usually 10 to 30 seconds.')
     const r = await callCloserHub('create_contract', { company: form.company, email: form.email, signer_name: form.name, offer: form.offer, template: form.template,
       fee, extra_conditions: form.extra, opt_rep_name: signer?.name || '', opt_rep_email: signer?.email || '' })
-    const sent = await callCloserHub('send_contract', { doc_id: r.doc_id, email: form.email })
-    const st = await callCloserHub('contract_status', { doc_id: r.doc_id }).catch(() => ({}))
-    await save({ data: { ...d, contract: { ...r, sent: true, status: st.status || sent.status, word: st.word, opened: st.opened, recipients: st.recipients, signing_link: st.signing_link || null, date_sent: st.date_sent } }, ticks: { ...ticks, contract: true } })
-    setConfirmSend(false); toast.success(`Contract sent to ${form.email}.`); onDone?.()
+    const row = await save({ data: { ...(deal?.data || {}), contract: { ...r, sent: false } } })
+    say(`Drafted: ${r.name}. Open it in PandaDoc to review.`)
+    return { r, row }
+  }
+  const sendDoc = async (docId, current) => {
+    say('Sending the signing links from PandaDoc.')
+    try {
+      const sent = await callCloserHub('send_contract', { doc_id: docId, email: form.email })
+      const st = await callCloserHub('contract_status', { doc_id: docId }).catch(() => ({}))
+      await save({ data: { ...current, contract: { ...current.contract, sent: true, status: st.status || sent.status, word: st.word, opened: st.opened, recipients: st.recipients, signing_link: st.signing_link || null, date_sent: st.date_sent } }, ticks: { ...ticks, contract: true } })
+      setConfirmSend(false); setNote(n => ({ ...n, contract: { ok: `Sent to ${form.email}. PandaDoc emailed the signing links.` } })); toast.success(`Contract sent to ${form.email}.`); onDone?.()
+    } catch (e) {
+      setConfirmSend(false)
+      setNote(n => ({ ...n, contract: { bad: e.data?.code === 'outside_org'
+        ? 'PandaDoc refused to send from the API: this key can only send inside our organisation. The draft is ready, so open it in PandaDoc and press Send there. A production API key makes this one click again.'
+        : `Not sent: ${e.message}. The draft is kept; open it in PandaDoc.` } }))
+      throw e
+    }
+  }
+  const sendContract = () => run('send', async () => {
+    const { r, row } = await makeDraft()
+    await sendDoc(r.doc_id, row.data || {})
   })
   const draft = () => run('contract', async () => {
-    if (!form.template) throw new Error('Pick a contract template first.')
-    const r = await callCloserHub('create_contract', { company: form.company, email: form.email, signer_name: form.name, offer: form.offer, template: form.template,
-      fee, extra_conditions: form.extra, opt_rep_name: signer?.name || '', opt_rep_email: signer?.email || '' })
-    await record('contract', r); setConfirmSend(false); toast.success('Drafted in PandaDoc.'); onDone?.()
+    const { r } = await makeDraft()
+    setConfirmSend(false); toast.success('Drafted in PandaDoc.'); onDone?.()
+    return r
   })
-  const send = () => run('send', async () => {
-    const r = await callCloserHub('send_contract', { doc_id: d.contract.doc_id, email: form.email })
-    const st = await callCloserHub('contract_status', { doc_id: d.contract.doc_id }).catch(() => ({}))
-    await save({ data: { ...d, contract: { ...d.contract, sent: true, status: st.status || r.status, word: st.word, opened: st.opened, recipients: st.recipients, signing_link: st.signing_link || null, date_sent: st.date_sent } }, ticks: { ...ticks, contract: true } })
-    setConfirmSend(false); toast.success(`Sent to ${form.email}.`); onDone?.()
-  })
+  const send = () => run('send', async () => { await sendDoc(d.contract.doc_id, d) })
   const refreshContract = async (quiet = false) => {
     if (!d.contract?.doc_id) return
     const r = await callCloserHub('contract_status', { doc_id: d.contract.doc_id })
@@ -504,8 +521,8 @@ function Deal({ settings, onDone, profile, user }) {
           )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Company"><input value={form.company} onChange={set('company')} onBlur={() => ready && save().catch(e => toast.error(e.message))} placeholder="Kings Roofing LLC" /></Field>
-          <Field label="Client email"><input type="email" value={form.email} onChange={set('email')} onBlur={() => ready && save().catch(e => toast.error(e.message))} placeholder="owner@kingsroofing.com" /></Field>
+          <Field label="Company"><input value={form.company} onChange={set('company')} onBlur={() => deal && filled && save().catch(e => toast.error(e.message))} placeholder="Kings Roofing LLC" /></Field>
+          <Field label="Client email"><input type="email" value={form.email} onChange={set('email')} onBlur={() => deal && filled && save().catch(e => toast.error(e.message))} placeholder="owner@kingsroofing.com" /></Field>
           <Field label="Client name" hint="Optional. They can type it when signing."><input value={form.name} onChange={set('name')} placeholder="Jane Smith" /></Field>
           <Field label="Deal type">
             <select value={form.offer} onChange={(e) => setForm(f => ({ ...f, offer: e.target.value, template: settings[`template_${e.target.value}`] || '', fee: '' }))}>
@@ -531,6 +548,12 @@ function Deal({ settings, onDone, profile, user }) {
           </Field>
           <Field label="Monthly fee" hint="Change only with sign-off."><input inputMode="numeric" value={fee} onChange={set('fee')} /></Field>
           <Field label="Extra details" hint="Optional. Only goes into the contract if you write something."><input value={form.extra} onChange={set('extra')} placeholder="Anything extra on this deal" /></Field>
+        </div>
+        <div className="flex items-center justify-between gap-3 flex-wrap mt-5 pt-4" style={{ borderTop: '1px solid var(--rule)' }}>
+          <span style={{ fontSize: 12.5, color: deal ? 'var(--ink-4)' : 'var(--house-warn)', fontWeight: deal ? 400 : 600 }}>
+            {deal ? `Saved ${new Date(deal.updated_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}.` : filled ? 'Save the deal to open the checklist.' : 'Company and client email, then save.'}
+          </span>
+          <button type="button" className="editorial-btn-primary" onClick={() => save().then(() => toast.success(deal ? 'Deal saved.' : 'Deal saved. The checklist is open.')).catch(e => toast.error(e.message))} disabled={!filled || busy === 'save'}>{deal ? 'Save changes' : 'Save deal'}</button>
         </div>
         {openDeals.filter(x => x.id !== deal?.id).length > 0 && (
           <div className="flex items-center gap-2 flex-wrap mt-4" style={{ fontSize: 12.5 }}>
@@ -571,7 +594,7 @@ function Deal({ settings, onDone, profile, user }) {
                   )}
                   {key === 'contract' && (
                     <>
-                      {!d.contract?.sent && !confirmSend && <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(true)} disabled={busy === 'send'}>Send contract</button>}
+                      {!d.contract?.sent && !confirmSend && <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(true)} disabled={busy === 'send' || busy === 'contract'}>{busy === 'send' ? 'Working' : 'Send contract'}</button>}
                       {confirmSend && !d.contract?.sent && (
                         <>
                           <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>Drafts it and emails the signing links now. Sure?</span>
@@ -608,6 +631,7 @@ function Deal({ settings, onDone, profile, user }) {
                   {key === 'notes' && <a href="https://app.gohighlevel.com/" target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open the card</a>}
                   {key === 'eod' && <Link to="/sales/eod" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open End of Day</Link>}
                 </div>
+                {n?.info && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-2)' }}>{n.info}</div>}
                 {n?.ok && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-good)' }}>{n.ok}</div>}
                 {n?.warn && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-warn)' }}>{n.warn}</div>}
                 {n?.bad && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-bad)' }}>{n.bad}</div>}
@@ -619,11 +643,8 @@ function Deal({ settings, onDone, profile, user }) {
           )
         })}
         <div className="flex items-center justify-between gap-3 flex-wrap mt-4 pt-4" style={{ borderTop: '1px solid var(--rule)' }}>
-          <span style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>{deal ? `Saved ${new Date(deal.updated_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}. Ticks save as you go.` : 'Not saved yet.'}</span>
-          <div className="flex gap-2">
-            <button type="button" className="editorial-btn-ghost" onClick={() => save().then(() => toast.success('Saved.')).catch(e => toast.error(e.message))} disabled={!ready}>Save</button>
-            <button type="button" className="editorial-btn-primary" onClick={finish} disabled={!deal}>Finish this deal</button>
-          </div>
+          <span style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>Ticks save as you go.</span>
+          <button type="button" className="editorial-btn-primary" onClick={finish} disabled={!deal}>Finish this deal</button>
         </div>
       </div>
     </div>
