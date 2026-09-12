@@ -26,13 +26,17 @@ const SETTING_FIELDS = [
   ['template_active_ids', 'Templates shown in the picker', 'Comma-separated PandaDoc template ids. Templates with ACTIVE in their name show too.'],
   ['role_opt', 'Template role: OPT', 'Usually "Role 1".'],
   ['role_client', 'Template role: client', '"Client" on the retainer template.'],
-  ['pay_link_us_trial', 'Commas link: US trial', ''],
-  ['pay_link_us_monthly', 'Commas link: US monthly', ''],
-  ['pay_link_au_trial', 'Commas link: AU trial', ''],
-  ['pay_link_au_monthly', 'Commas link: AU monthly', ''],
-  ['pay_link_nz_trial', 'Commas link: NZ trial', ''],
-  ['pay_link_nz_monthly', 'Commas link: NZ monthly', ''],
-  ['commas_login_url', 'Commas login', 'Where a closer goes to make a custom link.'],
+  ['pay_link_us_trial', 'Payment link: US trial', ''],
+  ['pay_link_us_monthly', 'Payment link: US monthly', ''],
+  ['pay_link_au_trial', 'Payment link: AU trial', ''],
+  ['pay_link_au_monthly', 'Payment link: AU monthly', ''],
+  ['pay_link_nz_trial', 'Payment link: NZ trial', ''],
+  ['pay_link_nz_monthly', 'Payment link: NZ monthly', ''],
+  ['pay_link_us_quarterly', 'Payment link: US quarterly', ''],
+  ['pay_link_au_quarterly', 'Payment link: AU quarterly', ''],
+  ['pay_link_nz_quarterly', 'Payment link: NZ quarterly', ''],
+  ['commas_login_url', 'Commas login', 'Where a closer goes to make a custom US link.'],
+  ['simpleinvoice_login_url', 'Simple Invoice login', 'Where a closer goes to make a custom AU link.'],
   ['stripe_currency', 'Stripe currency', 'usd or aud. Used only for the Stripe fallback link.'],
   ['onboarding_page_url', 'Onboarding page link', 'The welcome page the client lands on.'],
   ['onboarding_calendar_url', 'Onboarding calendar link', 'Where the onboarding call is booked.'],
@@ -147,7 +151,7 @@ function AppLink({ tool, first }) {
    make something custom." Links are Hub settings; the login is Commas. */
 function PaymentLinks({ settings, copy }) {
   const [region, setRegion] = useState('all')
-  const rows = REGIONS.flatMap(([r, label]) => [['trial', 'Trial'], ['monthly', 'Monthly']].map(([k, kl]) => ({
+  const rows = REGIONS.flatMap(([r, label]) => [['trial', 'Trial'], ['monthly', 'Monthly'], ['quarterly', 'Quarterly']].map(([k, kl]) => ({
     region: r, label: `${label} ${kl}`, url: settings[`pay_link_${r}_${k}`] || '',
   })))
   const shown = rows.filter(x => region === 'all' || x.region === region)
@@ -168,9 +172,65 @@ function PaymentLinks({ settings, copy }) {
           {x.url ? <LinkButton label="Copy" url={x.url} copy={copy} /> : <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>Not set</span>}
         </div>
       ))}
-      <div style={{ paddingTop: 10, marginTop: 4, borderTop: '1px solid var(--rule)', fontSize: 12.5 }}>
-        <a href={login} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 30, fontSize: 12.5 }}>Log in to Commas for a custom link <ExternalLink size={ICON.sm} /></a>
+      <div className="flex gap-2 flex-wrap" style={{ paddingTop: 10, marginTop: 4, borderTop: '1px solid var(--rule)', fontSize: 12.5 }}>
+        <span style={{ color: 'var(--ink-4)', alignSelf: 'center' }}>Custom link:</span>
+        <a href={login} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 30, fontSize: 12.5 }}>Commas (US) <ExternalLink size={ICON.sm} /></a>
+        <a href={settings.simpleinvoice_login_url || 'https://simpleinvoices.io/'} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 30, fontSize: 12.5 }}>Simple Invoice (AU) <ExternalLink size={ICON.sm} /></a>
       </div>
+    </div>
+  )
+}
+
+/* Case studies, under the payment links. Ben, 12 Sep 2026: "a section that
+   has case studies so we can link to different case studies. Put Complete
+   Flood as one, and have his contact number and his website." Stored as a
+   list in Hub settings; admins add and remove rows here. */
+function CaseStudies({ settings, copy, isAdmin, onSaved }) {
+  const toast = useToast()
+  const list = (() => { try { const v = JSON.parse(settings.case_studies || '[]'); return Array.isArray(v) ? v : [] } catch { return [] } })()
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState({ name: '', contact: '', phone: '', website: '', link: '', note: '' })
+  const persist = async (next) => {
+    try { await saveCloserHubSettings({ case_studies: JSON.stringify(next) }); onSaved({ ...settings, case_studies: JSON.stringify(next) }); toast.success('Saved.') }
+    catch (e) { toast.error(e.message) }
+  }
+  const add = async () => {
+    if (!draft.name.trim()) return toast.error('A name at least.')
+    await persist([...list, { ...draft, website: draft.website && !/^https?:/.test(draft.website) ? `https://${draft.website}` : draft.website }])
+    setDraft({ name: '', contact: '', phone: '', website: '', link: '', note: '' }); setAdding(false)
+  }
+  const remove = (i) => persist(list.filter((_, k) => k !== i))
+  return (
+    <div className="tile" style={{ padding: '14px 18px 12px', marginTop: 12 }}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <h2 className="eyebrow" style={{ margin: 0 }}>Case studies</h2>
+        {isAdmin && <button type="button" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} onClick={() => setAdding(v => !v)}>{adding ? 'Cancel' : 'Add'}</button>}
+      </div>
+      {list.length === 0 && !adding && <div style={{ fontSize: 12.5, color: 'var(--ink-4)', padding: '6px 0' }}>None yet.</div>}
+      {list.map((c, i) => (
+        <div key={c.name + i} style={{ padding: '9px 0', borderTop: i ? '1px solid var(--rule)' : 0, fontSize: 13 }}>
+          <div className="flex items-center gap-2">
+            <span style={{ fontWeight: 600, flex: 1 }} className="truncate">{c.name}</span>
+            {isAdmin && <button type="button" className="editorial-btn-ghost" style={{ height: 24, fontSize: 11, padding: '0 7px' }} onClick={() => remove(i)} title="Remove">×</button>}
+          </div>
+          {(c.contact || c.location) && <div style={{ fontSize: 12, color: 'var(--ink-4)' }}>{[c.contact, c.location].filter(Boolean).join(' · ')}</div>}
+          {c.note && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{c.note}</div>}
+          <div className="flex gap-1 flex-wrap mt-1">
+            {c.phone && <a href={`tel:${c.phone.replace(/[^0-9+]/g, '')}`} className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} title="Call">{c.phone}</a>}
+            {c.phone && <button type="button" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 8px' }} onClick={() => copy(c.phone)} title="Copy the number"><Copy size={ICON.sm} /></button>}
+            {c.website && <a href={c.website} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }}>Website <ExternalLink size={ICON.sm} /></a>}
+            {c.link && <a href={c.link} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }}>Case study <ExternalLink size={ICON.sm} /></a>}
+          </div>
+        </div>
+      ))}
+      {adding && (
+        <div className="grid gap-2 mt-2" style={{ paddingTop: 10, borderTop: '1px solid var(--rule)' }}>
+          {[['name', 'Business'], ['contact', 'Contact name'], ['phone', 'Phone'], ['website', 'Website'], ['link', 'Case study link'], ['note', 'One line about them']].map(([k, l]) => (
+            <input key={k} value={draft[k]} onChange={(e) => setDraft(d => ({ ...d, [k]: e.target.value }))} placeholder={l} style={{ height: 34, fontSize: 13 }} />
+          ))}
+          <div><button type="button" className="editorial-btn-primary" style={{ height: 30, fontSize: 12.5 }} onClick={add}>Save case study</button></div>
+        </div>
+      )}
     </div>
   )
 }
@@ -383,6 +443,11 @@ function Deal({ settings, onDone, profile, user }) {
     if (!quiet) setNote(n => ({ ...n, contract: r.status === 'document.completed' ? { ok: 'Signed.' } : r.opened ? { ok: 'They have opened it.' } : { warn: `Not opened yet (${r.word}).` } }))
   }
   const checkSigned = () => run('signed', () => refreshContract(false))
+  // Opening a deal from the list asks PandaDoc where the contract is up to.
+  useEffect(() => {
+    const c = deal?.data?.contract
+    if (c?.doc_id && c.status !== 'document.completed' && c.status !== 'document.declined') refreshContract(true).catch(() => {})
+  }, [deal?.id])  // eslint-disable-line react-hooks/exhaustive-deps
   // While a sent contract is still unsigned, look again every minute.
   useEffect(() => {
     const c = deal?.data?.contract
@@ -471,7 +536,9 @@ function Deal({ settings, onDone, profile, user }) {
           <div className="flex items-center gap-2 flex-wrap mt-4" style={{ fontSize: 12.5 }}>
             <span className="eyebrow">Open deals</span>
             {openDeals.filter(x => x.id !== deal?.id).map(x => (
-              <button key={x.id} type="button" className="editorial-btn-ghost" style={{ height: 28, fontSize: 12 }} onClick={() => load(x)}>{x.company}</button>
+              <button key={x.id} type="button" className="editorial-btn-ghost" style={{ height: 28, fontSize: 12 }} onClick={() => load(x)}>
+                {x.company}{x.data?.contract ? ` · contract ${x.data.contract.status === 'document.completed' ? 'signed' : x.data.contract.opened ? 'opened' : x.data.contract.sent ? 'sent, not opened' : 'drafted'}` : ''}
+              </button>
             ))}
           </div>
         )}
@@ -495,8 +562,8 @@ function Deal({ settings, onDone, profile, user }) {
                 <div className="flex items-center gap-2 flex-wrap mt-2">
                   {key === 'payment' && (
                     <>
-                      {commasLink ? <LinkButton label={`Commas ${form.region.toUpperCase()} ${form.offer === 'trial' ? 'trial' : 'monthly'} link`} url={commasLink} copy={copy} primary />
-                                  : <span style={{ fontSize: 12.5, color: 'var(--house-warn)' }}>No Commas {form.region.toUpperCase()} {form.offer === 'trial' ? 'trial' : 'monthly'} link set. Admin adds it in Hub settings.</span>}
+                      {commasLink ? <LinkButton label={`${form.region.toUpperCase()} ${form.offer === 'trial' ? 'trial' : 'monthly'} payment link`} url={commasLink} copy={copy} primary />
+                                  : <span style={{ fontSize: 12.5, color: 'var(--house-warn)' }}>No {form.region.toUpperCase()} {form.offer === 'trial' ? 'trial' : 'monthly'} payment link set. Admin adds it in Hub settings.</span>}
                       <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={stripe} disabled={busy === 'stripe'}>{busy === 'stripe' ? 'Making' : d.stripe ? 'New Stripe link' : 'Stripe link instead'}</button>
                       {d.stripe?.url && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(d.stripe.url)}>Copy Stripe link</button>}
                       {!on && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={checkPayment} disabled={busy === 'paycheck'}>{busy === 'paycheck' ? 'Checking' : 'Check for payment'}</button>}
@@ -710,6 +777,7 @@ export default function CloserHub() {
         <div className="xl:sticky" style={{ top: 16 }}>
           <AppsPanel />
           <PaymentLinks settings={settings} copy={copyLink} />
+          <CaseStudies settings={settings} copy={copyLink} isAdmin={isAdmin} onSaved={setSettings} />
         </div>
       </div>
     </div>
