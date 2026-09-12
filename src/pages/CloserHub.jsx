@@ -153,7 +153,7 @@ const STEPS = [
   ['payment', 'Take payment', 'Commas by default. Stripe only if Commas will not work for them. Ticks itself when the payment lands.'],
   ['contract', 'Send contract', 'Drafts it in PandaDoc and sends the signing links in one go. Draft only if you want to look first.'],
   ['channels', 'Make client channel and add the client', 'Makes client- for the team and opt- for the client, then add the client to opt- as a guest in Slack.'],
-  ['form', 'Send onboarding form', 'After payment. Pre-fill what you can.'],
+  ['form', 'Send onboarding form and book onboarding call', 'Send the form after payment, then book the kickoff for the next day. On a trial, forward-book the ascension call too.'],
   ['ghl', 'Move in GoHighLevel', 'Closed for a trial, New Map Closes for a retainer. This posts the close and starts onboarding.'],
   ['notes', 'Leave post-call notes', 'On the card: who they are, what they are like, the Fathom transcript for the account manager.'],
   ['eod', 'Log end of day', 'Closes only count once they are in.'],
