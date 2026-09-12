@@ -30,7 +30,6 @@ const SETTING_FIELDS = [
   ['pay_link_retainer', 'Commas checkout link: retainer', 'The Commas checkout page for the retainer.'],
   ['stripe_currency', 'Stripe currency', 'usd or aud. Used only for the Stripe fallback link.'],
   ['onboarding_page_url', 'Onboarding page link', 'The welcome page the client lands on.'],
-  ['onboarding_form_url', 'Onboarding flow link', 'The form the client fills in (step 1 of 3).'],
   ['onboarding_calendar_url', 'Onboarding calendar link', 'Where the onboarding call is booked.'],
   ['send_subject', 'Email subject when sending', ''],
   ['send_message', 'Email message when sending', ''],
@@ -160,6 +159,44 @@ const STEPS = [
   ['notes', 'Leave post-call notes', 'On the card: who they are, what they are like, the Fathom transcript for the account manager.'],
   ['eod', 'Log end of day', 'Closes only count once they are in.'],
 ]
+
+/* One control per link: the button copies it for the client, the small arrow
+   opens it. Ben, 12 Sep 2026: "just have one calendar link ... merge those". */
+function LinkButton({ label, url, copy, primary }) {
+  return (
+    <span className="inline-flex items-center">
+      <button type="button" className={primary ? 'editorial-btn-primary' : 'editorial-btn-ghost'} style={{ height: 32, fontSize: 12.5, borderTopRightRadius: 0, borderBottomRightRadius: 0 }} onClick={() => copy(url)} title="Copy the link for the client">
+        <Copy size={ICON.sm} /> {label}
+      </button>
+      <a href={url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5, padding: '0 9px', borderTopLeftRadius: 0, borderBottomLeftRadius: 0, marginLeft: -1 }} title="Open it"><ExternalLink size={ICON.sm} /></a>
+    </span>
+  )
+}
+
+/* Where the agreement is up to, at a glance: drafted, sent, opened, signed,
+   with the times PandaDoc reports and who has signed. */
+function ContractStrip({ c }) {
+  const t = (iso) => iso ? new Date(iso).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+  const signed = c.status === 'document.completed'
+  const declined = c.status === 'document.declined' || c.status === 'document.voided'
+  const opened = !!c.opened
+  const tone = signed ? 'pill-up' : declined ? 'pill-down' : opened ? 'pill-accent' : c.sent ? 'pill-soft' : 'pill-flat'
+  const word = signed ? 'Signed' : declined ? (c.status === 'document.declined' ? 'Declined' : 'Voided') : opened ? 'Opened' : c.sent ? 'Sent, not opened yet' : 'Drafted, not sent'
+  const clientSigned = (c.recipients || []).find(r => (r.role || '').toLowerCase() === 'client' || r.role === 'Role 2')?.has_completed
+  const optSigned = (c.recipients || []).find(r => r.role === 'Role 1' || (r.role || '').toLowerCase() === 'opt' || (r.role || '').toLowerCase() === 'creator')?.has_completed
+  return (
+    <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--ink-3)' }} className="flex items-center gap-2 flex-wrap">
+      <span className={`pill ${tone}`}>{word}</span>
+      <span>{c.name}{c.opt_signer_name ? `, ${c.opt_signer_name} for OPT` : ''}.</span>
+      {c.date_sent && <span>Sent {t(c.date_sent)}.</span>}
+      {opened && !signed && c.date_modified && <span>Last activity {t(c.date_modified)}.</span>}
+      {signed && c.date_completed && <span>Signed {t(c.date_completed)}.</span>}
+      {c.sent && !signed && (c.recipients || []).length > 0 && <span>{clientSigned ? 'Client has signed' : 'Client has not signed'}{optSigned ? ', OPT has signed' : ''}.</span>}
+      {!c.renamed && !c.sent && <span style={{ color: 'var(--house-warn)' }}>Check for a &quot;[DEV]&quot; prefix.</span>}
+      {c.checked_at && <span style={{ color: 'var(--ink-4)' }}>Checked {t(c.checked_at)}.</span>}
+    </div>
+  )
+}
 
 function Tick({ on, auto, onChange }) {
   return (
@@ -295,11 +332,21 @@ function Deal({ settings, onDone, profile, user }) {
     await save({ data: { ...d, contract: { ...d.contract, sent: true, status: r.status } }, ticks: { ...ticks, contract: true } })
     setConfirmSend(false); toast.success(`Sent to ${form.email}.`); onDone?.()
   })
-  const checkSigned = () => run('signed', async () => {
+  const refreshContract = async (quiet = false) => {
+    if (!d.contract?.doc_id) return
     const r = await callCloserHub('contract_status', { doc_id: d.contract.doc_id })
-    await save({ data: { ...d, contract: { ...d.contract, status: r.status } } })
-    setNote(n => ({ ...n, contract: r.status === 'document.completed' ? { ok: 'Signed.' } : { warn: `Not signed yet: ${r.status.replace('document.', '')}.` } }))
-  })
+    await save({ data: { ...d, contract: { ...d.contract, status: r.status, word: r.word, opened: r.opened, recipients: r.recipients,
+      date_modified: r.date_modified, date_sent: r.date_sent, date_completed: r.date_completed, checked_at: new Date().toISOString() } } })
+    if (!quiet) setNote(n => ({ ...n, contract: r.status === 'document.completed' ? { ok: 'Signed.' } : r.opened ? { ok: 'They have opened it.' } : { warn: `Not opened yet (${r.word}).` } }))
+  }
+  const checkSigned = () => run('signed', () => refreshContract(false))
+  // While a sent contract is still unsigned, look again every minute.
+  useEffect(() => {
+    const c = deal?.data?.contract
+    if (!c?.doc_id || !c.sent || c.status === 'document.completed' || c.status === 'document.declined' || c.status === 'document.voided') return undefined
+    const t = setInterval(() => { refreshContract(true).catch(() => {}) }, 60_000)
+    return () => clearInterval(t)
+  }, [deal?.id, deal?.data?.contract?.doc_id, deal?.data?.contract?.sent, deal?.data?.contract?.status])  // eslint-disable-line react-hooks/exhaustive-deps
   const make = () => run('channels', async () => {
     const r = await callCloserHub('make_channel', { company: form.company, email: form.email, prospect_name: form.name })
     await record('channels', r); toast.success('Channels ready. Now add the client as a guest.'); onDone?.()
@@ -419,8 +466,7 @@ function Deal({ settings, onDone, profile, user }) {
                       )}
                       {!d.contract?.sent && !confirmSend && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={draft} disabled={busy === 'contract'}>{busy === 'contract' ? 'Drafting' : d.contract?.doc_id ? 'Draft again' : 'Draft only'}</button>}
                       {d.contract?.url && <a href={d.contract.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open in PandaDoc <ExternalLink size={ICON.sm} /></a>}
-                      {d.contract?.sent && d.contract?.status !== 'document.completed' && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={checkSigned} disabled={busy === 'signed'}>{busy === 'signed' ? 'Checking' : 'Signed yet?'}</button>}
-                      {d.contract?.status === 'document.completed' && <span style={{ fontSize: 12.5, color: 'var(--house-good)' }}>Signed.</span>}
+                      {d.contract?.doc_id && d.contract?.status !== 'document.completed' && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={checkSigned} disabled={busy === 'signed'}>{busy === 'signed' ? 'Checking' : 'Refresh status'}</button>}
                     </>
                   )}
                   {key === 'channels' && (
@@ -439,11 +485,8 @@ function Deal({ settings, onDone, profile, user }) {
                   )}
                   {key === 'form' && (
                     <>
-                      <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(settings.onboarding_form_url || 'https://onboard.optdigital.io/ob-2')}>Copy form link</button>
-                      <a href={settings.onboarding_page_url || 'https://onboard.optdigital.io/onboarding'} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Onboarding page <ExternalLink size={ICON.sm} /></a>
-                      <a href={settings.onboarding_form_url || 'https://onboard.optdigital.io/ob-2'} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Onboarding flow <ExternalLink size={ICON.sm} /></a>
-                      <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(settings.onboarding_calendar_url || 'https://calendly.com/d/dzy3-78x-dr3/opt-digital-onboarding')}>Copy calendar link</button>
-                      <a href={settings.onboarding_calendar_url || 'https://calendly.com/d/dzy3-78x-dr3/opt-digital-onboarding'} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Calendar <ExternalLink size={ICON.sm} /></a>
+                      <LinkButton label="Onboarding page" url={settings.onboarding_page_url || 'https://onboard.optdigital.io/onboarding'} copy={copy} primary />
+                      <LinkButton label="Onboarding calendar" url={settings.onboarding_calendar_url || 'https://calendly.com/d/dzy3-78x-dr3/opt-digital-onboarding'} copy={copy} />
                     </>
                   )}
                   {key === 'notes' && <a href="https://app.gohighlevel.com/" target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open the card</a>}
@@ -452,7 +495,7 @@ function Deal({ settings, onDone, profile, user }) {
                 {n?.ok && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-good)' }}>{n.ok}</div>}
                 {n?.warn && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-warn)' }}>{n.warn}</div>}
                 {n?.bad && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-bad)' }}>{n.bad}</div>}
-                {key === 'contract' && d.contract?.name && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-3)' }}>{d.contract.name}{d.contract.opt_signer_name ? `, ${d.contract.opt_signer_name} signing for OPT` : ''}{d.contract.sent ? ', sent' : ', drafted'}.{!d.contract.renamed && !d.contract.sent ? ' Check for a "[DEV]" prefix.' : ''}</div>}
+                {key === 'contract' && d.contract?.name && <ContractStrip c={d.contract} />}
                 {key === 'channels' && ch && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-3)' }}>Now in Slack: open #{ch.external?.name}, Add people, paste the email, choose Guest. Then tick this off.</div>}
                 {key === 'ghl' && d.ghl?.candidates?.length > 1 && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-3)' }}>{d.ghl.candidates.map(c => `${c.name || c.id} (${c.region})`).join(', ')}</div>}
               </div>
@@ -509,7 +552,7 @@ function FinishedDeals({ refreshKey }) {
               <span className="pill pill-soft">{r.offer === 'trial' ? 'Trial' : 'Retainer'}</span>
               <span style={{ color: 'var(--ink-4)' }}>{r.closer_name} · finished {new Date(r.updated_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}</span>
               <span className="flex-1" />
-              {contractUrl && <a href={contractUrl} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 28, fontSize: 12 }}>Contract{contract?.status === 'document.completed' ? ' (signed)' : contract?.sent ? ' (sent)' : ''}</a>}
+              {contractUrl && <a href={contractUrl} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 28, fontSize: 12 }}>Contract{contract?.status === 'document.completed' ? ' (signed)' : contract?.opened ? ' (opened)' : contract?.sent ? ' (sent, not opened)' : ''}</a>}
               {ch?.external?.id && <a href={`https://slack.com/app_redirect?channel=${ch.external.id}`} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 28, fontSize: 12 }}>#{ch.external.name}</a>}
               {st?.client?.slug && <a href={`https://dashboard.optdigital.io/company/assignments`} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 28, fontSize: 12 }}>Assignments</a>}
             </div>
