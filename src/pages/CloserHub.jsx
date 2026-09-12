@@ -157,9 +157,8 @@ function PaymentLinks({ settings, copy }) {
   const shown = rows.filter(x => region === 'all' || x.region === region)
   const login = settings.commas_login_url || 'https://www.fanbasis.com/login'
   return (
-    <div className="tile" style={{ padding: '14px 18px 12px', marginTop: 12 }}>
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <h2 className="eyebrow" style={{ margin: 0 }}>Payment links</h2>
+    <div>
+      <div className="flex items-center justify-end gap-2 mb-2">
         <div className="flex gap-1">
           {[['all', 'All'], ...REGIONS].map(([v, l]) => (
             <button key={v} type="button" className={region === v ? 'editorial-btn-primary' : 'editorial-btn-ghost'} style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} onClick={() => setRegion(v)}>{l}</button>
@@ -201,12 +200,13 @@ function CaseStudies({ settings, copy, isAdmin, onSaved }) {
   }
   const remove = (i) => persist(list.filter((_, k) => k !== i))
   return (
-    <div className="tile" style={{ padding: '14px 18px 12px', marginTop: 12 }}>
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <h2 className="eyebrow" style={{ margin: 0 }}>Case studies</h2>
-        {isAdmin && <button type="button" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} onClick={() => setAdding(v => !v)}>{adding ? 'Cancel' : 'Add'}</button>}
-      </div>
-      {list.length === 0 && !adding && <div style={{ fontSize: 12.5, color: 'var(--ink-4)', padding: '6px 0' }}>None yet.</div>}
+    <div>
+      {isAdmin && (
+        <div className="flex items-center justify-end gap-2 mb-2">
+          <button type="button" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} onClick={() => setAdding(v => !v)}>{adding ? 'Cancel' : 'Add a referral'}</button>
+        </div>
+      )}
+      {list.length === 0 && !adding && <div style={{ fontSize: 12.5, color: 'var(--ink-4)', padding: '6px 0' }}>No referrals yet.</div>}
       {list.map((c, i) => (
         <div key={c.name + i} style={{ padding: '9px 0', borderTop: i ? '1px solid var(--rule)' : 0, fontSize: 13 }}>
           <div className="flex items-center gap-2">
@@ -225,10 +225,10 @@ function CaseStudies({ settings, copy, isAdmin, onSaved }) {
       ))}
       {adding && (
         <div className="grid gap-2 mt-2" style={{ paddingTop: 10, borderTop: '1px solid var(--rule)' }}>
-          {[['name', 'Business'], ['contact', 'Contact name'], ['phone', 'Phone'], ['website', 'Website'], ['link', 'Case study link'], ['note', 'One line about them']].map(([k, l]) => (
+          {[['name', 'Business'], ['contact', 'Contact name'], ['phone', 'Phone'], ['website', 'Website'], ['link', 'Case study or review link'], ['note', 'One line about them']].map(([k, l]) => (
             <input key={k} value={draft[k]} onChange={(e) => setDraft(d => ({ ...d, [k]: e.target.value }))} placeholder={l} style={{ height: 34, fontSize: 13 }} />
           ))}
-          <div><button type="button" className="editorial-btn-primary" style={{ height: 30, fontSize: 12.5 }} onClick={add}>Save case study</button></div>
+          <div><button type="button" className="editorial-btn-primary" style={{ height: 30, fontSize: 12.5 }} onClick={add}>Save referral</button></div>
         </div>
       )}
     </div>
@@ -236,10 +236,26 @@ function CaseStudies({ settings, copy, isAdmin, onSaved }) {
 }
 
 function AppsPanel() {
+  return <div>{CLOSER_TOOLS.map((t, i) => <AppLink key={t.key} tool={t} first={i === 0} />)}</div>
+}
+
+/* One side panel, three tabs. Ben, 12 Sep 2026: "make this a switchable tab
+   which has apps, payment links, and referrals". */
+const SIDE_TABS = [['apps', 'Apps'], ['pay', 'Payment links'], ['refs', 'Referrals']]
+
+function SidePanel({ settings, copy, isAdmin, onSaved }) {
+  const [tab, setTab] = useState(() => { try { return localStorage.getItem('closer-hub-side-tab') || 'apps' } catch { return 'apps' } })
+  const pick = (t) => { setTab(t); try { localStorage.setItem('closer-hub-side-tab', t) } catch { /* fine */ } }
   return (
-    <div className="tile" style={{ padding: '14px 18px 6px' }}>
-      <h2 className="eyebrow" style={{ margin: '0 0 6px' }}>Apps</h2>
-      {CLOSER_TOOLS.map((t, i) => <AppLink key={t.key} tool={t} first={i === 0} />)}
+    <div className="tile" style={{ padding: '12px 18px 10px' }}>
+      <div className="flex gap-1 mb-2" role="tablist">
+        {SIDE_TABS.map(([v, l]) => (
+          <button key={v} type="button" role="tab" aria-selected={tab === v} className={tab === v ? 'editorial-btn-primary' : 'editorial-btn-ghost'} style={{ height: 30, fontSize: 12.5, padding: '0 12px' }} onClick={() => pick(v)}>{l}</button>
+        ))}
+      </div>
+      {tab === 'apps' && <AppsPanel />}
+      {tab === 'pay' && <PaymentLinks settings={settings} copy={copy} />}
+      {tab === 'refs' && <CaseStudies settings={settings} copy={copy} isAdmin={isAdmin} onSaved={onSaved} />}
     </div>
   )
 }
@@ -792,7 +808,7 @@ export default function CloserHub() {
       <div className="mb-7 pb-5" style={{ borderBottom: '1px solid var(--rule)' }}>
         <span className="eyebrow eyebrow-accent">OPT Sales · Closer Hub</span>
         <h1 className="h2 mt-2">The <em>closer</em> hub.</h1>
-        <p className="lede mt-2" style={{ fontSize: 14 }}>The deal as a checklist, with your apps beside it.</p>
+        <p className="lede mt-2" style={{ fontSize: 14 }}>The deal as a checklist, with your apps, payment links and referrals beside it.</p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
@@ -803,9 +819,7 @@ export default function CloserHub() {
           {isAdmin && <SettingsSection settings={settings} onSaved={setSettings} />}
         </div>
         <div className="xl:sticky" style={{ top: 16 }}>
-          <AppsPanel />
-          <PaymentLinks settings={settings} copy={copyLink} />
-          <CaseStudies settings={settings} copy={copyLink} isAdmin={isAdmin} onSaved={setSettings} />
+          <SidePanel settings={settings} copy={copyLink} isAdmin={isAdmin} onSaved={setSettings} />
         </div>
       </div>
     </div>
