@@ -214,11 +214,29 @@ async function sendContract(admin: any, who: Caller, body: any) {
   return { status: 200, body: result }
 }
 
+// Where the agreement is up to. Ben, 12 Sep 2026: "see if they've opened
+// the contract, if they have not opened the contract, and get a bit more of
+// a feel for it". PandaDoc's status walks draft -> sent -> viewed ->
+// completed (or declined / voided); the details call adds who has signed.
 async function contractStatus(body: any) {
   const id = (body.doc_id || '').trim()
   if (!id) return { status: 400, body: { error: 'doc_id is required' } }
-  const d = await pd('GET', `/documents/${id}`)
-  return { status: 200, body: { doc_id: id, status: d.status, name: d.name, url: `https://app.pandadoc.com/a/#/documents/${id}` } }
+  const d = await pd('GET', `/documents/${id}/details`)
+  const status = String(d.status || '')
+  const recipients = (d.recipients || []).map((r: any) => ({
+    email: r.email, role: r.role, has_completed: !!r.has_completed, signing_order: r.signing_order ?? null,
+  }))
+  const opened = ['document.viewed', 'document.completed', 'document.waiting_approval', 'document.approved', 'document.waiting_pay', 'document.paid'].includes(status)
+  const word = status === 'document.completed' ? 'signed'
+    : status === 'document.declined' ? 'declined'
+    : status === 'document.voided' ? 'voided'
+    : opened ? 'opened'
+    : status === 'document.sent' ? 'sent, not opened yet'
+    : status === 'document.draft' ? 'drafted, not sent'
+    : status.replace('document.', '')
+  return { status: 200, body: { doc_id: id, status, word, opened, name: d.name, date_modified: d.date_modified || null,
+    date_sent: d.date_sent || null, date_completed: d.date_completed || null, recipients,
+    url: `https://app.pandadoc.com/a/#/documents/${id}` } }
 }
 
 // ── checklist automations ───────────────────────────────────────────────────
