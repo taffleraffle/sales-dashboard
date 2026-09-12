@@ -149,18 +149,22 @@ function AppLink({ tool, first }) {
    New Zealand payment links. I have the trial link and then the monthly link.
    In case you need to make something custom, it can be logged in to go and
    make something custom." Links are Hub settings; the login is Commas. */
-function PaymentLinks({ settings, copy }) {
-  const [region, setRegion] = useState('all')
+function PaymentLinks({ settings, copy, dealRegion }) {
+  // US / AU / NZ only (Ben, 12 Sep 2026: "I don't want to have an All tab").
+  // Follows the open deal's region, else the last one picked on this device.
+  const [picked, setPicked] = useState(() => { try { return localStorage.getItem('closer-hub-pay-region') || '' } catch { return '' } })
+  const region = dealRegion || picked || 'us'
+  const setRegion = (r) => { setPicked(r); try { localStorage.setItem('closer-hub-pay-region', r) } catch { /* fine */ } }
   const rows = REGIONS.flatMap(([r, label]) => [['trial', 'Trial'], ['monthly', 'Monthly'], ['quarterly', 'Quarterly']].map(([k, kl]) => ({
     region: r, label: `${label} ${kl}`, url: settings[`pay_link_${r}_${k}`] || '',
   })))
-  const shown = rows.filter(x => region === 'all' || x.region === region)
+  const shown = rows.filter(x => x.region === region)
   const login = settings.commas_login_url || 'https://www.fanbasis.com/login'
   return (
     <div>
       <div className="flex items-center justify-end gap-2 mb-2">
         <div className="flex gap-1">
-          {[['all', 'All'], ...REGIONS].map(([v, l]) => (
+          {REGIONS.map(([v, l]) => (
             <button key={v} type="button" className={region === v ? 'editorial-btn-primary' : 'editorial-btn-ghost'} style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} onClick={() => setRegion(v)}>{l}</button>
           ))}
         </div>
@@ -184,6 +188,25 @@ function PaymentLinks({ settings, copy }) {
    has case studies so we can link to different case studies. Put Complete
    Flood as one, and have his contact number and his website." Stored as a
    list in Hub settings; admins add and remove rows here. */
+/* The referral's logo: its site's favicon through Google's lookup service,
+   so an admin can add a referral and it gets a logo with no build step.
+   Letters if the site has none. Ben, 12 Sep 2026. */
+function SiteLogo({ website, name }) {
+  const [broken, setBroken] = useState(false)
+  let host = ''
+  try { host = new URL(/^https?:/.test(website || '') ? website : `https://${website || ''}`).hostname } catch { host = '' }
+  const box = { width: 30, height: 30, borderRadius: 9, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }
+  if (host && !broken) {
+    return (
+      <span style={{ ...box, background: '#fff', border: '1px solid var(--rule)' }}>
+        <img src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`} alt="" width={20} height={20} style={{ width: 20, height: 20, objectFit: 'contain', display: 'block' }} onError={() => setBroken(true)} />
+      </span>
+    )
+  }
+  const letters = (name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  return <span style={{ ...box, background: 'rgba(244,225,74,.55)', color: 'var(--ink)', fontFamily: 'var(--serif)', fontSize: 13, fontWeight: 500 }}>{letters}</span>
+}
+
 function CaseStudies({ settings, copy, isAdmin, onSaved }) {
   const toast = useToast()
   const list = (() => { try { const v = JSON.parse(settings.case_studies || '[]'); return Array.isArray(v) ? v : [] } catch { return [] } })()
@@ -209,13 +232,16 @@ function CaseStudies({ settings, copy, isAdmin, onSaved }) {
       {list.length === 0 && !adding && <div style={{ fontSize: 12.5, color: 'var(--ink-4)', padding: '6px 0' }}>No referrals yet.</div>}
       {list.map((c, i) => (
         <div key={c.name + i} style={{ padding: '9px 0', borderTop: i ? '1px solid var(--rule)' : 0, fontSize: 13 }}>
-          <div className="flex items-center gap-2">
-            <span style={{ fontWeight: 600, flex: 1 }} className="truncate">{c.name}</span>
+          <div className="flex items-center gap-3">
+            <SiteLogo website={c.website} name={c.name} />
+            <div className="min-w-0 flex-1">
+              <div style={{ fontWeight: 600 }} className="truncate">{c.name}</div>
+              {(c.contact || c.location) && <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[c.contact, c.location].filter(Boolean).join(' · ')}</div>}
+            </div>
             {isAdmin && <button type="button" className="editorial-btn-ghost" style={{ height: 24, fontSize: 11, padding: '0 7px' }} onClick={() => remove(i)} title="Remove">×</button>}
           </div>
-          {(c.contact || c.location) && <div style={{ fontSize: 12, color: 'var(--ink-4)' }}>{[c.contact, c.location].filter(Boolean).join(' · ')}</div>}
-          {c.note && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{c.note}</div>}
-          <div className="flex gap-1 flex-wrap mt-1">
+          {c.note && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4, paddingLeft: 42 }}>{c.note}</div>}
+          <div className="flex gap-1 flex-wrap mt-1" style={{ paddingLeft: 42 }}>
             {c.phone && <a href={`tel:${c.phone.replace(/[^0-9+]/g, '')}`} className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} title="Call">{c.phone}</a>}
             {c.phone && <button type="button" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 8px' }} onClick={() => copy(c.phone)} title="Copy the number"><Copy size={ICON.sm} /></button>}
             {c.website && <a href={c.website} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }}>Website <ExternalLink size={ICON.sm} /></a>}
@@ -243,7 +269,7 @@ function AppsPanel() {
    which has apps, payment links, and referrals". */
 const SIDE_TABS = [['apps', 'Apps'], ['pay', 'Payment links'], ['refs', 'Referrals']]
 
-function SidePanel({ settings, copy, isAdmin, onSaved }) {
+function SidePanel({ settings, copy, isAdmin, onSaved, dealRegion }) {
   const [tab, setTab] = useState(() => { try { return localStorage.getItem('closer-hub-side-tab') || 'apps' } catch { return 'apps' } })
   const pick = (t) => { setTab(t); try { localStorage.setItem('closer-hub-side-tab', t) } catch { /* fine */ } }
   return (
@@ -254,7 +280,7 @@ function SidePanel({ settings, copy, isAdmin, onSaved }) {
         ))}
       </div>
       {tab === 'apps' && <AppsPanel />}
-      {tab === 'pay' && <PaymentLinks settings={settings} copy={copy} />}
+      {tab === 'pay' && <PaymentLinks settings={settings} copy={copy} dealRegion={dealRegion} />}
       {tab === 'refs' && <CaseStudies settings={settings} copy={copy} isAdmin={isAdmin} onSaved={onSaved} />}
     </div>
   )
@@ -263,7 +289,7 @@ function SidePanel({ settings, copy, isAdmin, onSaved }) {
 /* ── The deal as a checklist ───────────────────────────────────────────── */
 
 const BLANK = { company: '', email: '', name: '', offer: 'retainer', template: '', fee: '', extra: '', signer: '', region: 'us' }
-const REGIONS = [['us', 'US'], ['au', 'AU'], ['nz', 'NZ']]
+const REGIONS = [['us', 'USA'], ['au', 'AU'], ['nz', 'NZ']]
 const regionOf = (country) => { const c = String(country || '').toUpperCase(); return c === 'AU' || c === 'AUSTRALIA' ? 'au' : c === 'NZ' || c === 'NEW ZEALAND' ? 'nz' : 'us' }
 
 // Ben's list, 12 Sep 2026, in his order.
@@ -323,7 +349,7 @@ function Tick({ on, auto, onChange }) {
   )
 }
 
-function Deal({ settings, onDone, profile, user }) {
+function Deal({ settings, onDone, profile, user, onRegion }) {
   const toast = useToast()
   const [deal, setDeal] = useState(null)          // the saved row
   const [form, setForm] = useState(BLANK)
@@ -369,6 +395,7 @@ function Deal({ settings, onDone, profile, user }) {
     setForm(f => ({ ...f, template: settings[`template_${f.offer}`] || '', fee: '' }))
   }, [form.offer, settings])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => { onRegion?.(form.region) }, [form.region])  // eslint-disable-line react-hooks/exhaustive-deps
   const fee = form.fee || settings[`fee_${form.offer}`] || ''
   const signer = signers.find(m => m.email === form.signer)
   const filled = form.company.trim().length > 0 && form.email.includes('@')
@@ -796,6 +823,7 @@ export default function CloserHub() {
   const toast = useToast()
   const [settings, setSettings] = useState({})
   const [refreshKey, setRefreshKey] = useState(0)
+  const [dealRegion, setDealRegion] = useState('')
   const bump = () => setRefreshKey(k => k + 1)
   const copyLink = async (text) => { try { await navigator.clipboard.writeText(text); toast.success('Copied.') } catch { toast.error('Copy blocked, select it by hand.') } }
 
@@ -813,13 +841,13 @@ export default function CloserHub() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
         <div className="xl:col-span-2 grid gap-4">
-          <Deal settings={settings} onDone={bump} profile={profile} user={{ id: session?.user?.id, name: profile?.name, email: profile?.email || session?.user?.email }} />
+          <Deal settings={settings} onDone={bump} profile={profile} user={{ id: session?.user?.id, name: profile?.name, email: profile?.email || session?.user?.email }} onRegion={setDealRegion} />
           <FinishedDeals refreshKey={refreshKey} />
           <Recent refreshKey={refreshKey} />
           {isAdmin && <SettingsSection settings={settings} onSaved={setSettings} />}
         </div>
         <div className="xl:sticky" style={{ top: 16 }}>
-          <SidePanel settings={settings} copy={copyLink} isAdmin={isAdmin} onSaved={setSettings} />
+          <SidePanel settings={settings} copy={copyLink} isAdmin={isAdmin} onSaved={setSettings} dealRegion={dealRegion} />
         </div>
       </div>
     </div>
