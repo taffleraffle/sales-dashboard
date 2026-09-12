@@ -216,6 +216,151 @@ async function contractStatus(body: any) {
   return { status: 200, body: { doc_id: id, status: d.status, name: d.name, url: `https://app.pandadoc.com/a/#/documents/${id}` } }
 }
 
+// ── checklist automations ───────────────────────────────────────────────────
+// Ben, 12 Sep 2026: "automate what we can with payment links / pages,
+// contract etc and tickboxes for things".
+
+// The Commas (FanBasis) products, so an admin can pick which one is the
+// trial and which the retainer, and the closer gets the right checkout link.
+async function payProducts() {
+  const key = Deno.env.get('FANBASIS_API_KEY') || ''
+  if (!key) return { status: 404, body: { error: 'FANBASIS_API_KEY is not set' } }
+  const r = await fetch('https://www.fanbasis.com/public-api/products?per_page=100', { headers: { 'x-api-key': key } })
+  const j: any = await r.json().catch(() => ({}))
+  if (!r.ok) return { status: 502, body: { error: `Commas answered ${r.status}` } }
+  const items: any[] = (j.data && (j.data.data || j.data.products)) || j.products || []
+  const products = items.map((x: any) => {
+    const url = Object.entries(x).find(([k, v]) => typeof v === 'string' && /^https?:\/\//.test(v as string) && /url|link|checkout|page/i.test(k))?.[1]
+      || Object.values(x).find((v) => typeof v === 'string' && /^https?:\/\/.*(checkout|fanbasis)/i.test(v as string)) || ''
+    return { id: String(x.id ?? x.uuid ?? ''), name: String(x.name || x.title || ''), price: x.price ?? x.amount ?? x.pricing ?? null, url,
+      keys: Object.keys(x).slice(0, 40) }
+  })
+  return { status: 200, body: { products } }
+}
+
+// A Stripe checkout for this client, when Commas will not work for them.
+// One-off for a trial, monthly subscription for a retainer. The session
+// carries the client's email, so the webhook that records the payment
+// matches it to the deal automatically.
+async function stripeLink(admin: any, who: Caller, body: any) {
+  const key = Deno.env.get('STRIPE_SECRET_KEY') || ''
+  if (!key) return { status: 404, body: { error: 'STRIPE_SECRET_KEY is not set' } }
+  const s = await settings(admin)
+  const email = (body.email || '').trim().toLowerCase()
+  const company = (body.company || '').trim()
+  const offer = body.offer === 'trial' ? 'trial' : 'retainer'
+  const amount = Math.round(parseFloat(String(body.fee || s[`fee_${offer}`] || '0').replace(/[^0-9.]/g, '')) * 100)
+  if (!email.includes('@') || !company || !amount) return { status: 400, body: { error: 'company, client email and a fee are required' } }
+  const currency = (body.currency || s.stripe_currency || 'usd').toLowerCase()
+  const form = new URLSearchParams()
+  form.set('mode', offer === 'trial' ? 'payment' : 'subscription')
+  form.set('customer_email', email)
+  form.set('success_url', 'https://sales-dashboard-ftct.onrender.com/sales/closer-hub?paid=1')
+  form.set('cancel_url', 'https://sales-dashboard-ftct.onrender.com/sales/closer-hub')
+  form.set('line_items[0][quantity]', '1')
+  form.set('line_items[0][price_data][currency]', currency)
+  form.set('line_items[0][price_data][unit_amount]', String(amount))
+  form.set('line_items[0][price_data][product_data][name]', offer === 'trial' ? `Opt Digital 14-day trial: ${company}` : `Opt Digital monthly retainer: ${company}`)
+  if (offer !== 'trial') form.set('line_items[0][price_data][recurring][interval]', 'month')
+  form.set('metadata[company]', company)
+  form.set('metadata[offer]', offer)
+  form.set('metadata[closer]', who.email)
+  const r = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString(),
+  })
+  const j: any = await r.json().catch(() => ({}))
+  if (!r.ok) return { status: 502, body: { error: j?.error?.message || `Stripe answered ${r.status}` } }
+  const out = { ok: true, url: j.url, session_id: j.id, amount: amount / 100, currency, mode: form.get('mode') }
+  await log(admin, who, 'stripe_link', body, true, out)
+  return { status: 200, body: out }
+}
+
+// Has this client paid since the deal was opened? Stripe and Commas both land
+// in `payments` through their webhooks, keyed by the customer's email.
+async function paymentCheck(admin: any, body: any) {
+  const email = (body.email || '').trim().toLowerCase()
+  if (!email.includes('@')) return { status: 400, body: { error: 'email required' } }
+  const since = body.since || new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+  const { data } = await admin.from('payments').select('source, amount, currency, payment_date, created_at, description')
+    .ilike('customer_email', email).gte('created_at', since).order('created_at', { ascending: false }).limit(3)
+  const hit = (data || [])[0]
+  return { status: 200, body: { paid: !!hit, payment: hit || null } }
+}
+
+// Move the client's GoHighLevel card into the win stage for the deal type.
+// This is "moving it", one of the two things that announce a close, so it
+// only acts on an exact match: one contact by email, one open deal in a
+// SCIO pipeline. Anything else is listed and nothing moves.
+const GHL_PIPELINES: Record<string, { region: string; closed: string; maps: string }> = {
+  ZN1DW9S9qS540PNAXSxa: { region: 'US', closed: 'b7dc415a-f0a4-41dd-b113-741929eb517b', maps: '62986bfd-7f23-4089-a6e5-f68527bbc750' },
+  Ab4csK3mR419FsgyqUE2: { region: 'AUS', closed: 'c654af24-25eb-4a09-981a-fd23ba5d0495', maps: '0c525201-de53-4d3c-9424-38be21da5f52' },
+}
+const WIN_STAGES = new Set(Object.values(GHL_PIPELINES).flatMap((p) => [p.closed, p.maps, '0f9d5445-37da-487b-8925-6e0d7d35386b', '441fcf18-e187-4b04-b5b9-8b8dea1250a4']))
+
+async function ghl(path: string, init: RequestInit = {}) {
+  const key = Deno.env.get('CLOSER_HUB_GHL_API_KEY') || Deno.env.get('GHL_API_KEY') || ''
+  if (!key) throw new Error('GHL_API_KEY is not set')
+  const r = await fetch(`https://services.leadconnectorhq.com${path}`, {
+    ...init, headers: { Authorization: `Bearer ${key}`, Version: '2021-07-28', Accept: 'application/json', 'Content-Type': 'application/json', ...(init.headers || {}) },
+  })
+  const j: any = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(`GoHighLevel ${path.split('?')[0]} ${r.status}: ${(j.message || j.error || '').toString().slice(0, 160)}`)
+  return j
+}
+
+// Find the lead in GoHighLevel so step 1 fills itself in. Ben, 12 Sep 2026:
+// "search for the lead in GoHighLevel to populate. If there's no lead, we
+// can manually fill that."
+async function ghlSearch(body: any) {
+  const loc = Deno.env.get('GHL_LOCATION_ID') || ''
+  const q = (body.query || '').trim()
+  if (q.length < 2) return { status: 400, body: { error: 'type a name, company or email' } }
+  const found = await ghl(`/contacts/?locationId=${encodeURIComponent(loc)}&query=${encodeURIComponent(q)}&limit=10`)
+  const contacts = (found.contacts || []).map((c: any) => ({
+    id: c.id, name: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.contactName || c.name || '',
+    company: c.companyName || '', email: c.email || '', phone: c.phone || '', country: c.country || '',
+    tags: (c.tags || []).slice(0, 6),
+  }))
+  return { status: 200, body: { contacts } }
+}
+
+async function ghlMove(admin: any, who: Caller, body: any) {
+  const loc = Deno.env.get('GHL_LOCATION_ID') || ''
+  const email = (body.email || '').trim().toLowerCase()
+  const offer = body.offer === 'trial' ? 'trial' : 'retainer'
+  if (!email.includes('@') && !body.contact_id) return { status: 400, body: { error: 'client email required' } }
+  // The contact picked in step 1 wins; otherwise an exact email match.
+  let contacts: any[] = []
+  if (body.contact_id) {
+    contacts = [{ id: String(body.contact_id) }]
+  } else {
+    const found = await ghl(`/contacts/?locationId=${encodeURIComponent(loc)}&query=${encodeURIComponent(email)}&limit=20`)
+    contacts = (found.contacts || []).filter((c: any) => (c.email || '').toLowerCase() === email)
+  }
+  if (contacts.length === 0) return { status: 200, body: { ok: false, reason: 'no_contact', message: `No GoHighLevel contact has the email ${email}.` } }
+  const deals: any[] = []
+  for (const c of contacts) {
+    const r = await ghl(`/opportunities/search?location_id=${encodeURIComponent(loc)}&contact_id=${encodeURIComponent(c.id)}&limit=20`)
+    for (const o of r.opportunities || []) {
+      if (!GHL_PIPELINES[o.pipelineId]) continue
+      deals.push({ id: o.id, name: o.name, pipelineId: o.pipelineId, region: GHL_PIPELINES[o.pipelineId].region, stageId: o.pipelineStageId, status: o.status, contact: c.id })
+    }
+  }
+  const already = deals.filter((d) => WIN_STAGES.has(d.stageId))
+  if (already.length) return { status: 200, body: { ok: true, already: true, deal: already[0], message: `${already[0].name || 'The deal'} is already in a win stage (${already[0].region}). Nothing moved.` } }
+  const open = deals.filter((d) => d.status === 'open')
+  if (open.length !== 1) return { status: 200, body: { ok: false, reason: open.length ? 'ambiguous' : 'no_deal', candidates: open,
+    message: open.length ? `${open.length} open deals match; move it by hand.` : `The contact has no open deal in a SCIO pipeline.` } }
+  const d = open[0]
+  const target = offer === 'trial' ? GHL_PIPELINES[d.pipelineId].closed : GHL_PIPELINES[d.pipelineId].maps
+  if (body.dry_run) return { status: 200, body: { ok: true, dry_run: true, deal: d, target, stage: offer === 'trial' ? 'Closed' : 'New Map Closes' } }
+  const moved = await ghl(`/opportunities/${d.id}`, { method: 'PUT', body: JSON.stringify({ pipelineId: d.pipelineId, pipelineStageId: target }) })
+  const o = moved.opportunity || moved
+  const out = { ok: true, moved: true, deal: { ...d, stageId: o.pipelineStageId || target }, stage: offer === 'trial' ? 'Closed' : 'New Map Closes', region: d.region }
+  await log(admin, who, 'ghl_move', body, true, out)
+  return { status: 200, body: out }
+}
+
 // ── entry ───────────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -246,6 +391,11 @@ serve(async (req) => {
       case 'semrush': out = login('semrush'); break
       case 'make_channel': out = await makeChannel(admin, who, body); break
       case 'templates': out = await templates(); break
+      case 'pay_products': out = await payProducts(); break
+      case 'stripe_link': out = await stripeLink(admin, who, body); break
+      case 'payment_check': out = await paymentCheck(admin, body); break
+      case 'ghl_search': out = await ghlSearch(body); break
+      case 'ghl_move': out = await ghlMove(admin, who, body); break
       case 'create_contract': out = await createContract(admin, who, body); break
       case 'send_contract': out = await sendContract(admin, who, body); break
       case 'contract_status': out = await contractStatus(body); break
