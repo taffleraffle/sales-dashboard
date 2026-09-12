@@ -26,8 +26,13 @@ const SETTING_FIELDS = [
   ['template_active_ids', 'Templates shown in the picker', 'Comma-separated PandaDoc template ids. Templates with ACTIVE in their name show too.'],
   ['role_opt', 'Template role: OPT', 'Usually "Role 1".'],
   ['role_client', 'Template role: client', '"Client" on the retainer template.'],
-  ['pay_link_trial', 'Commas checkout link: trial', 'The Commas (FanBasis) checkout page for the $997 trial.'],
-  ['pay_link_retainer', 'Commas checkout link: retainer', 'The Commas checkout page for the retainer.'],
+  ['pay_link_us_trial', 'Commas link: US trial', ''],
+  ['pay_link_us_monthly', 'Commas link: US monthly', ''],
+  ['pay_link_au_trial', 'Commas link: AU trial', ''],
+  ['pay_link_au_monthly', 'Commas link: AU monthly', ''],
+  ['pay_link_nz_trial', 'Commas link: NZ trial', ''],
+  ['pay_link_nz_monthly', 'Commas link: NZ monthly', ''],
+  ['commas_login_url', 'Commas login', 'Where a closer goes to make a custom link.'],
   ['stripe_currency', 'Stripe currency', 'usd or aud. Used only for the Stripe fallback link.'],
   ['onboarding_page_url', 'Onboarding page link', 'The welcome page the client lands on.'],
   ['onboarding_calendar_url', 'Onboarding calendar link', 'Where the onboarding call is booked.'],
@@ -136,6 +141,40 @@ function AppLink({ tool, first }) {
   )
 }
 
+/* Payment links, under Apps. Ben, 12 Sep 2026: "filter between Australia and
+   New Zealand payment links. I have the trial link and then the monthly link.
+   In case you need to make something custom, it can be logged in to go and
+   make something custom." Links are Hub settings; the login is Commas. */
+function PaymentLinks({ settings, copy }) {
+  const [region, setRegion] = useState('all')
+  const rows = REGIONS.flatMap(([r, label]) => [['trial', 'Trial'], ['monthly', 'Monthly']].map(([k, kl]) => ({
+    region: r, label: `${label} ${kl}`, url: settings[`pay_link_${r}_${k}`] || '',
+  })))
+  const shown = rows.filter(x => region === 'all' || x.region === region)
+  const login = settings.commas_login_url || 'https://www.fanbasis.com/login'
+  return (
+    <div className="tile" style={{ padding: '14px 18px 12px', marginTop: 12 }}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <h2 className="eyebrow" style={{ margin: 0 }}>Payment links</h2>
+        <div className="flex gap-1">
+          {[['all', 'All'], ...REGIONS].map(([v, l]) => (
+            <button key={v} type="button" className={region === v ? 'editorial-btn-primary' : 'editorial-btn-ghost'} style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} onClick={() => setRegion(v)}>{l}</button>
+          ))}
+        </div>
+      </div>
+      {shown.map((x, i) => (
+        <div key={x.region + x.label} className="flex items-center gap-2" style={{ padding: '8px 0', borderTop: i ? '1px solid var(--rule)' : 0, fontSize: 13 }}>
+          <span style={{ fontWeight: 600, flex: 1 }}>{x.label}</span>
+          {x.url ? <LinkButton label="Copy" url={x.url} copy={copy} /> : <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>Not set</span>}
+        </div>
+      ))}
+      <div style={{ paddingTop: 10, marginTop: 4, borderTop: '1px solid var(--rule)', fontSize: 12.5 }}>
+        <a href={login} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 30, fontSize: 12.5 }}>Log in to Commas for a custom link <ExternalLink size={ICON.sm} /></a>
+      </div>
+    </div>
+  )
+}
+
 function AppsPanel() {
   return (
     <div className="tile" style={{ padding: '14px 18px 6px' }}>
@@ -147,7 +186,9 @@ function AppsPanel() {
 
 /* ── The deal as a checklist ───────────────────────────────────────────── */
 
-const BLANK = { company: '', email: '', name: '', offer: 'retainer', template: '', fee: '', extra: '', signer: '' }
+const BLANK = { company: '', email: '', name: '', offer: 'retainer', template: '', fee: '', extra: '', signer: '', region: 'us' }
+const REGIONS = [['us', 'US'], ['au', 'AU'], ['nz', 'NZ']]
+const regionOf = (country) => { const c = String(country || '').toUpperCase(); return c === 'AU' || c === 'AUSTRALIA' ? 'au' : c === 'NZ' || c === 'NEW ZEALAND' ? 'nz' : 'us' }
 
 // Ben's list, 12 Sep 2026, in his order.
 const STEPS = [
@@ -256,7 +297,7 @@ function Deal({ settings, onDone, profile, user }) {
   const save = async (patch = {}) => {
     const fields = { company: form.company.trim(), email: form.email.trim().toLowerCase(), client_name: form.name.trim(), offer: form.offer,
       template: form.template, fee, extra: form.extra, signer_email: form.signer,
-      ...(contact && !(deal?.data || {}).ghl_contact ? { data: { ...(deal?.data || {}), ghl_contact: contact } } : {}) }
+      data: { ...(deal?.data || {}), region: form.region, ...(contact && !(deal?.data || {}).ghl_contact ? { ghl_contact: contact } : {}) } }
     if (!deal) {
       const row = await createDeal({ ...fields, ...patch }, user)
       setDeal(row); setOpenDeals(o => [row, ...o.filter(x => x.id !== row.id)])
@@ -272,7 +313,7 @@ function Deal({ settings, onDone, profile, user }) {
   const load = (row) => {
     setDeal(row)
     setForm({ company: row.company || '', email: row.email || '', name: row.client_name || '', offer: row.offer || 'retainer',
-      template: row.template || '', fee: row.fee || '', extra: row.extra || '', signer: row.signer_email || form.signer })
+      template: row.template || '', fee: row.fee || '', extra: row.extra || '', signer: row.signer_email || form.signer, region: row.data?.region || 'us' })
     setConfirmSend(false); setNote({}); setContact(row.data?.ghl_contact || null); setHits(null); setQ('')
   }
   const reset = () => { setContact(null); setHits(null); setQ(''); setDeal(null); setForm({ ...BLANK, signer: form.signer, template: settings.template_retainer || '' }); setConfirmSend(false); setNote({}) }
@@ -297,12 +338,12 @@ function Deal({ settings, onDone, profile, user }) {
   }, [q])
   const pickContact = (c) => {
     setContact(c); setHits(null); setQ('')
-    setForm(f => ({ ...f, company: c.company || f.company || c.name, email: c.email || f.email, name: c.name || f.name }))
+    setForm(f => ({ ...f, company: c.company || f.company || c.name, email: c.email || f.email, name: c.name || f.name, region: c.country ? regionOf(c.country) : f.region }))
   }
 
   // ── automations ──
   const copy = async (text) => { try { await navigator.clipboard.writeText(text); toast.success('Copied.') } catch { toast.error('Copy blocked, select it by hand.') } }
-  const commasLink = settings[`pay_link_${form.offer}`] || ''
+  const commasLink = settings[`pay_link_${form.region}_${form.offer === 'trial' ? 'trial' : 'monthly'}`] || settings[`pay_link_${form.offer}`] || ''
   const stripe = () => run('stripe', async () => {
     const r = await callCloserHub('stripe_link', { company: form.company, email: form.email, offer: form.offer, fee })
     await record('stripe', r); setNote(n => ({ ...n, payment: { ok: `Stripe link made for $${r.amount}.` } }))
@@ -318,7 +359,8 @@ function Deal({ settings, onDone, profile, user }) {
     const r = await callCloserHub('create_contract', { company: form.company, email: form.email, signer_name: form.name, offer: form.offer, template: form.template,
       fee, extra_conditions: form.extra, opt_rep_name: signer?.name || '', opt_rep_email: signer?.email || '' })
     const sent = await callCloserHub('send_contract', { doc_id: r.doc_id, email: form.email })
-    await save({ data: { ...d, contract: { ...r, sent: true, status: sent.status } }, ticks: { ...ticks, contract: true } })
+    const st = await callCloserHub('contract_status', { doc_id: r.doc_id }).catch(() => ({}))
+    await save({ data: { ...d, contract: { ...r, sent: true, status: st.status || sent.status, word: st.word, opened: st.opened, recipients: st.recipients, signing_link: st.signing_link || null, date_sent: st.date_sent } }, ticks: { ...ticks, contract: true } })
     setConfirmSend(false); toast.success(`Contract sent to ${form.email}.`); onDone?.()
   })
   const draft = () => run('contract', async () => {
@@ -329,13 +371,14 @@ function Deal({ settings, onDone, profile, user }) {
   })
   const send = () => run('send', async () => {
     const r = await callCloserHub('send_contract', { doc_id: d.contract.doc_id, email: form.email })
-    await save({ data: { ...d, contract: { ...d.contract, sent: true, status: r.status } }, ticks: { ...ticks, contract: true } })
+    const st = await callCloserHub('contract_status', { doc_id: d.contract.doc_id }).catch(() => ({}))
+    await save({ data: { ...d, contract: { ...d.contract, sent: true, status: st.status || r.status, word: st.word, opened: st.opened, recipients: st.recipients, signing_link: st.signing_link || null, date_sent: st.date_sent } }, ticks: { ...ticks, contract: true } })
     setConfirmSend(false); toast.success(`Sent to ${form.email}.`); onDone?.()
   })
   const refreshContract = async (quiet = false) => {
     if (!d.contract?.doc_id) return
     const r = await callCloserHub('contract_status', { doc_id: d.contract.doc_id })
-    await save({ data: { ...d, contract: { ...d.contract, status: r.status, word: r.word, opened: r.opened, recipients: r.recipients,
+    await save({ data: { ...d, contract: { ...d.contract, status: r.status, word: r.word, opened: r.opened, recipients: r.recipients, signing_link: r.signing_link || d.contract.signing_link || null,
       date_modified: r.date_modified, date_sent: r.date_sent, date_completed: r.date_completed, checked_at: new Date().toISOString() } } })
     if (!quiet) setNote(n => ({ ...n, contract: r.status === 'document.completed' ? { ok: 'Signed.' } : r.opened ? { ok: 'They have opened it.' } : { warn: `Not opened yet (${r.word}).` } }))
   }
@@ -405,6 +448,11 @@ function Deal({ settings, onDone, profile, user }) {
               <option value="retainer">Retainer</option>
             </select>
           </Field>
+          <Field label="Region" hint="Picks the payment link. Set from the GoHighLevel contact's country.">
+            <select value={form.region} onChange={set('region')}>
+              {REGIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </Field>
           <Field label="Contract template">
             <select value={form.template} onChange={set('template')}>
               <option value="">Pick one</option>
@@ -447,8 +495,8 @@ function Deal({ settings, onDone, profile, user }) {
                 <div className="flex items-center gap-2 flex-wrap mt-2">
                   {key === 'payment' && (
                     <>
-                      {commasLink ? <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(commasLink)}>Copy Commas link</button>
-                                  : <span style={{ fontSize: 12.5, color: 'var(--house-warn)' }}>No Commas link set for {form.offer}s. Admin adds it in Hub settings.</span>}
+                      {commasLink ? <LinkButton label={`Commas ${form.region.toUpperCase()} ${form.offer === 'trial' ? 'trial' : 'monthly'} link`} url={commasLink} copy={copy} primary />
+                                  : <span style={{ fontSize: 12.5, color: 'var(--house-warn)' }}>No Commas {form.region.toUpperCase()} {form.offer === 'trial' ? 'trial' : 'monthly'} link set. Admin adds it in Hub settings.</span>}
                       <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={stripe} disabled={busy === 'stripe'}>{busy === 'stripe' ? 'Making' : d.stripe ? 'New Stripe link' : 'Stripe link instead'}</button>
                       {d.stripe?.url && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(d.stripe.url)}>Copy Stripe link</button>}
                       {!on && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={checkPayment} disabled={busy === 'paycheck'}>{busy === 'paycheck' ? 'Checking' : 'Check for payment'}</button>}
@@ -466,6 +514,7 @@ function Deal({ settings, onDone, profile, user }) {
                       )}
                       {!d.contract?.sent && !confirmSend && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={draft} disabled={busy === 'contract'}>{busy === 'contract' ? 'Drafting' : d.contract?.doc_id ? 'Draft again' : 'Draft only'}</button>}
                       {d.contract?.url && <a href={d.contract.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open in PandaDoc <ExternalLink size={ICON.sm} /></a>}
+                      {d.contract?.signing_link && <LinkButton label="Client signing link" url={d.contract.signing_link} copy={copy} />}
                       {d.contract?.doc_id && d.contract?.status !== 'document.completed' && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={checkSigned} disabled={busy === 'signed'}>{busy === 'signed' ? 'Checking' : 'Refresh status'}</button>}
                     </>
                   )}
@@ -637,6 +686,7 @@ export default function CloserHub() {
   const [settings, setSettings] = useState({})
   const [refreshKey, setRefreshKey] = useState(0)
   const bump = () => setRefreshKey(k => k + 1)
+  const copyLink = async (text) => { try { await navigator.clipboard.writeText(text); toast.success('Copied.') } catch { toast.error('Copy blocked, select it by hand.') } }
 
   useEffect(() => {
     loadCloserHubSettings().then(setSettings).catch((e) => toast.error(`Settings did not load: ${e.message}`))
@@ -659,6 +709,7 @@ export default function CloserHub() {
         </div>
         <div className="xl:sticky" style={{ top: 16 }}>
           <AppsPanel />
+          <PaymentLinks settings={settings} copy={copyLink} />
         </div>
       </div>
     </div>
