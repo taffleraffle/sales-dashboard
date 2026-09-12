@@ -23,6 +23,7 @@ const SETTING_FIELDS = [
   ['fee_trial', 'Trial fee', 'Digits only.'],
   ['template_retainer', 'PandaDoc template: retainer', 'The default picked when the deal type is Retainer.'],
   ['template_trial', 'PandaDoc template: trial', 'The default picked when the deal type is Trial.'],
+  ['template_active_ids', 'Templates shown in the picker', 'Comma-separated PandaDoc template ids. Templates with ACTIVE in their name show too.'],
   ['role_opt', 'Template role: OPT', 'Usually "Role 1".'],
   ['role_client', 'Template role: client', '"Client" on the retainer template.'],
   ['pay_link_trial', 'Commas checkout link: trial', 'The Commas (FanBasis) checkout page for the $997 trial.'],
@@ -147,17 +148,15 @@ function AppsPanel() {
 
 const BLANK = { company: '', email: '', name: '', offer: 'retainer', template: '', fee: '', extra: '', signer: '' }
 
+// Ben's list, 12 Sep 2026, in his order.
 const STEPS = [
   ['payment', 'Take payment', 'Commas by default. Stripe only if Commas will not work for them. Ticks itself when the payment lands.'],
-  ['contract', 'Contract drafted and sent', 'Draft first, look it over, then send. Ticks itself when sent.'],
-  ['signed', 'Contract signed', 'Checked against PandaDoc.'],
-  ['channels', 'Slack channels made', 'client- for the team, opt- for the team and the client.'],
-  ['guest', 'Client added to opt- as a guest', 'By hand in Slack: open the channel, Add people, paste the email, choose Guest.'],
-  ['ghl', 'Card moved in GoHighLevel', 'Closed for a trial, New Map Closes for a retainer. This is what posts the close and starts onboarding.'],
-  ['form', 'Onboarding form sent', 'Send the link after payment. Pre-fill what you can.'],
-  ['notes', 'Notes and Fathom transcript on the card', 'Who they are, what they are like, the transcript for the account manager.'],
-  ['eod', 'Logged in End of Day', 'Closes only count once they are in.'],
-  ['kickoff', 'Kickoff booked', 'Next day. On a trial, forward-book the ascension call too.'],
+  ['contract', 'Send contract', 'Drafts it in PandaDoc and sends the signing links in one go. Draft only if you want to look first.'],
+  ['channels', 'Make client channel and add the client', 'Makes client- for the team and opt- for the client, then add the client to opt- as a guest in Slack.'],
+  ['form', 'Send onboarding form', 'After payment. Pre-fill what you can.'],
+  ['ghl', 'Move in GoHighLevel', 'Closed for a trial, New Map Closes for a retainer. This posts the close and starts onboarding.'],
+  ['notes', 'Leave post-call notes', 'On the card: who they are, what they are like, the Fathom transcript for the account manager.'],
+  ['eod', 'Log end of day', 'Closes only count once they are in.'],
 ]
 
 function Tick({ on, auto, onChange }) {
@@ -238,7 +237,7 @@ function Deal({ settings, onDone, profile, user }) {
     setConfirmSend(false); setNote({}); setContact(row.data?.ghl_contact || null); setHits(null); setQ('')
   }
   const reset = () => { setContact(null); setHits(null); setQ(''); setDeal(null); setForm({ ...BLANK, signer: form.signer, template: settings.template_retainer || '' }); setConfirmSend(false); setNote({}) }
-  const finish = async () => { await save({ status: 'done' }); setOpenDeals(o => o.filter(x => x.id !== deal?.id)); reset(); toast.success('Deal closed off.') }
+  const finish = async () => { const id = deal?.id; await save({ status: 'done' }); setOpenDeals(o => o.filter(x => x.id !== id)); reset(); toast.success('Deal finished and saved. On to the next one.') }
 
   const run = async (key, fn) => {
     setBusy(key)
@@ -250,6 +249,13 @@ function Deal({ settings, onDone, profile, user }) {
     const r = await callCloserHub('ghl_search', { query: q })
     setHits(r.contacts || [])
   })
+  // Search as you type, a beat after the last keystroke.
+  useEffect(() => {
+    const text = q.trim()
+    if (text.length < 2) { setHits(null); return undefined }
+    const t = setTimeout(() => { callCloserHub('ghl_search', { query: text }).then(r => setHits(r.contacts || [])).catch(() => setHits([])) }, 350)
+    return () => clearTimeout(t)
+  }, [q])
   const pickContact = (c) => {
     setContact(c); setHits(null); setQ('')
     setForm(f => ({ ...f, company: c.company || f.company || c.name, email: c.email || f.email, name: c.name || f.name }))
@@ -267,6 +273,15 @@ function Deal({ settings, onDone, profile, user }) {
     if (r.paid) { await record('payment', r.payment, 'payment'); setNote(n => ({ ...n, payment: { ok: `Paid ${r.payment.amount} via ${r.payment.source}.` } })) }
     else setNote(n => ({ ...n, payment: { warn: 'No payment from that email yet.' } }))
   })
+  // "Send and sign contract in one": draft, then send the signing links, one click.
+  const sendContract = () => run('send', async () => {
+    if (!form.template) throw new Error('Pick a contract template first.')
+    const r = await callCloserHub('create_contract', { company: form.company, email: form.email, signer_name: form.name, offer: form.offer, template: form.template,
+      fee, extra_conditions: form.extra, opt_rep_name: signer?.name || '', opt_rep_email: signer?.email || '' })
+    const sent = await callCloserHub('send_contract', { doc_id: r.doc_id, email: form.email })
+    await save({ data: { ...d, contract: { ...r, sent: true, status: sent.status } }, ticks: { ...ticks, contract: true } })
+    setConfirmSend(false); toast.success(`Contract sent to ${form.email}.`); onDone?.()
+  })
   const draft = () => run('contract', async () => {
     if (!form.template) throw new Error('Pick a contract template first.')
     const r = await callCloserHub('create_contract', { company: form.company, email: form.email, signer_name: form.name, offer: form.offer, template: form.template,
@@ -280,12 +295,12 @@ function Deal({ settings, onDone, profile, user }) {
   })
   const checkSigned = () => run('signed', async () => {
     const r = await callCloserHub('contract_status', { doc_id: d.contract.doc_id })
-    if (r.status === 'document.completed') { await save({ data: { ...d, contract: { ...d.contract, status: r.status } }, ticks: { ...ticks, signed: true } }); setNote(n => ({ ...n, signed: { ok: 'Signed.' } })) }
-    else setNote(n => ({ ...n, signed: { warn: `Not yet: ${r.status.replace('document.', '')}.` } }))
+    await save({ data: { ...d, contract: { ...d.contract, status: r.status } } })
+    setNote(n => ({ ...n, contract: r.status === 'document.completed' ? { ok: 'Signed.' } : { warn: `Not signed yet: ${r.status.replace('document.', '')}.` } }))
   })
   const make = () => run('channels', async () => {
     const r = await callCloserHub('make_channel', { company: form.company, email: form.email, prospect_name: form.name })
-    await record('channels', r, 'channels'); toast.success('Channels ready.'); onDone?.()
+    await record('channels', r); toast.success('Channels ready. Now add the client as a guest.'); onDone?.()
   })
   const moveCard = () => run('ghl', async () => {
     const r = await callCloserHub('ghl_move', { email: form.email, offer: form.offer, contact_id: (d.ghl_contact || contact)?.id })
@@ -307,31 +322,30 @@ function Deal({ settings, onDone, profile, user }) {
             <p style={{ margin: '2px 0 0', fontSize: 13.5, color: 'var(--ink-2)' }}>Find the lead in GoHighLevel or type it in. Company, the client&apos;s email, trial or retainer.</p>
           </div>
           <div className="flex gap-2">
-            {deal && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={finish}>Close off</button>}
             {(deal || form.company) && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={reset}>New deal</button>}
           </div>
         </div>
-        <div className="flex items-end gap-2 mb-4">
+        <div className="mb-4" style={{ position: 'relative', maxWidth: 520 }}>
           <Field label="Find the lead in GoHighLevel">
-            <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); search() } }} placeholder="Name, company or email" style={{ minWidth: 260 }} />
+            <div className="flex items-center gap-2">
+              <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); search() } if (e.key === 'Escape') setHits(null) }} placeholder="Start typing a name, company or email" style={{ flex: 1 }} autoComplete="off" />
+              <button type="button" className="editorial-btn-ghost" style={{ height: 40 }} onClick={search} disabled={busy === 'search' || q.trim().length < 2}>{busy === 'search' ? 'Searching' : 'Search'}</button>
+            </div>
           </Field>
-          <button type="button" className="editorial-btn-ghost" style={{ height: 40 }} onClick={search} disabled={busy === 'search' || q.trim().length < 2}>{busy === 'search' ? 'Searching' : 'Search'}</button>
-          {contact && <span className="pill pill-up" title={contact.id}>GoHighLevel: {contact.name || contact.company}</span>}
+          {contact && <div className="mt-2"><span className="pill pill-up" title={contact.id}>GoHighLevel: {contact.company || contact.name}</span></div>}
+          {hits && (
+            <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', zIndex: 20, marginTop: 6, background: '#fff', border: '1px solid var(--house-line-strong)', borderRadius: 'var(--house-radius-tile)', boxShadow: 'var(--house-shadow-tile)', padding: '4px 14px', maxHeight: 320, overflowY: 'auto' }}>
+              {hits.length === 0 && <div style={{ padding: '10px 0', fontSize: 13, color: 'var(--ink-3)' }}>Nobody in GoHighLevel matches. Fill the fields in by hand.</div>}
+              {hits.map((c, i) => (
+                <button key={c.id} type="button" className="house-plain flex items-center gap-3 flex-wrap w-full" style={{ padding: '9px 0', borderTop: i ? '1px solid var(--rule)' : 0, fontSize: 13, background: 'none', border: 0, borderRadius: 0, textAlign: 'left', cursor: 'pointer', color: 'inherit' }} onClick={() => pickContact(c)}>
+                  <span style={{ fontWeight: 600 }}>{c.company || c.name || '(no name)'}</span>
+                  {c.company && c.name && <span style={{ color: 'var(--ink-3)' }}>{c.name}</span>}
+                  <span style={{ color: 'var(--ink-4)' }}>{c.email}{c.phone ? ` · ${c.phone}` : ''}{c.country ? ` · ${c.country}` : ''}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        {hits && (
-          <div className="mb-4" style={{ border: '1px solid var(--rule)', borderRadius: 'var(--house-radius-tile)', padding: '4px 14px' }}>
-            {hits.length === 0 && <div style={{ padding: '10px 0', fontSize: 13, color: 'var(--ink-3)' }}>Nobody in GoHighLevel matches. Fill the fields in by hand.</div>}
-            {hits.map((c, i) => (
-              <div key={c.id} className="flex items-center gap-3 flex-wrap" style={{ padding: '9px 0', borderTop: i ? '1px solid var(--rule)' : 0, fontSize: 13 }}>
-                <span style={{ fontWeight: 600 }}>{c.name || '(no name)'}</span>
-                <span style={{ color: 'var(--ink-3)' }}>{c.company}</span>
-                <span style={{ color: 'var(--ink-4)' }}>{c.email}{c.phone ? ` · ${c.phone}` : ''}{c.country ? ` · ${c.country}` : ''}</span>
-                <span className="flex-1" />
-                <button type="button" className="editorial-btn-primary" style={{ height: 28, fontSize: 12 }} onClick={() => pickContact(c)}>Use</button>
-              </div>
-            ))}
-          </div>
-        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Company"><input value={form.company} onChange={set('company')} onBlur={() => ready && save().catch(e => toast.error(e.message))} placeholder="Kings Roofing LLC" /></Field>
           <Field label="Client email"><input type="email" value={form.email} onChange={set('email')} onBlur={() => ready && save().catch(e => toast.error(e.message))} placeholder="owner@kingsroofing.com" /></Field>
@@ -370,12 +384,11 @@ function Deal({ settings, onDone, profile, user }) {
       <div className="tile" style={{ padding: '22px 24px', ...(ready ? {} : { opacity: .55, pointerEvents: 'none' }) }}>
         <div className="flex items-center justify-between gap-3 mb-3">
           <h2 className="eyebrow" style={{ margin: 0 }}>Checklist <span style={{ color: 'var(--ink-2)', letterSpacing: '.03em' }}>{doneCount}/{STEPS.length}</span></h2>
-          {deal && <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>Saved. Pick it up again from Open deals.</span>}
         </div>
         {STEPS.map(([key, title, hint], i) => {
           const n = note[key]
           const on = !!ticks[key]
-          const auto = ['payment', 'contract', 'signed', 'channels', 'ghl'].includes(key)
+          const auto = ['payment', 'contract', 'ghl'].includes(key)
           return (
             <div key={key} className="flex items-start gap-3" style={{ padding: '14px 0', borderTop: i ? '1px solid var(--rule)' : 0, opacity: on ? .72 : 1 }}>
               <div style={{ paddingTop: 2 }}><Tick on={on} auto={auto && on} onChange={(v) => tick(key, v).catch(e => toast.error(e.message))} /></div>
@@ -394,29 +407,25 @@ function Deal({ settings, onDone, profile, user }) {
                   )}
                   {key === 'contract' && (
                     <>
-                      <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={draft} disabled={busy === 'contract'}>{busy === 'contract' ? 'Drafting' : d.contract?.doc_id ? 'Draft again' : 'Draft the contract'}</button>
-                      {d.contract?.url && <a href={d.contract.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open in PandaDoc <ExternalLink size={ICON.sm} /></a>}
-                      {d.contract?.doc_id && !d.contract?.sent && !confirmSend && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(true)}>Send to {form.email}</button>}
+                      {!d.contract?.sent && !confirmSend && <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(true)} disabled={busy === 'send'}>Send contract</button>}
                       {confirmSend && !d.contract?.sent && (
                         <>
-                          <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>Emails the signing links now. Sure?</span>
-                          <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={send} disabled={busy === 'send'}>{busy === 'send' ? 'Sending' : 'Yes, send'}</button>
+                          <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>Drafts it and emails the signing links now. Sure?</span>
+                          <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={d.contract?.doc_id ? send : sendContract} disabled={busy === 'send'}>{busy === 'send' ? 'Sending' : 'Yes, send'}</button>
                           <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(false)}>Not yet</button>
                         </>
                       )}
+                      {!d.contract?.sent && !confirmSend && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={draft} disabled={busy === 'contract'}>{busy === 'contract' ? 'Drafting' : d.contract?.doc_id ? 'Draft again' : 'Draft only'}</button>}
+                      {d.contract?.url && <a href={d.contract.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open in PandaDoc <ExternalLink size={ICON.sm} /></a>}
+                      {d.contract?.sent && d.contract?.status !== 'document.completed' && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={checkSigned} disabled={busy === 'signed'}>{busy === 'signed' ? 'Checking' : 'Signed yet?'}</button>}
+                      {d.contract?.status === 'document.completed' && <span style={{ fontSize: 12.5, color: 'var(--house-good)' }}>Signed.</span>}
                     </>
                   )}
-                  {key === 'signed' && d.contract?.doc_id && !on && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={checkSigned} disabled={busy === 'signed'}>{busy === 'signed' ? 'Checking' : 'Check PandaDoc'}</button>}
                   {key === 'channels' && (
                     <>
                       <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={make} disabled={busy === 'channels'}>{busy === 'channels' ? 'Making' : ch ? 'Make again' : 'Make the channels'}</button>
                       {ch && ['internal', 'external'].map(k => ch[k]?.id && <a key={k} href={`https://slack.com/app_redirect?channel=${ch[k].id}`} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>#{ch[k].name}</a>)}
-                    </>
-                  )}
-                  {key === 'guest' && (
-                    <>
-                      <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(form.email)}>Copy {form.email}</button>
-                      {ch?.external?.id && <a href={`https://slack.com/app_redirect?channel=${ch.external.id}`} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open #{ch.external.name}</a>}
+                      {ch && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(form.email)}>Copy {form.email}</button>}
                       {p?.ok && <span style={{ fontSize: 12.5, color: 'var(--house-good)' }}>Slack emailed them an invite.</span>}
                     </>
                   )}
@@ -434,12 +443,19 @@ function Deal({ settings, onDone, profile, user }) {
                 {n?.warn && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-warn)' }}>{n.warn}</div>}
                 {n?.bad && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-bad)' }}>{n.bad}</div>}
                 {key === 'contract' && d.contract?.name && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-3)' }}>{d.contract.name}{d.contract.opt_signer_name ? `, ${d.contract.opt_signer_name} signing for OPT` : ''}{d.contract.sent ? ', sent' : ', drafted'}.{!d.contract.renamed && !d.contract.sent ? ' Check for a "[DEV]" prefix.' : ''}</div>}
-                {key === 'channels' && p && !p.ok && !p.skipped && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-3)' }}>Slack cannot invite the client by itself on our plan: add them as a guest in the next step.</div>}
+                {key === 'channels' && ch && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-3)' }}>Now in Slack: open #{ch.external?.name}, Add people, paste the email, choose Guest. Then tick this off.</div>}
                 {key === 'ghl' && d.ghl?.candidates?.length > 1 && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-3)' }}>{d.ghl.candidates.map(c => `${c.name || c.id} (${c.region})`).join(', ')}</div>}
               </div>
             </div>
           )
         })}
+        <div className="flex items-center justify-between gap-3 flex-wrap mt-4 pt-4" style={{ borderTop: '1px solid var(--rule)' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>{deal ? `Saved ${new Date(deal.updated_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}. Ticks save as you go.` : 'Not saved yet.'}</span>
+          <div className="flex gap-2">
+            <button type="button" className="editorial-btn-ghost" onClick={() => save().then(() => toast.success('Saved.')).catch(e => toast.error(e.message))} disabled={!ready}>Save</button>
+            <button type="button" className="editorial-btn-primary" onClick={finish} disabled={!deal}>Finish this deal</button>
+          </div>
+        </div>
       </div>
     </div>
   )
