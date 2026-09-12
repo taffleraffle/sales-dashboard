@@ -107,11 +107,16 @@ async function makeChannel(admin: any, who: Caller, body: any) {
 
 // The templates in the account, for the picker. Names only; the hub shows
 // them and remembers nothing.
-async function templates() {
+async function templates(admin: any) {
   const t = await pd('GET', '/templates?count=50')
-  const list = (t.results || []).map((x: any) => ({ id: x.id, name: x.name }))
+  const all = (t.results || []).map((x: any) => ({ id: x.id, name: x.name }))
     .sort((a: any, b: any) => a.name.localeCompare(b.name))
-  return { status: 200, body: { templates: list } }
+  // Ben, 12 Sep 2026: only the templates in use, marked ACTIVE in PandaDoc.
+  // The API lists archived ones too, so the name is the switch.
+  const st = await settings(admin)
+  const allow = new Set((st.template_active_ids || '').split(',').map((x) => x.trim()).filter(Boolean))
+  const active = all.filter((x: any) => /ACTIVE/i.test(x.name) || allow.has(x.id))
+  return { status: 200, body: { templates: active.length ? active : all, all_count: all.length } }
 }
 
 // Which role signs for OPT and which for the client, and which merge fields
@@ -315,13 +320,15 @@ async function ghlSearch(body: any) {
   const loc = Deno.env.get('GHL_LOCATION_ID') || ''
   const q = (body.query || '').trim()
   if (q.length < 2) return { status: 400, body: { error: 'type a name, company or email' } }
-  const found = await ghl(`/contacts/?locationId=${encodeURIComponent(loc)}&query=${encodeURIComponent(q)}&limit=10`)
+  // POST search matches names, companies and emails together (GET query
+  // misses a company with no contact name on it).
+  const found = await ghl('/contacts/search', { method: 'POST', body: JSON.stringify({ locationId: loc, query: q, page: 1, pageLimit: 8 }) })
   const contacts = (found.contacts || []).map((c: any) => ({
     id: c.id, name: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.contactName || c.name || '',
     company: c.companyName || '', email: c.email || '', phone: c.phone || '', country: c.country || '',
     tags: (c.tags || []).slice(0, 6),
   }))
-  return { status: 200, body: { contacts } }
+  return { status: 200, body: { contacts, total: found.total ?? contacts.length } }
 }
 
 async function ghlMove(admin: any, who: Caller, body: any) {
@@ -390,7 +397,7 @@ serve(async (req) => {
       case 'login': out = login(String(body.tool || '')); break
       case 'semrush': out = login('semrush'); break
       case 'make_channel': out = await makeChannel(admin, who, body); break
-      case 'templates': out = await templates(); break
+      case 'templates': out = await templates(admin); break
       case 'pay_products': out = await payProducts(); break
       case 'stripe_link': out = await stripeLink(admin, who, body); break
       case 'payment_check': out = await paymentCheck(admin, body); break
