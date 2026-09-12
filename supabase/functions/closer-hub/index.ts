@@ -225,7 +225,12 @@ async function contractStatus(body: any) {
   const status = String(d.status || '')
   const recipients = (d.recipients || []).map((r: any) => ({
     email: r.email, role: r.role, has_completed: !!r.has_completed, signing_order: r.signing_order ?? null,
+    shared_link: r.shared_link || null,
   }))
+  // The client's own signing link, so the closer can text it instead of
+  // relying on PandaDoc's email. PandaDoc issues it once the document is sent.
+  const clientRole = (r: any) => ['client', 'role 2'].includes(String(r.role || '').toLowerCase())
+  const signing_link = (recipients.find((r: any) => clientRole(r) && r.shared_link) || recipients.find((r: any) => r.shared_link && !['role 1', 'opt', 'creator'].includes(String(r.role || '').toLowerCase())))?.shared_link || null
   const opened = ['document.viewed', 'document.completed', 'document.waiting_approval', 'document.approved', 'document.waiting_pay', 'document.paid'].includes(status)
   const word = status === 'document.completed' ? 'signed'
     : status === 'document.declined' ? 'declined'
@@ -234,7 +239,7 @@ async function contractStatus(body: any) {
     : status === 'document.sent' ? 'sent, not opened yet'
     : status === 'document.draft' ? 'drafted, not sent'
     : status.replace('document.', '')
-  return { status: 200, body: { doc_id: id, status, word, opened, name: d.name, date_modified: d.date_modified || null,
+  return { status: 200, body: { doc_id: id, status, word, opened, signing_link, name: d.name, date_modified: d.date_modified || null,
     date_sent: d.date_sent || null, date_completed: d.date_completed || null, recipients,
     url: `https://app.pandadoc.com/a/#/documents/${id}` } }
 }
