@@ -13,5 +13,6 @@ export const CLOSER_TOOLS = [
   { key: 'pandadoc', icon: '/app-icons/pandadoc.png', chip: 'PD', name: 'PandaDoc', url: 'https://app.pandadoc.com/', what: 'Agreements. New deal drafts one for you.' },
   { key: 'commas', icon: '/app-icons/commas.png', chip: 'C', name: 'Commas', url: 'https://www.fanbasis.com/', what: 'Take payment live on the call.' },
   { key: 'slack', icon: '/app-icons/slack.png', chip: 'SL', name: 'Slack', url: 'https://app.slack.com/', what: '#new-clients and the client channels.' },
+  { key: 'sops', chip: 'SOP', name: 'Closer SOPs', url: 'https://opt-team-hub.onrender.com/university.html?role=closer', what: 'The closer library: offer, audit, call, close.' },
   { key: 'eod', chip: 'EOD', name: 'End of Day', url: '/sales/eod', internal: true, what: 'Log every call before you finish.' },
 ]
