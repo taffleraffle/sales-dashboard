@@ -204,11 +204,24 @@ async function sendContract(admin: any, who: Caller, body: any) {
   const s = await settings(admin)
   const current = await pd('GET', `/documents/${id}`)
   if (current.status === 'document.uploaded') return { status: 409, body: { error: 'still processing, try again in a few seconds' } }
-  const out = await pd('POST', `/documents/${id}/send`, {
-    message: s.send_message || 'Here is your agreement to review and sign.',
-    subject: s.send_subject || 'Your Opt Digital agreement',
-    silent: false,
-  })
+  let out: any
+  try {
+    out = await pd('POST', `/documents/${id}/send`, {
+      message: s.send_message || 'Here is your agreement to review and sign.',
+      subject: s.send_subject || 'Your Opt Digital agreement',
+      silent: false,
+    })
+  } catch (e) {
+    const msg = String((e as Error)?.message || e)
+    // A sandbox API key may only send to members of the organisation.
+    // PandaDoc answers 403 "not allowed to send documents outside of your
+    // organization". The draft is fine; it just has to be sent from PandaDoc
+    // itself until a production key is in place.
+    if (/outside of your organization/i.test(msg)) {
+      return { status: 403, body: { error: 'PandaDoc will not send from the API with this key (a sandbox key can only send inside the organisation). The draft is ready: open it in PandaDoc and send it from there. A production API key fixes this for good.', code: 'outside_org', url: `https://app.pandadoc.com/a/#/documents/${id}` } }
+    }
+    throw e
+  }
   const result = { ok: true, doc_id: id, status: out.status || 'document.sent', name: current.name }
   await log(admin, who, 'send_contract', { company: current.name, email: body.email }, true, result)
   return { status: 200, body: result }
