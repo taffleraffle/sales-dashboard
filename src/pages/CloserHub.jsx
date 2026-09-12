@@ -7,7 +7,7 @@ import { useToast } from '../hooks/useToast'
 import { ICON } from '../utils/constants'
 import { CLOSER_TOOLS } from '../data/closerTools'
 import { callCloserHub, loadCloserHubSettings, saveCloserHubSettings } from '../lib/closerHub'
-import { listOpenDeals, createDeal, updateDeal } from '../lib/closerHubDeals'
+import { listOpenDeals, listFinishedDeals, createDeal, updateDeal } from '../lib/closerHubDeals'
 
 /* Closer Hub (Ben, 12 Sep 2026). No pop-ups: "I want everything in here in
    one hub." The main column is the deal as a saved checklist in the SOP's
@@ -29,7 +29,9 @@ const SETTING_FIELDS = [
   ['pay_link_trial', 'Commas checkout link: trial', 'The Commas (FanBasis) checkout page for the $997 trial.'],
   ['pay_link_retainer', 'Commas checkout link: retainer', 'The Commas checkout page for the retainer.'],
   ['stripe_currency', 'Stripe currency', 'usd or aud. Used only for the Stripe fallback link.'],
-  ['onboarding_form_url', 'Onboarding form link', ''],
+  ['onboarding_page_url', 'Onboarding page link', 'The welcome page the client lands on.'],
+  ['onboarding_form_url', 'Onboarding flow link', 'The form the client fills in (step 1 of 3).'],
+  ['onboarding_calendar_url', 'Onboarding calendar link', 'Where the onboarding call is booked.'],
   ['send_subject', 'Email subject when sending', ''],
   ['send_message', 'Email message when sending', ''],
 ]
@@ -435,7 +437,15 @@ function Deal({ settings, onDone, profile, user }) {
                       <a href="https://app.gohighlevel.com/" target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open GoHighLevel</a>
                     </>
                   )}
-                  {key === 'form' && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(settings.onboarding_form_url || 'https://onboard.optdigital.io/onboardingwd')}>Copy form link</button>}
+                  {key === 'form' && (
+                    <>
+                      <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(settings.onboarding_form_url || 'https://onboard.optdigital.io/ob-2')}>Copy form link</button>
+                      <a href={settings.onboarding_page_url || 'https://onboard.optdigital.io/onboarding'} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Onboarding page <ExternalLink size={ICON.sm} /></a>
+                      <a href={settings.onboarding_form_url || 'https://onboard.optdigital.io/ob-2'} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Onboarding flow <ExternalLink size={ICON.sm} /></a>
+                      <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(settings.onboarding_calendar_url || 'https://calendly.com/d/dzy3-78x-dr3/opt-digital-onboarding')}>Copy calendar link</button>
+                      <a href={settings.onboarding_calendar_url || 'https://calendly.com/d/dzy3-78x-dr3/opt-digital-onboarding'} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Calendar <ExternalLink size={ICON.sm} /></a>
+                    </>
+                  )}
                   {key === 'notes' && <a href="https://app.gohighlevel.com/" target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open the card</a>}
                   {key === 'eod' && <Link to="/sales/eod" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open End of Day</Link>}
                 </div>
@@ -457,6 +467,63 @@ function Deal({ settings, onDone, profile, user }) {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+/* ── Finished deals ────────────────────────────────────────────────────── */
+
+function FinishedDeals({ refreshKey }) {
+  const [rows, setRows] = useState([])
+  const [status, setStatus] = useState({})
+  useEffect(() => {
+    let alive = true
+    listFinishedDeals(8).then(async (deals) => {
+      if (!alive) return
+      setRows(deals)
+      // The client dashboard's view of each one: assignment, contract, onboarding call.
+      for (const dl of deals.slice(0, 6)) {
+        if (!dl.email && !dl.company) continue
+        try {
+          const st = await callCloserHub('deal_status', { email: dl.email, company: dl.company })
+          if (alive) setStatus(m => ({ ...m, [dl.id]: st }))
+        } catch { /* leave the row without it */ }
+      }
+    }).catch(() => setRows([]))
+    return () => { alive = false }
+  }, [refreshKey])
+  if (rows.length === 0) return null
+  const when = (iso) => iso ? new Date(iso).toLocaleString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+  return (
+    <div className="tile" style={{ padding: '14px 18px 4px' }}>
+      <h2 className="eyebrow" style={{ margin: '0 0 4px' }}>Finished deals</h2>
+      {rows.map((r, i) => {
+        const st = status[r.id]
+        const contract = r.data?.contract
+        const ch = r.data?.channels?.channels
+        const contractUrl = contract?.url || st?.assignment?.contract_url
+        return (
+          <div key={r.id} style={{ padding: '10px 0', borderTop: i ? '1px solid var(--rule)' : 0, fontSize: 13 }}>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span style={{ fontWeight: 600 }}>{r.company}</span>
+              <span className="pill pill-soft">{r.offer === 'trial' ? 'Trial' : 'Retainer'}</span>
+              <span style={{ color: 'var(--ink-4)' }}>{r.closer_name} · finished {new Date(r.updated_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}</span>
+              <span className="flex-1" />
+              {contractUrl && <a href={contractUrl} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 28, fontSize: 12 }}>Contract{contract?.status === 'document.completed' ? ' (signed)' : contract?.sent ? ' (sent)' : ''}</a>}
+              {ch?.external?.id && <a href={`https://slack.com/app_redirect?channel=${ch.external.id}`} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 28, fontSize: 12 }}>#{ch.external.name}</a>}
+              {st?.client?.slug && <a href={`https://dashboard.optdigital.io/company/assignments`} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 28, fontSize: 12 }}>Assignments</a>}
+            </div>
+            <div style={{ marginTop: 4, color: 'var(--ink-3)', fontSize: 12.5 }}>
+              {st === undefined && 'Checking the client dashboard.'}
+              {st && !st.client && !st.assignment && 'Not in the client dashboard yet: it appears once the card is moved in GoHighLevel or Optimus is told the deal closed.'}
+              {st?.client && <>In the client dashboard as <b>{st.client.name}</b>{st.account_manager ? `, account manager ${st.account_manager.name}` : ''}{st.assignment ? `, assignment ${st.assignment.status}` : ''}. </>}
+              {st?.onboarding_call
+                ? <>Onboarding call <b>{when(st.onboarding_call.start_time)}</b>{st.onboarding_call.join_url && <> <a href={st.onboarding_call.join_url} target="_blank" rel="noopener">Join</a></>}.</>
+                : (st && (st.client || st.assignment) ? 'No onboarding call booked yet.' : '')}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -543,6 +610,7 @@ export default function CloserHub() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
         <div className="xl:col-span-2 grid gap-4">
           <Deal settings={settings} onDone={bump} profile={profile} user={{ id: session?.user?.id, name: profile?.name, email: profile?.email || session?.user?.email }} />
+          <FinishedDeals refreshKey={refreshKey} />
           <Recent refreshKey={refreshKey} />
           {isAdmin && <SettingsSection settings={settings} onSaved={setSettings} />}
         </div>

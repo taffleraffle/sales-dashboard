@@ -368,6 +368,17 @@ async function ghlMove(admin: any, who: Caller, body: any) {
   return { status: 200, body: out }
 }
 
+// What the client dashboard knows about a finished deal: the assignment,
+// the contract link on it, the account manager and the onboarding call.
+async function dealStatus(body: any) {
+  const key = Deno.env.get('AGENT_WEBHOOK_KEY') || ''
+  if (!key) return { status: 500, body: { error: 'AGENT_WEBHOOK_KEY is not set' } }
+  const q = new URLSearchParams({ email: (body.email || '').trim().toLowerCase(), company: (body.company || '').trim() })
+  const r = await fetch(`${DASHBOARD_BASE}/webhooks/agent/deal-status?${q}`, { headers: { 'X-Webhook-Key': key } })
+  const out = await r.json().catch(() => ({ error: `dashboard answered ${r.status}` }))
+  return { status: r.ok ? 200 : (r.status || 502), body: out }
+}
+
 // ── entry ───────────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -402,6 +413,7 @@ serve(async (req) => {
       case 'stripe_link': out = await stripeLink(admin, who, body); break
       case 'payment_check': out = await paymentCheck(admin, body); break
       case 'ghl_search': out = await ghlSearch(body); break
+      case 'deal_status': out = await dealStatus(body); break
       case 'ghl_move': out = await ghlMove(admin, who, body); break
       case 'create_contract': out = await createContract(admin, who, body); break
       case 'send_contract': out = await sendContract(admin, who, body); break
